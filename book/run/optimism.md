@@ -69,7 +69,7 @@ The `optimism` feature flag in `op-reth` adds several new CLI flags to the `reth
 1. `--rollup.disable-tx-pool-gossip` - Disables gossiping of transactions in the mempool to peers. This can be omitted for personal nodes, though providers should always opt to enable this flag.
 1. `--rollup.enable-genesis-walkback` - Disables setting the forkchoice status to tip on startup, making the `op-node` walk back to genesis and verify the integrity of the chain before starting to sync. This can be omitted unless a corruption of local chainstate is suspected.
 
-First, ensure that your L1 archival node is running and synced to tip. Then, start `op-reth` with the `--rollup.sequencer-http` flag set to the `Base Mainnet` sequencer endpoint:
+First, ensure that your L1 archival node is running and synced to tip. Also make sure that the beacon node / consensus layer client is running and has http APIs enabled. Then, start `op-reth` with the `--rollup.sequencer-http` flag set to the `Base Mainnet` sequencer endpoint:
 ```sh
 op-reth node \
     --chain base \
@@ -89,10 +89,11 @@ op-node \
     --l2.jwt-secret=/path/to/jwt.hex \
     --rpc.addr=0.0.0.0 \
     --rpc.port=7000 \
-    --l1.trustrpc
+    --l1.trustrpc \
+    --l1.beacon=<your-beacon-node-http-endpoint>
 ```
 
-If you opted to build the `op-node` with the `rethdb` build tag, this "`RPCKind`" can be enabled via appending two extra flags to the `op-node` invocation:
+If you opted to build the `op-node` with the `rethdb` build tag, this feature can be enabled by appending one extra flag to the `op-node` invocation:
 
 > Note, the `reth_db_path` is the path to the `db` folder inside of the reth datadir, not the `mdbx.dat` file itself. This can be fetched from `op-reth db path [--chain <chain-name>]`, or if you are using a custom datadir location via the `--datadir` flag,
 > by appending `/db` to the end of the path.
@@ -100,7 +101,6 @@ If you opted to build the `op-node` with the `rethdb` build tag, this "`RPCKind`
 ```sh
 op-node \
     # ...
-    --l1.rpckind=reth_db \
     --l1.rethdb=<your_L1_reth_db_path>
 ```
 

@@ -78,7 +78,7 @@ fn bench_put_rand(c: &mut Criterion) {
     c.bench_function("bench_put_rand", |b| {
         b.iter(|| {
             let txn = env.begin_rw_txn().unwrap();
-            for (key, data) in items.iter() {
+            for (key, data) in &items {
                 txn.put(db.dbi(), key, data, WriteFlags::empty()).unwrap();
             }
         })
@@ -104,7 +104,7 @@ fn bench_put_rand_raw(c: &mut Criterion) {
                 mdbx_txn_begin_ex(env, ptr::null_mut(), 0, &mut txn, ptr::null_mut());
 
                 let mut i: ::libc::c_int = 0;
-                for (key, data) in items.iter() {
+                for (key, data) in &items {
                     key_val.iov_len = key.len() as size_t;
                     key_val.iov_base = key.as_bytes().as_ptr() as *mut _;
                     data_val.iov_len = data.len() as size_t;

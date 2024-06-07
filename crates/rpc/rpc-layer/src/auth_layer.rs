@@ -47,7 +47,7 @@ pub struct AuthLayer<V> {
 impl<V> AuthLayer<V> {
     /// Creates an instance of [`AuthLayer`].
     /// `validator` is a generic trait able to validate requests (see [`AuthValidator`]).
-    pub fn new(validator: V) -> Self {
+    pub const fn new(validator: V) -> Self {
         Self { validator }
     }
 }
@@ -115,11 +115,11 @@ impl<F, B> ResponseFuture<F, B>
 where
     B: Body,
 {
-    fn future(future: F) -> Self {
+    const fn future(future: F) -> Self {
         Self { kind: Kind::Future { future } }
     }
 
-    fn invalid_auth(err_res: Response<B>) -> Self {
+    const fn invalid_auth(err_res: Response<B>) -> Self {
         Self { kind: Kind::Error { response: Some(err_res) } }
     }
 }
@@ -155,6 +155,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::JwtAuthValidator;
+    use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
     use http::{header, Method, Request, StatusCode};
     use hyper::{body, Body};
     use jsonrpsee::{
@@ -165,9 +168,6 @@ mod tests {
         net::SocketAddr,
         time::{SystemTime, UNIX_EPOCH},
     };
-
-    use super::AuthLayer;
-    use crate::{jwt_secret::Claims, JwtAuthValidator, JwtError, JwtSecret};
 
     const AUTH_PORT: u32 = 8551;
     const AUTH_ADDR: &str = "0.0.0.0";
@@ -260,7 +260,7 @@ mod tests {
         (status, body)
     }
 
-    /// Spawn a new RPC server equipped with a JwtLayer auth middleware.
+    /// Spawn a new RPC server equipped with a `JwtLayer` auth middleware.
     async fn spawn_server() -> ServerHandle {
         let secret = JwtSecret::from_hex(SECRET).unwrap();
         let addr = format!("{AUTH_ADDR}:{AUTH_PORT}");

@@ -37,7 +37,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
         state_nonce: u64,
         /// The validated transaction.
         ///
-        /// See also [ValidTransaction].
+        /// See also [`ValidTransaction`].
         ///
         /// If this is a _new_ EIP-4844 blob transaction, then this must contain the extracted
         /// sidecar.
@@ -86,14 +86,14 @@ impl<T: PoolTransaction> TransactionValidationOutcome<T> {
 ///
 /// Note: Since blob transactions can be re-injected without their sidecar (after reorg), the
 /// validator can omit the sidecar if it is still in the blob store and return a
-/// [ValidTransaction::Valid] instead.
+/// [`ValidTransaction::Valid`] instead.
 #[derive(Debug)]
 pub enum ValidTransaction<T> {
     /// A valid transaction without a sidecar.
     Valid(T),
     /// A valid transaction for which a sidecar should be stored.
     ///
-    /// Caution: The [TransactionValidator] must ensure that this is only returned for EIP-4844
+    /// Caution: The [`TransactionValidator`] must ensure that this is only returned for EIP-4844
     /// transactions.
     ValidWithSidecar {
         /// The valid EIP-4844 transaction.
@@ -169,7 +169,7 @@ pub trait TransactionValidator: Send + Sync {
     ///    * nonce >= next nonce of the sender
     ///    * ...
     ///
-    /// See [InvalidTransactionError](reth_primitives::InvalidTransactionError) for common errors
+    /// See [`InvalidTransactionError`](reth_primitives::InvalidTransactionError) for common errors
     /// variants.
     ///
     /// The transaction pool makes no additional assumptions about the validity of the transaction
@@ -178,7 +178,7 @@ pub trait TransactionValidator: Send + Sync {
     /// example nonce or balance changes. Hence, any validation checks must be applied in this
     /// function.
     ///
-    /// See [TransactionValidationTaskExecutor] for a reference implementation.
+    /// See [`TransactionValidationTaskExecutor`] for a reference implementation.
     fn validate_transaction(
         &self,
         origin: TransactionOrigin,
@@ -189,7 +189,7 @@ pub trait TransactionValidator: Send + Sync {
     ///
     /// Must return all outcomes for the given transactions in the same order.
     ///
-    /// See also [Self::validate_transaction].
+    /// See also [`Self::validate_transaction`].
     fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
@@ -213,7 +213,7 @@ pub trait TransactionValidator: Send + Sync {
 /// This is used as the internal representation of a transaction inside the pool.
 ///
 /// For EIP-4844 blob transactions this will _not_ contain the blob sidecar which is stored
-/// separately in the [BlobStore](crate::blobstore::BlobStore).
+/// separately in the [`BlobStore`](crate::blobstore::BlobStore).
 pub struct ValidPoolTransaction<T: PoolTransaction> {
     /// The transaction
     pub transaction: T,

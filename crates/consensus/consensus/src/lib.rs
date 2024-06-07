@@ -9,14 +9,34 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_primitives::{
-    BlockHash, BlockNumber, GotExpected, GotExpectedBoxed, Header, HeaderValidationError,
-    InvalidTransactionError, SealedBlock, SealedHeader, B256, U256,
+    BlockHash, BlockNumber, BlockWithSenders, Bloom, GotExpected, GotExpectedBoxed, Header,
+    HeaderValidationError, InvalidTransactionError, Receipt, Request, SealedBlock, SealedHeader,
+    B256, U256,
 };
 use std::fmt::Debug;
+
+/// A consensus implementation that does nothing.
+pub mod noop;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking consensus
 pub mod test_utils;
+
+/// Post execution input passed to [`Consensus::validate_block_post_execution`].
+#[derive(Debug)]
+pub struct PostExecutionInput<'a> {
+    /// Receipts of the block.
+    pub receipts: &'a [Receipt],
+    /// EIP-7685 requests of the block.
+    pub requests: &'a [Request],
+}
+
+impl<'a> PostExecutionInput<'a> {
+    /// Creates a new instance of `PostExecutionInput`.
+    pub const fn new(receipts: &'a [Receipt], requests: &'a [Request]) -> Self {
+        Self { receipts, requests }
+    }
+}
 
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
@@ -83,7 +103,19 @@ pub trait Consensus: Debug + Send + Sync {
     /// **This should not be called for the genesis block**.
     ///
     /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block(&self, block: &SealedBlock) -> Result<(), ConsensusError>;
+    fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError>;
+
+    /// Validate a block considering world state, i.e. things that can not be checked before
+    /// execution.
+    ///
+    /// See the Yellow Paper sections 4.3.2 "Holistic Validity".
+    ///
+    /// Note: validating blocks does not include other validations of the Consensus
+    fn validate_block_post_execution(
+        &self,
+        block: &BlockWithSenders,
+        input: PostExecutionInput<'_>,
+    ) -> Result<(), ConsensusError>;
 }
 
 /// Consensus Errors
@@ -96,6 +128,15 @@ pub enum ConsensusError {
         gas_used: u64,
         /// The gas limit in the block header.
         gas_limit: u64,
+    },
+
+    /// Error when block gas used doesn't match expected value
+    #[error("block gas used mismatch: {gas}; gas spent by each transaction: {gas_spent_by_tx:?}")]
+    BlockGasUsed {
+        /// The gas diff.
+        gas: GotExpected<u64>,
+        /// Gas spent by each transaction
+        gas_spent_by_tx: Vec<(u64, u64)>,
     },
 
     /// Error when the hash of block ommer is different from the expected hash.
@@ -111,10 +152,23 @@ pub enum ConsensusError {
     #[error("mismatched block transaction root: {0}")]
     BodyTransactionRootDiff(GotExpectedBoxed<B256>),
 
+    /// Error when the receipt root in the block is different from the expected receipt root.
+    #[error("receipt root mismatch: {0}")]
+    BodyReceiptRootDiff(GotExpectedBoxed<B256>),
+
+    /// Error when header bloom filter is different from the expected bloom filter.
+    #[error("header bloom filter mismatch: {0}")]
+    BodyBloomLogDiff(GotExpectedBoxed<Bloom>),
+
     /// Error when the withdrawals root in the block is different from the expected withdrawals
     /// root.
     #[error("mismatched block withdrawals root: {0}")]
     BodyWithdrawalsRootDiff(GotExpectedBoxed<B256>),
+
+    /// Error when the requests root in the block is different from the expected requests
+    /// root.
+    #[error("mismatched block requests root: {0}")]
+    BodyRequestsRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when a block with a specific hash and number is already known.
     #[error("block with [hash={hash}, number={number}] is already known")]
@@ -183,13 +237,25 @@ pub enum ConsensusError {
     #[error("missing withdrawals root")]
     WithdrawalsRootMissing,
 
+    /// Error when the requests root is missing.
+    #[error("missing requests root")]
+    RequestsRootMissing,
+
     /// Error when an unexpected withdrawals root is encountered.
     #[error("unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
 
+    /// Error when an unexpected requests root is encountered.
+    #[error("unexpected requests root")]
+    RequestsRootUnexpected,
+
     /// Error when withdrawals are missing.
     #[error("missing withdrawals")]
     BodyWithdrawalsMissing,
+
+    /// Error when requests are missing.
+    #[error("missing requests")]
+    BodyRequestsMissing,
 
     /// Error when blob gas used is missing.
     #[error("missing blob gas used")]
@@ -254,15 +320,15 @@ pub enum ConsensusError {
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransactionError),
 
-    /// Error type transparently wrapping HeaderValidationError.
+    /// Error type transparently wrapping `HeaderValidationError`.
     #[error(transparent)]
     HeaderValidationError(#[from] HeaderValidationError),
 }
 
 impl ConsensusError {
     /// Returns `true` if the error is a state root error.
-    pub fn is_state_root_error(&self) -> bool {
-        matches!(self, ConsensusError::BodyStateRootDiff(_))
+    pub const fn is_state_root_error(&self) -> bool {
+        matches!(self, Self::BodyStateRootDiff(_))
     }
 }
 

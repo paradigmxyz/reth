@@ -33,11 +33,12 @@ tokio = { workspace = true, features = ["io-util", "net", "time"] }
 tokio-stream.workspace = true
 
 # misc
+schnellru.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
 rand = { workspace = true, optional = true }
-generic-array = "0.14"
+generic-array.workspace = true
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]

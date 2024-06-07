@@ -19,7 +19,7 @@ where
     let mut log_index: u64 = 0;
     // Iterate over transaction hashes and receipts and append matching logs.
     for (receipt_idx, (tx_hash, receipt)) in tx_hashes_and_receipts.into_iter().enumerate() {
-        for log in receipt.logs.iter() {
+        for log in &receipt.logs {
             if log_matches_filter(block_num_hash, log, filter) {
                 let log = Log {
                     inner: log.clone(),
@@ -64,7 +64,7 @@ pub(crate) fn append_matching_block_logs(
         // The transaction hash of the current receipt.
         let mut transaction_hash = None;
 
-        for log in receipt.logs.iter() {
+        for log in &receipt.logs {
             if log_matches_filter(block_num_hash, log, filter) {
                 let first_tx_num = match loaded_first_tx_num {
                     Some(num) => num,

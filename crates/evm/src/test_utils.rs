@@ -5,12 +5,13 @@ use crate::execute::{
     BlockExecutorProvider, Executor,
 };
 use parking_lot::Mutex;
-use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt};
+use reth_storage_errors::provider::ProviderError;
 use revm_primitives::db::Database;
 use std::sync::Arc;
 
-/// A [BlockExecutorProvider] that returns mocked execution results.
+/// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
 pub struct MockExecutorProvider {
     exec_results: Arc<Mutex<Vec<BatchBlockExecutionOutput>>>,
@@ -49,11 +50,12 @@ impl<DB> Executor<DB> for MockExecutorProvider {
     type Error = BlockExecutionError;
 
     fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        let BatchBlockExecutionOutput { bundle, receipts, .. } =
+        let BatchBlockExecutionOutput { bundle, receipts, requests, first_block: _ } =
             self.exec_results.lock().pop().unwrap();
         Ok(BlockExecutionOutput {
             state: bundle,
             receipts: receipts.into_iter().flatten().flatten().collect(),
+            requests: requests.into_iter().flatten().collect(),
             gas_used: 0,
         })
     }
@@ -64,7 +66,7 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
     type Output = BatchBlockExecutionOutput;
     type Error = BlockExecutionError;
 
-    fn execute_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
+    fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
         Ok(())
     }
 

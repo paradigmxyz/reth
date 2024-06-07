@@ -1,46 +1,21 @@
 //! Command that initializes the node from a genesis file.
 
-use crate::{
-    args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
-    },
-    dirs::{DataDirPath, MaybePlatformPath},
-};
+use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_config::config::EtlConfig;
-use reth_db::{database::Database, init_db};
-use reth_node_core::init::init_from_state_dump;
-use reth_primitives::{ChainSpec, B256};
+use reth_db_api::database::Database;
+use reth_db_common::init::init_from_state_dump;
+use reth_primitives::B256;
 use reth_provider::ProviderFactory;
 
-use std::{fs::File, io::BufReader, path::PathBuf, sync::Arc};
+use std::{fs::File, io::BufReader, path::PathBuf};
 use tracing::info;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
 pub struct InitStateCommand {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
-    )]
-    chain: Arc<ChainSpec>,
+    #[command(flatten)]
+    env: EnvironmentArgs,
 
     /// JSONL file with state dump.
     ///
@@ -61,9 +36,6 @@ pub struct InitStateCommand {
     /// and including the non-genesis block to init chain at. See 'import' command.
     #[arg(value_name = "STATE_DUMP_FILE", verbatim_doc_comment)]
     state: PathBuf,
-
-    #[command(flatten)]
-    db: DatabaseArgs,
 }
 
 impl InitStateCommand {
@@ -71,22 +43,11 @@ impl InitStateCommand {
     pub async fn execute(self) -> eyre::Result<()> {
         info!(target: "reth::cli", "Reth init-state starting");
 
-        // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db();
-        info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(&db_path, self.db.database_args())?);
-        info!(target: "reth::cli", "Database opened");
-
-        let provider_factory = ProviderFactory::new(db, self.chain, data_dir.static_files())?;
-        let etl_config = EtlConfig::new(
-            Some(EtlConfig::from_datadir(data_dir.data_dir())),
-            EtlConfig::default_file_size(),
-        );
+        let Environment { config, provider_factory, .. } = self.env.init(AccessRights::RW)?;
 
         info!(target: "reth::cli", "Initiating state dump");
 
-        let hash = init_at_state(self.state, provider_factory, etl_config)?;
+        let hash = init_at_state(self.state, provider_factory, config.stages.etl)?;
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())

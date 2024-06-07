@@ -8,7 +8,7 @@ pub(crate) struct NodeKey(pub(crate) PeerId);
 
 impl From<PeerId> for NodeKey {
     fn from(value: PeerId) -> Self {
-        NodeKey(value)
+        Self(value)
     }
 }
 
@@ -16,13 +16,13 @@ impl From<NodeKey> for discv5::Key<NodeKey> {
     fn from(value: NodeKey) -> Self {
         let hash = keccak256(value.0.as_slice());
         let hash = *GenericArray::from_slice(hash.as_slice());
-        discv5::Key::new_raw(value, hash)
+        Self::new_raw(value, hash)
     }
 }
 
 impl From<&NodeRecord> for NodeKey {
     fn from(node: &NodeRecord) -> Self {
-        NodeKey(node.id)
+        Self(node.id)
     }
 }
 

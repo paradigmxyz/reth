@@ -2,14 +2,14 @@
 
 use reth_config::{config::StageConfig, PruneConfig};
 use reth_consensus::Consensus;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::{client::BodiesClient, downloader::BodyDownloader},
     headers::{client::HeadersClient, downloader::HeaderDownloader},
 };
@@ -74,7 +74,7 @@ where
     Ok(pipeline)
 }
 
-/// Builds the [Pipeline] with the given [ProviderFactory] and downloaders.
+/// Builds the [Pipeline] with the given [`ProviderFactory`] and downloaders.
 #[allow(clippy::too_many_arguments)]
 pub async fn build_pipeline<DB, H, B, Executor>(
     node_config: &NodeConfig,

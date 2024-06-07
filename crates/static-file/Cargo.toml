@@ -15,13 +15,11 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-db.workspace = true
+reth-db-api.workspace = true
 reth-provider.workspace = true
-reth-interfaces.workspace = true
+reth-storage-errors.workspace = true
 reth-nippy-jar.workspace = true
 reth-tokio-util.workspace = true
-
-# async
-tokio-stream.workspace = true
 
 # misc
 tracing.workspace = true
@@ -31,6 +29,7 @@ parking_lot = { workspace = true, features = ["send_guard", "arc_lock"] }
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-stages = { workspace = true, features = ["test-utils"] }
+reth-testing-utils.workspace = true
 
 assert_matches.workspace = true
 tempfile.workspace = true

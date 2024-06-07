@@ -38,14 +38,14 @@ pub enum MessageId {
 
 impl MessageId {
     /// Converts the byte that represents the message id to the enum.
-    fn from_u8(msg: u8) -> Result<Self, u8> {
+    const fn from_u8(msg: u8) -> Result<Self, u8> {
         Ok(match msg {
-            1 => MessageId::Ping,
-            2 => MessageId::Pong,
-            3 => MessageId::FindNode,
-            4 => MessageId::Neighbours,
-            5 => MessageId::EnrRequest,
-            6 => MessageId::EnrResponse,
+            1 => Self::Ping,
+            2 => Self::Pong,
+            3 => Self::FindNode,
+            4 => Self::Neighbours,
+            5 => Self::EnrRequest,
+            6 => Self::EnrResponse,
             _ => return Err(msg),
         })
     }
@@ -72,14 +72,14 @@ pub enum Message {
 
 impl Message {
     /// Returns the id for this type
-    pub fn msg_type(&self) -> MessageId {
+    pub const fn msg_type(&self) -> MessageId {
         match self {
-            Message::Ping(_) => MessageId::Ping,
-            Message::Pong(_) => MessageId::Pong,
-            Message::FindNode(_) => MessageId::FindNode,
-            Message::Neighbours(_) => MessageId::Neighbours,
-            Message::EnrRequest(_) => MessageId::EnrRequest,
-            Message::EnrResponse(_) => MessageId::EnrResponse,
+            Self::Ping(_) => MessageId::Ping,
+            Self::Pong(_) => MessageId::Pong,
+            Self::FindNode(_) => MessageId::FindNode,
+            Self::Neighbours(_) => MessageId::Neighbours,
+            Self::EnrRequest(_) => MessageId::EnrRequest,
+            Self::EnrResponse(_) => MessageId::EnrResponse,
         }
     }
 
@@ -101,12 +101,12 @@ impl Message {
 
         // Match the message type and encode the corresponding message into the payload
         match self {
-            Message::Ping(message) => message.encode(&mut payload),
-            Message::Pong(message) => message.encode(&mut payload),
-            Message::FindNode(message) => message.encode(&mut payload),
-            Message::Neighbours(message) => message.encode(&mut payload),
-            Message::EnrRequest(message) => message.encode(&mut payload),
-            Message::EnrResponse(message) => message.encode(&mut payload),
+            Self::Ping(message) => message.encode(&mut payload),
+            Self::Pong(message) => message.encode(&mut payload),
+            Self::FindNode(message) => message.encode(&mut payload),
+            Self::Neighbours(message) => message.encode(&mut payload),
+            Self::EnrRequest(message) => message.encode(&mut payload),
+            Self::EnrResponse(message) => message.encode(&mut payload),
         }
 
         // Sign the payload with the secret key using recoverable ECDSA
@@ -165,12 +165,12 @@ impl Message {
         let payload = &mut &packet[98..];
 
         let msg = match MessageId::from_u8(msg_type).map_err(DecodePacketError::UnknownMessage)? {
-            MessageId::Ping => Message::Ping(Ping::decode(payload)?),
-            MessageId::Pong => Message::Pong(Pong::decode(payload)?),
-            MessageId::FindNode => Message::FindNode(FindNode::decode(payload)?),
-            MessageId::Neighbours => Message::Neighbours(Neighbours::decode(payload)?),
-            MessageId::EnrRequest => Message::EnrRequest(EnrRequest::decode(payload)?),
-            MessageId::EnrResponse => Message::EnrResponse(EnrResponse::decode(payload)?),
+            MessageId::Ping => Self::Ping(Ping::decode(payload)?),
+            MessageId::Pong => Self::Pong(Pong::decode(payload)?),
+            MessageId::FindNode => Self::FindNode(FindNode::decode(payload)?),
+            MessageId::Neighbours => Self::Neighbours(Neighbours::decode(payload)?),
+            MessageId::EnrRequest => Self::EnrRequest(EnrRequest::decode(payload)?),
+            MessageId::EnrResponse => Self::EnrResponse(EnrResponse::decode(payload)?),
         };
 
         Ok(Packet { msg, node_id, hash: header_hash })
@@ -197,7 +197,7 @@ pub struct NodeEndpoint {
     pub address: IpAddr,
     /// The UDP port used for communication in the discovery protocol.
     pub udp_port: u16,
-    /// The TCP port used for communication in the RLPx protocol.
+    /// The TCP port used for communication in the `RLPx` protocol.
     pub tcp_port: u16,
 }
 
@@ -209,8 +209,8 @@ impl From<NodeRecord> for NodeEndpoint {
 
 impl NodeEndpoint {
     /// Creates a new [`NodeEndpoint`] from a given UDP address and TCP port.
-    pub fn from_udp_address(udp_address: &std::net::SocketAddr, tcp_port: u16) -> Self {
-        NodeEndpoint { address: udp_address.ip(), udp_port: udp_address.port(), tcp_port }
+    pub const fn from_udp_address(udp_address: &std::net::SocketAddr, tcp_port: u16) -> Self {
+        Self { address: udp_address.ip(), udp_port: udp_address.port(), tcp_port }
     }
 }
 
@@ -343,11 +343,11 @@ impl Decodable for EnrRequest {
 
 /// A [ENRResponse packet](https://github.com/ethereum/devp2p/blob/master/discv4.md#enrresponse-packet-0x06).
 ///
-/// This packet is used to respond to an ENRRequest packet and includes the requested ENR along with
-/// the hash of the original request.
+/// This packet is used to respond to an `ENRRequest` packet and includes the requested ENR along
+/// with the hash of the original request.
 #[derive(Clone, Debug, Eq, PartialEq, RlpEncodable, RlpDecodable)]
 pub struct EnrResponse {
-    /// The hash of the ENRRequest packet being replied to.
+    /// The hash of the `ENRRequest` packet being replied to.
     pub request_hash: B256,
     /// The ENR (Ethereum Node Record) for the responding node.
     pub enr: Enr<SecretKey>,
@@ -376,7 +376,7 @@ pub struct Ping {
     pub to: NodeEndpoint,
     /// The expiration timestamp.
     pub expire: u64,
-    /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
+    /// Optional `enr_seq` for <https://eips.ethereum.org/EIPS/eip-868>
     pub enr_sq: Option<u64>,
 }
 
@@ -469,7 +469,7 @@ pub struct Pong {
     pub echo: B256,
     /// The expiration timestamp.
     pub expire: u64,
-    /// Optional enr_seq for <https://eips.ethereum.org/EIPS/eip-868>
+    /// Optional `enr_seq` for <https://eips.ethereum.org/EIPS/eip-868>
     pub enr_sq: Option<u64>,
 }
 

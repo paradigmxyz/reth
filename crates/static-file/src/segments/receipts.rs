@@ -1,9 +1,6 @@
 use crate::segments::{dataset_for_compression, prepare_jar, Segment};
-use reth_db::{
-    cursor::DbCursorRO, database::Database, static_file::create_static_file_T1, tables,
-    transaction::DbTx,
-};
-use reth_interfaces::provider::{ProviderError, ProviderResult};
+use reth_db::{static_file::create_static_file_T1, tables};
+use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_primitives::{
     static_file::{SegmentConfig, SegmentHeader},
     BlockNumber, StaticFileSegment, TxNumber,
@@ -12,9 +9,10 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockReader, DatabaseProviderRO, TransactionsProviderExt,
 };
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{ops::RangeInclusive, path::Path};
 
-/// Static File segment responsible for [StaticFileSegment::Receipts] part of data.
+/// Static File segment responsible for [`StaticFileSegment::Receipts`] part of data.
 #[derive(Debug, Default)]
 pub struct Receipts;
 

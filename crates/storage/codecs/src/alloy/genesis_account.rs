@@ -53,7 +53,7 @@ impl Compact for AlloyGenesisAccount {
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let (account, _) = GenesisAccount::from_compact(buf, len);
-        let alloy_account = AlloyGenesisAccount {
+        let alloy_account = Self {
             nonce: account.nonce,
             balance: account.balance,
             code: account.code,

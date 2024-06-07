@@ -4,6 +4,7 @@ use crate::{
     builder::{NodeAdapter, NodeAddOns, NodeTypesAdapter},
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
+    launch::common::WithConfigs,
     node::FullNode,
     BuilderContext, NodeBuilderWithComponents, NodeHandle,
 };
@@ -25,11 +26,13 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     engine::EngineMessageStreamExt,
     exit::NodeExitFuture,
+    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
 use reth_rpc_engine_api::EngineApi;
+use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
@@ -46,7 +49,7 @@ pub use common::LaunchContext;
 ///
 /// This is essentially the launch logic for a node.
 ///
-/// See also [DefaultNodeLauncher] and [NodeBuilderWithComponents::launch_with]
+/// See also [`DefaultNodeLauncher`] and [`NodeBuilderWithComponents::launch_with`]
 pub trait LaunchNode<Target> {
     /// The node type that is created.
     type Node;
@@ -64,7 +67,7 @@ pub struct DefaultNodeLauncher {
 
 impl DefaultNodeLauncher {
     /// Create a new instance of the default node launcher.
-    pub fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
+    pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
         Self { ctx: LaunchContext::new(task_executor, data_dir) }
     }
 }
@@ -92,13 +95,13 @@ where
         let ctx = ctx
             .with_configured_globals()
             // load the toml config
-            .with_loaded_toml_config(config)?
+            .with_loaded_toml_config(config).await?
             // attach the database
             .attach(database.clone())
             // ensure certain settings take effect
             .with_adjusted_configs()
             // Create the provider factory
-            .with_provider_factory()?
+            .with_provider_factory().await?
             .inspect(|_| {
                 info!(target: "reth::cli", "Database opened");
             })
@@ -140,13 +143,15 @@ where
             )),
         )?;
 
+        let config_container = WithConfigs {
+            config: ctx.node_config().clone(),
+            toml_config: ctx.toml_config().clone(),
+        };
         let builder_ctx = BuilderContext::new(
             head,
             blockchain_db.clone(),
             ctx.task_executor().clone(),
-            ctx.data_dir().clone(),
-            ctx.node_config().clone(),
-            ctx.toml_config().clone(),
+            config_container,
         );
 
         debug!(target: "reth::cli", "creating components");
@@ -164,7 +169,6 @@ where
             // once the Blockchain provider no longer depends on an instance of the tree
             .with_canon_state_notification_sender(canon_state_notification_sender);
 
-        let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // Replace the tree component with the actual tree
@@ -194,7 +198,6 @@ where
             // create the launch context for the exex
             let context = ExExContext {
                 head,
-                data_dir: ctx.data_dir().clone(),
                 config: ctx.node_config().clone(),
                 reth_config: ctx.toml_config().clone(),
                 components: node_adapter.clone(),
@@ -282,7 +285,7 @@ where
         // Configure the pipeline
         let pipeline_exex_handle =
             exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
-        let (mut pipeline, client) = if ctx.is_dev() {
+        let (pipeline, client) = if ctx.is_dev() {
             info!(target: "reth::cli", "Starting Reth in dev mode");
 
             for (idx, (address, alloc)) in ctx.chain_spec().genesis.alloc.iter().enumerate() {
@@ -299,13 +302,12 @@ where
                 blockchain_db.clone(),
                 node_adapter.components.pool().clone(),
                 consensus_engine_tx.clone(),
-                canon_state_notification_sender,
                 mining_mode,
                 node_adapter.components.block_executor().clone(),
             )
             .build();
 
-            let mut pipeline = crate::setup::build_networked_pipeline(
+            let pipeline = crate::setup::build_networked_pipeline(
                 ctx.node_config(),
                 &ctx.toml_config().stages,
                 client.clone(),
@@ -358,7 +360,7 @@ where
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
         }
 
-        let mut pruner = pruner_builder.build(ctx.provider_factory().clone());
+        let pruner = pruner_builder.build(ctx.provider_factory().clone());
 
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
@@ -395,7 +397,7 @@ where
                 Either::Right(stream::empty())
             },
             pruner_events.map(Into::into),
-            static_file_producer_events.map(Into::into)
+            static_file_producer_events.map(Into::into),
         );
         ctx.task_executor().spawn_critical(
             "events task",
@@ -407,12 +409,19 @@ where
             ),
         );
 
+        let client = ClientVersionV1 {
+            code: CLIENT_CODE,
+            name: NAME_CLIENT.to_string(),
+            version: CARGO_PKG_VERSION.to_string(),
+            commit: VERGEN_GIT_SHA.to_string(),
+        };
         let engine_api = EngineApi::new(
             blockchain_db.clone(),
             ctx.chain_spec(),
             beacon_engine_handle,
             node_adapter.components.payload_builder().clone().into(),
             Box::new(ctx.task_executor().clone()),
+            client,
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -444,6 +453,7 @@ where
 
         let full_node = FullNode {
             evm_config: node_adapter.components.evm_config().clone(),
+            block_executor: node_adapter.components.block_executor().clone(),
             pool: node_adapter.components.pool().clone(),
             network: node_adapter.components.network().clone(),
             provider: node_adapter.provider.clone(),

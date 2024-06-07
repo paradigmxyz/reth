@@ -4,14 +4,12 @@
 //! generic over it.
 
 use crate::{
-    NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
+    NetworkError, NetworkInfo, PeerId, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
     ReputationChangeKind,
 };
 use enr::{secp256k1::SecretKey, Enr};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_eth_wire::{DisconnectReason, ProtocolVersion};
-use reth_network_types::PeerId;
-use reth_primitives::{Chain, NodeRecord};
+use reth_network_types::NodeRecord;
 use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
 use std::net::{IpAddr, SocketAddr};
 
@@ -24,7 +22,7 @@ pub struct NoopNetwork;
 
 impl NetworkInfo for NoopNetwork {
     fn local_addr(&self) -> SocketAddr {
-        (IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), DEFAULT_DISCOVERY_PORT).into()
+        (IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), 30303).into()
     }
 
     async fn network_status(&self) -> Result<NetworkStatus, NetworkError> {
@@ -42,7 +40,8 @@ impl NetworkInfo for NoopNetwork {
     }
 
     fn chain_id(&self) -> u64 {
-        Chain::mainnet().into()
+        // mainnet
+        1
     }
 
     fn is_syncing(&self) -> bool {

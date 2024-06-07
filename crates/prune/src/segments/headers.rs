@@ -5,10 +5,10 @@ use crate::{
     PrunerError,
 };
 use itertools::Itertools;
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, RangeWalker},
     database::Database,
-    tables,
     transaction::DbTxMut,
 };
 
@@ -25,7 +25,7 @@ pub struct Headers {
 }
 
 impl Headers {
-    pub fn new(mode: PruneMode) -> Self {
+    pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
 }
@@ -188,14 +188,15 @@ where
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use reth_db::{tables, transaction::DbTx};
-    use reth_interfaces::test_utils::{generators, generators::random_header_range};
+    use reth_db::tables;
+    use reth_db_api::transaction::DbTx;
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
         PruneSegment, B256, U256,
     };
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::TestStageDB;
+    use reth_testing_utils::{generators, generators::random_header_range};
     use tracing::trace;
 
     use crate::segments::{
@@ -212,7 +213,7 @@ mod tests {
 
         let headers = random_header_range(&mut rng, 0..100, B256::ZERO);
         let tx = db.factory.provider_rw().unwrap().into_tx();
-        for header in headers.iter() {
+        for header in &headers {
             TestStageDB::insert_header(None, &tx, header, U256::ZERO).unwrap();
         }
         tx.commit().unwrap();

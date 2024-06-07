@@ -1,12 +1,12 @@
-use reth_db::{
+use reth_db::BlockNumberList;
+use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     models::ShardedKey,
     table::Table,
     transaction::DbTxMut,
-    BlockNumberList,
+    DatabaseError,
 };
-use reth_interfaces::db::DatabaseError;
 use reth_primitives::BlockNumber;
 use reth_provider::DatabaseProviderRW;
 

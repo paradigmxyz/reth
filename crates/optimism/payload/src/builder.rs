@@ -34,29 +34,29 @@ pub struct OptimismPayloadBuilder<EvmConfig> {
     compute_pending_block: bool,
     /// The rollup's chain spec.
     chain_spec: Arc<ChainSpec>,
-
+    /// The type responsible for creating the evm.
     evm_config: EvmConfig,
 }
 
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
-    /// OptimismPayloadBuilder constructor.
-    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+    /// `OptimismPayloadBuilder` constructor.
+    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         Self { compute_pending_block: true, chain_spec, evm_config }
     }
 
     /// Sets the rollup's compute pending block configuration option.
-    pub fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
+    pub const fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
         self.compute_pending_block = compute_pending_block;
         self
     }
 
     /// Enables the rollup's compute pending block configuration option.
-    pub fn compute_pending_block(self) -> Self {
+    pub const fn compute_pending_block(self) -> Self {
         self.set_compute_pending_block(true)
     }
 
     /// Returns the rollup's compute pending block configuration option.
-    pub fn is_compute_pending_block(&self) -> bool {
+    pub const fn is_compute_pending_block(&self) -> bool {
         self.compute_pending_block
     }
 
@@ -67,7 +67,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     }
 }
 
-/// Implementation of the [PayloadBuilder] trait for [OptimismPayloadBuilder].
+/// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
 impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory,
@@ -86,23 +86,15 @@ where
 
     fn on_missing_payload(
         &self,
-        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
-    ) -> Option<OptimismBuiltPayload> {
-        // In Optimism, the PayloadAttributes can specify a `no_tx_pool` option that implies we
-        // should not pull transactions from the tx pool. In this case, we build the payload
-        // upfront with the list of transactions sent in the attributes without caring about
-        // the results of the polling job, if a best payload has not already been built.
-        if args.config.attributes.no_tx_pool {
-            if let Ok(BuildOutcome::Better { payload, .. }) = self.try_build(args) {
-                trace!(target: "payload_builder", "[OPTIMISM] Forced best payload");
-                return Some(payload)
-            }
-        }
-
-        None
+        _args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+    ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
+        // we want to await the job that's already in progress because that should be returned as
+        // is, there's no benefit in racing another job
+        MissingPayloadBehaviour::AwaitInProgress
     }
 
     fn build_empty_payload(
+        &self,
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<OptimismBuiltPayload, PayloadBuilderError> {
@@ -217,9 +209,10 @@ where
             blob_gas_used,
             excess_blob_gas,
             parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
+            requests_root: None,
         };
 
-        let block = Block { header, body: vec![], ommers: vec![], withdrawals };
+        let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests: None };
         let sealed_block = block.seal_slow();
 
         Ok(OptimismBuiltPayload::new(
@@ -577,10 +570,11 @@ where
         parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
         blob_gas_used,
         excess_blob_gas,
+        requests_root: None,
     };
 
     // seal the block
-    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests: None };
 
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");

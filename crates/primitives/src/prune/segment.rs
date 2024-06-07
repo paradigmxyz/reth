@@ -28,7 +28,7 @@ pub enum PruneSegment {
 
 impl PruneSegment {
     /// Returns minimum number of blocks to left in the database for this segment.
-    pub fn min_blocks(&self, purpose: PrunePurpose) -> u64 {
+    pub const fn min_blocks(&self, purpose: PrunePurpose) -> u64 {
         match self {
             Self::SenderRecovery | Self::TransactionLookup | Self::Headers | Self::Transactions => {
                 0
@@ -47,23 +47,23 @@ impl PruneSegment {
 pub enum PrunePurpose {
     /// Prune data according to user configuration.
     User,
-    /// Prune data according to highest static_files to delete the data from database.
+    /// Prune data according to highest `static_files` to delete the data from database.
     StaticFile,
 }
 
 impl PrunePurpose {
     /// Returns true if the purpose is [`PrunePurpose::User`].
-    pub fn is_user(self) -> bool {
+    pub const fn is_user(self) -> bool {
         matches!(self, Self::User)
     }
 
     /// Returns true if the purpose is [`PrunePurpose::StaticFile`].
-    pub fn is_static_file(self) -> bool {
+    pub const fn is_static_file(self) -> bool {
         matches!(self, Self::StaticFile)
     }
 }
 
-/// PruneSegment error type.
+/// `PruneSegment` error type.
 #[derive(Debug, Error, PartialEq, Eq, Clone)]
 pub enum PruneSegmentError {
     /// Invalid configuration of a prune segment.

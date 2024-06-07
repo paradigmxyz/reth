@@ -1,7 +1,7 @@
 //! Optimism-specific implementation and utilities for the executor
 
 use crate::OptimismBlockExecutionError;
-use reth_interfaces::{executor::BlockExecutionError, RethError};
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{address, b256, hex, Address, Block, Bytes, ChainSpec, Hardfork, B256, U256};
 use revm::{
     primitives::{Bytecode, HashMap, SpecId},
@@ -20,10 +20,10 @@ const CREATE_2_DEPLOYER_CODEHASH: B256 =
 /// The raw bytecode of the create2 deployer contract.
 const CREATE_2_DEPLOYER_BYTECODE: [u8; 1584] = hex!("6080604052600436106100435760003560e01c8063076c37b21461004f578063481286e61461007157806356299481146100ba57806366cfa057146100da57600080fd5b3661004a57005b600080fd5b34801561005b57600080fd5b5061006f61006a366004610327565b6100fa565b005b34801561007d57600080fd5b5061009161008c366004610327565b61014a565b60405173ffffffffffffffffffffffffffffffffffffffff909116815260200160405180910390f35b3480156100c657600080fd5b506100916100d5366004610349565b61015d565b3480156100e657600080fd5b5061006f6100f53660046103ca565b610172565b61014582826040518060200161010f9061031a565b7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe082820381018352601f90910116604052610183565b505050565b600061015683836102e7565b9392505050565b600061016a8484846102f0565b949350505050565b61017d838383610183565b50505050565b6000834710156101f4576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152601d60248201527f437265617465323a20696e73756666696369656e742062616c616e636500000060448201526064015b60405180910390fd5b815160000361025f576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820181905260248201527f437265617465323a2062797465636f6465206c656e677468206973207a65726f60448201526064016101eb565b8282516020840186f5905073ffffffffffffffffffffffffffffffffffffffff8116610156576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152601960248201527f437265617465323a204661696c6564206f6e206465706c6f790000000000000060448201526064016101eb565b60006101568383305b6000604051836040820152846020820152828152600b8101905060ff815360559020949350505050565b61014e806104ad83390190565b6000806040838503121561033a57600080fd5b50508035926020909101359150565b60008060006060848603121561035e57600080fd5b8335925060208401359150604084013573ffffffffffffffffffffffffffffffffffffffff8116811461039057600080fd5b809150509250925092565b7f4e487b7100000000000000000000000000000000000000000000000000000000600052604160045260246000fd5b6000806000606084860312156103df57600080fd5b8335925060208401359150604084013567ffffffffffffffff8082111561040557600080fd5b818601915086601f83011261041957600080fd5b81358181111561042b5761042b61039b565b604051601f82017fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe0908116603f011681019083821181831017156104715761047161039b565b8160405282815289602084870101111561048a57600080fd5b826020860160208301376000602084830101528095505050505050925092509256fe608060405234801561001057600080fd5b5061012e806100206000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063249cb3fa14602d575b600080fd5b603c603836600460b1565b604e565b60405190815260200160405180910390f35b60008281526020818152604080832073ffffffffffffffffffffffffffffffffffffffff8516845290915281205460ff16608857600060aa565b7fa2ef4600d742022d532d4747cb3547474667d6f13804902513b2ec01c848f4b45b9392505050565b6000806040838503121560c357600080fd5b82359150602083013573ffffffffffffffffffffffffffffffffffffffff8116811460ed57600080fd5b80915050925092905056fea26469706673582212205ffd4e6cede7d06a5daf93d48d0541fc68189eeb16608c1999a82063b666eb1164736f6c63430008130033a2646970667358221220fdc4a0fe96e3b21c108ca155438d37c9143fb01278a3c1d274948bad89c564ba64736f6c63430008130033");
 
-/// The function selector of the "setL1BlockValuesEcotone" function in the L1Block contract.
+/// The function selector of the "setL1BlockValuesEcotone" function in the `L1Block` contract.
 const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 
-/// Extracts the [L1BlockInfo] from the L2 block. The L1 info transaction is always the first
+/// Extracts the [`L1BlockInfo`] from the L2 block. The L1 info transaction is always the first
 /// transaction in the L2 block.
 ///
 /// Returns an error if the L1 info transaction is not found, if the block is empty.
@@ -52,7 +52,7 @@ pub fn extract_l1_info(block: &Block) -> Result<L1BlockInfo, OptimismBlockExecut
     }
 }
 
-/// Parses the calldata of the [L1BlockInfo] transaction pre-Ecotone hardfork.
+/// Parses the calldata of the [`L1BlockInfo`] transaction pre-Ecotone hardfork.
 pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OptimismBlockExecutionError> {
     // The setL1BlockValues tx calldata must be exactly 260 bytes long, considering that
     // we already removed the first 4 bytes (the function selector). Detailed breakdown:
@@ -94,7 +94,7 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
     Ok(l1block)
 }
 
-/// Parses the calldata of the [L1BlockInfo] transaction post-Ecotone hardfork.
+/// Parses the calldata of the [`L1BlockInfo`] transaction post-Ecotone hardfork.
 ///
 /// This will fail if the call data is not exactly 160 bytes long:
 ///
@@ -146,13 +146,13 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OptimismBloc
     Ok(l1block)
 }
 
-/// An extension trait for [L1BlockInfo] that allows us to calculate the L1 cost of a transaction
-/// based off of the [ChainSpec]'s activated hardfork.
+/// An extension trait for [`L1BlockInfo`] that allows us to calculate the L1 cost of a transaction
+/// based off of the [`ChainSpec`]'s activated hardfork.
 pub trait RethL1BlockInfo {
     /// Forwards an L1 transaction calculation to revm and returns the gas cost.
     ///
     /// ### Takes
-    /// - `chain_spec`: The [ChainSpec] for the node.
+    /// - `chain_spec`: The [`ChainSpec`] for the node.
     /// - `timestamp`: The timestamp of the current block.
     /// - `input`: The calldata of the transaction.
     /// - `is_deposit`: Whether or not the transaction is a deposit.
@@ -167,7 +167,7 @@ pub trait RethL1BlockInfo {
     /// Computes the data gas cost for an L2 transaction.
     ///
     /// ### Takes
-    /// - `chain_spec`: The [ChainSpec] for the node.
+    /// - `chain_spec`: The [`ChainSpec`] for the node.
     /// - `timestamp`: The timestamp of the current block.
     /// - `input`: The calldata of the transaction.
     fn l1_data_gas(
@@ -190,7 +190,11 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Ok(U256::ZERO)
         }
 
-        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
+        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, timestamp) {
+            SpecId::FJORD
+        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, timestamp) {
+            SpecId::ECOTONE
+        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
             SpecId::REGOLITH
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
             SpecId::BEDROCK
@@ -209,7 +213,9 @@ impl RethL1BlockInfo for L1BlockInfo {
         timestamp: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError> {
-        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
+        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, timestamp) {
+            SpecId::FJORD
+        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
             SpecId::REGOLITH
         } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
             SpecId::BEDROCK
@@ -230,7 +236,7 @@ pub fn ensure_create2_deployer<DB>(
     chain_spec: Arc<ChainSpec>,
     timestamp: u64,
     db: &mut revm::State<DB>,
-) -> Result<(), RethError>
+) -> Result<(), DB::Error>
 where
     DB: revm::Database,
 {
@@ -244,9 +250,7 @@ where
         trace!(target: "evm", "Forcing create2 deployer contract deployment on Canyon transition");
 
         // Load the create2 deployer account from the cache.
-        let acc = db
-            .load_cache_account(CREATE_2_DEPLOYER_ADDR)
-            .map_err(|_| RethError::Custom("Failed to load account".to_string()))?;
+        let acc = db.load_cache_account(CREATE_2_DEPLOYER_ADDR)?;
 
         // Update the account info with the create2 deployer codehash and bytecode.
         let mut acc_info = acc.account_info().unwrap_or_default();
@@ -280,6 +284,7 @@ mod tests {
             body: vec![l1_info_tx],
             ommers: Vec::default(),
             withdrawals: None,
+            requests: None,
         };
 
         let l1_info: L1BlockInfo = extract_l1_info(&mock_block).unwrap();
@@ -301,6 +306,7 @@ mod tests {
             body: vec![l1_info_tx],
             ommers: Vec::default(),
             withdrawals: None,
+            requests: None,
         };
 
         let l1_info: L1BlockInfo = extract_l1_info(&mock_block).unwrap();

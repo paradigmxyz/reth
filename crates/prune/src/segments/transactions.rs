@@ -2,7 +2,8 @@ use crate::{
     segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
     PrunerError,
 };
-use reth_db::{database::Database, tables};
+use reth_db::tables;
+use reth_db_api::database::Database;
 use reth_primitives::{PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{DatabaseProviderRW, TransactionsProvider};
 use tracing::{instrument, trace};
@@ -13,7 +14,7 @@ pub struct Transactions {
 }
 
 impl Transactions {
-    pub fn new(mode: PruneMode) -> Self {
+    pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
 }
@@ -81,13 +82,13 @@ mod tests {
         Itertools,
     };
     use reth_db::tables;
-    use reth_interfaces::test_utils::{generators, generators::random_block_range};
     use reth_primitives::{
         BlockNumber, PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
         PruneSegment, TxNumber, B256,
     };
     use reth_provider::PruneCheckpointReader;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_testing_utils::{generators, generators::random_block_range};
     use std::ops::Sub;
 
     #[test]

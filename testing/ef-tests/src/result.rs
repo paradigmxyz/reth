@@ -2,7 +2,7 @@
 
 use crate::Case;
 use reth_db::DatabaseError;
-use reth_interfaces::RethError;
+use reth_provider::ProviderError;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -46,7 +46,7 @@ pub enum Error {
     Assertion(String),
     /// An error internally in reth occurred.
     #[error("test failed: {0}")]
-    RethError(#[from] RethError),
+    Provider(#[from] ProviderError),
     /// An error occurred while decoding RLP.
     #[error("an error occurred deserializing RLP: {0}")]
     RlpDecodeError(#[from] alloy_rlp::Error),
@@ -66,7 +66,7 @@ pub struct CaseResult {
 impl CaseResult {
     /// Create a new test result.
     pub fn new(path: &Path, case: &impl Case, result: Result<(), Error>) -> Self {
-        CaseResult { desc: case.description(), path: path.into(), result }
+        Self { desc: case.description(), path: path.into(), result }
     }
 }
 
@@ -76,9 +76,7 @@ pub(crate) fn assert_tests_pass(suite_name: &str, path: &Path, results: &[CaseRe
 
     print_results(suite_name, path, &passed, &failed, &skipped);
 
-    if !failed.is_empty() {
-        panic!("Some tests failed (see above)");
-    }
+    assert!(failed.is_empty(), "Some tests failed (see above)");
 }
 
 /// Categorize test results into `(passed, failed, skipped)`.

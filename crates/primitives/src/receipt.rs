@@ -1,6 +1,6 @@
 #[cfg(feature = "zstd-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
-use crate::{logs_bloom, Bloom, Bytes, PruneSegmentError, TxType, B256};
+use crate::{logs_bloom, Bloom, Bytes, TxType, B256};
 use alloy_primitives::Log;
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
@@ -45,15 +45,21 @@ pub struct Receipt {
 }
 
 impl Receipt {
-    /// Calculates [`Log`]'s bloom filter. this is slow operation and [ReceiptWithBloom] can
+    /// Calculates [`Log`]'s bloom filter. this is slow operation and [`ReceiptWithBloom`] can
     /// be used to cache this value.
     pub fn bloom_slow(&self) -> Bloom {
         logs_bloom(self.logs.iter())
     }
 
-    /// Calculates the bloom filter for the receipt and returns the [ReceiptWithBloom] container
+    /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloom`] container
     /// type.
     pub fn with_bloom(self) -> ReceiptWithBloom {
+        self.into()
+    }
+
+    /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloomRef`]
+    /// container type.
+    pub fn with_bloom_ref(&self) -> ReceiptWithBloomRef<'_> {
         self.into()
     }
 }
@@ -67,7 +73,7 @@ pub struct Receipts {
 
 impl Receipts {
     /// Create a new `Receipts` instance with an empty vector.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { receipt_vec: vec![] }
     }
 
@@ -98,7 +104,7 @@ impl Receipts {
 
     /// Retrieves the receipt root for all recorded receipts from index.
     pub fn root_slow(&self, index: usize) -> Option<B256> {
-        Some(crate::proofs::calculate_receipt_root_ref(
+        Some(crate::proofs::calculate_receipt_root_no_memo(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
         ))
     }
@@ -111,27 +117,11 @@ impl Receipts {
         chain_spec: &crate::ChainSpec,
         timestamp: u64,
     ) -> Option<B256> {
-        Some(crate::proofs::calculate_receipt_root_ref_optimism(
+        Some(crate::proofs::calculate_receipt_root_no_memo_optimism(
             &self.receipt_vec[index].iter().map(Option::as_ref).collect::<Option<Vec<_>>>()?,
             chain_spec,
             timestamp,
         ))
-    }
-
-    /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
-    pub fn gas_spent_by_tx(&self) -> Result<Vec<(u64, u64)>, PruneSegmentError> {
-        let Some(block_r) = self.last() else {
-            return Ok(vec![]);
-        };
-        let mut out = Vec::with_capacity(block_r.len());
-        for (id, tx_r) in block_r.iter().enumerate() {
-            if let Some(receipt) = tx_r.as_ref() {
-                out.push((id as u64, receipt.cumulative_gas_used));
-            } else {
-                return Err(PruneSegmentError::ReceiptsPruned);
-            }
-        }
-        Ok(out)
     }
 }
 
@@ -167,7 +157,7 @@ impl FromIterator<Vec<Option<Receipt>>> for Receipts {
 impl From<Receipt> for ReceiptWithBloom {
     fn from(receipt: Receipt) -> Self {
         let bloom = receipt.bloom_slow();
-        ReceiptWithBloom { receipt, bloom }
+        Self { receipt, bloom }
     }
 }
 
@@ -182,8 +172,8 @@ pub struct ReceiptWithBloom {
 }
 
 impl ReceiptWithBloom {
-    /// Create new [ReceiptWithBloom]
-    pub fn new(receipt: Receipt, bloom: Bloom) -> Self {
+    /// Create new [`ReceiptWithBloom`]
+    pub const fn new(receipt: Receipt, bloom: Bloom) -> Self {
         Self { receipt, bloom }
     }
 
@@ -198,9 +188,20 @@ impl ReceiptWithBloom {
     }
 
     #[inline]
-    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
+    const fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: &self.receipt, bloom: &self.bloom }
     }
+}
+
+/// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
+pub fn gas_spent_by_transactions<T: Deref<Target = Receipt>>(
+    receipts: impl IntoIterator<Item = T>,
+) -> Vec<(u64, u64)> {
+    receipts
+        .into_iter()
+        .enumerate()
+        .map(|(id, receipt)| (id as u64, receipt.deref().cumulative_gas_used))
+        .collect()
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -244,7 +245,7 @@ impl proptest::arbitrary::Arbitrary for Receipt {
         arbitrary_receipt().boxed()
     }
 
-    type Strategy = proptest::strategy::BoxedStrategy<Receipt>;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -282,7 +283,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
 impl ReceiptWithBloom {
     /// Returns the enveloped encoded receipt.
     ///
-    /// See also [ReceiptWithBloom::encode_enveloped]
+    /// See also [`ReceiptWithBloom::encode_enveloped`]
     pub fn envelope_encoded(&self) -> Bytes {
         let mut buf = Vec::new();
         self.encode_enveloped(&mut buf);
@@ -312,7 +313,7 @@ impl ReceiptWithBloom {
         let b = &mut &**buf;
         let rlp_head = alloy_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(alloy_rlp::Error::UnexpectedString);
+            return Err(alloy_rlp::Error::UnexpectedString)
         }
         let started_len = b.len();
 
@@ -357,7 +358,7 @@ impl ReceiptWithBloom {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            });
+            })
         }
         *buf = *b;
         Ok(this)
@@ -428,8 +429,8 @@ pub struct ReceiptWithBloomRef<'a> {
 }
 
 impl<'a> ReceiptWithBloomRef<'a> {
-    /// Create new [ReceiptWithBloomRef]
-    pub fn new(receipt: &'a Receipt, bloom: Bloom) -> Self {
+    /// Create new [`ReceiptWithBloomRef`]
+    pub const fn new(receipt: &'a Receipt, bloom: Bloom) -> Self {
         Self { receipt, bloom }
     }
 
@@ -439,7 +440,7 @@ impl<'a> ReceiptWithBloomRef<'a> {
     }
 
     #[inline]
-    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
+    const fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: self.receipt, bloom: &self.bloom }
     }
 }
@@ -510,7 +511,7 @@ impl<'a> ReceiptWithBloomEncoder<'a> {
     fn encode_inner(&self, out: &mut dyn BufMut, with_header: bool) {
         if matches!(self.receipt.tx_type, TxType::Legacy) {
             self.encode_fields(out);
-            return;
+            return
         }
 
         let mut payload = Vec::new();

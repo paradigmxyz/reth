@@ -1,24 +1,20 @@
 //! Database debugging tool
 
 use crate::{
-    dirs::{DataDirPath, MaybePlatformPath},
+    commands::common::{AccessRights, Environment, EnvironmentArgs},
+    dirs::DataDirPath,
     utils::DbTool,
 };
 
-use crate::args::{
-    utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    DatabaseArgs,
-};
+use crate::args::DatadirArgs;
 use clap::Parser;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, init_db, mdbx::DatabaseArguments,
-    models::client_version::ClientVersion, table::TableImporter, tables, transaction::DbTx,
-    DatabaseEnv,
+use reth_db::{init_db, mdbx::DatabaseArguments, tables, DatabaseEnv};
+use reth_db_api::{
+    cursor::DbCursorRO, database::Database, models::ClientVersion, table::TableImporter,
+    transaction::DbTx,
 };
 use reth_node_core::dirs::PlatformPath;
-use reth_primitives::ChainSpec;
-use reth_provider::ProviderFactory;
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 use tracing::info;
 
 mod hashing_storage;
@@ -36,30 +32,8 @@ use merkle::dump_merkle_stage;
 /// `reth dump-stage` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
-    )]
-    chain: Arc<ChainSpec>,
-
     #[command(flatten)]
-    db: DatabaseArgs,
+    env: EnvironmentArgs,
 
     #[command(subcommand)]
     command: Stages,
@@ -70,9 +44,9 @@ pub struct Command {
 pub enum Stages {
     /// Execution stage.
     Execution(StageCommand),
-    /// StorageHashing stage.
+    /// `StorageHashing` stage.
     StorageHashing(StageCommand),
-    /// AccountHashing stage.
+    /// `AccountHashing` stage.
     AccountHashing(StageCommand),
     /// Merkle stage.
     Merkle(StageCommand),
@@ -97,62 +71,25 @@ pub struct StageCommand {
     dry_run: bool,
 }
 
+macro_rules! handle_stage {
+    ($stage_fn:ident, $tool:expr, $command:expr) => {{
+        let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
+        let output_datadir = output_datadir.with_chain($tool.chain().chain, DatadirArgs::default());
+        $stage_fn($tool, *from, *to, output_datadir, *dry_run).await?
+    }};
+}
+
 impl Command {
     /// Execute `dump-stage` command
     pub async fn execute(self) -> eyre::Result<()> {
-        // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db();
-        info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let provider_factory =
-            ProviderFactory::new(db, self.chain.clone(), data_dir.static_files())?;
-
-        info!(target: "reth::cli", "Database opened");
-
-        let tool = DbTool::new(provider_factory, self.chain.clone())?;
+        let Environment { provider_factory, .. } = self.env.init(AccessRights::RO)?;
+        let tool = DbTool::new(provider_factory)?;
 
         match &self.command {
-            Stages::Execution(StageCommand { output_datadir, from, to, dry_run, .. }) => {
-                dump_execution_stage(
-                    &tool,
-                    *from,
-                    *to,
-                    output_datadir.with_chain(self.chain.chain),
-                    *dry_run,
-                )
-                .await?
-            }
-            Stages::StorageHashing(StageCommand { output_datadir, from, to, dry_run, .. }) => {
-                dump_hashing_storage_stage(
-                    &tool,
-                    *from,
-                    *to,
-                    output_datadir.with_chain(self.chain.chain),
-                    *dry_run,
-                )
-                .await?
-            }
-            Stages::AccountHashing(StageCommand { output_datadir, from, to, dry_run, .. }) => {
-                dump_hashing_account_stage(
-                    &tool,
-                    *from,
-                    *to,
-                    output_datadir.with_chain(self.chain.chain),
-                    *dry_run,
-                )
-                .await?
-            }
-            Stages::Merkle(StageCommand { output_datadir, from, to, dry_run, .. }) => {
-                dump_merkle_stage(
-                    &tool,
-                    *from,
-                    *to,
-                    output_datadir.with_chain(self.chain.chain),
-                    *dry_run,
-                )
-                .await?
-            }
+            Stages::Execution(cmd) => handle_stage!(dump_execution_stage, &tool, cmd),
+            Stages::StorageHashing(cmd) => handle_stage!(dump_hashing_storage_stage, &tool, cmd),
+            Stages::AccountHashing(cmd) => handle_stage!(dump_hashing_account_stage, &tool, cmd),
+            Stages::Merkle(cmd) => handle_stage!(dump_merkle_stage, &tool, cmd),
         }
 
         Ok(())

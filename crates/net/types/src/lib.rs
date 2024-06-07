@@ -2,6 +2,43 @@
 //!
 //! This crate manages and converts Ethereum network entities such as node records, peer IDs, and
 //! Ethereum Node Records (ENRs)
+//!
+//! ## An overview of Node Record types
+//!
+//! Ethereum uses different types of "node records" to represent peers on the network.
+//!
+//! The simplest way to identify a peer is by public key. This is the [`PeerId`] type, which usually
+//! represents a peer's secp256k1 public key.
+//!
+//! A more complete representation of a peer is the [`NodeRecord`] type, which includes the peer's
+//! IP address, the ports where it is reachable (TCP and UDP), and the peer's public key. This is
+//! what is returned from discovery v4 queries.
+//!
+//! The most comprehensive node record type is the Ethereum Node Record ([`Enr`]), which is a
+//! signed, versioned record that includes the information from a [`NodeRecord`] along with
+//! additional metadata. This is the data structure returned from discovery v5 queries.
+//!
+//! When we need to deserialize an identifier that could be any of these three types ([`PeerId`],
+//! [`NodeRecord`], and [`Enr`]), we use the [`AnyNode`] type, which is an enum over the three
+//! types. [`AnyNode`] is used in reth's `admin_addTrustedPeer` RPC method.
+//!
+//! The __final__ type is the [`TrustedPeer`] type, which is similar to a [`NodeRecord`] but may
+//! include a domain name instead of a direct IP address. It includes a `resolve` method, which can
+//! be used to resolve the domain name, producing a [`NodeRecord`]. This is useful for adding
+//! trusted peers at startup, whose IP address may not be static each time the node starts. This is
+//! common in orchestrated environments like Kubernetes, where there is reliable service discovery,
+//! but services do not necessarily have static IPs.
+//!
+//! In short, the types are as follows:
+//! - [`PeerId`]: A simple public key identifier.
+//! - [`NodeRecord`]: A more complete representation of a peer, including IP address and ports.
+//! - [`Enr`]: An Ethereum Node Record, which is a signed, versioned record that includes additional
+//!   metadata. Useful when interacting with discovery v5, or when custom metadata is required.
+//! - [`AnyNode`]: An enum over [`PeerId`], [`NodeRecord`], and [`Enr`], useful in deserialization
+//!   when the type of the node record is not known.
+//! - [`TrustedPeer`]: A [`NodeRecord`] with an optional domain name, which can be resolved to a
+//!   [`NodeRecord`]. Useful for adding trusted peers at startup, whose IP address may not be
+//!   static.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -24,6 +61,9 @@ pub type PeerId = B512;
 pub mod node_record;
 pub use node_record::{NodeRecord, NodeRecordParseError};
 
+pub mod trusted_peer;
+pub use trusted_peer::TrustedPeer;
+
 /// This tag should be set to indicate to libsecp256k1 that the following bytes denote an
 /// uncompressed pubkey.
 ///
@@ -32,15 +72,15 @@ pub use node_record::{NodeRecord, NodeRecordParseError};
 /// See: <https://github.com/bitcoin-core/secp256k1/blob/master/include/secp256k1.h#L211>
 const SECP256K1_TAG_PUBKEY_UNCOMPRESSED: u8 = 4;
 
-/// Converts a [secp256k1::PublicKey] to a [PeerId] by stripping the
-/// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag and storing the rest of the slice in the [PeerId].
+/// Converts a [`secp256k1::PublicKey`] to a [`PeerId`] by stripping the
+/// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag and storing the rest of the slice in the [`PeerId`].
 #[inline]
 pub fn pk2id(pk: &PublicKey) -> PeerId {
     PeerId::from_slice(&pk.serialize_uncompressed()[1..])
 }
 
-/// Converts a [PeerId] to a [secp256k1::PublicKey] by prepending the [PeerId] bytes with the
-/// SECP256K1_TAG_PUBKEY_UNCOMPRESSED tag.
+/// Converts a [`PeerId`] to a [`secp256k1::PublicKey`] by prepending the [`PeerId`] bytes with the
+/// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag.
 #[inline]
 pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
     // NOTE: B512 is used as a PeerId because 512 bits is enough to represent an uncompressed
@@ -51,7 +91,7 @@ pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
     PublicKey::from_slice(&s)
 }
 
-/// A peer that can come in ENR or [NodeRecord] form.
+/// A peer that can come in ENR or [`NodeRecord`] form.
 #[derive(
     Debug, Clone, Eq, PartialEq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr,
 )]
@@ -68,17 +108,17 @@ impl AnyNode {
     /// Returns the peer id of the node.
     pub fn peer_id(&self) -> PeerId {
         match self {
-            AnyNode::NodeRecord(record) => record.id,
-            AnyNode::Enr(enr) => pk2id(&enr.public_key()),
-            AnyNode::PeerId(peer_id) => *peer_id,
+            Self::NodeRecord(record) => record.id,
+            Self::Enr(enr) => pk2id(&enr.public_key()),
+            Self::PeerId(peer_id) => *peer_id,
         }
     }
 
     /// Returns the full node record if available.
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
-            AnyNode::NodeRecord(record) => Some(*record),
-            AnyNode::Enr(enr) => {
+            Self::NodeRecord(record) => Some(*record),
+            Self::Enr(enr) => {
                 let node_record = NodeRecord {
                     address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
                     tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
@@ -111,11 +151,11 @@ impl FromStr for AnyNode {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(rem) = s.strip_prefix("enode://") {
             if let Ok(record) = NodeRecord::from_str(s) {
-                return Ok(AnyNode::NodeRecord(record))
+                return Ok(Self::NodeRecord(record))
             }
             // incomplete enode
             if let Ok(peer_id) = PeerId::from_str(rem) {
-                return Ok(AnyNode::PeerId(peer_id))
+                return Ok(Self::PeerId(peer_id))
             }
             return Err(format!("invalid public key: {rem}"))
         }
@@ -129,9 +169,9 @@ impl FromStr for AnyNode {
 impl std::fmt::Display for AnyNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            AnyNode::NodeRecord(record) => write!(f, "{record}"),
-            AnyNode::Enr(enr) => write!(f, "{enr}"),
-            AnyNode::PeerId(peer_id) => {
+            Self::NodeRecord(record) => write!(f, "{record}"),
+            Self::Enr(enr) => write!(f, "{enr}"),
+            Self::PeerId(peer_id) => {
                 write!(f, "enode://{}", alloy_primitives::hex::encode(peer_id.as_slice()))
             }
         }
@@ -150,17 +190,17 @@ impl<T> From<(PeerId, T)> for WithPeerId<T> {
 
 impl<T> WithPeerId<T> {
     /// Wraps the value with the peerid.
-    pub fn new(peer: PeerId, value: T) -> Self {
+    pub const fn new(peer: PeerId, value: T) -> Self {
         Self(peer, value)
     }
 
     /// Get the peer id
-    pub fn peer_id(&self) -> PeerId {
+    pub const fn peer_id(&self) -> PeerId {
         self.0
     }
 
     /// Get the underlying data
-    pub fn data(&self) -> &T {
+    pub const fn data(&self) -> &T {
         &self.1
     }
 
@@ -174,7 +214,7 @@ impl<T> WithPeerId<T> {
         WithPeerId(self.0, self.1.into())
     }
 
-    /// Split the wrapper into [PeerId] and data tuple
+    /// Split the wrapper into [`PeerId`] and data tuple
     pub fn split(self) -> (PeerId, T) {
         (self.0, self.1)
     }

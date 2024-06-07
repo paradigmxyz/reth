@@ -29,7 +29,7 @@ jobs:
       id: services
       run: |
         export github_sha=${{ github.sha }}
-        export github_repository=${{ github.repository }} 
+        export github_repository=${{ github.repository }}
 
         cat etc/assertoor/assertoor-template.yaml | envsubst > etc/assertoor/assertoor.yaml
 
@@ -92,7 +92,7 @@ jobs:
             elif [ "$task_result" == "failure" ]; then
               task_result="${RED}failure${NC}"
             fi
-            
+
             echo -e " $(printf '%-4s' "$task_id")\t$task_status\t$task_result\t$(printf '%-50s' "$task_graph$task_name") \t$task_title"
           done <<< $(echo "$tasks")
         }
@@ -153,7 +153,7 @@ jobs:
             echo "$task_lines"
           fi
 
-          if [ $failed_tests -gt 0 ]; then 
+          if [ $failed_tests -gt 0 ]; then
             final_test_result="failure"
             break
           fi
@@ -197,7 +197,7 @@ jobs:
       with:
         name: "kurtosis-enclave-dump-${{ github.run_id }}"
         path: ./temp/dump
-    
+
     - name: Return test result
       shell: bash
       run: |
@@ -227,4 +227,3 @@ jobs:
 
           exit 1 # fail action
         fi
-

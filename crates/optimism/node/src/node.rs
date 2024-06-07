@@ -38,7 +38,7 @@ impl OptimismNode {
         Self { args }
     }
 
-    /// Returns the components for the given [RollupArgs].
+    /// Returns the components for the given [`RollupArgs`].
     pub fn components<Node>(
         args: RollupArgs,
     ) -> ComponentsBuilder<
@@ -126,7 +126,7 @@ where
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
-        let data_dir = ctx.data_dir();
+        let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
 
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())

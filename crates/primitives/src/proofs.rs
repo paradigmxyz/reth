@@ -4,11 +4,11 @@ use crate::{
     constants::EMPTY_OMMER_ROOT_HASH,
     keccak256,
     trie::{HashBuilder, Nibbles, TrieAccount},
-    Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, TransactionSigned, Withdrawal,
-    B256, U256,
+    Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Request, TransactionSigned,
+    Withdrawal, B256, U256,
 };
+use alloy_eips::eip7685::Encodable7685;
 use alloy_rlp::Encodable;
-use bytes::BufMut;
 use itertools::Itertools;
 
 /// Adjust the index of an item for rlp encoding.
@@ -30,9 +30,8 @@ pub fn ordered_trie_root<T: Encodable>(items: &[T]) -> B256 {
 /// Compute a trie root of the collection of items with a custom encoder.
 pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> B256
 where
-    F: FnMut(&T, &mut dyn BufMut),
+    F: FnMut(&T, &mut Vec<u8>),
 {
-    let mut index_buffer = Vec::new();
     let mut value_buffer = Vec::new();
 
     let mut hb = HashBuilder::default();
@@ -40,8 +39,7 @@ where
     for i in 0..items_len {
         let index = adjust_index_for_rlp(i, items_len);
 
-        index_buffer.clear();
-        index.encode(&mut index_buffer);
+        let index_buffer = alloy_rlp::encode_fixed_size(&index);
 
         value_buffer.clear();
         encode(&items[index], &mut value_buffer);
@@ -70,6 +68,13 @@ pub fn calculate_withdrawals_root(withdrawals: &[Withdrawal]) -> B256 {
 /// Calculates the receipt root for a header.
 pub fn calculate_receipt_root(receipts: &[ReceiptWithBloom]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
+}
+
+/// Calculate [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685) requests root.
+///
+/// NOTE: The requests are encoded as `id + request`
+pub fn calculate_requests_root(requests: &[Request]) -> B256 {
+    ordered_trie_root_with_encoder(requests, |item, buf| item.encode_7685(buf))
 }
 
 /// Calculates the receipt root for a header.
@@ -104,10 +109,15 @@ pub fn calculate_receipt_root_optimism(
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
 }
 
+/// Calculates the receipt root for a header.
+pub fn calculate_receipt_root_ref(receipts: &[ReceiptWithBloomRef<'_>]) -> B256 {
+    ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_inner(buf, false))
+}
+
 /// Calculates the receipt root for a header for the reference type of [Receipt].
 ///
-/// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
-pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
+/// NOTE: Prefer [`calculate_receipt_root`] if you have log blooms memoized.
+pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
     ordered_trie_root_with_encoder(receipts, |r, buf| {
         ReceiptWithBloomRef::from(*r).encode_inner(buf, false)
     })
@@ -115,9 +125,9 @@ pub fn calculate_receipt_root_ref(receipts: &[&Receipt]) -> B256 {
 
 /// Calculates the receipt root for a header for the reference type of [Receipt].
 ///
-/// NOTE: Prefer [calculate_receipt_root] if you have log blooms memoized.
+/// NOTE: Prefer [`calculate_receipt_root_optimism`] if you have log blooms memoized.
 #[cfg(feature = "optimism")]
-pub fn calculate_receipt_root_ref_optimism(
+pub fn calculate_receipt_root_no_memo_optimism(
     receipts: &[&Receipt],
     chain_spec: &crate::ChainSpec,
     timestamp: u64,
@@ -163,7 +173,7 @@ pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
 
 /// Hashes and sorts account keys, then proceeds to calculating the root hash of the state
 /// represented as MPT.
-/// See [state_root_unsorted] for more info.
+/// See [`state_root_unsorted`] for more info.
 pub fn state_root_ref_unhashed<'a, A: Into<TrieAccount> + Clone + 'a>(
     state: impl IntoIterator<Item = (&'a Address, &'a A)>,
 ) -> B256 {
@@ -174,7 +184,7 @@ pub fn state_root_ref_unhashed<'a, A: Into<TrieAccount> + Clone + 'a>(
 
 /// Hashes and sorts account keys, then proceeds to calculating the root hash of the state
 /// represented as MPT.
-/// See [state_root_unsorted] for more info.
+/// See [`state_root_unsorted`] for more info.
 pub fn state_root_unhashed<A: Into<TrieAccount>>(
     state: impl IntoIterator<Item = (Address, A)>,
 ) -> B256 {
@@ -182,7 +192,7 @@ pub fn state_root_unhashed<A: Into<TrieAccount>>(
 }
 
 /// Sorts the hashed account keys and calculates the root hash of the state represented as MPT.
-/// See [state_root] for more info.
+/// See [`state_root`] for more info.
 pub fn state_root_unsorted<A: Into<TrieAccount>>(
     state: impl IntoIterator<Item = (B256, A)>,
 ) -> B256 {
@@ -207,13 +217,13 @@ pub fn state_root<A: Into<TrieAccount>>(state: impl IntoIterator<Item = (B256, A
 }
 
 /// Hashes storage keys, sorts them and them calculates the root hash of the storage trie.
-/// See [storage_root_unsorted] for more info.
+/// See [`storage_root_unsorted`] for more info.
 pub fn storage_root_unhashed(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
     storage_root_unsorted(storage.into_iter().map(|(slot, value)| (keccak256(slot), value)))
 }
 
 /// Sorts and calculates the root hash of account storage trie.
-/// See [storage_root] for more info.
+/// See [`storage_root`] for more info.
 pub fn storage_root_unsorted(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
     storage_root(storage.into_iter().sorted_by_key(|(key, _)| *key))
 }

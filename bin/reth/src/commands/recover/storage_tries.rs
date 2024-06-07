@@ -1,65 +1,28 @@
-use crate::{
-    args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-    dirs::{DataDirPath, MaybePlatformPath},
-};
+use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_cli_runner::CliContext;
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
-    init_db, tables,
     transaction::DbTx,
 };
-use reth_node_core::{args::DatabaseArgs, init::init_genesis};
-use reth_primitives::ChainSpec;
-use reth_provider::{BlockNumReader, HeaderProvider, ProviderError, ProviderFactory};
+use reth_provider::{BlockNumReader, HeaderProvider, ProviderError};
 use reth_trie::StateRoot;
-use std::{fs, sync::Arc};
 use tracing::*;
 
 /// `reth recover storage-tries` command
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
-    )]
-    chain: Arc<ChainSpec>,
-
-    /// All database related arguments
     #[command(flatten)]
-    pub db: DatabaseArgs,
+    env: EnvironmentArgs,
 }
 
 impl Command {
     /// Execute `storage-tries` recovery command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let data_dir = self.datadir.unwrap_or_chain_default(self.chain.chain);
-        let db_path = data_dir.db();
-        fs::create_dir_all(&db_path)?;
-        let db = Arc::new(init_db(db_path, self.db.database_args())?);
+        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
 
-        let factory = ProviderFactory::new(&db, self.chain.clone(), data_dir.static_files())?;
-
-        debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
-        init_genesis(factory.clone())?;
-
-        let mut provider = factory.provider_rw()?;
+        let mut provider = provider_factory.provider_rw()?;
         let best_block = provider.best_block_number()?;
         let best_header = provider
             .sealed_header(best_block)?

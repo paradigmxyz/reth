@@ -36,7 +36,7 @@ use tracing::trace;
 /// Following diagram gives displays the dataflow contained in the [`Swarm`]
 ///
 /// The [`ConnectionListener`] yields incoming [`TcpStream`]s from peers that are spawned as session
-/// tasks. After a successful RLPx authentication, the task is ready to accept ETH requests or
+/// tasks. After a successful `RLPx` authentication, the task is ready to accept ETH requests or
 /// broadcast messages. A task listens for messages from the [`SessionManager`] which include
 /// broadcast messages like `Transactions` or internal commands, for example to disconnect the
 /// session.
@@ -47,7 +47,7 @@ use tracing::trace;
 /// [`StateFetcher`], which receives request objects from the client interfaces responsible for
 /// downloading headers and bodies.
 ///
-/// include_mmd!("docs/mermaid/swarm.mmd")
+/// `include_mmd!("docs/mermaid/swarm.mmd`")
 #[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
 pub(crate) struct Swarm<C> {
@@ -63,7 +63,7 @@ pub(crate) struct Swarm<C> {
 
 impl<C> Swarm<C> {
     /// Configures a new swarm instance.
-    pub(crate) fn new(
+    pub(crate) const fn new(
         incoming: ConnectionListener,
         sessions: SessionManager,
         state: NetworkState<C>,
@@ -71,13 +71,13 @@ impl<C> Swarm<C> {
         Self { incoming, sessions, state }
     }
 
-    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
     pub(crate) fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.sessions_mut().add_rlpx_sub_protocol(protocol);
     }
 
     /// Access to the state.
-    pub(crate) fn state(&self) -> &NetworkState<C> {
+    pub(crate) const fn state(&self) -> &NetworkState<C> {
         &self.state
     }
 
@@ -87,12 +87,12 @@ impl<C> Swarm<C> {
     }
 
     /// Access to the [`ConnectionListener`].
-    pub(crate) fn listener(&self) -> &ConnectionListener {
+    pub(crate) const fn listener(&self) -> &ConnectionListener {
         &self.incoming
     }
 
     /// Access to the [`SessionManager`].
-    pub(crate) fn sessions(&self) -> &SessionManager {
+    pub(crate) const fn sessions(&self) -> &SessionManager {
         &self.sessions
     }
 
@@ -273,9 +273,9 @@ where
         self.state_mut().peers_mut().on_shutdown();
     }
 
-    /// Checks if the node's network connection state is 'ShuttingDown'
+    /// Checks if the node's network connection state is '`ShuttingDown`'
     #[inline]
-    pub(crate) fn is_shutting_down(&self) -> bool {
+    pub(crate) const fn is_shutting_down(&self) -> bool {
         self.state().peers().connection_state().is_shutting_down()
     }
 
@@ -442,12 +442,12 @@ pub enum NetworkConnectionState {
 
 impl NetworkConnectionState {
     /// Returns true if the node is active.
-    pub(crate) fn is_active(&self) -> bool {
-        matches!(self, NetworkConnectionState::Active)
+    pub(crate) const fn is_active(&self) -> bool {
+        matches!(self, Self::Active)
     }
 
     /// Returns true if the node is shutting down.
-    pub(crate) fn is_shutting_down(&self) -> bool {
-        matches!(self, NetworkConnectionState::ShuttingDown)
+    pub(crate) const fn is_shutting_down(&self) -> bool {
+        matches!(self, Self::ShuttingDown)
     }
 }

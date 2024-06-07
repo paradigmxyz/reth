@@ -60,7 +60,8 @@ to make a PR!
 | Example                     | Description                                                       |
 | --------------------------- | ----------------------------------------------------------------- |
 | [Manual P2P](./manual-p2p)  | Illustrates how to connect and communicate with a peer            |
-| [Polygon P2P](./manual-p2p) | Illustrates how to connect and communicate with a peer on Polygon |
+| [Polygon P2P](./polygon-p2p) | Illustrates how to connect and communicate with a peer on Polygon |
+| [BSC P2P](./bsc-p2p) | Illustrates how to connect and communicate with a peer on Binance Smart Chain |
 
 ## Misc
 

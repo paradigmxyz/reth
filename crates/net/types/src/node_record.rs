@@ -1,4 +1,4 @@
-//! Commonly used NodeRecord type for peers.
+//! Commonly used `NodeRecord` type for peers.
 
 use std::{
     fmt,
@@ -49,11 +49,11 @@ impl NodeRecord {
     }
 
     /// Converts the `address` into an [`Ipv4Addr`] if the `address` is a mapped
-    /// [Ipv6Addr](std::net::Ipv6Addr).
+    /// [`Ipv6Addr`](std::net::Ipv6Addr).
     ///
     /// Returns `true` if the address was converted.
     ///
-    /// See also [std::net::Ipv6Addr::to_ipv4_mapped]
+    /// See also [`std::net::Ipv6Addr::to_ipv4_mapped`]
     pub fn convert_ipv4_mapped(&mut self) -> bool {
         // convert IPv4 mapped IPv6 address
         if let IpAddr::V6(v6) = self.address {
@@ -65,7 +65,7 @@ impl NodeRecord {
         false
     }
 
-    /// Same as [Self::convert_ipv4_mapped] but consumes the type
+    /// Same as [`Self::convert_ipv4_mapped`] but consumes the type
     pub fn into_ipv4_mapped(mut self) -> Self {
         self.convert_ipv4_mapped();
         self
@@ -73,19 +73,19 @@ impl NodeRecord {
 
     /// Creates a new record from a socket addr and peer id.
     #[allow(dead_code)]
-    pub fn new(addr: SocketAddr, id: PeerId) -> Self {
+    pub const fn new(addr: SocketAddr, id: PeerId) -> Self {
         Self { address: addr.ip(), tcp_port: addr.port(), udp_port: addr.port(), id }
     }
 
     /// The TCP socket address of this node
     #[must_use]
-    pub fn tcp_addr(&self) -> SocketAddr {
+    pub const fn tcp_addr(&self) -> SocketAddr {
         SocketAddr::new(self.address, self.tcp_port)
     }
 
     /// The UDP socket address of this node
     #[must_use]
-    pub fn udp_addr(&self) -> SocketAddr {
+    pub const fn udp_addr(&self) -> SocketAddr {
         SocketAddr::new(self.address, self.udp_port)
     }
 }
@@ -189,7 +189,7 @@ impl TryFrom<&Enr<SecretKey>> for NodeRecord {
 
         let id = pk2id(&enr.public_key());
 
-        Ok(NodeRecord { address, tcp_port, udp_port, id }.into_ipv4_mapped())
+        Ok(Self { address, tcp_port, udp_port, id }.into_ipv4_mapped())
     }
 }
 

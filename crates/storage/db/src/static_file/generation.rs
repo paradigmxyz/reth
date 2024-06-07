@@ -1,12 +1,12 @@
-use crate::{
-    abstraction::cursor::DbCursorRO,
+use crate::{RawKey, RawTable};
+use reth_db_api::{
+    cursor::DbCursorRO,
     table::{Key, Table},
     transaction::DbTx,
-    RawKey, RawTable,
 };
 
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::{ColumnResult, NippyJar, NippyJarHeader, PHFKey};
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_tracing::tracing::*;
 use std::{error::Error as StdError, ops::RangeInclusive};
 

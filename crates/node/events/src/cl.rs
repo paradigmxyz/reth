@@ -19,7 +19,7 @@ const NO_TRANSITION_CONFIG_EXCHANGED_PERIOD: Duration = Duration::from_secs(120)
 /// after which the warning is issued.
 const NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD: Duration = Duration::from_secs(120);
 
-/// A Stream of [ConsensusLayerHealthEvent].
+/// A Stream of [`ConsensusLayerHealthEvent`].
 pub struct ConsensusLayerHealthEvents {
     interval: Interval,
     canon_chain: Box<dyn CanonChainTracker>,
@@ -32,7 +32,7 @@ impl fmt::Debug for ConsensusLayerHealthEvents {
 }
 
 impl ConsensusLayerHealthEvents {
-    /// Creates a new [ConsensusLayerHealthEvents] with the given canonical chain tracker.
+    /// Creates a new [`ConsensusLayerHealthEvents`] with the given canonical chain tracker.
     pub fn new(canon_chain: Box<dyn CanonChainTracker>) -> Self {
         // Skip the first tick to prevent the false `ConsensusLayerHealthEvent::NeverSeen` event.
         let interval = tokio::time::interval_at(Instant::now() + CHECK_INTERVAL, CHECK_INTERVAL);

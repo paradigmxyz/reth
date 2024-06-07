@@ -27,7 +27,7 @@ educe = "0.4.19"
 tracing.workspace = true
 
 # HeaderBytes
-generic-array = "0.14.6"
+generic-array.workspace = true
 typenum = "1.15.0"
 byteorder = "1.4.3"
 

@@ -1,5 +1,5 @@
 use clap::Args;
-use reth_rpc::eth::cache::{
+use reth_rpc_server_types::constants::cache::{
     DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_CONCURRENT_DB_REQUESTS, DEFAULT_ENV_CACHE_MAX_LEN,
     DEFAULT_RECEIPT_CACHE_MAX_LEN,
 };

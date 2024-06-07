@@ -12,8 +12,8 @@ description = "Types shared across network code"
 workspace = true
 
 [dependencies]
-# reth
-reth-network-types.workspace = true
+# ethereum
+alloy-primitives.workspace = true
 
 # async
 pin-project.workspace = true

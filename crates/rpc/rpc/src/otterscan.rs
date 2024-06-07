@@ -26,7 +26,7 @@ pub struct OtterscanApi<Eth> {
 
 impl<Eth> OtterscanApi<Eth> {
     /// Creates a new instance of `Otterscan`.
-    pub fn new(eth: Eth) -> Self {
+    pub const fn new(eth: Eth) -> Self {
         Self { eth }
     }
 }
@@ -129,7 +129,7 @@ where
         if tx_len != receipts.len() {
             return Err(internal_rpc_err(
                 "the number of transactions does not match the number of receipts",
-            ));
+            ))
         }
 
         // make sure the block is full

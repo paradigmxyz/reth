@@ -18,7 +18,7 @@ impl PruneMode {
     /// Prune blocks up to the specified block number. The specified block number is also pruned.
     ///
     /// This acts as `PruneMode::Before(block_number + 1)`.
-    pub fn before_inclusive(block_number: BlockNumber) -> Self {
+    pub const fn before_inclusive(block_number: BlockNumber) -> Self {
         Self::Before(block_number + 1)
     }
 
@@ -29,37 +29,37 @@ impl PruneMode {
         tip: BlockNumber,
         segment: PruneSegment,
         purpose: PrunePurpose,
-    ) -> Result<Option<(BlockNumber, PruneMode)>, PruneSegmentError> {
+    ) -> Result<Option<(BlockNumber, Self)>, PruneSegmentError> {
         let result = match self {
-            PruneMode::Full if segment.min_blocks(purpose) == 0 => Some((tip, *self)),
-            PruneMode::Distance(distance) if *distance > tip => None, // Nothing to prune yet
-            PruneMode::Distance(distance) if *distance >= segment.min_blocks(purpose) => {
+            Self::Full if segment.min_blocks(purpose) == 0 => Some((tip, *self)),
+            Self::Distance(distance) if *distance > tip => None, // Nothing to prune yet
+            Self::Distance(distance) if *distance >= segment.min_blocks(purpose) => {
                 Some((tip - distance, *self))
             }
-            PruneMode::Before(n) if *n == tip + 1 && purpose.is_static_file() => Some((tip, *self)),
-            PruneMode::Before(n) if *n > tip => None, // Nothing to prune yet
-            PruneMode::Before(n) if tip - n >= segment.min_blocks(purpose) => Some((n - 1, *self)),
+            Self::Before(n) if *n == tip + 1 && purpose.is_static_file() => Some((tip, *self)),
+            Self::Before(n) if *n > tip => None, // Nothing to prune yet
+            Self::Before(n) if tip - n >= segment.min_blocks(purpose) => Some((n - 1, *self)),
             _ => return Err(PruneSegmentError::Configuration(segment)),
         };
         Ok(result)
     }
 
     /// Check if target block should be pruned according to the provided prune mode and tip.
-    pub fn should_prune(&self, block: BlockNumber, tip: BlockNumber) -> bool {
+    pub const fn should_prune(&self, block: BlockNumber, tip: BlockNumber) -> bool {
         match self {
-            PruneMode::Full => true,
-            PruneMode::Distance(distance) => {
+            Self::Full => true,
+            Self::Distance(distance) => {
                 if *distance > tip {
                     return false
                 }
                 block < tip - *distance
             }
-            PruneMode::Before(n) => *n > block,
+            Self::Before(n) => *n > block,
         }
     }
 
     /// Returns true if the prune mode is [`PruneMode::Full`].
-    pub fn is_full(&self) -> bool {
+    pub const fn is_full(&self) -> bool {
         matches!(self, Self::Full)
     }
 }

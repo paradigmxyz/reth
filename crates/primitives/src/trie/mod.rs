@@ -24,4 +24,4 @@ pub use storage::StorageTrieEntry;
 mod subnode;
 pub use subnode::StoredSubNode;
 
-pub use alloy_trie::{BranchNodeCompact, HashBuilder, TrieMask, EMPTY_ROOT_HASH};
+pub use alloy_trie::{proof, BranchNodeCompact, HashBuilder, TrieMask, EMPTY_ROOT_HASH};

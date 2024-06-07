@@ -1,10 +1,15 @@
 //! Merkle trie proofs.
 
-use super::Nibbles;
+use super::{
+    proof::{verify_proof, ProofVerificationError},
+    Nibbles, TrieAccount,
+};
 use crate::{keccak256, Account, Address, Bytes, B256, U256};
+use alloy_rlp::encode_fixed_size;
+use alloy_trie::EMPTY_ROOT_HASH;
 
 /// The merkle proof with the relevant account info.
-#[derive(PartialEq, Eq, Default, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct AccountProof {
     /// The address associated with the account.
     pub address: Address,
@@ -22,7 +27,13 @@ pub struct AccountProof {
 impl AccountProof {
     /// Create new account proof entity.
     pub fn new(address: Address) -> Self {
-        Self { address, ..Default::default() }
+        Self {
+            address,
+            info: None,
+            proof: Vec::new(),
+            storage_root: EMPTY_ROOT_HASH,
+            storage_proofs: Vec::new(),
+        }
     }
 
     /// Set account info, storage root and requested storage proofs.
@@ -40,6 +51,26 @@ impl AccountProof {
     /// Set proof path.
     pub fn set_proof(&mut self, proof: Vec<Bytes>) {
         self.proof = proof;
+    }
+
+    /// Verify the storage proofs and account proof against the provided state root.
+    pub fn verify(&self, root: B256) -> Result<(), ProofVerificationError> {
+        // Verify storage proofs.
+        for storage_proof in &self.storage_proofs {
+            storage_proof.verify(self.storage_root)?;
+        }
+
+        // Verify the account proof.
+        let expected = if self.info.is_none() && self.storage_root == EMPTY_ROOT_HASH {
+            None
+        } else {
+            Some(alloy_rlp::encode(TrieAccount::from((
+                self.info.unwrap_or_default(),
+                self.storage_root,
+            ))))
+        };
+        let nibbles = Nibbles::unpack(keccak256(self.address));
+        verify_proof(root, nibbles, expected, &self.proof)
     }
 }
 
@@ -82,5 +113,12 @@ impl StorageProof {
     /// Set proof path.
     pub fn set_proof(&mut self, proof: Vec<Bytes>) {
         self.proof = proof;
+    }
+
+    /// Verify the proof against the provided storage root.
+    pub fn verify(&self, root: B256) -> Result<(), ProofVerificationError> {
+        let expected =
+            if self.value.is_zero() { None } else { Some(encode_fixed_size(&self.value).to_vec()) };
+        verify_proof(root, self.nibbles.clone(), expected, &self.proof)
     }
 }

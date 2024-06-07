@@ -4,7 +4,7 @@ use iai_callgrind::{
     library_benchmark, library_benchmark_group, LibraryBenchmarkConfig, RegressionConfig,
 };
 use paste::paste;
-use reth_db::table::{Compress, Decode, Decompress, Encode, Table};
+use reth_db_api::table::{Compress, Decode, Decompress, Encode, Table};
 
 mod utils;
 use utils::*;
@@ -44,16 +44,16 @@ macro_rules! impl_iai_callgrind_inner {
                 }
 
                 #[allow(dead_code)]
-                pub fn $seqread() {}
+                pub const fn $seqread() {}
 
                 #[allow(dead_code)]
-                pub fn $randread() {}
+                pub const fn $randread() {}
 
                 #[allow(dead_code)]
-                pub fn $seqwrite() {}
+                pub const fn $seqwrite() {}
 
                 #[allow(dead_code)]
-                pub fn $randwrite() {}
+                pub const fn $randwrite() {}
 
 
                 library_benchmark_group!(

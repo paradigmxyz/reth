@@ -1,7 +1,7 @@
 use jsonrpsee::types::SubscriptionId;
 use std::fmt::Write;
 
-/// An [IdProvider](jsonrpsee::core::traits::IdProvider) for ethereum subscription ids.
+/// An [`IdProvider`](jsonrpsee::core::traits::IdProvider) for ethereum subscription ids.
 ///
 /// Returns new hex-string [QUANTITY](https://ethereum.org/en/developers/docs/apis/json-rpc/#quantities-encoding) ids
 #[derive(Debug, Clone, Copy, Default)]
