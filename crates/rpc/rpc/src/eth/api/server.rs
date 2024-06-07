@@ -20,7 +20,10 @@ use tracing::trace;
 
 use crate::{
     eth::{
-        api::{BuildReceipt, EthApiSpec, EthBlocks, EthState, EthTransactions},
+        api::{
+            BuildReceipt, EthApiSpec, EthBlocks, EthCall, EthState, EthTransactions, SpawnBlocking,
+            Trace,
+        },
         error::EthApiError,
         revm_utils::EvmOverrides,
         EthApi,
@@ -31,7 +34,14 @@ use crate::{
 #[async_trait::async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthApiServer for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: EthApiSpec + EthTransactions + BuildReceipt + EthState,
+    Self: EthApiSpec
+        + EthTransactions
+        + EthBlocks
+        + EthState
+        + EthCall
+        + Trace
+        + BuildReceipt
+        + SpawnBlocking,
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt
         + ChainSpecProvider
@@ -264,9 +274,13 @@ where
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, ?block_overrides, "Serving eth_call");
-        Ok(self
-            .call(request, block_number, EvmOverrides::new(state_overrides, block_overrides))
-            .await?)
+        Ok(EthCall::call(
+            self,
+            request,
+            block_number,
+            EvmOverrides::new(state_overrides, block_overrides),
+        )
+        .await?)
     }
 
     /// Handler for: `eth_callMany`
@@ -277,7 +291,7 @@ where
         state_override: Option<StateOverride>,
     ) -> Result<Vec<EthCallResponse>> {
         trace!(target: "rpc::eth", ?bundle, ?state_context, ?state_override, "Serving eth_callMany");
-        Ok(Self::call_many(self, bundle, state_context, state_override).await?)
+        Ok(EthCall::call_many(self, bundle, state_context, state_override).await?)
     }
 
     /// Handler for: `eth_createAccessList`
@@ -287,7 +301,8 @@ where
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
-        let access_list_with_gas_used = self.create_access_list_at(request, block_number).await?;
+        let access_list_with_gas_used =
+            EthCall::create_access_list_at(self, request, block_number).await?;
 
         Ok(access_list_with_gas_used)
     }
@@ -300,7 +315,13 @@ where
         state_override: Option<StateOverride>,
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
-        Ok(self.estimate_gas_at(request, block_number.unwrap_or_default(), state_override).await?)
+        Ok(EthCall::estimate_gas_at(
+            self,
+            request,
+            block_number.unwrap_or_default(),
+            state_override,
+        )
+        .await?)
     }
 
     /// Handler for: `eth_gasPrice`

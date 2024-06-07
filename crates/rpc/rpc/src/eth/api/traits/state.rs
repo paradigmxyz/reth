@@ -1,15 +1,20 @@
 //! Loads state from database. Helper trait for `eth_`transaction and state RPC methods.
 
 use futures::Future;
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, U256};
-use reth_provider::{StateProviderBox, StateProviderFactory};
+use reth_primitives::{
+    revm::env::fill_block_env_with_coinbase, Address, BlockId, BlockNumberOrTag, Bytes, Header,
+    B256, U256,
+};
+use reth_provider::{BlockIdReader, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_rpc_types::{serde_helpers::JsonStorageKey, EIP1186AccountProofResponse};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
 use crate::{
     eth::{
-        api::SpawnBlocking,
+        api::{pending_block::PendingBlockEnv, LoadPendingBlock, SpawnBlocking},
+        cache::EthStateCache,
         error::{EthApiError, EthResult, RpcInvalidTransactionError},
     },
     EthApiSpec,
@@ -139,6 +144,11 @@ pub trait LoadState {
     /// Data access in default trait method implementations.
     fn provider(&self) -> &impl StateProviderFactory;
 
+    /// Returns a handle for reading data from memory.
+    ///
+    /// Data access in default (L1) trait method implementations.
+    fn cache(&self) -> &EthStateCache;
+
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> EthResult<StateProviderBox> {
         Ok(self.provider().history_by_block_hash(block_hash)?)
@@ -168,6 +178,56 @@ pub trait LoadState {
             self.state_at_block_id(block_id)
         } else {
             Ok(self.latest_state()?)
+        }
+    }
+
+    /// Returns the revm evm env for the requested [`BlockId`]
+    ///
+    /// If the [`BlockId`] this will return the [`BlockId`] of the block the env was configured
+    /// for.
+    /// If the [`BlockId`] is pending, this will return the "Pending" tag, otherwise this returns
+    /// the hash of the exact block.
+    fn evm_env_at(
+        &self,
+        at: BlockId,
+    ) -> impl Future<Output = EthResult<(CfgEnvWithHandlerCfg, BlockEnv, BlockId)>> + Send
+    where
+        Self: LoadPendingBlock + SpawnBlocking,
+    {
+        async move {
+            if at.is_pending() {
+                let PendingBlockEnv { cfg, block_env, origin } =
+                    self.pending_block_env_and_cfg()?;
+                Ok((cfg, block_env, origin.state_block_id()))
+            } else {
+                // Use cached values if there is no pending block
+                let block_hash = LoadPendingBlock::provider(self)
+                    .block_hash_for_id(at)?
+                    .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+                let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
+                Ok((cfg, env, block_hash.into()))
+            }
+        }
+    }
+
+    /// Returns the revm evm env for the raw block header
+    ///
+    /// This is used for tracing raw blocks
+    fn evm_env_for_raw_block(
+        &self,
+        header: &Header,
+    ) -> impl Future<Output = EthResult<(CfgEnvWithHandlerCfg, BlockEnv)>> + Send
+    where
+        Self: LoadState + LoadPendingBlock + SpawnBlocking,
+    {
+        async move {
+            // get the parent config first
+            let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash.into()).await?;
+
+            let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
+            fill_block_env_with_coinbase(&mut block_env, header, after_merge, header.beneficiary);
+
+            Ok((cfg, block_env))
         }
     }
 }

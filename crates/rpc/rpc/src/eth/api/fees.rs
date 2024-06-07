@@ -15,11 +15,11 @@ use reth_rpc_types::FeeHistory;
 use reth_transaction_pool::TransactionPool;
 use tracing::debug;
 
-use super::traits::LoadPendingBlock;
+use super::{traits::LoadPendingBlock, LoadBlock};
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadPendingBlock,
+    Self: LoadPendingBlock + LoadBlock,
     Pool: TransactionPool + Clone + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,

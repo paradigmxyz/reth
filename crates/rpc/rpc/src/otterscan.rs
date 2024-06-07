@@ -15,7 +15,9 @@ use reth_rpc_types::{
 };
 
 use crate::{
-    eth::api::{EthTransactions, LoadPendingBlock, LoadState},
+    eth::api::{
+        Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace,
+    },
     result::internal_rpc_err,
 };
 
@@ -37,7 +39,15 @@ impl<Eth> OtterscanApi<Eth> {
 #[async_trait]
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
-    Eth: EthApiServer + EthTransactions + LoadState + LoadPendingBlock,
+    Eth: EthApiServer
+        + LoadState
+        + LoadPendingBlock
+        + LoadBlock
+        + LoadTransaction
+        + Call
+        + Trace
+        + SpawnBlocking
+        + 'static,
 {
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool> {

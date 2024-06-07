@@ -28,6 +28,7 @@ pub mod receipt;
 mod server;
 mod sign;
 mod state;
+pub mod trace;
 pub mod traits;
 pub mod transactions;
 
@@ -35,8 +36,8 @@ use crate::eth::traits::RawTransactionForwarder;
 pub use pending_block::PendingBlock;
 pub use receipt::ReceiptBuilder;
 pub use traits::{
-    BuildReceipt, EthBlocks, EthState, EthTransactions, LoadBlock, LoadPendingBlock, LoadState,
-    SpawnBlocking, StateCacheDB,
+    BuildReceipt, Call, EthBlocks, EthCall, EthState, EthTrace, EthTransactions, LoadBlock,
+    LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, StateCacheDB, Trace,
 };
 pub use transactions::TransactionSource;
 
@@ -381,5 +382,11 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     #[inline]
     pub const fn raw_tx_forwarder(&self) -> &Option<Arc<dyn RawTransactionForwarder>> {
         &self.raw_transaction_forwarder
+    }
+
+    /// Returns the gas cap.
+    #[inline]
+    pub const fn gas_cap(&self) -> u64 {
+        self.gas_cap
     }
 }

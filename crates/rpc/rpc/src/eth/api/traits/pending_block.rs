@@ -22,7 +22,7 @@ use crate::eth::{
 };
 
 /// Loads a pending block from database.
-pub trait LoadPendingBlock: SpawnBlocking {
+pub trait LoadPendingBlock {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -98,7 +98,10 @@ pub trait LoadPendingBlock: SpawnBlocking {
     /// Returns the locally built pending block
     fn local_pending_block(
         &self,
-    ) -> impl Future<Output = EthResult<Option<SealedBlockWithSenders>>> {
+    ) -> impl Future<Output = EthResult<Option<SealedBlockWithSenders>>> + Send
+    where
+        Self: SpawnBlocking,
+    {
         async move {
             let pending = self.pending_block_env_and_cfg()?;
             if pending.origin.is_actual_pending() {

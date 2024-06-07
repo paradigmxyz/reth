@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use futures::Future;
-use reth_primitives::{BlockId, Receipt, SealedBlock, TransactionMeta};
+use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt};
 use reth_rpc_types::AnyTransactionReceipt;
 
@@ -13,7 +13,9 @@ use crate::eth::{
     error::EthResult,
 };
 
-/// Commonly used block related functions for the [`EthApiServer`](crate::EthApi) trait in the
+use super::SpawnBlocking;
+
+/// Block related functions for the [`EthApiServer`](crate::EthApi) trait in the
 /// `eth_` namespace.
 pub trait EthBlocks: LoadBlock {
     /// Helper function for `eth_getBlockReceipts`.
@@ -22,7 +24,7 @@ pub trait EthBlocks: LoadBlock {
     fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = EthResult<Option<Vec<AnyTransactionReceipt>>>>
+    ) -> impl Future<Output = EthResult<Option<Vec<AnyTransactionReceipt>>>> + Send
     where
         Self: BuildReceipt,
     {
@@ -64,7 +66,7 @@ pub trait EthBlocks: LoadBlock {
 }
 
 /// Loads a block from database.
-pub trait LoadBlock {
+pub trait LoadBlock: Send + Sync {
     // Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -76,12 +78,27 @@ pub trait LoadBlock {
     fn cache(&self) -> &EthStateCache;
 
     /// Returns the block object for the given block id.
+    fn block(
+        &self,
+        block_id: impl Into<BlockId> + Send,
+    ) -> impl Future<Output = EthResult<Option<SealedBlock>>> + Send
+    where
+        Self: LoadPendingBlock + SpawnBlocking,
+    {
+        async move {
+            self.block_with_senders(block_id)
+                .await
+                .map(|maybe_block| maybe_block.map(|block| block.block))
+        }
+    }
+
+    /// Returns the block object for the given block id.
     fn block_with_senders(
         &self,
-        block_id: impl Into<BlockId>,
-    ) -> impl Future<Output = EthResult<Option<reth_primitives::SealedBlockWithSenders>>>
+        block_id: impl Into<BlockId> + Send,
+    ) -> impl Future<Output = EthResult<Option<SealedBlockWithSenders>>> + Send
     where
-        Self: LoadPendingBlock,
+        Self: LoadPendingBlock + SpawnBlocking,
     {
         async move {
             let block_id = block_id.into();
@@ -110,7 +127,7 @@ pub trait LoadBlock {
     fn load_block_and_receipts(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = EthResult<Option<(SealedBlock, Arc<Vec<Receipt>>)>>>
+    ) -> impl Future<Output = EthResult<Option<(SealedBlock, Arc<Vec<Receipt>>)>>> + Send
     where
         Self: BuildReceipt,
     {

@@ -1,7 +1,10 @@
 //! Contains RPC handler implementations specific to state.
 
 use crate::{
-    eth::api::{EthState, LoadState, SpawnBlocking},
+    eth::{
+        api::{EthState, LoadState, SpawnBlocking},
+        cache::EthStateCache,
+    },
     EthApi,
 };
 use reth_provider::StateProviderFactory;
@@ -22,8 +25,14 @@ impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Ne
 where
     Provider: StateProviderFactory,
 {
+    #[inline]
     fn provider(&self) -> &impl StateProviderFactory {
         &self.inner.provider
+    }
+
+    #[inline]
+    fn cache(&self) -> &EthStateCache {
+        self.inner.cache()
     }
 }
 

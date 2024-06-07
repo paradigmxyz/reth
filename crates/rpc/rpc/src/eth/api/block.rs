@@ -11,10 +11,7 @@ use crate::{
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_primitives::BlockId;
-use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ReceiptProvider,
-    StateProviderFactory,
-};
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{Header, Index, RichBlock};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
@@ -24,13 +21,14 @@ use crate::eth::api::{EthBlocks, LoadPendingBlock};
 use super::LoadBlock;
 
 impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig> where
-    Provider: BlockReaderIdExt + BlockReader + ReceiptProvider
+    Self: LoadBlock
 {
 }
 
 impl<Provider, Pool, Network, EvmConfig> LoadBlock for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReaderIdExt + BlockReader + ReceiptProvider,
+    Self: Send + Sync,
+    Provider: BlockReaderIdExt,
 {
     #[inline]
     fn provider(&self) -> &impl BlockReaderIdExt {
@@ -106,26 +104,13 @@ where
         Ok(self.cache().get_block_transactions(block_hash).await?.map(|txs| txs.len()))
     }
 
-    /// Returns the block object for the given block id.
-    pub(crate) async fn block(
-        &self,
-        block_id: impl Into<BlockId>,
-    ) -> EthResult<Option<reth_primitives::SealedBlock>>
-    where
-        Self: LoadPendingBlock,
-    {
-        self.block_with_senders(block_id)
-            .await
-            .map(|maybe_block| maybe_block.map(|block| block.block))
-    }
-
     /// Returns the populated rpc block object for the given block id.
     ///
     /// If `full` is true, the block object will contain all transaction objects, otherwise it will
     /// only contain the transaction hashes.
     pub(crate) async fn rpc_block(
         &self,
-        block_id: impl Into<BlockId>,
+        block_id: impl Into<BlockId> + Send,
         full: bool,
     ) -> EthResult<Option<RichBlock>>
     where
@@ -147,7 +132,7 @@ where
     /// Returns the block header for the given block id.
     pub(crate) async fn rpc_block_header(
         &self,
-        block_id: impl Into<BlockId>,
+        block_id: impl Into<BlockId> + Send,
     ) -> EthResult<Option<Header>>
     where
         Self: LoadPendingBlock,

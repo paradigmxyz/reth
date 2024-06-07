@@ -1,12 +1,5 @@
-use crate::{
-    eth::{
-        api::{EthTransactions, LoadBlock, LoadPendingBlock, LoadState, SpawnBlocking},
-        error::{EthApiError, EthResult},
-        revm_utils::{prepare_call_env, EvmOverrides},
-    },
-    result::{internal_rpc_err, ToRpcResult},
-    EthApiSpec,
-};
+use std::sync::Arc;
+
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -15,7 +8,8 @@ use reth_primitives::{
     TransactionSignedEcRecovered, Withdrawals, B256, U256,
 };
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProvider,
+    StateProviderFactory, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
@@ -35,8 +29,19 @@ use revm_inspectors::tracing::{
     js::{JsInspector, TransactionContext},
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig,
 };
-use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+
+use crate::{
+    eth::{
+        api::{
+            Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace,
+        },
+        error::{EthApiError, EthResult},
+        revm_utils::{prepare_call_env, EvmOverrides},
+    },
+    result::{internal_rpc_err, ToRpcResult},
+    EthApiSpec,
+};
 
 /// `debug` API implementation.
 ///
@@ -64,8 +69,20 @@ impl<Provider, Eth> DebugApi<Provider, Eth> {
 
 impl<Provider, Eth> DebugApi<Provider, Eth>
 where
-    Provider: BlockReaderIdExt + HeaderProvider + ChainSpecProvider + 'static,
-    Eth: EthTransactions + LoadState + SpawnBlocking + LoadPendingBlock + LoadBlock + 'static,
+    Provider: BlockReaderIdExt
+        + HeaderProvider
+        + ChainSpecProvider
+        + StateProviderFactory
+        + EvmEnvProvider
+        + 'static,
+    Eth: LoadState
+        + LoadPendingBlock
+        + LoadTransaction
+        + LoadBlock
+        + Trace
+        + Call
+        + SpawnBlocking
+        + 'static,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -73,7 +90,7 @@ where
     }
 
     /// Trace the entire block asynchronously
-    async fn trace_block_with(
+    async fn trace_block(
         &self,
         at: BlockId,
         transactions: Vec<TransactionSignedEcRecovered>,
@@ -164,7 +181,7 @@ where
                     .collect::<EthResult<Vec<_>>>()?
             };
 
-        self.trace_block_with(parent.into(), transactions, cfg, block_env, opts).await
+        self.trace_block(parent.into(), transactions, cfg, block_env, opts).await
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -181,7 +198,7 @@ where
 
         let ((cfg, block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(block_hash.into()),
-            self.inner.eth_api.block_by_id_with_senders(block_id),
+            self.inner.eth_api.block_with_senders(block_id),
         )?;
 
         let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
@@ -189,7 +206,7 @@ where
         // its parent block's state
         let state_at = block.parent_hash;
 
-        self.trace_block_with(
+        self.trace_block(
             state_at.into(),
             block.into_transactions_ecrecovered().collect(),
             cfg,
@@ -414,7 +431,7 @@ where
         let target_block = block_number.unwrap_or_default();
         let ((cfg, mut block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(target_block),
-            self.inner.eth_api.block_by_id_with_senders(target_block),
+            self.inner.eth_api.block_with_senders(target_block),
         )?;
 
         let opts = opts.unwrap_or_default();
@@ -517,7 +534,7 @@ where
         &self,
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
-        db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
+        db: &mut CacheDB<StateProviderDatabase<Box<dyn StateProvider + 'static>>>,
         transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::EvmState)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
@@ -613,8 +630,20 @@ where
 #[async_trait]
 impl<Provider, Eth> DebugApiServer for DebugApi<Provider, Eth>
 where
-    Provider: BlockReaderIdExt + HeaderProvider + ChainSpecProvider + 'static,
-    Eth: EthApiSpec + SpawnBlocking + LoadState + LoadPendingBlock + 'static,
+    Provider: BlockReaderIdExt
+        + HeaderProvider
+        + ChainSpecProvider
+        + StateProviderFactory
+        + EvmEnvProvider
+        + 'static,
+    Eth: EthApiSpec
+        + LoadState
+        + LoadPendingBlock
+        + LoadBlock
+        + Call
+        + Trace
+        + SpawnBlocking
+        + 'static,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
@@ -641,7 +670,7 @@ where
 
     /// Handler for `debug_getRawBlock`
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
-        let block = self.inner.provider.block_by_id(block_id).to_rpc_result()?;
+        let block = self.inner.provider.block(block_id).to_rpc_result()?;
 
         let mut res = Vec::new();
         if let Some(mut block) = block {
