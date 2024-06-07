@@ -16,13 +16,12 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
 };
-use reth_primitives::{
-    stage::PipelineTarget, BlockNumber, Chain, ChainSpec, Head, PruneModes, B256,
-};
+use reth_primitives::{stage::PipelineTarget, BlockNumber, Chain, ChainSpec, Head, B256};
 use reth_provider::{
     providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
+use reth_prune_types::PruneModes;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{sets::DefaultStages, Pipeline};
 use reth_static_file::StaticFileProducer;

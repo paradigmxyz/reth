@@ -1,6 +1,7 @@
 use crate::MINIMUM_PRUNING_DISTANCE;
 use derive_more::Display;
 use reth_codecs::{main_codec, Compact};
+use reth_primitives::bytes;
 use thiserror::Error;
 
 /// Segment of the data that can be pruned.

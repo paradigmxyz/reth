@@ -12,8 +12,9 @@ use reth_db_api::{
     transaction::DbTxMut,
 };
 
-use reth_primitives::{BlockNumber, PruneLimiter, PruneMode, PruneProgress, PruneSegment};
+use alloy_primitives::BlockNumber;
 use reth_provider::DatabaseProviderRW;
+use reth_prune_types::{PruneLimiter, PruneMode, PruneProgress, PruneSegment};
 use tracing::{instrument, trace};
 
 /// Number of header tables to prune in one step

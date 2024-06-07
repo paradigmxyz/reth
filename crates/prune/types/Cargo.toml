@@ -1,0 +1,24 @@
+[package]
+name = "reth-prune-types"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Commonly used types for prune usage in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+reth-codecs.workspace = true
+reth-codecs-derive.workspace = true
+reth-primitives.workspace = true
+modular-bitfield.workspace = true
+
+bytes.workspace = true
+derive_more.workspace = true
+thiserror.workspace = true
+serde.workspace = true

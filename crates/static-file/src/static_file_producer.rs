@@ -4,8 +4,9 @@ use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use reth_db_api::database::Database;
-use reth_primitives::{static_file::HighestStaticFiles, BlockNumber, PruneModes};
+use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
 use reth_provider::{providers::StaticFileWriter, ProviderFactory, StaticFileProviderFactory};
+use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::{EventSender, EventStream};
 use std::{

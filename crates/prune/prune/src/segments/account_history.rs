@@ -6,8 +6,8 @@ use crate::{
 };
 use reth_db::tables;
 use reth_db_api::{database::Database, models::ShardedKey};
-use reth_primitives::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
 use reth_provider::DatabaseProviderRW;
+use reth_prune_types::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
 use tracing::{instrument, trace};
 
 /// Number of account history tables to prune in one step.

@@ -8,8 +8,9 @@ use reth_codecs::{main_codec, Compact};
 use reth_primitives::{
     stage::StageCheckpoint,
     trie::{StoredNibbles, StoredNibblesSubKey, *},
-    Address, PruneSegment, B256, *,
+    Address, B256, *,
 };
+use reth_prune_types::{PruneCheckpoint, PruneSegment};
 
 pub mod accounts;
 pub mod blocks;

@@ -4,11 +4,11 @@ use crate::{
 };
 use reth_db::tables;
 use reth_db_api::database::Database;
-use reth_primitives::{
+use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
+use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig,
     MINIMUM_PRUNING_DISTANCE,
 };
-use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]

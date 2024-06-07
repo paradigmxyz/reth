@@ -45,8 +45,8 @@ use reth_consensus::Consensus;
 use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
-use reth_primitives::PruneModes;
 use reth_provider::{HeaderSyncGapProvider, HeaderSyncMode};
+use reth_prune_types::PruneModes;
 use std::sync::Arc;
 
 /// A set containing all stages to run a fully syncing instance of reth.

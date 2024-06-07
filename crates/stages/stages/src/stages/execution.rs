@@ -9,7 +9,7 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, PruneModes, StaticFileSegment,
+    BlockNumber, Header, StaticFileSegment,
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
@@ -17,6 +17,7 @@ use reth_provider::{
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter, StatsReader,
     TransactionVariant,
 };
+use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,

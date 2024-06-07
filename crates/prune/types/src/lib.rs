@@ -1,10 +1,11 @@
+//! Commonly used types for prune usage.
+
 mod checkpoint;
 mod limiter;
 mod mode;
 mod segment;
 mod target;
 
-use crate::{Address, BlockNumber};
 pub use checkpoint::PruneCheckpoint;
 pub use limiter::PruneLimiter;
 pub use mode::PruneMode;
@@ -12,6 +13,8 @@ pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 pub use target::{PruneModes, MINIMUM_PRUNING_DISTANCE};
+
+use alloy_primitives::{Address, BlockNumber};
 
 /// Configuration for pruning receipts not associated with logs emitted by the specified contracts.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

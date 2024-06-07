@@ -20,6 +20,7 @@ reth-network-p2p.workspace = true
 reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-prune.workspace = true
+reth-prune-types.workspace = true
 reth-errors.workspace = true
 
 # metrics

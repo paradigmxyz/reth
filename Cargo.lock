@@ -6210,6 +6210,7 @@ dependencies = [
  "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
+ "reth-prune-types",
  "reth-revm",
  "reth-rpc",
  "reth-rpc-api",
@@ -6344,6 +6345,7 @@ dependencies = [
  "reth-network",
  "reth-primitives",
  "reth-provider",
+ "reth-prune-types",
  "reth-revm",
  "reth-stages-api",
  "reth-storage-errors",
@@ -6411,7 +6413,7 @@ dependencies = [
  "confy",
  "humantime-serde",
  "reth-network",
- "reth-primitives",
+ "reth-prune-types",
  "serde",
  "tempfile",
  "toml",
@@ -6460,6 +6462,7 @@ dependencies = [
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-prune-types",
  "reth-storage-errors",
  "reth-tracing",
  "rustc-hash",
@@ -6492,6 +6495,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-codecs",
  "reth-primitives",
+ "reth-prune-types",
  "reth-storage-errors",
  "serde",
  "serde_json",
@@ -6838,6 +6842,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "reth-execution-errors",
  "reth-primitives",
+ "reth-prune-types",
  "reth-storage-errors",
  "revm",
  "revm-primitives",
@@ -6852,6 +6857,7 @@ dependencies = [
  "reth-ethereum-consensus",
  "reth-evm",
  "reth-primitives",
+ "reth-prune-types",
  "reth-revm",
  "reth-testing-utils",
  "revm-primitives",
@@ -6882,6 +6888,7 @@ version = "0.2.0-beta.9"
 dependencies = [
  "reth-consensus",
  "reth-primitives",
+ "reth-prune-types",
  "reth-storage-errors",
  "thiserror",
 ]
@@ -7222,6 +7229,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-prune",
+ "reth-prune-types",
  "reth-rpc",
  "reth-rpc-engine-api",
  "reth-rpc-layer",
@@ -7275,6 +7283,7 @@ dependencies = [
  "reth-network-types",
  "reth-primitives",
  "reth-provider",
+ "reth-prune-types",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",
@@ -7543,6 +7552,7 @@ dependencies = [
  "reth-network-p2p",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-prune-types",
  "reth-storage-api",
  "reth-storage-errors",
  "reth-testing-utils",
@@ -7559,6 +7569,7 @@ dependencies = [
 name = "reth-prune"
 version = "0.2.0-beta.9"
 dependencies = [
+ "alloy-primitives",
  "assert_matches",
  "itertools 0.12.1",
  "metrics",
@@ -7570,6 +7581,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
+ "reth-prune-types",
  "reth-stages",
  "reth-testing-utils",
  "reth-tokio-util",
@@ -7577,6 +7589,21 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "reth-prune-types"
+version = "0.2.0-beta.9"
+dependencies = [
+ "alloy-primitives",
+ "bytes",
+ "derive_more",
+ "modular-bitfield",
+ "reth-codecs",
+ "reth-codecs-derive",
+ "reth-primitives",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -7588,6 +7615,7 @@ dependencies = [
  "reth-consensus-common",
  "reth-execution-errors",
  "reth-primitives",
+ "reth-prune-types",
  "reth-storage-api",
  "reth-storage-errors",
  "reth-trie",
@@ -7836,6 +7864,7 @@ dependencies = [
  "reth-network-types",
  "reth-primitives",
  "reth-provider",
+ "reth-prune-types",
  "reth-revm",
  "reth-stages-api",
  "reth-static-file",
@@ -7866,6 +7895,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-prune",
+ "reth-prune-types",
  "reth-static-file",
  "reth-testing-utils",
  "reth-tokio-util",
@@ -7887,6 +7917,7 @@ dependencies = [
  "reth-nippy-jar",
  "reth-primitives",
  "reth-provider",
+ "reth-prune-types",
  "reth-stages",
  "reth-storage-errors",
  "reth-testing-utils",
@@ -7914,6 +7945,7 @@ dependencies = [
  "reth-db-api",
  "reth-execution-types",
  "reth-primitives",
+ "reth-prune-types",
  "reth-storage-errors",
  "reth-trie",
  "revm",

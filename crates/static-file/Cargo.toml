@@ -20,6 +20,7 @@ reth-provider.workspace = true
 reth-storage-errors.workspace = true
 reth-nippy-jar.workspace = true
 reth-tokio-util.workspace = true
+reth-prune-types.workspace = true
 
 # misc
 tracing.workspace = true

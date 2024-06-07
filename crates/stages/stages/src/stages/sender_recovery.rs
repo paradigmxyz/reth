@@ -8,12 +8,13 @@ use reth_db_api::{
 };
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    Address, PruneSegment, StaticFileSegment, TransactionSignedNoHash, TxNumber,
+    Address, StaticFileSegment, TransactionSignedNoHash, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
     StatsReader,
 };
+use reth_prune_types::PruneSegment;
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };

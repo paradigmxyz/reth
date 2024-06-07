@@ -4,8 +4,8 @@ use crate::{
 };
 use reth_db::tables;
 use reth_db_api::database::Database;
-use reth_primitives::{PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{DatabaseProviderRW, TransactionsProvider};
+use reth_prune_types::{PruneMode, PruneProgress, PruneSegment};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]

@@ -1,5 +1,7 @@
-use crate::{prune::segment::PrunePurpose, BlockNumber, PruneSegment, PruneSegmentError};
+use crate::{segment::PrunePurpose, PruneSegment, PruneSegmentError};
+use alloy_primitives::BlockNumber;
 use reth_codecs::{main_codec, Compact};
+use reth_primitives::bytes;
 
 /// Prune mode.
 #[main_codec]

@@ -1,5 +1,7 @@
-use crate::{prune::PruneMode, BlockNumber, TxNumber};
+use crate::PruneMode;
+use alloy_primitives::{BlockNumber, TxNumber};
 use reth_codecs::{main_codec, Compact};
+use reth_primitives::bytes;
 
 /// Saves the pruning progress of a stage.
 #[main_codec]
