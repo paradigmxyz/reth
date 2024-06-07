@@ -433,12 +433,10 @@ impl<H: NippyJarHeader> NippyJar<H> {
     /// Writes all necessary configuration to file.
     fn freeze_config(&self) -> Result<(), NippyJarError> {
         // Atomic writes are hard: <https://github.com/paradigmxyz/reth/issues/8622>
-        // So we need to do this dance.
-
         let mut tmp_path = self.config_path();
         tmp_path.set_extension(".tmp");
 
-        // Write to temporary file and sync
+        // Write to temporary file
         let mut file = File::create(&tmp_path)?;
         bincode::serialize_into(&mut file, &self)?;
 

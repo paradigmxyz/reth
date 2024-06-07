@@ -181,26 +181,28 @@ impl StaticFileProviderRW {
             }
         }
 
-        // Commits offsets and new user_header to disk
-        self.writer.commit().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+        if self.writer.is_dirty() {
+            // Commits offsets and new user_header to disk
+            self.writer.commit().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
 
-        if let Some(metrics) = &self.metrics {
-            metrics.record_segment_operation(
-                self.writer.user_header().segment(),
-                StaticFileProviderOperation::CommitWriter,
-                Some(start.elapsed()),
+            if let Some(metrics) = &self.metrics {
+                metrics.record_segment_operation(
+                    self.writer.user_header().segment(),
+                    StaticFileProviderOperation::CommitWriter,
+                    Some(start.elapsed()),
+                );
+            }
+
+            debug!(
+                target: "provider::static_file",
+                segment = ?self.writer.user_header().segment(),
+                path = ?self.data_path,
+                duration = ?start.elapsed(),
+                "Commit"
             );
+
+            self.update_index()?;
         }
-
-        debug!(
-            target: "provider::static_file",
-            segment = ?self.writer.user_header().segment(),
-            path = ?self.data_path,
-            duration = ?start.elapsed(),
-            "Commit"
-        );
-
-        self.update_index()?;
 
         Ok(())
     }
