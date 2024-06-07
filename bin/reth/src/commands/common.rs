@@ -93,7 +93,7 @@ impl EnvironmentArgs {
         Ok(Environment { config, provider_factory, data_dir })
     }
 
-    /// Returns a [ProviderFactory] after executing consistency checks.
+    /// Returns a [`ProviderFactory`] after executing consistency checks.
     ///
     /// If it's a read-write environment and an issue is found, it will attempt to heal (including a
     /// pipeline unwind). Otherwise, it will print out an warning, advising the user to restart the
@@ -123,9 +123,7 @@ impl EnvironmentArgs {
 
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
-            if PipelineTarget::Unwind(0) == unwind_target {
-                panic!("A static file <> database inconsistency was found that would trigger an unwind to block 0.")
-            }
+            assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
