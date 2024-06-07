@@ -89,9 +89,14 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
 ///
 /// - There is no guarantee that the nonce is not used twice for the same account
 pub fn random_signed_tx<R: Rng>(rng: &mut R) -> TransactionSigned {
+    let tx = random_tx(rng);
+    sign_tx_with_random_key_pair(rng, tx)
+}
+
+/// Signs the [Transaction] with a random key pair.
+pub fn sign_tx_with_random_key_pair<R: Rng>(rng: &mut R, tx: Transaction) -> TransactionSigned {
     let secp = Secp256k1::new();
     let key_pair = Keypair::new(&secp, rng);
-    let tx = random_tx(rng);
     sign_tx_with_key_pair(key_pair, tx)
 }
 

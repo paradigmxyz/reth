@@ -145,6 +145,26 @@ impl TestExExHandle {
         Ok(())
     }
 
+    /// Send a notification to the Execution Extension that the chain has been reorged
+    pub async fn send_notification_chain_reorged(
+        &self,
+        old: Chain,
+        new: Chain,
+    ) -> eyre::Result<()> {
+        self.notifications_tx
+            .send(ExExNotification::ChainReorged { old: Arc::new(old), new: Arc::new(new) })
+            .await?;
+        Ok(())
+    }
+
+    /// Send a notification to the Execution Extension that the chain has been reverted
+    pub async fn send_notification_chain_reverted(&self, chain: Chain) -> eyre::Result<()> {
+        self.notifications_tx
+            .send(ExExNotification::ChainReverted { old: Arc::new(chain) })
+            .await?;
+        Ok(())
+    }
+
     /// Asserts that the Execution Extension did not emit any events.
     #[track_caller]
     pub fn assert_events_empty(&self) {
