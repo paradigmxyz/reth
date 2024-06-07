@@ -27,7 +27,6 @@ crates/revm/                @mattsse @rakita
 crates/rpc/                 @mattsse @Rjected
 crates/stages/              @onbjerg @rkrasiuk @shekhirin
 crates/static-file/         @joshieDo @shekhirin
-crates/static-file-types/   @joshieDo @shekhirin
 crates/storage/codecs/      @joshieDo
 crates/storage/db/          @joshieDo @rakita
 crates/storage/db-api/      @joshieDo @rakita
