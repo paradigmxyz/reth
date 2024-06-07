@@ -96,7 +96,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
     }
 
     /// Returns whether there are changes that need to be committed.
-    pub fn is_dirty(&self) -> bool {
+    pub const fn is_dirty(&self) -> bool {
         self.dirty
     }
 
