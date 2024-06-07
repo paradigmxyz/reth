@@ -25,9 +25,9 @@ pub fn validate_block_post_execution(
             chain_spec,
             block.timestamp,
         ) {
-            debug!(%error, ?receipts, "receipts verification failed");
+            tracing::debug!(%error, ?receipts, "receipts verification failed");
             return Err(error)
-        };
+        }
     }
 
     // Check if gas used matches the value set in header.

@@ -22,9 +22,9 @@ pub fn validate_block_post_execution(
         if let Err(error) =
             verify_receipts(block.header.receipts_root, block.header.logs_bloom, receipts)
         {
-            debug!(%error, ?receipts, "receipts verification failed");
+            tracing::debug!(%error, ?receipts, "receipts verification failed");
             return Err(error)
-        };
+        }
     }
 
     // Check if gas used matches the value set in header.

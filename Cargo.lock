@@ -6849,6 +6849,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-primitives",
+ "tracing",
 ]
 
 [[package]]
@@ -7496,6 +7497,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-primitives",
+ "tracing",
 ]
 
 [[package]]
