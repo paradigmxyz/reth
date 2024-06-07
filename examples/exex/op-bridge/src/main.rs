@@ -270,7 +270,9 @@ mod tests {
 
     use crate::{L1StandardBridge, OP_BRIDGES};
 
-    fn generate_tx_and_receipt<E: SolEvent>(
+    /// Given the address of a bridge contract and an event, construct a transaction signed with a
+    /// random private key and a receipt for that transaction.
+    fn construct_tx_and_receipt<E: SolEvent>(
         to: Address,
         event: E,
     ) -> eyre::Result<(TransactionSigned, Receipt)> {
@@ -293,14 +295,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_exex() -> eyre::Result<()> {
+        // Initialize the test Execution Extension context with all dependencies
         let (ctx, handle) = test_exex_context().await?;
+        // Create a temporary database file, so we can access it later for assertions
         let db_file = tempfile::NamedTempFile::new()?;
 
+        // Initialize the ExEx
         let mut exex = pin!(super::init(ctx, Connection::open(&db_file)?).await?);
 
+        // Generate random "from" and "to" addresses for deposit and withdrawal events
         let from_address = Address::random();
         let to_address = Address::random();
 
+        // Construct deposit event, transaction and receipt
         let deposit_event = L1StandardBridge::ETHBridgeInitiated {
             from: from_address,
             to: to_address,
@@ -308,8 +315,9 @@ mod tests {
             extraData: Default::default(),
         };
         let (deposit_tx, deposit_tx_receipt) =
-            generate_tx_and_receipt(OP_BRIDGES[0], deposit_event.clone())?;
+            construct_tx_and_receipt(OP_BRIDGES[0], deposit_event.clone())?;
 
+        // Construct withdrawal event, transaction and receipt
         let withdrawal_event = L1StandardBridge::ETHBridgeFinalized {
             from: from_address,
             to: to_address,
@@ -317,8 +325,9 @@ mod tests {
             extraData: Default::default(),
         };
         let (withdrawal_tx, withdrawal_tx_receipt) =
-            generate_tx_and_receipt(OP_BRIDGES[1], withdrawal_event.clone())?;
+            construct_tx_and_receipt(OP_BRIDGES[1], withdrawal_event.clone())?;
 
+        // Construct a block
         let block = Block {
             header: Header::default(),
             body: vec![deposit_tx, withdrawal_tx],
@@ -328,6 +337,7 @@ mod tests {
         .seal_with_senders()
         .ok_or_else(|| eyre::eyre!("failed to recover senders"))?;
 
+        // Construct a chain
         let chain = Chain::new(
             vec![block.clone()],
             BundleStateWithReceipts::new(
@@ -338,18 +348,20 @@ mod tests {
             None,
         );
 
+        // Send a notification that the chain has been committed
         handle.send_notification_chain_committed(chain.clone()).await?;
+        // Poll the ExEx once, it will process the notification that we just sent
         exex.poll_once().await;
 
         let connection = Connection::open(&db_file)?;
 
+        // Assert that the deposit event was parsed correctly and inserted into the database
         let deposits: Vec<(u64, String, String, String, String, String)> = connection
             .prepare(r#"SELECT block_number, contract_address, "from", "to", amount, tx_hash FROM deposits"#)?
             .query_map([], |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
             })?
             .collect::<Result<Vec<_>, _>>()?;
-
         assert_eq!(deposits.len(), 1);
         assert_eq!(
             deposits[0],
@@ -363,13 +375,13 @@ mod tests {
             )
         );
 
+        // Assert that the withdrawal event was parsed correctly and inserted into the database
         let withdrawals: Vec<(u64, String, String, String, String, String)> = connection
             .prepare(r#"SELECT block_number, contract_address, "from", "to", amount, tx_hash FROM withdrawals"#)?
             .query_map([], |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
             })?
             .collect::<Result<Vec<_>, _>>()?;
-
         assert_eq!(withdrawals.len(), 1);
         assert_eq!(
             withdrawals[0],
@@ -383,9 +395,12 @@ mod tests {
             )
         );
 
+        // Send a notification that the same chain has been reverted
         handle.send_notification_chain_reverted(chain).await?;
+        // Poll the ExEx once, it will process the notification that we just sent
         exex.poll_once().await;
 
+        // Assert that the deposit was removed from the database
         let deposits = connection
             .prepare(r#"SELECT block_number, contract_address, "from", "to", amount, tx_hash FROM deposits"#)?
             .query_map([], |_| {
@@ -394,6 +409,7 @@ mod tests {
             .count();
         assert_eq!(deposits, 0);
 
+        // Assert that the withdrawal was removed from the database
         let withdrawals = connection
             .prepare(r#"SELECT block_number, contract_address, "from", "to", amount, tx_hash FROM withdrawals"#)?
             .query_map([], |_| {
