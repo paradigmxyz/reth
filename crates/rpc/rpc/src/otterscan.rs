@@ -1,9 +1,6 @@
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use revm_inspectors::transfer::{TransferInspector, TransferKind};
-use revm_primitives::ExecutionResult;
-
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_types::{
@@ -13,6 +10,8 @@ use reth_rpc_types::{
     },
     BlockTransactions, Transaction,
 };
+use revm_inspectors::transfer::{TransferInspector, TransferKind};
+use revm_primitives::ExecutionResult;
 
 use crate::{
     eth::api::{

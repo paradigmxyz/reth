@@ -19,8 +19,9 @@ use crate::eth::{
     api::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace},
     error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
     revm_utils::{
-        apply_state_overrides, build_call_evm_env, cap_tx_gas_limit_with_caller_allowance,
-        get_precompiles, prepare_call_env, EvmOverrides, FillableTransaction,
+        apply_state_overrides, build_call_evm_env, caller_gas_allowance,
+        cap_tx_gas_limit_with_caller_allowance, get_precompiles, prepare_call_env, EvmOverrides,
+        FillableTransaction,
     },
 };
 
@@ -701,7 +702,7 @@ pub trait Call {
             let block_txs = block.into_transactions_ecrecovered();
 
             let this = self.clone();
-            self.spawn_with_state_at_block(parent_block.into(), move |state: StateProviderBox| {
+            self.spawn_with_state_at_block(parent_block.into(), move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 // replay all transactions prior to the targeted transaction

@@ -36,8 +36,8 @@ use crate::eth::traits::RawTransactionForwarder;
 pub use pending_block::PendingBlock;
 pub use receipt::ReceiptBuilder;
 pub use traits::{
-    BuildReceipt, Call, EthBlocks, EthCall, EthState, EthTrace, EthTransactions, LoadBlock,
-    LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, StateCacheDB, Trace,
+    BuildReceipt, Call, EthBlocks, EthCall, EthFee, EthState, EthTrace, EthTransactions, LoadBlock,
+    LoadFee, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, StateCacheDB, Trace,
 };
 pub use transactions::TransactionSource;
 
@@ -207,7 +207,7 @@ impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Networ
 #[async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthApiSpec for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Pool: TransactionPool + Clone + 'static,
+    Pool: TransactionPool + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
@@ -388,5 +388,23 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     #[inline]
     pub const fn gas_cap(&self) -> u64 {
         self.gas_cap
+    }
+
+    /// Returns a handle to the gas oracle.
+    #[inline]
+    pub const fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
+        &self.gas_oracle
+    }
+
+    /// Returns a handle to the fee history cache.
+    #[inline]
+    pub fn fee_history_cache(&self) -> &FeeHistoryCache {
+        &self.fee_history_cache
+    }
+
+    /// Returns a handle to the signers.
+    #[inline]
+    pub fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
+        &self.signers
     }
 }

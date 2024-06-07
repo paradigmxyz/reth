@@ -46,7 +46,7 @@ where
     Self: LoadBlock,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Pool: TransactionPool + Clone + 'static,
+    Pool: TransactionPool + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
     EvmConfig: ConfigureEvm + 'static,
 {
