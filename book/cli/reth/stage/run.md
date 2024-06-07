@@ -6,27 +6,22 @@ Run a single stage.
 $ reth stage run --help
 Usage: reth stage run [OPTIONS] --from <FROM> --to <TO> <STAGE>
 
-Arguments:
-  <STAGE>
-          The name of the stage to run
-
-          Possible values:
-          - headers:         The headers stage within the pipeline
-          - bodies:          The bodies stage within the pipeline
-          - senders:         The senders stage within the pipeline
-          - execution:       The execution stage within the pipeline
-          - account-hashing: The account hashing stage within the pipeline
-          - storage-hashing: The storage hashing stage within the pipeline
-          - hashing:         The account and storage hashing stages within the pipeline
-          - merkle:          The merkle stage within the pipeline
-          - tx-lookup:       The transaction lookup stage within the pipeline
-          - account-history: The account history stage within the pipeline
-          - storage-history: The storage history stage within the pipeline
-
 Options:
-      --config <FILE>
-          The path to the configuration file to use.
+      --instance <INSTANCE>
+          Add a new instance of a node.
 
+          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
+
+          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
+
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
+
+          [default: 1]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Datadir:
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
 
@@ -38,6 +33,12 @@ Options:
 
           [default: default]
 
+      --datadir.static_files <PATH>
+          The absolute path to store static files in.
+
+      --config <FILE>
+          The path to the configuration file to use
+
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -46,6 +47,25 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
 
           [default: mainnet]
+
+Database:
+      --db.log-level <LOG_LEVEL>
+          Database logging level. Levels higher than "notice" require a debug build
+
+          Possible values:
+          - fatal:   Enables logging for critical conditions, i.e. assertion failures
+          - error:   Enables logging for error conditions
+          - warn:    Enables logging for warning conditions
+          - notice:  Enables logging for normal but significant condition
+          - verbose: Enables logging for verbose informational
+          - debug:   Enables logging for debug-level messages
+          - trace:   Enables logging for trace debug-level messages
+          - extra:   Enables logging for extra debug-level messages
+
+      --db.exclusive <EXCLUSIVE>
+          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
+
+          [possible values: true, false]
 
       --metrics <SOCKET>
           Enable Prometheus metrics.
@@ -61,30 +81,34 @@ Options:
       --batch-size <BATCH_SIZE>
           Batch size for stage execution and unwind
 
-      --etl-file-size <ETL_FILE_SIZE>
-          The maximum size in bytes of data held in memory before being flushed to disk as a file
-
-      --etl-dir <ETL_DIR>
-          Directory where to collect ETL files
-
   -s, --skip-unwind
           Normally, running the stage requires unwinding for stages that already have been run, in order to not rewrite to the same database slots.
 
           You can optionally skip the unwinding phase if you're syncing a block range that has not been synced before.
 
-      --instance <INSTANCE>
-          Add a new instance of a node.
+  -c, --commit
+          Commits the changes in the database. WARNING: potentially destructive.
 
-          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
+          Useful when you want to run diagnostics on the database.
 
-          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
+      --checkpoints
+          Save stage checkpoints
 
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
+  <STAGE>
+          The name of the stage to run
 
-          [default: 1]
-
-  -h, --help
-          Print help (see a summary with '-h')
+          Possible values:
+          - headers:         The headers stage within the pipeline
+          - bodies:          The bodies stage within the pipeline
+          - senders:         The senders stage within the pipeline
+          - execution:       The execution stage within the pipeline
+          - account-hashing: The account hashing stage within the pipeline
+          - storage-hashing: The storage hashing stage within the pipeline
+          - hashing:         The account and storage hashing stages within the pipeline
+          - merkle:          The merkle stage within the pipeline
+          - tx-lookup:       The transaction lookup stage within the pipeline
+          - account-history: The account history stage within the pipeline
+          - storage-history: The storage history stage within the pipeline
 
 Networking:
   -d, --disable-discovery
@@ -110,10 +134,10 @@ Networking:
           [default: 30303]
 
       --discovery.v5.addr <DISCOVERY_V5_ADDR>
-          The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by RLPx address, if it's also IPv4
+          The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by `RLPx` address, if it's also IPv4
 
       --discovery.v5.addr.ipv6 <DISCOVERY_V5_ADDR_IPV6>
-          The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by RLPx address, if it's also IPv6
+          The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by `RLPx` address, if it's also IPv6
 
       --discovery.v5.port <DISCOVERY_V5_PORT>
           The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discv5.addr` is set
@@ -152,6 +176,11 @@ Networking:
           Comma separated enode URLs for P2P discovery bootstrap.
 
           Will fall back to a network-specific default if not specified.
+
+      --dns-retries <DNS_RETRIES>
+          Amount of DNS resolution requests retries to perform when peering
+
+          [default: 0]
 
       --peers-file <FILE>
           The path to the known peers file. Connected peers are dumped to this file on nodes
@@ -202,8 +231,8 @@ Networking:
           Experimental, for usage in research. Sets the max accumulated byte size of transactions to
           request in one request.
 
-          Since RLPx protocol version 68, the byte size of a transaction is shared as metadata in a
-          transaction announcement (see RLPx specs). This allows a node to request a specific size
+          Since `RLPx` protocol version 68, the byte size of a transaction is shared as metadata in a
+          transaction announcement (see `RLPx` specs). This allows a node to request a specific size
           response.
 
           By default, nodes request only 128 KiB worth of transactions, but should a peer request
@@ -212,33 +241,6 @@ Networking:
           Default is 128 KiB.
 
           [default: 131072]
-
-Database:
-      --db.log-level <LOG_LEVEL>
-          Database logging level. Levels higher than "notice" require a debug build
-
-          Possible values:
-          - fatal:   Enables logging for critical conditions, i.e. assertion failures
-          - error:   Enables logging for error conditions
-          - warn:    Enables logging for warning conditions
-          - notice:  Enables logging for normal but significant condition
-          - verbose: Enables logging for verbose informational
-          - debug:   Enables logging for debug-level messages
-          - trace:   Enables logging for trace debug-level messages
-          - extra:   Enables logging for extra debug-level messages
-
-      --db.exclusive <EXCLUSIVE>
-          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
-
-          [possible values: true, false]
-
-  -c, --commit
-          Commits the changes in the database. WARNING: potentially destructive.
-
-          Useful when you want to run diagnostics on the database.
-
-      --checkpoints
-          Save stage checkpoints
 
 Logging:
       --log.stdout.format <FORMAT>

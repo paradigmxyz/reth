@@ -125,7 +125,7 @@ pub enum EthApiError {
 }
 
 impl EthApiError {
-    /// crates a new [EthApiError::Other] variant.
+    /// crates a new [`EthApiError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
@@ -150,7 +150,8 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::InvalidBlockData(_) |
             EthApiError::Internal(_) |
             EthApiError::TransactionNotFound |
-            EthApiError::EvmCustom(_) => internal_rpc_err(error.to_string()),
+            EthApiError::EvmCustom(_) |
+            EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
             EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
             }
@@ -160,12 +161,12 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),
-            EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
             err @ EthApiError::ExecutionTimedOut(_) => {
                 rpc_error_with_code(CALL_EXECUTION_FAILED_CODE, err.to_string())
             }
-            err @ EthApiError::InternalBlockingTaskError => internal_rpc_err(err.to_string()),
-            err @ EthApiError::InternalEthError => internal_rpc_err(err.to_string()),
+            err @ EthApiError::InternalBlockingTaskError | err @ EthApiError::InternalEthError => {
+                internal_rpc_err(err.to_string())
+            }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
@@ -367,7 +368,7 @@ pub enum OptimismInvalidTransactionError {
 
 impl RpcInvalidTransactionError {
     /// Returns the rpc error code for this error.
-    fn error_code(&self) -> i32 {
+    const fn error_code(&self) -> i32 {
         match self {
             Self::InvalidChainId | Self::GasTooLow | Self::GasTooHigh => {
                 EthRpcErrorCode::InvalidInput.code()
@@ -380,7 +381,7 @@ impl RpcInvalidTransactionError {
     /// Converts the halt error
     ///
     /// Takes the configured gas limit of the transaction which is attached to the error
-    pub(crate) fn halt(reason: HaltReason, gas_limit: u64) -> Self {
+    pub(crate) const fn halt(reason: HaltReason, gas_limit: u64) -> Self {
         match reason {
             HaltReason::OutOfGas(err) => Self::out_of_gas(err, gas_limit),
             HaltReason::NonceOverflow => Self::NonceMaxValue,
@@ -389,13 +390,12 @@ impl RpcInvalidTransactionError {
     }
 
     /// Converts the out of gas error
-    pub(crate) fn out_of_gas(reason: OutOfGasError, gas_limit: u64) -> Self {
+    pub(crate) const fn out_of_gas(reason: OutOfGasError, gas_limit: u64) -> Self {
         match reason {
             OutOfGasError::Basic => Self::BasicOutOfGas(gas_limit),
-            OutOfGasError::Memory => Self::MemoryOutOfGas(gas_limit),
+            OutOfGasError::Memory | OutOfGasError::MemoryLimit => Self::MemoryOutOfGas(gas_limit),
             OutOfGasError::Precompile => Self::PrecompileOutOfGas(gas_limit),
             OutOfGasError::InvalidOperand => Self::InvalidOperandOutOfGas(gas_limit),
-            OutOfGasError::MemoryLimit => Self::MemoryOutOfGas(gas_limit),
         }
     }
 }
@@ -471,7 +471,7 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
             InvalidTransactionError::ChainIdMismatch => Self::InvalidChainId,
             InvalidTransactionError::Eip2930Disabled |
             InvalidTransactionError::Eip1559Disabled |
-            InvalidTransactionError::Eip4844Disabled => Self::TxTypeNotSupported,
+            InvalidTransactionError::Eip4844Disabled |
             InvalidTransactionError::TxTypeNotSupported => Self::TxTypeNotSupported,
             InvalidTransactionError::GasUintOverflow => Self::GasUintOverflow,
             InvalidTransactionError::GasTooLow => Self::GasTooLow,
@@ -508,7 +508,7 @@ impl RevertError {
         }
     }
 
-    fn error_code(&self) -> i32 {
+    const fn error_code(&self) -> i32 {
         EthRpcErrorCode::ExecutionError.code()
     }
 }
@@ -589,8 +589,9 @@ impl From<PoolError> for RpcPoolError {
         match err.kind {
             PoolErrorKind::ReplacementUnderpriced => Self::ReplaceUnderpriced,
             PoolErrorKind::FeeCapBelowMinimumProtocolFeeCap(_) => Self::Underpriced,
-            PoolErrorKind::SpammerExceededCapacity(_) => Self::TxPoolOverflow,
-            PoolErrorKind::DiscardedOnInsert => Self::TxPoolOverflow,
+            PoolErrorKind::SpammerExceededCapacity(_) | PoolErrorKind::DiscardedOnInsert => {
+                Self::TxPoolOverflow
+            }
             PoolErrorKind::InvalidTransaction(err) => err.into(),
             PoolErrorKind::Other(err) => Self::Other(err),
             PoolErrorKind::AlreadyImported => Self::AlreadyKnown,
@@ -636,7 +637,7 @@ pub enum SignError {
     /// Signer for requested account not found.
     #[error("unknown account")]
     NoAccount,
-    /// TypedData has invalid format.
+    /// `TypedData` has invalid format.
     #[error("given typed data is not valid")]
     InvalidTypedData,
     /// Invalid transaction request in `sign_transaction`.
@@ -647,8 +648,8 @@ pub enum SignError {
     NoChainId,
 }
 
-/// Converts the evm [ExecutionResult] into a result where `Ok` variant is the output bytes if it is
-/// [ExecutionResult::Success].
+/// Converts the evm [`ExecutionResult`] into a result where `Ok` variant is the output bytes if it
+/// is [`ExecutionResult::Success`].
 pub(crate) fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
     match result {
         ExecutionResult::Success { output, .. } => Ok(output.into_data()),

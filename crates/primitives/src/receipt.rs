@@ -45,20 +45,20 @@ pub struct Receipt {
 }
 
 impl Receipt {
-    /// Calculates [`Log`]'s bloom filter. this is slow operation and [ReceiptWithBloom] can
+    /// Calculates [`Log`]'s bloom filter. this is slow operation and [`ReceiptWithBloom`] can
     /// be used to cache this value.
     pub fn bloom_slow(&self) -> Bloom {
         logs_bloom(self.logs.iter())
     }
 
-    /// Calculates the bloom filter for the receipt and returns the [ReceiptWithBloom] container
+    /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloom`] container
     /// type.
     pub fn with_bloom(self) -> ReceiptWithBloom {
         self.into()
     }
 
-    /// Calculates the bloom filter for the receipt and returns the [ReceiptWithBloomRef] container
-    /// type.
+    /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloomRef`]
+    /// container type.
     pub fn with_bloom_ref(&self) -> ReceiptWithBloomRef<'_> {
         self.into()
     }
@@ -73,7 +73,7 @@ pub struct Receipts {
 
 impl Receipts {
     /// Create a new `Receipts` instance with an empty vector.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { receipt_vec: vec![] }
     }
 
@@ -172,8 +172,8 @@ pub struct ReceiptWithBloom {
 }
 
 impl ReceiptWithBloom {
-    /// Create new [ReceiptWithBloom]
-    pub fn new(receipt: Receipt, bloom: Bloom) -> Self {
+    /// Create new [`ReceiptWithBloom`]
+    pub const fn new(receipt: Receipt, bloom: Bloom) -> Self {
         Self { receipt, bloom }
     }
 
@@ -188,7 +188,7 @@ impl ReceiptWithBloom {
     }
 
     #[inline]
-    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
+    const fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: &self.receipt, bloom: &self.bloom }
     }
 }
@@ -283,7 +283,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
 impl ReceiptWithBloom {
     /// Returns the enveloped encoded receipt.
     ///
-    /// See also [ReceiptWithBloom::encode_enveloped]
+    /// See also [`ReceiptWithBloom::encode_enveloped`]
     pub fn envelope_encoded(&self) -> Bytes {
         let mut buf = Vec::new();
         self.encode_enveloped(&mut buf);
@@ -429,8 +429,8 @@ pub struct ReceiptWithBloomRef<'a> {
 }
 
 impl<'a> ReceiptWithBloomRef<'a> {
-    /// Create new [ReceiptWithBloomRef]
-    pub fn new(receipt: &'a Receipt, bloom: Bloom) -> Self {
+    /// Create new [`ReceiptWithBloomRef`]
+    pub const fn new(receipt: &'a Receipt, bloom: Bloom) -> Self {
         Self { receipt, bloom }
     }
 
@@ -440,7 +440,7 @@ impl<'a> ReceiptWithBloomRef<'a> {
     }
 
     #[inline]
-    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
+    const fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: self.receipt, bloom: &self.bloom }
     }
 }

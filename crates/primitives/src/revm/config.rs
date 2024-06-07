@@ -21,7 +21,9 @@ pub fn revm_spec_by_timestamp_after_merge(
         }
     }
 
-    if chain_spec.is_cancun_active_at_timestamp(timestamp) {
+    if chain_spec.is_prague_active_at_timestamp(timestamp) {
+        revm_primitives::PRAGUE
+    } else if chain_spec.is_cancun_active_at_timestamp(timestamp) {
         revm_primitives::CANCUN
     } else if chain_spec.is_shanghai_active_at_timestamp(timestamp) {
         revm_primitives::SHANGHAI
@@ -30,11 +32,13 @@ pub fn revm_spec_by_timestamp_after_merge(
     }
 }
 
-/// return revm_spec from spec configuration.
+/// return `revm_spec` from spec configuration.
 pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId {
     #[cfg(feature = "optimism")]
     if chain_spec.is_optimism() {
-        if chain_spec.fork(Hardfork::Ecotone).active_at_head(&block) {
+        if chain_spec.fork(Hardfork::Fjord).active_at_head(&block) {
+            return revm_primitives::FJORD
+        } else if chain_spec.fork(Hardfork::Ecotone).active_at_head(&block) {
             return revm_primitives::ECOTONE
         } else if chain_spec.fork(Hardfork::Canyon).active_at_head(&block) {
             return revm_primitives::CANYON
@@ -45,7 +49,9 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId
         }
     }
 
-    if chain_spec.fork(Hardfork::Cancun).active_at_head(&block) {
+    if chain_spec.fork(Hardfork::Prague).active_at_head(&block) {
+        revm_primitives::PRAGUE
+    } else if chain_spec.fork(Hardfork::Cancun).active_at_head(&block) {
         revm_primitives::CANCUN
     } else if chain_spec.fork(Hardfork::Shanghai).active_at_head(&block) {
         revm_primitives::SHANGHAI
@@ -145,7 +151,10 @@ mod tests {
                 let cs = ChainSpecBuilder::mainnet().chain(crate::Chain::from_id(10));
                 f(cs).build()
             }
-
+            assert_eq!(
+                revm_spec(&op_cs(|cs| cs.fjord_activated()), Head::default()),
+                revm_primitives::FJORD
+            );
             assert_eq!(
                 revm_spec(&op_cs(|cs| cs.ecotone_activated()), Head::default()),
                 revm_primitives::ECOTONE

@@ -49,8 +49,7 @@ fn fill(
 
     #[allow(unreachable_patterns)]
     let (gas_price, max_fee_per_gas) = match signed_tx.tx_type() {
-        TxType::Legacy => (Some(signed_tx.max_fee_per_gas()), None),
-        TxType::Eip2930 => (Some(signed_tx.max_fee_per_gas()), None),
+        TxType::Legacy | TxType::Eip2930 => (Some(signed_tx.max_fee_per_gas()), None),
         TxType::Eip1559 | TxType::Eip4844 => {
             // the gas price field for EIP1559 is set to `min(tip, gasFeeCap - baseFee) +
             // baseFee`
@@ -114,7 +113,7 @@ fn fill(
     }
 }
 
-/// Convert [TransactionSignedEcRecovered] to [TransactionRequest]
+/// Convert [`TransactionSignedEcRecovered`] to [`TransactionRequest`]
 pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> TransactionRequest {
     let from = tx.signer();
     let to = Some(tx.transaction.to().into());

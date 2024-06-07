@@ -56,14 +56,14 @@ pub use block::{
 };
 pub use chain::{
     AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, Chain, ChainInfo, ChainKind, ChainSpec,
-    ChainSpecBuilder, DisplayHardforks, ForkBaseFeeParams, ForkCondition, NamedChain, DEV, GOERLI,
-    HOLESKY, MAINNET, SEPOLIA,
+    ChainSpecBuilder, DepositContract, DisplayHardforks, ForkBaseFeeParams, ForkCondition,
+    NamedChain, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
 };
 #[cfg(feature = "zstd-codec")]
 pub use compression::*;
 pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
-    KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+    KECCAK_EMPTY, MAINNET_DEPOSIT_CONTRACT, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use error::{GotExpected, GotExpectedBoxed};
 pub use exex::FinishedExExHeight;
@@ -73,7 +73,7 @@ pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
 pub use net::{
     goerli_nodes, holesky_nodes, mainnet_nodes, parse_nodes, sepolia_nodes, NodeRecord,
-    NodeRecordParseError, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
+    NodeRecordParseError, TrustedPeer, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
     SEPOLIA_BOOTNODES,
 };
 pub use prune::{

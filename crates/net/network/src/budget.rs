@@ -3,6 +3,11 @@
 /// Default is 10 iterations.
 pub const DEFAULT_BUDGET_TRY_DRAIN_STREAM: u32 = 10;
 
+/// Default budget to try and drain headers and bodies download streams.
+///
+/// Default is 4 iterations.
+pub const DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS: u32 = 4;
+
 /// Default budget to try and drain [`Swarm`](crate::swarm::Swarm).
 ///
 /// Default is 10 [`SwarmEvent`](crate::swarm::SwarmEvent)s.
@@ -68,8 +73,8 @@ macro_rules! poll_nested_stream_with_budget {
 /// Metered poll of the given stream. Breaks with `true` if there maybe is more work.
 #[macro_export]
 macro_rules! metered_poll_nested_stream_with_budget {
-    ($acc:ident, $target:literal, $label:literal, $budget:ident, $poll_stream:expr, $on_ready_some:expr $(, $on_ready_none:expr;)? $(,)?) => {{
-        duration_metered_exec!(
+    ($acc:expr, $target:literal, $label:literal, $budget:ident, $poll_stream:expr, $on_ready_some:expr $(, $on_ready_none:expr;)? $(,)?) => {{
+        $crate::duration_metered_exec!(
             {
                 $crate::poll_nested_stream_with_budget!($target, $label, $budget, $poll_stream, $on_ready_some $(, $on_ready_none;)?)
             },

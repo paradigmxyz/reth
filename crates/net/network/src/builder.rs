@@ -8,7 +8,7 @@ use crate::{
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::mpsc;
 
-/// We set the max channel capacity of the EthRequestHandler to 256
+/// We set the max channel capacity of the `EthRequestHandler` to 256
 /// 256 requests with malicious 10MB body requests is 2.6GB which can be absorbed by the node.
 pub(crate) const ETH_REQUEST_CHANNEL_CAPACITY: usize = 256;
 
@@ -30,7 +30,7 @@ impl<C, Tx, Eth> NetworkBuilder<C, Tx, Eth> {
     }
 
     /// Returns the network manager.
-    pub fn network(&self) -> &NetworkManager<C> {
+    pub const fn network(&self) -> &NetworkManager<C> {
         &self.network
     }
 

@@ -1,6 +1,4 @@
 use crate::{
-    constants,
-    constants::{DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE},
     error::{RpcError, ServerKind},
     EthConfig,
 };
@@ -34,6 +32,10 @@ use reth_rpc_api::servers::*;
 use reth_rpc_layer::{
     secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, JwtAuthValidator,
     JwtSecret,
+};
+use reth_rpc_server_types::{
+    constants,
+    constants::{DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE},
 };
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
@@ -102,7 +104,7 @@ where
     launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
 }
 
-/// Configure and launch a _standalone_ auth server with existing EthApi implementation.
+/// Configure and launch a _standalone_ auth server with existing `EthApi` implementation.
 pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi, EngineT, EvmConfig>(
     eth_api: EthApi<Provider, Pool, Network, EvmConfig>,
     eth_filter: EthFilter<Provider, Pool>,
@@ -170,12 +172,12 @@ pub struct AuthServerConfig {
 
 impl AuthServerConfig {
     /// Convenience function to create a new `AuthServerConfig`.
-    pub fn builder(secret: JwtSecret) -> AuthServerConfigBuilder {
+    pub const fn builder(secret: JwtSecret) -> AuthServerConfigBuilder {
         AuthServerConfigBuilder::new(secret)
     }
 
     /// Returns the address the server will listen on.
-    pub fn address(&self) -> SocketAddr {
+    pub const fn address(&self) -> SocketAddr {
         self.socket_addr
     }
 
@@ -231,7 +233,7 @@ pub struct AuthServerConfigBuilder {
 
 impl AuthServerConfigBuilder {
     /// Create a new `AuthServerConfigBuilder` with the given `secret`.
-    pub fn new(secret: JwtSecret) -> Self {
+    pub const fn new(secret: JwtSecret) -> Self {
         Self {
             socket_addr: None,
             secret,
@@ -242,27 +244,27 @@ impl AuthServerConfigBuilder {
     }
 
     /// Set the socket address for the server.
-    pub fn socket_addr(mut self, socket_addr: SocketAddr) -> Self {
+    pub const fn socket_addr(mut self, socket_addr: SocketAddr) -> Self {
         self.socket_addr = Some(socket_addr);
         self
     }
 
     /// Set the socket address for the server.
-    pub fn maybe_socket_addr(mut self, socket_addr: Option<SocketAddr>) -> Self {
+    pub const fn maybe_socket_addr(mut self, socket_addr: Option<SocketAddr>) -> Self {
         self.socket_addr = socket_addr;
         self
     }
 
     /// Set the secret for the server.
-    pub fn secret(mut self, secret: JwtSecret) -> Self {
+    pub const fn secret(mut self, secret: JwtSecret) -> Self {
         self.secret = secret;
         self
     }
 
     /// Configures the JSON-RPC server
     ///
-    /// Note: this always configures an [EthSubscriptionIdProvider]
-    /// [IdProvider](jsonrpsee::server::IdProvider) for convenience.
+    /// Note: this always configures an [`EthSubscriptionIdProvider`]
+    /// [`IdProvider`](jsonrpsee::server::IdProvider) for convenience.
     pub fn with_server_config(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
         self.server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
@@ -276,7 +278,7 @@ impl AuthServerConfigBuilder {
 
     /// Configures the IPC server
     ///
-    /// Note: this always configures an [EthSubscriptionIdProvider]
+    /// Note: this always configures an [`EthSubscriptionIdProvider`]
     pub fn with_ipc_config(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
         self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
@@ -363,7 +365,7 @@ impl AuthRpcModule {
 
 /// A handle to the spawned auth server.
 ///
-/// When this type is dropped or [AuthServerHandle::stop] has been called the server will be
+/// When this type is dropped or [`AuthServerHandle::stop`] has been called the server will be
 /// stopped.
 #[derive(Clone, Debug)]
 #[must_use = "Server stops if dropped"]
@@ -379,7 +381,7 @@ pub struct AuthServerHandle {
 
 impl AuthServerHandle {
     /// Returns the [`SocketAddr`] of the http server if started.
-    pub fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
 

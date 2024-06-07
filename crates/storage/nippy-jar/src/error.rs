@@ -57,4 +57,6 @@ pub enum NippyJarError {
     InvalidPruning(u64, u64),
     #[error("jar has been frozen and cannot be modified.")]
     FrozenJar,
+    #[error("File is in an inconsistent state.")]
+    InconsistentState,
 }

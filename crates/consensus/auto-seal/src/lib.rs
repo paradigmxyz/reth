@@ -1,7 +1,7 @@
 //! A [Consensus] implementation for local testing purposes
 //! that automatically seals blocks.
 //!
-//! The Mining task polls a [MiningMode], and will return a list of transactions that are ready to
+//! The Mining task polls a [`MiningMode`], and will return a list of transactions that are ready to
 //! be mined.
 //!
 //! These downloaders poll the miner, assemble the block, and return transactions that are ready to
@@ -27,8 +27,7 @@ use reth_primitives::{
     Withdrawals, B256, U256,
 };
 use reth_provider::{
-    BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender, StateProviderFactory,
-    StateRootProvider,
+    BlockReaderIdExt, BundleStateWithReceipts, StateProviderFactory, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::TransactionPool;
@@ -58,7 +57,7 @@ pub struct AutoSealConsensus {
 }
 
 impl AutoSealConsensus {
-    /// Create a new instance of [AutoSealConsensus]
+    /// Create a new instance of [`AutoSealConsensus`]
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
@@ -107,7 +106,6 @@ pub struct AutoSealBuilder<Client, Pool, Engine: EngineTypes, EvmConfig> {
     mode: MiningMode,
     storage: Storage,
     to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
-    canon_state_notification: CanonStateNotificationSender,
     evm_config: EvmConfig,
 }
 
@@ -125,7 +123,6 @@ where
         client: Client,
         pool: Pool,
         to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
-        canon_state_notification: CanonStateNotificationSender,
         mode: MiningMode,
         evm_config: EvmConfig,
     ) -> Self {
@@ -142,12 +139,11 @@ where
             pool,
             mode,
             to_engine,
-            canon_state_notification,
             evm_config,
         }
     }
 
-    /// Sets the [MiningMode] it operates in, default is [MiningMode::Auto]
+    /// Sets the [`MiningMode`] it operates in, default is [`MiningMode::Auto`]
     pub fn mode(mut self, mode: MiningMode) -> Self {
         self.mode = mode;
         self
@@ -158,22 +154,12 @@ where
     pub fn build(
         self,
     ) -> (AutoSealConsensus, AutoSealClient, MiningTask<Client, Pool, EvmConfig, Engine>) {
-        let Self {
-            client,
-            consensus,
-            pool,
-            mode,
-            storage,
-            to_engine,
-            canon_state_notification,
-            evm_config,
-        } = self;
+        let Self { client, consensus, pool, mode, storage, to_engine, evm_config } = self;
         let auto_client = AutoSealClient::new(storage.clone());
         let task = MiningTask::new(
             Arc::clone(&consensus.chain_spec),
             mode,
             to_engine,
-            canon_state_notification,
             storage,
             client,
             pool,
@@ -274,14 +260,13 @@ impl StorageInner {
     /// transactions.
     pub(crate) fn build_header_template(
         &self,
+        timestamp: u64,
         transactions: &[TransactionSigned],
         ommers: &[Header],
         withdrawals: Option<&Withdrawals>,
         requests: Option<&Requests>,
         chain_spec: Arc<ChainSpec>,
     ) -> Header {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-
         // check previous block for base fee
         let base_fee_per_gas = self.headers.get(&self.best_block).and_then(|parent| {
             parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
@@ -361,8 +346,6 @@ impl StorageInner {
         &mut self,
         transactions: Vec<TransactionSigned>,
         ommers: Vec<Header>,
-        withdrawals: Option<Withdrawals>,
-        requests: Option<Requests>,
         provider: &Provider,
         chain_spec: Arc<ChainSpec>,
         executor: &Executor,
@@ -371,7 +354,17 @@ impl StorageInner {
         Executor: BlockExecutorProvider,
         Provider: StateProviderFactory,
     {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+
+        // if shanghai is active, include empty withdrawals
+        let withdrawals =
+            chain_spec.is_shanghai_active_at_timestamp(timestamp).then_some(Withdrawals::default());
+        // if prague is active, include empty requests
+        let requests =
+            chain_spec.is_prague_active_at_timestamp(timestamp).then_some(Requests::default());
+
         let header = self.build_header_template(
+            timestamp,
             &transactions,
             &ommers,
             withdrawals.as_ref(),

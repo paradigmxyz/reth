@@ -42,7 +42,7 @@ mod test_utils {
     use byteorder::{ByteOrder, LittleEndian};
     use tempfile::tempdir;
 
-    /// Regression test for https://github.com/danburkert/lmdb-rs/issues/21.
+    /// Regression test for <https://github.com/danburkert/lmdb-rs/issues/21>.
     /// This test reliably segfaults when run against lmbdb compiled with opt level -O3 and newer
     /// GCC compilers.
     #[test]

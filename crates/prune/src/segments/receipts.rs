@@ -2,7 +2,8 @@ use crate::{
     segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
     PrunerError,
 };
-use reth_db::{database::Database, tables};
+use reth_db::tables;
+use reth_db_api::database::Database;
 use reth_primitives::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{
     errors::provider::ProviderResult, DatabaseProviderRW, PruneCheckpointWriter,
@@ -16,7 +17,7 @@ pub struct Receipts {
 }
 
 impl Receipts {
-    pub fn new(mode: PruneMode) -> Self {
+    pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
 }

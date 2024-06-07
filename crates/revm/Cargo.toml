@@ -25,6 +25,7 @@ revm.workspace = true
 
 # alloy
 alloy-eips.workspace = true
+alloy-rlp.workspace = true
 
 # common
 tracing.workspace = true

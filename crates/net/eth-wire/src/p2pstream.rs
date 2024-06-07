@@ -50,16 +50,11 @@ const PING_TIMEOUT: Duration = Duration::from_secs(15);
 /// when the peer is responsive.
 const PING_INTERVAL: Duration = Duration::from_secs(60);
 
-/// [`GRACE_PERIOD`] determines the amount of time to wait for a peer to disconnect after sending a
-/// [`P2PMessage::Disconnect`] message.
-#[allow(dead_code)]
-const GRACE_PERIOD: Duration = Duration::from_secs(2);
-
 /// [`MAX_P2P_CAPACITY`] is the maximum number of messages that can be buffered to be sent in the
 /// `p2p` stream.
 ///
-/// Note: this default is rather low because it is expected that the [P2PStream] wraps an
-/// [ECIESStream](reth_ecies::stream::ECIESStream) which internally already buffers a few MB of
+/// Note: this default is rather low because it is expected that the [`P2PStream`] wraps an
+/// [`ECIESStream`](reth_ecies::stream::ECIESStream) which internally already buffers a few MB of
 /// encoded data.
 const MAX_P2P_CAPACITY: usize = 2;
 
@@ -74,12 +69,12 @@ pub struct UnauthedP2PStream<S> {
 
 impl<S> UnauthedP2PStream<S> {
     /// Create a new `UnauthedP2PStream` from a type `S` which implements `Stream` and `Sink`.
-    pub fn new(inner: S) -> Self {
+    pub const fn new(inner: S) -> Self {
         Self { inner }
     }
 
     /// Returns a reference to the inner stream.
-    pub fn inner(&self) -> &S {
+    pub const fn inner(&self) -> &S {
         &self.inner
     }
 }
@@ -128,7 +123,7 @@ where
                 } else {
                     debug!(%reason, "Disconnected by peer during handshake");
                 };
-                counter!("p2pstream.disconnected_errors", 1);
+                counter!("p2pstream.disconnected_errors").increment(1);
                 Err(P2PStreamError::HandshakeError(P2PHandshakeError::Disconnected(reason)))
             }
             Err(err) => {
@@ -249,7 +244,7 @@ pub struct P2PStream<S> {
     outgoing_messages: VecDeque<Bytes>,
 
     /// Maximum number of messages that we can buffer here before the [Sink] impl returns
-    /// [Poll::Pending].
+    /// [`Poll::Pending`].
     outgoing_message_buffer_capacity: usize,
 
     /// Whether this stream is currently in the process of disconnecting by sending a disconnect
@@ -275,7 +270,7 @@ impl<S> P2PStream<S> {
     }
 
     /// Returns a reference to the inner stream.
-    pub fn inner(&self) -> &S {
+    pub const fn inner(&self) -> &S {
         &self.inner
     }
 
@@ -292,7 +287,7 @@ impl<S> P2PStream<S> {
     ///
     /// This includes all the shared capabilities that were negotiated during the handshake and
     /// their offsets based on the number of messages of each capability.
-    pub fn shared_capabilities(&self) -> &SharedCapabilities {
+    pub const fn shared_capabilities(&self) -> &SharedCapabilities {
         &self.shared_capabilities
     }
 
@@ -663,7 +658,7 @@ pub enum P2PMessage {
 
 impl P2PMessage {
     /// Gets the [`P2PMessageID`] for the given message.
-    pub fn message_id(&self) -> P2PMessageID {
+    pub const fn message_id(&self) -> P2PMessageID {
         match self {
             Self::Hello(_) => P2PMessageID::Hello,
             Self::Disconnect(_) => P2PMessageID::Disconnect,
@@ -703,8 +698,7 @@ impl Encodable for P2PMessage {
             Self::Hello(msg) => msg.length(),
             Self::Disconnect(msg) => msg.length(),
             // id + snappy encoded payload
-            Self::Ping => 3, // len([0x01, 0x00, 0xc0]) = 3
-            Self::Pong => 3, // len([0x01, 0x00, 0xc0]) = 3
+            Self::Ping | Self::Pong => 3, // len([0x01, 0x00, 0xc0]) = 3
         };
         payload_len + 1 // (1 for length of p2p message id)
     }

@@ -2,7 +2,8 @@ use crate::{
     segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
     PrunerError,
 };
-use reth_db::{database::Database, tables};
+use reth_db::tables;
+use reth_db_api::database::Database;
 use reth_primitives::{PruneMode, PruneProgress, PruneSegment};
 use reth_provider::{DatabaseProviderRW, TransactionsProvider};
 use tracing::{instrument, trace};
@@ -13,7 +14,7 @@ pub struct Transactions {
 }
 
 impl Transactions {
-    pub fn new(mode: PruneMode) -> Self {
+    pub const fn new(mode: PruneMode) -> Self {
         Self { mode }
     }
 }

@@ -2,7 +2,8 @@
 
 #![allow(dead_code)]
 
-use reth_db::{database::Database, tables, transaction::DbTxMut, DatabaseEnv};
+use reth_db::{tables, DatabaseEnv};
+use reth_db_api::{database::Database, transaction::DbTxMut};
 use reth_network_p2p::bodies::response::BlockResponse;
 use reth_primitives::{Block, BlockBody, SealedBlock, SealedHeader, B256};
 use std::collections::HashMap;
@@ -30,15 +31,15 @@ pub(crate) fn zip_blocks<'a>(
         .collect()
 }
 
-pub(crate) fn create_raw_bodies<'a>(
-    headers: impl Iterator<Item = &'a SealedHeader>,
+pub(crate) fn create_raw_bodies(
+    headers: impl IntoIterator<Item = SealedHeader>,
     bodies: &mut HashMap<B256, BlockBody>,
 ) -> Vec<Block> {
     headers
         .into_iter()
         .map(|header| {
             let body = bodies.remove(&header.hash()).expect("body exists");
-            body.create_block(header.as_ref().clone())
+            body.create_block(header.unseal())
         })
         .collect()
 }

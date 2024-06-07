@@ -362,7 +362,7 @@ pub struct ChunkedFileReader {
 
 impl ChunkedFileReader {
     /// Returns the remaining file length.
-    pub fn file_len(&self) -> u64 {
+    pub const fn file_len(&self) -> u64 {
         self.file_byte_len
     }
 

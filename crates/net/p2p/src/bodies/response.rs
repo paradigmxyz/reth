@@ -11,14 +11,14 @@ pub enum BlockResponse {
 
 impl BlockResponse {
     /// Return the reference to the response header
-    pub fn header(&self) -> &SealedHeader {
+    pub const fn header(&self) -> &SealedHeader {
         match self {
             Self::Full(block) => &block.header,
             Self::Empty(header) => header,
         }
     }
 
-    /// Calculates a heuristic for the in-memory size of the [BlockResponse].
+    /// Calculates a heuristic for the in-memory size of the [`BlockResponse`].
     #[inline]
     pub fn size(&self) -> usize {
         match self {

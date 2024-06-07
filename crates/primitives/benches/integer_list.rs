@@ -85,7 +85,7 @@ criterion_group! {
 }
 criterion_main!(benches);
 
-/// Implementation from https://github.com/paradigmxyz/reth/blob/cda5d4e7c53ccc898b7725eb5d3b46c35e4da7f8/crates/primitives/src/integer_list.rs
+/// Implementation from <https://github.com/paradigmxyz/reth/blob/cda5d4e7c53ccc898b7725eb5d3b46c35e4da7f8/crates/primitives/src/integer_list.rs>
 /// adapted to work with `sucds = "0.8.1"`
 #[allow(unused, unreachable_pub)]
 mod elias_fano {
@@ -111,7 +111,7 @@ mod elias_fano {
     }
 
     impl IntegerList {
-        /// Creates an IntegerList from a list of integers. `usize` is safe to use since
+        /// Creates an `IntegerList` from a list of integers. `usize` is safe to use since
         /// [`sucds::EliasFano`] restricts its compilation to 64bits.
         ///
         /// # Returns

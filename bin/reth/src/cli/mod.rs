@@ -1,9 +1,5 @@
 //! CLI definition and entrypoint to executable
 
-#[cfg(feature = "optimism")]
-use crate::commands::import_op;
-#[cfg(feature = "optimism")]
-use crate::commands::import_receipts_op;
 use crate::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
@@ -63,10 +59,10 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// port numbers that conflict with each other.
     ///
     /// Changes to the following port numbers:
-    /// - DISCOVERY_PORT: default + `instance` - 1
-    /// - AUTH_PORT: default + `instance` * 100 - 100
-    /// - HTTP_RPC_PORT: default - `instance` + 1
-    /// - WS_RPC_PORT: default + `instance` * 2 - 2
+    /// - `DISCOVERY_PORT`: default + `instance` - 1
+    /// - `AUTH_PORT`: default + `instance` * 100 - 100
+    /// - `HTTP_RPC_PORT`: default - `instance` + 1
+    /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
     #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
     instance: u16,
 
@@ -94,7 +90,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the
-    /// [NodeCommand](node::NodeCommand).
+    /// [`NodeCommand`](node::NodeCommand).
     ///
     ///
     /// # Example
@@ -197,11 +193,11 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
     #[cfg(feature = "optimism")]
     #[command(name = "import-op")]
-    ImportOp(import_op::ImportOpCommand),
+    ImportOp(crate::commands::import_op::ImportOpCommand),
     /// This imports RLP encoded receipts from a file.
     #[cfg(feature = "optimism")]
     #[command(name = "import-receipts-op")]
-    ImportReceiptsOp(import_receipts_op::ImportReceiptsOpCommand),
+    ImportReceiptsOp(crate::commands::import_receipts_op::ImportReceiptsOpCommand),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand),
     /// Database debugging utilities

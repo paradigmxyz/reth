@@ -22,7 +22,7 @@ pub mod noop;
 /// test helpers for mocking consensus
 pub mod test_utils;
 
-/// Post execution input passed to [Consensus::validate_block_post_execution].
+/// Post execution input passed to [`Consensus::validate_block_post_execution`].
 #[derive(Debug)]
 pub struct PostExecutionInput<'a> {
     /// Receipts of the block.
@@ -33,7 +33,7 @@ pub struct PostExecutionInput<'a> {
 
 impl<'a> PostExecutionInput<'a> {
     /// Creates a new instance of `PostExecutionInput`.
-    pub fn new(receipts: &'a [Receipt], requests: &'a [Request]) -> Self {
+    pub const fn new(receipts: &'a [Receipt], requests: &'a [Request]) -> Self {
         Self { receipts, requests }
     }
 }
@@ -320,14 +320,14 @@ pub enum ConsensusError {
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransactionError),
 
-    /// Error type transparently wrapping HeaderValidationError.
+    /// Error type transparently wrapping `HeaderValidationError`.
     #[error(transparent)]
     HeaderValidationError(#[from] HeaderValidationError),
 }
 
 impl ConsensusError {
     /// Returns `true` if the error is a state root error.
-    pub fn is_state_root_error(&self) -> bool {
+    pub const fn is_state_root_error(&self) -> bool {
         matches!(self, Self::BodyStateRootDiff(_))
     }
 }

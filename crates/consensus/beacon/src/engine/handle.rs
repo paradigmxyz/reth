@@ -33,7 +33,7 @@ where
     Engine: EngineTypes,
 {
     /// Creates a new beacon consensus engine handle.
-    pub fn new(
+    pub const fn new(
         to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
         event_sender: EventSender<BeaconConsensusEngineEvent>,
     ) -> Self {

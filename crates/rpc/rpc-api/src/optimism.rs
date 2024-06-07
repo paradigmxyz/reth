@@ -161,9 +161,9 @@ pub struct PeerInfo {
     pub enr: String,
     pub addresses: Vec<String>,
     pub protocols: Option<Vec<String>>,
-    /// 0: "NotConnected", 1: "Connected",
-    /// 2: "CanConnect" (gracefully disconnected)
-    /// 3: "CannotConnect" (tried but failed)
+    /// 0: "`NotConnected`", 1: "Connected",
+    /// 2: "`CanConnect`" (gracefully disconnected)
+    /// 3: "`CannotConnect`" (tried but failed)
     pub connectedness: u8,
     /// 0: "Unknown", 1: "Inbound" (if the peer contacted us)
     /// 2: "Outbound" (if we connected to them)

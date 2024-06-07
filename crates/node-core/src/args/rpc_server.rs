@@ -18,10 +18,10 @@ use reth_rpc::eth::{
     cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
 };
 use reth_rpc_builder::{
-    auth::AuthServerConfig, constants, error::RpcError, EthConfig, Identity, IpcServerBuilder,
-    RethRpcModule, RpcModuleConfig, RpcModuleSelection, RpcServerConfig, ServerBuilder,
-    TransportRpcModuleConfig,
+    auth::AuthServerConfig, error::RpcError, EthConfig, Identity, IpcServerBuilder, RethRpcModule,
+    RpcModuleConfig, RpcModuleSelection, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
 };
+use reth_rpc_server_types::constants;
 use std::{
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr, SocketAddr},
@@ -79,7 +79,7 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.port", default_value_t = constants::DEFAULT_WS_RPC_PORT)]
     pub ws_port: u16,
 
-    /// Origins from which to accept WebSocket requests
+    /// Origins from which to accept `WebSocket` requests
     #[arg(id = "ws.origins", long = "ws.origins")]
     pub ws_allowed_origins: Option<String>,
 
@@ -177,19 +177,19 @@ pub struct RpcServerArgs {
 
 impl RpcServerArgs {
     /// Enables the HTTP-RPC server.
-    pub fn with_http(mut self) -> Self {
+    pub const fn with_http(mut self) -> Self {
         self.http = true;
         self
     }
 
     /// Enables the WS-RPC server.
-    pub fn with_ws(mut self) -> Self {
+    pub const fn with_ws(mut self) -> Self {
         self.ws = true;
         self
     }
 
     /// Enables the Auth IPC
-    pub fn with_auth_ipc(mut self) -> Self {
+    pub const fn with_auth_ipc(mut self) -> Self {
         self.auth_ipc = true;
         self
     }
@@ -225,21 +225,21 @@ impl RpcServerArgs {
 
     /// Set the http port to zero, to allow the OS to assign a random unused port when the rpc
     /// server binds to a socket.
-    pub fn with_http_unused_port(mut self) -> Self {
+    pub const fn with_http_unused_port(mut self) -> Self {
         self.http_port = 0;
         self
     }
 
     /// Set the ws port to zero, to allow the OS to assign a random unused port when the rpc
     /// server binds to a socket.
-    pub fn with_ws_unused_port(mut self) -> Self {
+    pub const fn with_ws_unused_port(mut self) -> Self {
         self.ws_port = 0;
         self
     }
 
     /// Set the auth port to zero, to allow the OS to assign a random unused port when the rpc
     /// server binds to a socket.
-    pub fn with_auth_unused_port(mut self) -> Self {
+    pub const fn with_auth_unused_port(mut self) -> Self {
         self.auth_port = 0;
         self
     }
@@ -438,7 +438,7 @@ impl Default for RpcServerArgs {
     }
 }
 
-/// clap value parser for [RpcModuleSelection].
+/// clap value parser for [`RpcModuleSelection`].
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
 struct RpcModuleSelectionValueParser;
@@ -532,7 +532,7 @@ mod tests {
     fn test_rpc_server_args_parser_none() {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.api", "none"]).args;
         let apis = args.http_api.unwrap();
-        let expected = Selection(vec![]);
+        let expected = Selection(Default::default());
         assert_eq!(apis, expected);
     }
 
@@ -547,8 +547,8 @@ mod tests {
         ])
         .args;
         let config = args.transport_rpc_module_config();
-        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
         assert_eq!(
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
@@ -566,8 +566,8 @@ mod tests {
         ])
         .args;
         let config = args.transport_rpc_module_config();
-        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
         assert_eq!(
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()
@@ -585,8 +585,8 @@ mod tests {
         ])
         .args;
         let config = args.transport_rpc_module_config();
-        let expected = vec![RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
-        assert_eq!(config.http().cloned().unwrap().into_selection(), expected);
+        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
         assert_eq!(
             config.ws().cloned().unwrap().into_selection(),
             RpcModuleSelection::standard_modules()

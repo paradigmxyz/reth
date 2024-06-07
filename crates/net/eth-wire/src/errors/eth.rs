@@ -1,4 +1,4 @@
-//! Error handling for (`EthStream`)[crate::EthStream]
+//! Error handling for (`EthStream`)[`crate::EthStream`]
 
 use crate::{
     errors::P2PStreamError, message::MessageError, version::ParseVersionError, DisconnectReason,
@@ -43,7 +43,7 @@ pub enum EthStreamError {
 
 impl EthStreamError {
     /// Returns the [`DisconnectReason`] if the error is a disconnect message
-    pub fn as_disconnected(&self) -> Option<DisconnectReason> {
+    pub const fn as_disconnected(&self) -> Option<DisconnectReason> {
         if let Self::P2PStreamError(err) = self {
             err.as_disconnected()
         } else {
@@ -51,8 +51,8 @@ impl EthStreamError {
         }
     }
 
-    /// Returns the [io::Error] if it was caused by IO
-    pub fn as_io(&self) -> Option<&io::Error> {
+    /// Returns the [`io::Error`] if it was caused by IO
+    pub const fn as_io(&self) -> Option<&io::Error> {
         if let Self::P2PStreamError(P2PStreamError::Io(io)) = self {
             return Some(io)
         }

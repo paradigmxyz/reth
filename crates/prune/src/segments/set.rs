@@ -2,7 +2,7 @@ use crate::segments::{
     AccountHistory, Receipts, ReceiptsByLogs, Segment, SenderRecovery, StorageHistory,
     TransactionLookup,
 };
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_primitives::PruneModes;
 
 /// Collection of [Segment]. Thread-safe, allocated on the heap.
@@ -12,7 +12,7 @@ pub struct SegmentSet<DB: Database> {
 }
 
 impl<DB: Database> SegmentSet<DB> {
-    /// Returns empty [SegmentSet] collection.
+    /// Returns empty [`SegmentSet`] collection.
     pub fn new() -> Self {
         Self::default()
     }
@@ -31,12 +31,12 @@ impl<DB: Database> SegmentSet<DB> {
         self
     }
 
-    /// Consumes [SegmentSet] and returns a [Vec].
+    /// Consumes [`SegmentSet`] and returns a [Vec].
     pub fn into_vec(self) -> Vec<Box<dyn Segment<DB>>> {
         self.inner
     }
 
-    /// Creates a [SegmentSet] from an existing [PruneModes].
+    /// Creates a [`SegmentSet`] from an existing [`PruneModes`].
     pub fn from_prune_modes(prune_modes: PruneModes) -> Self {
         let PruneModes {
             sender_recovery,

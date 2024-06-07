@@ -104,17 +104,17 @@ impl<S> MeteredStream<S> {
 
     /// Creates a new [`MeteredStream`] wrapping around the provided stream,
     /// attaching the provided [`BandwidthMeter`]
-    pub fn new_with_meter(inner: S, meter: BandwidthMeter) -> Self {
+    pub const fn new_with_meter(inner: S, meter: BandwidthMeter) -> Self {
         Self { inner, meter }
     }
 
     /// Provides a reference to the [`BandwidthMeter`] attached to this [`MeteredStream`]
-    pub fn get_bandwidth_meter(&self) -> &BandwidthMeter {
+    pub const fn get_bandwidth_meter(&self) -> &BandwidthMeter {
         &self.meter
     }
 
     /// Returns the wrapped stream
-    pub fn inner(&self) -> &S {
+    pub const fn inner(&self) -> &S {
         &self.inner
     }
 }

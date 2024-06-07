@@ -5,7 +5,7 @@ use crate::{
     segments::{PruneInput, Segment},
     Metrics, PrunerError, PrunerEvent,
 };
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_primitives::{
     BlockNumber, FinishedExExHeight, PruneLimiter, PruneMode, PruneProgress, PrunePurpose,
     PruneSegment, StaticFileSegment,
@@ -21,15 +21,15 @@ use std::{
 use tokio::sync::watch;
 use tracing::debug;
 
-/// Result of [Pruner::run] execution.
+/// Result of [`Pruner::run`] execution.
 pub type PrunerResult = Result<PruneProgress, PrunerError>;
 
-/// The pruner type itself with the result of [Pruner::run]
+/// The pruner type itself with the result of [`Pruner::run`]
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 
 type PrunerStats = BTreeMap<PruneSegment, (PruneProgress, usize)>;
 
-/// Pruning routine. Main pruning logic happens in [Pruner::run].
+/// Pruning routine. Main pruning logic happens in [`Pruner::run`].
 #[derive(Debug)]
 pub struct Pruner<DB> {
     provider_factory: ProviderFactory<DB>,
@@ -48,7 +48,7 @@ pub struct Pruner<DB> {
     prune_max_blocks_per_run: usize,
     /// Maximum time for a one pruner run.
     timeout: Option<Duration>,
-    /// The finished height of all ExEx's.
+    /// The finished height of all `ExEx`'s.
     finished_exex_height: watch::Receiver<FinishedExExHeight>,
     #[doc(hidden)]
     metrics: Metrics,
@@ -159,10 +159,10 @@ impl<DB: Database> Pruner<DB> {
     }
 
     /// Prunes the segments that the [Pruner] was initialized with, and the segments that needs to
-    /// be pruned according to the highest static_files. Segments are parts of the database that
+    /// be pruned according to the highest `static_files`. Segments are parts of the database that
     /// represent one or more tables.
     ///
-    /// Returns [PrunerStats], total number of entries pruned, and [PruneProgress].
+    /// Returns [`PrunerStats`], total number of entries pruned, and [`PruneProgress`].
     fn prune_segments(
         &mut self,
         provider: &DatabaseProviderRW<DB>,
@@ -248,8 +248,8 @@ impl<DB: Database> Pruner<DB> {
     }
 
     /// Returns pre-configured segments that needs to be pruned according to the highest
-    /// static_files for [PruneSegment::Transactions], [PruneSegment::Headers] and
-    /// [PruneSegment::Receipts].
+    /// `static_files` for [`PruneSegment::Transactions`], [`PruneSegment::Headers`] and
+    /// [`PruneSegment::Receipts`].
     fn static_file_segments(&self) -> Vec<Box<dyn Segment<DB>>> {
         let mut segments = Vec::<Box<dyn Segment<DB>>>::new();
 
@@ -304,13 +304,13 @@ impl<DB: Database> Pruner<DB> {
         }
     }
 
-    /// Adjusts the tip block number to the finished ExEx height. This is needed to not prune more
-    /// data than ExExs have processed. Depending on the height:
-    /// - [FinishedExExHeight::NoExExs] returns the tip block number as is as no adjustment for
-    ///   ExExs is needed.
-    /// - [FinishedExExHeight::NotReady] returns `None` as not all ExExs have emitted a
+    /// Adjusts the tip block number to the finished `ExEx` height. This is needed to not prune more
+    /// data than `ExExs` have processed. Depending on the height:
+    /// - [`FinishedExExHeight::NoExExs`] returns the tip block number as is as no adjustment for
+    ///   `ExExs` is needed.
+    /// - [`FinishedExExHeight::NotReady`] returns `None` as not all `ExExs` have emitted a
     ///   `FinishedHeight` event yet.
-    /// - [FinishedExExHeight::Height] returns the finished ExEx height.
+    /// - [`FinishedExExHeight::Height`] returns the finished `ExEx` height.
     fn adjust_tip_block_number_to_finished_exex_height(
         &self,
         tip_block_number: BlockNumber,
@@ -335,14 +335,17 @@ mod tests {
     use crate::Pruner;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_primitives::{FinishedExExHeight, MAINNET};
-    use reth_provider::ProviderFactory;
+    use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 
     #[test]
     fn is_pruning_needed() {
         let db = create_test_rw_db();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
-        let provider_factory = ProviderFactory::new(db, MAINNET.clone(), static_dir_path)
-            .expect("create provide factory with static_files");
+        let provider_factory = ProviderFactory::new(
+            db,
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
+        );
 
         let (finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);

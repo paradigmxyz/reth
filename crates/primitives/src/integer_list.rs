@@ -28,7 +28,7 @@ impl fmt::Debug for IntegerList {
 }
 
 impl IntegerList {
-    /// Creates an IntegerList from a list of integers.
+    /// Creates an `IntegerList` from a list of integers.
     ///
     /// # Returns
     ///

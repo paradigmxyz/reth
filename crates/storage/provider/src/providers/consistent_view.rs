@@ -1,5 +1,5 @@
 use crate::{BlockNumReader, DatabaseProviderFactory, DatabaseProviderRO, HeaderProvider};
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_primitives::{GotExpected, B256};
 use reth_storage_errors::provider::ProviderResult;
 use std::marker::PhantomData;
@@ -15,10 +15,10 @@ pub use reth_storage_errors::provider::ConsistentViewError;
 /// ## Usage
 ///
 /// The view should only be used outside of staged-sync.
-/// Otherwise, any attempt to create a provider will result in [ConsistentViewError::Syncing].
+/// Otherwise, any attempt to create a provider will result in [`ConsistentViewError::Syncing`].
 ///
 /// When using the view, the consumer should either
-/// 1) have a failover for when the state changes and handle [ConsistentViewError::Inconsistent]
+/// 1) have a failover for when the state changes and handle [`ConsistentViewError::Inconsistent`]
 ///    appropriately.
 /// 2) be sure that the state does not change.
 #[derive(Clone, Debug)]
@@ -34,7 +34,7 @@ where
     Provider: DatabaseProviderFactory<DB>,
 {
     /// Creates new consistent database view.
-    pub fn new(provider: Provider, tip: Option<B256>) -> Self {
+    pub const fn new(provider: Provider, tip: Option<B256>) -> Self {
         Self { database: PhantomData, provider, tip }
     }
 

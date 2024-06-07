@@ -11,5 +11,8 @@
 /// Database error
 pub mod db;
 
+/// Lockfile error
+pub mod lockfile;
+
 /// Provider error
 pub mod provider;

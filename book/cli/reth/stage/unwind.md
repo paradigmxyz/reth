@@ -12,6 +12,21 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
+      --instance <INSTANCE>
+          Add a new instance of a node.
+
+          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
+
+          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
+
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
+
+          [default: 1]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Datadir:
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
 
@@ -23,6 +38,12 @@ Options:
 
           [default: default]
 
+      --datadir.static_files <PATH>
+          The absolute path to store static files in.
+
+      --config <FILE>
+          The path to the configuration file to use
+
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -31,20 +52,6 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
 
           [default: mainnet]
-
-      --instance <INSTANCE>
-          Add a new instance of a node.
-
-          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
-
-          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
-
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
-
-          [default: 1]
-
-  -h, --help
-          Print help (see a summary with '-h')
 
 Database:
       --db.log-level <LOG_LEVEL>
@@ -89,10 +96,10 @@ Networking:
           [default: 30303]
 
       --discovery.v5.addr <DISCOVERY_V5_ADDR>
-          The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by RLPx address, if it's also IPv4
+          The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by `RLPx` address, if it's also IPv4
 
       --discovery.v5.addr.ipv6 <DISCOVERY_V5_ADDR_IPV6>
-          The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by RLPx address, if it's also IPv6
+          The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by `RLPx` address, if it's also IPv6
 
       --discovery.v5.port <DISCOVERY_V5_PORT>
           The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discv5.addr` is set
@@ -131,6 +138,11 @@ Networking:
           Comma separated enode URLs for P2P discovery bootstrap.
 
           Will fall back to a network-specific default if not specified.
+
+      --dns-retries <DNS_RETRIES>
+          Amount of DNS resolution requests retries to perform when peering
+
+          [default: 0]
 
       --peers-file <FILE>
           The path to the known peers file. Connected peers are dumped to this file on nodes
@@ -181,8 +193,8 @@ Networking:
           Experimental, for usage in research. Sets the max accumulated byte size of transactions to
           request in one request.
 
-          Since RLPx protocol version 68, the byte size of a transaction is shared as metadata in a
-          transaction announcement (see RLPx specs). This allows a node to request a specific size
+          Since `RLPx` protocol version 68, the byte size of a transaction is shared as metadata in a
+          transaction announcement (see `RLPx` specs). This allows a node to request a specific size
           response.
 
           By default, nodes request only 128 KiB worth of transactions, but should a peer request

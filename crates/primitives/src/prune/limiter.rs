@@ -22,11 +22,11 @@ struct PruneDeletedEntriesLimit {
 }
 
 impl PruneDeletedEntriesLimit {
-    fn new(limit: usize) -> Self {
+    const fn new(limit: usize) -> Self {
         Self { limit, deleted: 0 }
     }
 
-    fn is_limit_reached(&self) -> bool {
+    const fn is_limit_reached(&self) -> bool {
         self.deleted >= self.limit
     }
 }

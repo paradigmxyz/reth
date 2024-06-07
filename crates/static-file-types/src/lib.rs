@@ -36,7 +36,7 @@ pub struct HighestStaticFiles {
 
 impl HighestStaticFiles {
     /// Returns the highest static file if it exists for a segment
-    pub fn highest(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
+    pub const fn highest(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
         match segment {
             StaticFileSegment::Headers => self.headers,
             StaticFileSegment::Transactions => self.transactions,
@@ -61,7 +61,7 @@ impl HighestStaticFiles {
 
 /// Each static file has a fixed number of blocks. This gives out the range where the requested
 /// block is positioned. Used for segment filename.
-pub fn find_fixed_range(block: BlockNumber) -> SegmentRangeInclusive {
+pub const fn find_fixed_range(block: BlockNumber) -> SegmentRangeInclusive {
     let start = (block / BLOCKS_PER_STATIC_FILE) * BLOCKS_PER_STATIC_FILE;
     SegmentRangeInclusive::new(start, start + BLOCKS_PER_STATIC_FILE - 1)
 }

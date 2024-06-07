@@ -1,5 +1,5 @@
 use crate::{BundleStateWithReceipts, Chain};
-use reth_db::models::StoredBlockBodyIndices;
+use reth_db_api::models::StoredBlockBodyIndices;
 use reth_primitives::{BlockNumber, PruneModes, SealedBlockWithSenders};
 use reth_storage_api::BlockReader;
 use reth_storage_errors::provider::ProviderResult;

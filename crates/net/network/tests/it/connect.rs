@@ -54,7 +54,7 @@ async fn test_establish_connections() {
         let mut established = listener0.take(4);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionClosed { .. } => {
+                NetworkEvent::SessionClosed { .. } | NetworkEvent::PeerRemoved(_) => {
                     panic!("unexpected event")
                 }
                 NetworkEvent::SessionEstablished { peer_id, .. } => {
@@ -62,9 +62,6 @@ async fn test_establish_connections() {
                 }
                 NetworkEvent::PeerAdded(peer_id) => {
                     assert!(expected_peers.remove(&peer_id))
-                }
-                NetworkEvent::PeerRemoved(_) => {
-                    panic!("unexpected event")
                 }
             }
         }

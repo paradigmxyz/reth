@@ -15,8 +15,8 @@ pub(crate) struct Metrics {
 }
 
 impl Metrics {
-    /// Returns existing or initializes a new instance of [PrunerSegmentMetrics] for the provided
-    /// [PruneSegment].
+    /// Returns existing or initializes a new instance of [`PrunerSegmentMetrics`] for the provided
+    /// [`PruneSegment`].
     pub(crate) fn get_prune_segment_metrics(
         &mut self,
         segment: PruneSegment,

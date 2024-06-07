@@ -6,7 +6,7 @@ use crate::{
     StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
     WithdrawalsProvider,
 };
-use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},

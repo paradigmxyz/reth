@@ -109,12 +109,12 @@ pub enum Error {
     #[error("invalid parameter specified or active write transaction")]
     DecodeErrorLenDiff,
     /// If the [Environment](crate::Environment) was opened with
-    /// [EnvironmentKind::WriteMap](crate::EnvironmentKind::WriteMap) flag, nested transactions are
-    /// not supported.
+    /// [`EnvironmentKind::WriteMap`](crate::EnvironmentKind::WriteMap) flag, nested transactions
+    /// are not supported.
     #[error("nested transactions are not supported with WriteMap")]
     NestedTransactionsUnsupportedWithWriteMap,
     /// If the [Environment](crate::Environment) was opened with in read-only mode
-    /// [Mode::ReadOnly](crate::flags::Mode::ReadOnly), write transactions can't be opened.
+    /// [`Mode::ReadOnly`](crate::flags::Mode::ReadOnly), write transactions can't be opened.
     #[error("write transactions are not supported in read-only mode")]
     WriteTransactionUnsupportedInReadOnlyMode,
     /// Read transaction has been timed out.
@@ -127,7 +127,7 @@ pub enum Error {
 
 impl Error {
     /// Converts a raw error code to an [Error].
-    pub fn from_err_code(err_code: c_int) -> Self {
+    pub const fn from_err_code(err_code: c_int) -> Self {
         match err_code {
             ffi::MDBX_KEYEXIST => Self::KeyExist,
             ffi::MDBX_NOTFOUND => Self::NotFound,
@@ -163,7 +163,7 @@ impl Error {
     }
 
     /// Converts an [Error] to the raw error code.
-    pub fn to_err_code(&self) -> i32 {
+    pub const fn to_err_code(&self) -> i32 {
         match self {
             Self::KeyExist => ffi::MDBX_KEYEXIST,
             Self::NotFound => ffi::MDBX_NOTFOUND,
@@ -191,10 +191,10 @@ impl Error {
             Self::WannaRecovery => ffi::MDBX_WANNA_RECOVERY,
             Self::KeyMismatch => ffi::MDBX_EKEYMISMATCH,
             Self::DecodeErrorLenDiff | Self::DecodeError => ffi::MDBX_EINVAL,
-            Self::Access => ffi::MDBX_EACCESS,
             Self::TooLarge => ffi::MDBX_TOO_LARGE,
             Self::BadSignature => ffi::MDBX_EBADSIGN,
-            Self::WriteTransactionUnsupportedInReadOnlyMode => ffi::MDBX_EACCESS,
+            Self::Access |
+            Self::WriteTransactionUnsupportedInReadOnlyMode |
             Self::NestedTransactionsUnsupportedWithWriteMap => ffi::MDBX_EACCESS,
             Self::ReadTransactionTimeout => -96000, // Custom non-MDBX error code
             Self::Other(err_code) => *err_code,
@@ -209,7 +209,7 @@ impl From<Error> for i32 {
 }
 
 #[inline]
-pub(crate) fn mdbx_result(err_code: c_int) -> Result<bool> {
+pub(crate) const fn mdbx_result(err_code: c_int) -> Result<bool> {
     match err_code {
         ffi::MDBX_SUCCESS => Ok(false),
         ffi::MDBX_RESULT_TRUE => Ok(true),

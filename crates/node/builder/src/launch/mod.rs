@@ -4,6 +4,7 @@ use crate::{
     builder::{NodeAdapter, NodeAddOns, NodeTypesAdapter},
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
+    launch::common::WithConfigs,
     node::FullNode,
     BuilderContext, NodeBuilderWithComponents, NodeHandle,
 };
@@ -48,7 +49,7 @@ pub use common::LaunchContext;
 ///
 /// This is essentially the launch logic for a node.
 ///
-/// See also [DefaultNodeLauncher] and [NodeBuilderWithComponents::launch_with]
+/// See also [`DefaultNodeLauncher`] and [`NodeBuilderWithComponents::launch_with`]
 pub trait LaunchNode<Target> {
     /// The node type that is created.
     type Node;
@@ -66,7 +67,7 @@ pub struct DefaultNodeLauncher {
 
 impl DefaultNodeLauncher {
     /// Create a new instance of the default node launcher.
-    pub fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
+    pub const fn new(task_executor: TaskExecutor, data_dir: ChainPath<DataDirPath>) -> Self {
         Self { ctx: LaunchContext::new(task_executor, data_dir) }
     }
 }
@@ -94,13 +95,15 @@ where
         let ctx = ctx
             .with_configured_globals()
             // load the toml config
-            .with_loaded_toml_config(config)?
+            .with_loaded_toml_config(config).await?
+            // add resolved peers
+            .with_resolved_peers().await?
             // attach the database
             .attach(database.clone())
             // ensure certain settings take effect
             .with_adjusted_configs()
             // Create the provider factory
-            .with_provider_factory()?
+            .with_provider_factory().await?
             .inspect(|_| {
                 info!(target: "reth::cli", "Database opened");
             })
@@ -142,13 +145,15 @@ where
             )),
         )?;
 
+        let config_container = WithConfigs {
+            config: ctx.node_config().clone(),
+            toml_config: ctx.toml_config().clone(),
+        };
         let builder_ctx = BuilderContext::new(
             head,
             blockchain_db.clone(),
             ctx.task_executor().clone(),
-            ctx.data_dir().clone(),
-            ctx.node_config().clone(),
-            ctx.toml_config().clone(),
+            config_container,
         );
 
         debug!(target: "reth::cli", "creating components");
@@ -166,7 +171,6 @@ where
             // once the Blockchain provider no longer depends on an instance of the tree
             .with_canon_state_notification_sender(canon_state_notification_sender);
 
-        let canon_state_notification_sender = tree.canon_state_notification_sender();
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // Replace the tree component with the actual tree
@@ -196,7 +200,6 @@ where
             // create the launch context for the exex
             let context = ExExContext {
                 head,
-                data_dir: ctx.data_dir().clone(),
                 config: ctx.node_config().clone(),
                 reth_config: ctx.toml_config().clone(),
                 components: node_adapter.clone(),
@@ -301,7 +304,6 @@ where
                 blockchain_db.clone(),
                 node_adapter.components.pool().clone(),
                 consensus_engine_tx.clone(),
-                canon_state_notification_sender,
                 mining_mode,
                 node_adapter.components.block_executor().clone(),
             )
@@ -453,6 +455,7 @@ where
 
         let full_node = FullNode {
             evm_config: node_adapter.components.evm_config().clone(),
+            block_executor: node_adapter.components.block_executor().clone(),
             pool: node_adapter.components.pool().clone(),
             network: node_adapter.components.network().clone(),
             provider: node_adapter.provider.clone(),

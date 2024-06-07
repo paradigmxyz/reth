@@ -6,7 +6,7 @@ use std::fmt::Display;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub trait ToRpcResult<Ok, Err>: Sized {
-    /// Converts the error of the [Result] to an [RpcResult] via the `Err` [Display] impl.
+    /// Converts the error of the [Result] to an [`RpcResult`] via the `Err` [Display] impl.
     fn to_rpc_result(self) -> RpcResult<Ok>
     where
         Err: Display,
@@ -154,7 +154,7 @@ mod tests {
     use super::*;
     use reth_errors::{RethError, RethResult};
 
-    fn assert_rpc_result<T, E, TRR: ToRpcResult<T, E>>() {}
+    const fn assert_rpc_result<T, E, TRR: ToRpcResult<T, E>>() {}
 
     #[test]
     fn can_convert_rpc() {

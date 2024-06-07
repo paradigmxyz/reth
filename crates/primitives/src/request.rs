@@ -31,7 +31,7 @@ impl Encodable for Requests {
         let mut h = alloy_rlp::Header { list: true, payload_length: 0 };
 
         let mut encoded = Vec::new();
-        for req in self.0.iter() {
+        for req in &self.0 {
             let encoded_req = req.encoded_7685();
             h.payload_length += encoded_req.len();
             encoded.push(Bytes::from(encoded_req));

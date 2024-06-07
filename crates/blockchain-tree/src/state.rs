@@ -47,9 +47,9 @@ impl TreeState {
         BlockchainId(id)
     }
 
-    /// Expose internal indices of the BlockchainTree.
+    /// Expose internal indices of the `BlockchainTree`.
     #[inline]
-    pub(crate) fn block_indices(&self) -> &BlockIndices {
+    pub(crate) const fn block_indices(&self) -> &BlockIndices {
         &self.block_indices
     }
 

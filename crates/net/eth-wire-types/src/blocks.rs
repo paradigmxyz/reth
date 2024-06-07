@@ -172,9 +172,10 @@ mod tests {
         // 0xa1 = 0x80 (start of string) + 0x21 (33, length of string)
         let long_rlp = hex!("a1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         let decode_result = BlockHashOrNumber::decode(&mut &long_rlp[..]);
-        if decode_result.is_ok() {
-            panic!("Decoding a bytestring longer than 32 bytes should not decode successfully");
-        }
+        assert!(
+            decode_result.is_err(),
+            "Decoding a bytestring longer than 32 bytes should not decode successfully"
+        );
     }
 
     #[test]
@@ -183,9 +184,7 @@ mod tests {
         // 0x89 = 0x80 (start of string) + 0x09 (9, length of string)
         let long_number = hex!("89ffffffffffffffffff");
         let decode_result = BlockHashOrNumber::decode(&mut &long_number[..]);
-        if decode_result.is_ok() {
-            panic!("Decoding a number longer than 64 bits (but not exactly 32 bytes) should not decode successfully");
-        }
+        assert!(decode_result.is_err(), "Decoding a number longer than 64 bits (but not exactly 32 bytes) should not decode successfully");
     }
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481

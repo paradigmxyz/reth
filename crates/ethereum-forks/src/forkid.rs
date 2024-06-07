@@ -121,7 +121,7 @@ pub struct ForkId {
 /// See:
 /// <https://github.com/ethereum/devp2p/blob/master/enr-entries/eth.md#entry-format>
 ///
-/// for how geth implements ForkId values and forward compatibility.
+/// for how geth implements `ForkId` values and forward compatibility.
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable)]
 pub struct EnrForkIdEntry {
     /// The inner forkid
@@ -183,7 +183,7 @@ pub enum ValidationError {
     RemoteStale {
         /// locally configured forkId
         local: ForkId,
-        /// ForkId received from remote
+        /// `ForkId` received from remote
         remote: ForkId,
     },
     /// Local node is on an incompatible chain or needs a software update.
@@ -191,7 +191,7 @@ pub enum ValidationError {
     LocalIncompatibleOrStale {
         /// locally configured forkId
         local: ForkId,
-        /// ForkId received from remote
+        /// `ForkId` received from remote
         remote: ForkId,
     },
 }
@@ -389,9 +389,9 @@ impl ForkFilter {
 /// See also [`ForkFilter::set_head`]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ForkTransition {
-    /// The new, active ForkId
+    /// The new, active `ForkId`
     pub current: ForkId,
-    /// The previously active ForkId before the transition
+    /// The previously active `ForkId` before the transition
     pub past: ForkId,
 }
 

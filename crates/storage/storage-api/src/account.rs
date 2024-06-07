@@ -1,5 +1,5 @@
 use auto_impl::auto_impl;
-use reth_db::models::AccountBeforeTx;
+use reth_db_api::models::AccountBeforeTx;
 use reth_primitives::{Account, Address, BlockNumber};
 use reth_storage_errors::provider::ProviderResult;
 use std::{

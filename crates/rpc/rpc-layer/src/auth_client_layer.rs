@@ -7,15 +7,15 @@ use std::{
 };
 use tower::Layer;
 
-/// A layer that adds a new JWT token to every request using AuthClientService.
+/// A layer that adds a new JWT token to every request using `AuthClientService`.
 #[derive(Debug)]
 pub struct AuthClientLayer {
     secret: JwtSecret,
 }
 
 impl AuthClientLayer {
-    /// Create a new AuthClientLayer with the given `secret`.
-    pub fn new(secret: JwtSecret) -> Self {
+    /// Create a new `AuthClientLayer` with the given `secret`.
+    pub const fn new(secret: JwtSecret) -> Self {
         Self { secret }
     }
 }
@@ -36,7 +36,7 @@ pub struct AuthClientService<S> {
 }
 
 impl<S> AuthClientService<S> {
-    fn new(secret: JwtSecret, inner: S) -> Self {
+    const fn new(secret: JwtSecret, inner: S) -> Self {
         Self { secret, inner }
     }
 }

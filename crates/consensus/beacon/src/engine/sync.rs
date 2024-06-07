@@ -5,7 +5,7 @@ use crate::{
     ConsensusEngineLiveSyncProgress, EthBeaconConsensus,
 };
 use futures::FutureExt;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_network_p2p::{
     bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
@@ -29,7 +29,7 @@ use tracing::trace;
 /// This type controls the [Pipeline] and supports (single) full block downloads.
 ///
 /// Caution: If the pipeline is running, this type will not emit blocks downloaded from the network
-/// [EngineSyncEvent::FetchedFullBlock] until the pipeline is idle to prevent commits to the
+/// [`EngineSyncEvent::FetchedFullBlock`] until the pipeline is idle to prevent commits to the
 /// database while the pipeline is still active.
 pub(crate) struct EngineSyncController<DB, Client>
 where
@@ -123,23 +123,23 @@ where
     }
 
     /// Returns whether or not the sync controller is set to run the pipeline continuously.
-    pub(crate) fn run_pipeline_continuously(&self) -> bool {
+    pub(crate) const fn run_pipeline_continuously(&self) -> bool {
         self.run_pipeline_continuously
     }
 
     /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
     #[allow(dead_code)]
-    pub(crate) fn is_pipeline_sync_pending(&self) -> bool {
+    pub(crate) const fn is_pipeline_sync_pending(&self) -> bool {
         self.pending_pipeline_target.is_some() && self.pipeline_state.is_idle()
     }
 
     /// Returns `true` if the pipeline is idle.
-    pub(crate) fn is_pipeline_idle(&self) -> bool {
+    pub(crate) const fn is_pipeline_idle(&self) -> bool {
         self.pipeline_state.is_idle()
     }
 
     /// Returns `true` if the pipeline is active.
-    pub(crate) fn is_pipeline_active(&self) -> bool {
+    pub(crate) const fn is_pipeline_active(&self) -> bool {
         !self.is_pipeline_idle()
     }
 
@@ -359,7 +359,7 @@ where
     }
 }
 
-/// A wrapper type around [SealedBlock] that implements the [Ord] trait by block number.
+/// A wrapper type around [`SealedBlock`] that implements the [Ord] trait by block number.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OrderedSealedBlock(SealedBlock);
 
@@ -375,7 +375,7 @@ impl Ord for OrderedSealedBlock {
     }
 }
 
-/// The event type emitted by the [EngineSyncController].
+/// The event type emitted by the [`EngineSyncController`].
 #[derive(Debug)]
 pub(crate) enum EngineSyncEvent {
     /// A full block has been downloaded from the network.
@@ -402,8 +402,8 @@ pub(crate) enum EngineSyncEvent {
 
 /// The possible pipeline states within the sync controller.
 ///
-/// [PipelineState::Idle] means that the pipeline is currently idle.
-/// [PipelineState::Running] means that the pipeline is currently running.
+/// [`PipelineState::Idle`] means that the pipeline is currently idle.
+/// [`PipelineState::Running`] means that the pipeline is currently running.
 ///
 /// NOTE: The differentiation between these two states is important, because when the pipeline is
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
@@ -418,7 +418,7 @@ enum PipelineState<DB: Database> {
 
 impl<DB: Database> PipelineState<DB> {
     /// Returns `true` if the state matches idle.
-    fn is_idle(&self) -> bool {
+    const fn is_idle(&self) -> bool {
         matches!(self, Self::Idle(_))
     }
 }
@@ -436,7 +436,6 @@ mod tests {
     };
     use reth_provider::{
         test_utils::create_test_provider_factory_with_chain_spec, BundleStateWithReceipts,
-        StaticFileProviderFactory,
     };
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_static_file::StaticFileProducer;
@@ -451,7 +450,7 @@ mod tests {
     }
 
     impl TestPipelineBuilder {
-        /// Create a new [TestPipelineBuilder].
+        /// Create a new [`TestPipelineBuilder`].
         fn new() -> Self {
             Self {
                 pipeline_exec_outputs: VecDeque::new(),
@@ -478,7 +477,7 @@ mod tests {
 
         /// Sets the max block for the pipeline to run.
         #[allow(dead_code)]
-        fn with_max_block(mut self, max_block: BlockNumber) -> Self {
+        const fn with_max_block(mut self, max_block: BlockNumber) -> Self {
             self.max_block = Some(max_block);
             self
         }
@@ -499,11 +498,8 @@ mod tests {
 
             let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
 
-            let static_file_producer = StaticFileProducer::new(
-                provider_factory.clone(),
-                provider_factory.static_file_provider(),
-                PruneModes::default(),
-            );
+            let static_file_producer =
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 
             pipeline.build(provider_factory, static_file_producer)
         }
@@ -515,14 +511,14 @@ mod tests {
     }
 
     impl<Client> TestSyncControllerBuilder<Client> {
-        /// Create a new [TestSyncControllerBuilder].
-        fn new() -> Self {
+        /// Create a new [`TestSyncControllerBuilder`].
+        const fn new() -> Self {
             Self { max_block: None, client: None }
         }
 
         /// Sets the max block for the pipeline to run.
         #[allow(dead_code)]
-        fn with_max_block(mut self, max_block: BlockNumber) -> Self {
+        const fn with_max_block(mut self, max_block: BlockNumber) -> Self {
             self.max_block = Some(max_block);
             self
         }

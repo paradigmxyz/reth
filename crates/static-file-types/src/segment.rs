@@ -57,9 +57,7 @@ impl StaticFileSegment {
         };
 
         match self {
-            Self::Headers => default_config,
-            Self::Transactions => default_config,
-            Self::Receipts => default_config,
+            Self::Headers | Self::Transactions | Self::Receipts => default_config,
         }
     }
 
@@ -67,8 +65,7 @@ impl StaticFileSegment {
     pub const fn columns(&self) -> usize {
         match self {
             Self::Headers => 3,
-            Self::Transactions => 1,
-            Self::Receipts => 1,
+            Self::Transactions | Self::Receipts => 1,
         }
     }
 
@@ -103,8 +100,8 @@ impl StaticFileSegment {
     /// Parses a filename into a `StaticFileSegment` and its expected block range.
     ///
     /// The filename is expected to follow the format:
-    /// "static_file_{segment}_{block_start}_{block_end}". This function checks
-    /// for the correct prefix ("static_file"), and then parses the segment and the inclusive
+    /// "`static_file`_{segment}_{`block_start`}_{`block_end`}". This function checks
+    /// for the correct prefix ("`static_file`"), and then parses the segment and the inclusive
     /// ranges for blocks. It ensures that the start of each range is less than or equal to the
     /// end.
     ///
@@ -133,8 +130,13 @@ impl StaticFileSegment {
     }
 
     /// Returns `true` if the segment is `StaticFileSegment::Headers`.
-    pub fn is_headers(&self) -> bool {
+    pub const fn is_headers(&self) -> bool {
         matches!(self, Self::Headers)
+    }
+
+    /// Returns `true` if the segment is `StaticFileSegment::Receipts`.
+    pub const fn is_receipts(&self) -> bool {
+        matches!(self, Self::Receipts)
     }
 }
 
@@ -156,7 +158,7 @@ pub struct SegmentHeader {
 
 impl SegmentHeader {
     /// Returns [`SegmentHeader`].
-    pub fn new(
+    pub const fn new(
         expected_block_range: SegmentRangeInclusive,
         block_range: Option<SegmentRangeInclusive>,
         tx_range: Option<SegmentRangeInclusive>,
@@ -166,27 +168,27 @@ impl SegmentHeader {
     }
 
     /// Returns the static file segment kind.
-    pub fn segment(&self) -> StaticFileSegment {
+    pub const fn segment(&self) -> StaticFileSegment {
         self.segment
     }
 
     /// Returns the block range.
-    pub fn block_range(&self) -> Option<&SegmentRangeInclusive> {
+    pub const fn block_range(&self) -> Option<&SegmentRangeInclusive> {
         self.block_range.as_ref()
     }
 
     /// Returns the transaction range.
-    pub fn tx_range(&self) -> Option<&SegmentRangeInclusive> {
+    pub const fn tx_range(&self) -> Option<&SegmentRangeInclusive> {
         self.tx_range.as_ref()
     }
 
     /// The expected block start of the segment.
-    pub fn expected_block_start(&self) -> BlockNumber {
+    pub const fn expected_block_start(&self) -> BlockNumber {
         self.expected_block_range.start()
     }
 
     /// The expected block end of the segment.
-    pub fn expected_block_end(&self) -> BlockNumber {
+    pub const fn expected_block_end(&self) -> BlockNumber {
         self.expected_block_range.end()
     }
 
@@ -200,17 +202,17 @@ impl SegmentHeader {
         self.block_range.as_ref().map(|b| b.end())
     }
 
-    /// Returns the first transaction number of the segment.  
+    /// Returns the first transaction number of the segment.
     pub fn tx_start(&self) -> Option<TxNumber> {
         self.tx_range.as_ref().map(|t| t.start())
     }
 
-    /// Returns the last transaction number of the segment.   
+    /// Returns the last transaction number of the segment.
     pub fn tx_end(&self) -> Option<TxNumber> {
         self.tx_range.as_ref().map(|t| t.end())
     }
 
-    /// Number of transactions.  
+    /// Number of transactions.
     pub fn tx_len(&self) -> Option<u64> {
         self.tx_range.as_ref().map(|r| (r.end() + 1) - r.start())
     }
@@ -272,7 +274,7 @@ impl SegmentHeader {
         };
     }
 
-    /// Sets a new block_range.
+    /// Sets a new `block_range`.
     pub fn set_block_range(&mut self, block_start: BlockNumber, block_end: BlockNumber) {
         if let Some(block_range) = &mut self.block_range {
             block_range.start = block_start;
@@ -282,7 +284,7 @@ impl SegmentHeader {
         }
     }
 
-    /// Sets a new tx_range.
+    /// Sets a new `tx_range`.
     pub fn set_tx_range(&mut self, tx_start: TxNumber, tx_end: TxNumber) {
         if let Some(tx_range) = &mut self.tx_range {
             tx_range.start = tx_start;
@@ -321,17 +323,17 @@ pub struct SegmentRangeInclusive {
 
 impl SegmentRangeInclusive {
     /// Creates a new [`SegmentRangeInclusive`]
-    pub fn new(start: u64, end: u64) -> Self {
+    pub const fn new(start: u64, end: u64) -> Self {
         Self { start, end }
     }
 
     /// Start of the inclusive range
-    pub fn start(&self) -> u64 {
+    pub const fn start(&self) -> u64 {
         self.start
     }
 
     /// End of the inclusive range
-    pub fn end(&self) -> u64 {
+    pub const fn end(&self) -> u64 {
         self.end
     }
 }

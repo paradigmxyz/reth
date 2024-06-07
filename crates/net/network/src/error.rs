@@ -19,7 +19,7 @@ pub enum ServiceKind {
 
 impl ServiceKind {
     /// Returns the appropriate flags for each variant.
-    pub fn flags(&self) -> &'static str {
+    pub const fn flags(&self) -> &'static str {
         match self {
             Self::Listener(_) => "--port",
             Self::Discovery(_) => "--discovery.port",
@@ -58,7 +58,7 @@ pub enum NetworkError {
     Discv5Error(#[from] reth_discv5::Error),
     /// Error when setting up the DNS resolver failed
     ///
-    /// See also [DnsResolver](reth_dns_discovery::DnsResolver::from_system_conf)
+    /// See also [`DnsResolver`](reth_dns_discovery::DnsResolver::from_system_conf)
     #[error("failed to configure DNS resolver: {0}")]
     DnsResolver(#[from] ResolveError),
 }
@@ -127,7 +127,7 @@ pub enum BackoffKind {
 
 impl BackoffKind {
     /// Returns true if the backoff is considered severe.
-    pub(crate) fn is_severe(&self) -> bool {
+    pub(crate) const fn is_severe(&self) -> bool {
         matches!(self, Self::Medium | Self::High)
     }
 }
