@@ -17,7 +17,7 @@ use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
-    fs::File,
+    fs::{File, OpenOptions},
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -432,7 +432,27 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Writes all necessary configuration to file.
     fn freeze_config(&self) -> Result<(), NippyJarError> {
-        Ok(bincode::serialize_into(File::create(self.config_path())?, &self)?)
+        // Atomic writes are hard: <https://github.com/paradigmxyz/reth/issues/8622>
+        // So we need to do this dance.
+
+        let mut tmp_path = self.config_path();
+        tmp_path.set_extension(".tmp");
+
+        // Write to temporary file and sync
+        let mut file = File::create(&tmp_path)?;
+        bincode::serialize_into(&mut file, &self)?;
+
+        // fsync() file
+        file.sync_all()?;
+
+        // Rename file, not move
+        reth_fs_util::rename(&tmp_path, self.config_path())?;
+
+        // fsync() dir
+        if let Some(parent) = tmp_path.parent() {
+            OpenOptions::new().read(true).open(parent)?.sync_all()?;
+        }
+        Ok(())
     }
 }
 
