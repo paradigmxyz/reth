@@ -5,6 +5,11 @@ use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
 
 /// An ExEx that keeps track of the entire state in memory
 struct InMemoryStateExEx<Node: FullNodeComponents> {
@@ -19,33 +24,43 @@ impl<Node: FullNodeComponents> InMemoryStateExEx<Node> {
     fn new(ctx: ExExContext<Node>) -> Self {
         Self { ctx, state: BundleStateWithReceipts::default() }
     }
+}
 
-    /// Start the ExEx
-    async fn start(mut self) -> eyre::Result<()> {
-        while let Some(notification) = self.ctx.notifications.recv().await {
-            match &notification {
-                ExExNotification::ChainCommitted { new } => {
-                    info!(committed_chain = ?new.range(), "Received commit");
-                }
-                ExExNotification::ChainReorged { old, new } => {
-                    // revert to block before the reorg
-                    self.state.revert_to(new.first().number - 1);
-                    info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
-                }
-                ExExNotification::ChainReverted { old } => {
-                    self.state.revert_to(old.first().number - 1);
-                    info!(reverted_chain = ?old.range(), "Received revert");
-                }
-            };
+impl<Node: FullNodeComponents + Unpin> Future for InMemoryStateExEx<Node> {
+    type Output = eyre::Result<()>;
 
-            if let Some(committed_chain) = notification.committed_chain() {
-                // extend the state with the new chain
-                self.state.extend(committed_chain.state().clone());
-                self.ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+
+        loop {
+            match ready!(this.ctx.notifications.poll_recv(cx)) {
+                Some(notification) => {
+                    match &notification {
+                        ExExNotification::ChainCommitted { new } => {
+                            info!(committed_chain = ?new.range(), "Received commit");
+                        }
+                        ExExNotification::ChainReorged { old, new } => {
+                            // revert to block before the reorg
+                            this.state.revert_to(new.first().number - 1);
+                            info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
+                        }
+                        ExExNotification::ChainReverted { old } => {
+                            this.state.revert_to(old.first().number - 1);
+                            info!(reverted_chain = ?old.range(), "Received revert");
+                        }
+                    };
+
+                    if let Some(committed_chain) = notification.committed_chain() {
+                        // extend the state with the new chain
+                        this.state.extend(committed_chain.state().clone());
+                        this.ctx
+                            .events
+                            .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+                    }
+                }
+                None => return Poll::Ready(Ok(())),
             }
         }
-
-        Ok(())
     }
 }
 
@@ -53,9 +68,7 @@ fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex("in-memory-state", |ctx| async move {
-                Ok(InMemoryStateExEx::new(ctx).start())
-            })
+            .install_exex("in-memory-state", |ctx| async move { Ok(InMemoryStateExEx::new(ctx)) })
             .launch()
             .await?;
 
@@ -81,7 +94,7 @@ mod tests {
         let (ctx, handle) = test_exex_context().await?;
 
         let exex = super::InMemoryStateExEx::new(ctx);
-        let mut exex_future = pin!(exex.start());
+        let mut exex_future = pin!(exex);
 
         let block = random_block(&mut rng, 1, None, Some(1), None)
             .seal_with_senders()
@@ -97,7 +110,7 @@ mod tests {
             .await?;
         exex_future.poll_once().await?;
 
-        assert_eq!(exex.state, state);
+        assert_eq!(exex_future.get_mut().state, state);
 
         Ok(())
     }
