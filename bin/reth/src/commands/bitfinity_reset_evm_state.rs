@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use alloy_rlp::Encodable;
@@ -38,7 +39,7 @@ pub struct BitfinityResetEvmStateCommandBuilder {
     pub bitfinity: BitfinityResetEvmStateArgs,
 }
 
-const MAX_REQUEST_BYTES: usize = 500_000;
+const MAX_REQUEST_BYTES: usize = 750_000;
 const SPLIT_ADD_ACCOUNTS_REQUEST_BYTES: usize = 1_000_000;
 
 impl BitfinityResetEvmStateCommandBuilder {
@@ -65,7 +66,7 @@ impl BitfinityResetEvmStateCommandBuilder {
         let db = Arc::new(init_db(db_path, Default::default())?);
         let provider_factory = ProviderFactory::new(db.clone(), chain, data_dir.static_files())?;
 
-        Ok(BitfinityResetEvmStateCommand::new(provider_factory, executor))
+        Ok(BitfinityResetEvmStateCommand::new(provider_factory, executor, self.bitfinity.parallel_requests))
     }
 }
 
@@ -74,6 +75,7 @@ impl BitfinityResetEvmStateCommandBuilder {
 pub struct BitfinityResetEvmStateCommand {
     provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
     executor: Arc<dyn ResetStateExecutor>,
+    parallel_requests: usize,
 }
 
 impl BitfinityResetEvmStateCommand {
@@ -81,43 +83,61 @@ impl BitfinityResetEvmStateCommand {
     pub fn new(
         provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
         executor: Arc<dyn ResetStateExecutor>,
+        parallel_requests: usize,
     ) -> Self {
-        Self { provider_factory, executor }
+        Self { provider_factory, executor, parallel_requests: parallel_requests.max(1) }
     }
 
     /// Execute the command
     pub async fn execute(&self) -> eyre::Result<()> {
+
         let mut provider = self.provider_factory.provider()?;
         let last_block_number = provider.last_block_number()?;
         let last_block =
-            provider.block_by_number(last_block_number)?.expect("Block should be present");
-
+        provider.block_by_number(last_block_number)?.expect("Block should be present");
+        
         info!(target: "reth::cli", "Attempting reset of evm to block {}, state root: {:?}", last_block_number, last_block.state_root);
-
+        
         // Step 1: Reset the evm, the EVM must be disabled
         {
             self.executor.start().await?;
         }
-
+        
         // Step 2: Send the state to the EVM
         {
-            // TODO: get block number from config. See EPROD-859
-            // let GET_BLOCK_FROM_CONFIG = 0;
-            // let block_number = provider.last_block_number().unwrap_or_default();
-            // let state_provider = provider.state_provider_by_block_number(block_number)?;
-            // let res = state_provider.basic_account(...)?;
-
+            
             let start = std::time::Instant::now();
-
             let tx_ref = provider.tx_mut();
 
             // We need to disable the long read transaction safety to avoid the transaction being closed
             tx_ref.disable_long_read_transaction_safety();
 
             let plain_accounts_total_count = tx_ref.entries::<tables::PlainAccountState>()?;
-            let mut plain_accounts_recovered_count = 0usize;
+            let plain_accounts_recovered_count = Arc::new(AtomicUsize::new(0));
             let mut plain_account_cursor = tx_ref.cursor_read::<tables::PlainAccountState>()?;
             let mut contract_storage_cursor = tx_ref.cursor_read::<tables::Bytecodes>()?;
+
+            let (accounts_sender, accounts_receiver) = async_channel::bounded(self.parallel_requests * 20);
+            let mut task_handles = vec![];
+
+            for _ in 0..self.parallel_requests {
+                let receiver = accounts_receiver.clone();
+                let executor = self.executor.clone();
+                let plain_accounts_recovered_count = plain_accounts_recovered_count.clone();
+                task_handles.push(tokio::spawn(async move {
+                    while let Ok(accounts) = receiver.recv().await {
+                        split_and_send_add_accout_request(
+                            &executor,
+                            accounts,
+                            start,
+                            plain_accounts_total_count,
+                            &plain_accounts_recovered_count,
+                        )
+                        .await.expect("Failed to send account data");
+                    }
+                }));
+            }
+
 
             // We need to iterate through all the accounts and retrieve their storage tries and populate the AccountInfo
             let mut accounts = AccountInfoMap::new();
@@ -172,16 +192,25 @@ impl BitfinityResetEvmStateCommand {
 
                 if accounts.estimate_byte_size() > MAX_REQUEST_BYTES {
                     let process_accounts = std::mem::replace(&mut accounts, AccountInfoMap::new());
-                    split_and_send_add_accout_request(&self.executor, process_accounts, start, plain_accounts_total_count, &mut plain_accounts_recovered_count).await?;
+                    // split_and_send_add_accout_request(&self.executor, process_accounts, start, plain_accounts_total_count, &mut plain_accounts_recovered_count).await?;
+                    accounts_sender.send(process_accounts).await?;
                 }
             }
 
             if !accounts.data.is_empty() {
                 info!(target: "reth::cli", "Processing last batch of {} accounts", accounts.data.len());
-                split_and_send_add_accout_request(&self.executor, accounts, start, plain_accounts_total_count, &mut plain_accounts_recovered_count).await?;
+                // split_and_send_add_accout_request(&self.executor, accounts, start, plain_accounts_total_count, &mut plain_accounts_recovered_count).await?;
+                accounts_sender.send(accounts).await?;
             }
+            accounts_sender.close();
 
             info!(target: "reth::cli", "Storage tries recovered successfully");
+
+            // Wait for other tasks to finish.
+            for handle in task_handles {
+                handle.await.expect("Failed to wait for task to finish");
+            }
+
         }
 
         // Step 3: End of the recovery process. Send block data
@@ -203,7 +232,7 @@ impl BitfinityResetEvmStateCommand {
 }
 
 /// Trait for the reset state executor
-pub trait ResetStateExecutor: Send + Debug {
+pub trait ResetStateExecutor: Sync + Send + Debug {
     /// Start the reset state process
     fn start(
         &self,
@@ -285,15 +314,19 @@ async fn split_and_send_add_accout_request(
     accounts: AccountInfoMap,
     process_start: std::time::Instant,
     total_accounts: usize,
-    processed_accounts: &mut usize,
+    processed_accounts: &AtomicUsize,
 ) -> eyre::Result<()> {
-    *processed_accounts += accounts.data.len();
+
+    let accounts_data_len = accounts.data.len();
     for account in split_add_account_request_data(SPLIT_ADD_ACCOUNTS_REQUEST_BYTES, accounts) {
         executor.add_accounts(account).await?;
     }
-    let percent_done = (*processed_accounts * 100) / total_accounts;
+
+    let processed_accounts_count = processed_accounts.fetch_add(accounts_data_len, std::sync::atomic::Ordering::Relaxed) + accounts_data_len;
+
+    let percent_done = (processed_accounts_count * 100) / total_accounts;
     let minutes_elapsed = process_start.elapsed().as_secs() / 60;
-    info!(target: "reth::cli", "Reset Trie Progress {percent_done}%: Processed {processed_accounts}/{total_accounts} accounts in {minutes_elapsed} minute(s)");
+    info!(target: "reth::cli", "Reset Trie Progress {percent_done}%: Processed {processed_accounts_count}/{total_accounts} accounts in {minutes_elapsed} minute(s)");
     Ok(())
 }
 

@@ -108,8 +108,9 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
     import_blocks(import_data.clone(), Duration::from_secs(fetch_block_timeout_secs), true).await;
 
     let executor = Arc::new(InMemoryResetStateExecutor::default());
+    let parallel_requests = 4;
     let reset_state_command =
-        BitfinityResetEvmStateCommand::new(import_data.provider_factory.clone(), executor.clone());
+        BitfinityResetEvmStateCommand::new(import_data.provider_factory.clone(), executor.clone(), parallel_requests);
 
     // Act
     {
@@ -214,6 +215,7 @@ async fn build_bitfinity_reset_evm_command(
             .join("identity.pem"),
         evm_network: format!("http://127.0.0.1:{dfx_port}"),
         evm_datasource_url: evm_datasource_url.to_string(),
+        parallel_requests: 4,
     };
 
     let principal = candid::Principal::from_text(bitfinity_args.evmc_principal.as_str()).unwrap();
@@ -231,7 +233,7 @@ async fn build_bitfinity_reset_evm_command(
 
     let executor = Arc::new(EvmCanisterResetStateExecutor::new(evm_client.clone()));
 
-    (evm_client, BitfinityResetEvmStateCommand::new(provider_factory, executor))
+    (evm_client, BitfinityResetEvmStateCommand::new(provider_factory, executor, bitfinity_args.parallel_requests))
 }
 
 /// In-memory executor for resetting the EVM canister state.
