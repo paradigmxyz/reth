@@ -22,9 +22,7 @@ use reth::{
 };
 use reth_db::{mdbx::DatabaseArguments, models::client_version::ClientVersion};
 // Bringing up the RPC
-use reth::rpc::builder::{
-    RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig,
-};
+use reth::rpc::builder::{RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig};
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 use reth::{
@@ -32,6 +30,7 @@ use reth::{
     tasks::TokioTaskExecutor,
 };
 use reth_node_ethereum::EthEvmConfig;
+use reth_rpc_server_types::RethRpcModule;
 use std::{path::Path, sync::Arc};
 
 // Custom rpc extension

@@ -36,7 +36,7 @@ pub mod exex;
 
 /// Re-export the core configuration traits.
 pub use reth_node_core::cli::config::{
-    PayloadBuilderConfig, RethNetworkConfig, RethRpcConfig, RethTransactionPoolConfig,
+    PayloadBuilderConfig, RethNetworkConfig, RethTransactionPoolConfig,
 };
 
 // re-export the core config for convenience
