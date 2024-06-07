@@ -608,7 +608,7 @@ mod tests {
     use reth_consensus::ConsensusError;
     use reth_errors::ProviderError;
     use reth_provider::test_utils::create_test_provider_factory;
-    use reth_prune_types::PruneModes;
+    use reth_prune::PruneModes;
     use reth_testing_utils::{generators, generators::random_header};
     use tokio_stream::StreamExt;
 

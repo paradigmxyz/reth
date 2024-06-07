@@ -221,10 +221,7 @@ mod tests {
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_primitives::B256;
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
-    use reth_prune_types::{
-        PruneLimiter, PruneMode,
-        PruneSegment, ReceiptsLogPruneConfig,
-    };
+    use reth_prune_types::{PruneLimiter, PruneMode, PruneSegment, ReceiptsLogPruneConfig};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::{
         generators,

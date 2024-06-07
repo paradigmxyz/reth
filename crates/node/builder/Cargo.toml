@@ -36,7 +36,6 @@ reth-tracing.workspace = true
 reth-network-p2p.workspace = true
 reth-static-file.workspace = true
 reth-prune.workspace = true
-reth-prune-types.workspace = true
 reth-stages.workspace = true
 reth-config.workspace = true
 reth-downloaders.workspace = true
