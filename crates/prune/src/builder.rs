@@ -1,7 +1,8 @@
 use crate::{segments::SegmentSet, Pruner};
 use reth_config::PruneConfig;
 use reth_db_api::database::Database;
-use reth_primitives::{FinishedExExHeight, PruneModes, MAINNET};
+use reth_exex_types::FinishedExExHeight;
+use reth_primitives::{PruneModes, MAINNET};
 use reth_provider::ProviderFactory;
 use std::time::Duration;
 use tokio::sync::watch;
