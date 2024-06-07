@@ -1235,8 +1235,10 @@ mod tests {
 
             writer.append_column(Some(Ok(&col1[0]))).unwrap();
             assert_eq!(writer.column(), 1);
+            assert!(writer.is_dirty());
 
             writer.append_column(Some(Ok(&col2[0]))).unwrap();
+            assert!(writer.is_dirty());
 
             // Adding last column of a row resets writer and updates jar config
             assert_eq!(writer.column(), 0);
@@ -1245,6 +1247,7 @@ mod tests {
             assert_eq!(writer.offsets().len(), 3);
             let expected_data_file_size = *writer.offsets().last().unwrap();
             writer.commit().unwrap();
+            assert!(!writer.is_dirty());
 
             assert_eq!(writer.max_row_size(), col1[0].len() + col2[0].len());
             assert_eq!(writer.rows(), 1);
@@ -1301,6 +1304,7 @@ mod tests {
         // Appends a third row, so we have an offset list in memory, which is not flushed to disk
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
         writer.append_column(Some(Ok(&col2[2]))).unwrap();
+        assert!(writer.is_dirty());
 
         // This should prune from the on-memory offset list and ondisk offset list
         writer.prune_rows(2).unwrap();
@@ -1328,6 +1332,8 @@ mod tests {
         // This should prune from the ondisk offset list and clear the jar.
         let mut writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
         writer.prune_rows(1).unwrap();
+        assert!(writer.is_dirty());
+
         assert_eq!(writer.rows(), 0);
         assert_eq!(writer.max_row_size(), 0);
         assert_eq!(File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize, 0);
@@ -1336,6 +1342,8 @@ mod tests {
             File::open(writer.offsets_path()).unwrap().metadata().unwrap().len() as usize,
             1
         );
+        writer.commit().unwrap();
+        assert!(!writer.is_dirty());
     }
 
     fn simulate_interrupted_prune(
