@@ -2795,9 +2795,12 @@ dependencies = [
  "eyre",
  "reth",
  "reth-exex",
+ "reth-exex-test-utils",
  "reth-node-api",
  "reth-node-ethereum",
+ "reth-testing-utils",
  "reth-tracing",
+ "tokio",
 ]
 
 [[package]]
