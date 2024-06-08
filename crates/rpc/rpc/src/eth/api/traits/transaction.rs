@@ -5,11 +5,13 @@ use std::{fmt, sync::Arc};
 
 use reth_evm::ConfigureEvm;
 use reth_primitives::{
-    revm::env::fill_block_env_with_coinbase, BlockId, Bytes, FromRecoveredPooledTransaction,
-    Header, IntoRecoveredTransaction, Receipt, SealedBlock, SealedBlockWithSenders,
-    TransactionMeta, TransactionSigned, TxHash, B256,
+    revm::env::{fill_block_env_with_coinbase, tx_env_with_recovered},
+    BlockId, Bytes, FromRecoveredPooledTransaction, Header, IntoRecoveredTransaction, Receipt,
+    SealedBlock, SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash, B256,
 };
-use reth_provider::{BlockReaderIdExt, ReceiptProvider, StateProviderBox, TransactionsProvider};
+use reth_provider::{
+    BlockIdReader, BlockReaderIdExt, ReceiptProvider, StateProviderBox, TransactionsProvider,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{AnyTransactionReceipt, TransactionInfo, TransactionRequest};
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
@@ -29,10 +31,13 @@ use revm_primitives::{
 
 use crate::{
     eth::{
-        api::{BuildReceipt, EthState, LoadState, SpawnBlocking},
+        api::{
+            pending_block::PendingBlockEnv, BuildReceipt, EthState, LoadPendingBlock, LoadState,
+            SpawnBlocking,
+        },
         cache::EthStateCache,
         error::{EthApiError, EthResult},
-        revm_utils::{EvmOverrides, FillableTransaction},
+        revm_utils::{prepare_call_env, EvmOverrides, FillableTransaction},
         utils::recover_raw_transaction,
         TransactionSource,
     },
@@ -191,7 +196,7 @@ pub trait EthTransactions: Send + Sync {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     fn call_gas_limit(&self) -> u64;
 
-    /// Executes the closure with the state that corresponds to the given [BlockId].
+    /// Executes the closure with the state that corresponds to the given [`BlockId`].
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
         Self: LoadState,
@@ -201,7 +206,7 @@ pub trait EthTransactions: Send + Sync {
         f(state)
     }
 
-    /// Executes the closure with the state that corresponds to the given [BlockId] on a new task
+    /// Executes the closure with the state that corresponds to the given [`BlockId`] on a new task
     async fn spawn_with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
         Self: LoadState + SpawnBlocking,
@@ -215,15 +220,28 @@ pub trait EthTransactions: Send + Sync {
         .await
     }
 
-    /// Returns the revm evm env for the requested [BlockId]
+    /// Returns the revm evm env for the requested [`BlockId`]
     ///
-    /// If the [BlockId] this will return the [BlockId] of the block the env was configured
+    /// If the [`BlockId`] this will return the [`BlockId`] of the block the env was configured
     /// for.
-    /// If the [BlockId] is pending, this will return the "Pending" tag, otherwise this returns the
-    /// hash of the exact block.
+    /// If the [`BlockId`] is pending, this will return the "Pending" tag, otherwise this returns
+    /// the hash of the exact block.
     async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv, BlockId)>
     where
-        Self: LoadState;
+        Self: LoadState + LoadPendingBlock,
+    {
+        if at.is_pending() {
+            let PendingBlockEnv { cfg, block_env, origin } = self.pending_block_env_and_cfg()?;
+            Ok((cfg, block_env, origin.state_block_id()))
+        } else {
+            // Use cached values if there is no pending block
+            let block_hash = EthTransactions::provider(self)
+                .block_hash_for_id(at)?
+                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+            let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
+            Ok((cfg, env, block_hash.into()))
+        }
+    }
 
     /// Returns the revm evm env for the raw block header
     ///
@@ -233,7 +251,7 @@ pub trait EthTransactions: Send + Sync {
         header: &Header,
     ) -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv)>
     where
-        Self: LoadState,
+        Self: LoadState + LoadPendingBlock,
     {
         // get the parent config first
         let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash.into()).await?;
@@ -483,9 +501,29 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<R>
     where
-        Self: LoadState,
+        Self: LoadState + SpawnBlocking + LoadPendingBlock,
         F: FnOnce(&mut StateCacheDB, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
-        R: Send + 'static;
+        R: Send + 'static,
+    {
+        let (cfg, block_env, at) = self.evm_env_at(at).await?;
+        let this = self.clone();
+        self.spawn_tracing(move |_| {
+            let state = this.state_at_block_id(at)?;
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+            let env = prepare_call_env(
+                cfg,
+                block_env,
+                request,
+                this.call_gas_limit(),
+                &mut db,
+                overrides,
+            )?;
+            f(&mut db, env)
+        })
+        .await
+        .map_err(|_| EthApiError::InternalBlockingTaskError)
+    }
 
     /// Executes the call request at the given [BlockId].
     async fn transact_call_at(
@@ -495,7 +533,11 @@ pub trait EthTransactions: Send + Sync {
         overrides: EvmOverrides,
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
     where
-        Self: LoadState;
+        Self: LoadState + LoadPendingBlock,
+    {
+        let this = self.clone();
+        self.spawn_with_call_at(request, at, overrides, move |db, env| this.transact(db, env)).await
+    }
 
     /// Executes the call request at the given [BlockId] on a new task and returns the result of the
     /// inspect call.
@@ -507,8 +549,15 @@ pub trait EthTransactions: Send + Sync {
         inspector: I,
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
     where
-        Self: LoadState,
-        I: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static;
+        Self: LoadState + LoadPendingBlock,
+        I: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
+    {
+        let this = self.clone();
+        self.spawn_with_call_at(request, at, overrides, move |db, env| {
+            this.inspect(db, env, inspector)
+        })
+        .await
+    }
 
     /// Executes the transaction on top of the given [BlockId] with a tracer configured by the
     /// config.
@@ -603,7 +652,7 @@ pub trait EthTransactions: Send + Sync {
         f: F,
     ) -> EthResult<Option<R>>
     where
-        Self: LoadState,
+        Self: LoadState + LoadPendingBlock,
         F: FnOnce(TransactionInfo, TracingInspector, ResultAndState, StateCacheDB) -> EthResult<R>
             + Send
             + 'static,
@@ -624,9 +673,45 @@ pub trait EthTransactions: Send + Sync {
     /// [BlockingTaskPool](reth_tasks::pool::BlockingTaskPool).
     async fn spawn_replay_transaction<F, R>(&self, hash: B256, f: F) -> EthResult<Option<R>>
     where
-        Self: LoadState,
+        Self: LoadState + LoadPendingBlock,
         F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
-        R: Send + 'static;
+        R: Send + 'static,
+    {
+        let (transaction, block) = match self.transaction_and_block(hash).await? {
+            None => return Ok(None),
+            Some(res) => res,
+        };
+        let (tx, tx_info) = transaction.split();
+
+        let (cfg, block_env, _) = self.evm_env_at(block.hash().into()).await?;
+
+        // we need to get the state of the parent block because we're essentially replaying the
+        // block the transaction is included in
+        let parent_block = block.parent_hash;
+        let block_txs = block.into_transactions_ecrecovered();
+
+        let this = self.clone();
+        self.spawn_with_state_at_block(parent_block.into(), move |state| {
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+            // replay all transactions prior to the targeted transaction
+            this.replay_transactions_until(
+                &mut db,
+                cfg.clone(),
+                block_env.clone(),
+                block_txs,
+                tx.hash,
+            )?;
+
+            let env =
+                EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
+
+            let (res, _) = this.transact(&mut db, env)?;
+            f(tx_info, res, db)
+        })
+        .await
+        .map(Some)
+    }
 
     /// Retrieves the transaction if it exists and returns its trace.
     ///
@@ -640,16 +725,52 @@ pub trait EthTransactions: Send + Sync {
     async fn spawn_trace_transaction_in_block_with_inspector<Insp, F, R>(
         &self,
         hash: B256,
-        inspector: Insp,
+        mut inspector: Insp,
         f: F,
     ) -> EthResult<Option<R>>
     where
-        Self: LoadState,
+        Self: LoadState + LoadPendingBlock,
         F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDB) -> EthResult<R>
             + Send
             + 'static,
         Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
-        R: Send + 'static;
+        R: Send + 'static,
+    {
+        let (transaction, block) = match self.transaction_and_block(hash).await? {
+            None => return Ok(None),
+            Some(res) => res,
+        };
+        let (tx, tx_info) = transaction.split();
+
+        let (cfg, block_env, _) = self.evm_env_at(block.hash().into()).await?;
+
+        // we need to get the state of the parent block because we're essentially replaying the
+        // block the transaction is included in
+        let parent_block = block.parent_hash;
+        let block_txs = block.into_transactions_ecrecovered();
+
+        let this = self.clone();
+        self.spawn_with_state_at_block(parent_block.into(), move |state| {
+            let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+            // replay all transactions prior to the targeted transaction
+            this.replay_transactions_until(
+                &mut db,
+                cfg.clone(),
+                block_env.clone(),
+                block_txs,
+                tx.hash,
+            )?;
+
+            let env =
+                EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
+
+            let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
+            f(tx_info, inspector, res, db)
+        })
+        .await
+        .map(Some)
+    }
 
     /// Executes all transactions of a block and returns a list of callback results invoked for each
     /// transaction in the block.

@@ -26,6 +26,8 @@ use crate::eth::{
     utils::recover_raw_transaction,
 };
 
+use super::api::LoadPendingBlock;
+
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
     /// All nested fields bundled together.
@@ -41,7 +43,7 @@ impl<Eth> EthBundle<Eth> {
 
 impl<Eth> EthBundle<Eth>
 where
-    Eth: EthTransactions + LoadState + SpawnBlocking + 'static,
+    Eth: EthTransactions + LoadState + SpawnBlocking + LoadPendingBlock + 'static,
 {
     /// Simulates a bundle of transactions at the top of a given block number with the state of
     /// another (or the same) block. This can be used to simulate future blocks with the current

@@ -28,8 +28,7 @@ use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::{
     db::CacheDB,
     primitives::{
-        db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, EvmState,
-        ExecutionResult, ResultAndState,
+        db::DatabaseCommit, EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState,
     },
     Inspector,
 };
@@ -37,12 +36,12 @@ use revm::{
 use crate::{
     eth::{
         api::{
-            pending_block::PendingBlockEnv, BuildReceipt, EthState, EthTransactions,
-            LoadPendingBlock, LoadState, RawTransactionForwarder, SpawnBlocking, StateCacheDB,
+            BuildReceipt, EthState, EthTransactions, LoadState, RawTransactionForwarder,
+            SpawnBlocking, StateCacheDB,
         },
         cache::EthStateCache,
         error::{EthApiError, EthResult, RpcInvalidTransactionError, SignError},
-        revm_utils::{prepare_call_env, EvmOverrides, FillableTransaction},
+        revm_utils::FillableTransaction,
     },
     EthApi, EthApiSpec,
 };
@@ -93,24 +92,6 @@ where
     #[inline]
     fn call_gas_limit(&self) -> u64 {
         self.inner.gas_cap
-    }
-
-    async fn evm_env_at(&self, at: BlockId) -> EthResult<(CfgEnvWithHandlerCfg, BlockEnv, BlockId)>
-    where
-        Self: LoadState + LoadPendingBlock,
-    {
-        if at.is_pending() {
-            let PendingBlockEnv { cfg, block_env, origin } = self.pending_block_env_and_cfg()?;
-            Ok((cfg, block_env, origin.state_block_id()))
-        } else {
-            // Use cached values if there is no pending block
-            let block_hash = self
-                .provider()
-                .block_hash_for_id(at)?
-                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
-            let (cfg, env) = self.cache().get_evm_env(block_hash).await?;
-            Ok((cfg, env, block_hash.into()))
-        }
     }
 
     async fn block_by_id(&self, id: BlockId) -> EthResult<Option<SealedBlock>> {
@@ -327,163 +308,6 @@ where
         let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
 
         Ok(hash)
-    }
-
-    async fn spawn_with_call_at<F, R>(
-        &self,
-        request: TransactionRequest,
-        at: BlockId,
-        overrides: EvmOverrides,
-        f: F,
-    ) -> EthResult<R>
-    where
-        Self: LoadState,
-        F: FnOnce(&mut StateCacheDB, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
-        R: Send + 'static,
-    {
-        let (cfg, block_env, at) = self.evm_env_at(at).await?;
-        let this = self.clone();
-        self.inner
-            .blocking_task_pool
-            .spawn(move || {
-                let state = this.state_at_block_id(at)?;
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
-
-                let env = prepare_call_env(
-                    cfg,
-                    block_env,
-                    request,
-                    this.call_gas_limit(),
-                    &mut db,
-                    overrides,
-                )?;
-                f(&mut db, env)
-            })
-            .await
-            .map_err(|_| EthApiError::InternalBlockingTaskError)?
-    }
-
-    async fn transact_call_at(
-        &self,
-        request: TransactionRequest,
-        at: BlockId,
-        overrides: EvmOverrides,
-    ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
-    where
-        Self: LoadState,
-    {
-        let this = self.clone();
-        self.spawn_with_call_at(request, at, overrides, move |db, env| this.transact(db, env)).await
-    }
-
-    async fn spawn_inspect_call_at<I>(
-        &self,
-        request: TransactionRequest,
-        at: BlockId,
-        overrides: EvmOverrides,
-        inspector: I,
-    ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
-    where
-        Self: LoadState,
-        I: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
-    {
-        let this = self.clone();
-        self.spawn_with_call_at(request, at, overrides, move |db, env| {
-            this.inspect(db, env, inspector)
-        })
-        .await
-    }
-
-    async fn spawn_replay_transaction<F, R>(&self, hash: B256, f: F) -> EthResult<Option<R>>
-    where
-        Self: LoadState,
-        F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
-        R: Send + 'static,
-    {
-        let (transaction, block) = match self.transaction_and_block(hash).await? {
-            None => return Ok(None),
-            Some(res) => res,
-        };
-        let (tx, tx_info) = transaction.split();
-
-        let (cfg, block_env, _) = self.evm_env_at(block.hash().into()).await?;
-
-        // we need to get the state of the parent block because we're essentially replaying the
-        // block the transaction is included in
-        let parent_block = block.parent_hash;
-        let block_txs = block.into_transactions_ecrecovered();
-
-        let this = self.clone();
-        self.spawn_with_state_at_block(parent_block.into(), move |state| {
-            let mut db = CacheDB::new(StateProviderDatabase::new(state));
-
-            // replay all transactions prior to the targeted transaction
-            this.replay_transactions_until(
-                &mut db,
-                cfg.clone(),
-                block_env.clone(),
-                block_txs,
-                tx.hash,
-            )?;
-
-            let env =
-                EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
-
-            let (res, _) = this.transact(&mut db, env)?;
-            f(tx_info, res, db)
-        })
-        .await
-        .map(Some)
-    }
-
-    async fn spawn_trace_transaction_in_block_with_inspector<Insp, F, R>(
-        &self,
-        hash: B256,
-        mut inspector: Insp,
-        f: F,
-    ) -> EthResult<Option<R>>
-    where
-        Self: LoadState,
-        F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDB) -> EthResult<R>
-            + Send
-            + 'static,
-        Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
-        R: Send + 'static,
-    {
-        let (transaction, block) = match self.transaction_and_block(hash).await? {
-            None => return Ok(None),
-            Some(res) => res,
-        };
-        let (tx, tx_info) = transaction.split();
-
-        let (cfg, block_env, _) = self.evm_env_at(block.hash().into()).await?;
-
-        // we need to get the state of the parent block because we're essentially replaying the
-        // block the transaction is included in
-        let parent_block = block.parent_hash;
-        let block_txs = block.into_transactions_ecrecovered();
-
-        let this = self.clone();
-        self.spawn_with_state_at_block(parent_block.into(), move |state| {
-            let mut db = CacheDB::new(StateProviderDatabase::new(state));
-
-            // replay all transactions prior to the targeted transaction
-            this.replay_transactions_until(
-                &mut db,
-                cfg.clone(),
-                block_env.clone(),
-                block_txs,
-                tx.hash,
-            )?;
-
-            let env =
-                EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
-
-            let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
-            f(tx_info, inspector, res, db)
-        })
-        .await
-        .map(Some)
     }
 
     async fn trace_block_until_with_inspector<Setup, Insp, F, R>(
