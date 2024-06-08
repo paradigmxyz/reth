@@ -39,7 +39,7 @@ pub type PeerId = reth_primitives::B512;
 ///
 /// Note: This requires `Clone` for convenience, since it is assumed that this will be implemented
 /// for a wrapped `Arc` type, see also [`Pool`](crate::Pool).
-#[auto_impl::auto_impl(Arc)]
+#[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPool: Send + Sync + Clone {
     /// The transaction type of the pool
     type Transaction: PoolTransaction;
@@ -388,7 +388,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.
-#[auto_impl::auto_impl(Arc)]
+#[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPoolExt: TransactionPool {
     /// Sets the current block info for the pool.
     fn set_block_info(&self, info: BlockInfo);

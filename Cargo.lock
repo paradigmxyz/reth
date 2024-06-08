@@ -7900,6 +7900,7 @@ dependencies = [
 name = "reth-tasks"
 version = "0.2.0-beta.8"
 dependencies = [
+ "auto_impl",
  "dyn-clone",
  "futures-util",
  "metrics",

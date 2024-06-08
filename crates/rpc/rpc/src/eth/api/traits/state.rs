@@ -20,7 +20,7 @@ pub trait EthState: LoadState + SpawnBlocking {
     /// Returns a handle for reading data from transaction pool.
     ///
     /// Data access in default trait method implementations.
-    fn pool(&self) -> &impl TransactionPool;
+    fn pool(&self) -> impl TransactionPool;
 
     /// Returns the number of transactions sent from an address at the given block identifier.
     ///
@@ -133,11 +133,12 @@ pub trait EthState: LoadState + SpawnBlocking {
 }
 
 /// Loads state from database.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait LoadState {
     /// Returns a handle for reading state from database.
     ///
     /// Data access in default trait method implementations.
-    fn provider(&self) -> &impl StateProviderFactory;
+    fn provider(&self) -> impl StateProviderFactory;
 
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> EthResult<StateProviderBox> {

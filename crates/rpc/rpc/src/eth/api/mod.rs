@@ -380,7 +380,7 @@ impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
 where
     Self: Send + Sync + 'static,
 {
-    fn io_task_spawner(&self) -> &dyn TaskSpawner {
+    fn io_task_spawner(&self) -> impl TaskSpawner {
         self.inner.task_spawner()
     }
 
