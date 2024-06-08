@@ -60,4 +60,3 @@ reth-tokio-util.workspace = true
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true
-clap = { workspace = true, features = ["derive"] }

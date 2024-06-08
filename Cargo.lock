@@ -7732,7 +7732,6 @@ dependencies = [
 name = "reth-rpc-builder"
 version = "0.2.0-beta.9"
 dependencies = [
- "clap",
  "hyper 0.14.29",
  "jsonrpsee",
  "metrics",
