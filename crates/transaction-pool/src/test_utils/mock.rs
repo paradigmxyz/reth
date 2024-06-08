@@ -893,20 +893,16 @@ impl From<MockTransaction> for Transaction {
         match mock {
             MockTransaction::Legacy {
                 chain_id,
-                hash: _,
-                sender: _,
                 nonce,
                 gas_price,
                 gas_limit,
                 to,
                 value,
                 input,
-                size: _,
+                ..
             } => Self::Legacy(TxLegacy { chain_id, nonce, gas_price, gas_limit, to, value, input }),
             MockTransaction::Eip2930 {
                 chain_id,
-                hash: _,
-                sender: _,
                 nonce,
                 to,
                 gas_limit,
@@ -914,7 +910,7 @@ impl From<MockTransaction> for Transaction {
                 value,
                 gas_price,
                 access_list,
-                size: _,
+                ..
             } => Self::Eip2930(TxEip2930 {
                 chain_id,
                 nonce,
@@ -927,8 +923,6 @@ impl From<MockTransaction> for Transaction {
             }),
             MockTransaction::Eip1559 {
                 chain_id,
-                hash: _,
-                sender: _,
                 nonce,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
@@ -937,7 +931,7 @@ impl From<MockTransaction> for Transaction {
                 value,
                 access_list,
                 input,
-                size: _,
+                ..
             } => Self::Eip1559(TxEip1559 {
                 chain_id,
                 nonce,
@@ -951,8 +945,6 @@ impl From<MockTransaction> for Transaction {
             }),
             MockTransaction::Eip4844 {
                 chain_id,
-                hash: _,
-                sender: _,
                 nonce,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
@@ -963,8 +955,8 @@ impl From<MockTransaction> for Transaction {
                 access_list,
                 input,
                 sidecar,
-                size: _,
                 placeholder,
+                ..
             } => Self::Eip4844(TxEip4844 {
                 chain_id,
                 nonce,
@@ -1069,8 +1061,8 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
                     input,
                     max_fee_per_blob_gas,
                     access_list,
-                    blob_versioned_hashes: _,
                     placeholder,
+                    ..
                 }) => Self::Eip4844 {
                     chain_id: *chain_id,
                     sender,

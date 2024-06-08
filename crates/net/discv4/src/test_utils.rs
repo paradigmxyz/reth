@@ -343,7 +343,7 @@ mod tests {
         // process the mock pong
         let event = mockv4.next().await.unwrap();
         match event {
-            MockEvent::Pong { ping: _, pong: _, to } => {
+            MockEvent::Pong { to, .. } => {
                 assert_eq!(to, SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), discv_addr.port()));
             }
             MockEvent::Neighbours { .. } => {

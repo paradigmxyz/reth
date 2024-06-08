@@ -152,12 +152,12 @@ impl PeersManager {
         let mut peers = HashMap::with_capacity(trusted_nodes.len() + basic_nodes.len());
         let mut trusted_peer_ids = HashSet::with_capacity(trusted_nodes.len());
 
-        for NodeRecord { address, tcp_port, udp_port: _, id } in trusted_nodes {
+        for NodeRecord { address, tcp_port, id, .. } in trusted_nodes {
             trusted_peer_ids.insert(id);
             peers.entry(id).or_insert_with(|| Peer::trusted(SocketAddr::from((address, tcp_port))));
         }
 
-        for NodeRecord { address, tcp_port, udp_port: _, id } in basic_nodes {
+        for NodeRecord { address, tcp_port, id, .. } in basic_nodes {
             peers.entry(id).or_insert_with(|| Peer::new(SocketAddr::from((address, tcp_port))));
         }
 

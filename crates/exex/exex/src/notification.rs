@@ -29,7 +29,7 @@ impl ExExNotification {
     /// variants, if any.
     pub fn committed_chain(&self) -> Option<Arc<Chain>> {
         match self {
-            Self::ChainCommitted { new } | Self::ChainReorged { old: _, new } => Some(new.clone()),
+            Self::ChainCommitted { new } | Self::ChainReorged { new, .. } => Some(new.clone()),
             Self::ChainReverted { .. } => None,
         }
     }
@@ -38,7 +38,7 @@ impl ExExNotification {
     /// variants, if any.
     pub fn reverted_chain(&self) -> Option<Arc<Chain>> {
         match self {
-            Self::ChainReorged { old, new: _ } | Self::ChainReverted { old } => Some(old.clone()),
+            Self::ChainReorged { old, .. } | Self::ChainReverted { old } => Some(old.clone()),
             Self::ChainCommitted { .. } => None,
         }
     }

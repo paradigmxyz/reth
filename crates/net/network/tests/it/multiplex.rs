@@ -294,7 +294,7 @@ async fn test_proto_multiplex() {
 
     let peer0_to_peer1 = from_peer0.recv().await.unwrap();
     let peer0_conn = match peer0_to_peer1 {
-        ProtocolEvent::Established { direction: _, peer_id, to_connection } => {
+        ProtocolEvent::Established { peer_id, to_connection, .. } => {
             assert_eq!(peer_id, *handle.peers()[1].peer_id());
             to_connection
         }
@@ -302,7 +302,7 @@ async fn test_proto_multiplex() {
 
     let peer1_to_peer0 = from_peer1.recv().await.unwrap();
     let peer1_conn = match peer1_to_peer0 {
-        ProtocolEvent::Established { direction: _, peer_id, to_connection } => {
+        ProtocolEvent::Established { peer_id, to_connection, .. } => {
             assert_eq!(peer_id, *handle.peers()[0].peer_id());
             to_connection
         }

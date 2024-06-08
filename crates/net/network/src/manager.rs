@@ -195,7 +195,7 @@ where
             dns_discovery_config,
             extra_protocols,
             tx_gossip_disabled,
-            transactions_manager_config: _,
+            ..
         } = config;
 
         let peers_manager = PeersManager::new(peers_config);

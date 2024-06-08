@@ -227,8 +227,7 @@ impl Discv5 {
             discv5::Event::SocketUpdated(_) | discv5::Event::TalkRequest(_) |
             // `Discovered` not unique discovered peers
             discv5::Event::Discovered(_) => None,
-            discv5::Event::NodeInserted { replaced: _, .. } => {
-
+            discv5::Event::NodeInserted {..} => {
                 // node has been inserted into kbuckets
 
                 // `replaced` partly covers `reth_discv4::DiscoveryUpdate::Removed(_)`
@@ -249,11 +248,7 @@ impl Discv5 {
 
                 self.on_discovered_peer(&enr, remote_socket)
             }
-            discv5::Event::UnverifiableEnr {
-                enr,
-                socket,
-                node_id: _,
-            } => {
+            discv5::Event::UnverifiableEnr { enr, socket, .. } => {
                 // this branch is semantically similar to branches of
                 // `reth_discv4::DiscoveryUpdate`: `DiscoveryUpdate::Added(_)` and
                 // `DiscoveryUpdate::DiscoveredAtCapacity(_)
