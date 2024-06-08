@@ -85,17 +85,17 @@ impl PruneInput {
         &self,
         provider: &DatabaseProviderRW<DB>,
     ) -> ProviderResult<Option<RangeInclusive<TxNumber>>> {
+        // If checkpoint exists, then prune from the next transaction after the highest pruned one
+        // else prune from genesis block number
         let from_tx_number = self.previous_checkpoint
-            // Checkpoint exists, prune from the next transaction after the highest pruned one
-            .and_then(|checkpoint| match checkpoint.tx_number {
-                Some(tx_number) => Some(tx_number + 1),
-                _ => {
+            .map_or(0, |checkpoint| {
+                if let Some(tx_number) = checkpoint.tx_number {
+                    tx_number + 1
+                } else {
                     error!(target: "pruner", ?checkpoint, "Expected transaction number in prune checkpoint, found None");
-                    None
-                },
-            })
-            // No checkpoint exists, prune from genesis
-            .unwrap_or(0);
+                    0
+                }
+            });
 
         let to_tx_number = match provider.block_body_indices(self.to_block)? {
             Some(body) => {
