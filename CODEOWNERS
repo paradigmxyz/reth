@@ -1,27 +1,44 @@
 *                           @gakonst
 bin/                        @onbjerg
-crates/blockchain-tree      @rakita @rkrasiuk
+crates/blockchain-tree/     @rakita @rkrasiuk @mattsse @Rjected
+crates/blockchain-tree-api/ @rakita @rkrasiuk @mattsse @Rjected
 crates/cli/                 @onbjerg @mattsse
-crates/consensus            @rkrasiuk @mattsse @Rjected
-crates/exex                 @onbjerg @shekhirin
-crates/metrics              @onbjerg
+crates/config/              @onbjerg
+crates/consensus/           @rkrasiuk @mattsse @Rjected
+crates/e2e-test-utils/      @mattsse @Rjected
+crates/engine-primitives/   @rkrasiuk @mattsse @Rjected
+crates/errors/              @mattsse
+crates/ethereum/            @mattsse @Rjected
+crates/ethereum-forks/      @mattsse @Rjected
+crates/etl/                 @joshieDo @shekhirin
+crates/evm/                 @rakita @mattsse @Rjected @DaniPopes
+crates/exex/                @onbjerg @shekhirin
+crates/fs-util/             @onbjerg @DaniPopes @emhane
+crates/metrics/             @onbjerg
 crates/net/                 @emhane @mattsse @Rjected
-crates/net/downloaders/     @onbjerg @rkrasiuk
+crates/net/downloaders/     @onbjerg @rkrasiuk @emhane
 crates/node/                @mattsse @Rjected @onbjerg
 crates/node-core/           @mattsse @Rjected @onbjerg
-crates/node-ethereum/       @mattsse @Rjected
+crates/optimism/            @mattsse @Rjected @fgimenez
 crates/payload/             @mattsse @Rjected
-crates/prune                @shekhirin @joshieDo
+crates/primitives/          @DaniPopes @Rjected
+crates/prune/               @shekhirin @joshieDo
 crates/revm/                @mattsse @rakita
 crates/rpc/                 @mattsse @Rjected
 crates/stages/              @onbjerg @rkrasiuk @shekhirin
-crates/stages-api/          @onbjerg @rkrasiuk @shekhirin
-crates/static-file          @joshieDo @shekhirin
-crates/storage/             @rakita @joshieDo @shekhirin
-crates/tasks                @mattsse
-crates/tracing              @onbjerg
+crates/static-file/         @joshieDo @shekhirin
+crates/storage/codecs/      @joshieDo
+crates/storage/db/          @joshieDo @rakita
+crates/storage/db-api/      @joshieDo @rakita
+crates/storage/db-common/   @Rjected @onbjerg
+crates/storage/errors/      @rakita @onbjerg
+crates/storage/libmdbx-rs/  @rakita @shekhirin
+crates/storage/nippy-jar/   @joshieDo @shekhirin
+crates/storage/provider/    @rakita @joshieDo @shekhirin
+crates/storage/storage-api/ @joshieDo @rkrasiuk
+crates/tasks/               @mattsse
+crates/tokio-util/          @fgimenez @emhane
+crates/tracing/             @onbjerg
 crates/transaction-pool/    @mattsse
-crates/trie                 @rkrasiuk
-crates/trie-parallel        @rkrasiuk
-crates/optimism             @mattsse
+crates/trie/                @rkrasiuk @Rjected
 .github/                    @onbjerg @gakonst @DaniPopes

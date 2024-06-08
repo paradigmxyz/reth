@@ -13,7 +13,7 @@ workspace = true
 [dependencies]
 # reth
 reth-network.workspace = true
-reth-primitives.workspace = true
+reth-prune-types.workspace = true
 
 # serde
 serde.workspace = true

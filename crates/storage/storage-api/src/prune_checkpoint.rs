@@ -1,4 +1,4 @@
-use reth_primitives::{PruneCheckpoint, PruneSegment};
+use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_storage_errors::provider::ProviderResult;
 
 /// The trait for fetching prune checkpoint related data.

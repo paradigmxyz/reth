@@ -432,11 +432,12 @@ mod tests {
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,
-        Header, PruneModes, SealedHeader, MAINNET,
+        Header, SealedHeader, MAINNET,
     };
     use reth_provider::{
         test_utils::create_test_provider_factory_with_chain_spec, BundleStateWithReceipts,
     };
+    use reth_prune_types::PruneModes;
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_static_file::StaticFileProducer;
     use reth_tasks::TokioTaskExecutor;

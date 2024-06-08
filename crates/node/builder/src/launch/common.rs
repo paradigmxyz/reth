@@ -16,13 +16,11 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
 };
-use reth_primitives::{
-    stage::PipelineTarget, BlockNumber, Chain, ChainSpec, Head, PruneModes, B256,
-};
+use reth_primitives::{stage::PipelineTarget, BlockNumber, Chain, ChainSpec, Head, B256};
 use reth_provider::{
     providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
 };
-use reth_prune::PrunerBuilder;
+use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{sets::DefaultStages, Pipeline};
 use reth_static_file::StaticFileProducer;
@@ -81,20 +79,6 @@ impl LaunchContext {
 
         // Update the config with the command line arguments
         toml_config.peers.trusted_nodes_only = config.network.trusted_only;
-
-        if !config.network.trusted_peers.is_empty() {
-            info!(target: "reth::cli", "Adding trusted nodes");
-
-            // resolve trusted peers if they use a domain instead of dns
-            for peer in &config.network.trusted_peers {
-                let backoff = ConstantBuilder::default().with_max_times(config.network.dns_retries);
-                let resolved = (move || { peer.resolve() })
-                .retry(&backoff)
-                .notify(|err, _| warn!(target: "reth::cli", "Error resolving peer domain: {err}. Retrying..."))
-                .await?;
-                toml_config.peers.trusted_nodes.insert(resolved);
-            }
-        }
 
         Ok(toml_config)
     }
@@ -199,6 +183,27 @@ impl<T> LaunchContextWith<T> {
     {
         f(&self);
         self
+    }
+}
+
+impl LaunchContextWith<WithConfigs> {
+    /// Resolves the trusted peers and adds them to the toml config.
+    pub async fn with_resolved_peers(mut self) -> eyre::Result<Self> {
+        if !self.attachment.config.network.trusted_peers.is_empty() {
+            info!(target: "reth::cli", "Adding trusted nodes");
+
+            // resolve trusted peers if they use a domain instead of dns
+            for peer in &self.attachment.config.network.trusted_peers {
+                let backoff = ConstantBuilder::default()
+                    .with_max_times(self.attachment.config.network.dns_retries);
+                let resolved = (move || { peer.resolve() })
+                .retry(&backoff)
+                .notify(|err, _| warn!(target: "reth::cli", "Error resolving peer domain: {err}. Retrying..."))
+                .await?;
+                self.attachment.toml_config.peers.trusted_nodes.insert(resolved);
+            }
+        }
+        Ok(self)
     }
 }
 
