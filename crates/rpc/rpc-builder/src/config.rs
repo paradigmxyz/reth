@@ -214,3 +214,155 @@ impl RethRpcServerConfig for RpcServerArgs {
         self.rpc_jwtsecret
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
+    use clap::{Args, Parser};
+    use reth_node_core::args::RpcServerArgs;
+    use reth_rpc::eth::RPC_DEFAULT_GAS_CAP;
+    use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
+
+    use crate::config::RethRpcServerConfig;
+
+    /// A helper type to parse Args more easily
+    #[derive(Parser)]
+    struct CommandParser<T: Args> {
+        #[command(flatten)]
+        args: T,
+    }
+
+    #[test]
+    fn test_rpc_gas_cap() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        let config = args.eth_config();
+        assert_eq!(config.rpc_gas_cap, Into::<u64>::into(RPC_DEFAULT_GAS_CAP));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.gascap", "1000"]).args;
+        let config = args.eth_config();
+        assert_eq!(config.rpc_gas_cap, 1000);
+
+        let args = CommandParser::<RpcServerArgs>::try_parse_from(["reth", "--rpc.gascap", "0"]);
+        assert!(args.is_err());
+    }
+
+    #[test]
+    fn test_transport_rpc_module_config() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            "eth,admin,debug",
+            "--http",
+            "--ws",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
+        assert_eq!(
+            config.ws().cloned().unwrap().into_selection(),
+            RpcModuleSelection::standard_modules()
+        );
+    }
+
+    #[test]
+    fn test_transport_rpc_module_trim_config() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            " eth, admin, debug",
+            "--http",
+            "--ws",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
+        assert_eq!(
+            config.ws().cloned().unwrap().into_selection(),
+            RpcModuleSelection::standard_modules()
+        );
+    }
+
+    #[test]
+    fn test_unique_rpc_modules() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            " eth, admin, debug, eth,admin",
+            "--http",
+            "--ws",
+        ])
+        .args;
+        let config = args.transport_rpc_module_config();
+        let expected = [RethRpcModule::Eth, RethRpcModule::Admin, RethRpcModule::Debug];
+        assert_eq!(config.http().cloned().unwrap().into_selection(), expected.into());
+        assert_eq!(
+            config.ws().cloned().unwrap().into_selection(),
+            RpcModuleSelection::standard_modules()
+        );
+    }
+
+    #[test]
+    fn test_rpc_server_config() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.api",
+            "eth,admin,debug",
+            "--http",
+            "--ws",
+            "--ws.addr",
+            "127.0.0.1",
+            "--ws.port",
+            "8888",
+        ])
+        .args;
+        let config = args.rpc_server_config();
+        assert_eq!(
+            config.http_address().unwrap(),
+            SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::LOCALHOST,
+                constants::DEFAULT_HTTP_RPC_PORT
+            ))
+        );
+        assert_eq!(
+            config.ws_address().unwrap(),
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8888))
+        );
+        assert_eq!(config.ipc_endpoint().unwrap(), constants::DEFAULT_IPC_ENDPOINT);
+    }
+
+    #[test]
+    fn test_zero_filter_limits() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc-max-blocks-per-filter",
+            "0",
+            "--rpc-max-logs-per-response",
+            "0",
+        ])
+        .args;
+
+        let config = args.eth_config().filter_config();
+        assert_eq!(config.max_blocks_per_filter, Some(u64::MAX));
+        assert_eq!(config.max_logs_per_response, Some(usize::MAX));
+    }
+
+    #[test]
+    fn test_custom_filter_limits() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc-max-blocks-per-filter",
+            "100",
+            "--rpc-max-logs-per-response",
+            "200",
+        ])
+        .args;
+
+        let config = args.eth_config().filter_config();
+        assert_eq!(config.max_blocks_per_filter, Some(100));
+        assert_eq!(config.max_logs_per_response, Some(200));
+    }
+}
