@@ -1,12 +1,5 @@
 //! Contains RPC handler implementations for fee history.
 
-use crate::{
-    eth::{
-        api::fee_history::{calculate_reward_percentiles_for_block, FeeHistoryEntry},
-        error::{EthApiError, EthResult},
-    },
-    EthApi,
-};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumberOrTag, U256};
@@ -15,8 +8,20 @@ use reth_rpc_types::FeeHistory;
 use reth_transaction_pool::TransactionPool;
 use tracing::debug;
 
+use crate::{
+    eth::{
+        api::{
+            fee_history::{calculate_reward_percentiles_for_block, FeeHistoryEntry},
+            LoadPendingBlock,
+        },
+        error::{EthApiError, EthResult},
+    },
+    EthApi,
+};
+
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
+    Self: LoadPendingBlock,
     Pool: TransactionPool + Clone + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,

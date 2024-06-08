@@ -1,7 +1,10 @@
 //! Support for building a pending block via local txpool.
 
-use crate::eth::error::{EthApiError, EthResult};
+use std::time::Instant;
+
+use derive_more::Constructor;
 use reth_errors::ProviderError;
+use reth_evm::ConfigureEvm;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
     proofs,
@@ -13,7 +16,10 @@ use reth_primitives::{
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     Receipts, Requests, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
-use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
+use reth_provider::{
+    BlockReaderIdExt, BundleStateWithReceipts, ChainSpecProvider, EvmEnvProvider,
+    StateProviderFactory,
+};
 use reth_revm::{
     database::StateProviderDatabase,
     state_change::{
@@ -24,17 +30,56 @@ use reth_revm::{
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
 use revm_primitives::EnvWithHandlerCfg;
-use std::time::Instant;
+use tokio::sync::Mutex;
+
+use crate::{
+    eth::{
+        api::{LoadPendingBlock, SpawnBlocking},
+        error::{EthApiError, EthResult},
+    },
+    EthApi,
+};
+
+impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
+    for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: SpawnBlocking,
+    Provider: BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory,
+    Pool: TransactionPool,
+    EvmConfig: ConfigureEvm,
+{
+    #[inline]
+    fn provider(
+        &self,
+    ) -> &(impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory) {
+        self.inner.provider()
+    }
+
+    #[inline]
+    fn pool(&self) -> &impl TransactionPool {
+        self.inner.pool()
+    }
+
+    #[inline]
+    fn pending_block(&self) -> &Mutex<Option<PendingBlock>> {
+        self.inner.pending_block()
+    }
+
+    #[inline]
+    fn evm_config(&self) -> &impl ConfigureEvm {
+        self.inner.evm_config()
+    }
+}
 
 /// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block
-#[derive(Debug, Clone)]
-pub(crate) struct PendingBlockEnv {
+#[derive(Debug, Clone, Constructor)]
+pub struct PendingBlockEnv {
     /// Configured [`CfgEnvWithHandlerCfg`] for the pending block.
-    pub(crate) cfg: CfgEnvWithHandlerCfg,
+    pub cfg: CfgEnvWithHandlerCfg,
     /// Configured [`BlockEnv`] for the pending block.
-    pub(crate) block_env: BlockEnv,
+    pub block_env: BlockEnv,
     /// Origin block for the config
-    pub(crate) origin: PendingBlockEnvOrigin,
+    pub origin: PendingBlockEnvOrigin,
 }
 
 impl PendingBlockEnv {
@@ -44,7 +89,7 @@ impl PendingBlockEnv {
     ///
     /// After Cancun, if the origin is the actual pending block, the block includes the EIP-4788 pre
     /// block contract call using the parent beacon block root received from the CL.
-    pub(crate) fn build_block<Client, Pool>(
+    pub fn build_block<Client, Pool>(
         self,
         client: &Client,
         pool: &Pool,
@@ -358,7 +403,7 @@ where
 
 /// The origin for a configured [`PendingBlockEnv`]
 #[derive(Clone, Debug)]
-pub(crate) enum PendingBlockEnvOrigin {
+pub enum PendingBlockEnvOrigin {
     /// The pending block as received from the CL.
     ActualPending(SealedBlockWithSenders),
     /// The _modified_ header of the latest block.
@@ -372,12 +417,12 @@ pub(crate) enum PendingBlockEnvOrigin {
 
 impl PendingBlockEnvOrigin {
     /// Returns true if the origin is the actual pending block as received from the CL.
-    pub(crate) const fn is_actual_pending(&self) -> bool {
+    pub const fn is_actual_pending(&self) -> bool {
         matches!(self, Self::ActualPending(_))
     }
 
     /// Consumes the type and returns the actual pending block.
-    pub(crate) fn into_actual_pending(self) -> Option<SealedBlockWithSenders> {
+    pub fn into_actual_pending(self) -> Option<SealedBlockWithSenders> {
         match self {
             Self::ActualPending(block) => Some(block),
             _ => None,
@@ -388,7 +433,7 @@ impl PendingBlockEnvOrigin {
     ///
     /// If this is the actual pending block, the state is the "Pending" tag, otherwise we can safely
     /// identify the block by its hash (latest block).
-    pub(crate) fn state_block_id(&self) -> BlockId {
+    pub fn state_block_id(&self) -> BlockId {
         match self {
             Self::ActualPending(_) => BlockNumberOrTag::Pending.into(),
             Self::DerivedFromLatest(header) => BlockId::Hash(header.hash().into()),
@@ -408,7 +453,7 @@ impl PendingBlockEnvOrigin {
     }
 
     /// Returns the header this pending block is based on.
-    pub(crate) fn header(&self) -> &SealedHeader {
+    pub fn header(&self) -> &SealedHeader {
         match self {
             Self::ActualPending(block) => &block.header,
             Self::DerivedFromLatest(header) => header,
@@ -417,10 +462,10 @@ impl PendingBlockEnvOrigin {
 }
 
 /// In memory pending block for `pending` tag
-#[derive(Debug)]
-pub(crate) struct PendingBlock {
+#[derive(Debug, Constructor)]
+pub struct PendingBlock {
     /// The cached pending block
-    pub(crate) block: SealedBlockWithSenders,
+    pub block: SealedBlockWithSenders,
     /// Timestamp when the pending block is considered outdated
-    pub(crate) expires_at: Instant,
+    pub expires_at: Instant,
 }
