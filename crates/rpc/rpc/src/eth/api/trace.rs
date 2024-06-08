@@ -1,3 +1,5 @@
+//! Contains RPC handler implementations specific to tracing.
+
 use reth_evm::ConfigureEvm;
 
 use crate::{

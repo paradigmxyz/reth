@@ -674,7 +674,8 @@ mod tests {
         let (eth_api, base_fees_per_gas, gas_used_ratios) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let fee_history = eth_api.fee_history(1, newest_block.into(), None).await.unwrap();
+        let fee_history =
+            eth_api.fee_history(U64::from(1), newest_block.into(), None).await.unwrap();
         assert_eq!(
             fee_history.base_fee_per_gas,
             &base_fees_per_gas[base_fees_per_gas.len() - 2..],
@@ -708,7 +709,7 @@ mod tests {
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
         let fee_history =
-            eth_api.fee_history(block_count, newest_block.into(), None).await.unwrap();
+            eth_api.fee_history(U64::from(block_count), newest_block.into(), None).await.unwrap();
 
         assert_eq!(
             &fee_history.base_fee_per_gas, &base_fees_per_gas,

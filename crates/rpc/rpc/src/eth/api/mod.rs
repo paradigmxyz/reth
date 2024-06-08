@@ -408,13 +408,13 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 
     /// Returns a handle to the fee history cache.
     #[inline]
-    pub fn fee_history_cache(&self) -> &FeeHistoryCache {
+    pub const fn fee_history_cache(&self) -> &FeeHistoryCache {
         &self.fee_history_cache
     }
 
     /// Returns a handle to the signers.
     #[inline]
-    pub fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
+    pub const fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
         &self.signers
     }
 }

@@ -585,7 +585,7 @@ pub trait Call {
     /// Data access in default (L1) trait method implementations.
     fn evm_config(&self) -> &impl ConfigureEvm;
 
-    /// Executes the [EnvWithHandlerCfg] against the given [Database] without committing state
+    /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
     /// changes.
     fn transact<DB>(
         &self,
@@ -602,7 +602,7 @@ pub trait Call {
         Ok((res, env))
     }
 
-    /// Executes the call request at the given [BlockId].
+    /// Executes the call request at the given [`BlockId`].
     fn transact_call_at(
         &self,
         request: TransactionRequest,
@@ -633,11 +633,11 @@ pub trait Call {
         })
     }
 
-    /// Prepares the state and env for the given [TransactionRequest] at the given [BlockId] and
+    /// Prepares the state and env for the given [`TransactionRequest`] at the given [`BlockId`] and
     /// executes the closure on a new task returning the result of the closure.
     ///
-    /// This returns the configured [EnvWithHandlerCfg] for the given [TransactionRequest] at the
-    /// given [BlockId] and with configured call settings: `prepare_call_env`.
+    /// This returns the configured [`EnvWithHandlerCfg`] for the given [`TransactionRequest`] at
+    /// the given [`BlockId`] and with configured call settings: `prepare_call_env`.
     fn spawn_with_call_at<F, R>(
         &self,
         request: TransactionRequest,
@@ -738,7 +738,7 @@ pub trait Call {
     /// Replays all the transactions until the target transaction is found.
     ///
     /// All transactions before the target transaction are executed and their changes are written to
-    /// the _runtime_ db ([CacheDB]).
+    /// the _runtime_ db ([`CacheDB`]).
     ///
     /// Note: This assumes the target transaction is in the given iterator.
     /// Returns the index of the target transaction in the given iterator.

@@ -16,7 +16,7 @@ type Result<T> = std::result::Result<T, SignError>;
 
 /// An Ethereum Signer used via RPC.
 #[async_trait::async_trait]
-pub(crate) trait EthSigner: Send + Sync + DynClone {
+pub trait EthSigner: Send + Sync + DynClone {
     /// Returns the available accounts for this signer.
     fn accounts(&self) -> Vec<Address>;
 

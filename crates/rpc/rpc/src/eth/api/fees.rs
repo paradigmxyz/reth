@@ -29,7 +29,7 @@ where
 
     #[inline]
     fn cache(&self) -> &EthStateCache {
-        &self.inner.cache()
+        self.inner.cache()
     }
 
     #[inline]
@@ -39,6 +39,6 @@ where
 
     #[inline]
     fn fee_history_cache(&self) -> &FeeHistoryCache {
-        &self.inner.fee_history_cache()
+        self.inner.fee_history_cache()
     }
 }

@@ -29,7 +29,7 @@ pub trait Trace {
     /// Data access in default (L1) trait method implementations.
     fn evm_config(&self) -> &impl ConfigureEvm;
 
-    /// Executes the [EnvWithHandlerCfg] against the given [Database] without committing state
+    /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
     /// changes.
     fn inspect<DB, I>(
         &self,
@@ -45,7 +45,7 @@ pub trait Trace {
         self.inspect_and_return_db(db, env, inspector).map(|(res, env, _)| (res, env))
     }
 
-    /// Same as [Self::inspect] but also returns the database again.
+    /// Same as [`inspect`](Self::inspect) but also returns the database again.
     ///
     /// Even though [Database] is also implemented on `&mut`
     /// this is still useful if there are certain trait bounds on the Inspector's database generic
@@ -67,11 +67,11 @@ pub trait Trace {
         Ok((res, env, db))
     }
 
-    /// Executes the transaction on top of the given [BlockId] with a tracer configured by the
+    /// Executes the transaction on top of the given [`BlockId`] with a tracer configured by the
     /// config.
     ///
-    /// The callback is then called with the [TracingInspector] and the [`ResultAndState`] after the
-    /// configured [EnvWithHandlerCfg] was inspected.
+    /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
+    /// the configured [`EnvWithHandlerCfg`] was inspected.
     ///
     /// Caution: this is blocking
     fn trace_at<F, R>(
@@ -93,13 +93,13 @@ pub trait Trace {
         })
     }
 
-    /// Same as [Self::trace_at] but also provides the used database to the callback.
+    /// Same as [`trace_at`](Self::trace_at) but also provides the used database to the callback.
     ///
-    /// Executes the transaction on top of the given [BlockId] with a tracer configured by the
+    /// Executes the transaction on top of the given [`BlockId`] with a tracer configured by the
     /// config.
     ///
-    /// The callback is then called with the [TracingInspector] and the [`ResultAndState`] after the
-    /// configured [EnvWithHandlerCfg] was inspected.
+    /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
+    /// the configured [`EnvWithHandlerCfg`] was inspected.
     fn spawn_trace_at_with_state<F, R>(
         &self,
         env: EnvWithHandlerCfg,
@@ -363,8 +363,8 @@ pub trait Trace {
     /// 2. configures the EVM evn
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
-    /// _after_ the transaction [`StateProviderDatabase`] and the database that points to the state
-    /// right _before_ the transaction.
+    ///    _after_ the transaction [`StateProviderDatabase`] and the database that points to the
+    ///    state right _before_ the transaction.
     fn trace_block<F, R>(
         &self,
         block_id: BlockId,
@@ -397,9 +397,9 @@ pub trait Trace {
     /// 2. configures the EVM evn
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
-    /// _after_ the transaction [`EvmState`] and the database that points to the state
-    /// right _before_ the transaction, in other words the state the transaction was executed on:
-    /// `changed_state = tx(cached_state)`
+    ///    _after_ the transaction [`EvmState`] and the database that points to the state right
+    ///    _before_ the transaction, in other words the state the transaction was executed on:
+    ///    `changed_state = tx(cached_state)`
     ///
     /// This accepts a `inspector_setup` closure that returns the inspector to be used for tracing
     /// a transaction. This is invoked for each transaction.
