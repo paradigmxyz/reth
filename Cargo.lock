@@ -7673,6 +7673,7 @@ dependencies = [
  "alloy-sol-types",
  "assert_matches",
  "async-trait",
+ "auto_impl",
  "derive_more",
  "dyn-clone",
  "futures",
@@ -8002,6 +8003,7 @@ dependencies = [
 name = "reth-tasks"
 version = "0.2.0-beta.9"
 dependencies = [
+ "auto_impl",
  "dyn-clone",
  "futures-util",
  "metrics",

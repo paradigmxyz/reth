@@ -14,7 +14,10 @@ use reth_rpc_types::{
     BlockTransactions, Transaction,
 };
 
-use crate::{eth::api::EthTransactions, result::internal_rpc_err};
+use crate::{
+    eth::api::{EthTransactions, LoadState},
+    result::internal_rpc_err,
+};
 
 const API_LEVEL: u64 = 8;
 
@@ -34,7 +37,7 @@ impl<Eth> OtterscanApi<Eth> {
 #[async_trait]
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
-    Eth: EthApiServer + EthTransactions,
+    Eth: EthApiServer + EthTransactions + LoadState,
 {
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool> {

@@ -24,6 +24,7 @@ pub mod provider;
 pub mod test_utils;
 
 /// Trait for configuring the EVM for executing full blocks.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// Associated type for the default external context that should be configured for the EVM.
     type DefaultExternalContext<'a>;
@@ -95,6 +96,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 
 /// This represents the set of methods used to configure the EVM's environment before block
 /// execution.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// Fill transaction environment from a [`TransactionSigned`] and the given sender address.
     fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address);

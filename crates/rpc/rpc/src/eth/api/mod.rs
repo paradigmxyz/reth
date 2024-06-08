@@ -7,12 +7,9 @@ use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, SealedHeader, B256,
-    U256, U64,
+    Address, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, SealedHeader, U256, U64,
 };
-use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,
-};
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::TransactionPool;
@@ -23,7 +20,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::Mutex;
-use traits::SpawnBlocking;
 
 use crate::eth::{
     api::{
@@ -49,15 +45,18 @@ mod state;
 pub mod traits;
 pub mod transactions;
 
-use crate::eth::traits::RawTransactionForwarder;
 pub use receipt::ReceiptBuilder;
-pub use traits::{BuildReceipt, EthBlocks, EthTransactions, StateCacheDB};
+pub use traits::{
+    BuildReceipt, EthBlocks, EthState, EthTransactions, LoadState, RawTransactionForwarder,
+    SpawnBlocking, StateCacheDB,
+};
 pub use transactions::TransactionSource;
 
 /// `Eth` API trait.
 ///
 /// Defines core functionality of the `eth` API implementation.
 #[async_trait]
+#[auto_impl::auto_impl(&, Arc)]
 pub trait EthApiSpec: EthTransactions + Send + Sync {
     /// Returns the current ethereum protocol version.
     async fn protocol_version(&self) -> RethResult<U64>;
@@ -209,45 +208,6 @@ where
     /// Returns fee history cache
     pub fn fee_history_cache(&self) -> &FeeHistoryCache {
         &self.inner.fee_history_cache
-    }
-}
-
-// === State access helpers ===
-
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-{
-    /// Returns the state at the given [`BlockId`] enum.
-    ///
-    /// Note: if not [`BlockNumberOrTag::Pending`] then this will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
-    pub fn state_at_block_id(&self, at: BlockId) -> EthResult<StateProviderBox> {
-        Ok(self.provider().state_by_block_id(at)?)
-    }
-
-    /// Returns the state at the given [`BlockId`] enum or the latest.
-    ///
-    /// Convenience function to interprets `None` as `BlockId::Number(BlockNumberOrTag::Latest)`
-    pub fn state_at_block_id_or_latest(
-        &self,
-        block_id: Option<BlockId>,
-    ) -> EthResult<StateProviderBox> {
-        if let Some(block_id) = block_id {
-            self.state_at_block_id(block_id)
-        } else {
-            Ok(self.latest_state()?)
-        }
-    }
-
-    /// Returns the state at the given block number
-    pub fn state_at_hash(&self, block_hash: B256) -> RethResult<StateProviderBox> {
-        Ok(self.provider().history_by_block_hash(block_hash)?)
-    }
-
-    /// Returns the _latest_ state
-    pub fn latest_state(&self) -> RethResult<StateProviderBox> {
-        Ok(self.provider().latest()?)
     }
 }
 
@@ -430,7 +390,7 @@ impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
 where
     Self: Send + Sync + 'static,
 {
-    fn io_task_spawner(&self) -> &dyn TaskSpawner {
+    fn io_task_spawner(&self) -> impl TaskSpawner {
         self.inner.task_spawner()
     }
 
@@ -524,5 +484,23 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     #[inline]
     pub const fn blocking_task_pool(&self) -> &BlockingTaskPool {
         &self.blocking_task_pool
+    }
+
+    /// Returns a handle to the EVM config.
+    #[inline]
+    pub const fn evm_config(&self) -> &EvmConfig {
+        &self.evm_config
+    }
+
+    /// Returns a handle to the transaction pool.
+    #[inline]
+    pub const fn pool(&self) -> &Pool {
+        &self.pool
+    }
+
+    /// Returns a handle to the transaction forwarder.
+    #[inline]
+    pub fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
+        self.raw_transaction_forwarder.read().clone()
     }
 }

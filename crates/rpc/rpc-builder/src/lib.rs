@@ -180,10 +180,10 @@ use reth_provider::{
 };
 use reth_rpc::{
     eth::{
+        api::RawTransactionForwarder,
         cache::{cache_new_blocks_task, EthStateCache},
         fee_history_cache_new_blocks_task,
         gas_oracle::GasPriceOracle,
-        traits::RawTransactionForwarder,
         EthBundle, FeeHistoryCache,
     },
     AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
