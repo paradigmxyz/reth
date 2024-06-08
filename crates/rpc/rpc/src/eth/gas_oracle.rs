@@ -73,7 +73,7 @@ pub struct GasPriceOracle<Provider> {
 
 impl<Provider> GasPriceOracle<Provider>
 where
-    Provider: BlockReaderIdExt + 'static,
+    Provider: BlockReaderIdExt,
 {
     /// Creates and returns the [`GasPriceOracle`].
     pub fn new(

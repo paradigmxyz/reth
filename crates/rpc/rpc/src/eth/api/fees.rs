@@ -3,9 +3,12 @@
 use reth_provider::{BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider};
 
 use crate::{
-    eth::{api::LoadFee, cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache},
+    eth::{api::{EthFees, LoadFee}, cache::EthStateCache, gas_oracle::GasPriceOracle,FeeHistoryCache},
     EthApi,
 };
+
+impl<Provider, Pool, Network, EvmConfig> EthFees for EthApi<Provider, Pool, Network, EvmConfig>
+where Self: LoadFee {}
 
 impl<Provider, Pool, Network, EvmConfig> LoadFee for EthApi<Provider, Pool, Network, EvmConfig>
 where

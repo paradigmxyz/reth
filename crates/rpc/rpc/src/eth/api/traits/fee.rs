@@ -17,7 +17,7 @@ use crate::eth::{
 
 /// Fee related functions for the [`EthApiServer`](crate::EthApi) trait in the
 /// `eth_` namespace.
-pub trait EthFee: LoadFee {
+pub trait EthFees: LoadFee {
     /// Returns a suggestion for a gas price for legacy transactions.
     ///
     /// See also: <https://github.com/ethereum/pm/issues/328#issuecomment-853234014>
@@ -53,7 +53,7 @@ pub trait EthFee: LoadFee {
         mut block_count: u64,
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
-    ) -> impl Future<Output = EthResult<FeeHistory>> + Send {
+    ) -> impl Future<Output = EthResult<FeeHistory>> + Send where {
         async move {
             if block_count == 0 {
                 return Ok(FeeHistory::default())
@@ -355,6 +355,6 @@ pub trait LoadFee: Send + Sync + Clone {
     where
         Self: 'static,
     {
-        self.clone().gas_oracle().suggest_tip_cap()
+        self.gas_oracle().suggest_tip_cap()
     }
 }

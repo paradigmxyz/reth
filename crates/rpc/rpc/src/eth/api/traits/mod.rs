@@ -13,7 +13,7 @@ pub mod transaction;
 pub use block::{EthBlocks, LoadBlock};
 pub use blocking_task::SpawnBlocking;
 pub use call::{Call, EthCall, StateCacheDB};
-pub use fee::{EthFee, LoadFee};
+pub use fee::{EthFees, LoadFee};
 pub use pending_block::LoadPendingBlock;
 pub use receipt::BuildReceipt;
 pub use state::{EthState, LoadState};

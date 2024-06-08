@@ -21,7 +21,7 @@ use tracing::trace;
 use crate::{
     eth::{
         api::{
-            BuildReceipt, EthApiSpec, EthBlocks, EthCall, EthFee, EthState, EthTransactions,
+            BuildReceipt, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions,
             SpawnBlocking, Trace,
         },
         error::EthApiError,
@@ -39,7 +39,7 @@ where
         + EthBlocks
         + EthState
         + EthCall
-        + EthFee
+        + EthFees
         + Trace
         + BuildReceipt
         + SpawnBlocking,
@@ -328,19 +328,19 @@ where
     /// Handler for: `eth_gasPrice`
     async fn gas_price(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
-        return Ok(EthFee::gas_price(self).await?)
+        return Ok(EthFees::gas_price(self).await?)
     }
 
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
-        return Ok(EthFee::suggested_priority_fee(self).await?)
+        return Ok(EthFees::suggested_priority_fee(self).await?)
     }
 
     /// Handler for: `eth_blobBaseFee`
     async fn blob_base_fee(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
-        return Ok(EthFee::blob_base_fee(self).await?)
+        return Ok(EthFees::blob_base_fee(self).await?)
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
@@ -360,7 +360,7 @@ where
     ) -> Result<FeeHistory> {
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
         return Ok(
-            EthFee::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?
+            EthFees::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?
         )
     }
 
