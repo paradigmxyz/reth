@@ -17,7 +17,7 @@ use crate::{
 /// A trait that provides a configured RPC server.
 ///
 /// This provides all basic config values for the RPC server and is implemented by the
-/// [`RpcServerArgs`](reth_node_core::args::RpcServerArgs) type.
+/// [`RpcServerArgs`] type.
 pub trait RethRpcServerConfig {
     /// Returns whether ipc is enabled.
     fn is_ipc_enabled(&self) -> bool;
