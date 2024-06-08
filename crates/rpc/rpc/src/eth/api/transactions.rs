@@ -38,7 +38,7 @@ use crate::{
     eth::{
         api::{
             pending_block::PendingBlockEnv, BuildReceipt, EthState, EthTransactions, LoadState,
-            SpawnBlocking, StateCacheDB,
+            RawTransactionForwarder, SpawnBlocking, StateCacheDB,
         },
         cache::EthStateCache,
         error::{EthApiError, EthResult, RpcInvalidTransactionError, SignError},
@@ -86,7 +86,7 @@ where
     }
 
     #[inline]
-    fn raw_tx_forwarder(&self) -> &Option<Arc<dyn crate::eth::traits::RawTransactionForwarder>> {
+    fn raw_tx_forwarder(&self) -> &Option<Arc<dyn RawTransactionForwarder>> {
         self.inner.raw_tx_forwarder()
     }
 

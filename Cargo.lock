@@ -7575,6 +7575,7 @@ dependencies = [
  "alloy-sol-types",
  "assert_matches",
  "async-trait",
+ "auto_impl",
  "derive_more",
  "dyn-clone",
  "futures",

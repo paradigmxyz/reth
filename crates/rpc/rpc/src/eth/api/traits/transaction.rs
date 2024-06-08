@@ -1,7 +1,7 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use reth_evm::ConfigureEvm;
 use reth_primitives::{
@@ -33,7 +33,6 @@ use crate::{
         cache::EthStateCache,
         error::{EthApiError, EthResult},
         revm_utils::{EvmOverrides, FillableTransaction},
-        traits::RawTransactionForwarder,
         utils::recover_raw_transaction,
         TransactionSource,
     },
@@ -791,4 +790,13 @@ pub trait EthTransactions: Send + Sync {
         Setup: FnMut() -> Insp + Send + 'static,
         Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
         R: Send + 'static;
+}
+
+/// A trait that allows for forwarding raw transactions.
+///
+/// For example to a sequencer.
+#[async_trait::async_trait]
+pub trait RawTransactionForwarder: fmt::Debug + Send + Sync + 'static {
+    /// Forwards raw transaction bytes for `eth_sendRawTransaction`
+    async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()>;
 }

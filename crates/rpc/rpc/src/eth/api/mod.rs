@@ -45,10 +45,10 @@ mod state;
 pub mod traits;
 pub mod transactions;
 
-use crate::eth::traits::RawTransactionForwarder;
 pub use receipt::ReceiptBuilder;
 pub use traits::{
-    BuildReceipt, EthBlocks, EthState, EthTransactions, LoadState, SpawnBlocking, StateCacheDB,
+    BuildReceipt, EthBlocks, EthState, EthTransactions, LoadState, RawTransactionForwarder,
+    SpawnBlocking, StateCacheDB,
 };
 pub use transactions::TransactionSource;
 
@@ -56,6 +56,7 @@ pub use transactions::TransactionSource;
 ///
 /// Defines core functionality of the `eth` API implementation.
 #[async_trait]
+#[auto_impl::auto_impl(&, Arc)]
 pub trait EthApiSpec: EthTransactions + Send + Sync {
     /// Returns the current ethereum protocol version.
     async fn protocol_version(&self) -> RethResult<U64>;

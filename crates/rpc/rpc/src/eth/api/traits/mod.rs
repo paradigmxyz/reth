@@ -10,4 +10,4 @@ pub use block::EthBlocks;
 pub use blocking_task::SpawnBlocking;
 pub use receipt::BuildReceipt;
 pub use state::{EthState, LoadState};
-pub use transaction::{EthTransactions, StateCacheDB};
+pub use transaction::{EthTransactions, RawTransactionForwarder, StateCacheDB};
