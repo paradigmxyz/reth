@@ -68,7 +68,7 @@ pub enum StageError {
     Database(#[from] DatabaseError),
     /// Invalid pruning configuration
     #[error(transparent)]
-    PruningConfiguration(#[from] reth_primitives::PruneSegmentError),
+    PruningConfiguration(#[from] reth_prune::PruneSegmentError),
     /// Invalid checkpoint passed to the stage
     #[error("invalid stage checkpoint: {0}")]
     StageCheckpoint(u64),

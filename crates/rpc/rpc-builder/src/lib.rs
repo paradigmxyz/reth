@@ -1016,6 +1016,10 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
         &mut self,
         forwarder: Arc<dyn RawTransactionForwarder>,
     ) {
+        if let Some(eth) = self.eth.as_ref() {
+            // in case the eth api has been created before the forwarder was set: <https://github.com/paradigmxyz/reth/issues/8661>
+            eth.api.set_eth_raw_transaction_forwarder(forwarder.clone());
+        }
         self.eth_raw_transaction_forwarder = Some(forwarder);
     }
 

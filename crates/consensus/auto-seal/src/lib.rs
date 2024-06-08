@@ -260,14 +260,13 @@ impl StorageInner {
     /// transactions.
     pub(crate) fn build_header_template(
         &self,
+        timestamp: u64,
         transactions: &[TransactionSigned],
         ommers: &[Header],
         withdrawals: Option<&Withdrawals>,
         requests: Option<&Requests>,
         chain_spec: Arc<ChainSpec>,
     ) -> Header {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-
         // check previous block for base fee
         let base_fee_per_gas = self.headers.get(&self.best_block).and_then(|parent| {
             parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
@@ -347,8 +346,6 @@ impl StorageInner {
         &mut self,
         transactions: Vec<TransactionSigned>,
         ommers: Vec<Header>,
-        withdrawals: Option<Withdrawals>,
-        requests: Option<Requests>,
         provider: &Provider,
         chain_spec: Arc<ChainSpec>,
         executor: &Executor,
@@ -357,7 +354,17 @@ impl StorageInner {
         Executor: BlockExecutorProvider,
         Provider: StateProviderFactory,
     {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+
+        // if shanghai is active, include empty withdrawals
+        let withdrawals =
+            chain_spec.is_shanghai_active_at_timestamp(timestamp).then_some(Withdrawals::default());
+        // if prague is active, include empty requests
+        let requests =
+            chain_spec.is_prague_active_at_timestamp(timestamp).then_some(Requests::default());
+
         let header = self.build_header_template(
+            timestamp,
             &transactions,
             &ommers,
             withdrawals.as_ref(),
