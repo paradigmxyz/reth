@@ -1,7 +1,7 @@
 use futures::Future;
 use reth_evm::ConfigureEvm;
 use reth_primitives::{revm::env::tx_env_with_recovered, Bytes, TxKind, B256, U256};
-use reth_provider::{StateProvider, StateProviderBox};
+use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
 use reth_rpc_types::{
     state::StateOverride, AccessListWithGasUsed, BlockId, Bundle, EthCallResponse, StateContext,
@@ -33,7 +33,7 @@ pub const MIN_TRANSACTION_GAS: u64 = 21_000u64;
 pub const ESTIMATE_GAS_ERROR_RATIO: f64 = 0.015;
 
 /// Helper alias type for the state's [`CacheDB`]
-pub type StateCacheDB = CacheDB<StateProviderDatabase<StateProviderBox>>;
+pub type StateCacheDB<'a> = CacheDB<StateProviderDatabase<StateProviderObj<'a>>>;
 
 /// Execution related functions for the [`EthApiServer`](crate::EthApi) trait in the
 /// `eth_` namespace.
@@ -84,7 +84,7 @@ pub trait EthCall: Call {
         bundle: Bundle,
         state_context: Option<StateContext>,
         mut state_override: Option<StateOverride>,
-    ) -> impl Future<Output = EthResult<Vec<EthCallResponse>>>
+    ) -> impl Future<Output = EthResult<Vec<EthCallResponse>>> + Send
     where
         Self: LoadState + LoadPendingBlock + LoadBlock + SpawnBlocking,
     {
@@ -568,10 +568,10 @@ pub trait Call {
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
         Self: LoadState,
-        F: FnOnce(StateProviderBox) -> EthResult<T>,
+        F: for<'a> FnOnce(StateProviderObj<'a>) -> EthResult<T>,
     {
         let state = self.state_at_block_id(at)?;
-        f(state)
+        f(StateProviderObj(&state))
     }
 
     /// Returns a handle for reading evm config.
@@ -618,12 +618,12 @@ pub trait Call {
     ) -> impl Future<Output = EthResult<T>> + Send
     where
         Self: LoadState + SpawnBlocking,
-        F: FnOnce(StateProviderBox) -> EthResult<T> + Send + 'static,
+        F: for<'a> FnOnce(StateProviderObj<'a>) -> EthResult<T> + Send + 'static,
         T: Send + 'static,
     {
         self.spawn_tracing(move |this| {
             let state = this.state_at_block_id(at)?;
-            f(state)
+            f(StateProviderObj(&state))
         })
     }
 
@@ -632,7 +632,7 @@ pub trait Call {
     ///
     /// This returns the configured [EnvWithHandlerCfg] for the given [TransactionRequest] at the
     /// given [BlockId] and with configured call settings: `prepare_call_env`.
-    fn spawn_with_call_at<'a, F, R>(
+    fn spawn_with_call_at<F, R>(
         &self,
         request: TransactionRequest,
         at: BlockId,
@@ -641,7 +641,9 @@ pub trait Call {
     ) -> impl Future<Output = EthResult<R>> + Send
     where
         Self: LoadState + SpawnBlocking + LoadPendingBlock,
-        F: FnOnce(&mut StateCacheDB, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
+        F: for<'a, 'b> FnOnce(StateCacheDBMut<'a, 'b>, EnvWithHandlerCfg) -> EthResult<R>
+            + Send
+            + 'static,
         R: Send + 'static,
     {
         async move {
@@ -649,9 +651,7 @@ pub trait Call {
             let this = self.clone();
             self.spawn_tracing(move |_| {
                 let state = this.state_at_block_id(at)?;
-                let mut db = CacheDB::new(StateProviderDatabase::new(
-                    Box::new(state) as Box<dyn StateProvider>
-                ));
+                let mut db = CacheDB::new(StateProviderDatabase::new(StateProviderObj(&state)));
 
                 let env = prepare_call_env(
                     cfg,
@@ -661,7 +661,7 @@ pub trait Call {
                     &mut db,
                     overrides,
                 )?;
-                f(&mut db, env)
+                f(StateCacheDBMut(&mut db), env)
             })
             .await
             .map_err(|_| EthApiError::InternalBlockingTaskError)
@@ -681,10 +681,12 @@ pub trait Call {
         &self,
         hash: B256,
         f: F,
-    ) -> impl Future<Output = EthResult<Option<R>>>
+    ) -> impl Future<Output = EthResult<Option<R>>> + Send
     where
         Self: LoadState + LoadTransaction + LoadBlock + LoadPendingBlock + SpawnBlocking,
-        F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB) -> EthResult<R> + Send + 'static,
+        F: for<'a> FnOnce(TransactionInfo, ResultAndState, StateCacheDB<'a>) -> EthResult<R>
+            + Send
+            + 'static,
         R: Send + 'static,
     {
         async move {
@@ -761,5 +763,161 @@ pub trait Call {
             index += 1;
         }
         Ok(index)
+    }
+}
+
+/// Hack to get around 'higher-ranked' lifetime error, see
+/// <https://github.com/rust-lang/rust/issues/100013>
+pub struct StateProviderObj<'a>(pub &'a dyn StateProvider);
+
+impl<'a> reth_provider::StateRootProvider for StateProviderObj<'a> {
+    fn state_root(
+        &self,
+        bundle_state: &revm::db::BundleState,
+    ) -> reth_errors::ProviderResult<B256> {
+        self.0.state_root(bundle_state)
+    }
+
+    fn state_root_with_updates(
+        &self,
+        bundle_state: &revm::db::BundleState,
+    ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
+        self.0.state_root_with_updates(bundle_state)
+    }
+}
+
+impl<'a> reth_provider::AccountReader for StateProviderObj<'a> {
+    fn basic_account(
+        &self,
+        address: revm_primitives::Address,
+    ) -> reth_errors::ProviderResult<Option<reth_primitives::Account>> {
+        self.0.basic_account(address)
+    }
+}
+
+impl<'a> reth_provider::BlockHashReader for StateProviderObj<'a> {
+    fn block_hash(
+        &self,
+        block_number: reth_primitives::BlockNumber,
+    ) -> reth_errors::ProviderResult<Option<B256>> {
+        self.0.block_hash(block_number)
+    }
+
+    fn canonical_hashes_range(
+        &self,
+        start: reth_primitives::BlockNumber,
+        end: reth_primitives::BlockNumber,
+    ) -> reth_errors::ProviderResult<Vec<B256>> {
+        self.0.canonical_hashes_range(start, end)
+    }
+
+    fn convert_block_hash(
+        &self,
+        hash_or_number: reth_rpc_types::BlockHashOrNumber,
+    ) -> reth_errors::ProviderResult<Option<B256>> {
+        self.0.convert_block_hash(hash_or_number)
+    }
+}
+
+impl<'a> StateProvider for StateProviderObj<'a> {
+    fn account_balance(
+        &self,
+        addr: revm_primitives::Address,
+    ) -> reth_errors::ProviderResult<Option<U256>> {
+        self.0.account_balance(addr)
+    }
+
+    fn account_code(
+        &self,
+        addr: revm_primitives::Address,
+    ) -> reth_errors::ProviderResult<Option<reth_primitives::Bytecode>> {
+        self.0.account_code(addr)
+    }
+
+    fn account_nonce(
+        &self,
+        addr: revm_primitives::Address,
+    ) -> reth_errors::ProviderResult<Option<u64>> {
+        self.0.account_nonce(addr)
+    }
+
+    fn bytecode_by_hash(
+        &self,
+        code_hash: B256,
+    ) -> reth_errors::ProviderResult<Option<reth_primitives::Bytecode>> {
+        self.0.bytecode_by_hash(code_hash)
+    }
+
+    fn proof(
+        &self,
+        address: revm_primitives::Address,
+        keys: &[B256],
+    ) -> reth_errors::ProviderResult<reth_primitives::trie::AccountProof> {
+        self.0.proof(address, keys)
+    }
+
+    fn storage(
+        &self,
+        account: revm_primitives::Address,
+        storage_key: reth_primitives::StorageKey,
+    ) -> reth_errors::ProviderResult<Option<reth_primitives::StorageValue>> {
+        self.0.storage(account, storage_key)
+    }
+}
+
+/// Hack to get around 'higher-ranked' lifetime error, see
+/// <https://github.com/rust-lang/rust/issues/100013>
+pub struct StateCacheDBMut<'a, 'b>(pub &'b mut StateCacheDB<'a>);
+
+impl<'a, 'b> Database for StateCacheDBMut<'a, 'b> {
+    type Error = <StateCacheDB<'a> as Database>::Error;
+    fn basic(
+        &mut self,
+        address: revm_primitives::Address,
+    ) -> Result<Option<revm_primitives::AccountInfo>, Self::Error> {
+        self.0.basic(address)
+    }
+
+    fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
+        self.0.block_hash(number)
+    }
+
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<revm_primitives::Bytecode, Self::Error> {
+        self.0.code_by_hash(code_hash)
+    }
+
+    fn storage(
+        &mut self,
+        address: revm_primitives::Address,
+        index: U256,
+    ) -> Result<U256, Self::Error> {
+        self.0.storage(address, index)
+    }
+}
+
+impl<'a, 'b> DatabaseRef for StateCacheDBMut<'a, 'b> {
+    type Error = <StateCacheDB<'a> as Database>::Error;
+
+    fn basic_ref(
+        &self,
+        address: revm_primitives::Address,
+    ) -> Result<Option<revm_primitives::AccountInfo>, Self::Error> {
+        self.0.basic_ref(address)
+    }
+
+    fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
+        self.0.block_hash_ref(number)
+    }
+
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<revm_primitives::Bytecode, Self::Error> {
+        self.0.code_by_hash_ref(code_hash)
+    }
+
+    fn storage_ref(
+        &self,
+        address: revm_primitives::Address,
+        index: U256,
+    ) -> Result<U256, Self::Error> {
+        self.0.storage_ref(address, index)
     }
 }
