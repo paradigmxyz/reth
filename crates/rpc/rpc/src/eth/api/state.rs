@@ -13,7 +13,7 @@ where
     Pool: TransactionPool,
 {
     #[inline]
-    fn pool(&self) -> &impl TransactionPool {
+    fn pool(&self) -> impl TransactionPool {
         self.inner.pool()
     }
 }
@@ -22,7 +22,7 @@ impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Ne
 where
     Provider: StateProviderFactory,
 {
-    fn provider(&self) -> &impl StateProviderFactory {
+    fn provider(&self) -> impl StateProviderFactory {
         &self.inner.provider
     }
 }

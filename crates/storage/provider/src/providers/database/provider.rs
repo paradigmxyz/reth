@@ -6,11 +6,11 @@ use crate::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
-    Chain, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
-    HeaderSyncMode, HistoricalStateProvider, HistoryWriter, LatestStateProvider,
-    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter,
-    RequestsProvider, StageCheckpointReader, StateProviderBox, StateWriter, StatsReader,
-    StorageReader, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
+    Chain, EvmEnvProvider, FinalizedBlockReader, FinalizedBlockWriter, HashingWriter,
+    HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode, HistoricalStateProvider,
+    HistoryWriter, LatestStateProvider, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, RequestsProvider, StageCheckpointReader, StateProviderBox, StateWriter,
+    StatsReader, StorageReader, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
     WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
@@ -35,12 +35,12 @@ use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, GotExpected, Head, Header, PruneCheckpoint, PruneLimiter, PruneModes,
-    PruneSegment, Receipt, Requests, SealedBlock, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, StorageEntry, TransactionMeta, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
-    Withdrawals, B256, U256,
+    ChainInfo, ChainSpec, GotExpected, Head, Header, Receipt, Requests, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta,
+    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
+    Withdrawal, Withdrawals, B256, U256,
 };
+use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneModes, PruneSegment};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
@@ -2750,6 +2750,30 @@ impl<TX: DbTx> StatsReader for DatabaseProvider<TX> {
         };
 
         Ok(db_entries + static_file_entries)
+    }
+}
+
+impl<TX: DbTx> FinalizedBlockReader for DatabaseProvider<TX> {
+    fn last_finalized_block_number(&self) -> ProviderResult<BlockNumber> {
+        let mut finalized_blocks = self
+            .tx
+            .cursor_read::<tables::ChainState>()?
+            .walk(Some(tables::ChainStateKey::LastFinalizedBlock))?
+            .take(1)
+            .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
+
+        let last_finalized_block_number = finalized_blocks
+            .pop_first()
+            .unwrap_or((tables::ChainStateKey::LastFinalizedBlock, 0_u64));
+        Ok(last_finalized_block_number.1)
+    }
+}
+
+impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
+    fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
+        Ok(self
+            .tx
+            .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, block_number)?)
     }
 }
 

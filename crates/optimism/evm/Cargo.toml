@@ -17,6 +17,7 @@ reth-primitives.workspace = true
 reth-revm.workspace = true
 reth-execution-errors.workspace = true
 reth-provider.workspace = true
+reth-prune-types.workspace = true
 reth-consensus-common.workspace = true
 
 # Optimism

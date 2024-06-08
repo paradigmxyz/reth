@@ -1,7 +1,7 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use reth_evm::ConfigureEvm;
 use reth_primitives::{
@@ -33,7 +33,6 @@ use crate::{
         cache::EthStateCache,
         error::{EthApiError, EthResult},
         revm_utils::{EvmOverrides, FillableTransaction},
-        traits::RawTransactionForwarder,
         utils::recover_raw_transaction,
         TransactionSource,
     },
@@ -75,7 +74,7 @@ pub trait EthTransactions: Send + Sync {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> &impl BlockReaderIdExt;
+    fn provider(&self) -> impl BlockReaderIdExt;
 
     /// Returns a handle for reading data from memory.
     ///
@@ -90,7 +89,7 @@ pub trait EthTransactions: Send + Sync {
     /// Returns a handle for forwarding received raw transactions.
     ///
     /// Access to transaction forwarder in default (L1) trait method implementations.
-    fn raw_tx_forwarder(&self) -> &Option<Arc<dyn RawTransactionForwarder>>;
+    fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>>;
 
     /// Returns a handle for reading evm config.
     ///
@@ -448,7 +447,7 @@ pub trait EthTransactions: Send + Sync {
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<B256> {
         // On optimism, transactions are forwarded directly to the sequencer to be included in
         // blocks that it builds.
-        if let Some(client) = self.raw_tx_forwarder().as_ref() {
+        if let Some(client) = self.raw_tx_forwarder() {
             tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
             client.forward_raw_transaction(&tx).await?;
         }
@@ -791,4 +790,13 @@ pub trait EthTransactions: Send + Sync {
         Setup: FnMut() -> Insp + Send + 'static,
         Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
         R: Send + 'static;
+}
+
+/// A trait that allows for forwarding raw transactions.
+///
+/// For example to a sequencer.
+#[async_trait::async_trait]
+pub trait RawTransactionForwarder: fmt::Debug + Send + Sync + 'static {
+    /// Forwards raw transaction bytes for `eth_sendRawTransaction`
+    async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()>;
 }

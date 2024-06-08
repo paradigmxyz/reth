@@ -12,7 +12,7 @@ pub trait SpawnBlocking: Clone + Send + Sync + 'static {
     /// Returns a handle for spawning IO heavy blocking tasks.
     ///
     /// Runtime access in default trait method implementations.
-    fn io_task_spawner(&self) -> &dyn TaskSpawner;
+    fn io_task_spawner(&self) -> impl TaskSpawner;
 
     /// Returns a handle for spawning CPU heavy blocking tasks.
     ///

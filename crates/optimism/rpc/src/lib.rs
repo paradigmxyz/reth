@@ -21,6 +21,7 @@ pub mod transaction;
 /// This type provides OP specific extension of default functionality for handling `eth_` related
 /// requests. See [`EthApi`](reth_rpc::EthApi) for the default L1 implementation.
 #[allow(missing_debug_implementations)]
+#[allow(dead_code)]
 pub struct OptimismApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,

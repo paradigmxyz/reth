@@ -8,8 +8,9 @@ use reth_codecs::{main_codec, Compact};
 use reth_primitives::{
     stage::StageCheckpoint,
     trie::{StoredNibbles, StoredNibblesSubKey, *},
-    Address, PruneSegment, B256, *,
+    Address, B256, *,
 };
+use reth_prune_types::{PruneCheckpoint, PruneSegment};
 
 pub mod accounts;
 pub mod blocks;
@@ -305,9 +306,10 @@ mod tests {
             ExecutionCheckpoint, HeadersCheckpoint, IndexHistoryCheckpoint, StageCheckpoint,
             StageUnitCheckpoint, StorageHashingCheckpoint,
         },
-        Account, Header, PruneCheckpoint, PruneMode, PruneSegment, Receipt, ReceiptWithBloom,
-        SealedHeader, TxEip1559, TxEip2930, TxEip4844, TxLegacy, Withdrawals,
+        Account, Header, Receipt, ReceiptWithBloom, SealedHeader, TxEip1559, TxEip2930, TxEip4844,
+        TxLegacy, Withdrawals,
     };
+    use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
 
     // each value in the database has an extra field named flags that encodes metadata about other
     // fields in the value, e.g. offset and length.
