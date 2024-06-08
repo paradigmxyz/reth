@@ -350,7 +350,7 @@ where
         &self,
         block_id: BlockId,
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
-        let traces = self.inner.eth_api.trace_block(
+        let traces = self.inner.eth_api.trace_block_with(
             block_id,
             TracingInspectorConfig::default_parity(),
             |tx_info, inspector, res, _, _| {
@@ -413,7 +413,7 @@ where
     ) -> EthResult<Option<Vec<TraceResultsWithTransactionHash>>> {
         self.inner
             .eth_api
-            .trace_block(
+            .trace_block_with(
                 block_id,
                 TracingInspectorConfig::from_parity_config(&trace_types),
                 move |tx_info, inspector, res, state, db| {
