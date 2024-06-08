@@ -20,7 +20,7 @@ use reth_provider::{
     providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
-use reth_rpc_builder::config::RethRpcConfig;
+use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{sets::DefaultStages, Pipeline};
 use reth_static_file::StaticFileProducer;

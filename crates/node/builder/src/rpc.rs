@@ -7,7 +7,7 @@ use reth_node_core::{node_config::NodeConfig, rpc::api::EngineApiServer};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
-    config::RethRpcConfig,
+    config::RethRpcServerConfig,
     RethModuleRegistry, RpcModuleBuilder, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_layer::JwtSecret;

@@ -18,7 +18,7 @@ use crate::{
 ///
 /// This provides all basic config values for the RPC server and is implemented by the
 /// [`RpcServerArgs`](crate::args::RpcServerArgs) type.
-pub trait RethRpcConfig {
+pub trait RethRpcServerConfig {
     /// Returns whether ipc is enabled.
     fn is_ipc_enabled(&self) -> bool;
 
@@ -79,7 +79,7 @@ pub trait RethRpcConfig {
     fn rpc_secret_key(&self) -> Option<JwtSecret>;
 }
 
-impl RethRpcConfig for RpcServerArgs {
+impl RethRpcServerConfig for RpcServerArgs {
     fn is_ipc_enabled(&self) -> bool {
         // By default IPC is enabled therefore it is enabled if the `ipcdisable` is false.
         !self.ipcdisable
