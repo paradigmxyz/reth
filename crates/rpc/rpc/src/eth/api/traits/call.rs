@@ -574,7 +574,7 @@ pub trait Call {
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
         Self: LoadState,
-        F: for<'a> FnOnce(StateProviderTraitObjWrapper<'a>) -> EthResult<T>,
+        F: FnOnce(StateProviderTraitObjWrapper<'_>) -> EthResult<T>,
     {
         let state = self.state_at_block_id(at)?;
         f(StateProviderTraitObjWrapper(&state))
@@ -624,7 +624,7 @@ pub trait Call {
     ) -> impl Future<Output = EthResult<T>> + Send
     where
         Self: LoadState + SpawnBlocking,
-        F: for<'a> FnOnce(StateProviderTraitObjWrapper<'a>) -> EthResult<T> + Send + 'static,
+        F: FnOnce(StateProviderTraitObjWrapper<'_>) -> EthResult<T> + Send + 'static,
         T: Send + 'static,
     {
         self.spawn_tracing(move |this| {
@@ -647,7 +647,7 @@ pub trait Call {
     ) -> impl Future<Output = EthResult<R>> + Send
     where
         Self: LoadState + SpawnBlocking + LoadPendingBlock,
-        F: for<'a, 'b> FnOnce(StateCacheDBRefMutWrapper<'a, 'b>, EnvWithHandlerCfg) -> EthResult<R>
+        F: FnOnce(StateCacheDBRefMutWrapper<'_, '_>, EnvWithHandlerCfg) -> EthResult<R>
             + Send
             + 'static,
         R: Send + 'static,
@@ -692,7 +692,7 @@ pub trait Call {
     ) -> impl Future<Output = EthResult<Option<R>>> + Send
     where
         Self: LoadState + LoadTransaction + LoadBlock + LoadPendingBlock + SpawnBlocking,
-        F: for<'a> FnOnce(TransactionInfo, ResultAndState, StateCacheDB<'a>) -> EthResult<R>
+        F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB<'_>) -> EthResult<R>
             + Send
             + 'static,
         R: Send + 'static,

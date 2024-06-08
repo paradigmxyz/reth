@@ -109,7 +109,7 @@ pub trait Trace {
     ) -> impl Future<Output = EthResult<R>> + Send
     where
         Self: LoadState + SpawnBlocking + Call,
-        F: for<'a> FnOnce(TracingInspector, ResultAndState, StateCacheDB<'a>) -> EthResult<R>
+        F: FnOnce(TracingInspector, ResultAndState, StateCacheDB<'_>) -> EthResult<R>
             + Send
             + 'static,
         R: Send + 'static,
@@ -140,11 +140,11 @@ pub trait Trace {
     ) -> impl Future<Output = EthResult<Option<R>>> + Send
     where
         Self: LoadState + LoadTransaction + LoadPendingBlock + Call + SpawnBlocking,
-        F: for<'a> FnOnce(
+        F: FnOnce(
                 TransactionInfo,
                 TracingInspector,
                 ResultAndState,
-                StateCacheDB<'a>,
+                StateCacheDB<'_>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -170,7 +170,7 @@ pub trait Trace {
     ) -> impl Future<Output = EthResult<Option<R>>> + Send
     where
         Self: LoadState + LoadTransaction + LoadPendingBlock + Call + SpawnBlocking,
-        F: for<'a> FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDB<'a>) -> EthResult<R>
+        F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDB<'_>) -> EthResult<R>
             + Send
             + 'static,
         Insp: for<'a, 'b> Inspector<StateCacheDBRefMutWrapper<'a, 'b>> + Send + 'static,
@@ -229,12 +229,12 @@ pub trait Trace {
     ) -> impl Future<Output = EthResult<Option<Vec<R>>>> + Send
     where
         Self: LoadState + LoadPendingBlock + LoadBlock + SpawnBlocking,
-        F: for<'a, 'b, 'c> Fn(
+        F: Fn(
                 TransactionInfo,
                 TracingInspector,
                 ExecutionResult,
-                &'a EvmState,
-                &'c StateCacheDB<'b>,
+                &EvmState,
+                &StateCacheDB<'_>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -267,13 +267,7 @@ pub trait Trace {
     ) -> impl Future<Output = EthResult<Option<Vec<R>>>> + Send
     where
         Self: LoadState + LoadPendingBlock + LoadBlock + SpawnBlocking,
-        F: for<'a, 'b, 'c> Fn(
-                TransactionInfo,
-                Insp,
-                ExecutionResult,
-                &'a EvmState,
-                &'c StateCacheDB<'b>,
-            ) -> EthResult<R>
+        F: Fn(TransactionInfo, Insp, ExecutionResult, &EvmState, &StateCacheDB<'_>) -> EthResult<R>
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
@@ -375,12 +369,12 @@ pub trait Trace {
         Self: LoadState + LoadPendingBlock + LoadBlock + SpawnBlocking,
         // This is the callback that's invoked for each transaction with the inspector, the result,
         // state and db
-        F: for<'a, 'b, 'c> Fn(
+        F: Fn(
                 TransactionInfo,
                 TracingInspector,
                 ExecutionResult,
-                &'a EvmState,
-                &'c StateCacheDB<'b>,
+                &EvmState,
+                &StateCacheDB<'_>,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -413,13 +407,7 @@ pub trait Trace {
         Self: LoadState + LoadPendingBlock + LoadBlock + SpawnBlocking,
         // This is the callback that's invoked for each transaction with the inspector, the result,
         // state and db
-        F: for<'a, 'b, 'c> Fn(
-                TransactionInfo,
-                Insp,
-                ExecutionResult,
-                &'a EvmState,
-                &'c StateCacheDB<'b>,
-            ) -> EthResult<R>
+        F: Fn(TransactionInfo, Insp, ExecutionResult, &EvmState, &StateCacheDB<'_>) -> EthResult<R>
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
