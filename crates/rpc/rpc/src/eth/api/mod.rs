@@ -500,7 +500,7 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 
     /// Returns a handle to the transaction forwarder.
     #[inline]
-    pub const fn raw_tx_forwarder(&self) -> &Option<Arc<dyn RawTransactionForwarder>> {
-        &self.raw_transaction_forwarder
+    pub fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
+        self.raw_transaction_forwarder.read().clone()
     }
 }

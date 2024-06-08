@@ -89,7 +89,7 @@ pub trait EthTransactions: Send + Sync {
     /// Returns a handle for forwarding received raw transactions.
     ///
     /// Access to transaction forwarder in default (L1) trait method implementations.
-    fn raw_tx_forwarder(&self) -> &Option<Arc<dyn RawTransactionForwarder>>;
+    fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>>;
 
     /// Returns a handle for reading evm config.
     ///
@@ -447,7 +447,7 @@ pub trait EthTransactions: Send + Sync {
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<B256> {
         // On optimism, transactions are forwarded directly to the sequencer to be included in
         // blocks that it builds.
-        if let Some(client) = self.raw_tx_forwarder().as_ref() {
+        if let Some(client) = self.raw_tx_forwarder() {
             tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
             client.forward_raw_transaction(&tx).await?;
         }

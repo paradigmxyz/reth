@@ -86,7 +86,7 @@ where
     }
 
     #[inline]
-    fn raw_tx_forwarder(&self) -> &Option<Arc<dyn RawTransactionForwarder>> {
+    fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
         self.inner.raw_tx_forwarder()
     }
 
