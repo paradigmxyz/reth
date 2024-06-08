@@ -10,7 +10,7 @@ use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, Variant
 /// Create a [`RpcModuleSelection`] from a selection.
 ///
 /// ```
-/// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
+/// use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 /// let config: RpcModuleSelection = vec![RethRpcModule::Eth].into();
 /// ```
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
@@ -59,7 +59,7 @@ impl RpcModuleSelection {
     /// Create a selection from the [`RethRpcModule`] string identifiers
     ///
     /// ```
-    /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
+    /// use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
     /// let selection = vec!["eth", "admin"];
     /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
     /// assert_eq!(config, RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]));
@@ -68,7 +68,7 @@ impl RpcModuleSelection {
     /// Create a unique selection from the [`RethRpcModule`] string identifiers
     ///
     /// ```
-    /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
+    /// use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
     /// let selection = vec!["eth", "admin", "eth", "admin"];
     /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
     /// assert_eq!(config, RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]));

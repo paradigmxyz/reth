@@ -191,8 +191,8 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
-pub use reth_rpc_server_types::constants;
-use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
+use reth_rpc_server_types::RpcModuleSelection;
+pub use reth_rpc_server_types::{constants, RethRpcModule};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
