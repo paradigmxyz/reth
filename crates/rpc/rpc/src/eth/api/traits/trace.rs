@@ -359,7 +359,7 @@ pub trait Trace {
     /// 4. calls the callback with the transaction info, the execution result, the changed state
     ///    _after_ the transaction [`StateProviderDatabase`] and the database that points to the
     ///    state right _before_ the transaction.
-    fn trace_block<F, R>(
+    fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,
         config: TracingInspectorConfig,
