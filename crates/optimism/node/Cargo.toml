@@ -30,6 +30,7 @@ reth-revm.workspace = true
 reth-evm-optimism.workspace = true
 reth-beacon-consensus.workspace = true
 revm-primitives.workspace = true
+reth-discv5.workspace = true
 
 # async
 async-trait.workspace = true
