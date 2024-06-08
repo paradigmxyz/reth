@@ -13,7 +13,7 @@ where
     Provider: BlockReaderIdExt + HeaderProvider + ChainSpecProvider,
 {
     #[inline]
-    fn provider(&self) -> &(impl BlockIdReader + HeaderProvider + ChainSpecProvider) {
+    fn provider(&self) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider {
         self.inner.provider()
     }
 

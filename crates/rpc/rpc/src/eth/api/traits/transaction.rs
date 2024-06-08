@@ -1,7 +1,7 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use futures::Future;
 use reth_primitives::{
@@ -26,7 +26,6 @@ use crate::eth::{
     cache::EthStateCache,
     error::{EthApiError, EthResult, SignError},
     signer::EthSigner,
-    traits::RawTransactionForwarder,
     utils::recover_raw_transaction,
     TransactionSource,
 };
@@ -58,12 +57,12 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> &impl BlockReaderIdExt;
+    fn provider(&self) -> impl BlockReaderIdExt;
 
     /// Returns a handle for forwarding received raw transactions.
     ///
     /// Access to transaction forwarder in default (L1) trait method implementations.
-    fn raw_tx_forwarder(&self) -> &Option<Arc<dyn RawTransactionForwarder>>;
+    fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>>;
 
     /// Returns a handle for signing data.
     ///
@@ -576,4 +575,13 @@ pub trait LoadTransaction {
             Ok(block.map(|block| (transaction, block.seal(block_hash))))
         }
     }
+}
+
+/// A trait that allows for forwarding raw transactions.
+///
+/// For example to a sequencer.
+#[async_trait::async_trait]
+pub trait RawTransactionForwarder: fmt::Debug + Send + Sync + 'static {
+    /// Forwards raw transaction bytes for `eth_sendRawTransaction`
+    async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()>;
 }

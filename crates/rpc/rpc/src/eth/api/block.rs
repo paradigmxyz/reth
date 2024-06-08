@@ -1,13 +1,5 @@
 //! Contains RPC handler implementations specific to blocks.
 
-use crate::{
-    eth::{
-        cache::EthStateCache,
-        error::{EthApiError, EthResult},
-    },
-    EthApi,
-};
-
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_primitives::BlockId;
@@ -16,9 +8,14 @@ use reth_rpc_types::{Header, Index, RichBlock};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 use reth_transaction_pool::TransactionPool;
 
-use crate::eth::api::{EthBlocks, LoadPendingBlock};
-
-use super::LoadBlock;
+use crate::{
+    eth::{
+        api::{EthBlocks, LoadBlock, LoadPendingBlock},
+        cache::EthStateCache,
+        error::{EthApiError, EthResult},
+    },
+    EthApi,
+};
 
 impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig> where
     Self: LoadBlock
@@ -31,7 +28,7 @@ where
     Provider: BlockReaderIdExt,
 {
     #[inline]
-    fn provider(&self) -> &impl BlockReaderIdExt {
+    fn provider(&self) -> impl BlockReaderIdExt {
         self.inner.provider()
     }
 

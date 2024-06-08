@@ -22,18 +22,19 @@ use crate::eth::{
 };
 
 /// Loads a pending block from database.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait LoadPendingBlock {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
     fn provider(
         &self,
-    ) -> &(impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory);
+    ) -> impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory;
 
     /// Returns a handle for reading data from transaction pool.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn pool(&self) -> &impl TransactionPool;
+    fn pool(&self) -> impl TransactionPool;
 
     /// Returns a handle to the pending block.
     ///
@@ -127,7 +128,7 @@ pub trait LoadPendingBlock {
             let pending_block = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
-                    pending.build_block(this.provider(), this.pool())
+                    pending.build_block(&this.provider(), &this.pool())
                 })
                 .await
             {

@@ -51,12 +51,12 @@ where
     #[inline]
     fn provider(
         &self,
-    ) -> &(impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory) {
+    ) -> impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory {
         self.inner.provider()
     }
 
     #[inline]
-    fn pool(&self) -> &impl TransactionPool {
+    fn pool(&self) -> impl TransactionPool {
         self.inner.pool()
     }
 

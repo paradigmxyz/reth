@@ -228,7 +228,7 @@ pub trait LoadFee: Send + Sync + Clone {
     // Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> &(impl BlockIdReader + HeaderProvider + ChainSpecProvider);
+    fn provider(&self) -> impl BlockIdReader + HeaderProvider + ChainSpecProvider;
 
     /// Returns a handle for reading data from memory.
     ///

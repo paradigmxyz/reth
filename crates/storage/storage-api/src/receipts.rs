@@ -38,6 +38,7 @@ pub trait ReceiptProvider: Send + Sync {
 /// so this trait can only be implemented for types that implement `BlockIdReader`. The
 /// `BlockIdReader` methods should be used to resolve `BlockId`s to block numbers or hashes, and
 /// retrieving the receipts should be done using the type's `ReceiptProvider` methods.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdReader {
     /// Get receipt by block id
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {

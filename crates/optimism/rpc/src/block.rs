@@ -72,7 +72,7 @@ where
     Provider: BlockReaderIdExt,
 {
     #[inline]
-    fn provider(&self) -> &impl BlockReaderIdExt {
+    fn provider(&self) -> impl BlockReaderIdExt {
         self.inner.provider()
     }
 

@@ -25,7 +25,7 @@ pub trait EthState: LoadState + SpawnBlocking {
     /// Returns a handle for reading data from transaction pool.
     ///
     /// Data access in default trait method implementations.
-    fn pool(&self) -> &impl TransactionPool;
+    fn pool(&self) -> impl TransactionPool;
 
     /// Returns the number of transactions sent from an address at the given block identifier.
     ///
@@ -142,7 +142,7 @@ pub trait LoadState {
     /// Returns a handle for reading state from database.
     ///
     /// Data access in default trait method implementations.
-    fn provider(&self) -> &impl StateProviderFactory;
+    fn provider(&self) -> impl StateProviderFactory;
 
     /// Returns a handle for reading data from memory.
     ///

@@ -16,7 +16,7 @@ where
     Pool: TransactionPool,
 {
     #[inline]
-    fn pool(&self) -> &impl TransactionPool {
+    fn pool(&self) -> impl TransactionPool {
         self.inner.pool()
     }
 }
@@ -26,7 +26,7 @@ where
     Provider: StateProviderFactory,
 {
     #[inline]
-    fn provider(&self) -> &impl StateProviderFactory {
+    fn provider(&self) -> impl StateProviderFactory {
         &self.inner.provider
     }
 

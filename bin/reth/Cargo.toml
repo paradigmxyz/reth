@@ -44,6 +44,7 @@ reth-tracing.workspace = true
 reth-tasks.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
 reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
@@ -62,6 +63,7 @@ reth-node-builder.workspace = true
 reth-node-events.workspace = true
 reth-consensus.workspace = true
 reth-optimism-primitives.workspace = true
+reth-prune-types.workspace = true
 
 # crypto
 alloy-rlp.workspace = true

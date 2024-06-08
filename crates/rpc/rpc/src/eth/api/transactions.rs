@@ -15,7 +15,7 @@ use reth_transaction_pool::TransactionPool;
 
 use crate::{
     eth::{
-        api::{BuildReceipt, EthTransactions, LoadBlock, LoadTransaction},
+        api::{BuildReceipt, EthTransactions, LoadBlock, LoadTransaction, RawTransactionForwarder},
         cache::EthStateCache,
         error::EthResult,
         revm_utils::FillableTransaction,
@@ -63,12 +63,12 @@ where
     EvmConfig: ConfigureEvm,
 {
     #[inline]
-    fn provider(&self) -> &impl BlockReaderIdExt {
+    fn provider(&self) -> impl BlockReaderIdExt {
         self.inner.provider()
     }
 
     #[inline]
-    fn raw_tx_forwarder(&self) -> &Option<Arc<dyn crate::eth::traits::RawTransactionForwarder>> {
+    fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
         self.inner.raw_tx_forwarder()
     }
 

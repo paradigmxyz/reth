@@ -2,9 +2,8 @@
 
 use clap::Args;
 use reth_config::config::PruneConfig;
-use reth_primitives::{
-    ChainSpec, PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE,
-};
+use reth_primitives::ChainSpec;
+use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
 
 /// Parameters for pruning and full node
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]

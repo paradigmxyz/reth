@@ -18,4 +18,4 @@ pub use pending_block::LoadPendingBlock;
 pub use receipt::BuildReceipt;
 pub use state::{EthState, LoadState};
 pub use trace::{EthTrace, Trace};
-pub use transaction::{EthTransactions, LoadTransaction};
+pub use transaction::{EthTransactions, LoadTransaction, RawTransactionForwarder};

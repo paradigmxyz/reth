@@ -12,6 +12,7 @@ use crate::eth::{
 };
 
 /// Assembles transaction receipt data w.r.t to network.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait BuildReceipt {
     /// Returns a handle for reading data from memory.
     ///

@@ -4,11 +4,12 @@ use reth_db::tables;
 use reth_db_api::{database::Database, models::ShardedKey, table::Decode, transaction::DbTxMut};
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
-    Address, PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment,
+    Address,
 };
 use reth_provider::{
     DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
 };
+use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::fmt::Debug;
 use tracing::info;

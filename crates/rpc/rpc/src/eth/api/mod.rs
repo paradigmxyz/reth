@@ -32,12 +32,12 @@ pub mod trace;
 pub mod traits;
 pub mod transactions;
 
-use crate::eth::traits::RawTransactionForwarder;
 pub use pending_block::PendingBlock;
 pub use receipt::ReceiptBuilder;
 pub use traits::{
     BuildReceipt, Call, EthBlocks, EthCall, EthFee, EthState, EthTrace, EthTransactions, LoadBlock,
-    LoadFee, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, StateCacheDB, Trace,
+    LoadFee, LoadPendingBlock, LoadState, LoadTransaction, RawTransactionForwarder, SpawnBlocking,
+    StateCacheDB, Trace,
 };
 pub use transactions::TransactionSource;
 
@@ -45,6 +45,7 @@ pub use transactions::TransactionSource;
 ///
 /// Defines core functionality of the `eth` API implementation.
 #[async_trait]
+#[auto_impl::auto_impl(&, Arc)]
 pub trait EthApiSpec: EthTransactions + Send + Sync {
     /// Returns the current ethereum protocol version.
     async fn protocol_version(&self) -> RethResult<U64>;
@@ -76,6 +77,15 @@ pub trait EthApiSpec: EthTransactions + Send + Sync {
 pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
+}
+
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
+    /// Sets a forwarder for `eth_sendRawTransaction`
+    ///
+    /// Note: this might be removed in the future in favor of a more generic approach.
+    pub fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
+        self.inner.raw_transaction_forwarder.write().replace(forwarder);
+    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
@@ -148,7 +158,7 @@ where
             blocking_task_pool,
             fee_history_cache,
             evm_config,
-            raw_transaction_forwarder,
+            raw_transaction_forwarder: parking_lot::RwLock::new(raw_transaction_forwarder),
         };
 
         Self { inner: Arc::new(inner) }
@@ -264,7 +274,7 @@ impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
 where
     Self: Send + Sync + 'static,
 {
-    fn io_task_spawner(&self) -> &dyn TaskSpawner {
+    fn io_task_spawner(&self) -> impl TaskSpawner {
         self.inner.task_spawner()
     }
 
@@ -332,7 +342,7 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// The type that defines how to configure the EVM
     evm_config: EvmConfig,
     /// Allows forwarding received raw transactions
-    raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+    raw_transaction_forwarder: parking_lot::RwLock<Option<Arc<dyn RawTransactionForwarder>>>,
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig> {
@@ -380,8 +390,8 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 
     /// Returns a handle to the transaction forwarder.
     #[inline]
-    pub const fn raw_tx_forwarder(&self) -> &Option<Arc<dyn RawTransactionForwarder>> {
-        &self.raw_transaction_forwarder
+    pub fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
+        self.raw_transaction_forwarder.read().clone()
     }
 
     /// Returns the gas cap.

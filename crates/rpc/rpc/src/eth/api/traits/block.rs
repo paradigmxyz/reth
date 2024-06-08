@@ -8,12 +8,10 @@ use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt};
 use reth_rpc_types::AnyTransactionReceipt;
 
 use crate::eth::{
-    api::{BuildReceipt, LoadPendingBlock, ReceiptBuilder},
+    api::{BuildReceipt, LoadPendingBlock, ReceiptBuilder, SpawnBlocking},
     cache::EthStateCache,
     error::EthResult,
 };
-
-use super::SpawnBlocking;
 
 /// Block related functions for the [`EthApiServer`](crate::EthApi) trait in the
 /// `eth_` namespace.
@@ -70,7 +68,7 @@ pub trait LoadBlock: Send + Sync {
     // Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> &impl BlockReaderIdExt;
+    fn provider(&self) -> impl BlockReaderIdExt;
 
     /// Returns a handle for reading data from memory.
     ///

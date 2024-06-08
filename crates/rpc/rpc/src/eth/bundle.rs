@@ -1,11 +1,7 @@
 //! `Eth` bundle implementation and helpers.
 
-use crate::eth::{
-    api::{Call, EthTransactions, SpawnBlocking},
-    error::{EthApiError, EthResult, RpcInvalidTransactionError},
-    revm_utils::FillableTransaction,
-    utils::recover_raw_transaction,
-};
+use std::sync::Arc;
+
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{
     constants::eip4844::MAINNET_KZG_TRUSTED_SETUP,
@@ -22,9 +18,13 @@ use revm::{
     primitives::{ResultAndState, TxEnv},
 };
 use revm_primitives::{EnvWithHandlerCfg, MAX_BLOB_GAS_PER_BLOCK};
-use std::sync::Arc;
 
-use super::api::{LoadPendingBlock, LoadState};
+use crate::eth::{
+    api::{Call, EthTransactions, LoadPendingBlock, LoadState, SpawnBlocking},
+    error::{EthApiError, EthResult, RpcInvalidTransactionError},
+    revm_utils::FillableTransaction,
+    utils::recover_raw_transaction,
+};
 
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
