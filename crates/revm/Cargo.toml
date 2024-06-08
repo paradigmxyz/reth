@@ -17,6 +17,7 @@ reth-primitives.workspace = true
 reth-storage-errors.workspace = true
 reth-execution-errors.workspace = true
 reth-consensus-common.workspace = true
+reth-prune-types.workspace = true
 reth-storage-api.workspace = true
 reth-trie = { workspace = true, optional = true }
 

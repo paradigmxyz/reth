@@ -1,11 +1,10 @@
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
-use reth_db::{
+use reth_db::{tables, RawKey, RawTable, RawValue};
+use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
 use reth_primitives::{
@@ -64,7 +63,7 @@ impl AccountHashingStage {
         provider: &DatabaseProviderRW<DB>,
         opts: SeedOpts,
     ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
-        use reth_db::models::AccountBeforeTx;
+        use reth_db_api::models::AccountBeforeTx;
         use reth_primitives::U256;
         use reth_provider::providers::StaticFileWriter;
         use reth_testing_utils::{

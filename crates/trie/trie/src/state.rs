@@ -5,12 +5,11 @@ use crate::{
     StateRoot,
 };
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_db::{
+use reth_db::{tables, DatabaseError};
+use reth_db_api::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
-    tables,
     transaction::DbTx,
-    DatabaseError,
 };
 use reth_execution_errors::StateRootError;
 use reth_primitives::{
@@ -214,7 +213,8 @@ impl HashedPostState {
     /// # Example
     ///
     /// ```
-    /// use reth_db::{database::Database, test_utils::create_test_rw_db};
+    /// use reth_db::test_utils::create_test_rw_db;
+    /// use reth_db_api::database::Database;
     /// use reth_primitives::{Account, U256};
     /// use reth_trie::HashedPostState;
     ///
@@ -334,7 +334,8 @@ pub struct HashedStorageSorted {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_db::{database::Database, test_utils::create_test_rw_db};
+    use reth_db::test_utils::create_test_rw_db;
+    use reth_db_api::database::Database;
     use reth_primitives::hex;
     use revm::{
         db::states::BundleState,

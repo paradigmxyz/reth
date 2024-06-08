@@ -1,16 +1,15 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
-};
+use reth_db::{static_file::HeaderMask, tables};
+use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
 use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, PruneModes, StaticFileSegment,
+    BlockNumber, Header, StaticFileSegment,
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
@@ -18,6 +17,7 @@ use reth_provider::{
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter, StatsReader,
     TransactionVariant,
 };
+use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
@@ -654,18 +654,18 @@ mod tests {
     use crate::test_utils::TestStageDB;
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
-    use reth_db::{models::AccountBeforeTx, transaction::DbTxMut};
+    use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_execution_errors::BlockValidationError;
     use reth_primitives::{
         address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
-        Bytecode, ChainSpecBuilder, PruneMode, ReceiptsLogPruneConfig, SealedBlock, StorageEntry,
-        B256, U256,
+        Bytecode, ChainSpecBuilder, SealedBlock, StorageEntry, B256, U256,
     };
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, ReceiptProvider,
         StaticFileProviderFactory,
     };
+    use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthExecutorProvider> {

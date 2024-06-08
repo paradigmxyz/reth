@@ -1,7 +1,8 @@
 use super::setup;
 use crate::utils::DbTool;
 use eyre::Result;
-use reth_db::{database::Database, table::TableImporter, tables, DatabaseEnv};
+use reth_db::{tables, DatabaseEnv};
+use reth_db_api::{database::Database, table::TableImporter};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::{stage::StageCheckpoint, BlockNumber};
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};

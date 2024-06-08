@@ -1,7 +1,7 @@
 //! Traits for configuring a node.
 
 use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
-use reth_db::{
+use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };

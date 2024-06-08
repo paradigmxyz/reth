@@ -10,10 +10,8 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
     Frame, Terminal,
 };
-use reth_db::{
-    table::{Table, TableRow},
-    RawValue,
-};
+use reth_db::RawValue;
+use reth_db_api::table::{Table, TableRow};
 use std::{
     io,
     time::{Duration, Instant},

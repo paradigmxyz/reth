@@ -1,8 +1,8 @@
 use super::setup;
 use crate::{macros::block_executor, utils::DbTool};
-use reth_db::{
-    cursor::DbCursorRO, database::Database, table::TableImporter, tables, transaction::DbTx,
-    DatabaseEnv,
+use reth_db::{tables, DatabaseEnv};
+use reth_db_api::{
+    cursor::DbCursorRO, database::Database, table::TableImporter, transaction::DbTx,
 };
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::stage::StageCheckpoint;

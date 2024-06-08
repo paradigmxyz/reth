@@ -1,12 +1,11 @@
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
-use reth_db::{
-    codecs::CompactU256,
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
     database::Database,
-    models::BlockNumberAddress,
+    models::{BlockNumberAddress, CompactU256},
     table::Decompress,
-    tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
@@ -219,7 +218,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use rand::Rng;
-    use reth_db::{
+    use reth_db_api::{
         cursor::{DbCursorRW, DbDupCursorRO},
         models::StoredBlockBodyIndices,
     };

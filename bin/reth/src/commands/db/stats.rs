@@ -4,14 +4,13 @@ use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
 use itertools::Itertools;
-use reth_db::{
-    database::Database, mdbx, static_file::iter_static_files, DatabaseEnv, TableViewer, Tables,
-};
+use reth_db::{mdbx, static_file::iter_static_files, DatabaseEnv, TableViewer, Tables};
+use reth_db_api::database::Database;
 use reth_fs_util as fs;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::static_file::{find_fixed_range, SegmentRangeInclusive};
 use reth_provider::providers::StaticFileProvider;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db stats` command
@@ -39,7 +38,7 @@ impl Command {
     pub fn execute(
         self,
         data_dir: ChainPath<DataDirPath>,
-        tool: &DbTool<DatabaseEnv>,
+        tool: &DbTool<Arc<DatabaseEnv>>,
     ) -> eyre::Result<()> {
         if self.checksum {
             let checksum_report = self.checksum_report(tool)?;
@@ -58,7 +57,7 @@ impl Command {
         Ok(())
     }
 
-    fn db_stats_table(&self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<ComfyTable> {
+    fn db_stats_table(&self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
         table.set_header([
@@ -306,7 +305,7 @@ impl Command {
         Ok(table)
     }
 
-    fn checksum_report(&self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<ComfyTable> {
+    fn checksum_report(&self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
         table.set_header(vec![Cell::new("Table"), Cell::new("Checksum"), Cell::new("Elapsed")]);

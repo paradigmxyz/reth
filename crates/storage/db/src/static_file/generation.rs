@@ -1,8 +1,8 @@
-use crate::{
-    abstraction::cursor::DbCursorRO,
+use crate::{RawKey, RawTable};
+use reth_db_api::{
+    cursor::DbCursorRO,
     table::{Key, Table},
     transaction::DbTx,
-    RawKey, RawTable,
 };
 
 use reth_nippy_jar::{ColumnResult, NippyJar, NippyJarHeader, PHFKey};

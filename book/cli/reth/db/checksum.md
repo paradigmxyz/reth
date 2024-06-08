@@ -11,15 +11,6 @@ Arguments:
           The table name
 
 Options:
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-
-          Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
-
-          [default: mainnet]
-
       --start-key <START_KEY>
           The start of the range to checksum
 

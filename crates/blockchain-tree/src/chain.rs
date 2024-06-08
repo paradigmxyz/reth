@@ -10,7 +10,7 @@ use reth_blockchain_tree_api::{
     BlockAttachment, BlockValidationKind,
 };
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{

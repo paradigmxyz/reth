@@ -1,11 +1,13 @@
 //! Blockchain tree externals.
 
 use reth_consensus::Consensus;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, static_file::HeaderMask, tables, transaction::DbTx,
-};
+use reth_db::{static_file::HeaderMask, tables};
+use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
-use reth_provider::{ProviderFactory, StaticFileProviderFactory, StatsReader};
+use reth_provider::{
+    FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
+    StatsReader,
+};
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -81,5 +83,19 @@ impl<DB: Database, E> TreeExternals<DB, E> {
         // the requested number.
         let hashes = hashes.into_iter().rev().take(num_hashes).collect();
         Ok(hashes)
+    }
+
+    pub(crate) fn fetch_latest_finalized_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.provider_factory.provider()?.last_finalized_block_number()
+    }
+
+    pub(crate) fn save_finalized_block_number(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<()> {
+        let provider_rw = self.provider_factory.provider_rw()?;
+        provider_rw.save_finalized_block_number(block_number)?;
+        provider_rw.commit()?;
+        Ok(())
     }
 }

@@ -7,24 +7,6 @@ $ reth import --help
 Usage: reth import [OPTIONS] <IMPORT_PATH>
 
 Options:
-      --config <FILE>
-          The path to the configuration file to use.
-
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-
-          Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
-
-          [default: mainnet]
-
-      --no-state
-          Disables stages that require state.
-
-      --chunk-len <CHUNK_LEN>
-          Chunk byte length to read from file.
-
       --instance <INSTANCE>
           Add a new instance of a node.
 
@@ -54,6 +36,18 @@ Datadir:
       --datadir.static_files <PATH>
           The absolute path to store static files in.
 
+      --config <FILE>
+          The path to the configuration file to use
+
+      --chain <CHAIN_OR_PATH>
+          The chain this node is running.
+          Possible values are either a built-in chain or the path to a chain specification file.
+
+          Built-in chains:
+              mainnet, sepolia, goerli, holesky, dev
+
+          [default: mainnet]
+
 Database:
       --db.log-level <LOG_LEVEL>
           Database logging level. Levels higher than "notice" require a debug build
@@ -72,6 +66,12 @@ Database:
           Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
 
           [possible values: true, false]
+
+      --no-state
+          Disables stages that require state.
+
+      --chunk-len <CHUNK_LEN>
+          Chunk byte length to read from file.
 
   <IMPORT_PATH>
           The path to a block file for import.

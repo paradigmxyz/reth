@@ -7,15 +7,6 @@ $ reth init-state --help
 Usage: reth init-state [OPTIONS] <STATE_DUMP_FILE>
 
 Options:
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-
-          Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
-
-          [default: mainnet]
-
       --instance <INSTANCE>
           Add a new instance of a node.
 
@@ -45,24 +36,17 @@ Datadir:
       --datadir.static_files <PATH>
           The absolute path to store static files in.
 
-  <STATE_DUMP_FILE>
-          JSONL file with state dump.
+      --config <FILE>
+          The path to the configuration file to use
 
-          Must contain accounts in following format, additional account fields are ignored. Must
-          also contain { "root": \<state-root\> } as first line.
-          {
-              "balance": "\<balance\>",
-              "nonce": \<nonce\>,
-              "code": "\<bytecode\>",
-              "storage": {
-                  "\<key\>": "\<value\>",
-                  ..
-              },
-              "address": "\<address\>",
-          }
+      --chain <CHAIN_OR_PATH>
+          The chain this node is running.
+          Possible values are either a built-in chain or the path to a chain specification file.
 
-          Allows init at a non-genesis block. Caution! Blocks must be manually imported up until
-          and including the non-genesis block to init chain at. See 'import' command.
+          Built-in chains:
+              mainnet, sepolia, goerli, holesky, dev
+
+          [default: mainnet]
 
 Database:
       --db.log-level <LOG_LEVEL>
@@ -82,6 +66,25 @@ Database:
           Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
 
           [possible values: true, false]
+
+  <STATE_DUMP_FILE>
+          JSONL file with state dump.
+
+          Must contain accounts in following format, additional account fields are ignored. Must
+          also contain { "root": \<state-root\> } as first line.
+          {
+              "balance": "\<balance\>",
+              "nonce": \<nonce\>,
+              "code": "\<bytecode\>",
+              "storage": {
+                  "\<key\>": "\<value\>",
+                  ..
+              },
+              "address": "\<address\>",
+          }
+
+          Allows init at a non-genesis block. Caution! Blocks must be manually imported up until
+          and including the non-genesis block to init chain at. See 'import' command.
 
 Logging:
       --log.stdout.format <FORMAT>

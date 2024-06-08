@@ -88,6 +88,15 @@ pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
 }
 
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
+    /// Sets a forwarder for `eth_sendRawTransaction`
+    ///
+    /// Note: this might be removed in the future in favor of a more generic approach.
+    pub fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
+        self.inner.raw_transaction_forwarder.write().replace(forwarder);
+    }
+}
+
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider: BlockReaderIdExt + ChainSpecProvider,
@@ -158,7 +167,7 @@ where
             blocking_task_pool,
             fee_history_cache,
             evm_config,
-            raw_transaction_forwarder,
+            raw_transaction_forwarder: parking_lot::RwLock::new(raw_transaction_forwarder),
         };
 
         Self { inner: Arc::new(inner) }
@@ -490,5 +499,5 @@ struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// The type that defines how to configure the EVM
     evm_config: EvmConfig,
     /// Allows forwarding received raw transactions
-    raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+    raw_transaction_forwarder: parking_lot::RwLock<Option<Arc<dyn RawTransactionForwarder>>>,
 }

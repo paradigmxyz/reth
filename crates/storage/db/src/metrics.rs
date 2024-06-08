@@ -19,7 +19,7 @@ const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 #[derive(Debug)]
 pub(crate) struct DatabaseEnvMetrics {
     /// Caches `OperationMetrics` handles for each table and operation tuple.
-    operations: FxHashMap<(Tables, Operation), OperationMetrics>,
+    operations: FxHashMap<(&'static str, Operation), OperationMetrics>,
     /// Caches `TransactionMetrics` handles for counters grouped by only transaction mode.
     /// Updated both at tx open and close.
     transactions: FxHashMap<TransactionMode, TransactionMetrics>,
@@ -42,7 +42,7 @@ impl DatabaseEnvMetrics {
 
     /// Generate a map of all possible operation handles for each table and operation tuple.
     /// Used for tracking all operation metrics.
-    fn generate_operation_handles() -> FxHashMap<(Tables, Operation), OperationMetrics> {
+    fn generate_operation_handles() -> FxHashMap<(&'static str, Operation), OperationMetrics> {
         let mut operations = FxHashMap::with_capacity_and_hasher(
             Tables::COUNT * Operation::COUNT,
             BuildHasherDefault::<FxHasher>::default(),
@@ -50,7 +50,7 @@ impl DatabaseEnvMetrics {
         for table in Tables::ALL {
             for operation in Operation::iter() {
                 operations.insert(
-                    (*table, operation),
+                    (table.name(), operation),
                     OperationMetrics::new_with_labels(&[
                         (Labels::Table.as_str(), table.name()),
                         (Labels::Operation.as_str(), operation.as_str()),
@@ -103,7 +103,7 @@ impl DatabaseEnvMetrics {
     /// Panics if a metric recorder is not found for the given table and operation.
     pub(crate) fn record_operation<R>(
         &self,
-        table: Tables,
+        table: &'static str,
         operation: Operation,
         value_size: Option<usize>,
         f: impl FnOnce() -> R,

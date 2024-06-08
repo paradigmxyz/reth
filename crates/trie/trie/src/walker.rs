@@ -250,7 +250,8 @@ mod tests {
         prefix_set::PrefixSetMut,
         trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
     };
-    use reth_db::{cursor::DbCursorRW, tables, transaction::DbTxMut};
+    use reth_db::tables;
+    use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_primitives::trie::{StorageTrieEntry, StoredBranchNode};
     use reth_provider::test_utils::create_test_provider_factory;
 

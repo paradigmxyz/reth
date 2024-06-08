@@ -17,6 +17,11 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use std::convert::Infallible;
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
 use reth::{
     builder::{
         components::{ComponentsBuilder, PayloadServiceBuilder},
@@ -33,8 +38,8 @@ use reth_basic_payload_builder::{
     PayloadBuilder, PayloadConfig,
 };
 use reth_node_api::{
-    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    EngineTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
+    payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
+    validate_version_specific_fields, EngineTypes, PayloadAttributes, PayloadBuilderAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::node::{
@@ -53,9 +58,6 @@ use reth_rpc_types::{
     ExecutionPayloadV1, Withdrawal,
 };
 use reth_tracing::{RethTracer, Tracer};
-use serde::{Deserialize, Serialize};
-use std::convert::Infallible;
-use thiserror::Error;
 
 /// A custom payload attributes type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -302,6 +304,7 @@ where
     }
 
     fn build_empty_payload(
+        &self,
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
@@ -313,9 +316,8 @@ where
             attributes,
             chain_spec,
         } = config;
-        <reth_ethereum_payload_builder::EthereumPayloadBuilder  as PayloadBuilder<Pool,Client>>  ::build_empty_payload(client,
-                                                                                                                       PayloadConfig { initialized_block_env, initialized_cfg, parent_block, extra_data, attributes: attributes.0, chain_spec }
-        )
+        <reth_ethereum_payload_builder::EthereumPayloadBuilder as PayloadBuilder<Pool, Client>>::build_empty_payload(&reth_ethereum_payload_builder::EthereumPayloadBuilder::default(),client,
+                                                                                                                     PayloadConfig { initialized_block_env, initialized_cfg, parent_block, extra_data, attributes: attributes.0, chain_spec })
     }
 }
 
