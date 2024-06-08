@@ -9,7 +9,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_consensus::ConsensusError;
-use reth_primitives::{revm_primitives::EVMError, BlockNumHash, PruneSegmentError, B256};
+use reth_primitives::{revm_primitives::EVMError, BlockNumHash, B256};
+use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
 use std::fmt::Display;
 use thiserror::Error;

@@ -11,8 +11,8 @@ use reth_primitives::{
     BlockNumber, B256,
 };
 use reth_provider::{
-    providers::StaticFileWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StaticFileProviderFactory,
+    providers::StaticFileWriter, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
+    StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -353,6 +353,15 @@ where
                         self.event_sender
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
+                        // update finalized block if needed
+                        let last_saved_finalized_block_number =
+                            provider_rw.last_finalized_block_number()?;
+                        if checkpoint.block_number < last_saved_finalized_block_number {
+                            provider_rw.save_finalized_block_number(BlockNumber::from(
+                                checkpoint.block_number,
+                            ))?;
+                        }
+
                         // For unwinding it makes more sense to commit the database first, since if
                         // this function is interrupted before the static files commit, we can just
                         // truncate the static files according to the
@@ -598,8 +607,8 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
     use reth_errors::ProviderError;
-    use reth_primitives::PruneModes;
     use reth_provider::test_utils::create_test_provider_factory;
+    use reth_prune::PruneModes;
     use reth_testing_utils::{generators, generators::random_header};
     use tokio_stream::StreamExt;
 

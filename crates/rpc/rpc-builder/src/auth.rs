@@ -1,157 +1,23 @@
-use crate::{
-    error::{RpcError, ServerKind},
-    EthConfig,
-};
-
+use crate::error::{RpcError, ServerKind};
 use hyper::header::AUTHORIZATION;
 pub use jsonrpsee::server::ServerBuilder;
 use jsonrpsee::{
     core::RegisterMethodError,
-    http_client::HeaderMap,
+    http_client::{transport::HttpBackend, HeaderMap},
     server::{AlreadyStoppedError, RpcModule},
     Methods,
 };
-pub use reth_ipc::server::Builder as IpcServerBuilder;
-
-use jsonrpsee::http_client::transport::HttpBackend;
 use reth_engine_primitives::EngineTypes;
-use reth_evm::ConfigureEvm;
-use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, ReceiptProviderIdExt,
-    StateProviderFactory,
-};
-use reth_rpc::{
-    eth::{
-        cache::EthStateCache, gas_oracle::GasPriceOracle, EthFilterConfig, FeeHistoryCache,
-        FeeHistoryCacheConfig,
-    },
-    EngineEthApi, EthApi, EthFilter, EthSubscriptionIdProvider,
-};
+pub use reth_ipc::server::Builder as IpcServerBuilder;
+use reth_rpc::EthSubscriptionIdProvider;
 use reth_rpc_api::servers::*;
 use reth_rpc_layer::{
     secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, JwtAuthValidator,
     JwtSecret,
 };
-use reth_rpc_server_types::{
-    constants,
-    constants::{DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE},
-};
-use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
-use reth_transaction_pool::TransactionPool;
+use reth_rpc_server_types::constants;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tower::layer::util::Identity;
-
-/// Configure and launch a _standalone_ auth server with `engine` and a _new_ `eth` namespace.
-#[allow(clippy::too_many_arguments)]
-pub async fn launch<Provider, Pool, Network, Tasks, EngineApi, EngineT, EvmConfig>(
-    provider: Provider,
-    pool: Pool,
-    network: Network,
-    executor: Tasks,
-    engine_api: EngineApi,
-    socket_addr: SocketAddr,
-    secret: JwtSecret,
-    evm_config: EvmConfig,
-) -> Result<AuthServerHandle, RpcError>
-where
-    Provider: BlockReaderIdExt
-        + ChainSpecProvider
-        + EvmEnvProvider
-        + HeaderProvider
-        + ReceiptProviderIdExt
-        + StateProviderFactory
-        + Clone
-        + Unpin
-        + 'static,
-    Pool: TransactionPool + Clone + 'static,
-    Network: NetworkInfo + Peers + Clone + 'static,
-    Tasks: TaskSpawner + Clone + 'static,
-    EngineT: EngineTypes + 'static,
-    EngineApi: EngineApiServer<EngineT>,
-    EvmConfig: ConfigureEvm + 'static,
-{
-    // spawn a new cache task
-    let eth_cache = EthStateCache::spawn_with(
-        provider.clone(),
-        Default::default(),
-        executor.clone(),
-        evm_config.clone(),
-    );
-
-    let gas_oracle = GasPriceOracle::new(provider.clone(), Default::default(), eth_cache.clone());
-
-    let fee_history_cache =
-        FeeHistoryCache::new(eth_cache.clone(), FeeHistoryCacheConfig::default());
-    let eth_api = EthApi::with_spawner(
-        provider.clone(),
-        pool.clone(),
-        network,
-        eth_cache.clone(),
-        gas_oracle,
-        EthConfig::default().rpc_gas_cap,
-        Box::new(executor.clone()),
-        BlockingTaskPool::build().expect("failed to build tracing pool"),
-        fee_history_cache,
-        evm_config,
-        None,
-    );
-    let config = EthFilterConfig::default()
-        .max_logs_per_response(DEFAULT_MAX_LOGS_PER_RESPONSE)
-        .max_blocks_per_filter(DEFAULT_MAX_BLOCKS_PER_FILTER);
-    let eth_filter =
-        EthFilter::new(provider, pool, eth_cache.clone(), config, Box::new(executor.clone()));
-    launch_with_eth_api(eth_api, eth_filter, engine_api, socket_addr, secret).await
-}
-
-/// Configure and launch a _standalone_ auth server with existing `EthApi` implementation.
-pub async fn launch_with_eth_api<Provider, Pool, Network, EngineApi, EngineT, EvmConfig>(
-    eth_api: EthApi<Provider, Pool, Network, EvmConfig>,
-    eth_filter: EthFilter<Provider, Pool>,
-    engine_api: EngineApi,
-    socket_addr: SocketAddr,
-    secret: JwtSecret,
-) -> Result<AuthServerHandle, RpcError>
-where
-    Provider: BlockReaderIdExt
-        + ChainSpecProvider
-        + EvmEnvProvider
-        + HeaderProvider
-        + StateProviderFactory
-        + Clone
-        + Unpin
-        + 'static,
-    Pool: TransactionPool + Clone + 'static,
-    Network: NetworkInfo + Peers + Clone + 'static,
-    EngineT: EngineTypes + 'static,
-    EngineApi: EngineApiServer<EngineT>,
-    EvmConfig: ConfigureEvm + 'static,
-{
-    // Configure the module and start the server.
-    let mut module = RpcModule::new(());
-    module.merge(engine_api.into_rpc()).expect("No conflicting methods");
-    let engine_eth = EngineEthApi::new(eth_api, eth_filter);
-    module.merge(engine_eth.into_rpc()).expect("No conflicting methods");
-
-    // Create auth middleware.
-    let middleware =
-        tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
-
-    // By default, both http and ws are enabled.
-    let server = ServerBuilder::new()
-        .set_http_middleware(middleware)
-        .build(socket_addr)
-        .await
-        .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
-
-    let local_addr = server
-        .local_addr()
-        .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
-
-    let handle = server.start(module);
-
-    Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint: None, ipc_handle: None })
-}
 
 /// Server configuration for the auth server.
 #[derive(Debug)]

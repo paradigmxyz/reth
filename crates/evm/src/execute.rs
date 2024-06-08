@@ -1,8 +1,7 @@
 //! Traits for execution.
 
-use reth_primitives::{
-    BlockNumber, BlockWithSenders, PruneModes, Receipt, Receipts, Request, Requests, U256,
-};
+use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Receipts, Request, Requests, U256};
+use reth_prune_types::PruneModes;
 use revm::db::BundleState;
 use revm_primitives::db::Database;
 

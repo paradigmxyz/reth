@@ -22,6 +22,7 @@ reth-libmdbx = { workspace = true, optional = true, features = [
     "read-tx-timeouts",
 ] }
 reth-nippy-jar.workspace = true
+reth-prune-types.workspace = true
 reth-tracing.workspace = true
 
 # codecs

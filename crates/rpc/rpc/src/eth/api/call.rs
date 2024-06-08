@@ -1,17 +1,5 @@
 //! Contains RPC handler implementations specific to endpoints that call/execute within evm.
 
-use crate::{
-    eth::{
-        api::{EthTransactions, LoadPendingBlock, LoadState, SpawnBlocking},
-        error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
-        revm_utils::{
-            apply_state_overrides, build_call_evm_env, caller_gas_allowance,
-            cap_tx_gas_limit_with_caller_allowance, get_precompiles, prepare_call_env,
-            EvmOverrides,
-        },
-    },
-    EthApi,
-};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, TxKind, U256};
@@ -33,6 +21,19 @@ use revm::{
 };
 use revm_inspectors::access_list::AccessListInspector;
 use tracing::trace;
+
+use crate::{
+    eth::{
+        api::{EthTransactions, LoadPendingBlock, LoadState, SpawnBlocking},
+        error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
+        revm_utils::{
+            apply_state_overrides, build_call_evm_env, caller_gas_allowance,
+            cap_tx_gas_limit_with_caller_allowance, get_precompiles, prepare_call_env,
+            EvmOverrides,
+        },
+    },
+    EthApi,
+};
 
 // Gas per transaction not creating a contract.
 const MIN_TRANSACTION_GAS: u64 = 21_000u64;

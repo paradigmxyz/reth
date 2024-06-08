@@ -407,6 +407,7 @@ impl ChunkedFileReader {
         T: FromReader,
     {
         if self.file_byte_len == 0 && self.chunk.is_empty() {
+            dbg!(self.chunk.is_empty());
             // eof
             return Ok(None)
         }
@@ -605,8 +606,9 @@ mod tests {
         // Generate some random blocks
         let (file, headers, _) = generate_bodies_file(0..=14).await;
 
-        // calculate min for chunk byte length range
-        let chunk_byte_len = rand::thread_rng().gen_range(1..=10_000);
+        // calculate min for chunk byte length range, pick a lower bound that guarantees at least
+        // one block will be read
+        let chunk_byte_len = rand::thread_rng().gen_range(2000..=10_000);
         trace!(target: "downloaders::file::test", chunk_byte_len);
 
         // init reader
@@ -619,6 +621,7 @@ mod tests {
         // test
         while let Some(client) = reader.next_chunk::<FileClient>().await.unwrap() {
             let sync_target = client.tip_header().unwrap();
+
             let sync_target_hash = sync_target.hash();
 
             // construct headers downloader and use first header

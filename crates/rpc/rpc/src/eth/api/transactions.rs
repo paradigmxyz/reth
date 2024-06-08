@@ -35,7 +35,10 @@ use revm::{
 
 use crate::{
     eth::{
-        api::{BuildReceipt, EthState, EthTransactions, LoadState, SpawnBlocking, StateCacheDB},
+        api::{
+            BuildReceipt, EthState, EthTransactions, LoadState, RawTransactionForwarder,
+            SpawnBlocking, StateCacheDB,
+        },
         cache::EthStateCache,
         error::{EthApiError, EthResult, RpcInvalidTransactionError, SignError},
         revm_utils::FillableTransaction,
@@ -62,7 +65,7 @@ where
     type Pool = Pool;
 
     #[inline]
-    fn provider(&self) -> &impl BlockReaderIdExt {
+    fn provider(&self) -> impl BlockReaderIdExt {
         self.inner.provider()
     }
 
@@ -82,7 +85,7 @@ where
     }
 
     #[inline]
-    fn raw_tx_forwarder(&self) -> &Option<Arc<dyn crate::eth::traits::RawTransactionForwarder>> {
+    fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
         self.inner.raw_tx_forwarder()
     }
 

@@ -75,8 +75,9 @@ tracing.workspace = true
 tracing-futures = "0.2"
 schnellru.workspace = true
 futures.workspace = true
-derive_more = { workspace = true, default-features = false, features = ["deref", "deref_mut", "constructor"] }
+derive_more.workspace = true
 dyn-clone.workspace = true
+auto_impl.workspace = true
 
 [dev-dependencies]
 reth-evm-ethereum.workspace = true

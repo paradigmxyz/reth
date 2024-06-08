@@ -22,11 +22,12 @@ use reth_network_p2p::{
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
 use reth_node_events::node::NodeEvent;
-use reth_primitives::{stage::StageId, PruneModes, B256};
+use reth_primitives::{stage::StageId, B256};
 use reth_provider::{
     BlockNumReader, ChainSpecProvider, HeaderProvider, HeaderSyncMode, ProviderError,
     ProviderFactory, StageCheckpointReader,
 };
+use reth_prune_types::PruneModes;
 use reth_stages::{prelude::*, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};

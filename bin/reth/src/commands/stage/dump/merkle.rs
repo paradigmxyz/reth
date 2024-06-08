@@ -6,8 +6,9 @@ use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, table::TableImporter};
 use reth_exex::ExExManagerHandle;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_primitives::{stage::StageCheckpoint, BlockNumber, PruneModes};
+use reth_primitives::{stage::StageCheckpoint, BlockNumber};
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
+use reth_prune_types::PruneModes;
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,

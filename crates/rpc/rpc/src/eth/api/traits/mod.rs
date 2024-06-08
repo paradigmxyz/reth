@@ -12,4 +12,4 @@ pub use blocking_task::SpawnBlocking;
 pub use pending_block::LoadPendingBlock;
 pub use receipt::BuildReceipt;
 pub use state::{EthState, LoadState};
-pub use transaction::{EthTransactions, StateCacheDB};
+pub use transaction::{EthTransactions, RawTransactionForwarder, StateCacheDB};
