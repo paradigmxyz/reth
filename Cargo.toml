@@ -106,7 +106,8 @@ members = [
     "examples/rpc-db/",
     "examples/txpool-tracing/",
     "testing/ef-tests/",
-    "testing/testing-utils"
+    "testing/testing-utils",
+    "testing/zkvm"
 ]
 default-members = ["bin/reth"]
 
