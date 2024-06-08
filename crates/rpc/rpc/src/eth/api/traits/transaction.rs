@@ -2,7 +2,6 @@
 //! network.
 
 use std::sync::Arc;
-
 use reth_evm::ConfigureEvm;
 use reth_primitives::{
     revm::env::fill_block_env_with_coinbase, BlockId, Bytes, FromRecoveredPooledTransaction,
