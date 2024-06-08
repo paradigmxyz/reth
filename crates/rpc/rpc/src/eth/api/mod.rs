@@ -170,7 +170,7 @@ where
     }
 
     /// Returns the gas oracle frontend
-    pub(crate) fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
+    pub fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
         &self.inner.gas_oracle
     }
 

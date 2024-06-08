@@ -1,3 +1,6 @@
+//! Loads a pending block from database. Helper trait for `eth_` transaction, call and trace RPC
+//! methods.
+
 use futures::Future;
 use reth_evm::ConfigureEvm;
 use reth_primitives::{revm::env::tx_env_with_recovered, Bytes, TxKind, B256, U256};
@@ -25,7 +28,7 @@ use crate::eth::{
     },
 };
 
-// Gas per transaction not creating a contract.
+/// Gas per transaction not creating a contract.
 pub const MIN_TRANSACTION_GAS: u64 = 21_000u64;
 /// Allowed error ratio for gas estimation
 /// Taken from Geth's implementation in order to pass the hive tests
@@ -384,7 +387,8 @@ pub trait EthCall: Call {
         Ok(U256::from(highest_gas_limit))
     }
 
-    /// Creates the `AccessList` for the `request` at the [`BlockId`] or latest.
+    /// Creates [`AccessListWithGasUsed`] for the [`TransactionRequest`] at the given
+    /// [`BlockId`], or latest block.
     fn create_access_list_at(
         &self,
         request: TransactionRequest,
@@ -404,6 +408,8 @@ pub trait EthCall: Call {
         }
     }
 
+    /// Creates [`AccessListWithGasUsed`] for the [`TransactionRequest`] at the given
+    /// [`BlockId`].
     fn create_access_list_with(
         &self,
         cfg: CfgEnvWithHandlerCfg,
@@ -674,11 +680,11 @@ pub trait Call {
     ///
     /// Before the transaction is executed, all previous transaction in the block are applied to the
     /// state by executing them first.
-    /// The callback `f` is invoked with the [ResultAndState] after the transaction was executed and
-    /// the database that points to the beginning of the transaction.
+    /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
+    /// and the database that points to the beginning of the transaction.
     ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
-    /// [BlockingTaskPool](reth_tasks::pool::BlockingTaskPool).
+    /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
     fn spawn_replay_transaction<F, R>(
         &self,
         hash: B256,

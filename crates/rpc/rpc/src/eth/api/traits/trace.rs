@@ -1,3 +1,5 @@
+//! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
+
 use futures::Future;
 use reth_evm::ConfigureEvm;
 use reth_primitives::{revm::env::tx_env_with_recovered, B256};
@@ -68,7 +70,7 @@ pub trait Trace {
     /// Executes the transaction on top of the given [BlockId] with a tracer configured by the
     /// config.
     ///
-    /// The callback is then called with the [TracingInspector] and the [ResultAndState] after the
+    /// The callback is then called with the [TracingInspector] and the [`ResultAndState`] after the
     /// configured [EnvWithHandlerCfg] was inspected.
     ///
     /// Caution: this is blocking
@@ -96,7 +98,7 @@ pub trait Trace {
     /// Executes the transaction on top of the given [BlockId] with a tracer configured by the
     /// config.
     ///
-    /// The callback is then called with the [TracingInspector] and the [ResultAndState] after the
+    /// The callback is then called with the [TracingInspector] and the [`ResultAndState`] after the
     /// configured [EnvWithHandlerCfg] was inspected.
     fn spawn_trace_at_with_state<F, R>(
         &self,
@@ -125,11 +127,11 @@ pub trait Trace {
     ///
     /// Before the transaction is traced, all previous transaction in the block are applied to the
     /// state by executing them first.
-    /// The callback `f` is invoked with the [ResultAndState] after the transaction was executed and
-    /// the database that points to the beginning of the transaction.
+    /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
+    /// and the database that points to the beginning of the transaction.
     ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
-    /// [BlockingTaskPool](reth_tasks::pool::BlockingTaskPool).
+    /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
     fn spawn_trace_transaction_in_block<F, R>(
         &self,
         hash: B256,
@@ -155,11 +157,11 @@ pub trait Trace {
     ///
     /// Before the transaction is traced, all previous transaction in the block are applied to the
     /// state by executing them first.
-    /// The callback `f` is invoked with the [ResultAndState] after the transaction was executed and
-    /// the database that points to the beginning of the transaction.
+    /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
+    /// and the database that points to the beginning of the transaction.
     ///
     /// Note: Implementers should use a threadpool where blocking is allowed, such as
-    /// [BlockingTaskPool](reth_tasks::pool::BlockingTaskPool).
+    /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
     fn spawn_trace_transaction_in_block_with_inspector<Insp, F, R>(
         &self,
         hash: B256,
@@ -361,7 +363,7 @@ pub trait Trace {
     /// 2. configures the EVM evn
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
-    /// _after_ the transaction [StateProviderDatabase] and the database that points to the state
+    /// _after_ the transaction [`StateProviderDatabase`] and the database that points to the state
     /// right _before_ the transaction.
     fn trace_block<F, R>(
         &self,
@@ -395,9 +397,9 @@ pub trait Trace {
     /// 2. configures the EVM evn
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
-    /// _after_ the transaction [EvmState] and the database that points to the state
-    /// right _before_ the transaction, in other words the state the transaction was
-    /// executed on: `changed_state = tx(cached_state)`
+    /// _after_ the transaction [`EvmState`] and the database that points to the state
+    /// right _before_ the transaction, in other words the state the transaction was executed on:
+    /// `changed_state = tx(cached_state)`
     ///
     /// This accepts a `inspector_setup` closure that returns the inspector to be used for tracing
     /// a transaction. This is invoked for each transaction.

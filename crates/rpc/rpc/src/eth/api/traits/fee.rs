@@ -1,3 +1,5 @@
+//! Loads fee history from database. Helper trait for `eth_` fee and transaction RPC methods.
+
 use futures::Future;
 use reth_primitives::U256;
 use reth_provider::{BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider};

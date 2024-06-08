@@ -423,6 +423,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
         }
     }
 
+    /// Signs a transaction, with configured signers.
     fn sign_request(
         &self,
         from: &Address,
@@ -440,6 +441,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
     }
 }
 
+/// Loads a transaction from database.
 pub trait LoadTransaction {
     /// Transaction pool with pending transactions. [`TransactionPool::Transaction`] is the
     /// supported transaction type.
@@ -512,7 +514,7 @@ pub trait LoadTransaction {
         }
     }
 
-    /// Returns the transaction by including its corresponding [BlockId]
+    /// Returns the transaction by including its corresponding [`BlockId`].
     ///
     /// Note: this supports pending transactions
     fn transaction_by_hash_at(
@@ -524,7 +526,7 @@ pub trait LoadTransaction {
     {
         async move {
             match self.transaction_by_hash(transaction_hash).await? {
-                None => return Ok(None),
+                None => Ok(None),
                 Some(tx) => {
                     let res = match tx {
                         tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),

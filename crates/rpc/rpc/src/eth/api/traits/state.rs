@@ -1,4 +1,5 @@
-//! Loads state from database. Helper trait for `eth_`transaction and state RPC methods.
+//! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
+//! RPC methods.
 
 use futures::Future;
 use reth_primitives::{

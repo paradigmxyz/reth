@@ -1,4 +1,5 @@
-//! Loads a pending block from database. Helper trait for `eth_` block and transaction RPC methods.
+//! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
+//! RPC methods.
 
 use std::time::{Duration, Instant};
 
