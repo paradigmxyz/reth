@@ -198,16 +198,14 @@ use reth_tasks::{
     TaskSpawner, TokioTaskExecutor,
 };
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
 pub use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
@@ -218,6 +216,7 @@ pub use crate::eth::{EthConfig, EthHandlers};
 /// Auth server utilities.
 pub mod auth;
 
+/// RPC server utilities.
 pub mod config;
 
 /// Cors utilities.

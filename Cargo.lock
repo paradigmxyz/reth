@@ -7598,6 +7598,7 @@ dependencies = [
 name = "reth-rpc-builder"
 version = "0.2.0-beta.8"
 dependencies = [
+ "clap",
  "hyper 0.14.28",
  "jsonrpsee",
  "metrics",
@@ -7627,7 +7628,6 @@ dependencies = [
  "reth-transaction-pool",
  "serde",
  "serde_json",
- "strum",
  "thiserror",
  "tokio",
  "tower",
