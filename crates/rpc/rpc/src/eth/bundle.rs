@@ -26,8 +26,6 @@ use crate::eth::{
     utils::recover_raw_transaction,
 };
 
-use super::api::LoadState;
-
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
     /// All nested fields bundled together.
