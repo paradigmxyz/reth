@@ -14,7 +14,7 @@ use crate::eth::{
     error::{EthApiError, EthResult},
 };
 
-use super::call::{StateCacheDBMut, StateProviderObj};
+use super::call::{StateCacheDBRefMutWrapper, StateProviderTraitObjWrapper};
 
 /// Execution related functions for the [`EthApiServer`](crate::EthApi) trait in the
 /// `eth_` namespace.
@@ -116,7 +116,7 @@ pub trait Trace {
         self.spawn_with_state_at_block(at, move |state| {
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = this.inspect(StateCacheDBMut(&mut db), env, &mut inspector)?;
+            let (res, _) = this.inspect(StateCacheDBRefMutWrapper(&mut db), env, &mut inspector)?;
             f(inspector, res, db)
         })
     }
@@ -171,7 +171,7 @@ pub trait Trace {
         F: for<'a> FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDB<'a>) -> EthResult<R>
             + Send
             + 'static,
-        Insp: for<'a, 'b> Inspector<StateCacheDBMut<'a, 'b>> + Send + 'static,
+        Insp: for<'a, 'b> Inspector<StateCacheDBRefMutWrapper<'a, 'b>> + Send + 'static,
         R: Send + 'static,
     {
         async move {
@@ -203,8 +203,8 @@ pub trait Trace {
 
                 let env =
                     EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
-
-                let (res, _) = this.inspect(StateCacheDBMut(&mut db), env, &mut inspector)?;
+                let (res, _) =
+                    this.inspect(StateCacheDBRefMutWrapper(&mut db), env, &mut inspector)?;
                 f(tx_info, inspector, res, db)
             })
             .await
@@ -275,7 +275,7 @@ pub trait Trace {
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: for<'a, 'b> Inspector<StateCacheDBMut<'a, 'b>> + Send + 'static,
+        Insp: for<'a, 'b> Inspector<StateCacheDBRefMutWrapper<'a, 'b>> + Send + 'static,
         R: Send + 'static,
     {
         async move {
@@ -326,14 +326,16 @@ pub trait Trace {
 
                 // now get the state
                 let state = this.state_at_block_id(state_at.into())?;
-                let mut db = CacheDB::new(StateProviderDatabase::new(StateProviderObj(&state)));
+                let mut db =
+                    CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
 
                 while let Some((tx_info, tx)) = transactions.next() {
                     let env =
                         EnvWithHandlerCfg::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
 
                     let mut inspector = inspector_setup();
-                    let (res, _) = this.inspect(StateCacheDBMut(&mut db), env, &mut inspector)?;
+                    let (res, _) =
+                        this.inspect(StateCacheDBRefMutWrapper(&mut db), env, &mut inspector)?;
                     let ResultAndState { result, state } = res;
                     results.push(f(tx_info, inspector, result, &state, &db)?);
 
@@ -419,7 +421,7 @@ pub trait Trace {
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: for<'a, 'b> Inspector<StateCacheDBMut<'a, 'b>> + Send + 'static,
+        Insp: for<'a, 'b> Inspector<StateCacheDBRefMutWrapper<'a, 'b>> + Send + 'static,
         R: Send + 'static,
     {
         self.trace_block_until_with_inspector(block_id, None, insp_setup, f)

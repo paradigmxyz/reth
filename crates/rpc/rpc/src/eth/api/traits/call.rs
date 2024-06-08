@@ -33,7 +33,7 @@ pub const MIN_TRANSACTION_GAS: u64 = 21_000u64;
 pub const ESTIMATE_GAS_ERROR_RATIO: f64 = 0.015;
 
 /// Helper alias type for the state's [`CacheDB`]
-pub type StateCacheDB<'a> = CacheDB<StateProviderDatabase<StateProviderObj<'a>>>;
+pub type StateCacheDB<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'a>>>;
 
 /// Execution related functions for the [`EthApiServer`](crate::EthApi) trait in the
 /// `eth_` namespace.
@@ -568,10 +568,10 @@ pub trait Call {
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
         Self: LoadState,
-        F: for<'a> FnOnce(StateProviderObj<'a>) -> EthResult<T>,
+        F: for<'a> FnOnce(StateProviderTraitObjWrapper<'a>) -> EthResult<T>,
     {
         let state = self.state_at_block_id(at)?;
-        f(StateProviderObj(&state))
+        f(StateProviderTraitObjWrapper(&state))
     }
 
     /// Returns a handle for reading evm config.
@@ -618,12 +618,12 @@ pub trait Call {
     ) -> impl Future<Output = EthResult<T>> + Send
     where
         Self: LoadState + SpawnBlocking,
-        F: for<'a> FnOnce(StateProviderObj<'a>) -> EthResult<T> + Send + 'static,
+        F: for<'a> FnOnce(StateProviderTraitObjWrapper<'a>) -> EthResult<T> + Send + 'static,
         T: Send + 'static,
     {
         self.spawn_tracing(move |this| {
             let state = this.state_at_block_id(at)?;
-            f(StateProviderObj(&state))
+            f(StateProviderTraitObjWrapper(&state))
         })
     }
 
@@ -641,7 +641,7 @@ pub trait Call {
     ) -> impl Future<Output = EthResult<R>> + Send
     where
         Self: LoadState + SpawnBlocking + LoadPendingBlock,
-        F: for<'a, 'b> FnOnce(StateCacheDBMut<'a, 'b>, EnvWithHandlerCfg) -> EthResult<R>
+        F: for<'a, 'b> FnOnce(StateCacheDBRefMutWrapper<'a, 'b>, EnvWithHandlerCfg) -> EthResult<R>
             + Send
             + 'static,
         R: Send + 'static,
@@ -651,7 +651,8 @@ pub trait Call {
             let this = self.clone();
             self.spawn_tracing(move |_| {
                 let state = this.state_at_block_id(at)?;
-                let mut db = CacheDB::new(StateProviderDatabase::new(StateProviderObj(&state)));
+                let mut db =
+                    CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
 
                 let env = prepare_call_env(
                     cfg,
@@ -661,7 +662,8 @@ pub trait Call {
                     &mut db,
                     overrides,
                 )?;
-                f(StateCacheDBMut(&mut db), env)
+
+                f(StateCacheDBRefMutWrapper(&mut db), env)
             })
             .await
             .map_err(|_| EthApiError::InternalBlockingTaskError)
@@ -766,11 +768,12 @@ pub trait Call {
     }
 }
 
-/// Hack to get around 'higher-ranked' lifetime error, see
+/// Hack to get around 'higher-ranked lifetime error', see
 /// <https://github.com/rust-lang/rust/issues/100013>
-pub struct StateProviderObj<'a>(pub &'a dyn StateProvider);
+#[allow(missing_debug_implementations)]
+pub struct StateProviderTraitObjWrapper<'a>(pub &'a dyn StateProvider);
 
-impl<'a> reth_provider::StateRootProvider for StateProviderObj<'a> {
+impl<'a> reth_provider::StateRootProvider for StateProviderTraitObjWrapper<'a> {
     fn state_root(
         &self,
         bundle_state: &revm::db::BundleState,
@@ -786,7 +789,7 @@ impl<'a> reth_provider::StateRootProvider for StateProviderObj<'a> {
     }
 }
 
-impl<'a> reth_provider::AccountReader for StateProviderObj<'a> {
+impl<'a> reth_provider::AccountReader for StateProviderTraitObjWrapper<'a> {
     fn basic_account(
         &self,
         address: revm_primitives::Address,
@@ -795,7 +798,7 @@ impl<'a> reth_provider::AccountReader for StateProviderObj<'a> {
     }
 }
 
-impl<'a> reth_provider::BlockHashReader for StateProviderObj<'a> {
+impl<'a> reth_provider::BlockHashReader for StateProviderTraitObjWrapper<'a> {
     fn block_hash(
         &self,
         block_number: reth_primitives::BlockNumber,
@@ -819,7 +822,7 @@ impl<'a> reth_provider::BlockHashReader for StateProviderObj<'a> {
     }
 }
 
-impl<'a> StateProvider for StateProviderObj<'a> {
+impl<'a> StateProvider for StateProviderTraitObjWrapper<'a> {
     fn account_balance(
         &self,
         addr: revm_primitives::Address,
@@ -865,11 +868,12 @@ impl<'a> StateProvider for StateProviderObj<'a> {
     }
 }
 
-/// Hack to get around 'higher-ranked' lifetime error, see
+/// Hack to get around 'higher-ranked lifetime error', see
 /// <https://github.com/rust-lang/rust/issues/100013>
-pub struct StateCacheDBMut<'a, 'b>(pub &'b mut StateCacheDB<'a>);
+#[allow(missing_debug_implementations)]
+pub struct StateCacheDBRefMutWrapper<'a, 'b>(pub &'b mut StateCacheDB<'a>);
 
-impl<'a, 'b> Database for StateCacheDBMut<'a, 'b> {
+impl<'a, 'b> Database for StateCacheDBRefMutWrapper<'a, 'b> {
     type Error = <StateCacheDB<'a> as Database>::Error;
     fn basic(
         &mut self,
@@ -895,7 +899,7 @@ impl<'a, 'b> Database for StateCacheDBMut<'a, 'b> {
     }
 }
 
-impl<'a, 'b> DatabaseRef for StateCacheDBMut<'a, 'b> {
+impl<'a, 'b> DatabaseRef for StateCacheDBRefMutWrapper<'a, 'b> {
     type Error = <StateCacheDB<'a> as Database>::Error;
 
     fn basic_ref(

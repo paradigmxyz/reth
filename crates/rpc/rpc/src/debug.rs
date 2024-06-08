@@ -34,8 +34,8 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use crate::{
     eth::{
         api::{
-            traits::call::{StateCacheDBMut, StateProviderObj},
-            Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace,
+            Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking,
+            StateCacheDB, Trace,
         },
         error::{EthApiError, EthResult},
         revm_utils::{prepare_call_env, EvmOverrides},
@@ -341,9 +341,10 @@ where
                             self.inner
                                 .eth_api
                                 .spawn_with_call_at(call, at, overrides, move |db, env| {
-                                    // hack to get around 'higher-ranked' lifetime error, see
-                                    // <https://github.com/rust-lang/rust/issues/100013>
-                                    let StateCacheDBMut(db) = db;
+                                    // wrapper is hack to get around 'higher-ranked lifetime error',
+                                    // see <https://github.com/rust-lang/rust/issues/100013>
+                                    let db = db.0;
+
                                     let (res, _) =
                                         this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                                     let frame = inspector
@@ -366,9 +367,10 @@ where
                             .inner
                             .eth_api
                             .spawn_with_call_at(call, at, overrides, move |db, env| {
-                                // hack to get around 'higher-ranked' lifetime error, see
+                                // wrapper is hack to get around 'higher-ranked lifetime error', see
                                 // <https://github.com/rust-lang/rust/issues/100013>
-                                let StateCacheDBMut(db) = db;
+                                let db = db.0;
+
                                 let (res, _) =
                                     this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                                 let frame = inspector.try_into_mux_frame(&res, db)?;
@@ -387,9 +389,10 @@ where
                         .inner
                         .eth_api
                         .spawn_with_call_at(call, at, overrides, move |db, env| {
-                            // hack to get around 'higher-ranked' lifetime error, see
+                            // wrapper is hack to get around 'higher-ranked lifetime error', see
                             // <https://github.com/rust-lang/rust/issues/100013>
-                            let StateCacheDBMut(db) = db;
+                            let db = db.0;
+
                             let mut inspector = JsInspector::new(code, config)?;
                             let (res, _) =
                                 this.eth_api().inspect(&mut *db, env.clone(), &mut inspector)?;
@@ -544,7 +547,7 @@ where
         &self,
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
-        db: &mut CacheDB<StateProviderDatabase<StateProviderObj<'_>>>,
+        db: &mut StateCacheDB<'_>,
         transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::EvmState)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;

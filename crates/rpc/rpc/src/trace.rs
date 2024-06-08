@@ -29,10 +29,7 @@ use revm_inspectors::{
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 use crate::eth::{
-    api::{
-        traits::call::StateCacheDBMut, EthCall, LoadBlock, LoadPendingBlock, LoadState,
-        LoadTransaction, SpawnBlocking, Trace,
-    },
+    api::{EthCall, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace},
     error::{EthApiError, EthResult},
     revm_utils::{prepare_call_env, EvmOverrides},
     utils::recover_raw_transaction,
@@ -96,9 +93,10 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, env| {
-                // hack to get around 'higher-ranked' lifetime error, see
+                // wrapper is hack to get around 'higher-ranked lifetime error', see
                 // <https://github.com/rust-lang/rust/issues/100013>
-                let StateCacheDBMut(db) = db;
+                let db = db.0;
+
                 let (res, _) = this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     &res,
