@@ -1,13 +1,17 @@
 use crate::{db::DatabaseError, lockfile::StorageLockError};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+};
 use core::fmt::{Display, Formatter, Result};
 use reth_fs_util::FsPathError;
 use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, StaticFileSegment,
     TxHashOrNumber, TxNumber, B256, U256,
 };
-use std::path::PathBuf;
 
 /// Provider result type.
+#[cfg(feature = "std")]
 pub type ProviderResult<Ok> = std::result::Result<Ok, ProviderError>;
 
 /// Bundled errors variants thrown by various providers.
@@ -46,7 +50,7 @@ pub enum ProviderError {
     },
     /// The total difficulty for a block is missing.
     TotalDifficultyNotFound(BlockNumber),
-    /// when required header related data was not found but was required.
+    /// When required header-related data was not found but was required.
     HeaderNotFound(BlockHashOrNumber),
     /// The specific transaction is missing.
     TransactionNotFound(TxHashOrNumber),
@@ -84,7 +88,8 @@ pub enum ProviderError {
     /// Provider does not support this particular request.
     UnsupportedProvider,
     /// Static File is not found at specified path.
-    MissingStaticFilePath(StaticFileSegment, PathBuf),
+    #[cfg(feature = "std")]
+    MissingStaticFilePath(StaticFileSegment, std::path::PathBuf),
     /// Static File is not found for requested block.
     MissingStaticFileBlock(StaticFileSegment, BlockNumber),
     /// Static File is not found for requested transaction.
@@ -173,6 +178,7 @@ impl Display for ProviderError {
                 write!(f, "State at block #{} is pruned", block_number)
             }
             Self::UnsupportedProvider => write!(f, "This provider does not support this request"),
+            #[cfg(feature = "std")]
             Self::MissingStaticFilePath(segment, path) => {
                 write!(f, "Not able to find {} static file at {}", segment, path.display())
             }
@@ -216,7 +222,7 @@ impl From<StorageLockError> for ProviderError {
 
 impl From<DatabaseError> for ProviderError {
     fn from(err: DatabaseError) -> Self {
-        Self::Database(err) // Assuming `Database` is a variant of `ProviderError`
+        Self::Database(err)
     }
 }
 
@@ -274,10 +280,10 @@ impl Display for ConsistentViewError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
             Self::Syncing { best_block } => {
-                f.write_fmt(format_args!("node is syncing. best block: {0:?}", best_block,))
+                write!(f, "node is syncing. best block: {:?}", best_block)
             }
             Self::Inconsistent { tip } => {
-                f.write_fmt(format_args!("inconsistent database state: {0:?}", tip))
+                write!(f, "inconsistent database state: {:?}", tip)
             }
         }
     }

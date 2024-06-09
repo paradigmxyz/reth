@@ -1,3 +1,4 @@
+use alloc::string::{String, ToString};
 use core::fmt::{Display, Formatter, Result};
 use reth_fs_util::FsPathError;
 
