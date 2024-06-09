@@ -755,7 +755,7 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0, Vector::new())
+        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 

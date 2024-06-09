@@ -13,6 +13,7 @@ use reth_primitives::{
     BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, Receipt, Receipts, TxType,
     Withdrawals, U256,
 };
+use reth_provider::BundleStateWithReceipts;
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
@@ -426,8 +427,8 @@ where
         BundleStateWithReceipts::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
-            self.batch_record.take_requests(),
             self.batch_record.first_block().unwrap_or_default(),
+            self.batch_record.take_requests(),
         )
     }
 
