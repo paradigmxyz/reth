@@ -79,8 +79,9 @@ struct EtherscanBlockResponse {
     result: RichBlock,
 }
 
-/// Load block using Etherscan API. Note: only BlockNumberOrTag::Latest, BlockNumberOrTag::Earliest,
-/// BlockNumberOrTag::Pending, BlockNumberOrTag::Number(u64) are supported.
+/// Load block using Etherscan API. Note: only `BlockNumberOrTag::Latest`,
+/// `BlockNumberOrTag::Earliest`, `BlockNumberOrTag::Pending`, `BlockNumberOrTag::Number(u64)` are
+/// supported.
 async fn load_etherscan_block(
     http_client: &Client,
     base_url: &str,
