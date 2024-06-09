@@ -15,7 +15,7 @@ use reth_eth_wire::{
     UnauthedP2PStream,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
-use reth_net_common::{bandwidth_meter::MeteredStream, stream::HasRemoteAddr};
+use reth_net_common::stream::HasRemoteAddr;
 use reth_network_types::PeerId;
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_tasks::TaskSpawner;
@@ -233,7 +233,6 @@ impl SessionManager {
 
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
-        let metered_stream = MeteredStream::new(stream);
         let secret_key = self.secret_key;
         let hello_message = self.hello_message.clone();
         let status = self.status;
@@ -248,7 +247,7 @@ impl SessionManager {
             start_pending_incoming_session(
                 disconnect_rx,
                 session_id,
-                metered_stream,
+                stream,
                 pending_events,
                 remote_addr,
                 secret_key,
@@ -788,7 +787,7 @@ pub(crate) async fn pending_session_with_timeout<F>(
 pub(crate) async fn start_pending_incoming_session(
     disconnect_rx: oneshot::Receiver<()>,
     session_id: SessionId,
-    stream: MeteredStream<TcpStream>,
+    stream: TcpStream,
     events: mpsc::Sender<PendingSessionEvent>,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
@@ -833,7 +832,7 @@ async fn start_pending_outbound_session(
             if let Err(err) = stream.set_nodelay(true) {
                 tracing::warn!(target: "net::session", "set nodelay failed: {:?}", err);
             }
-            MeteredStream::new(stream)
+            stream
         }
         Err(error) => {
             let _ = events
@@ -868,7 +867,7 @@ async fn start_pending_outbound_session(
 async fn authenticate(
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent>,
-    stream: MeteredStream<TcpStream>,
+    stream: TcpStream,
     session_id: SessionId,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
@@ -878,7 +877,7 @@ async fn authenticate(
     fork_filter: ForkFilter,
     extra_handlers: RlpxSubProtocolHandlers,
 ) {
-    let local_addr = stream.inner().local_addr().ok();
+    let local_addr = stream.local_addr().ok();
     let stream = match get_eciess_stream(stream, secret_key, direction).await {
         Ok(stream) => stream,
         Err(error) => {
@@ -949,7 +948,7 @@ async fn get_eciess_stream<Io: AsyncRead + AsyncWrite + Unpin + HasRemoteAddr>(
 /// also negotiate the additional protocols.
 #[allow(clippy::too_many_arguments)]
 async fn authenticate_stream(
-    stream: UnauthedP2PStream<ECIESStream<MeteredStream<TcpStream>>>,
+    stream: UnauthedP2PStream<ECIESStream<TcpStream>>,
     session_id: SessionId,
     remote_addr: SocketAddr,
     local_addr: Option<SocketAddr>,

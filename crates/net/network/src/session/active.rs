@@ -768,7 +768,6 @@ mod tests {
         EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream, Status, StatusBuilder,
         UnauthedEthStream, UnauthedP2PStream,
     };
-    use reth_net_common::bandwidth_meter::MeteredStream;
     use reth_network_types::pk2id;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
     use secp256k1::{SecretKey, SECP256K1};
@@ -837,12 +836,11 @@ mod tests {
             let session_id = self.next_id();
             let (_disconnect_tx, disconnect_rx) = oneshot::channel();
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
-            let metered_stream = MeteredStream::new(stream);
 
             tokio::task::spawn(start_pending_incoming_session(
                 disconnect_rx,
                 session_id,
-                metered_stream,
+                stream,
                 pending_sessions_tx,
                 remote_addr,
                 self.secret_key,
