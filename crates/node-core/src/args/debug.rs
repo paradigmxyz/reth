@@ -39,7 +39,7 @@ pub struct DebugArgs {
     )]
     pub etherscan: Option<Option<String>>,
 
-    /// Runs a fake consensus client using blocks fetched from an RPC WebSocket endpoint.
+    /// Runs a fake consensus client using blocks fetched from an RPC `WebSocket` endpoint.
     #[arg(
         long = "debug.rpc-consensus-ws",
         help_heading = "Debug",

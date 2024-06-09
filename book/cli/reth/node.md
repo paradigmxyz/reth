@@ -467,7 +467,7 @@ Debug:
           Runs a fake consensus client that advances the chain using recent block hashes on Etherscan. If specified, requires an `ETHERSCAN_API_KEY` environment variable
 
       --debug.rpc-consensus-ws <RPC_CONSENSUS_WS>
-          Runs a fake consensus client using blocks fetched from an RPC WebSocket endpoint
+          Runs a fake consensus client using blocks fetched from an RPC `WebSocket` endpoint
 
       --debug.skip-fcu <SKIP_FCU>
           If provided, the engine will skip `n` consecutive FCUs
