@@ -448,6 +448,7 @@ where
         db.take_bundle(),
         Receipts::from_vec(vec![receipts]),
         block_number,
+        vec![requests.clone().unwrap_or_default()],
     );
     let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
     let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");

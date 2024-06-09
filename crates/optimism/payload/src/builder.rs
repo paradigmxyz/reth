@@ -510,6 +510,7 @@ where
         db.take_bundle(),
         Receipts::from_vec(vec![receipts]),
         block_number,
+        Vec::new(),
     );
     let receipts_root = bundle
         .optimism_receipts_root_slow(

@@ -219,6 +219,7 @@ impl AppendableChain {
             state,
             Receipts::from_block_receipt(receipts),
             block.number,
+            vec![requests.into()],
         );
 
         // check state root if the block extends the canonical chain __and__ if state root

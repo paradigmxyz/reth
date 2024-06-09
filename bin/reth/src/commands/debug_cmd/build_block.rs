@@ -271,12 +271,13 @@ impl Command {
                 let db = StateProviderDatabase::new(blockchain_db.latest()?);
                 let executor = block_executor!(provider_factory.chain_spec()).executor(db);
 
-                let BlockExecutionOutput { state, receipts, .. } =
+                let BlockExecutionOutput { state, receipts, requests, .. } =
                     executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
                 let state = BundleStateWithReceipts::new(
                     state,
                     Receipts::from_block_receipt(receipts),
                     block.number,
+                    vec![requests.into()],
                 );
                 debug!(target: "reth::cli", ?state, "Executed block");
 

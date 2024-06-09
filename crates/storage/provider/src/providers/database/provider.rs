@@ -540,6 +540,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             Vec::new(),
             reth_primitives::Receipts::from_vec(receipts),
             start_block_number,
+            Vec::new(),
         ))
     }
 

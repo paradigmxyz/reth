@@ -135,7 +135,7 @@ impl Command {
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
-        let BlockExecutionOutput { state, receipts, .. } = executor.execute(
+        let BlockExecutionOutput { state, receipts, requests, .. } = executor.execute(
             (
                 &block
                     .clone()
@@ -150,6 +150,7 @@ impl Command {
             state,
             Receipts::from_block_receipt(receipts),
             block.number,
+            vec![requests.into()],
         );
 
         // Unpacked `BundleState::state_root_slow` function

@@ -526,6 +526,7 @@ mod tests {
             ),
             Receipts::from_vec(vec![vec![]]),
             1,
+            vec![],
         );
 
         let block_state2 = BundleStateWithReceipts::new(
@@ -541,6 +542,7 @@ mod tests {
             ),
             Receipts::from_vec(vec![vec![]]),
             2,
+            vec![],
         );
 
         let mut block1 = SealedBlockWithSenders::default();

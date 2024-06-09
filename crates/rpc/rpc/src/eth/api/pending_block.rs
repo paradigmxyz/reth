@@ -225,6 +225,7 @@ impl PendingBlockEnv {
             db.take_bundle(),
             Receipts::from_vec(vec![receipts]),
             block_number,
+            Vec::new(),
         );
 
         #[cfg(feature = "optimism")]
