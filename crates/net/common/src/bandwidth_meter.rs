@@ -46,7 +46,7 @@ pub struct MeteredStream<S> {
 
 impl<S> MeteredStream<S> {
     /// Creates a new [`MeteredStream`] wrapping around the provided stream
-    pub fn new(inner: S) -> Self {
+    pub const fn new(inner: S) -> Self {
         Self { inner }
     }
 
