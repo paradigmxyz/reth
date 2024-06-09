@@ -87,10 +87,10 @@ impl std::error::Error for BlockValidationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         #[allow(deprecated)]
         match self {
-            Self::EVM { error: source, .. } => ::core::option::Option::Some(source),
-            Self::StateRoot { 0: transparent } => std::error::Error::source(transparent),
-            Self::BlockHashAccountLoadingFailed { 0: transparent } => {
-                std::error::Error::source(transparent)
+            Self::EVM { error: source, .. } => Some(source),
+            Self::StateRoot(state_root_error) => Some(state_root_error),
+            Self::BlockHashAccountLoadingFailed(account_loading_error) => {
+                Some(account_loading_error)
             }
             _ => None,
         }
@@ -102,20 +102,20 @@ impl Display for BlockValidationError {
         #[allow(unused_variables, deprecated, clippy::used_underscore_binding)]
         match self {
             Self::EVM { hash, error } => {
-                write!(f, "EVM reported invalid transaction ({}): {}", hash, error,)
+                write!(f, "EVM reported invalid transaction ({}): {}", hash, error)
             }
             Self::SenderRecoveryError => f.write_str("failed to recover sender for transaction"),
             Self::IncrementBalanceFailed => {
                 f.write_str("incrementing balance in post execution failed")
             }
-            Self::StateRoot(state_root_error) => Display::fmt(state_root_error, f),
+            Self::StateRoot(state_root_error) => write!(f, "{}", state_root_error),
             Self::TransactionGasLimitMoreThanAvailableBlockGas {
                 transaction_gas_limit,
                 block_available_gas,
             } => write!(
                 f,
                 "transaction gas limit {} is more than block's available gas {}",
-                transaction_gas_limit, block_available_gas,
+                transaction_gas_limit, block_available_gas
             ),
             Self::BlockPreMerge { hash } => {
                 write!(f, "block {} is pre merge", hash)
@@ -130,22 +130,22 @@ impl Display for BlockValidationError {
                 write!(
                     f,
                     "the parent beacon block root is not zero for Cancun genesis block: {}",
-                    parent_beacon_block_root,
+                    parent_beacon_block_root
                 )
             }
             Self::BeaconRootContractCall { parent_beacon_block_root, message } => write!(
                 f,
                 "failed to apply beacon root contract call at {}: {}",
-                parent_beacon_block_root, message,
+                parent_beacon_block_root, message
             ),
             Self::BlockHashAccountLoadingFailed(account_loading_error) => {
-                Display::fmt(account_loading_error, f)
+                write!(f, "{}", account_loading_error)
             }
             Self::WithdrawalRequestsContractCall { message } => {
-                write!(f, "failed to apply withdrawal requests contract call: {}", message,)
+                write!(f, "failed to apply withdrawal requests contract call: {}", message)
             }
             Self::DepositRequestDecode(deposit_request) => {
-                write!(f, "failed to decode deposit requests from receipts: {}", deposit_request,)
+                write!(f, "failed to decode deposit requests from receipts: {}", deposit_request)
             }
         }
     }
@@ -156,6 +156,7 @@ impl From<StateRootError> for BlockValidationError {
         Self::StateRoot(source)
     }
 }
+
 impl From<ProviderError> for BlockValidationError {
     fn from(source: ProviderError) -> Self {
         Self::BlockHashAccountLoadingFailed(source)
@@ -211,9 +212,9 @@ impl std::error::Error for BlockExecutionError {
 impl Display for BlockExecutionError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
-            Self::Validation(validation_error) => Display::fmt(validation_error, f),
-            Self::Pruning(pruning_error) => Display::fmt(pruning_error, f),
-            Self::Consensus(consensus_error) => Display::fmt(consensus_error, f),
+            Self::Validation(validation_error) => write!(f, "{}", validation_error),
+            Self::Pruning(pruning_error) => write!(f, "{}", pruning_error),
+            Self::Consensus(consensus_error) => write!(f, "{}", consensus_error),
             Self::CanonicalRevert { inner } => {
                 write!(f, "transaction error on revert: {}", inner)
             }
@@ -224,11 +225,11 @@ impl Display for BlockExecutionError {
                 write!(
                     f,
                     "appending chain on fork {:?} is not possible as the tip is {:?}",
-                    other_chain_fork, chain_tip,
+                    other_chain_fork, chain_tip
                 )
             }
-            Self::LatestBlock(latest_block_error) => Display::fmt(latest_block_error, f),
-            Self::Other(other_error) => Display::fmt(other_error, f),
+            Self::LatestBlock(latest_block_error) => write!(f, "{}", latest_block_error),
+            Self::Other(other_error) => write!(f, "{}", other_error),
         }
     }
 }
@@ -238,19 +239,19 @@ impl From<BlockValidationError> for BlockExecutionError {
         Self::Validation(source)
     }
 }
-#[allow(unused_qualifications)]
+
 impl From<PruneSegmentError> for BlockExecutionError {
     fn from(source: PruneSegmentError) -> Self {
         Self::Pruning(source)
     }
 }
-#[allow(unused_qualifications)]
+
 impl From<ConsensusError> for BlockExecutionError {
     fn from(source: ConsensusError) -> Self {
         Self::Consensus(source)
     }
 }
-#[allow(unused_qualifications)]
+
 impl From<ProviderError> for BlockExecutionError {
     fn from(source: ProviderError) -> Self {
         Self::LatestBlock(source)

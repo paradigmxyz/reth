@@ -24,8 +24,8 @@ impl std::error::Error for StateRootError {
 impl Display for StateRootError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
-            Self::DB(db_err) => Display::fmt(db_err, f),
-            Self::StorageRootError(storage_err) => Display::fmt(storage_err, f),
+            Self::DB(db_err) => write!(f, "{}", db_err),
+            Self::StorageRootError(storage_err) => write!(f, "{}", storage_err),
         }
     }
 }
@@ -74,7 +74,7 @@ impl std::error::Error for StorageRootError {
 impl Display for StorageRootError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
-            Self::DB(db_err) => Display::fmt(db_err, f),
+            Self::DB(db_err) => write!(f, "{}", db_err),
         }
     }
 }
