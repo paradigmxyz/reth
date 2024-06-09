@@ -768,7 +768,7 @@ mod tests {
         EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream, Status, StatusBuilder,
         UnauthedEthStream, UnauthedP2PStream,
     };
-    use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
+    use reth_net_common::bandwidth_meter::MeteredStream;
     use reth_network_types::pk2id;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
     use secp256k1::{SecretKey, SECP256K1};
@@ -793,7 +793,6 @@ mod tests {
         status: Status,
         fork_filter: ForkFilter,
         next_id: usize,
-        bandwidth_meter: BandwidthMeter,
     }
 
     impl SessionBuilder {
@@ -925,7 +924,6 @@ mod tests {
                 fork_filter: MAINNET
                     .hardfork_fork_filter(Hardfork::Frontier)
                     .expect("The Frontier fork filter should exist on mainnet"),
-                bandwidth_meter: BandwidthMeter::default(),
             }
         }
     }
