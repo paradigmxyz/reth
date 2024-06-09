@@ -130,7 +130,7 @@ async fn main() -> eyre::Result<()> {
 
     let tasks = TaskManager::current();
 
-    // create optimism genesis with canyon at block 2
+    // create a custom chain spec
     let spec = ChainSpec::builder()
         .chain(Chain::mainnet())
         .genesis(Genesis::default())
@@ -145,7 +145,9 @@ async fn main() -> eyre::Result<()> {
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
+        // configure the node with regular ethereum types
         .with_types::<EthereumNode>()
+        // use default ethereum components but with our executor
         .with_components(EthereumNode::components().executor(MyExecutorBuilder::default()))
         .launch()
         .await
