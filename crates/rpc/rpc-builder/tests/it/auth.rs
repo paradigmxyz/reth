@@ -13,8 +13,7 @@ use reth_rpc_types_compat::engine::payload::{
 #[allow(unused_must_use)]
 async fn test_basic_engine_calls<C>(client: &C)
 where
-    C: ClientT + SubscriptionClientT + Sync,
-    C: EngineApiClient<EthEngineTypes>,
+    C: ClientT + SubscriptionClientT + Sync + EngineApiClient<EthEngineTypes>,
 {
     let block = Block::default().seal_slow();
     EngineApiClient::new_payload_v1(client, block_to_payload_v1(block.clone())).await;

@@ -6,12 +6,13 @@ use crate::execute::{
 };
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
-use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt};
+use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm_primitives::db::Database;
 use std::sync::Arc;
 
-/// A [BlockExecutorProvider] that returns mocked execution results.
+/// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
 pub struct MockExecutorProvider {
     exec_results: Arc<Mutex<Vec<BatchBlockExecutionOutput>>>,

@@ -104,7 +104,7 @@ pub fn recover_header_signer(header: &Header) -> Result<Address, CliqueSignerRec
         .map_err(CliqueSignerRecoveryError::InvalidSignature)
 }
 
-/// Returns a new [TxEnv] filled with the transaction's data.
+/// Returns a new [`TxEnv`] filled with the transaction's data.
 pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEnv {
     let mut tx_env = TxEnv::default();
 
@@ -132,8 +132,8 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
 /// [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) are:
 ///
 /// At the start of processing any execution block where `block.timestamp >= FORK_TIMESTAMP` (i.e.
-/// before processing any transactions), call [BEACON_ROOTS_ADDRESS] as
-/// [SYSTEM_ADDRESS](alloy_eips::eip4788::SYSTEM_ADDRESS) with the 32-byte input of
+/// before processing any transactions), call [`BEACON_ROOTS_ADDRESS`] as
+/// [`SYSTEM_ADDRESS`](alloy_eips::eip4788::SYSTEM_ADDRESS) with the 32-byte input of
 /// `header.parent_beacon_block_root`. This will trigger the `set()` routine of the beacon roots
 /// contract.
 pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: B256) {
@@ -215,13 +215,13 @@ fn fill_tx_env_with_system_contract_call(
     env.block.basefee = U256::ZERO;
 }
 
-/// Fill transaction environment from [TransactionSignedEcRecovered].
+/// Fill transaction environment from [`TransactionSignedEcRecovered`].
 #[cfg(not(feature = "optimism"))]
 pub fn fill_tx_env_with_recovered(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovered) {
     fill_tx_env(tx_env, transaction.as_ref(), transaction.signer());
 }
 
-/// Fill transaction environment from [TransactionSignedEcRecovered] and the given envelope.
+/// Fill transaction environment from [`TransactionSignedEcRecovered`] and the given envelope.
 #[cfg(feature = "optimism")]
 pub fn fill_tx_env_with_recovered(
     tx_env: &mut TxEnv,

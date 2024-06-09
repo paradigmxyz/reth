@@ -31,7 +31,7 @@ pub type EthSatelliteConnection =
 pub enum EthRlpxConnection {
     /// A That only supports the ETH protocol.
     EthOnly(Box<EthPeerConnection>),
-    /// A connection that supports the ETH protocol and __at least one other__ RLPx protocol.
+    /// A connection that supports the ETH protocol and __at least one other__ `RLPx` protocol.
     Satellite(Box<EthSatelliteConnection>),
 }
 
@@ -45,7 +45,7 @@ impl EthRlpxConnection {
         }
     }
 
-    /// Consumes this type and returns the wrapped [P2PStream].
+    /// Consumes this type and returns the wrapped [`P2PStream`].
     #[inline]
     pub(crate) fn into_inner(self) -> P2PStream<ECIESStream<MeteredStream<TcpStream>>> {
         match self {

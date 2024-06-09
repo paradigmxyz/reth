@@ -10,7 +10,7 @@ pub struct RpcModules {
 }
 
 impl RpcModules {
-    /// Create a new instance of RPCModules
+    /// Create a new instance of `RPCModules`
     pub const fn new(module_map: HashMap<String, String>) -> Self {
         Self { module_map }
     }

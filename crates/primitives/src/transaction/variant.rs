@@ -43,7 +43,7 @@ impl TransactionSignedVariant {
 
     /// Returns the signer of the transaction.
     ///
-    /// If the transaction is of not of [TransactionSignedEcRecovered] it will be recovered.
+    /// If the transaction is of not of [`TransactionSignedEcRecovered`] it will be recovered.
     pub fn signer(&self) -> Option<Address> {
         match self {
             Self::SignedNoHash(tx) => tx.recover_signer(),
@@ -52,7 +52,7 @@ impl TransactionSignedVariant {
         }
     }
 
-    /// Returns [TransactionSigned] type
+    /// Returns [`TransactionSigned`] type
     /// else None
     pub const fn as_signed(&self) -> Option<&TransactionSigned> {
         match self {
@@ -70,22 +70,22 @@ impl TransactionSignedVariant {
         }
     }
 
-    /// Returns true if the transaction is of [TransactionSigned] variant
+    /// Returns true if the transaction is of [`TransactionSigned`] variant
     pub const fn is_signed(&self) -> bool {
         matches!(self, Self::Signed(_))
     }
 
-    /// Returns true if the transaction is of [TransactionSignedNoHash] variant
+    /// Returns true if the transaction is of [`TransactionSignedNoHash`] variant
     pub const fn is_signed_no_hash(&self) -> bool {
         matches!(self, Self::SignedNoHash(_))
     }
 
-    /// Returns true if the transaction is of [TransactionSignedEcRecovered] variant
+    /// Returns true if the transaction is of [`TransactionSignedEcRecovered`] variant
     pub const fn is_signed_ec_recovered(&self) -> bool {
         matches!(self, Self::SignedEcRecovered(_))
     }
 
-    /// Consumes the [TransactionSignedVariant] and returns the consumed [Transaction]
+    /// Consumes the [`TransactionSignedVariant`] and returns the consumed [Transaction]
     pub fn into_raw(self) -> Transaction {
         match self {
             Self::SignedNoHash(tx) => tx.transaction,
@@ -94,7 +94,7 @@ impl TransactionSignedVariant {
         }
     }
 
-    /// Consumes the [TransactionSignedVariant] and returns the consumed [TransactionSigned]
+    /// Consumes the [`TransactionSignedVariant`] and returns the consumed [`TransactionSigned`]
     pub fn into_signed(self) -> TransactionSigned {
         match self {
             Self::SignedNoHash(tx) => tx.with_hash(),
@@ -103,20 +103,20 @@ impl TransactionSignedVariant {
         }
     }
 
-    /// Consumes the [TransactionSignedVariant] and converts it into a
-    /// [TransactionSignedEcRecovered]
+    /// Consumes the [`TransactionSignedVariant`] and converts it into a
+    /// [`TransactionSignedEcRecovered`]
     ///
-    /// If the variants is not a [TransactionSignedEcRecovered] it will recover the sender.
+    /// If the variants is not a [`TransactionSignedEcRecovered`] it will recover the sender.
     ///
     /// Returns `None` if the transaction's signature is invalid
     pub fn into_signed_ec_recovered(self) -> Option<TransactionSignedEcRecovered> {
         self.try_into_signed_ec_recovered().ok()
     }
 
-    /// Consumes the [TransactionSignedVariant] and converts it into a
-    /// [TransactionSignedEcRecovered]
+    /// Consumes the [`TransactionSignedVariant`] and converts it into a
+    /// [`TransactionSignedEcRecovered`]
     ///
-    /// If the variants is not a [TransactionSignedEcRecovered] it will recover the sender.
+    /// If the variants is not a [`TransactionSignedEcRecovered`] it will recover the sender.
     ///
     /// Returns an error if the transaction's signature is invalid.
     pub fn try_into_signed_ec_recovered(

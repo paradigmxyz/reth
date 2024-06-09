@@ -48,7 +48,7 @@ impl Compact for MerkleCheckpoint {
 
         buf.put_u16(self.walker_stack.len() as u16);
         len += 2;
-        for item in self.walker_stack.into_iter() {
+        for item in self.walker_stack {
             len += item.to_compact(buf);
         }
 
@@ -291,7 +291,7 @@ impl Default for StageUnitCheckpoint {
     }
 }
 
-/// Generates [StageCheckpoint] getter and builder methods.
+/// Generates [`StageCheckpoint`] getter and builder methods.
 macro_rules! stage_unit_checkpoints {
     ($(($index:expr,$enum_variant:tt,$checkpoint_ty:ty,#[doc = $fn_get_doc:expr]$fn_get_name:ident,#[doc = $fn_build_doc:expr]$fn_build_name:ident)),+) => {
         impl StageCheckpoint {

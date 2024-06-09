@@ -1,7 +1,7 @@
 //! Contains types required for building a payload.
 
 use alloy_rlp::Encodable;
-use reth_engine_primitives::{BuiltPayload, PayloadBuilderAttributes};
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     constants::EIP1559_INITIAL_BASE_FEE, revm::config::revm_spec_by_timestamp_after_merge, Address,
     BlobTransactionSidecar, ChainSpec, Hardfork, Header, SealedBlock, Withdrawals, B256, U256,
@@ -178,7 +178,7 @@ impl EthPayloadBuilderAttributes {
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
-    /// Derives the unique [PayloadId] for the given parent and attributes
+    /// Derives the unique [`PayloadId`] for the given parent and attributes
     pub fn new(parent: B256, attributes: PayloadAttributes) -> Self {
         let id = payload_id(&parent, &attributes);
 
@@ -200,7 +200,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
-    /// Derives the unique [PayloadId] for the given parent and attributes
+    /// Derives the unique [`PayloadId`] for the given parent and attributes
     fn try_new(parent: B256, attributes: PayloadAttributes) -> Result<Self, Infallible> {
         Ok(Self::new(parent, attributes))
     }
@@ -293,7 +293,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
     }
 }
 
-/// Generates the payload id for the configured payload from the [PayloadAttributes].
+/// Generates the payload id for the configured payload from the [`PayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
 pub(crate) fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {

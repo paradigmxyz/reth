@@ -48,7 +48,7 @@ pub fn open_db_read_only(path: &Path, args: DatabaseArguments) -> eyre::Result<D
     }
 }
 
-/// Opens up an existing database. Read/Write mode with WriteMap enabled. It doesn't create it or
+/// Opens up an existing database. Read/Write mode with `WriteMap` enabled. It doesn't create it or
 /// create tables if missing.
 pub fn open_db(path: &Path, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
     let db = DatabaseEnv::open(path, DatabaseEnvKind::RW, args.clone())

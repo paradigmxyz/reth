@@ -74,12 +74,12 @@ use self::constants::{tx_manager::*, DEFAULT_SOFT_LIMIT_BYTE_SIZE_TRANSACTIONS_B
 /// Resolves with the result of each transaction import.
 pub type PoolImportFuture = Pin<Box<dyn Future<Output = Vec<PoolResult<TxHash>>> + Send + 'static>>;
 
-/// Api to interact with [TransactionsManager] task.
+/// Api to interact with [`TransactionsManager`] task.
 ///
-/// This can be obtained via [TransactionsManager::handle] and can be used to manually interact with
-/// the [TransactionsManager] task once it is spawned.
+/// This can be obtained via [`TransactionsManager::handle`] and can be used to manually interact
+/// with the [`TransactionsManager`] task once it is spawned.
 ///
-/// For example [TransactionsHandle::get_peer_transaction_hashes] returns the transaction hashes
+/// For example [`TransactionsHandle::get_peer_transaction_hashes`] returns the transaction hashes
 /// known by a specific peer.
 #[derive(Debug, Clone)]
 pub struct TransactionsHandle {
@@ -211,11 +211,11 @@ pub struct TransactionsManager<Pool> {
     /// The import process includes:
     ///  - validation of the transactions, e.g. transaction is well formed: valid tx type, fees are
     ///    valid, or for 4844 transaction the blobs are valid. See also
-    ///    [EthTransactionValidator](reth_transaction_pool::validate::EthTransactionValidator)
+    ///    [`EthTransactionValidator`](reth_transaction_pool::validate::EthTransactionValidator)
     /// - if the transaction is valid, it is added into the pool.
     ///
     /// Once the new transaction reaches the __pending__ state it will be emitted by the pool via
-    /// [TransactionPool::pending_transactions_listener] and arrive at the `pending_transactions`
+    /// [`TransactionPool::pending_transactions_listener`] and arrive at the `pending_transactions`
     /// receiver.
     pool_imports: FuturesUnordered<PoolImportFuture>,
     /// Stats on pending pool imports that help the node self-monitor.
@@ -226,12 +226,12 @@ pub struct TransactionsManager<Pool> {
     peers: HashMap<PeerId, PeerMetadata>,
     /// Send half for the command channel.
     ///
-    /// This is kept so that a new [TransactionsHandle] can be created at any time.
+    /// This is kept so that a new [`TransactionsHandle`] can be created at any time.
     command_tx: mpsc::UnboundedSender<TransactionsCommand>,
     /// Incoming commands from [`TransactionsHandle`].
     ///
     /// This will only receive commands if a user manually sends a command to the manager through
-    /// the [TransactionsHandle] to interact with this type directly.
+    /// the [`TransactionsHandle`] to interact with this type directly.
     command_rx: UnboundedReceiverStream<TransactionsCommand>,
     /// A stream that yields new __pending__ transactions.
     ///
@@ -244,7 +244,7 @@ pub struct TransactionsManager<Pool> {
     pending_transactions: ReceiverStream<TxHash>,
     /// Incoming events from the [`NetworkManager`](crate::NetworkManager).
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent>,
-    /// TransactionsManager metrics
+    /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
 }
 
@@ -404,7 +404,7 @@ where
     /// Propagate the transactions to all connected peers either as full objects or hashes.
     ///
     /// The message for new pooled hashes depends on the negotiated version of the stream.
-    /// See [NewPooledTransactionHashes]
+    /// See [`NewPooledTransactionHashes`]
     ///
     /// Note: EIP-4844 are disallowed from being broadcast in full and are only ever sent as hashes, see also <https://eips.ethereum.org/EIPS/eip-4844#networking>.
     fn propagate_transactions(
@@ -429,7 +429,7 @@ where
             // Iterate through the transactions to propagate and fill the hashes and full
             // transaction lists, before deciding whether or not to send full transactions to the
             // peer.
-            for tx in to_propagate.iter() {
+            for tx in &to_propagate {
                 if peer.seen_transactions.insert(tx.hash()) {
                     hashes.push(tx);
 
@@ -469,7 +469,7 @@ where
                 } else {
                     let new_full_transactions = full_transactions.build();
 
-                    for tx in new_full_transactions.iter() {
+                    for tx in &new_full_transactions {
                         propagated
                             .0
                             .entry(tx.hash())
@@ -527,7 +527,7 @@ where
         }
 
         let new_full_transactions = full_transactions.build();
-        for tx in new_full_transactions.iter() {
+        for tx in &new_full_transactions {
             propagated.0.entry(tx.hash()).or_default().push(PropagateKind::Full(peer_id));
         }
         // send full transactions
@@ -955,7 +955,7 @@ where
         // requests (based on received `NewPooledTransactionHashes`) then we already
         // recorded the hashes as seen by this peer in `Self::on_new_pooled_transaction_hashes`.
         let mut num_already_seen_by_peer = 0;
-        for tx in transactions.iter() {
+        for tx in &transactions {
             if source.is_broadcast() && !peer.seen_transactions.insert(*tx.hash()) {
                 num_already_seen_by_peer += 1;
             }
@@ -1231,9 +1231,8 @@ where
         // this can potentially validate >200k transactions. More if the message size
         // is bigger than the soft limit on a `PooledTransactions` response which is
         // 2 MiB (`Transactions` broadcast messages is smaller, 128 KiB).
-        let acc = &mut poll_durations.acc_pending_imports;
         let maybe_more_pool_imports = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_pending_imports,
             "net::tx",
             "Batched pool imports stream",
             DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS,
@@ -1242,9 +1241,8 @@ where
         );
 
         // Advance network/peer related events (update peers map).
-        let acc = &mut poll_durations.acc_network_events;
         let maybe_more_network_events = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_network_events,
             "net::tx",
             "Network events stream",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
@@ -1261,9 +1259,8 @@ where
         // We don't expect this buffer to be large, since only pending transactions are
         // emitted here.
         let mut new_txs = Vec::new();
-        let acc = &mut poll_durations.acc_imported_txns;
         let maybe_more_pending_txns = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_imported_txns,
             "net::tx",
             "Pending transactions stream",
             DEFAULT_BUDGET_TRY_DRAIN_POOL_IMPORTS,
@@ -1284,9 +1281,8 @@ where
         // this can potentially queue >200k transactions for insertion to pool. More
         // if the message size is bigger than the soft limit on a `PooledTransactions`
         // response which is 2 MiB.
-        let acc = &mut poll_durations.acc_fetch_events;
         let maybe_more_tx_fetch_events = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_fetch_events,
             "net::tx",
             "Transaction fetch events stream",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
@@ -1308,9 +1304,8 @@ where
         // validated until they are inserted into the pool, this can potentially queue
         // >13k transactions for insertion to pool. More if the message size is bigger
         // than the soft limit on a `Transactions` broadcast message, which is 128 KiB.
-        let acc = &mut poll_durations.acc_tx_events;
         let maybe_more_tx_events = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_tx_events,
             "net::tx",
             "Network transaction events stream",
             DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
@@ -1322,20 +1317,18 @@ where
         // capacity for this (fetch txns).
         //
         // Sends at most one request.
-        let acc = &mut poll_durations.acc_pending_fetch;
         duration_metered_exec!(
             {
                 if this.has_capacity_for_fetching_pending_hashes() {
                     this.on_fetch_hashes_pending_fetch();
                 }
             },
-            acc
+            poll_durations.acc_pending_fetch
         );
 
         // Advance commands (propagate/fetch/serve txns).
-        let acc = &mut poll_durations.acc_cmds;
         let maybe_more_commands = metered_poll_nested_stream_with_budget!(
-            acc,
+            poll_durations.acc_cmds,
             "net::tx",
             "Commands channel",
             DEFAULT_BUDGET_TRY_DRAIN_STREAM,
@@ -1413,7 +1406,7 @@ impl FullTransactionsBuilder {
         self.transactions.push(Arc::clone(&transaction.transaction));
     }
 
-    /// Returns whether or not any transactions are in the [FullTransactionsBuilder].
+    /// Returns whether or not any transactions are in the [`FullTransactionsBuilder`].
     fn is_empty(&self) -> bool {
         self.transactions.is_empty()
     }

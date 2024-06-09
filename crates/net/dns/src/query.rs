@@ -62,7 +62,7 @@ impl<R: Resolver, K: EnrKeyUnambiguous> QueryPool<R, K> {
         self.queued_queries.push_back(Query::Root(Box::pin(resolve_root(resolver, link, timeout))))
     }
 
-    /// Resolves the [DnsEntry] for `<hash.domain>`
+    /// Resolves the [`DnsEntry`] for `<hash.domain>`
     pub(crate) fn resolve_entry(&mut self, link: LinkEntry<K>, hash: String, kind: ResolveKind) {
         let resolver = Arc::clone(&self.resolver);
         let timeout = self.lookup_timeout;
@@ -153,7 +153,7 @@ pub(crate) enum QueryOutcome<K: EnrKeyUnambiguous> {
     Entry(ResolveEntryResult<K>),
 }
 
-/// Retrieves the [DnsEntry]
+/// Retrieves the [`DnsEntry`]
 async fn resolve_entry<K: EnrKeyUnambiguous, R: Resolver>(
     resolver: Arc<R>,
     link: LinkEntry<K>,

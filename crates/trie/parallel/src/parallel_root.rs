@@ -1,7 +1,7 @@
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
 use alloy_rlp::{BufMut, Encodable};
 use rayon::prelude::*;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_execution_errors::StorageRootError;
 use reth_primitives::{
     trie::{HashBuilder, Nibbles, TrieAccount},
@@ -29,10 +29,10 @@ use crate::metrics::ParallelStateRootMetrics;
 /// accounts in parallel. Once that's done, it proceeds to walking the state
 /// trie retrieving the pre-computed storage roots when needed.
 ///
-/// Internally, the calculator uses [ConsistentDbView] since
+/// Internally, the calculator uses [`ConsistentDbView`] since
 /// it needs to rely on database state saying the same until
 /// the last transaction is open.
-/// See docs of using [ConsistentDbView] for caveats.
+/// See docs of using [`ConsistentDbView`] for caveats.
 ///
 /// If possible, use more optimized `AsyncStateRoot` instead.
 #[derive(Debug)]
@@ -273,7 +273,7 @@ mod tests {
         );
 
         let mut hashed_state = HashedPostState::default();
-        for (address, (account, storage)) in state.iter_mut() {
+        for (address, (account, storage)) in &mut state {
             let hashed_address = keccak256(address);
 
             let should_update_account = rng.gen_bool(0.5);

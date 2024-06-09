@@ -65,7 +65,7 @@ impl MustNotIncludeKeys {
 impl MustNotIncludeKeys {
     /// Returns `true` if [`Enr`](discv5::Enr) passes filtering rules.
     pub fn filter(&self, enr: &discv5::Enr) -> FilterOutcome {
-        for key in self.keys.iter() {
+        for key in &self.keys {
             if matches!(key.filter(enr), FilterOutcome::Ok) {
                 return FilterOutcome::Ignore {
                     reason: format!(

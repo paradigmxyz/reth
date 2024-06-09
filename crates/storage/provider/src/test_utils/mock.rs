@@ -7,7 +7,7 @@ use crate::{
     WithdrawalsProvider,
 };
 use parking_lot::Mutex;
-use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
     keccak256, trie::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
@@ -98,7 +98,7 @@ impl MockEthProvider {
 
     /// Add multiple blocks to local block store
     pub fn extend_blocks(&self, iter: impl IntoIterator<Item = (B256, Block)>) {
-        for (hash, block) in iter.into_iter() {
+        for (hash, block) in iter {
             self.add_header(hash, block.header.clone());
             self.add_block(hash, block)
         }
@@ -111,7 +111,7 @@ impl MockEthProvider {
 
     /// Add multiple headers to local header store
     pub fn extend_headers(&self, iter: impl IntoIterator<Item = (B256, Header)>) {
-        for (hash, header) in iter.into_iter() {
+        for (hash, header) in iter {
             self.add_header(hash, header)
         }
     }
@@ -123,7 +123,7 @@ impl MockEthProvider {
 
     /// Add account to local account store
     pub fn extend_accounts(&self, iter: impl IntoIterator<Item = (Address, ExtendedAccount)>) {
-        for (address, account) in iter.into_iter() {
+        for (address, account) in iter {
             self.add_account(address, account)
         }
     }

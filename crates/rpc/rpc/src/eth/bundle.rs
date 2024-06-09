@@ -242,7 +242,7 @@ impl<Eth> Clone for EthBundle<Eth> {
     }
 }
 
-/// [EthBundle] specific errors.
+/// [`EthBundle`] specific errors.
 #[derive(Debug, thiserror::Error)]
 pub enum EthBundleError {
     /// Thrown if the bundle does not contain any transactions.
@@ -252,7 +252,7 @@ pub enum EthBundleError {
     #[error("bundle missing blockNumber")]
     BundleMissingBlockNumber,
     /// Thrown when the blob gas usage of the blob transactions in a bundle exceed
-    /// [MAX_BLOB_GAS_PER_BLOCK].
+    /// [`MAX_BLOB_GAS_PER_BLOCK`].
     #[error("blob gas usage exceeds the limit of {MAX_BLOB_GAS_PER_BLOCK} gas per block.")]
     Eip4844BlobGasExceeded,
 }

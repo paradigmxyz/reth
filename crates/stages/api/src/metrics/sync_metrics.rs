@@ -12,7 +12,8 @@ pub(crate) struct SyncMetrics {
 }
 
 impl SyncMetrics {
-    /// Returns existing or initializes a new instance of [StageMetrics] for the provided [StageId].
+    /// Returns existing or initializes a new instance of [`StageMetrics`] for the provided
+    /// [`StageId`].
     pub(crate) fn get_stage_metrics(&mut self, stage_id: StageId) -> &mut StageMetrics {
         self.stages
             .entry(stage_id)

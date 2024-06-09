@@ -1,7 +1,5 @@
-use crate::{
-    table::{Compress, Decode, Decompress, DupSort, Encode, Key, Table, Value},
-    DatabaseError,
-};
+use crate::DatabaseError;
+use reth_db_api::table::{Compress, Decode, Decompress, DupSort, Encode, Key, Table, Value};
 use serde::{Deserialize, Serialize};
 
 /// Tuple with `RawKey<T::Key>` and `RawValue<T::Value>`.
@@ -15,13 +13,13 @@ pub struct RawTable<T: Table> {
 }
 
 impl<T: Table> Table for RawTable<T> {
-    const TABLE: crate::Tables = T::TABLE;
+    const NAME: &'static str = T::NAME;
 
     type Key = RawKey<T::Key>;
     type Value = RawValue<T::Value>;
 }
 
-/// Raw DupSort table that can be used to access any table and its data in raw mode.
+/// Raw `DupSort` table that can be used to access any table and its data in raw mode.
 /// This is useful for delayed decoding/encoding of data.
 #[derive(Default, Copy, Clone, Debug)]
 pub struct RawDupSort<T: DupSort> {
@@ -29,7 +27,7 @@ pub struct RawDupSort<T: DupSort> {
 }
 
 impl<T: DupSort> Table for RawDupSort<T> {
-    const TABLE: crate::Tables = T::TABLE;
+    const NAME: &'static str = T::NAME;
 
     type Key = RawKey<T::Key>;
     type Value = RawValue<T::Value>;

@@ -159,7 +159,7 @@ impl Default for LayerInfo {
         Self {
             format: LogFormat::Terminal,
             default_directive: LevelFilter::INFO.to_string(),
-            filters: "".to_string(),
+            filters: String::new(),
             color: Some("always".to_string()),
         }
     }

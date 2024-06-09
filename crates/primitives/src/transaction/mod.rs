@@ -150,7 +150,7 @@ impl Transaction {
         }
     }
 
-    /// Get chain_id.
+    /// Get `chain_id`.
     pub const fn chain_id(&self) -> Option<u64> {
         match self {
             Self::Legacy(TxLegacy { chain_id, .. }) => *chain_id,
@@ -232,7 +232,7 @@ impl Transaction {
         }
     }
 
-    /// Returns the [AccessList] of the transaction.
+    /// Returns the [`AccessList`] of the transaction.
     ///
     /// Returns `None` for legacy transactions.
     pub const fn access_list(&self) -> Option<&AccessList> {
@@ -268,7 +268,7 @@ impl Transaction {
         }
     }
 
-    /// Max fee per gas for eip1559 transaction, for legacy transactions this is gas_price.
+    /// Max fee per gas for eip1559 transaction, for legacy transactions this is `gas_price`.
     ///
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     pub const fn max_fee_per_gas(&self) -> u128 {
@@ -315,7 +315,7 @@ impl Transaction {
         }
     }
 
-    /// Max fee per blob gas for eip4844 transaction [TxEip4844].
+    /// Max fee per blob gas for eip4844 transaction [`TxEip4844`].
     ///
     /// Returns `None` for non-eip4844 transactions.
     ///
@@ -331,7 +331,7 @@ impl Transaction {
     /// transaction.
     ///
     /// This is the number of blobs times the
-    /// [DATA_GAS_PER_BLOB](crate::constants::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
+    /// [`DATA_GAS_PER_BLOB`](crate::constants::eip4844::DATA_GAS_PER_BLOB) a single blob consumes.
     pub fn blob_gas_used(&self) -> Option<u64> {
         self.as_eip4844().map(TxEip4844::blob_gas)
     }
@@ -374,7 +374,7 @@ impl Transaction {
     /// If the base fee is `None`, the `max_priority_fee_per_gas`, or gas price for non-EIP1559
     /// transactions is returned.
     ///
-    /// Returns `None` if the basefee is higher than the [Transaction::max_fee_per_gas].
+    /// Returns `None` if the basefee is higher than the [`Transaction::max_fee_per_gas`].
     pub fn effective_tip_per_gas(&self, base_fee: Option<u64>) -> Option<u128> {
         let base_fee = match base_fee {
             Some(base_fee) => base_fee as u128,
@@ -551,7 +551,7 @@ impl Transaction {
         matches!(self, Self::Eip4844(_))
     }
 
-    /// Returns the [TxLegacy] variant if the transaction is a legacy transaction.
+    /// Returns the [`TxLegacy`] variant if the transaction is a legacy transaction.
     pub const fn as_legacy(&self) -> Option<&TxLegacy> {
         match self {
             Self::Legacy(tx) => Some(tx),
@@ -559,7 +559,7 @@ impl Transaction {
         }
     }
 
-    /// Returns the [TxEip2930] variant if the transaction is an EIP-2930 transaction.
+    /// Returns the [`TxEip2930`] variant if the transaction is an EIP-2930 transaction.
     pub const fn as_eip2930(&self) -> Option<&TxEip2930> {
         match self {
             Self::Eip2930(tx) => Some(tx),
@@ -567,7 +567,7 @@ impl Transaction {
         }
     }
 
-    /// Returns the [TxEip1559] variant if the transaction is an EIP-1559 transaction.
+    /// Returns the [`TxEip1559`] variant if the transaction is an EIP-1559 transaction.
     pub const fn as_eip1559(&self) -> Option<&TxEip1559> {
         match self {
             Self::Eip1559(tx) => Some(tx),
@@ -575,7 +575,7 @@ impl Transaction {
         }
     }
 
-    /// Returns the [TxEip4844] variant if the transaction is an EIP-4844 transaction.
+    /// Returns the [`TxEip4844`] variant if the transaction is an EIP-4844 transaction.
     pub const fn as_eip4844(&self) -> Option<&TxEip4844> {
         match self {
             Self::Eip4844(tx) => Some(tx),
@@ -752,7 +752,7 @@ impl TransactionSignedNoHash {
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
+    /// Returns `None` if the transaction's signature is invalid, see also [`Self::recover_signer`].
     pub fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -772,11 +772,11 @@ impl TransactionSignedNoHash {
     /// buffer before use.**
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
-    /// [Signature::recover_signer_unchecked].
+    /// [`Signature::recover_signer_unchecked`].
     ///
     /// # Optimism
     ///
-    /// For optimism this will return [Address::ZERO] if the Signature is empty, this is because pre bedrock (on OP mainnet), relay messages to the L2 Cross Domain Messenger were sent as legacy transactions from the zero address with an empty signature, e.g.: <https://optimistic.etherscan.io/tx/0x1bb352ff9215efe5a4c102f45d730bae323c3288d2636672eb61543ddd47abad>
+    /// For optimism this will return [`Address::ZERO`] if the Signature is empty, this is because pre bedrock (on OP mainnet), relay messages to the L2 Cross Domain Messenger were sent as legacy transactions from the zero address with an empty signature, e.g.: <https://optimistic.etherscan.io/tx/0x1bb352ff9215efe5a4c102f45d730bae323c3288d2636672eb61543ddd47abad>
     /// This makes it possible to import pre bedrock transactions via the sender recovery stage.
     pub fn encode_and_recover_unchecked(&self, buffer: &mut Vec<u8>) -> Option<Address> {
         buffer.clear();
@@ -814,7 +814,7 @@ impl TransactionSignedNoHash {
     /// Recovers a list of signers from a transaction list iterator
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [Self::recover_signer].
+    /// [`Self::recover_signer`].
     pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
         T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
@@ -936,11 +936,10 @@ fn from_compact_zstd_unaware(mut buf: &[u8], _len: usize) -> (TransactionSignedN
     let (signature, buf) = Signature::from_compact(buf, sig_bit);
 
     let zstd_bit = bitflags >> 3;
-    if zstd_bit != 0 {
-        panic!(
-            "zstd-codec feature is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag"
-        )
-    }
+    assert_eq!(
+        zstd_bit, 0,
+        "zstd-codec feature is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag"
+    );
 
     let transaction_type = bitflags >> 1;
     let (transaction, buf) = Transaction::from_compact(buf, transaction_type);
@@ -1000,13 +999,13 @@ impl TransactionSigned {
 
     /// Recover signer from signature and hash.
     ///
-    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [Signature::recover_signer].
+    /// Returns `None` if the transaction's signature is invalid following [EIP-2](https://eips.ethereum.org/EIPS/eip-2), see also [`Signature::recover_signer`].
     ///
     /// Note:
     ///
     /// This can fail for some early ethereum mainnet transactions pre EIP-2, use
-    /// [Self::recover_signer_unchecked] if you want to recover the signer without ensuring that the
-    /// signature has a low `s` value.
+    /// [`Self::recover_signer_unchecked`] if you want to recover the signer without ensuring that
+    /// the signature has a low `s` value.
     pub fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -1022,7 +1021,7 @@ impl TransactionSigned {
     /// value_.
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
-    /// [Signature::recover_signer_unchecked].
+    /// [`Signature::recover_signer_unchecked`].
     pub fn recover_signer_unchecked(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -1037,7 +1036,7 @@ impl TransactionSigned {
     /// Recovers a list of signers from a transaction list iterator.
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [Self::recover_signer].
+    /// [`Self::recover_signer`].
     pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
         T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
@@ -1053,7 +1052,7 @@ impl TransactionSigned {
     /// signature has a low `s` value_.
     ///
     /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [Self::recover_signer_unchecked].
+    /// [`Self::recover_signer_unchecked`].
     pub fn recover_signers_unchecked<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
         T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self>,
@@ -1065,7 +1064,7 @@ impl TransactionSigned {
         }
     }
 
-    /// Returns the [TransactionSignedEcRecovered] transaction with the given sender.
+    /// Returns the [`TransactionSignedEcRecovered`] transaction with the given sender.
     #[inline]
     pub const fn with_signer(self, signer: Address) -> TransactionSignedEcRecovered {
         TransactionSignedEcRecovered::from_signed_transaction(self, signer)
@@ -1073,7 +1072,7 @@ impl TransactionSigned {
 
     /// Consumes the type, recover signer and return [`TransactionSignedEcRecovered`]
     ///
-    /// Returns `None` if the transaction's signature is invalid, see also [Self::recover_signer].
+    /// Returns `None` if the transaction's signature is invalid, see also [`Self::recover_signer`].
     pub fn into_ecrecovered(self) -> Option<TransactionSignedEcRecovered> {
         let signer = self.recover_signer()?;
         Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
@@ -1083,7 +1082,7 @@ impl TransactionSigned {
     /// ensuring that the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
-    /// [Self::recover_signer_unchecked].
+    /// [`Self::recover_signer_unchecked`].
     pub fn into_ecrecovered_unchecked(self) -> Option<TransactionSignedEcRecovered> {
         let signer = self.recover_signer_unchecked()?;
         Some(TransactionSignedEcRecovered { signed_transaction: self, signer })
@@ -1098,7 +1097,7 @@ impl TransactionSigned {
     /// Tries to recover signer and return [`TransactionSignedEcRecovered`].
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
-    /// [Self::recover_signer].
+    /// [`Self::recover_signer`].
     pub fn try_into_ecrecovered(self) -> Result<TransactionSignedEcRecovered, Self> {
         match self.recover_signer() {
             None => Err(self),
@@ -1110,7 +1109,7 @@ impl TransactionSigned {
     /// the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
-    /// [Self::recover_signer_unchecked].
+    /// [`Self::recover_signer_unchecked`].
     pub fn try_into_ecrecovered_unchecked(self) -> Result<TransactionSignedEcRecovered, Self> {
         match self.recover_signer_unchecked() {
             None => Err(self),
@@ -1120,7 +1119,7 @@ impl TransactionSigned {
 
     /// Returns the enveloped encoded transactions.
     ///
-    /// See also [TransactionSigned::encode_enveloped]
+    /// See also [`TransactionSigned::encode_enveloped`]
     pub fn envelope_encoded(&self) -> Bytes {
         let mut buf = Vec::new();
         self.encode_enveloped(&mut buf);
@@ -1144,8 +1143,8 @@ impl TransactionSigned {
         self.transaction.encode_with_signature(&self.signature, out, with_header);
     }
 
-    /// Output the length of the encode_inner(out, true). Note to assume that `with_header` is only
-    /// `true`.
+    /// Output the length of the `encode_inner(out`, true). Note to assume that `with_header` is
+    /// only `true`.
     pub(crate) fn payload_len_inner(&self) -> usize {
         match &self.transaction {
             Transaction::Legacy(legacy_tx) => legacy_tx.payload_len_with_signature(&self.signature),
@@ -1178,7 +1177,7 @@ impl TransactionSigned {
         initial_tx
     }
 
-    /// Calculate a heuristic for the in-memory size of the [TransactionSigned].
+    /// Calculate a heuristic for the in-memory size of the [`TransactionSigned`].
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<TxHash>() + self.transaction.size() + self.signature.size()
@@ -1188,7 +1187,7 @@ impl TransactionSigned {
     ///
     /// This expects `rlp(legacy_tx)`
     ///
-    /// Refer to the docs for [Self::decode_rlp_legacy_transaction] for details on the exact
+    /// Refer to the docs for [`Self::decode_rlp_legacy_transaction`] for details on the exact
     /// format expected.
     pub(crate) fn decode_rlp_legacy_transaction_tuple(
         data: &mut &[u8],
@@ -1404,16 +1403,16 @@ impl Decodable for TransactionSigned {
     /// This can be used for decoding all signed transactions in p2p `BlockBodies` responses.
     ///
     /// This cannot be used for decoding EIP-4844 transactions in p2p `PooledTransactions`, since
-    /// the EIP-4844 variant of [TransactionSigned] does not include the blob sidecar.
+    /// the EIP-4844 variant of [`TransactionSigned`] does not include the blob sidecar.
     ///
-    /// For a method suitable for decoding pooled transactions, see [PooledTransactionsElement].
+    /// For a method suitable for decoding pooled transactions, see [`PooledTransactionsElement`].
     ///
-    /// CAUTION: Due to a quirk in [Header::decode], this method will succeed even if a typed
+    /// CAUTION: Due to a quirk in [`Header::decode`], this method will succeed even if a typed
     /// transaction is encoded in this format, and does not start with a RLP header:
     /// `tx-type || rlp(tx-data)`.
     ///
-    /// This is because [Header::decode] does not advance the buffer, and returns a length-1 string
-    /// header if the first byte is less than `0xf7`.
+    /// This is because [`Header::decode`] does not advance the buffer, and returns a length-1
+    /// string header if the first byte is less than `0xf7`.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         if buf.is_empty() {
             return Err(RlpError::InputTooShort)
@@ -1548,7 +1547,7 @@ impl TransactionSignedEcRecovered {
 impl Encodable for TransactionSignedEcRecovered {
     /// This encodes the transaction _with_ the signature, and an rlp header.
     ///
-    /// Refer to docs for [TransactionSigned::encode] for details on the exact format.
+    /// Refer to docs for [`TransactionSigned::encode`] for details on the exact format.
     fn encode(&self, out: &mut dyn bytes::BufMut) {
         self.signed_transaction.encode(out)
     }
@@ -1609,7 +1608,7 @@ pub trait FromRecoveredPooledTransaction {
     fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
 }
 
-/// The inverse of [TryFromRecoveredTransaction] that ensure the transaction can be sent over the
+/// The inverse of [`TryFromRecoveredTransaction`] that ensure the transaction can be sent over the
 /// network
 pub trait IntoRecoveredTransaction {
     /// Converts to this type into a [`TransactionSignedEcRecovered`].

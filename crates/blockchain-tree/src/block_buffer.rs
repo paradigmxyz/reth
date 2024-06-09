@@ -7,10 +7,10 @@ use std::collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet};
 /// It allows to store unconnected blocks for potential future inclusion.
 ///
 /// The buffer has three main functionalities:
-/// * [BlockBuffer::insert_block] for inserting blocks inside the buffer.
-/// * [BlockBuffer::remove_block_with_children] for connecting blocks if the parent gets received
+/// * [`BlockBuffer::insert_block`] for inserting blocks inside the buffer.
+/// * [`BlockBuffer::remove_block_with_children`] for connecting blocks if the parent gets received
 ///   and inserted.
-/// * [BlockBuffer::remove_old_blocks] to remove old blocks that precede the finalized number.
+/// * [`BlockBuffer::remove_old_blocks`] to remove old blocks that precede the finalized number.
 ///
 /// Note: Buffer is limited by number of blocks that it can contain and eviction of the block
 /// is done by last recently used block.
@@ -22,7 +22,7 @@ pub struct BlockBuffer {
     /// to the buffered children.
     /// Allows connecting buffered blocks by parent.
     pub(crate) parent_to_child: HashMap<BlockHash, HashSet<BlockHash>>,
-    /// BTreeMap tracking the earliest blocks by block number.
+    /// `BTreeMap` tracking the earliest blocks by block number.
     /// Used for removal of old blocks that precede finalization.
     pub(crate) earliest_blocks: BTreeMap<BlockNumber, HashSet<BlockHash>>,
     /// LRU used for tracing oldest inserted blocks that are going to be
@@ -167,7 +167,7 @@ impl BlockBuffer {
             // get this child blocks children and add them to the remove list.
             if let Some(parent_children) = self.parent_to_child.remove(&parent_hash) {
                 // remove child from buffer
-                for child_hash in parent_children.iter() {
+                for child_hash in &parent_children {
                     if let Some(block) = self.remove_block(child_hash) {
                         removed_blocks.push(block);
                     }

@@ -99,7 +99,7 @@ pub enum EngineHookError {
     /// Hook channel closed.
     #[error("hook channel closed")]
     ChannelClosed,
-    /// Common error. Wrapper around [RethError].
+    /// Common error. Wrapper around [`RethError`].
     #[error(transparent)]
     Common(#[from] RethError),
     /// An internal error occurred.

@@ -64,7 +64,7 @@ fn prefix_set_bench<T: PrefixSetAbstraction>(
 ) {
     let setup = || {
         let mut prefix_set = T::default();
-        for key in preload.iter() {
+        for key in &preload {
             prefix_set.insert(key.clone());
         }
         (prefix_set, input.clone(), expected.clone())

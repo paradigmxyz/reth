@@ -48,7 +48,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
         &self.inner.provider
     }
 
-    /// Create a new instance of the [TraceApi]
+    /// Create a new instance of the [`TraceApi`]
     pub fn new(provider: Provider, eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
         let inner = Arc::new(TraceApiInner { provider, eth_api, blocking_task_guard });
         Self { inner }
@@ -232,7 +232,7 @@ where
 
     /// Returns all transaction traces that match the given filter.
     ///
-    /// This is similar to [Self::trace_block] but only returns traces for transactions that match
+    /// This is similar to [`Self::trace_block`] but only returns traces for transactions that match
     /// the filter.
     pub async fn trace_filter(
         &self,
@@ -447,7 +447,7 @@ where
 
     /// Returns the opcodes of all transactions in the given block.
     ///
-    /// This is the same as [Self::trace_transaction_opcode_gas] but for all transactions in a
+    /// This is the same as [`Self::trace_transaction_opcode_gas`] but for all transactions in a
     /// block.
     pub async fn trace_block_opcode_gas(
         &self,

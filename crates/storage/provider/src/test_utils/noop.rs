@@ -6,17 +6,17 @@ use crate::{
     StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
     WithdrawalsProvider,
 };
-use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     trie::AccountProof,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, BlockWithSenders,
-    Bytecode, ChainInfo, ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
-    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
-    MAINNET, U256,
+    Bytecode, ChainInfo, ChainSpec, Header, Receipt, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
+    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, MAINNET, U256,
 };
+use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::updates::TrieUpdates;
 use revm::{

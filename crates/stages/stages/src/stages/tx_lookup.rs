@@ -1,21 +1,21 @@
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
-use reth_db::{
+use reth_db::{tables, RawKey, RawValue};
+use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    tables,
     transaction::{DbTx, DbTxMut},
-    RawKey, RawValue,
 };
 use reth_etl::Collector;
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, TxHash, TxNumber,
+    TxHash, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter, StatsReader,
     TransactionsProvider, TransactionsProviderExt,
 };
+use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_storage_errors::provider::ProviderError;
 use tracing::*;
@@ -44,7 +44,7 @@ impl Default for TransactionLookupStage {
 }
 
 impl TransactionLookupStage {
-    /// Create new instance of [TransactionLookupStage].
+    /// Create new instance of [`TransactionLookupStage`].
     pub const fn new(
         config: TransactionLookupConfig,
         etl_config: EtlConfig,
@@ -427,10 +427,10 @@ mod tests {
 
         /// # Panics
         ///
-        /// 1. If there are any entries in the [tables::TransactionHashNumbers] table above a given
-        ///    block number.
+        /// 1. If there are any entries in the [`tables::TransactionHashNumbers`] table above a
+        ///    given block number.
         /// 2. If the is no requested block entry in the bodies table, but
-        ///    [tables::TransactionHashNumbers] is    not empty.
+        ///    [`tables::TransactionHashNumbers`] is    not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
                 .db

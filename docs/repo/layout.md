@@ -68,8 +68,8 @@ The networking component mainly lives in [`net/network`](../../crates/net/networ
 
 #### Protocol
 
-- [`net/eth-wire`](../../crates/net/eth-wire): Implements the `eth` wire protocol and the RLPx networking stack.
-- [`net/ecies`](../../crates/net/ecies): Implementation of the Elliptic Curve Integrated Encryption Scheme used in the RLPx handshake.
+- [`net/eth-wire`](../../crates/net/eth-wire): Implements the `eth` wire protocol and the ``RLPx`` networking stack.
+- [`net/ecies`](../../crates/net/ecies): Implementation of the Elliptic Curve Integrated Encryption Scheme used in the ``RLPx`` handshake.
 
 #### Downloaders
 

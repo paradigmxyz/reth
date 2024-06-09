@@ -4,7 +4,7 @@ use iai_callgrind::{
     library_benchmark, library_benchmark_group, LibraryBenchmarkConfig, RegressionConfig,
 };
 use paste::paste;
-use reth_db::table::{Compress, Decode, Decompress, Encode, Table};
+use reth_db_api::table::{Compress, Decode, Decompress, Encode, Table};
 
 mod utils;
 use utils::*;

@@ -35,7 +35,7 @@ pub mod headers;
 /// interacting with the network implementation
 pub mod error;
 
-/// Priority enum for BlockHeader and BlockBody requests
+/// Priority enum for `BlockHeader` and `BlockBody` requests
 pub mod priority;
 
 /// Syncing related traits.

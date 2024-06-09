@@ -9,7 +9,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_consensus::ConsensusError;
-use reth_primitives::{revm_primitives::EVMError, BlockNumHash, PruneSegmentError, B256};
+use reth_primitives::{revm_primitives::EVMError, BlockNumHash, B256};
+use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
 use std::fmt::Display;
 use thiserror::Error;
@@ -97,7 +98,7 @@ pub enum BlockValidationError {
     DepositRequestDecode(String),
 }
 
-/// BlockExecutor Errors
+/// `BlockExecutor` Errors
 #[derive(Error, Debug)]
 pub enum BlockExecutionError {
     /// Validation error, transparently wrapping `BlockValidationError`
@@ -131,11 +132,6 @@ pub enum BlockExecutionError {
         /// The fork on the other chain
         other_chain_fork: Box<BlockNumHash>,
     },
-    /// Only used for TestExecutor
-    ///
-    /// Note: this is not feature gated for convenience.
-    #[error("execution unavailable for tests")]
-    UnavailableForTest,
     /// Error when fetching latest block state.
     #[error(transparent)]
     LatestBlock(#[from] ProviderError),
@@ -153,7 +149,7 @@ impl BlockExecutionError {
         Self::Other(Box::new(error))
     }
 
-    /// Create a new [BlockExecutionError::Other] from a given message.
+    /// Create a new [`BlockExecutionError::Other`] from a given message.
     pub fn msg(msg: impl Display) -> Self {
         Self::Other(msg.to_string().into())
     }

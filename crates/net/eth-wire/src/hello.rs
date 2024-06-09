@@ -9,15 +9,15 @@ use crate::protocol::Protocol;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// This is a superset of [HelloMessage] that provides additional protocol [Protocol] information
+/// This is a superset of [`HelloMessage`] that provides additional protocol [Protocol] information
 /// about the number of messages used by each capability in order to do proper message ID
 /// multiplexing.
 ///
-/// This type is required for the `p2p` handshake because the [HelloMessage] does not share the
+/// This type is required for the `p2p` handshake because the [`HelloMessage`] does not share the
 /// number of messages used by each capability.
 ///
-/// To get the encodable [HelloMessage] without the additional protocol information, use the
-/// [HelloMessageWithProtocols::message].
+/// To get the encodable [`HelloMessage`] without the additional protocol information, use the
+/// [`HelloMessageWithProtocols::message`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct HelloMessageWithProtocols {
@@ -49,7 +49,7 @@ impl HelloMessageWithProtocols {
         HelloMessageBuilder::new(id)
     }
 
-    /// Returns the raw [HelloMessage] without the additional protocol information.
+    /// Returns the raw [`HelloMessage`] without the additional protocol information.
     #[inline]
     pub fn message(&self) -> HelloMessage {
         HelloMessage {
@@ -61,7 +61,7 @@ impl HelloMessageWithProtocols {
         }
     }
 
-    /// Converts the type into a [HelloMessage] without the additional protocol information.
+    /// Converts the type into a [`HelloMessage`] without the additional protocol information.
     pub fn into_message(self) -> HelloMessage {
         HelloMessage {
             protocol_version: self.protocol_version,
@@ -191,7 +191,7 @@ impl HelloMessageBuilder {
     /// Unset fields will be set to their default values:
     /// - `protocol_version`: [`ProtocolVersion::V5`]
     /// - `client_version`: [`RETH_CLIENT_VERSION`]
-    /// - `capabilities`: All [EthVersion]
+    /// - `capabilities`: All [`EthVersion`]
     pub fn build(self) -> HelloMessageWithProtocols {
         let Self { protocol_version, client_version, protocols, port, id } = self;
         HelloMessageWithProtocols {

@@ -38,7 +38,7 @@ pub use multi_consumer::MultiConsumerLruCache;
 type BlockTransactionsResponseSender =
     oneshot::Sender<ProviderResult<Option<Vec<TransactionSigned>>>>;
 
-/// The type that can send the response to a requested [BlockWithSenders]
+/// The type that can send the response to a requested [`BlockWithSenders`]
 type BlockWithSendersResponseSender = oneshot::Sender<ProviderResult<Option<BlockWithSenders>>>;
 
 /// The type that can send the response to the requested receipts of a block.
@@ -70,7 +70,7 @@ pub struct EthStateCache {
 }
 
 impl EthStateCache {
-    /// Creates and returns both [EthStateCache] frontend and the memory bound service.
+    /// Creates and returns both [`EthStateCache`] frontend and the memory bound service.
     fn create<Provider, Tasks, EvmConfig>(
         provider: Provider,
         action_task_spawner: Tasks,
@@ -97,9 +97,9 @@ impl EthStateCache {
     }
 
     /// Creates a new async LRU backed cache service task and spawns it to a new task via
-    /// [tokio::spawn].
+    /// [`tokio::spawn`].
     ///
-    /// See also [Self::spawn_with]
+    /// See also [`Self::spawn_with`]
     pub fn spawn<Provider, EvmConfig>(
         provider: Provider,
         config: EthStateCacheConfig,
@@ -203,7 +203,7 @@ impl EthStateCache {
         Ok(transactions.zip(receipts))
     }
 
-    /// Requests the  [BlockWithSenders] for the block hash
+    /// Requests the  [`BlockWithSenders`] for the block hash
     ///
     /// Returns `None` if the block does not exist.
     pub async fn get_block_with_senders(
@@ -215,7 +215,7 @@ impl EthStateCache {
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 
-    /// Requests the  [SealedBlockWithSenders] for the block hash
+    /// Requests the  [`SealedBlockWithSenders`] for the block hash
     ///
     /// Returns `None` if the block does not exist.
     pub async fn get_sealed_block_with_senders(
@@ -266,19 +266,19 @@ impl EthStateCache {
 
 /// A task than manages caches for data required by the `eth` rpc implementation.
 ///
-/// It provides a caching layer on top of the given [StateProvider](reth_provider::StateProvider)
+/// It provides a caching layer on top of the given [`StateProvider`](reth_provider::StateProvider)
 /// and keeps data fetched via the provider in memory in an LRU cache. If the requested data is
 /// missing in the cache it is fetched and inserted into the cache afterwards. While fetching data
 /// from disk is sync, this service is async since requests and data is shared via channels.
 ///
 /// This type is an endless future that listens for incoming messages from the user facing
-/// [EthStateCache] via a channel. If the requested data is not cached then it spawns a new task
+/// [`EthStateCache`] via a channel. If the requested data is not cached then it spawns a new task
 /// that does the IO and sends the result back to it. This way the caching service only
 /// handles messages and does LRU lookups and never blocking IO.
 ///
 /// Caution: The channel for the data is _unbounded_ it is assumed that this is mainly used by the
-/// [EthApi](crate::EthApi) which is typically invoked by the RPC server, which already uses permits
-/// to limit concurrent requests.
+/// [`EthApi`](crate::EthApi) which is typically invoked by the RPC server, which already uses
+/// permits to limit concurrent requests.
 #[must_use = "Type does nothing unless spawned"]
 pub(crate) struct EthStateCacheService<
     Provider,

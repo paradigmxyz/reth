@@ -61,18 +61,18 @@ impl<T: reth_storage_api::StateProvider> EvmStateProvider for T {
     }
 }
 
-/// A [Database] and [DatabaseRef] implementation that uses [EvmStateProvider] as the underlying
+/// A [Database] and [`DatabaseRef`] implementation that uses [`EvmStateProvider`] as the underlying
 /// data source.
 #[derive(Debug, Clone)]
 pub struct StateProviderDatabase<DB>(pub DB);
 
 impl<DB> StateProviderDatabase<DB> {
-    /// Create new State with generic StateProvider.
+    /// Create new State with generic `StateProvider`.
     pub const fn new(db: DB) -> Self {
         Self(db)
     }
 
-    /// Consume State and return inner StateProvider.
+    /// Consume State and return inner `StateProvider`.
     pub fn into_inner(self) -> DB {
         self.0
     }

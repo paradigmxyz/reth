@@ -1,7 +1,7 @@
 use rayon::slice::ParallelSliceMut;
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    tables,
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::{revm::compat::into_reth_acc, Bytecode, StorageEntry, U256};
@@ -31,7 +31,7 @@ impl StateChanges {
         tracing::trace!(target: "provider::bundle_state", len = self.0.accounts.len(), "Writing new account state");
         let mut accounts_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
         // write account to database.
-        for (address, account) in self.0.accounts.into_iter() {
+        for (address, account) in self.0.accounts {
             if let Some(account) = account {
                 tracing::trace!(target: "provider::bundle_state", ?address, "Updating plain state account");
                 accounts_cursor.upsert(address, into_reth_acc(account))?;
@@ -44,14 +44,14 @@ impl StateChanges {
         // Write bytecode
         tracing::trace!(target: "provider::bundle_state", len = self.0.contracts.len(), "Writing bytecodes");
         let mut bytecodes_cursor = tx.cursor_write::<tables::Bytecodes>()?;
-        for (hash, bytecode) in self.0.contracts.into_iter() {
+        for (hash, bytecode) in self.0.contracts {
             bytecodes_cursor.upsert(hash, Bytecode(bytecode))?;
         }
 
         // Write new storage state and wipe storage if needed.
         tracing::trace!(target: "provider::bundle_state", len = self.0.storage.len(), "Writing new storage state");
         let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-        for PlainStorageChangeset { address, wipe_storage, storage } in self.0.storage.into_iter() {
+        for PlainStorageChangeset { address, wipe_storage, storage } in self.0.storage {
             // Wiping of storage.
             if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
                 storages_cursor.delete_current_duplicates()?;
@@ -64,7 +64,7 @@ impl StateChanges {
             // sort storage slots by key.
             storage.par_sort_unstable_by_key(|a| a.key);
 
-            for entry in storage.into_iter() {
+            for entry in storage {
                 tracing::trace!(target: "provider::bundle_state", ?address, ?entry.key, "Updating plain state storage");
                 if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)? {
                     if db_entry.key == entry.key {

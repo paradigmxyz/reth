@@ -31,8 +31,8 @@ pub struct TaskDownloader {
 // === impl TaskDownloader ===
 
 impl TaskDownloader {
-    /// Spawns the given `downloader` via [tokio::task::spawn] and returns a [TaskDownloader] that's
-    /// connected to that task.
+    /// Spawns the given `downloader` via [`tokio::task::spawn`] and returns a [`TaskDownloader`]
+    /// that's connected to that task.
     ///
     /// # Panics
     ///
@@ -60,8 +60,8 @@ impl TaskDownloader {
         Self::spawn_with(downloader, &TokioTaskExecutor::default())
     }
 
-    /// Spawns the given `downloader` via the given [TaskSpawner] returns a [TaskDownloader] that's
-    /// connected to that task.
+    /// Spawns the given `downloader` via the given [`TaskSpawner`] returns a [`TaskDownloader`]
+    /// that's connected to that task.
     pub fn spawn_with<T, S>(downloader: T, spawner: &S) -> Self
     where
         T: HeaderDownloader + 'static,
@@ -107,7 +107,7 @@ impl Stream for TaskDownloader {
     }
 }
 
-/// A [HeaderDownloader] that runs on its own task
+/// A [`HeaderDownloader`] that runs on its own task
 struct SpawnedDownloader<T> {
     updates: UnboundedReceiverStream<DownloaderUpdates>,
     headers_tx: PollSender<HeadersDownloaderResult<Vec<SealedHeader>>>,
@@ -169,7 +169,7 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
     }
 }
 
-/// Commands delegated tot the spawned [HeaderDownloader]
+/// Commands delegated tot the spawned [`HeaderDownloader`]
 enum DownloaderUpdates {
     UpdateSyncGap(SealedHeader, SyncTarget),
     UpdateLocalHead(SealedHeader),

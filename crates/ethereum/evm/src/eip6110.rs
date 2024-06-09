@@ -1,9 +1,8 @@
 //! EIP-6110 deposit requests parsing
-use alloy_consensus::Request;
 use alloy_eips::eip6110::{DepositRequest, MAINNET_DEPOSIT_CONTRACT_ADDRESS};
 use alloy_sol_types::{sol, SolEvent};
 use reth_evm::execute::BlockValidationError;
-use reth_primitives::{ChainSpec, Receipt};
+use reth_primitives::{ChainSpec, Receipt, Request};
 use revm_primitives::Log;
 
 sol! {
@@ -18,7 +17,7 @@ sol! {
 }
 
 /// Parse [deposit contract](https://etherscan.io/address/0x00000000219ab540356cbb839cbe05303d7705fa)
-/// (address is from the passed [ChainSpec]) deposits from receipts, and return them as a
+/// (address is from the passed [`ChainSpec`]) deposits from receipts, and return them as a
 /// [vector](Vec) of (requests)[Request].
 pub fn parse_deposits_from_receipts<'a, I>(
     chain_spec: &ChainSpec,

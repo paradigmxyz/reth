@@ -1,21 +1,20 @@
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
-use reth_db::{
+use reth_db::{static_file::TransactionMask, tables, RawValue};
+use reth_db_api::{
     cursor::DbCursorRW,
     database::Database,
-    static_file::TransactionMask,
-    tables,
     transaction::{DbTx, DbTxMut},
-    RawValue,
 };
 use reth_primitives::{
     stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    Address, PruneSegment, StaticFileSegment, TransactionSignedNoHash, TxNumber,
+    Address, StaticFileSegment, TransactionSignedNoHash, TxNumber,
 };
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
     StatsReader,
 };
+use reth_prune_types::PruneSegment;
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
@@ -24,7 +23,7 @@ use thiserror::Error;
 use tracing::*;
 
 /// Maximum amount of transactions to read from disk at one time before we flush their senders to
-/// disk. Since each rayon worker will hold at most 100 transactions (WORKER_CHUNK_SIZE), we
+/// disk. Since each rayon worker will hold at most 100 transactions (`WORKER_CHUNK_SIZE`), we
 /// effectively max limit each batch to 1000 channels in memory.
 const BATCH_SIZE: usize = 100_000;
 
@@ -42,7 +41,7 @@ pub struct SenderRecoveryStage {
 }
 
 impl SenderRecoveryStage {
-    /// Create new instance of [SenderRecoveryStage].
+    /// Create new instance of [`SenderRecoveryStage`].
     pub const fn new(config: SenderRecoveryConfig) -> Self {
         Self { commit_threshold: config.commit_threshold }
     }
@@ -92,9 +91,9 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Acquire the cursor for inserting elements
         let mut senders_cursor = tx.cursor_write::<tables::TransactionSenders>()?;
 
-        // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
 
+        // Iterate over transactions in batches, recover the senders and append them
         let batch = (tx_range.start..tx_range.end)
             .step_by(BATCH_SIZE)
             .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, tx_range.end))
@@ -157,8 +156,6 @@ fn recover_range<DB: Database>(
     let static_file_provider = provider.static_file_provider().clone();
     tokio::task::spawn_blocking(move || {
         for (chunk_range, recovered_senders_tx) in chunks {
-            let static_file_provider = static_file_provider.clone();
-
             // Read the raw value, and let the rayon worker to decompress & decode.
             let chunk = static_file_provider
                 .fetch_range_with_predicate(
@@ -231,11 +228,11 @@ fn recover_sender(
     (tx_id, tx): (TxNumber, TransactionSignedNoHash),
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(u64, Address), Box<SenderRecoveryStageError>> {
-    // We call [Signature::recover_signer_unchecked] because transactions run in the pipeline are
-    // known to be valid - this means that we do not need to check whether or not the `s` value is
-    // greater than `secp256k1n / 2` if past EIP-2. There are transactions pre-homestead which have
-    // large `s` values, so using [Signature::recover_signer] here would not be
-    // backwards-compatible.
+    // We call [Signature::encode_and_recover_unchecked] because transactions run in the pipeline
+    // are known to be valid - this means that we do not need to check whether or not the `s`
+    // value is greater than `secp256k1n / 2` if past EIP-2. There are transactions
+    // pre-homestead which have large `s` values, so using [Signature::recover_signer] here
+    // would not be backwards-compatible.
     let sender = tx
         .encode_and_recover_unchecked(rlp_buf)
         .ok_or(SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError { tx: tx_id }))?;
@@ -284,15 +281,15 @@ struct FailedSenderRecoveryError {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use reth_db::cursor::DbCursorRO;
+    use reth_db_api::cursor::DbCursorRO;
     use reth_primitives::{
-        stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
-        TransactionSigned, B256,
+        stage::StageUnitCheckpoint, BlockNumber, SealedBlock, TransactionSigned, B256,
     };
     use reth_provider::{
         providers::StaticFileWriter, PruneCheckpointWriter, StaticFileProviderFactory,
         TransactionsProvider,
     };
+    use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_testing_utils::{
         generators,
         generators::{random_block, random_block_range},
@@ -506,10 +503,10 @@ mod tests {
 
         /// # Panics
         ///
-        /// 1. If there are any entries in the [tables::TransactionSenders] table above a given
+        /// 1. If there are any entries in the [`tables::TransactionSenders`] table above a given
         ///    block number.
         /// 2. If the is no requested block entry in the bodies table, but
-        ///    [tables::TransactionSenders] is not empty.
+        ///    [`tables::TransactionSenders`] is not empty.
         fn ensure_no_senders_by_block(&self, block: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
                 .db

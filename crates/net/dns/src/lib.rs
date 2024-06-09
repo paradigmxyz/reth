@@ -56,7 +56,7 @@ pub mod resolver;
 mod sync;
 pub mod tree;
 
-/// [DnsDiscoveryService] front-end.
+/// [`DnsDiscoveryService`] front-end.
 #[derive(Clone, Debug)]
 pub struct DnsDiscoveryHandle {
     /// Channel for sending commands to the service.
@@ -96,7 +96,7 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     command_tx: UnboundedSender<DnsDiscoveryCommand>,
     /// Receiver half of the command channel.
     command_rx: UnboundedReceiverStream<DnsDiscoveryCommand>,
-    /// All subscribers for resolved [NodeRecord]s.
+    /// All subscribers for resolved [`NodeRecord`]s.
     node_record_listeners: Vec<mpsc::Sender<DnsNodeRecordUpdate>>,
     /// All the trees that can be synced.
     trees: HashMap<LinkEntry, SyncTree>,
@@ -115,7 +115,7 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
 // === impl DnsDiscoveryService ===
 
 impl<R: Resolver> DnsDiscoveryService<R> {
-    /// Creates a new instance of the [DnsDiscoveryService] using the given settings.
+    /// Creates a new instance of the [`DnsDiscoveryService`] using the given settings.
     ///
     /// ```
     /// use reth_dns_discovery::{DnsDiscoveryService, DnsResolver};
@@ -170,7 +170,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
         }
     }
 
-    /// Same as [DnsDiscoveryService::new] but also returns a new handle that's connected to the
+    /// Same as [`DnsDiscoveryService::new`] but also returns a new handle that's connected to the
     /// service
     pub fn new_pair(resolver: Arc<R>, config: DnsDiscoveryConfig) -> (Self, DnsDiscoveryHandle) {
         let service = Self::new(resolver, config);
@@ -377,7 +377,7 @@ pub struct DnsNodeRecordUpdate {
     pub enr: Enr<SecretKey>,
 }
 
-/// Commands sent from [DnsDiscoveryHandle] to [DnsDiscoveryService]
+/// Commands sent from [`DnsDiscoveryHandle`] to [`DnsDiscoveryService`]
 enum DnsDiscoveryCommand {
     /// Sync a tree
     SyncTree(LinkEntry),
@@ -391,7 +391,7 @@ pub enum DnsDiscoveryEvent {
     Enr(Enr<SecretKey>),
 }
 
-/// Converts an [Enr] into a [NodeRecord]
+/// Converts an [Enr] into a [`NodeRecord`]
 fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
     let node_record = NodeRecord {
         address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,

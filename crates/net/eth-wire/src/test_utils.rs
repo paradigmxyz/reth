@@ -125,8 +125,7 @@ pub mod proto {
             let mut buf = BytesMut::new();
             buf.put_u8(self.message_type as u8);
             match &self.message {
-                TestProtoMessageKind::Ping => {}
-                TestProtoMessageKind::Pong => {}
+                TestProtoMessageKind::Ping | TestProtoMessageKind::Pong => {}
                 TestProtoMessageKind::Message(msg) => {
                     buf.put(msg.as_bytes());
                 }

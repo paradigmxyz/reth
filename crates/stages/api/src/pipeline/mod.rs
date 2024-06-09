@@ -3,7 +3,7 @@ mod event;
 pub use crate::pipeline::ctrl::ControlFlow;
 pub use event::*;
 use futures_util::Future;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_primitives::{
     constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH,
     stage::{PipelineTarget, StageCheckpoint, StageId},
@@ -11,8 +11,8 @@ use reth_primitives::{
     BlockNumber, B256,
 };
 use reth_provider::{
-    providers::StaticFileWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StaticFileProviderFactory,
+    providers::StaticFileWriter, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
+    StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -38,10 +38,10 @@ pub use set::*;
 pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
 
 /// The future that returns the owned pipeline and the result of the pipeline run. See
-/// [Pipeline::run_as_fut].
+/// [`Pipeline::run_as_fut`].
 pub type PipelineFut<DB> = Pin<Box<dyn Future<Output = PipelineWithResult<DB>> + Send>>;
 
-/// The pipeline type itself with the result of [Pipeline::run_as_fut]
+/// The pipeline type itself with the result of [`Pipeline::run_as_fut`]
 pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineError>);
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -53,19 +53,19 @@ pub type PipelineWithResult<DB> = (Pipeline<DB>, Result<ControlFlow, PipelineErr
 /// tip.
 ///
 /// After the entire pipeline has been run, it will run again unless asked to stop (see
-/// [Pipeline::set_max_block]).
+/// [`Pipeline::set_max_block`]).
 ///
-/// include_mmd!("docs/mermaid/pipeline.mmd")
+/// `include_mmd!("docs/mermaid/pipeline.mmd`")
 ///
 /// # Unwinding
 ///
 /// In case of a validation error (as determined by the consensus engine) in one of the stages, the
 /// pipeline will unwind the stages in reverse order of execution. It is also possible to
-/// request an unwind manually (see [Pipeline::unwind]).
+/// request an unwind manually (see [`Pipeline::unwind`]).
 ///
 /// # Defaults
 ///
-/// The [DefaultStages](crate::sets::DefaultStages) are used to fully sync reth.
+/// The [`DefaultStages`](crate::sets::DefaultStages) are used to fully sync reth.
 pub struct Pipeline<DB: Database> {
     /// Provider factory.
     provider_factory: ProviderFactory<DB>,
@@ -195,9 +195,9 @@ where
     /// up to the block that caused the error.
     ///
     /// Returns the control flow after it ran the pipeline.
-    /// This will be [ControlFlow::Continue] or [ControlFlow::NoProgress] of the _last_ stage in the
-    /// pipeline (for example the `Finish` stage). Or [ControlFlow::Unwind] of the stage that caused
-    /// the unwind.
+    /// This will be [`ControlFlow::Continue`] or [`ControlFlow::NoProgress`] of the _last_ stage in
+    /// the pipeline (for example the `Finish` stage). Or [`ControlFlow::Unwind`] of the stage
+    /// that caused the unwind.
     pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
         self.move_to_static_files()?;
 
@@ -240,12 +240,12 @@ where
     /// all data from the database to static files for corresponding
     /// [segments](reth_primitives::static_file::StaticFileSegment), according to their [stage
     /// checkpoints](StageCheckpoint):
-    /// - [StaticFileSegment::Headers](reth_primitives::static_file::StaticFileSegment::Headers) ->
-    ///   [StageId::Headers]
-    /// - [StaticFileSegment::Receipts](reth_primitives::static_file::StaticFileSegment::Receipts)
-    ///   -> [StageId::Execution]
-    /// - [StaticFileSegment::Transactions](reth_primitives::static_file::StaticFileSegment::Transactions)
-    ///   -> [StageId::Bodies]
+    /// - [`StaticFileSegment::Headers`](reth_primitives::static_file::StaticFileSegment::Headers)
+    ///   -> [`StageId::Headers`]
+    /// - [`StaticFileSegment::Receipts`](reth_primitives::static_file::StaticFileSegment::Receipts)
+    ///   -> [`StageId::Execution`]
+    /// - [`StaticFileSegment::Transactions`](reth_primitives::static_file::StaticFileSegment::Transactions)
+    ///   -> [`StageId::Bodies`]
     ///
     /// CAUTION: This method locks the static file producer Mutex, hence can block the thread if the
     /// lock is occupied.
@@ -316,7 +316,7 @@ where
                 continue
             }
 
-            debug!(
+            info!(
                 target: "sync::pipeline",
                 from = %checkpoint.block_number,
                 %to,
@@ -353,8 +353,21 @@ where
                         self.event_sender
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
-                        self.provider_factory.static_file_provider().commit()?;
+                        // update finalized block if needed
+                        let last_saved_finalized_block_number =
+                            provider_rw.last_finalized_block_number()?;
+                        if checkpoint.block_number < last_saved_finalized_block_number {
+                            provider_rw.save_finalized_block_number(BlockNumber::from(
+                                checkpoint.block_number,
+                            ))?;
+                        }
+
+                        // For unwinding it makes more sense to commit the database first, since if
+                        // this function is interrupted before the static files commit, we can just
+                        // truncate the static files according to the
+                        // checkpoints on the next start-up.
                         provider_rw.commit()?;
+                        self.provider_factory.static_file_provider().commit()?;
 
                         provider_rw = self.provider_factory.provider_rw()?;
                     }
@@ -459,6 +472,10 @@ where
                         result: out.clone(),
                     });
 
+                    // For execution it makes more sense to commit the static files first, since if
+                    // this function is interrupted before the database commit, we can just truncate
+                    // the static files according to the checkpoints on the next
+                    // start-up.
                     self.provider_factory.static_file_provider().commit()?;
                     provider_rw.commit()?;
 
@@ -590,8 +607,8 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
     use reth_errors::ProviderError;
-    use reth_primitives::PruneModes;
     use reth_provider::test_utils::create_test_provider_factory;
+    use reth_prune::PruneModes;
     use reth_testing_utils::{generators, generators::random_header};
     use tokio_stream::StreamExt;
 
@@ -639,11 +656,7 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
-                    provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
             );
         let events = pipeline.events();
 
@@ -718,11 +731,7 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
-                    provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
             );
         let events = pipeline.events();
 
@@ -850,11 +859,7 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
-                    provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
             );
         let events = pipeline.events();
 
@@ -964,11 +969,7 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
-                    provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
             );
         let events = pipeline.events();
 
@@ -1075,11 +1076,7 @@ mod tests {
             .with_max_block(10)
             .build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
-                    provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
             );
         let result = pipeline.run().await;
         assert_matches!(result, Ok(()));
@@ -1092,11 +1089,7 @@ mod tests {
             )))
             .build(
                 provider_factory.clone(),
-                StaticFileProducer::new(
-                    provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
             );
         let result = pipeline.run().await;
         assert_matches!(

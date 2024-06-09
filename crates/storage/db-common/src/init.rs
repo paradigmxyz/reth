@@ -2,7 +2,8 @@
 
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
-use reth_db::{database::Database, tables, transaction::DbTxMut, DatabaseError};
+use reth_db::tables;
+use reth_db_api::{database::Database, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
@@ -522,12 +523,12 @@ struct GenesisAccountWithAddress {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_db::{
+    use reth_db::DatabaseEnv;
+    use reth_db_api::{
         cursor::DbCursorRO,
         models::{storage_sharded_key::StorageShardedKey, ShardedKey},
         table::{Table, TableRow},
         transaction::DbTx,
-        DatabaseEnv,
     };
     use reth_primitives::{
         Chain, Genesis, IntegerList, GOERLI, GOERLI_GENESIS_HASH, MAINNET, MAINNET_GENESIS_HASH,
@@ -579,14 +580,11 @@ mod tests {
         init_genesis(factory.clone()).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(
-            ProviderFactory::new(
-                factory.into_db(),
-                MAINNET.clone(),
-                static_file_provider.path().into(),
-            )
-            .unwrap(),
-        );
+        let genesis_hash = init_genesis(ProviderFactory::new(
+            factory.into_db(),
+            MAINNET.clone(),
+            static_file_provider,
+        ));
 
         assert_eq!(
             genesis_hash.unwrap_err(),

@@ -260,7 +260,7 @@ mod tests {
         (status, body)
     }
 
-    /// Spawn a new RPC server equipped with a JwtLayer auth middleware.
+    /// Spawn a new RPC server equipped with a `JwtLayer` auth middleware.
     async fn spawn_server() -> ServerHandle {
         let secret = JwtSecret::from_hex(SECRET).unwrap();
         let addr = format!("{AUTH_ADDR}:{AUTH_PORT}");

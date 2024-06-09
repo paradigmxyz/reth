@@ -58,7 +58,7 @@ pub enum NetworkError {
     Discv5Error(#[from] reth_discv5::Error),
     /// Error when setting up the DNS resolver failed
     ///
-    /// See also [DnsResolver](reth_dns_discovery::DnsResolver::from_system_conf)
+    /// See also [`DnsResolver`](reth_dns_discovery::DnsResolver::from_system_conf)
     #[error("failed to configure DNS resolver: {0}")]
     DnsResolver(#[from] ResolveError),
 }

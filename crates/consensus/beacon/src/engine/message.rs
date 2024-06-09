@@ -16,7 +16,7 @@ use tokio::sync::oneshot;
 
 /// Represents the outcome of forkchoice update.
 ///
-/// This is a future that resolves to [ForkChoiceUpdateResult]
+/// This is a future that resolves to [`ForkChoiceUpdateResult`]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 #[derive(Debug)]
 pub struct OnForkChoiceUpdated {
@@ -32,7 +32,7 @@ pub struct OnForkChoiceUpdated {
 // === impl OnForkChoiceUpdated ===
 
 impl OnForkChoiceUpdated {
-    /// Returns the determined status of the received ForkchoiceState.
+    /// Returns the determined status of the received `ForkchoiceState`.
     pub const fn forkchoice_status(&self) -> ForkchoiceStatus {
         self.forkchoice_status
     }

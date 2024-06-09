@@ -1,4 +1,4 @@
-//! [BundleStateDataProvider] implementations used by the tree.
+//! [`BundleStateDataProvider`] implementations used by the tree.
 
 use reth_primitives::{BlockHash, BlockNumber, ForkBlock};
 use reth_provider::{BundleStateDataProvider, BundleStateForkProvider, BundleStateWithReceipts};

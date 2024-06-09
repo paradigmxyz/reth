@@ -15,7 +15,7 @@ use std::{borrow::Cow, collections::BTreeMap, fmt, ops::RangeInclusive};
 /// The chain contains the state of accounts after execution of its blocks,
 /// changesets for those blocks (and their transactions), as well as the blocks themselves.
 ///
-/// Used inside the BlockchainTree.
+/// Used inside the `BlockchainTree`.
 ///
 /// # Warning
 ///
@@ -25,7 +25,7 @@ pub struct Chain {
     /// All blocks in this chain.
     blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
     /// The state of all accounts after execution of the _all_ blocks in this chain's range from
-    /// [Chain::first] to [Chain::tip], inclusive.
+    /// [`Chain::first`] to [`Chain::tip`], inclusive.
     ///
     /// This state also contains the individual changes that lead to the current state.
     state: BundleStateWithReceipts,
@@ -403,7 +403,7 @@ impl<'a> ChainBlocks<'a> {
         self.blocks.values().flat_map(|block| block.transactions_with_sender())
     }
 
-    /// Returns an iterator over all [TransactionSignedEcRecovered] in the blocks
+    /// Returns an iterator over all [`TransactionSignedEcRecovered`] in the blocks
     ///
     /// Note: This clones the transactions since it is assumed this is part of a shared [Chain].
     #[inline]
@@ -459,13 +459,13 @@ pub enum ChainSplit {
     /// Given block split is lower than first block.
     NoSplitCanonical(Chain),
     /// Chain is split into two: `[canonical]` and `[pending]`
-    /// The target of this chain split [ChainSplitTarget] belongs to the `canonical` chain.
+    /// The target of this chain split [`ChainSplitTarget`] belongs to the `canonical` chain.
     Split {
         /// Contains lower block numbers that are considered canonicalized. It ends with
-        /// the [ChainSplitTarget] block. The state of this chain is now empty and no longer
+        /// the [`ChainSplitTarget`] block. The state of this chain is now empty and no longer
         /// usable.
         canonical: Chain,
-        /// Right contains all subsequent blocks __after__ the [ChainSplitTarget] that are still
+        /// Right contains all subsequent blocks __after__ the [`ChainSplitTarget`] that are still
         /// pending.
         ///
         /// The state of the original chain is moved here.

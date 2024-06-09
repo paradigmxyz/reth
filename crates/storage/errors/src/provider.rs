@@ -122,12 +122,18 @@ pub enum ProviderError {
     /// Trying to insert data from an unexpected block number.
     #[error("trying to append data to {0} as block #{1} but expected block #{2}")]
     UnexpectedStaticFileBlockNumber(StaticFileSegment, BlockNumber, BlockNumber),
+    /// Static File Provider was initialized as read-only.
+    #[error("cannot get a writer on a read-only environment.")]
+    ReadOnlyStaticFileAccess,
     /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
     #[error("failed to convert block number U256 to u64: {0}")]
     BlockNumberOverflow(U256),
     /// Consistent view error.
     #[error("failed to initialize consistent view: {0}")]
     ConsistentView(Box<ConsistentViewError>),
+    /// Storage lock error.
+    #[error(transparent)]
+    StorageLockError(#[from] crate::lockfile::StorageLockError),
 }
 
 impl From<reth_fs_util::FsPathError> for ProviderError {

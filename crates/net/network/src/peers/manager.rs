@@ -92,7 +92,7 @@ pub struct PeersManager {
     /// The set of trusted peer ids.
     ///
     /// This tracks peer ids that are considered trusted, but for which we don't necessarily have
-    /// an address: [Self::add_trusted_peer_id]
+    /// an address: [`Self::add_trusted_peer_id`]
     trusted_peer_ids: HashSet<PeerId>,
     /// Copy of the sender half, so new [`PeersHandle`] can be created on demand.
     manager_tx: mpsc::UnboundedSender<PeerCommand>,
@@ -120,7 +120,7 @@ pub struct PeersManager {
     /// If non-trusted peers should be connected to, or the connection from non-trusted
     /// incoming peers should be accepted.
     trusted_nodes_only: bool,
-    /// Timestamp of the last time [Self::tick] was called.
+    /// Timestamp of the last time [`Self::tick`] was called.
     last_tick: Instant,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
     max_backoff_count: u8,
@@ -250,7 +250,7 @@ impl PeersManager {
         Ok(())
     }
 
-    /// Invoked when a previous call to [Self::on_incoming_pending_session] succeeded but it was
+    /// Invoked when a previous call to [`Self::on_incoming_pending_session`] succeeded but it was
     /// rejected.
     pub(crate) fn on_incoming_pending_session_rejected_internally(&mut self) {
         self.connection_info.decr_pending_in();
@@ -661,7 +661,7 @@ impl PeersManager {
 
     /// Called for a newly discovered peer.
     ///
-    /// If the peer already exists, then the address, kind and fork_id will be updated.
+    /// If the peer already exists, then the address, kind and `fork_id` will be updated.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: SocketAddr, fork_id: Option<ForkId>) {
         self.add_peer_kind(peer_id, PeerKind::Basic, addr, fork_id)
     }
@@ -681,7 +681,7 @@ impl PeersManager {
 
     /// Called for a newly discovered peer.
     ///
-    /// If the peer already exists, then the address, kind and fork_id will be updated.
+    /// If the peer already exists, then the address, kind and `fork_id` will be updated.
     pub(crate) fn add_peer_kind(
         &mut self,
         peer_id: PeerId,
@@ -763,10 +763,10 @@ impl PeersManager {
 
     /// Returns the idle peer with the highest reputation.
     ///
-    /// Peers that are `trusted`, see [PeerKind], are prioritized as long as they're not currently
+    /// Peers that are `trusted`, see [`PeerKind`], are prioritized as long as they're not currently
     /// marked as banned or backed off.
     ///
-    /// If `trusted_nodes_only` is enabled, see [PeersConfig], then this will only consider
+    /// If `trusted_nodes_only` is enabled, see [`PeersConfig`], then this will only consider
     /// `trusted` peers.
     ///
     /// Returns `None` if no peer is available.
@@ -842,7 +842,7 @@ impl PeersManager {
         &self.net_connection_state
     }
 
-    /// Sets net_connection_state to ShuttingDown.
+    /// Sets `net_connection_state` to `ShuttingDown`.
     pub fn on_shutdown(&mut self) {
         self.net_connection_state = NetworkConnectionState::ShuttingDown;
     }
@@ -883,10 +883,8 @@ impl PeersManager {
                 for peer_id in unbanned_peers {
                     if let Some(peer) = self.peers.get_mut(&peer_id) {
                         peer.unban();
-                    } else {
-                        continue
+                        self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
                     }
-                    self.queued_actions.push_back(PeerAction::UnBanPeer { peer_id });
                 }
 
                 // clear the backoff list of expired backoffs, and mark the relevant peers as
@@ -1031,7 +1029,7 @@ pub struct Peer {
     kind: PeerKind,
     /// Whether the peer is currently backed off.
     backed_off: bool,
-    /// Counts number of times the peer was backed off due to a severe [BackoffKind].
+    /// Counts number of times the peer was backed off due to a severe [`BackoffKind`].
     severe_backoff_counter: u8,
 }
 
@@ -1294,7 +1292,7 @@ pub struct PeersConfig {
     /// How long to ban bad peers.
     #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
     pub ban_duration: Duration,
-    /// Restrictions on PeerIds and Ips.
+    /// Restrictions on `PeerIds` and Ips.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub ban_list: BanList,
     /// Restrictions on connections.
@@ -1327,7 +1325,7 @@ impl Default for PeersConfig {
 }
 
 impl PeersConfig {
-    /// A set of peer_ids and ip addr that we want to never connect to
+    /// A set of `peer_ids` and ip addr that we want to never connect to
     pub fn with_ban_list(mut self, ban_list: BanList) -> Self {
         self.ban_list = ban_list;
         self
@@ -2829,12 +2827,12 @@ mod tests {
         );
 
         // establish dialed connections
-        for peer_id in num_pendingout_states.iter() {
+        for peer_id in &num_pendingout_states {
             peer_manager.on_active_outgoing_established(*peer_id);
         }
 
         // all dialed connections should now be in 'Out' state
-        for peer_id in num_pendingout_states.iter() {
+        for peer_id in &num_pendingout_states {
             assert_eq!(peer_manager.peers.get(peer_id).unwrap().state, PeerConnectionState::Out);
         }
 

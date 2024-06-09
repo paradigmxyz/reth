@@ -5,7 +5,7 @@ use crate::{
     ConsensusEngineLiveSyncProgress, EthBeaconConsensus,
 };
 use futures::FutureExt;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_network_p2p::{
     bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
@@ -29,7 +29,7 @@ use tracing::trace;
 /// This type controls the [Pipeline] and supports (single) full block downloads.
 ///
 /// Caution: If the pipeline is running, this type will not emit blocks downloaded from the network
-/// [EngineSyncEvent::FetchedFullBlock] until the pipeline is idle to prevent commits to the
+/// [`EngineSyncEvent::FetchedFullBlock`] until the pipeline is idle to prevent commits to the
 /// database while the pipeline is still active.
 pub(crate) struct EngineSyncController<DB, Client>
 where
@@ -359,7 +359,7 @@ where
     }
 }
 
-/// A wrapper type around [SealedBlock] that implements the [Ord] trait by block number.
+/// A wrapper type around [`SealedBlock`] that implements the [Ord] trait by block number.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct OrderedSealedBlock(SealedBlock);
 
@@ -375,7 +375,7 @@ impl Ord for OrderedSealedBlock {
     }
 }
 
-/// The event type emitted by the [EngineSyncController].
+/// The event type emitted by the [`EngineSyncController`].
 #[derive(Debug)]
 pub(crate) enum EngineSyncEvent {
     /// A full block has been downloaded from the network.
@@ -402,8 +402,8 @@ pub(crate) enum EngineSyncEvent {
 
 /// The possible pipeline states within the sync controller.
 ///
-/// [PipelineState::Idle] means that the pipeline is currently idle.
-/// [PipelineState::Running] means that the pipeline is currently running.
+/// [`PipelineState::Idle`] means that the pipeline is currently idle.
+/// [`PipelineState::Running`] means that the pipeline is currently running.
 ///
 /// NOTE: The differentiation between these two states is important, because when the pipeline is
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
@@ -432,12 +432,12 @@ mod tests {
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,
-        Header, PruneModes, SealedHeader, MAINNET,
+        Header, SealedHeader, MAINNET,
     };
     use reth_provider::{
         test_utils::create_test_provider_factory_with_chain_spec, BundleStateWithReceipts,
-        StaticFileProviderFactory,
     };
+    use reth_prune_types::PruneModes;
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
     use reth_static_file::StaticFileProducer;
     use reth_tasks::TokioTaskExecutor;
@@ -451,7 +451,7 @@ mod tests {
     }
 
     impl TestPipelineBuilder {
-        /// Create a new [TestPipelineBuilder].
+        /// Create a new [`TestPipelineBuilder`].
         fn new() -> Self {
             Self {
                 pipeline_exec_outputs: VecDeque::new(),
@@ -499,11 +499,8 @@ mod tests {
 
             let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
 
-            let static_file_producer = StaticFileProducer::new(
-                provider_factory.clone(),
-                provider_factory.static_file_provider(),
-                PruneModes::default(),
-            );
+            let static_file_producer =
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 
             pipeline.build(provider_factory, static_file_producer)
         }
@@ -515,7 +512,7 @@ mod tests {
     }
 
     impl<Client> TestSyncControllerBuilder<Client> {
-        /// Create a new [TestSyncControllerBuilder].
+        /// Create a new [`TestSyncControllerBuilder`].
         const fn new() -> Self {
             Self { max_block: None, client: None }
         }

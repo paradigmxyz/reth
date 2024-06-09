@@ -18,14 +18,14 @@ pub struct BlockIndices {
     /// Last finalized block.
     last_finalized_block: BlockNumber,
     /// Non-finalized canonical chain. Contains N number (depends on `finalization_depth`) of
-    /// blocks. These blocks are found in fork_to_child but not inside `blocks_to_chain` or
+    /// blocks. These blocks are found in `fork_to_child` but not inside `blocks_to_chain` or
     /// `number_to_block` as those are sidechain specific indices.
     canonical_chain: CanonicalChain,
     /// Index needed when discarding the chain, so we can remove connected chains from tree.
     ///
     /// This maintains insertion order for all child blocks, so
-    /// [BlockIndices::pending_block_num_hash] returns always the same block: the first child block
-    /// we inserted.
+    /// [`BlockIndices::pending_block_num_hash`] returns always the same block: the first child
+    /// block we inserted.
     ///
     /// NOTE: It contains just blocks that are forks as a key and not all blocks.
     fork_to_child: HashMap<BlockHash, LinkedHashSet<BlockHash>>,
@@ -111,7 +111,7 @@ impl BlockIndices {
 
     /// Insert block to chain and fork child indices of the new chain
     pub(crate) fn insert_chain(&mut self, chain_id: BlockchainId, chain: &Chain) {
-        for (number, block) in chain.blocks().iter() {
+        for (number, block) in chain.blocks() {
             // add block -> chain_id index
             self.blocks_to_chain.insert(block.hash(), chain_id);
             // add number -> block
@@ -122,7 +122,7 @@ impl BlockIndices {
         self.fork_to_child.entry(first.parent_hash).or_default().insert_if_absent(first.hash());
     }
 
-    /// Get the [BlockchainId] the given block belongs to if it exists.
+    /// Get the [`BlockchainId`] the given block belongs to if it exists.
     pub(crate) fn get_block_chain_id(&self, block: &BlockHash) -> Option<BlockchainId> {
         self.blocks_to_chain.get(block).cloned()
     }
@@ -328,7 +328,7 @@ impl BlockIndices {
 
         let mut lose_chains = BTreeSet::new();
 
-        for block_hash in finalized_blocks.into_iter() {
+        for block_hash in finalized_blocks {
             // there is a fork block.
             if let Some(fork_blocks) = self.fork_to_child.remove(&block_hash) {
                 lose_chains = fork_blocks.into_iter().fold(lose_chains, |mut fold, fork_child| {
