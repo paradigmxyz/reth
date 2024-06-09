@@ -96,10 +96,9 @@ impl std::error::Error for DatabaseErrorInfo {}
 
 impl Display for DatabaseErrorInfo {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        f.write_fmt(format_args!("{0} ({1})", self.message, self.code))
+        write!(f, "{} ({})", self.message, self.code)
     }
 }
-
 /// Database write error.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DatabaseWriteError {
@@ -133,13 +132,14 @@ impl std::error::Error for DatabaseWriteError {}
 
 impl Display for DatabaseWriteError {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        f.write_fmt(format_args!(
-            "write operation {0:?} failed for key \"{1}\" in table {2:?}: {3}",
+        write!(
+            f,
+            "write operation {:?} failed for key \"{}\" in table {:?}: {}",
             self.operation,
             reth_primitives::hex::encode(&self.key),
             self.table_name,
-            self.info,
-        ))
+            self.info
+        )
     }
 }
 

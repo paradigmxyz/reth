@@ -23,11 +23,12 @@ impl std::error::Error for StorageLockError {}
 impl Display for StorageLockError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
-            Self::Taken(write_lock) => f.write_fmt(format_args!(
-                "storage directory is currently in use as read-write by another process: PID {0}",
-                write_lock,
-            )),
-            Self::Other(unspecified) => f.write_fmt(format_args!("{0}", unspecified,)),
+            Self::Taken(write_lock) => write!(
+                f,
+                "storage directory is currently in use as read-write by another process: PID {}",
+                write_lock
+            ),
+            Self::Other(unspecified) => write!(f, "{}", unspecified),
         }
     }
 }
