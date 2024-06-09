@@ -7904,7 +7904,6 @@ version = "0.2.0-beta.9"
 dependencies = [
  "reth-fs-util",
  "reth-primitives",
- "thiserror",
 ]
 
 [[package]]
