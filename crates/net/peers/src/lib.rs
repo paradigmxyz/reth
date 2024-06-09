@@ -49,7 +49,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_primitives::B512;
-use secp256k1::{constants::UNCOMPRESSED_PUBLIC_KEY_SIZE, PublicKey, SecretKey};
 use std::{net::IpAddr, str::FromStr};
 
 // Re-export PeerId for ease of use.
@@ -75,20 +74,20 @@ const SECP256K1_TAG_PUBKEY_UNCOMPRESSED: u8 = 4;
 /// Converts a [`secp256k1::PublicKey`] to a [`PeerId`] by stripping the
 /// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag and storing the rest of the slice in the [`PeerId`].
 #[inline]
-pub fn pk2id(pk: &PublicKey) -> PeerId {
+pub fn pk2id(pk: &secp256k1::PublicKey) -> PeerId {
     PeerId::from_slice(&pk.serialize_uncompressed()[1..])
 }
 
 /// Converts a [`PeerId`] to a [`secp256k1::PublicKey`] by prepending the [`PeerId`] bytes with the
 /// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag.
 #[inline]
-pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
+pub fn id2pk(id: PeerId) -> Result<secp256k1::PublicKey, secp256k1::Error> {
     // NOTE: B512 is used as a PeerId because 512 bits is enough to represent an uncompressed
     // public key.
-    let mut s = [0u8; UNCOMPRESSED_PUBLIC_KEY_SIZE];
+    let mut s = [0u8; secp256k1::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE];
     s[0] = SECP256K1_TAG_PUBKEY_UNCOMPRESSED;
     s[1..].copy_from_slice(id.as_slice());
-    PublicKey::from_slice(&s)
+    secp256k1::PublicKey::from_slice(&s)
 }
 
 /// A peer that can come in ENR or [`NodeRecord`] form.
@@ -99,7 +98,7 @@ pub enum AnyNode {
     /// An "enode:" peer with full ip
     NodeRecord(NodeRecord),
     /// An "enr:"
-    Enr(Enr<SecretKey>),
+    Enr(Enr<secp256k1::SecretKey>),
     /// An incomplete "enode" with only a peer id
     PeerId(PeerId),
 }
@@ -139,8 +138,8 @@ impl From<NodeRecord> for AnyNode {
     }
 }
 
-impl From<Enr<SecretKey>> for AnyNode {
-    fn from(value: Enr<SecretKey>) -> Self {
+impl From<Enr<secp256k1::SecretKey>> for AnyNode {
+    fn from(value: Enr<secp256k1::SecretKey>) -> Self {
         Self::Enr(value)
     }
 }
@@ -235,7 +234,6 @@ impl<T> WithPeerId<Option<T>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secp256k1::SECP256K1;
 
     #[test]
     fn test_node_record_parse() {
@@ -278,8 +276,8 @@ mod tests {
 
     #[test]
     fn pk2id2pk() {
-        let prikey = SecretKey::new(&mut secp256k1::rand::thread_rng());
-        let pubkey = PublicKey::from_secret_key(SECP256K1, &prikey);
+        let prikey = secp256k1::SecretKey::new(&mut rand::thread_rng());
+        let pubkey = secp256k1::PublicKey::from_secret_key(secp256k1::SECP256K1, &prikey);
         assert_eq!(pubkey, id2pk(pk2id(&pubkey)).unwrap());
     }
 }
