@@ -1,9 +1,6 @@
 use core::fmt::{Display, Formatter, Result};
 use reth_fs_util::FsPathError;
 
-#[cfg(feature = "std")]
-use std::error::Error;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Storage lock error.
 pub enum StorageLockError {
@@ -21,7 +18,7 @@ impl From<FsPathError> for StorageLockError {
 }
 
 #[cfg(feature = "std")]
-impl Error for StorageLockError {}
+impl std::error::Error for StorageLockError {}
 
 impl Display for StorageLockError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {

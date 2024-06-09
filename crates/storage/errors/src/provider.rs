@@ -7,9 +7,6 @@ use reth_primitives::{
 };
 use std::path::PathBuf;
 
-#[cfg(feature = "std")]
-use std::error::Error;
-
 /// Provider result type.
 pub type ProviderResult<Ok> = std::result::Result<Ok, ProviderError>;
 
@@ -107,8 +104,8 @@ pub enum ProviderError {
 }
 
 #[cfg(feature = "std")]
-impl Error for ProviderError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
+impl std::error::Error for ProviderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Database(ref e) => Some(e),
             Self::StorageLockError(ref e) => Some(e),
@@ -271,7 +268,7 @@ impl From<ConsistentViewError> for ProviderError {
 }
 
 #[cfg(feature = "std")]
-impl Error for ConsistentViewError {}
+impl std::error::Error for ConsistentViewError {}
 
 impl Display for ConsistentViewError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {

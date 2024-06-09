@@ -1,13 +1,10 @@
 use core::{
-    fmt::{Display, Result},
+    fmt::{Display, Formatter, Result},
     str::FromStr,
 };
 
 extern crate alloc;
 use alloc::boxed::Box;
-
-#[cfg(feature = "std")]
-use std::{error::Error, fmt};
 
 /// Database error type.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,8 +36,8 @@ pub enum DatabaseError {
 }
 
 #[cfg(feature = "std")]
-impl Error for DatabaseError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
+impl std::error::Error for DatabaseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Write(err) => Some(&**err),
             _ => None,
@@ -49,35 +46,20 @@ impl Error for DatabaseError {
 }
 
 impl Display for DatabaseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
-            Self::Open(info) => f.write_fmt(format_args!("failed to open the database: {0}", info)),
-            Self::CreateTable(info) => {
-                f.write_fmt(format_args!("failed to create a table: {0}", info))
-            }
-            Self::Write(err) => f.write_fmt(format_args!("{0}", err)),
-            Self::Read(info) => f
-                .write_fmt(
-                    format_args!("failed to read a value from a database table: {0}", info,),
-                ),
-            Self::Delete(info) => {
-                f.write_fmt(format_args!("database delete error code: {0}", info))
-            }
-            Self::Commit(info) => {
-                f.write_fmt(format_args!("failed to commit transaction changes: {0}", info))
-            }
-            Self::InitTx(info) => {
-                f.write_fmt(format_args!("failed to initialize a transaction: {0}", info))
-            }
-            Self::InitCursor(info) => {
-                f.write_fmt(format_args!("failed to initialize a cursor: {0}", info))
-            }
-            Self::Decode => f.write_fmt(format_args!("failed to decode a key from a table")),
-            Self::Stats(info) => f.write_fmt(format_args!("failed to get stats: {0}", info)),
-            Self::LogLevelUnavailable(level) => {
-                f.write_fmt(format_args!("log level {0:?} is not available", level))
-            }
-            Self::Other(msg) => f.write_fmt(format_args!("{0}", msg)),
+            Self::Open(info) => write!(f, "failed to open the database: {}", info),
+            Self::CreateTable(info) => write!(f, "failed to create a table: {}", info),
+            Self::Write(err) => write!(f, "{}", err),
+            Self::Read(info) => write!(f, "failed to read a value from a database table: {}", info),
+            Self::Delete(info) => write!(f, "database delete error code: {}", info),
+            Self::Commit(info) => write!(f, "failed to commit transaction changes: {}", info),
+            Self::InitTx(info) => write!(f, "failed to initialize a transaction: {}", info),
+            Self::InitCursor(info) => write!(f, "failed to initialize a cursor: {}", info),
+            Self::Decode => write!(f, "failed to decode a key from a table"),
+            Self::Stats(info) => write!(f, "failed to get stats: {}", info),
+            Self::LogLevelUnavailable(level) => write!(f, "log level {:?} is not available", level),
+            Self::Other(msg) => write!(f, "{}", msg),
         }
     }
 }
@@ -110,10 +92,10 @@ impl From<DatabaseWriteError> for DatabaseError {
 }
 
 #[cfg(feature = "std")]
-impl Error for DatabaseErrorInfo {}
+impl std::error::Error for DatabaseErrorInfo {}
 
 impl Display for DatabaseErrorInfo {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.write_fmt(format_args!("{0} ({1})", self.message, self.code))
     }
 }
@@ -147,10 +129,10 @@ pub enum DatabaseWriteOperation {
 }
 
 #[cfg(feature = "std")]
-impl Error for DatabaseWriteError {}
+impl std::error::Error for DatabaseWriteError {}
 
 impl Display for DatabaseWriteError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
             "write operation {0:?} failed for key \"{1}\" in table {2:?}: {3}",
             self.operation,
