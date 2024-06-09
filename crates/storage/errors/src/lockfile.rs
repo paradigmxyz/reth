@@ -24,16 +24,13 @@ impl From<FsPathError> for StorageLockError {
 impl Error for StorageLockError {}
 
 impl Display for StorageLockError {
-    fn fmt(&self, __formatter: &mut Formatter<'_>) -> Result {
-        use thiserror::__private::AsDisplay as _;
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
-            Self::Taken(write_lock) => __formatter.write_fmt(format_args!(
+            Self::Taken(write_lock) => f.write_fmt(format_args!(
                 "storage directory is currently in use as read-write by another process: PID {0}",
-                write_lock.as_display(),
+                write_lock,
             )),
-            Self::Other(unspecified) => {
-                __formatter.write_fmt(format_args!("{0}", unspecified.as_display()))
-            }
+            Self::Other(unspecified) => f.write_fmt(format_args!("{0}", unspecified,)),
         }
     }
 }

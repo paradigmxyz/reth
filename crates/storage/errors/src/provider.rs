@@ -1,4 +1,6 @@
+use crate::{db::DatabaseError, lockfile::StorageLockError};
 use core::fmt::{Display, Formatter, Result};
+use reth_fs_util::FsPathError;
 use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, StaticFileSegment,
     TxHashOrNumber, TxNumber, B256, U256,
@@ -15,7 +17,7 @@ pub type ProviderResult<Ok> = std::result::Result<Ok, ProviderError>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProviderError {
     /// Database error.
-    Database(crate::db::DatabaseError),
+    Database(DatabaseError),
     /// Filesystem path error.
     FsPathError(String),
     /// Nippy jar error.
@@ -104,192 +106,125 @@ pub enum ProviderError {
     StorageLockError(crate::lockfile::StorageLockError),
 }
 
+#[cfg(feature = "std")]
 impl Error for ProviderError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
-        use thiserror::__private::AsDynError as _;
-        #[allow(deprecated)]
         match self {
-            ProviderError::Database { 0: transparent } => {
-                std::error::Error::source(transparent.as_dyn_error())
-            }
-            ProviderError::FsPathError { .. } => ::core::option::Option::None,
-            ProviderError::NippyJar { .. } => ::core::option::Option::None,
-            ProviderError::SenderRecoveryError { .. } => ::core::option::Option::None,
-            ProviderError::BlockHashNotFound { .. } => ::core::option::Option::None,
-            ProviderError::BlockBodyIndicesNotFound { .. } => ::core::option::Option::None,
-            ProviderError::StorageChangesetNotFound { .. } => ::core::option::Option::None,
-            ProviderError::AccountChangesetNotFound { .. } => ::core::option::Option::None,
-            ProviderError::TotalDifficultyNotFound { .. } => ::core::option::Option::None,
-            ProviderError::HeaderNotFound { .. } => ::core::option::Option::None,
-            ProviderError::TransactionNotFound { .. } => ::core::option::Option::None,
-            ProviderError::ReceiptNotFound { .. } => ::core::option::Option::None,
-            ProviderError::BestBlockNotFound { .. } => ::core::option::Option::None,
-            ProviderError::FinalizedBlockNotFound { .. } => ::core::option::Option::None,
-            ProviderError::SafeBlockNotFound { .. } => ::core::option::Option::None,
-            ProviderError::MismatchOfTransactionAndSenderId { .. } => ::core::option::Option::None,
-            ProviderError::BlockBodyTransactionCount { .. } => ::core::option::Option::None,
-            ProviderError::CacheServiceUnavailable { .. } => ::core::option::Option::None,
-            ProviderError::UnknownBlockHash { .. } => ::core::option::Option::None,
-            ProviderError::StateForHashNotFound { .. } => ::core::option::Option::None,
-            ProviderError::StateRootNotAvailableForHistoricalBlock { .. } => {
-                ::core::option::Option::None
-            }
-            ProviderError::BlockNumberForTransactionIndexNotFound { .. } => {
-                ::core::option::Option::None
-            }
-            ProviderError::StateRootMismatch { .. } => ::core::option::Option::None,
-            ProviderError::UnwindStateRootMismatch { .. } => ::core::option::Option::None,
-            ProviderError::StateAtBlockPruned { .. } => ::core::option::Option::None,
-            ProviderError::UnsupportedProvider { .. } => ::core::option::Option::None,
-            ProviderError::MissingStaticFilePath { .. } => ::core::option::Option::None,
-            ProviderError::MissingStaticFileBlock { .. } => ::core::option::Option::None,
-            ProviderError::MissingStaticFileTx { .. } => ::core::option::Option::None,
-            ProviderError::FinalizedStaticFile { .. } => ::core::option::Option::None,
-            ProviderError::UnexpectedStaticFileBlockNumber { .. } => ::core::option::Option::None,
-            ProviderError::ReadOnlyStaticFileAccess { .. } => ::core::option::Option::None,
-            ProviderError::BlockNumberOverflow { .. } => ::core::option::Option::None,
-            ProviderError::ConsistentView { .. } => ::core::option::Option::None,
-            ProviderError::StorageLockError { 0: transparent } => {
-                std::error::Error::source(transparent.as_dyn_error())
-            }
+            Self::Database(ref e) => Some(e),
+            Self::StorageLockError(ref e) => Some(e),
+            _ => None,
         }
     }
 }
 
 impl Display for ProviderError {
-    fn fmt(&self, __formatter: &mut Formatter<'_>) -> Result {
-        use thiserror::__private::AsDisplay as _;
-        #[allow(unused_variables, deprecated, clippy::used_underscore_binding)]
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
-            ProviderError::Database(_0) => Display::fmt(_0, __formatter),
-            ProviderError::FsPathError(_0) => {
-                __formatter.write_fmt(format_args!("{0}", _0.as_display()))
+            Self::Database(db_error) => write!(f, "Database error: {}", db_error),
+            Self::FsPathError(path_error) => write!(f, "Filesystem path error: {}", path_error),
+            Self::NippyJar(error) => write!(f, "Nippy jar error: {}", error),
+            Self::SenderRecoveryError => write!(f, "Failed to recover sender for transaction"),
+            Self::BlockHashNotFound(block_hash) => {
+                write!(f, "Block hash {} does not exist in Headers table", block_hash)
             }
-            ProviderError::NippyJar(_0) => {
-                __formatter.write_fmt(format_args!("nippy jar error: {0}", _0.as_display()))
+            Self::BlockBodyIndicesNotFound(block_number) => {
+                write!(f, "Block meta not found for block #{}", block_number)
             }
-            ProviderError::SenderRecoveryError {} => {
-                __formatter.write_str("failed to recover sender for transaction")
-            }
-            ProviderError::BlockHashNotFound(_0) => __formatter.write_fmt(format_args!(
-                "block hash {0} does not exist in Headers table",
-                _0.as_display(),
-            )),
-            ProviderError::BlockBodyIndicesNotFound(_0) => __formatter
-                .write_fmt(format_args!("block meta not found for block #{0}", _0.as_display(),)),
-            ProviderError::StorageChangesetNotFound { block_number, address, storage_key } => {
-                __formatter.write_fmt(format_args!(
-                    "storage change set for address {0} and key {1} at block #{2} does not exist",
-                    address.as_display(),
-                    storage_key.as_display(),
-                    block_number.as_display(),
-                ))
-            }
-            ProviderError::AccountChangesetNotFound { block_number, address } => __formatter
-                .write_fmt(format_args!(
-                    "account change set for address {0} at block #{1} does not exist",
-                    address.as_display(),
-                    block_number.as_display(),
-                )),
-            ProviderError::TotalDifficultyNotFound(_0) => __formatter.write_fmt(format_args!(
-                "total difficulty not found for block #{0}",
-                _0.as_display(),
-            )),
-            ProviderError::HeaderNotFound(_0) => {
-                __formatter.write_fmt(format_args!("no header found for {0:?}", _0))
-            }
-            ProviderError::TransactionNotFound(_0) => {
-                __formatter.write_fmt(format_args!("no transaction found for {0:?}", _0))
-            }
-            ProviderError::ReceiptNotFound(_0) => {
-                __formatter.write_fmt(format_args!("no receipt found for {0:?}", _0))
-            }
-            ProviderError::BestBlockNotFound {} => {
-                __formatter.write_str("best block does not exist")
-            }
-            ProviderError::FinalizedBlockNotFound {} => {
-                __formatter.write_str("finalized block does not exist")
-            }
-            ProviderError::SafeBlockNotFound {} => {
-                __formatter.write_str("safe block does not exist")
-            }
-            ProviderError::MismatchOfTransactionAndSenderId { tx_id } => __formatter.write_fmt(
-                format_args!("mismatch of sender and transaction id {0}", tx_id.as_display(),),
+            Self::StorageChangesetNotFound { block_number, address, storage_key } => write!(
+                f,
+                "Storage change set for address {} and key {} at block #{} does not exist",
+                address, storage_key, block_number
             ),
-            ProviderError::BlockBodyTransactionCount {} => {
-                __formatter.write_str("stored block indices does not match transaction count")
+            Self::AccountChangesetNotFound { block_number, address } => write!(
+                f,
+                "Account change set for address {} at block #{} does not exist",
+                address, block_number
+            ),
+            Self::TotalDifficultyNotFound(block_number) => {
+                write!(f, "Total difficulty not found for block #{}", block_number)
             }
-            ProviderError::CacheServiceUnavailable {} => {
-                __formatter.write_str("cache service task stopped")
+            Self::HeaderNotFound(header) => write!(f, "No header found for {:?}", header),
+            Self::TransactionNotFound(tx) => write!(f, "No transaction found for {:?}", tx),
+            Self::ReceiptNotFound(tx) => write!(f, "No receipt found for {:?}", tx),
+            Self::BestBlockNotFound => write!(f, "Best block does not exist"),
+            Self::FinalizedBlockNotFound => write!(f, "Finalized block does not exist"),
+            Self::SafeBlockNotFound => write!(f, "Safe block does not exist"),
+            Self::MismatchOfTransactionAndSenderId { tx_id } => {
+                write!(f, "Mismatch of sender and transaction id {}", tx_id)
             }
-            ProviderError::UnknownBlockHash(_0) => {
-                __formatter.write_fmt(format_args!("unknown block {0}", _0.as_display()))
+            Self::BlockBodyTransactionCount => {
+                write!(f, "Stored block indices do not match transaction count")
             }
-            ProviderError::StateForHashNotFound(_0) => {
-                __formatter.write_fmt(format_args!("no state found for block {0}", _0.as_display()))
+            Self::CacheServiceUnavailable => write!(f, "Cache service task stopped"),
+            Self::UnknownBlockHash(block_hash) => write!(f, "Unknown block {}", block_hash),
+            Self::StateForHashNotFound(block_hash) => {
+                write!(f, "No state found for block {}", block_hash)
             }
-            ProviderError::StateRootNotAvailableForHistoricalBlock {} => {
-                __formatter.write_str("unable to compute state root on top of historical block")
+            Self::StateRootNotAvailableForHistoricalBlock => {
+                write!(f, "Unable to compute state root on top of historical block")
             }
-            ProviderError::BlockNumberForTransactionIndexNotFound {} => __formatter
-                .write_str("unable to find the block number for a given transaction index"),
-            ProviderError::StateRootMismatch(_0) => {
-                __formatter.write_fmt(format_args!("merkle trie {0}", _0.as_display()))
+            Self::BlockNumberForTransactionIndexNotFound => {
+                write!(f, "Unable to find the block number for a given transaction index")
             }
-            ProviderError::UnwindStateRootMismatch(_0) => {
-                __formatter.write_fmt(format_args!("unwind merkle trie {0}", _0.as_display()))
+            Self::StateRootMismatch(root_mismatch) => {
+                write!(f, "Merkle trie root mismatch: {}", root_mismatch)
             }
-            ProviderError::StateAtBlockPruned(_0) => __formatter
-                .write_fmt(format_args!("state at block #{0} is pruned", _0.as_display(),)),
-            ProviderError::UnsupportedProvider {} => {
-                __formatter.write_str("this provider does not support this request")
+            Self::UnwindStateRootMismatch(root_mismatch) => {
+                write!(f, "Unwind merkle trie root mismatch: {}", root_mismatch)
             }
-            ProviderError::MissingStaticFilePath(_0, _1) => __formatter.write_fmt(format_args!(
-                "not able to find {0} static file at {1}",
-                _0.as_display(),
-                _1.as_display(),
-            )),
-            ProviderError::MissingStaticFileBlock(_0, _1) => __formatter.write_fmt(format_args!(
-                "not able to find {0} static file for block number {1}",
-                _0.as_display(),
-                _1.as_display(),
-            )),
-            ProviderError::MissingStaticFileTx(_0, _1) => __formatter.write_fmt(format_args!(
-                "unable to find {0} static file for transaction id {1}",
-                _0.as_display(),
-                _1.as_display(),
-            )),
-            ProviderError::FinalizedStaticFile(_0, _1) => __formatter.write_fmt(format_args!(
-                "unable to write block #{0} to finalized static file {1}",
-                _1.as_display(),
-                _0.as_display(),
-            )),
-            ProviderError::UnexpectedStaticFileBlockNumber(_0, _1, _2) => {
-                __formatter.write_fmt(format_args!(
-                    "trying to append data to {0} as block #{1} but expected block #{2}",
-                    _0.as_display(),
-                    _1.as_display(),
-                    _2.as_display(),
-                ))
+            Self::StateAtBlockPruned(block_number) => {
+                write!(f, "State at block #{} is pruned", block_number)
             }
-            ProviderError::ReadOnlyStaticFileAccess {} => {
-                __formatter.write_str("cannot get a writer on a read-only environment.")
+            Self::UnsupportedProvider => write!(f, "This provider does not support this request"),
+            Self::MissingStaticFilePath(segment, path) => {
+                write!(f, "Not able to find {} static file at {}", segment, path.display())
             }
-            ProviderError::BlockNumberOverflow(_0) => __formatter.write_fmt(format_args!(
-                "failed to convert block number U256 to u64: {0}",
-                _0.as_display(),
-            )),
-            ProviderError::ConsistentView(_0) => __formatter.write_fmt(format_args!(
-                "failed to initialize consistent view: {0}",
-                _0.as_display(),
-            )),
-            ProviderError::StorageLockError(_0) => ::core::fmt::Display::fmt(_0, __formatter),
+            Self::MissingStaticFileBlock(segment, block_number) => write!(
+                f,
+                "Not able to find {} static file for block number {}",
+                segment, block_number
+            ),
+            Self::MissingStaticFileTx(segment, tx_number) => {
+                write!(f, "Unable to find {} static file for transaction id {}", segment, tx_number)
+            }
+            Self::FinalizedStaticFile(segment, block_number) => write!(
+                f,
+                "Unable to write block #{} to finalized static file {}",
+                block_number, segment
+            ),
+            Self::UnexpectedStaticFileBlockNumber(segment, expected, actual) => write!(
+                f,
+                "Trying to append data to {} as block #{} but expected block #{}",
+                segment, actual, expected
+            ),
+            Self::ReadOnlyStaticFileAccess => {
+                write!(f, "Cannot get a writer on a read-only environment")
+            }
+            Self::BlockNumberOverflow(block_number) => {
+                write!(f, "Failed to convert block number U256 to u64: {}", block_number)
+            }
+            Self::ConsistentView(error) => {
+                write!(f, "Failed to initialize consistent view: {}", error)
+            }
+            Self::StorageLockError(lock_error) => write!(f, "Storage lock error: {}", lock_error),
         }
     }
 }
 
-impl From<reth_fs_util::FsPathError> for ProviderError {
-    fn from(err: reth_fs_util::FsPathError) -> Self {
+impl From<StorageLockError> for ProviderError {
+    fn from(err: StorageLockError) -> Self {
+        Self::StorageLockError(err)
+    }
+}
+
+impl From<DatabaseError> for ProviderError {
+    fn from(err: DatabaseError) -> Self {
+        Self::Database(err) // Assuming `Database` is a variant of `ProviderError`
+    }
+}
+
+impl From<FsPathError> for ProviderError {
+    fn from(err: FsPathError) -> Self {
         Self::FsPathError(err.to_string())
     }
 }
@@ -309,17 +244,8 @@ pub struct RootMismatch {
 impl std::error::Error for RootMismatch {}
 
 impl Display for RootMismatch {
-    #[allow(clippy::used_underscore_binding)]
-    fn fmt(&self, __formatter: &mut Formatter<'_>) -> Result {
-        use thiserror::__private::AsDisplay as _;
-        #[allow(unused_variables, deprecated)]
-        let Self { root, block_number, block_hash } = self;
-        __formatter.write_fmt(format_args!(
-            "root mismatch at #{0} ({1}): {2}",
-            block_number.as_display(),
-            block_hash.as_display(),
-            root.as_display(),
-        ))
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "root mismatch at #{} ({}): {}", self.block_number, self.block_hash, self.root)
     }
 }
 
@@ -348,12 +274,13 @@ impl From<ConsistentViewError> for ProviderError {
 impl Error for ConsistentViewError {}
 
 impl Display for ConsistentViewError {
-    fn fmt(&self, __formatter: &mut Formatter<'_>) -> Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
-            ConsistentViewError::Syncing { best_block } => __formatter
-                .write_fmt(format_args!("node is syncing. best block: {0:?}", best_block,)),
-            ConsistentViewError::Inconsistent { tip } => {
-                __formatter.write_fmt(format_args!("inconsistent database state: {0:?}", tip))
+            Self::Syncing { best_block } => {
+                f.write_fmt(format_args!("node is syncing. best block: {0:?}", best_block,))
+            }
+            Self::Inconsistent { tip } => {
+                f.write_fmt(format_args!("inconsistent database state: {0:?}", tip))
             }
         }
     }
