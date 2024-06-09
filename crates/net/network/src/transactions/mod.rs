@@ -26,7 +26,7 @@ use reth_network_p2p::{
     error::{RequestError, RequestResult},
     sync::SyncStateProvider,
 };
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{
     FromRecoveredPooledTransaction, PooledTransactionsElement, TransactionSigned, TxHash, B256,
 };
