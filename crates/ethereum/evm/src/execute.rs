@@ -31,6 +31,10 @@ use revm_primitives::{
 };
 use std::sync::Arc;
 use tracing::debug;
+use revm_primitives::address;
+use revm_primitives::EVMError;
+use reth_revm::JournaledState;
+use revm_primitives::HashSet;
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
@@ -160,6 +164,8 @@ where
         let mut receipts = Vec::with_capacity(block.body.len());
         let mut tx_number = 0;
         for (sender, transaction) in block.transactions_with_sender() {
+            //println!("tx: {:?}", tx_number);
+
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
@@ -175,11 +181,14 @@ where
             }
 
             EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender, ());
-            if is_taiko && tx_number == 0 {
-                evm.tx_mut().taiko.is_anchor = true;
-                // set the treasury address
-                //tx_env.taiko.treasury = chain_spec.l2_contract.unwrap_or_default();
-            }
+
+            let is_anchor = is_taiko && tx_number == 0;
+
+            evm.tx_mut().taiko.is_anchor = is_anchor;
+            // set the treasury address
+            //tx_env.taiko.treasury = chain_spec.l2_contract.unwrap_or_default();
+            evm.tx_mut().taiko.treasury = address!("1670090000000000000000000000000000010001");
+
             tx_number += 1;
 
             // Execute transaction.
@@ -190,8 +199,38 @@ where
                     error: err.into(),
                 }
             });
-            if optimistic && res.is_err() {
-                continue;
+            if res.is_err() {
+
+                // Clear the state for the next tx
+                evm.context.evm.journaled_state = JournaledState::new(evm.context.evm.journaled_state.spec, HashSet::new());
+
+                if optimistic {
+                    continue;
+                }
+
+                if !is_taiko || is_anchor {
+                    return Err(BlockExecutionError::Validation(res.err().unwrap()));
+                }
+                // only continue for invalid tx errors, not db errors (because those can be
+                // manipulated by the prover)
+                match res {
+                    Err(BlockValidationError::EVM { hash, error }) => match *error {
+                        EVMError::Transaction(invalid_transaction) => {
+                            //#[cfg(feature = "std")]
+                            println!("Invalid tx at {}: {:?}", tx_number, invalid_transaction);
+                            // skip the tx
+                            continue;
+                        },
+                        _ => {
+                            // any other error is not allowed
+                            return Err(BlockExecutionError::Validation(BlockValidationError::EVM { hash, error }));
+                        },
+                    },
+                    _ => {
+                        // Any other type of error is not allowed
+                        return Err(BlockExecutionError::Validation(res.err().unwrap()));
+                    }
+                }
             }
             let ResultAndState { result, state } = res?;
             evm.db_mut().commit(state);
