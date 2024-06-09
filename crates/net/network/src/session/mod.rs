@@ -15,10 +15,7 @@ use reth_eth_wire::{
     UnauthedP2PStream,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
-use reth_net_common::{
-    bandwidth_meter::{BandwidthMeter, MeteredStream},
-    stream::HasRemoteAddr,
-};
+use reth_net_common::stream::HasRemoteAddr;
 use reth_network_peers::PeerId;
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_tasks::TaskSpawner;
@@ -109,8 +106,6 @@ pub struct SessionManager {
     active_session_rx: ReceiverStream<ActiveSessionMessage>,
     /// Additional `RLPx` sub-protocols to be used by the session manager.
     extra_protocols: RlpxSubProtocols,
-    /// Used to measure inbound & outbound bandwidth across all managed streams
-    bandwidth_meter: BandwidthMeter,
     /// Metrics for the session manager.
     metrics: SessionManagerMetrics,
 }
@@ -128,7 +123,6 @@ impl SessionManager {
         hello_message: HelloMessageWithProtocols,
         fork_filter: ForkFilter,
         extra_protocols: RlpxSubProtocols,
-        bandwidth_meter: BandwidthMeter,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
@@ -152,7 +146,6 @@ impl SessionManager {
             pending_session_rx: ReceiverStream::new(pending_sessions_rx),
             active_session_tx: MeteredPollSender::new(active_session_tx, "network_active_session"),
             active_session_rx: ReceiverStream::new(active_session_rx),
-            bandwidth_meter,
             extra_protocols,
             metrics: Default::default(),
         }
@@ -240,7 +233,6 @@ impl SessionManager {
 
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
-        let metered_stream = MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
         let secret_key = self.secret_key;
         let hello_message = self.hello_message.clone();
         let status = self.status;
@@ -255,7 +247,7 @@ impl SessionManager {
             start_pending_incoming_session(
                 disconnect_rx,
                 session_id,
-                metered_stream,
+                stream,
                 pending_events,
                 remote_addr,
                 secret_key,
@@ -286,7 +278,6 @@ impl SessionManager {
             let hello_message = self.hello_message.clone();
             let fork_filter = self.fork_filter.clone();
             let status = self.status;
-            let band_with_meter = self.bandwidth_meter.clone();
             let extra_handlers = self.extra_protocols.on_outgoing(remote_addr, remote_peer_id);
             self.spawn(pending_session_with_timeout(
                 self.pending_session_timeout,
@@ -304,7 +295,6 @@ impl SessionManager {
                     hello_message,
                     status,
                     fork_filter,
-                    band_with_meter,
                     extra_handlers,
                 ),
             ));
@@ -797,7 +787,7 @@ pub(crate) async fn pending_session_with_timeout<F>(
 pub(crate) async fn start_pending_incoming_session(
     disconnect_rx: oneshot::Receiver<()>,
     session_id: SessionId,
-    stream: MeteredStream<TcpStream>,
+    stream: TcpStream,
     events: mpsc::Sender<PendingSessionEvent>,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
@@ -835,7 +825,6 @@ async fn start_pending_outbound_session(
     hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
-    bandwidth_meter: BandwidthMeter,
     extra_handlers: RlpxSubProtocolHandlers,
 ) {
     let stream = match TcpStream::connect(remote_addr).await {
@@ -843,7 +832,7 @@ async fn start_pending_outbound_session(
             if let Err(err) = stream.set_nodelay(true) {
                 tracing::warn!(target: "net::session", "set nodelay failed: {:?}", err);
             }
-            MeteredStream::new_with_meter(stream, bandwidth_meter)
+            stream
         }
         Err(error) => {
             let _ = events
@@ -878,7 +867,7 @@ async fn start_pending_outbound_session(
 async fn authenticate(
     disconnect_rx: oneshot::Receiver<()>,
     events: mpsc::Sender<PendingSessionEvent>,
-    stream: MeteredStream<TcpStream>,
+    stream: TcpStream,
     session_id: SessionId,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
@@ -888,7 +877,7 @@ async fn authenticate(
     fork_filter: ForkFilter,
     extra_handlers: RlpxSubProtocolHandlers,
 ) {
-    let local_addr = stream.inner().local_addr().ok();
+    let local_addr = stream.local_addr().ok();
     let stream = match get_eciess_stream(stream, secret_key, direction).await {
         Ok(stream) => stream,
         Err(error) => {
@@ -959,7 +948,7 @@ async fn get_eciess_stream<Io: AsyncRead + AsyncWrite + Unpin + HasRemoteAddr>(
 /// also negotiate the additional protocols.
 #[allow(clippy::too_many_arguments)]
 async fn authenticate_stream(
-    stream: UnauthedP2PStream<ECIESStream<MeteredStream<TcpStream>>>,
+    stream: UnauthedP2PStream<ECIESStream<TcpStream>>,
     session_id: SessionId,
     remote_addr: SocketAddr,
     local_addr: Option<SocketAddr>,

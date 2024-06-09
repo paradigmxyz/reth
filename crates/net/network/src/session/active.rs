@@ -768,7 +768,6 @@ mod tests {
         EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream, Status, StatusBuilder,
         UnauthedEthStream, UnauthedP2PStream,
     };
-    use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
     use reth_network_peers::pk2id;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
     use secp256k1::{SecretKey, SECP256K1};
@@ -793,7 +792,6 @@ mod tests {
         status: Status,
         fork_filter: ForkFilter,
         next_id: usize,
-        bandwidth_meter: BandwidthMeter,
     }
 
     impl SessionBuilder {
@@ -838,13 +836,11 @@ mod tests {
             let session_id = self.next_id();
             let (_disconnect_tx, disconnect_rx) = oneshot::channel();
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
-            let metered_stream =
-                MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
 
             tokio::task::spawn(start_pending_incoming_session(
                 disconnect_rx,
                 session_id,
-                metered_stream,
+                stream,
                 pending_sessions_tx,
                 remote_addr,
                 self.secret_key,
@@ -925,7 +921,6 @@ mod tests {
                 fork_filter: MAINNET
                     .hardfork_fork_filter(Hardfork::Frontier)
                     .expect("The Frontier fork filter should exist on mainnet"),
-                bandwidth_meter: BandwidthMeter::default(),
             }
         }
     }
