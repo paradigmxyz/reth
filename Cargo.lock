@@ -6898,7 +6898,6 @@ dependencies = [
  "reth-primitives",
  "reth-prune-types",
  "reth-storage-errors",
- "thiserror",
 ]
 
 [[package]]
