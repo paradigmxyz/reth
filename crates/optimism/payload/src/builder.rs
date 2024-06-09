@@ -506,11 +506,8 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let bundle = BundleStateWithReceipts::new(
-        db.take_bundle(),
-        Receipts::from_vec(vec![receipts]),
-        block_number,
-    );
+    let bundle =
+        BundleStateWithReceipts::new(db.take_bundle(), vec![receipts].into(), block_number);
     let receipts_root = bundle
         .optimism_receipts_root_slow(
             block_number,

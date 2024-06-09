@@ -271,7 +271,7 @@ impl BundleStateWithReceipts {
 
         // Truncate higher state to [at..].
         let at_idx = higher_state.block_number_to_index(at).unwrap();
-        higher_state.receipts = Receipts::from_vec(higher_state.receipts.split_off(at_idx));
+        higher_state.receipts = higher_state.receipts.split_off(at_idx).into();
         higher_state.bundle.take_n_reverts(at_idx);
         higher_state.first_block = at;
 

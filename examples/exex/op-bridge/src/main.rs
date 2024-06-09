@@ -343,7 +343,7 @@ mod tests {
             vec![block.clone()],
             BundleStateWithReceipts::new(
                 BundleState::default(),
-                Receipts::from_block_receipt(vec![deposit_tx_receipt, withdrawal_tx_receipt]),
+                vec![deposit_tx_receipt, withdrawal_tx_receipt].into(),
                 block.number,
             ),
             None,
