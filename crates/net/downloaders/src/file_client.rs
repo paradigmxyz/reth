@@ -8,7 +8,7 @@ use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersFut, HeadersRequest},
     priority::Priority,
 };
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BytesMut, Header, HeadersDirection,
     SealedHeader, B256,

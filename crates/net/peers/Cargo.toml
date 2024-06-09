@@ -1,12 +1,12 @@
 [package]
-name = "reth-network-types"
+name = "reth-network-peers"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Network types and utils"
+description = "Network peer types and utils"
 
 [lints]
 workspace = true

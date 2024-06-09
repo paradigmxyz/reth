@@ -283,6 +283,7 @@ mod tests {
             event.encode_data().into(),
         )
         .ok_or_else(|| eyre::eyre!("failed to encode event"))?;
+        #[allow(clippy::needless_update)] // side-effect of optimism fields
         let receipt = Receipt {
             tx_type: TxType::Legacy,
             success: true,

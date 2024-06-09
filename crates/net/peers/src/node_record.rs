@@ -11,7 +11,6 @@ use std::{
 use crate::{pk2id, PeerId};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use enr::Enr;
-use secp256k1::{SecretKey, SECP256K1};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 /// Represents a ENR in discovery.
@@ -42,8 +41,8 @@ pub struct NodeRecord {
 
 impl NodeRecord {
     /// Derive the [`NodeRecord`] from the secret key and addr
-    pub fn from_secret_key(addr: SocketAddr, sk: &SecretKey) -> Self {
-        let pk = secp256k1::PublicKey::from_secret_key(SECP256K1, sk);
+    pub fn from_secret_key(addr: SocketAddr, sk: &secp256k1::SecretKey) -> Self {
+        let pk = secp256k1::PublicKey::from_secret_key(secp256k1::SECP256K1, sk);
         let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
         Self::new(addr, id)
     }
@@ -170,10 +169,10 @@ impl FromStr for NodeRecord {
     }
 }
 
-impl TryFrom<&Enr<SecretKey>> for NodeRecord {
+impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
     type Error = NodeRecordParseError;
 
-    fn try_from(enr: &Enr<SecretKey>) -> Result<Self, Self::Error> {
+    fn try_from(enr: &Enr<secp256k1::SecretKey>) -> Result<Self, Self::Error> {
         let Some(address) = enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))
         else {
             return Err(NodeRecordParseError::InvalidUrl("ip missing".to_string()))
@@ -195,10 +194,9 @@ impl TryFrom<&Enr<SecretKey>> for NodeRecord {
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv6Addr;
-
     use alloy_rlp::Decodable;
     use rand::{thread_rng, Rng, RngCore};
+    use std::net::Ipv6Addr;
 
     use super::*;
 

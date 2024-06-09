@@ -60,7 +60,7 @@ reth-static-file.workspace = true
 reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-network-types.workspace = true
+reth-network-peers.workspace = true
 
 alloy-rlp.workspace = true
 itertools.workspace = true
