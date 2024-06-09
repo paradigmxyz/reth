@@ -16,7 +16,7 @@ use reth_eth_wire::{
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_net_common::stream::HasRemoteAddr;
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_tasks::TaskSpawner;
 use secp256k1::SecretKey;

@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::Stream;
 use reth_consensus::{Consensus, ConsensusError};
-use reth_network_types::WithPeerId;
+use reth_network_peers::WithPeerId;
 use reth_primitives::{
     BlockBody, GotExpected, Header, HeadersDirection, SealedBlock, SealedHeader, B256,
 };

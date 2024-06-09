@@ -20,7 +20,7 @@ use reth_eth_wire::{
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_p2p::error::RequestError;
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use std::{
     collections::VecDeque,
     future::Future,
@@ -768,7 +768,7 @@ mod tests {
         EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream, Status, StatusBuilder,
         UnauthedEthStream, UnauthedP2PStream,
     };
-    use reth_network_types::pk2id;
+    use reth_network_peers::pk2id;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::{

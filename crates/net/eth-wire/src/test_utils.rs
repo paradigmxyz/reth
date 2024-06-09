@@ -4,7 +4,7 @@ use crate::{
     EthVersion, HelloMessageWithProtocols, P2PStream, ProtocolVersion, Status, UnauthedP2PStream,
 };
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
-use reth_network_types::pk2id;
+use reth_network_peers::pk2id;
 use reth_primitives::{Chain, ForkFilter, Head, B256, U256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::net::SocketAddr;
