@@ -7,6 +7,7 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+
 use core::fmt::{Display, Formatter, Result};
 use reth_consensus::ConsensusError;
 use reth_primitives::{revm_primitives::EVMError, BlockNumHash, B256};
@@ -85,9 +86,8 @@ pub enum BlockValidationError {
 #[cfg(feature = "std")]
 impl std::error::Error for BlockValidationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        #[allow(deprecated)]
         match self {
-            Self::EVM { error: source, .. } => Some(source),
+            Self::EVM { error, .. } => Some(error),
             Self::StateRoot(state_root_error) => Some(state_root_error),
             Self::BlockHashAccountLoadingFailed(account_loading_error) => {
                 Some(account_loading_error)
@@ -99,7 +99,6 @@ impl std::error::Error for BlockValidationError {
 
 impl Display for BlockValidationError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        #[allow(unused_variables, deprecated, clippy::used_underscore_binding)]
         match self {
             Self::EVM { hash, error } => {
                 write!(f, "EVM reported invalid transaction ({}): {}", hash, error)
