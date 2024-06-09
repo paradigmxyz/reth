@@ -476,7 +476,7 @@ pub enum ChainSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Receipts, B256};
+    use reth_primitives::B256;
     use revm::primitives::{AccountInfo, HashMap};
 
     #[test]

@@ -261,8 +261,8 @@ mod tests {
     use reth::revm::db::BundleState;
     use reth_exex_test_utils::{test_exex_context, PollOnce};
     use reth_primitives::{
-        Address, Block, Header, Log, Receipt, Receipts, Transaction, TransactionSigned, TxKind,
-        TxLegacy, TxType, U256,
+        Address, Block, Header, Log, Receipt, Transaction, TransactionSigned, TxKind, TxLegacy,
+        TxType, U256,
     };
     use reth_provider::{BundleStateWithReceipts, Chain};
     use reth_testing_utils::generators::sign_tx_with_random_key_pair;

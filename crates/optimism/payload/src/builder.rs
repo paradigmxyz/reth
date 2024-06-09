@@ -12,7 +12,7 @@ use reth_primitives::{
     eip4844::calculate_excess_blob_gas,
     proofs,
     revm::env::tx_env_with_recovered,
-    Block, ChainSpec, Hardfork, Header, IntoRecoveredTransaction, Receipt, Receipts, TxType,
+    Block, ChainSpec, Hardfork, Header, IntoRecoveredTransaction, Receipt, TxType,
     EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
