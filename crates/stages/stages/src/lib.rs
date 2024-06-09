@@ -19,7 +19,7 @@
 //! # use reth_evm_ethereum::execute::EthExecutorProvider;
 //! # use reth_primitives::{MAINNET, B256};
 //! # use reth_prune_types::PruneModes;
-//! # use reth_network_types::PeerId;
+//! # use reth_network_peers::PeerId;
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # use tokio::sync::watch;

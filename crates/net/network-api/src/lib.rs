@@ -19,7 +19,7 @@ use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
-use reth_network_types::NodeRecord;
+use reth_network_peers::NodeRecord;
 
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;

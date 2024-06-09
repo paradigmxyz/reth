@@ -1,5 +1,5 @@
 use generic_array::GenericArray;
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{keccak256, NodeRecord};
 
 /// The key type for the table.
