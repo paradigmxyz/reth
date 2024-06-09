@@ -1,10 +1,8 @@
+use alloc::boxed::Box;
 use core::{
     fmt::{Display, Formatter, Result},
     str::FromStr,
 };
-
-extern crate alloc;
-use alloc::boxed::Box;
 
 /// Database error type.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -211,7 +209,7 @@ impl LogLevel {
 impl FromStr for LogLevel {
     type Err = String;
 
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "fatal" => Ok(Self::Fatal),
             "error" => Ok(Self::Error),
