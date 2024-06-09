@@ -278,6 +278,15 @@ where
         let state = BundleStateWithReceipts::new(bundle, receipts, first_block);
         let write_preparation_duration = time.elapsed();
 
+        let time = Instant::now();
+        // write output
+        state.clone().write_to_storage(
+            provider.tx_ref(),
+            static_file_producer,
+            OriginalValuesKnown::Yes,
+        )?;
+        let db_write_duration = time.elapsed();
+
         // Check if we should send a [`ExExNotification`] to execution extensions.
         //
         // Note: Since we only write to `blocks` if there are any ExEx's we don't need to perform
@@ -288,7 +297,7 @@ where
                     let hash = block.header.hash_slow();
                     block.seal(hash)
                 }),
-                state.clone(),
+                state,
                 None,
             ));
 
@@ -297,14 +306,6 @@ where
             let _ = self.exex_manager_handle.send(ExExNotification::ChainCommitted { new: chain });
         }
 
-        let time = Instant::now();
-        // write output
-        state.write_to_storage(
-            provider.tx_ref(),
-            static_file_producer,
-            OriginalValuesKnown::Yes,
-        )?;
-        let db_write_duration = time.elapsed();
         debug!(
             target: "sync::stages::execution",
             block_fetch = ?fetch_block_duration,
