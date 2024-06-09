@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_network_types::AnyNode;
+use reth_network_peers::AnyNode;
 use reth_primitives::NodeRecord;
 use reth_rpc_types::{admin::NodeInfo, PeerInfo};
 

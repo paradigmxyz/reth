@@ -3,7 +3,7 @@
 use crate::{error::DecodePacketError, MAX_PACKET_SIZE, MIN_PACKET_SIZE};
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header, RlpDecodable, RlpEncodable};
 use enr::Enr;
-use reth_network_types::{pk2id, PeerId};
+use reth_network_peers::{pk2id, PeerId};
 use reth_primitives::{
     bytes::{Buf, BufMut, Bytes, BytesMut},
     keccak256, EnrForkIdEntry, ForkId, NodeRecord, B256,

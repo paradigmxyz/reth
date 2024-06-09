@@ -25,7 +25,7 @@ reth-evm.workspace = true
 reth-engine-primitives.workspace = true
 reth-consensus.workspace = true
 reth-rpc-types.workspace = true
-reth-network-types.workspace = true
+reth-network-peers.workspace = true
 reth-tokio-util.workspace = true
 
 # async

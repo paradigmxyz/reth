@@ -13,7 +13,7 @@ use ctr::Ctr64BE;
 use digest::{crypto_common::KeyIvInit, Digest};
 use educe::Educe;
 use rand::{thread_rng, Rng};
-use reth_network_types::{id2pk, pk2id};
+use reth_network_peers::{id2pk, pk2id};
 use reth_primitives::{
     bytes::{BufMut, Bytes, BytesMut},
     B128, B256, B512 as PeerId,
