@@ -497,7 +497,8 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
 
 /// Loads a transaction from database.
 ///
-/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
+/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` transactions RPC
+/// methods.
 pub trait LoadTransaction {
     /// Transaction pool with pending transactions. [`TransactionPool::Transaction`] is the
     /// supported transaction type.

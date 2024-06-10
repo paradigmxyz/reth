@@ -227,7 +227,7 @@ pub trait EthFees: LoadFee {
 
 /// Loads fee from database.
 ///
-/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
+/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` fees RPC methods.
 pub trait LoadFee: Send + Sync + Clone {
     // Returns a handle for reading data from disk.
     ///

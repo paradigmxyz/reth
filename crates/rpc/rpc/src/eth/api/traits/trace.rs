@@ -23,8 +23,6 @@ use super::call::{StateCacheDBRefMutWrapper, StateProviderTraitObjWrapper};
 pub trait EthTrace: Trace {}
 
 /// Executes CPU heavy tasks.
-///
-/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait Trace {
     /// Returns a handle for reading evm config.
     ///
