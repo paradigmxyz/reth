@@ -148,7 +148,6 @@ pub enum BlockExecutionError {
     #[error(transparent)]
     LatestBlock(#[from] ProviderError),
     /// Arbitrary Block Executor Errors
-    #[cfg(feature = "std")]
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -169,7 +168,6 @@ impl std::error::Error for BlockExecutionError {
 
 impl BlockExecutionError {
     /// Create a new `BlockExecutionError::Other` variant.
-    #[cfg(feature = "std")]
     pub fn other<E>(error: E) -> Self
     where
         E: std::error::Error + Send + Sync + 'static,
@@ -178,7 +176,6 @@ impl BlockExecutionError {
     }
 
     /// Create a new [`BlockExecutionError::Other`] from a given message.
-    #[cfg(feature = "std")]
     pub fn msg(msg: impl Display) -> Self {
         Self::Other(msg.to_string().into())
     }
