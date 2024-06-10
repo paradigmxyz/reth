@@ -1,3 +1,12 @@
+[workspace.package]
+version = "0.2.0-beta.9"
+edition = "2021"
+rust-version = "1.76"
+license = "MIT OR Apache-2.0"
+homepage = "https://paradigmxyz.github.io/reth"
+repository = "https://github.com/paradigmxyz/reth"
+exclude = [".github/"]
+
 [workspace]
 members = [
     "bin/reth/",
@@ -192,15 +201,6 @@ non_send_fields_in_send_ty = "allow"
 redundant_pub_crate = "allow"
 significant_drop_in_scrutinee = "allow"
 significant_drop_tightening = "allow"
-
-[workspace.package]
-version = "0.2.0-beta.9"
-edition = "2021"
-rust-version = "1.76"
-license = "MIT OR Apache-2.0"
-homepage = "https://paradigmxyz.github.io/reth"
-repository = "https://github.com/paradigmxyz/reth"
-exclude = [".github/"]
 
 # Speed up tests.
 [profile.dev.package]
