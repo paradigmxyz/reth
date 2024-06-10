@@ -33,7 +33,7 @@ where
     type Pool = Pool;
 
     #[inline]
-    fn provider(&self) -> &impl TransactionsProvider {
+    fn provider(&self) -> impl TransactionsProvider {
         self.inner.provider()
     }
 

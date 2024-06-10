@@ -450,7 +450,7 @@ pub trait LoadTransaction {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> &impl TransactionsProvider;
+    fn provider(&self) -> impl TransactionsProvider;
 
     /// Returns a handle for reading data from memory.
     ///
