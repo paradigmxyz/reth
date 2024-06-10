@@ -9,7 +9,7 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, SealedBlockWithSenders, StaticFileSegment,
+    BlockNumber, Header, StaticFileSegment,
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
@@ -75,7 +75,8 @@ pub struct ExecutionStage<E> {
     external_clean_threshold: u64,
     /// Pruning configuration.
     prune_modes: PruneModes,
-    post_execute_commit_input: Option<(Vec<SealedBlockWithSenders>, BundleStateWithReceipts)>,
+    post_execute_commit_input: Option<Chain>,
+    post_unwind_commit_input: Option<Chain>,
     /// Handle to communicate with `ExEx` manager.
     exex_manager_handle: ExExManagerHandle,
 }
@@ -96,6 +97,7 @@ impl<E> ExecutionStage<E> {
             thresholds,
             prune_modes,
             post_execute_commit_input: None,
+            post_unwind_commit_input: None,
             exex_manager_handle,
         }
     }
@@ -301,14 +303,11 @@ where
         // Note: Since we only write to `blocks` if there are any ExEx's we don't need to perform
         // the `has_exexs` check here as well
         if !blocks.is_empty() {
-            let blocks = blocks
-                .into_iter()
-                .map(|block| {
-                    let hash = block.header.hash_slow();
-                    block.seal(hash)
-                })
-                .collect();
-            self.post_execute_commit_input = Some((blocks, state.clone()))
+            let blocks = blocks.into_iter().map(|block| {
+                let hash = block.header.hash_slow();
+                block.seal(hash)
+            });
+            self.post_execute_commit_input = Some(Chain::new(blocks, state.clone(), None));
         }
 
         let time = Instant::now();
@@ -337,12 +336,13 @@ where
     }
 
     fn post_execute_commit(&mut self) -> Result<(), StageError> {
-        let Some((blocks, state)) = self.post_execute_commit_input.take() else { return Ok(()) };
+        let Some(chain) = self.post_execute_commit_input.take() else { return Ok(()) };
 
-        let chain = Arc::new(Chain::new(blocks, state, None));
         // NOTE: We can ignore the error here, since an error means that the channel is closed,
         // which means the manager has died, which then in turn means the node is shutting down.
-        let _ = self.exex_manager_handle.send(ExExNotification::ChainCommitted { new: chain });
+        let _ = self
+            .exex_manager_handle
+            .send(ExExNotification::ChainCommitted { new: Arc::new(chain) });
 
         Ok(())
     }
@@ -370,13 +370,8 @@ where
         if self.exex_manager_handle.has_exexs() {
             // Get the blocks for the unwound range. This is needed for `ExExNotification`.
             let blocks = provider.get_take_block_range::<false>(range.clone())?;
-            let chain = Chain::new(blocks, bundle_state_with_receipts, None);
-
-            // NOTE: We can ignore the error here, since an error means that the channel is closed,
-            // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = self
-                .exex_manager_handle
-                .send(ExExNotification::ChainReverted { old: Arc::new(chain) });
+            self.post_unwind_commit_input =
+                Some(Chain::new(blocks, bundle_state_with_receipts, None));
         }
 
         // Unwind all receipts for transactions in the block range
@@ -412,6 +407,17 @@ where
         };
 
         Ok(UnwindOutput { checkpoint })
+    }
+
+    fn post_unwind_commit(&mut self) -> Result<(), StageError> {
+        let Some(chain) = self.post_unwind_commit_input.take() else { return Ok(()) };
+
+        // NOTE: We can ignore the error here, since an error means that the channel is closed,
+        // which means the manager has died, which then in turn means the node is shutting down.
+        let _ =
+            self.exex_manager_handle.send(ExExNotification::ChainReverted { old: Arc::new(chain) });
+
+        Ok(())
     }
 }
 
