@@ -14,8 +14,9 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    AnyTransactionReceipt, TransactionRequest, TypedTransactionRequest,
+    AnyTransactionReceipt, Index, Transaction, TransactionRequest, TypedTransactionRequest,
 };
+use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 
 use crate::eth::{
@@ -187,6 +188,59 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
 
             Ok(Some((tx, meta, receipt)))
         })
+    }
+
+    /// Get [`Transaction`] by [`BlockId`] and index of transaction within that block.
+    ///
+    /// Returns `Ok(None)` if the block does not exist, or index is out of range.
+    fn transaction_by_block_and_tx_index(
+        &self,
+        block_id: impl Into<BlockId> + Send,
+        index: Index,
+    ) -> impl Future<Output = EthResult<Option<Transaction>>> + Send
+    where
+        Self: LoadBlock + LoadPendingBlock + SpawnBlocking,
+    {
+        async move {
+            if let Some(block) = self.block_with_senders(block_id.into()).await? {
+                let block_hash = block.hash();
+                let block_number = block.number;
+                let base_fee_per_gas = block.base_fee_per_gas;
+                if let Some(tx) = block.into_transactions_ecrecovered().nth(index.into()) {
+                    return Ok(Some(from_recovered_with_block_context(
+                        tx,
+                        block_hash,
+                        block_number,
+                        base_fee_per_gas,
+                        index.into(),
+                    )))
+                }
+            }
+
+            Ok(None)
+        }
+    }
+
+    /// Get transaction, as raw bytes, by [`BlockId`] and index of transaction within that block.
+    ///
+    /// Returns `Ok(None)` if the block does not exist, or index is out of range.
+    fn raw_transaction_by_block_and_tx_index(
+        &self,
+        block_id: impl Into<BlockId> + Send,
+        index: Index,
+    ) -> impl Future<Output = EthResult<Option<Bytes>>> + Send
+    where
+        Self: LoadBlock + LoadPendingBlock + SpawnBlocking,
+    {
+        async move {
+            if let Some(block) = self.block_with_senders(block_id.into()).await? {
+                if let Some(tx) = block.transactions().nth(index.into()) {
+                    return Ok(Some(tx.envelope_encoded()))
+                }
+            }
+
+            Ok(None)
+        }
     }
 
     /// Decodes and recovers the transaction and submits it to the pool.
