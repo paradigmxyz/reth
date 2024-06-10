@@ -261,8 +261,8 @@ mod tests {
     use reth::revm::db::BundleState;
     use reth_exex_test_utils::{test_exex_context, PollOnce};
     use reth_primitives::{
-        Address, Block, Header, Log, Receipt, Receipts, Transaction, TransactionSigned, TxKind,
-        TxLegacy, TxType, U256,
+        Address, Block, Header, Log, Receipt, Transaction, TransactionSigned, TxKind, TxLegacy,
+        TxType, U256,
     };
     use reth_provider::{BundleStateWithReceipts, Chain};
     use reth_testing_utils::generators::sign_tx_with_random_key_pair;
@@ -283,6 +283,7 @@ mod tests {
             event.encode_data().into(),
         )
         .ok_or_else(|| eyre::eyre!("failed to encode event"))?;
+        #[allow(clippy::needless_update)] // side-effect of optimism fields
         let receipt = Receipt {
             tx_type: TxType::Legacy,
             success: true,
@@ -342,8 +343,9 @@ mod tests {
             vec![block.clone()],
             BundleStateWithReceipts::new(
                 BundleState::default(),
-                Receipts::from_block_receipt(vec![deposit_tx_receipt, withdrawal_tx_receipt]),
+                vec![deposit_tx_receipt, withdrawal_tx_receipt].into(),
                 block.number,
+                vec![block.requests.clone().unwrap_or_default()],
             ),
             None,
         );

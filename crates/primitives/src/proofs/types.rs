@@ -1,12 +1,12 @@
 //! Merkle trie proofs.
 
-use super::{
-    proof::{verify_proof, ProofVerificationError},
-    Nibbles, TrieAccount,
-};
+use super::{traits::IntoTrieAccount, Nibbles};
 use crate::{keccak256, Account, Address, Bytes, B256, U256};
 use alloy_rlp::encode_fixed_size;
-use alloy_trie::EMPTY_ROOT_HASH;
+use alloy_trie::{
+    proof::{verify_proof, ProofVerificationError},
+    EMPTY_ROOT_HASH,
+};
 
 /// The merkle proof with the relevant account info.
 #[derive(PartialEq, Eq, Debug)]
@@ -64,7 +64,7 @@ impl AccountProof {
         let expected = if self.info.is_none() && self.storage_root == EMPTY_ROOT_HASH {
             None
         } else {
-            Some(alloy_rlp::encode(TrieAccount::from((
+            Some(alloy_rlp::encode(IntoTrieAccount::to_trie_account((
                 self.info.unwrap_or_default(),
                 self.storage_root,
             ))))

@@ -49,8 +49,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_primitives::B512;
-use secp256k1::{constants::UNCOMPRESSED_PUBLIC_KEY_SIZE, PublicKey, SecretKey};
-use std::{net::IpAddr, str::FromStr};
+use std::str::FromStr;
 
 // Re-export PeerId for ease of use.
 pub use enr::Enr;
@@ -70,25 +69,28 @@ pub use trusted_peer::TrustedPeer;
 /// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` = `0x04`
 ///
 /// See: <https://github.com/bitcoin-core/secp256k1/blob/master/include/secp256k1.h#L211>
+#[cfg(feature = "secp256k1")]
 const SECP256K1_TAG_PUBKEY_UNCOMPRESSED: u8 = 4;
 
 /// Converts a [`secp256k1::PublicKey`] to a [`PeerId`] by stripping the
 /// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag and storing the rest of the slice in the [`PeerId`].
+#[cfg(feature = "secp256k1")]
 #[inline]
-pub fn pk2id(pk: &PublicKey) -> PeerId {
+pub fn pk2id(pk: &secp256k1::PublicKey) -> PeerId {
     PeerId::from_slice(&pk.serialize_uncompressed()[1..])
 }
 
 /// Converts a [`PeerId`] to a [`secp256k1::PublicKey`] by prepending the [`PeerId`] bytes with the
 /// `SECP256K1_TAG_PUBKEY_UNCOMPRESSED` tag.
+#[cfg(feature = "secp256k1")]
 #[inline]
-pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
+pub fn id2pk(id: PeerId) -> Result<secp256k1::PublicKey, secp256k1::Error> {
     // NOTE: B512 is used as a PeerId because 512 bits is enough to represent an uncompressed
     // public key.
-    let mut s = [0u8; UNCOMPRESSED_PUBLIC_KEY_SIZE];
+    let mut s = [0u8; secp256k1::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE];
     s[0] = SECP256K1_TAG_PUBKEY_UNCOMPRESSED;
     s[1..].copy_from_slice(id.as_slice());
-    PublicKey::from_slice(&s)
+    secp256k1::PublicKey::from_slice(&s)
 }
 
 /// A peer that can come in ENR or [`NodeRecord`] form.
@@ -98,8 +100,9 @@ pub fn id2pk(id: PeerId) -> Result<PublicKey, secp256k1::Error> {
 pub enum AnyNode {
     /// An "enode:" peer with full ip
     NodeRecord(NodeRecord),
-    /// An "enr:"
-    Enr(Enr<SecretKey>),
+    #[cfg(feature = "secp256k1")]
+    /// An "enr:" peer
+    Enr(Enr<secp256k1::SecretKey>),
     /// An incomplete "enode" with only a peer id
     PeerId(PeerId),
 }
@@ -109,6 +112,7 @@ impl AnyNode {
     pub fn peer_id(&self) -> PeerId {
         match self {
             Self::NodeRecord(record) => record.id,
+            #[cfg(feature = "secp256k1")]
             Self::Enr(enr) => pk2id(&enr.public_key()),
             Self::PeerId(peer_id) => *peer_id,
         }
@@ -118,9 +122,13 @@ impl AnyNode {
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
             Self::NodeRecord(record) => Some(*record),
+            #[cfg(feature = "secp256k1")]
             Self::Enr(enr) => {
                 let node_record = NodeRecord {
-                    address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
+                    address: enr
+                        .ip4()
+                        .map(std::net::IpAddr::from)
+                        .or_else(|| enr.ip6().map(std::net::IpAddr::from))?,
                     tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
                     udp_port: enr.udp4().or_else(|| enr.udp6())?,
                     id: pk2id(&enr.public_key()),
@@ -139,8 +147,9 @@ impl From<NodeRecord> for AnyNode {
     }
 }
 
-impl From<Enr<SecretKey>> for AnyNode {
-    fn from(value: Enr<SecretKey>) -> Self {
+#[cfg(feature = "secp256k1")]
+impl From<Enr<secp256k1::SecretKey>> for AnyNode {
+    fn from(value: Enr<secp256k1::SecretKey>) -> Self {
         Self::Enr(value)
     }
 }
@@ -159,6 +168,7 @@ impl FromStr for AnyNode {
             }
             return Err(format!("invalid public key: {rem}"))
         }
+        #[cfg(feature = "secp256k1")]
         if s.starts_with("enr:") {
             return Enr::from_str(s).map(AnyNode::Enr)
         }
@@ -170,6 +180,7 @@ impl std::fmt::Display for AnyNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NodeRecord(record) => write!(f, "{record}"),
+            #[cfg(feature = "secp256k1")]
             Self::Enr(enr) => write!(f, "{enr}"),
             Self::PeerId(peer_id) => {
                 write!(f, "enode://{}", alloy_primitives::hex::encode(peer_id.as_slice()))
@@ -235,14 +246,14 @@ impl<T> WithPeerId<Option<T>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use secp256k1::SECP256K1;
 
+    #[cfg(feature = "secp256k1")]
     #[test]
     fn test_node_record_parse() {
         let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
         let node: AnyNode = url.parse().unwrap();
         assert_eq!(node, AnyNode::NodeRecord(NodeRecord {
-            address: IpAddr::V4([10,3,58,6].into()),
+            address: std::net::IpAddr::V4([10,3,58,6].into()),
             tcp_port: 30303,
             udp_port: 30301,
             id: "6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0".parse().unwrap(),
@@ -263,6 +274,7 @@ mod tests {
     }
 
     // <https://eips.ethereum.org/EIPS/eip-778>
+    #[cfg(feature = "secp256k1")]
     #[test]
     fn test_enr_parse() {
         let url = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
@@ -277,9 +289,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "secp256k1")]
     fn pk2id2pk() {
-        let prikey = SecretKey::new(&mut secp256k1::rand::thread_rng());
-        let pubkey = PublicKey::from_secret_key(SECP256K1, &prikey);
+        let prikey = secp256k1::SecretKey::new(&mut rand::thread_rng());
+        let pubkey = secp256k1::PublicKey::from_secret_key(secp256k1::SECP256K1, &prikey);
         assert_eq!(pubkey, id2pk(pk2id(&pubkey)).unwrap());
     }
 }
