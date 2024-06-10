@@ -6,7 +6,7 @@ homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Traits for primitive types used in reth."
+description = "Common abstracted types in reth."
 
 [lints]
 workspace = true

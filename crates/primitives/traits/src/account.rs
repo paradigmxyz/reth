@@ -1,5 +1,4 @@
 use alloy_primitives::{B256, U256};
-use revm_primitives::AccountInfo;
 
 /// Represents a minimal Account.
 pub trait Account {
@@ -13,7 +12,7 @@ pub trait Account {
     fn bytecode_hash(&self) -> Option<B256>;
 }
 
-impl Account for AccountInfo {
+impl Account for revm_primitives::AccountInfo {
     fn nonce(&self) -> u64 {
         self.nonce
     }
