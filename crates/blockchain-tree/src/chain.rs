@@ -18,7 +18,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView},
-    BlockExecutionOutcome, Chain, FullBundleStateDataProvider, ProviderError, StateRootProvider,
+    BlockExecutionOutcome, Chain, FullBlockExecutionDataProvider, ProviderError, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::updates::TrieUpdates;
@@ -166,16 +166,16 @@ impl AppendableChain {
     ///   - [`BlockAttachment`] represents if the block extends the canonical chain, and thus we can
     ///     cache the trie state updates.
     ///   - [`BlockValidationKind`] determines if the state root __should__ be validated.
-    fn validate_and_execute<BSDP, DB, E>(
+    fn validate_and_execute<BEDP, DB, E>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
-        bundle_state_data_provider: BSDP,
+        bundle_state_data_provider: BEDP,
         externals: &TreeExternals<DB, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
     ) -> Result<(BlockExecutionOutcome, Option<TrieUpdates>), BlockExecutionError>
     where
-        BSDP: FullBundleStateDataProvider,
+        BEDP: FullBlockExecutionDataProvider,
         DB: Database + Clone,
         E: BlockExecutorProvider,
     {
