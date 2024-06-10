@@ -6,7 +6,7 @@ use reth_network_p2p::{
     error::{DownloadError, DownloadResult},
     priority::Priority,
 };
-use reth_network_types::{PeerId, WithPeerId};
+use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives::{BlockBody, GotExpected, SealedBlock, SealedHeader, B256};
 use std::{
     collections::VecDeque,
