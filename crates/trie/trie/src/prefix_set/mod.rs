@@ -38,8 +38,7 @@ pub struct TriePrefixSets {
 /// # Examples
 ///
 /// ```
-/// use reth_trie::prefix_set::PrefixSetMut;
-/// crate::Nibbles;
+/// use reth_trie::{prefix_set::PrefixSetMut, Nibbles};
 ///
 /// let mut prefix_set = PrefixSetMut::default();
 /// prefix_set.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb]));
