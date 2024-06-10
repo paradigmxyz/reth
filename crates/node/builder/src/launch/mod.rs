@@ -58,6 +58,18 @@ pub trait LaunchNode<Target> {
     fn launch_node(self, target: Target) -> impl Future<Output = eyre::Result<Self::Node>> + Send;
 }
 
+impl<F, Target, Fut, Node> LaunchNode<Target> for F
+where
+    F: FnOnce(Target) -> Fut + Send,
+    Fut: Future<Output = eyre::Result<Node>> + Send,
+{
+    type Node = Node;
+
+    fn launch_node(self, target: Target) -> impl Future<Output = eyre::Result<Self::Node>> + Send {
+        self(target)
+    }
+}
+
 /// The default launcher for a node.
 #[derive(Debug)]
 pub struct DefaultNodeLauncher {
