@@ -1,6 +1,6 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
-use crate::BundleStateWithReceipts;
+use crate::BlockExecutionOutcome;
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{
     Address, BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock,
@@ -28,7 +28,7 @@ pub struct Chain {
     /// [`Chain::first`] to [`Chain::tip`], inclusive.
     ///
     /// This state also contains the individual changes that lead to the current state.
-    state: BundleStateWithReceipts,
+    state: BlockExecutionOutcome,
     /// State trie updates after block is added to the chain.
     /// NOTE: Currently, trie updates are present only for
     /// single-block chains that extend the canonical chain.
@@ -43,7 +43,7 @@ impl Chain {
     /// A chain of blocks should not be empty.
     pub fn new(
         blocks: impl IntoIterator<Item = SealedBlockWithSenders>,
-        state: BundleStateWithReceipts,
+        state: BlockExecutionOutcome,
         trie_updates: Option<TrieUpdates>,
     ) -> Self {
         let blocks = BTreeMap::from_iter(blocks.into_iter().map(|b| (b.number, b)));
@@ -55,7 +55,7 @@ impl Chain {
     /// Create new Chain from a single block and its state.
     pub fn from_block(
         block: SealedBlockWithSenders,
-        state: BundleStateWithReceipts,
+        state: BlockExecutionOutcome,
         trie_updates: Option<TrieUpdates>,
     ) -> Self {
         Self::new([block], state, trie_updates)
@@ -87,7 +87,7 @@ impl Chain {
     }
 
     /// Get post state of this chain
-    pub const fn state(&self) -> &BundleStateWithReceipts {
+    pub const fn state(&self) -> &BlockExecutionOutcome {
         &self.state
     }
 
@@ -118,7 +118,7 @@ impl Chain {
     }
 
     /// Return post state of the block at the `block_number` or None if block is not known
-    pub fn state_at_block(&self, block_number: BlockNumber) -> Option<BundleStateWithReceipts> {
+    pub fn state_at_block(&self, block_number: BlockNumber) -> Option<BlockExecutionOutcome> {
         if self.tip().number == block_number {
             return Some(self.state.clone())
         }
@@ -133,15 +133,13 @@ impl Chain {
 
     /// Destructure the chain into its inner components, the blocks and the state at the tip of the
     /// chain.
-    pub fn into_inner(
-        self,
-    ) -> (ChainBlocks<'static>, BundleStateWithReceipts, Option<TrieUpdates>) {
+    pub fn into_inner(self) -> (ChainBlocks<'static>, BlockExecutionOutcome, Option<TrieUpdates>) {
         (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.state, self.trie_updates)
     }
 
     /// Destructure the chain into its inner components, the blocks and the state at the tip of the
     /// chain.
-    pub const fn inner(&self) -> (ChainBlocks<'_>, &BundleStateWithReceipts) {
+    pub const fn inner(&self) -> (ChainBlocks<'_>, &BlockExecutionOutcome) {
         (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.state)
     }
 
@@ -231,7 +229,7 @@ impl Chain {
 
     /// Append a single block with state to the chain.
     /// This method assumes that blocks attachment to the chain has already been validated.
-    pub fn append_block(&mut self, block: SealedBlockWithSenders, state: BundleStateWithReceipts) {
+    pub fn append_block(&mut self, block: SealedBlockWithSenders, state: BlockExecutionOutcome) {
         self.blocks.insert(block.number, block);
         self.state.extend(state);
         self.trie_updates.take(); // reset
@@ -513,7 +511,7 @@ mod tests {
 
     #[test]
     fn test_number_split() {
-        let block_state1 = BundleStateWithReceipts::new(
+        let block_state1 = BlockExecutionOutcome::new(
             BundleState::new(
                 vec![(
                     Address::new([2; 20]),
@@ -529,7 +527,7 @@ mod tests {
             vec![],
         );
 
-        let block_state2 = BundleStateWithReceipts::new(
+        let block_state2 = BlockExecutionOutcome::new(
             BundleState::new(
                 vec![(
                     Address::new([3; 20]),

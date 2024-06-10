@@ -13,7 +13,7 @@ use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::{stage::StageId, Receipts, StaticFileSegment};
 use reth_provider::{
-    BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    BlockExecutionOutcome, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
     StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
 };
 use std::path::{Path, PathBuf};
@@ -130,9 +130,9 @@ where
         );
 
         // We're reusing receipt writing code internal to
-        // `BundleStateWithReceipts::write_to_storage`, so we just use a default empty
+        // `BlockExecutionOutcome::write_to_storage`, so we just use a default empty
         // `BundleState`.
-        let bundled_state = BundleStateWithReceipts::new(
+        let bundled_state = BlockExecutionOutcome::new(
             Default::default(),
             receipts,
             first_block,

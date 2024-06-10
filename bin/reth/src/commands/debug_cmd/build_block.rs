@@ -31,7 +31,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter,
-    BundleStateWithReceipts, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
+    BlockExecutionOutcome, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
     StateProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -273,7 +273,7 @@ impl Command {
 
                 let BlockExecutionOutput { state, receipts, requests, .. } =
                     executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
-                let state = BundleStateWithReceipts::new(
+                let state = BlockExecutionOutcome::new(
                     state,
                     receipts.into(),
                     block.number,

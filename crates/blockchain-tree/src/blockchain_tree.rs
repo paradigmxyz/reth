@@ -18,7 +18,7 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, BlockWriter, BundleStateWithReceipts,
+    BlockExecutionWriter, BlockNumReader, BlockWriter, BlockExecutionOutcome,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
     ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
     ProviderError, StaticFileProviderFactory,
@@ -303,7 +303,7 @@ where
             trace!(target: "blockchain_tree", %block_hash, "Constructing post state data based on canonical chain");
             return Some(BundleStateData {
                 canonical_fork: ForkBlock { number: canonical_number, hash: block_hash },
-                state: BundleStateWithReceipts::default(),
+                state: BlockExecutionOutcome::default(),
                 parent_block_hashes: canonical_chain.inner().clone(),
             })
         }
@@ -1398,7 +1398,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn setup_externals(
-        exec_res: Vec<BundleStateWithReceipts>,
+        exec_res: Vec<BlockExecutionOutcome>,
     ) -> TreeExternals<Arc<TempDatabase<DatabaseEnv>>, MockExecutorProvider> {
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()

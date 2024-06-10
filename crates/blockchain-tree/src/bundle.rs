@@ -1,14 +1,14 @@
 //! [`BundleStateDataProvider`] implementations used by the tree.
 
 use reth_primitives::{BlockHash, BlockNumber, ForkBlock};
-use reth_provider::{BundleStateDataProvider, BundleStateForkProvider, BundleStateWithReceipts};
+use reth_provider::{BundleStateDataProvider, BundleStateForkProvider, BlockExecutionOutcome};
 use std::collections::BTreeMap;
 
 /// Structure that combines references of required data to be a [`BundleStateDataProvider`].
 #[derive(Clone, Debug)]
 pub struct BundleStateDataRef<'a> {
     /// The wrapped state after execution of one or more transactions and/or blocks.
-    pub state: &'a BundleStateWithReceipts,
+    pub state: &'a BlockExecutionOutcome,
     /// The blocks in the sidechain.
     pub sidechain_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
     /// The blocks in the canonical chain.
@@ -18,7 +18,7 @@ pub struct BundleStateDataRef<'a> {
 }
 
 impl<'a> BundleStateDataProvider for BundleStateDataRef<'a> {
-    fn state(&self) -> &BundleStateWithReceipts {
+    fn state(&self) -> &BlockExecutionOutcome {
         self.state
     }
 
@@ -42,7 +42,7 @@ impl<'a> BundleStateForkProvider for BundleStateDataRef<'a> {
 #[derive(Clone, Debug)]
 pub struct BundleStateData {
     /// Post state with changes
-    pub state: BundleStateWithReceipts,
+    pub state: BlockExecutionOutcome,
     /// Parent block hashes needs for evm BLOCKHASH opcode.
     /// NOTE: it does not mean that all hashes are there but all until finalized are there.
     /// Other hashes can be obtained from provider
@@ -52,7 +52,7 @@ pub struct BundleStateData {
 }
 
 impl BundleStateDataProvider for BundleStateData {
-    fn state(&self) -> &BundleStateWithReceipts {
+    fn state(&self) -> &BlockExecutionOutcome {
         &self.state
     }
 

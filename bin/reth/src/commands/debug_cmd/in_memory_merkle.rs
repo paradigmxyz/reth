@@ -17,7 +17,7 @@ use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{stage::StageId, BlockHashOrNumber};
 use reth_provider::{
-    AccountExtReader, BundleStateWithReceipts, ChainSpecProvider, HashingWriter, HeaderProvider,
+    AccountExtReader, BlockExecutionOutcome, ChainSpecProvider, HashingWriter, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
     StateWriter, StaticFileProviderFactory, StorageReader,
 };
@@ -146,7 +146,7 @@ impl Command {
             )
                 .into(),
         )?;
-        let block_state = BundleStateWithReceipts::new(
+        let block_state = BlockExecutionOutcome::new(
             state,
             receipts.into(),
             block.number,

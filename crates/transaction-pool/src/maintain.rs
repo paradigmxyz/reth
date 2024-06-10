@@ -18,7 +18,7 @@ use reth_primitives::{
     TryFromRecoveredTransaction,
 };
 use reth_provider::{
-    BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
+    BlockReaderIdExt, BlockExecutionOutcome, CanonStateNotification, ChainSpecProvider,
     ProviderError, StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
@@ -556,7 +556,7 @@ where
 
 /// Extracts all changed accounts from the `BundleState`
 fn changed_accounts_iter(
-    state: &BundleStateWithReceipts,
+    state: &BlockExecutionOutcome,
 ) -> impl Iterator<Item = ChangedAccount> + '_ {
     state
         .accounts_iter()

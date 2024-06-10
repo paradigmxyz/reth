@@ -12,7 +12,7 @@ use reth_primitives::{
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     Requests, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
-use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
+use reth_provider::{BlockExecutionOutcome, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     state_change::{
@@ -220,7 +220,7 @@ impl PendingBlockEnv {
         // merge all transitions into bundle state.
         db.merge_transitions(BundleRetention::PlainState);
 
-        let bundle = BundleStateWithReceipts::new(
+        let bundle = BlockExecutionOutcome::new(
             db.take_bundle(),
             vec![receipts].into(),
             block_number,

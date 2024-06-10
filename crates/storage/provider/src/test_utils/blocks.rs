@@ -1,5 +1,5 @@
 //! Dummy blocks and data for tests
-use crate::{BundleStateWithReceipts, DatabaseProviderRW};
+use crate::{BlockExecutionOutcome, DatabaseProviderRW};
 use alloy_primitives::Log;
 use alloy_rlp::Decodable;
 use reth_db::tables;
@@ -68,7 +68,7 @@ pub struct BlockchainTestData {
     /// Genesis
     pub genesis: SealedBlock,
     /// Blocks with its execution result
-    pub blocks: Vec<(SealedBlockWithSenders, BundleStateWithReceipts)>,
+    pub blocks: Vec<(SealedBlockWithSenders, BlockExecutionOutcome)>,
 }
 
 impl BlockchainTestData {
@@ -114,7 +114,7 @@ pub fn genesis() -> SealedBlock {
     }
 }
 
-fn bundle_state_root(state: &BundleStateWithReceipts) -> B256 {
+fn bundle_state_root(state: &BlockExecutionOutcome) -> B256 {
     state_root_unhashed(state.bundle_accounts_iter().filter_map(|(address, account)| {
         account.info.as_ref().map(|info| {
             (
@@ -135,14 +135,14 @@ fn bundle_state_root(state: &BundleStateWithReceipts) -> B256 {
 }
 
 /// Block one that points to genesis
-fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceipts) {
+fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BlockExecutionOutcome) {
     // block changes
     let account1: Address = [0x60; 20].into();
     let account2: Address = [0x61; 20].into();
     let slot = U256::from(5);
     let info = AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() };
 
-    let bundle = BundleStateWithReceipts::new(
+    let bundle = BlockExecutionOutcome::new(
         BundleState::builder(number..=number)
             .state_present_account_info(account1, info.clone())
             .revert_account_info(number, account1, Some(None))
@@ -190,13 +190,13 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
 fn block2(
     number: BlockNumber,
     parent_hash: B256,
-    prev_state: &BundleStateWithReceipts,
-) -> (SealedBlockWithSenders, BundleStateWithReceipts) {
+    prev_state: &BlockExecutionOutcome,
+) -> (SealedBlockWithSenders, BlockExecutionOutcome) {
     // block changes
     let account: Address = [0x60; 20].into();
     let slot = U256::from(5);
 
-    let bundle = BundleStateWithReceipts::new(
+    let bundle = BlockExecutionOutcome::new(
         BundleState::builder(number..=number)
             .state_present_account_info(
                 account,
@@ -254,8 +254,8 @@ fn block2(
 fn block3(
     number: BlockNumber,
     parent_hash: B256,
-    prev_state: &BundleStateWithReceipts,
-) -> (SealedBlockWithSenders, BundleStateWithReceipts) {
+    prev_state: &BlockExecutionOutcome,
+) -> (SealedBlockWithSenders, BlockExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -278,7 +278,7 @@ fn block3(
             .revert_account_info(number, address, Some(None))
             .revert_storage(number, address, Vec::new());
     }
-    let bundle = BundleStateWithReceipts::new(
+    let bundle = BlockExecutionOutcome::new(
         bundle_state_builder.build(),
         vec![vec![Some(Receipt {
             tx_type: TxType::Eip1559,
@@ -319,8 +319,8 @@ fn block3(
 fn block4(
     number: BlockNumber,
     parent_hash: B256,
-    prev_state: &BundleStateWithReceipts,
-) -> (SealedBlockWithSenders, BundleStateWithReceipts) {
+    prev_state: &BlockExecutionOutcome,
+) -> (SealedBlockWithSenders, BlockExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -369,7 +369,7 @@ fn block4(
                 Vec::from_iter(slot_range.clone().map(|slot| (U256::from(slot), U256::from(slot)))),
             );
     }
-    let bundle = BundleStateWithReceipts::new(
+    let bundle = BlockExecutionOutcome::new(
         bundle_state_builder.build(),
         vec![vec![Some(Receipt {
             tx_type: TxType::Eip1559,
@@ -410,8 +410,8 @@ fn block4(
 fn block5(
     number: BlockNumber,
     parent_hash: B256,
-    prev_state: &BundleStateWithReceipts,
-) -> (SealedBlockWithSenders, BundleStateWithReceipts) {
+    prev_state: &BlockExecutionOutcome,
+) -> (SealedBlockWithSenders, BlockExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -455,7 +455,7 @@ fn block5(
             bundle_state_builder.revert_address(number, address)
         };
     }
-    let bundle = BundleStateWithReceipts::new(
+    let bundle = BlockExecutionOutcome::new(
         bundle_state_builder.build(),
         vec![vec![Some(Receipt {
             tx_type: TxType::Eip1559,

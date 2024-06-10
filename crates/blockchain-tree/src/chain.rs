@@ -18,7 +18,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView},
-    BundleStateWithReceipts, Chain, FullBundleStateDataProvider, ProviderError, StateRootProvider,
+    BlockExecutionOutcome, Chain, FullBundleStateDataProvider, ProviderError, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::updates::TrieUpdates;
@@ -78,7 +78,7 @@ impl AppendableChain {
         DB: Database + Clone,
         E: BlockExecutorProvider,
     {
-        let state = BundleStateWithReceipts::default();
+        let state = BlockExecutionOutcome::default();
         let empty = BTreeMap::new();
 
         let state_provider = BundleStateDataRef {
@@ -173,7 +173,7 @@ impl AppendableChain {
         externals: &TreeExternals<DB, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
-    ) -> Result<(BundleStateWithReceipts, Option<TrieUpdates>), BlockExecutionError>
+    ) -> Result<(BlockExecutionOutcome, Option<TrieUpdates>), BlockExecutionError>
     where
         BSDP: FullBundleStateDataProvider,
         DB: Database + Clone,
@@ -214,7 +214,7 @@ impl AppendableChain {
             .consensus
             .validate_block_post_execution(&block, PostExecutionInput::new(&receipts, &requests))?;
 
-        let bundle_state = BundleStateWithReceipts::new(
+        let bundle_state = BlockExecutionOutcome::new(
             state,
             receipts.into(),
             block.number,

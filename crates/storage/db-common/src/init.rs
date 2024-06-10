@@ -14,7 +14,7 @@ use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     errors::provider::ProviderResult,
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockNumReader, BundleStateWithReceipts, ChainSpecProvider,
+    BlockHashReader, BlockNumReader, BlockExecutionOutcome, ChainSpecProvider,
     DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
     ProviderFactory, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
 };
@@ -193,7 +193,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
     }
     let all_reverts_init: RevertsInit = HashMap::from([(block, reverts_init)]);
 
-    let bundle = BundleStateWithReceipts::new_init(
+    let bundle = BlockExecutionOutcome::new_init(
         state_init,
         all_reverts_init,
         contracts.into_iter().collect(),

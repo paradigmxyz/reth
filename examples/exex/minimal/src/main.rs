@@ -56,7 +56,7 @@ fn main() -> eyre::Result<()> {
 mod tests {
     use std::pin::pin;
 
-    use reth::providers::{BundleStateWithReceipts, Chain};
+    use reth::providers::{BlockExecutionOutcome, Chain};
     use reth_exex_test_utils::{test_exex_context, PollOnce};
 
     #[tokio::test]
@@ -71,7 +71,7 @@ mod tests {
         handle
             .send_notification_chain_committed(Chain::from_block(
                 handle.genesis.clone(),
-                BundleStateWithReceipts::default(),
+                BlockExecutionOutcome::default(),
                 None,
             ))
             .await?;

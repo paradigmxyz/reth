@@ -1,6 +1,6 @@
 use super::{AccountReader, BlockHashReader, BlockIdReader, StateRootProvider};
 use auto_impl::auto_impl;
-use reth_execution_types::BundleStateWithReceipts;
+use reth_execution_types::BlockExecutionOutcome;
 use reth_primitives::{
     proofs::AccountProof, Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
     Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
@@ -207,18 +207,18 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
 /// Post state data needed for execution on it.
 ///
 /// State contains:
-/// * [`BundleStateWithReceipts`] contains all changed of accounts and storage of pending chain
+/// * [`BlockExecutionOutcome`] contains all changed of accounts and storage of pending chain
 /// * block hashes of pending chain and canonical blocks.
 #[auto_impl(&, Box)]
 pub trait BundleStateDataProvider: Send + Sync {
     /// Return post state
-    fn state(&self) -> &BundleStateWithReceipts;
+    fn state(&self) -> &BlockExecutionOutcome;
     /// Return block hash by block number of pending or canonical chain.
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash>;
 }
 
-impl BundleStateDataProvider for BundleStateWithReceipts {
-    fn state(&self) -> &BundleStateWithReceipts {
+impl BundleStateDataProvider for BlockExecutionOutcome {
+    fn state(&self) -> &BlockExecutionOutcome {
         self
     }
 
@@ -245,7 +245,7 @@ pub trait BundleStateForkProvider {
 /// This trait is a combination of [`BundleStateDataProvider`] and [`BundleStateForkProvider`].
 ///
 /// Pending state contains:
-/// * [`BundleStateWithReceipts`] contains all changed of accounts and storage of pending chain
+/// * [`BlockExecutionOutcome`] contains all changed of accounts and storage of pending chain
 /// * block hashes of pending chain and canonical blocks.
 /// * canonical fork, the block on what pending chain was forked from.
 pub trait FullBundleStateDataProvider: BundleStateDataProvider + BundleStateForkProvider {}

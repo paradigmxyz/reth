@@ -29,7 +29,7 @@ use reth_primitives::{
     revm::env::tx_env_with_recovered,
     Block, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH, U256,
 };
-use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
+use reth_provider::{BlockExecutionOutcome, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{
@@ -444,7 +444,7 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let bundle = BundleStateWithReceipts::new(
+    let bundle = BlockExecutionOutcome::new(
         db.take_bundle(),
         vec![receipts].into(),
         block_number,

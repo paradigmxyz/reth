@@ -15,7 +15,7 @@ use std::collections::HashMap;
 ///
 /// Aggregates the changes over an arbitrary number of blocks.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub struct BundleStateWithReceipts {
+pub struct BlockExecutionOutcome {
     /// Bundle state with reverts.
     pub bundle: BundleState,
     /// The collection of receipts.
@@ -45,8 +45,8 @@ pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 /// Type used to initialize revms reverts.
 pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
 
-impl BundleStateWithReceipts {
-    /// Create Bundle State.
+impl BlockExecutionOutcome {
+    /// Create a new block execution outcome.
     pub const fn new(
         bundle: BundleState,
         receipts: Receipts,
@@ -56,7 +56,7 @@ impl BundleStateWithReceipts {
         Self { bundle, receipts, first_block, requests }
     }
 
-    /// Create new bundle state with receipts.
+    /// Create a new block execution outcome.
     pub fn new_init(
         state_init: BundleStateInit,
         revert_init: RevertsInit,
@@ -297,5 +297,17 @@ impl BundleStateWithReceipts {
         other.take_n_reverts(other_len);
         // swap bundles
         std::mem::swap(&mut self.bundle, &mut other)
+    }
+
+    /// Create a new instance with updated receipts.
+    pub fn with_receipts(mut self, receipts: Receipts) -> Self {
+        self.receipts = receipts;
+        self
+    }
+
+    /// Create a new instance with updated requests.
+    pub fn with_requests(mut self, requests: Vec<Requests>) -> Self {
+        self.requests = requests;
+        self
     }
 }

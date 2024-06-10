@@ -27,7 +27,7 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::{
-    BlockReaderIdExt, BundleStateWithReceipts, StateProviderFactory, StateRootProvider,
+    BlockReaderIdExt, BlockExecutionOutcome, StateProviderFactory, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::TransactionPool;
@@ -349,7 +349,7 @@ impl StorageInner {
         provider: &Provider,
         chain_spec: Arc<ChainSpec>,
         executor: &Executor,
-    ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError>
+    ) -> Result<(SealedHeader, BlockExecutionOutcome), BlockExecutionError>
     where
         Executor: BlockExecutorProvider,
         Provider: StateProviderFactory,
@@ -391,7 +391,7 @@ impl StorageInner {
         // execute the block
         let BlockExecutionOutput { state, receipts, requests: block_execution_requests, .. } =
             executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
-        let bundle_state = BundleStateWithReceipts::new(
+        let bundle_state = BlockExecutionOutcome::new(
             state,
             receipts.into(),
             block.number,

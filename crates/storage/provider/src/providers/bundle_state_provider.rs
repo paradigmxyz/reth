@@ -6,7 +6,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
 
-/// A state provider that either resolves to data in a wrapped [`crate::BundleStateWithReceipts`],
+/// A state provider that either resolves to data in a wrapped [`crate::BlockExecutionOutcome`],
 /// or an underlying state provider.
 #[derive(Debug)]
 pub struct BundleStateProvider<SP: StateProvider, BSDP: BundleStateDataProvider> {
