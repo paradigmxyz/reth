@@ -27,6 +27,7 @@ use std::{
 ///
 /// The core logic is part of the [EngineRequestHandler], which is responsible for processing the
 /// incoming requests.
+#[derive(Debug)]
 pub struct EngineHandler<T>
 where
     T: EngineRequestHandler,
@@ -87,6 +88,7 @@ pub trait EngineRequestHandler: Send + Sync {
 ///
 /// In case required blocks are missing, the handler will request them from the network, by emitting
 /// a download request upstream.
+#[derive(Debug)]
 pub struct EngineApiRequestHandler<T>
 where
     T: EngineApiTreeHandler,

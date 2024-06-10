@@ -14,6 +14,7 @@ use tracing::warn;
 const INVALID_HEADER_HIT_EVICTION_THRESHOLD: u8 = 128;
 
 /// Keeps track of invalid headers.
+#[derive(Debug)]
 pub struct InvalidHeaderCache {
     /// This maps a header hash to a reference to its invalid ancestor.
     headers: LruMap<B256, HeaderEntry>,
