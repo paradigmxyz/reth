@@ -254,6 +254,11 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
         self
     }
 
+    /// Returns the container for all config types
+    pub const fn configs(&self) -> &WithConfigs {
+        self.attachment.left()
+    }
+
     /// Returns the attached [`NodeConfig`].
     pub const fn node_config(&self) -> &NodeConfig {
         &self.left().config

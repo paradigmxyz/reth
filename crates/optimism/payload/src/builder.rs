@@ -12,7 +12,7 @@ use reth_primitives::{
     eip4844::calculate_excess_blob_gas,
     proofs,
     revm::env::tx_env_with_recovered,
-    Block, ChainSpec, Hardfork, Header, IntoRecoveredTransaction, Receipt, Receipts, TxType,
+    Block, ChainSpec, Hardfork, Header, IntoRecoveredTransaction, Receipt, TxType,
     EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
@@ -506,11 +506,8 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let bundle = BundleStateWithReceipts::new(
-        db.take_bundle(),
-        Receipts::from_vec(vec![receipts]),
-        block_number,
-    );
+    let bundle =
+        BundleStateWithReceipts::new(db.take_bundle(), vec![receipts].into(), block_number);
     let receipts_root = bundle
         .optimism_receipts_root_slow(
             block_number,
