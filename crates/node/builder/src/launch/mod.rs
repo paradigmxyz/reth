@@ -18,6 +18,7 @@ use reth_blockchain_tree::{
     TreeExternals,
 };
 use reth_consensus::Consensus;
+use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_exex::ExExManagerHandle;
 use reth_network::NetworkEvents;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
@@ -396,6 +397,48 @@ where
             let res = beacon_consensus_engine.await;
             let _ = tx.send(res);
         });
+
+        if let Some(maybe_custom_etherscan_url) = ctx.node_config().debug.etherscan.clone() {
+            info!(target: "reth::cli", "Using etherscan as consensus client");
+
+            let chain = ctx.node_config().chain.chain;
+            let etherscan_url = maybe_custom_etherscan_url.map(Ok).unwrap_or_else(|| {
+                // If URL isn't provided, use default Etherscan URL for the chain if it is known
+                chain
+                    .etherscan_urls()
+                    .map(|urls| urls.0.to_string())
+                    .ok_or_else(|| eyre::eyre!("failed to get etherscan url for chain: {chain}"))
+            })?;
+
+            let block_provider = EtherscanBlockProvider::new(
+                etherscan_url,
+                chain.etherscan_api_key().ok_or_else(|| {
+                    eyre::eyre!(
+                        "etherscan api key not found for rpc consensus client for chain: {chain}"
+                    )
+                })?,
+            );
+            let rpc_consensus_client = DebugConsensusClient::new(
+                rpc_server_handles.auth.clone(),
+                Arc::new(block_provider),
+            );
+            ctx.task_executor().spawn_critical("etherscan consensus client", async move {
+                rpc_consensus_client.run::<T::Engine>().await
+            });
+        }
+
+        if let Some(rpc_ws_url) = ctx.node_config().debug.rpc_consensus_ws.clone() {
+            info!(target: "reth::cli", "Using rpc provider as consensus client");
+
+            let block_provider = RpcBlockProvider::new(rpc_ws_url);
+            let rpc_consensus_client = DebugConsensusClient::new(
+                rpc_server_handles.auth.clone(),
+                Arc::new(block_provider),
+            );
+            ctx.task_executor().spawn_critical("rpc consensus client", async move {
+                rpc_consensus_client.run::<T::Engine>().await
+            });
+        }
 
         let full_node = FullNode {
             evm_config: node_adapter.components.evm_config().clone(),
