@@ -391,7 +391,7 @@ impl StorageInner {
         // execute the block
         let BlockExecutionOutput { state, receipts, requests: block_execution_requests, .. } =
             executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
-        let bundle_state = BlockExecutionOutcome::new(
+        let block_execution_outcome = BlockExecutionOutcome::new(
             state,
             receipts.into(),
             block.number,
@@ -405,10 +405,10 @@ impl StorageInner {
         let Block { mut header, body, .. } = block.block;
         let body = BlockBody { transactions: body, ommers, withdrawals, requests };
 
-        trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
+        trace!(target: "consensus::auto", ?block_execution_outcome, ?header, ?body, "executed block, calculating state root and completing header");
 
         // calculate the state root
-        header.state_root = db.state_root(bundle_state.state())?;
+        header.state_root = db.state_root(block_execution_outcome.state())?;
         trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 
         // finally insert into storage
@@ -417,6 +417,6 @@ impl StorageInner {
         // set new header with hash that should have been updated by insert_new_block
         let new_header = header.seal(self.best_hash);
 
-        Ok((new_header, bundle_state))
+        Ok((new_header, block_execution_outcome))
     }
 }

@@ -24,11 +24,13 @@ use std::{borrow::Cow, collections::BTreeMap, fmt, ops::RangeInclusive};
 pub struct Chain {
     /// All blocks in this chain.
     blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
-    /// The state of all accounts after execution of the _all_ blocks in this chain's range from
-    /// [`Chain::first`] to [`Chain::tip`], inclusive.
+    /// The outcome of block execution for this chain.
     ///
-    /// This state also contains the individual changes that lead to the current state.
-    state: BlockExecutionOutcome,
+    /// This field contains the state of all accounts after the execution of all blocks in this
+    /// chain, ranging from the [`Chain::first`] block to the [`Chain::tip`] block, inclusive.
+    ///
+    /// Additionally, it includes the individual state changes that led to the current state.
+    block_execution_outcome: BlockExecutionOutcome,
     /// State trie updates after block is added to the chain.
     /// NOTE: Currently, trie updates are present only for
     /// single-block chains that extend the canonical chain.
@@ -43,22 +45,22 @@ impl Chain {
     /// A chain of blocks should not be empty.
     pub fn new(
         blocks: impl IntoIterator<Item = SealedBlockWithSenders>,
-        state: BlockExecutionOutcome,
+        block_execution_outcome: BlockExecutionOutcome,
         trie_updates: Option<TrieUpdates>,
     ) -> Self {
         let blocks = BTreeMap::from_iter(blocks.into_iter().map(|b| (b.number, b)));
         debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
 
-        Self { blocks, state, trie_updates }
+        Self { blocks, block_execution_outcome, trie_updates }
     }
 
     /// Create new Chain from a single block and its state.
     pub fn from_block(
         block: SealedBlockWithSenders,
-        state: BlockExecutionOutcome,
+        block_execution_outcome: BlockExecutionOutcome,
         trie_updates: Option<TrieUpdates>,
     ) -> Self {
-        Self::new([block], state, trie_updates)
+        Self::new([block], block_execution_outcome, trie_updates)
     }
 
     /// Get the blocks in this chain.
@@ -86,14 +88,14 @@ impl Chain {
         self.trie_updates.take();
     }
 
-    /// Get post state of this chain
-    pub const fn state(&self) -> &BlockExecutionOutcome {
-        &self.state
+    /// Get block execution outcome of this chain
+    pub const fn block_execution_outcome(&self) -> &BlockExecutionOutcome {
+        &self.block_execution_outcome
     }
 
     /// Prepends the given state to the current state.
     pub fn prepend_state(&mut self, state: BundleState) {
-        self.state.prepend_state(state);
+        self.block_execution_outcome.prepend_state(state);
         self.trie_updates.take(); // invalidate cached trie updates
     }
 
@@ -117,35 +119,45 @@ impl Chain {
         self.blocks.iter().find_map(|(_num, block)| (block.hash() == block_hash).then_some(block))
     }
 
-    /// Return post state of the block at the `block_number` or None if block is not known
-    pub fn state_at_block(&self, block_number: BlockNumber) -> Option<BlockExecutionOutcome> {
+    /// Return block execution outcome at the `block_number` or None if block is not known
+    pub fn block_execution_outcome_at_block(
+        &self,
+        block_number: BlockNumber,
+    ) -> Option<BlockExecutionOutcome> {
         if self.tip().number == block_number {
-            return Some(self.state.clone())
+            return Some(self.block_execution_outcome.clone())
         }
 
         if self.blocks.contains_key(&block_number) {
-            let mut state = self.state.clone();
-            state.revert_to(block_number);
-            return Some(state)
+            let mut block_execution_outcome = self.block_execution_outcome.clone();
+            block_execution_outcome.revert_to(block_number);
+            return Some(block_execution_outcome)
         }
         None
     }
 
-    /// Destructure the chain into its inner components, the blocks and the state at the tip of the
-    /// chain.
+    /// Destructure the chain into its inner components:
+    /// 1. The blocks contained in the chain.
+    /// 2. The execution outcome representing the final state.
+    /// 3. The optional trie updates.
     pub fn into_inner(self) -> (ChainBlocks<'static>, BlockExecutionOutcome, Option<TrieUpdates>) {
-        (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.state, self.trie_updates)
+        (
+            ChainBlocks { blocks: Cow::Owned(self.blocks) },
+            self.block_execution_outcome,
+            self.trie_updates,
+        )
     }
 
-    /// Destructure the chain into its inner components, the blocks and the state at the tip of the
-    /// chain.
+    /// Destructure the chain into its inner components:
+    /// 1. A reference to the blocks contained in the chain.
+    /// 2. A reference to the execution outcome representing the final state.
     pub const fn inner(&self) -> (ChainBlocks<'_>, &BlockExecutionOutcome) {
-        (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.state)
+        (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.block_execution_outcome)
     }
 
     /// Returns an iterator over all the receipts of the blocks in the chain.
     pub fn block_receipts_iter(&self) -> impl Iterator<Item = &Vec<Option<Receipt>>> + '_ {
-        self.state.receipts().iter()
+        self.block_execution_outcome.receipts().iter()
     }
 
     /// Returns an iterator over all blocks in the chain with increasing block number.
@@ -204,7 +216,7 @@ impl Chain {
     /// Get all receipts for the given block.
     pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<&Receipt>> {
         let num = self.block_number(block_hash)?;
-        self.state.receipts_by_block(num).iter().map(Option::as_ref).collect()
+        self.block_execution_outcome.receipts_by_block(num).iter().map(Option::as_ref).collect()
     }
 
     /// Get all receipts with attachment.
@@ -212,7 +224,8 @@ impl Chain {
     /// Attachment includes block number, block hash, transaction hash and transaction index.
     pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts> {
         let mut receipt_attach = Vec::new();
-        for ((block_num, block), receipts) in self.blocks().iter().zip(self.state.receipts().iter())
+        for ((block_num, block), receipts) in
+            self.blocks().iter().zip(self.block_execution_outcome.receipts().iter())
         {
             let mut tx_receipts = Vec::new();
             for (tx, receipt) in block.body.iter().zip(receipts.iter()) {
@@ -229,9 +242,13 @@ impl Chain {
 
     /// Append a single block with state to the chain.
     /// This method assumes that blocks attachment to the chain has already been validated.
-    pub fn append_block(&mut self, block: SealedBlockWithSenders, state: BlockExecutionOutcome) {
+    pub fn append_block(
+        &mut self,
+        block: SealedBlockWithSenders,
+        block_execution_outcome: BlockExecutionOutcome,
+    ) {
         self.blocks.insert(block.number, block);
-        self.state.extend(state);
+        self.block_execution_outcome.extend(block_execution_outcome);
         self.trie_updates.take(); // reset
     }
 
@@ -250,7 +267,7 @@ impl Chain {
 
         // Insert blocks from other chain
         self.blocks.extend(other.blocks);
-        self.state.extend(other.state);
+        self.block_execution_outcome.extend(other.block_execution_outcome);
         self.trie_updates.take(); // reset
 
         Ok(())
@@ -307,19 +324,20 @@ impl Chain {
         let split_at = block_number + 1;
         let higher_number_blocks = self.blocks.split_off(&split_at);
 
-        let state = std::mem::take(&mut self.state);
-        let (canonical_state, pending_state) = state.split_at(split_at);
+        let block_execution_outcome = std::mem::take(&mut self.block_execution_outcome);
+        let (canonical_block_exec_outcome, pending_block_exec_outcome) =
+            block_execution_outcome.split_at(split_at);
 
         // TODO: Currently, trie updates are reset on chain split.
         // Add tests ensuring that it is valid to leave updates in the pending chain.
         ChainSplit::Split {
             canonical: Self {
-                state: canonical_state.expect("split in range"),
+                block_execution_outcome: canonical_block_exec_outcome.expect("split in range"),
                 blocks: self.blocks,
                 trie_updates: None,
             },
             pending: Self {
-                state: pending_state,
+                block_execution_outcome: pending_block_exec_outcome,
                 blocks: higher_number_blocks,
                 trie_updates: None,
             },
@@ -511,7 +529,7 @@ mod tests {
 
     #[test]
     fn test_number_split() {
-        let block_state1 = BlockExecutionOutcome::new(
+        let block_execution_outcome1 = BlockExecutionOutcome::new(
             BundleState::new(
                 vec![(
                     Address::new([2; 20]),
@@ -527,7 +545,7 @@ mod tests {
             vec![],
         );
 
-        let block_state2 = BlockExecutionOutcome::new(
+        let block_execution_outcome2 = BlockExecutionOutcome::new(
             BundleState::new(
                 vec![(
                     Address::new([3; 20]),
@@ -555,30 +573,37 @@ mod tests {
         block2.set_hash(block2_hash);
         block2.senders.push(Address::new([4; 20]));
 
-        let mut block_state_extended = block_state1;
-        block_state_extended.extend(block_state2);
+        let mut block_state_extended = block_execution_outcome1;
+        block_state_extended.extend(block_execution_outcome2);
 
         let chain = Chain::new(vec![block1.clone(), block2.clone()], block_state_extended, None);
 
-        let (split1_state, split2_state) = chain.state.clone().split_at(2);
+        let (split1_block_execution_outcome, split2_block_execution_outcome) =
+            chain.block_execution_outcome.clone().split_at(2);
 
         let chain_split1 = Chain {
-            state: split1_state.unwrap(),
+            block_execution_outcome: split1_block_execution_outcome.unwrap(),
             blocks: BTreeMap::from([(1, block1.clone())]),
             trie_updates: None,
         };
 
         let chain_split2 = Chain {
-            state: split2_state,
+            block_execution_outcome: split2_block_execution_outcome,
             blocks: BTreeMap::from([(2, block2.clone())]),
             trie_updates: None,
         };
 
         // return tip state
-        assert_eq!(chain.state_at_block(block2.number), Some(chain.state.clone()));
-        assert_eq!(chain.state_at_block(block1.number), Some(chain_split1.state.clone()));
+        assert_eq!(
+            chain.block_execution_outcome_at_block(block2.number),
+            Some(chain.block_execution_outcome.clone())
+        );
+        assert_eq!(
+            chain.block_execution_outcome_at_block(block1.number),
+            Some(chain_split1.block_execution_outcome.clone())
+        );
         // state at unknown block
-        assert_eq!(chain.state_at_block(100), None);
+        assert_eq!(chain.block_execution_outcome_at_block(100), None);
 
         // split in two
         assert_eq!(

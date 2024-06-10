@@ -1,14 +1,16 @@
-//! [`BundleStateDataProvider`] implementations used by the tree.
+//! [`BlockExecutionDataProvider`] implementations used by the tree.
 
 use reth_primitives::{BlockHash, BlockNumber, ForkBlock};
-use reth_provider::{BlockExecutionOutcome, BundleStateDataProvider, BundleStateForkProvider};
+use reth_provider::{
+    BlockExecutionDataProvider, BlockExecutionForkProvider, BlockExecutionOutcome,
+};
 use std::collections::BTreeMap;
 
-/// Structure that combines references of required data to be a [`BundleStateDataProvider`].
+/// Structure that combines references of required data to be a [`BlockExecutionDataProvider`].
 #[derive(Clone, Debug)]
 pub struct BundleStateDataRef<'a> {
-    /// The wrapped state after execution of one or more transactions and/or blocks.
-    pub state: &'a BlockExecutionOutcome,
+    /// The block execution outcome after execution of one or more transactions and/or blocks.
+    pub block_execution_outcome: &'a BlockExecutionOutcome,
     /// The blocks in the sidechain.
     pub sidechain_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
     /// The blocks in the canonical chain.
@@ -17,9 +19,9 @@ pub struct BundleStateDataRef<'a> {
     pub canonical_fork: ForkBlock,
 }
 
-impl<'a> BundleStateDataProvider for BundleStateDataRef<'a> {
-    fn state(&self) -> &BlockExecutionOutcome {
-        self.state
+impl<'a> BlockExecutionDataProvider for BundleStateDataRef<'a> {
+    fn block_execution_outcome(&self) -> &BlockExecutionOutcome {
+        self.block_execution_outcome
     }
 
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash> {
@@ -32,17 +34,17 @@ impl<'a> BundleStateDataProvider for BundleStateDataRef<'a> {
     }
 }
 
-impl<'a> BundleStateForkProvider for BundleStateDataRef<'a> {
+impl<'a> BlockExecutionForkProvider for BundleStateDataRef<'a> {
     fn canonical_fork(&self) -> ForkBlock {
         self.canonical_fork
     }
 }
 
-/// Structure that owns the relevant data needs to be a [`BundleStateDataProvider`]
+/// Structure that owns the relevant data needs to be a [`BlockExecutionDataProvider`]
 #[derive(Clone, Debug)]
-pub struct BundleStateData {
-    /// Post state with changes
-    pub state: BlockExecutionOutcome,
+pub struct BlockExecutionData {
+    /// Block execution outcome.
+    pub block_execution_outcome: BlockExecutionOutcome,
     /// Parent block hashes needs for evm BLOCKHASH opcode.
     /// NOTE: it does not mean that all hashes are there but all until finalized are there.
     /// Other hashes can be obtained from provider
@@ -51,9 +53,9 @@ pub struct BundleStateData {
     pub canonical_fork: ForkBlock,
 }
 
-impl BundleStateDataProvider for BundleStateData {
-    fn state(&self) -> &BlockExecutionOutcome {
-        &self.state
+impl BlockExecutionDataProvider for BlockExecutionData {
+    fn block_execution_outcome(&self) -> &BlockExecutionOutcome {
+        &self.block_execution_outcome
     }
 
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash> {
@@ -61,7 +63,7 @@ impl BundleStateDataProvider for BundleStateData {
     }
 }
 
-impl BundleStateForkProvider for BundleStateData {
+impl BlockExecutionForkProvider for BlockExecutionData {
     fn canonical_fork(&self) -> ForkBlock {
         self.canonical_fork
     }

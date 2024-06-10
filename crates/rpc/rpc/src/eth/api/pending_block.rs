@@ -220,7 +220,7 @@ impl PendingBlockEnv {
         // merge all transitions into bundle state.
         db.merge_transitions(BundleRetention::PlainState);
 
-        let bundle = BlockExecutionOutcome::new(
+        let block_execution_outcome = BlockExecutionOutcome::new(
             db.take_bundle(),
             vec![receipts].into(),
             block_number,
@@ -228,7 +228,7 @@ impl PendingBlockEnv {
         );
 
         #[cfg(feature = "optimism")]
-        let receipts_root = bundle
+        let receipts_root = block_execution_outcome
             .optimism_receipts_root_slow(
                 block_number,
                 chain_spec.as_ref(),
@@ -237,13 +237,15 @@ impl PendingBlockEnv {
             .expect("Block is present");
 
         #[cfg(not(feature = "optimism"))]
-        let receipts_root = bundle.receipts_root_slow(block_number).expect("Block is present");
+        let receipts_root =
+            block_execution_outcome.receipts_root_slow(block_number).expect("Block is present");
 
-        let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");
+        let logs_bloom =
+            block_execution_outcome.block_logs_bloom(block_number).expect("Block is present");
 
         // calculate the state root
         let state_provider = &db.database;
-        let state_root = state_provider.state_root(bundle.state())?;
+        let state_root = state_provider.state_root(block_execution_outcome.state())?;
 
         // create the block header
         let transactions_root = proofs::calculate_transaction_root(&executed_txs);

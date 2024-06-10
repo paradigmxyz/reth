@@ -11,9 +11,10 @@ use revm::{
 };
 use std::collections::HashMap;
 
-/// Bundle state of post execution changes and reverts.
+/// Represents the outcome of block execution, including post-execution changes and reverts.
 ///
-/// Aggregates the changes over an arbitrary number of blocks.
+/// The `BlockExecutionOutcome` structure aggregates the state changes over an arbitrary number of
+/// blocks, capturing the resulting state, receipts, and requests following the execution.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct BlockExecutionOutcome {
     /// Bundle state with reverts.
@@ -46,7 +47,10 @@ pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
 
 impl BlockExecutionOutcome {
-    /// Create a new block execution outcome.
+    /// Creates a new `BlockExecutionOutcome`.
+    ///
+    /// This constructor initializes a new `BlockExecutionOutcome` instance with the provided
+    /// bundle state, receipts, first block number, and EIP-7685 requests.
     pub const fn new(
         bundle: BundleState,
         receipts: Receipts,
@@ -56,7 +60,10 @@ impl BlockExecutionOutcome {
         Self { bundle, receipts, first_block, requests }
     }
 
-    /// Create a new block execution outcome.
+    /// Creates a new `BlockExecutionOutcome` from initialization parameters.
+    ///
+    /// This constructor initializes a new `BlockExecutionOutcome` instance using detailed
+    /// initialization parameters.
     pub fn new_init(
         state_init: BundleStateInit,
         revert_init: RevertsInit,
@@ -137,7 +144,7 @@ impl BlockExecutionOutcome {
         self.bundle.bytecode(code_hash).map(Bytecode)
     }
 
-    /// Returns [`HashedPostState`] for this bundle state.
+    /// Returns [`HashedPostState`] for this block execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
     pub fn hash_state_slow(&self) -> HashedPostState {
         HashedPostState::from_bundle_state(&self.bundle.state)

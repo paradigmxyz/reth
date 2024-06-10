@@ -65,7 +65,7 @@ pub trait BlockWriter: Send + Sync {
     fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
-        state: BlockExecutionOutcome,
+        block_execution_outcome: BlockExecutionOutcome,
         hashed_state: HashedPostState,
         trie_updates: TrieUpdates,
         prune_modes: Option<&PruneModes>,

@@ -8,8 +8,8 @@ use reth_tracing::tracing::info;
 
 /// An ExEx that keeps track of the entire state in memory
 async fn track_state<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Result<()> {
-    // keeps the entire plain state of the chain in memory
-    let mut state = BlockExecutionOutcome::default();
+    // keeps the entire plain block execution outcome of the chain in memory
+    let mut block_execution_outcome = BlockExecutionOutcome::default();
 
     while let Some(notification) = ctx.notifications.recv().await {
         match &notification {
@@ -18,18 +18,18 @@ async fn track_state<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> ey
             }
             ExExNotification::ChainReorged { old, new } => {
                 // revert to block before the reorg
-                state.revert_to(new.first().number - 1);
+                block_execution_outcome.revert_to(new.first().number - 1);
                 info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
             }
             ExExNotification::ChainReverted { old } => {
-                state.revert_to(old.first().number - 1);
+                block_execution_outcome.revert_to(old.first().number - 1);
                 info!(reverted_chain = ?old.range(), "Received revert");
             }
         };
 
         if let Some(committed_chain) = notification.committed_chain() {
-            // extend the state with the new chain
-            state.extend(committed_chain.state().clone());
+            // extend the block execution outcome with the new chain
+            block_execution_outcome.extend(committed_chain.block_execution_outcome().clone());
             ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
         }
     }

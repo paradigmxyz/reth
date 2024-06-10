@@ -204,21 +204,25 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
     ) -> Option<Box<dyn FullBundleStateDataProvider>>;
 }
 
-/// Post state data needed for execution on it.
+/// Provides data required for post-block execution.
 ///
-/// State contains:
-/// * [`BlockExecutionOutcome`] contains all changed of accounts and storage of pending chain
-/// * block hashes of pending chain and canonical blocks.
+/// This trait offers methods to access essential post-execution data, including the state changes
+/// in accounts and storage, as well as block hashes for both the pending and canonical chains.
+///
+/// The trait includes:
+/// * [`BlockExecutionOutcome`] - Captures all account and storage changes in the pending chain.
+/// * Block hashes - Provides access to the block hashes of both the pending chain and canonical
+///   blocks.
 #[auto_impl(&, Box)]
-pub trait BundleStateDataProvider: Send + Sync {
-    /// Return post state
-    fn state(&self) -> &BlockExecutionOutcome;
+pub trait BlockExecutionDataProvider: Send + Sync {
+    /// Return the block execution outcome.
+    fn block_execution_outcome(&self) -> &BlockExecutionOutcome;
     /// Return block hash by block number of pending or canonical chain.
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash>;
 }
 
-impl BundleStateDataProvider for BlockExecutionOutcome {
-    fn state(&self) -> &BlockExecutionOutcome {
+impl BlockExecutionDataProvider for BlockExecutionOutcome {
+    fn block_execution_outcome(&self) -> &BlockExecutionOutcome {
         self
     }
 
@@ -232,7 +236,7 @@ impl BundleStateDataProvider for BlockExecutionOutcome {
 ///
 /// It contains a canonical fork, the block on what pending chain was forked from.
 #[auto_impl(&, Box)]
-pub trait BundleStateForkProvider {
+pub trait BlockExecutionForkProvider {
     /// Return canonical fork, the block on what post state was forked from.
     ///
     /// Needed to create state provider.
@@ -242,12 +246,19 @@ pub trait BundleStateForkProvider {
 /// Full post state data needed for execution on it.
 /// This trait is used to create a state provider over pending state.
 ///
-/// This trait is a combination of [`BundleStateDataProvider`] and [`BundleStateForkProvider`].
+/// This trait is a combination of [`BlockExecutionDataProvider`] and
+/// [`BlockExecutionForkProvider`].
 ///
 /// Pending state contains:
 /// * [`BlockExecutionOutcome`] contains all changed of accounts and storage of pending chain
 /// * block hashes of pending chain and canonical blocks.
 /// * canonical fork, the block on what pending chain was forked from.
-pub trait FullBundleStateDataProvider: BundleStateDataProvider + BundleStateForkProvider {}
+pub trait FullBundleStateDataProvider:
+    BlockExecutionDataProvider + BlockExecutionForkProvider
+{
+}
 
-impl<T> FullBundleStateDataProvider for T where T: BundleStateDataProvider + BundleStateForkProvider {}
+impl<T> FullBundleStateDataProvider for T where
+    T: BlockExecutionDataProvider + BlockExecutionForkProvider
+{
+}

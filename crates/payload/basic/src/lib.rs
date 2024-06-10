@@ -206,8 +206,8 @@ where
 
         // extract the state from the notification and put it into the cache
         let committed = new_state.committed();
-        let new_state = committed.state();
-        for (addr, acc) in new_state.bundle_accounts_iter() {
+        let new_block_execution_outcome = committed.block_execution_outcome();
+        for (addr, acc) in new_block_execution_outcome.bundle_accounts_iter() {
             if let Some(info) = acc.info.clone() {
                 // we want pre cache existing accounts and their storage
                 // this only includes changed accounts and storage but is better than nothing

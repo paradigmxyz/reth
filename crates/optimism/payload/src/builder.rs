@@ -506,25 +506,26 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let bundle = BlockExecutionOutcome::new(
+    let block_execution_outcome = BlockExecutionOutcome::new(
         db.take_bundle(),
         vec![receipts].into(),
         block_number,
         Vec::new(),
     );
-    let receipts_root = bundle
+    let receipts_root = block_execution_outcome
         .optimism_receipts_root_slow(
             block_number,
             chain_spec.as_ref(),
             attributes.payload_attributes.timestamp,
         )
         .expect("Number is in range");
-    let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
+    let logs_bloom =
+        block_execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
     let state_root = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root(bundle.state())?
+        state_provider.db.state_root(block_execution_outcome.state())?
     };
 
     // create the block header

@@ -132,7 +132,7 @@ where
         // We're reusing receipt writing code internal to
         // `BlockExecutionOutcome::write_to_storage`, so we just use a default empty
         // `BundleState`.
-        let bundled_state = BlockExecutionOutcome::new(
+        let block_execution_outcome = BlockExecutionOutcome::new(
             Default::default(),
             receipts,
             first_block,
@@ -143,7 +143,7 @@ where
             static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
 
         // finally, write the receipts
-        bundled_state.write_to_storage::<DB::TXMut>(
+        block_execution_outcome.write_to_storage::<DB::TXMut>(
             &tx,
             Some(static_file_producer),
             OriginalValuesKnown::Yes,

@@ -78,11 +78,11 @@ impl AppendableChain {
         DB: Database + Clone,
         E: BlockExecutorProvider,
     {
-        let state = BlockExecutionOutcome::default();
+        let block_execution_outcome = BlockExecutionOutcome::default();
         let empty = BTreeMap::new();
 
         let state_provider = BundleStateDataRef {
-            state: &state,
+            block_execution_outcome: &block_execution_outcome,
             sidechain_block_hashes: &empty,
             canonical_block_hashes,
             canonical_fork,
@@ -122,14 +122,14 @@ impl AppendableChain {
             BlockchainTreeError::BlockNumberNotFoundInChain { block_number: parent_number },
         )?;
 
-        let mut state = self.state().clone();
+        let mut block_execution_outcome = self.block_execution_outcome().clone();
 
         // Revert state to the state after execution of the parent block
-        state.revert_to(parent.number);
+        block_execution_outcome.revert_to(parent.number);
 
         // Revert changesets to get the state of the parent that we need to apply the change.
         let bundle_state_data = BundleStateDataRef {
-            state: &state,
+            block_execution_outcome: &block_execution_outcome,
             sidechain_block_hashes: &side_chain_block_hashes,
             canonical_block_hashes,
             canonical_fork,
@@ -144,17 +144,17 @@ impl AppendableChain {
         )?;
         // extending will also optimize few things, mostly related to selfdestruct and wiping of
         // storage.
-        state.extend(block_state);
+        block_execution_outcome.extend(block_state);
 
         // remove all receipts and reverts (except the last one), as they belong to the chain we
         // forked from and not the new chain we are creating.
-        let size = state.receipts().len();
-        state.receipts_mut().drain(0..size - 1);
-        state.state_mut().take_n_reverts(size - 1);
-        state.set_first_block(block.number);
+        let size = block_execution_outcome.receipts().len();
+        block_execution_outcome.receipts_mut().drain(0..size - 1);
+        block_execution_outcome.state_mut().take_n_reverts(size - 1);
+        block_execution_outcome.set_first_block(block.number);
 
         // If all is okay, return new chain back. Present chain is not modified.
-        Ok(Self { chain: Chain::from_block(block, state, None) })
+        Ok(Self { chain: Chain::from_block(block, block_execution_outcome, None) })
     }
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its
@@ -214,7 +214,7 @@ impl AppendableChain {
             .consensus
             .validate_block_post_execution(&block, PostExecutionInput::new(&receipts, &requests))?;
 
-        let bundle_state =
+        let block_execution_outcome =
             BlockExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
 
         // check state root if the block extends the canonical chain __and__ if state root
@@ -223,15 +223,16 @@ impl AppendableChain {
             // calculate and check state root
             let start = Instant::now();
             let (state_root, trie_updates) = if block_attachment.is_canonical() {
-                let mut state = provider.bundle_state_data_provider.state().clone();
-                state.extend(bundle_state.clone());
-                let hashed_state = state.hash_state_slow();
+                let mut block_execution_outcome =
+                    provider.block_execution_data_provider.block_execution_outcome().clone();
+                block_execution_outcome.extend(block_execution_outcome.clone());
+                let hashed_state = block_execution_outcome.hash_state_slow();
                 ParallelStateRoot::new(consistent_view, hashed_state)
                     .incremental_root_with_updates()
                     .map(|(root, updates)| (root, Some(updates)))
                     .map_err(ProviderError::from)?
             } else {
-                (provider.state_root(bundle_state.state())?, None)
+                (provider.state_root(block_execution_outcome.state())?, None)
             };
             if block.state_root != state_root {
                 return Err(ConsensusError::BodyStateRootDiff(
@@ -248,9 +249,9 @@ impl AppendableChain {
                 "Validated state root"
             );
 
-            Ok((bundle_state, trie_updates))
+            Ok((block_execution_outcome, trie_updates))
         } else {
-            Ok((bundle_state, None))
+            Ok((block_execution_outcome, None))
         }
     }
 
@@ -284,7 +285,7 @@ impl AppendableChain {
         let parent_block = self.chain.tip();
 
         let bundle_state_data = BundleStateDataRef {
-            state: self.state(),
+            block_execution_outcome: self.block_execution_outcome(),
             sidechain_block_hashes: &side_chain_block_hashes,
             canonical_block_hashes,
             canonical_fork,

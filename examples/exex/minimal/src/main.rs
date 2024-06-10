@@ -54,10 +54,9 @@ fn main() -> eyre::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::pin::pin;
-
     use reth::providers::{BlockExecutionOutcome, Chain};
     use reth_exex_test_utils::{test_exex_context, PollOnce};
+    use std::pin::pin;
 
     #[tokio::test]
     async fn test_exex() -> eyre::Result<()> {

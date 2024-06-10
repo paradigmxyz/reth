@@ -193,7 +193,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
     }
     let all_reverts_init: RevertsInit = HashMap::from([(block, reverts_init)]);
 
-    let bundle = BlockExecutionOutcome::new_init(
+    let block_execution_outcome = BlockExecutionOutcome::new_init(
         state_init,
         all_reverts_init,
         contracts.into_iter().collect(),
@@ -202,7 +202,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
         Vec::new(),
     );
 
-    bundle.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;
+    block_execution_outcome.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;
 
     trace!(target: "reth::cli", "Inserted state");
 

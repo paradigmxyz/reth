@@ -556,9 +556,9 @@ where
 
 /// Extracts all changed accounts from the `BundleState`
 fn changed_accounts_iter(
-    state: &BlockExecutionOutcome,
+    block_execution_outcome: &BlockExecutionOutcome,
 ) -> impl Iterator<Item = ChangedAccount> + '_ {
-    state
+    block_execution_outcome
         .accounts_iter()
         .filter_map(|(addr, acc)| acc.map(|acc| (addr, acc)))
         .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })
