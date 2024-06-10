@@ -9,7 +9,7 @@ use reth_primitives::{
     stage::{
         CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
     },
-    BlockNumber, Header, StaticFileSegment,
+    BlockNumber, Header, SealedBlockWithSenders, StaticFileSegment,
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
@@ -75,6 +75,7 @@ pub struct ExecutionStage<E> {
     external_clean_threshold: u64,
     /// Pruning configuration.
     prune_modes: PruneModes,
+    post_execute_commit_input: Option<(Vec<SealedBlockWithSenders>, BundleStateWithReceipts)>,
     /// Handle to communicate with `ExEx` manager.
     exex_manager_handle: ExExManagerHandle,
 }
@@ -94,6 +95,7 @@ impl<E> ExecutionStage<E> {
             executor_provider,
             thresholds,
             prune_modes,
+            post_execute_commit_input: None,
             exex_manager_handle,
         }
     }
@@ -283,18 +285,14 @@ where
         // Note: Since we only write to `blocks` if there are any ExEx's we don't need to perform
         // the `has_exexs` check here as well
         if !blocks.is_empty() {
-            let chain = Arc::new(Chain::new(
-                blocks.into_iter().map(|block| {
+            let blocks = blocks
+                .into_iter()
+                .map(|block| {
                     let hash = block.header.hash_slow();
                     block.seal(hash)
-                }),
-                state.clone(),
-                None,
-            ));
-
-            // NOTE: We can ignore the error here, since an error means that the channel is closed,
-            // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = self.exex_manager_handle.send(ExExNotification::ChainCommitted { new: chain });
+                })
+                .collect();
+            self.post_execute_commit_input = Some((blocks, state.clone()))
         }
 
         let time = Instant::now();
@@ -440,6 +438,17 @@ where
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         self.execute_inner(provider, input)
+    }
+
+    fn post_execute_commit(&mut self) -> Result<(), StageError> {
+        let Some((blocks, state)) = self.post_execute_commit_input.take() else { return Ok(()) };
+
+        let chain = Arc::new(Chain::new(blocks, state, None));
+        // NOTE: We can ignore the error here, since an error means that the channel is closed,
+        // which means the manager has died, which then in turn means the node is shutting down.
+        let _ = self.exex_manager_handle.send(ExExNotification::ChainCommitted { new: chain });
+
+        Ok(())
     }
 
     /// Unwind the stage.

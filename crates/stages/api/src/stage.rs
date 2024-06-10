@@ -238,6 +238,15 @@ pub trait Stage<DB: Database>: Send + Sync {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>;
 
+    /// Post execution commit hook.
+    ///
+    /// This is called after the stage has been executed and the database transaction has been
+    /// committed. The stage may want to pass some data from [`Self::execute`] via the internal
+    /// field of struct.
+    fn post_execute_commit(&mut self) -> Result<(), StageError> {
+        Ok(())
+    }
+
     /// Unwind the stage.
     fn unwind(
         &mut self,
