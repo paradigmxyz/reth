@@ -18,6 +18,8 @@ members = [
     "crates/consensus/beacon/",
     "crates/consensus/common/",
     "crates/consensus/consensus/",
+    "crates/consensus/debug-client/",
+    "crates/ethereum-forks/",
     "crates/e2e-test-utils/",
     "crates/engine-primitives/",
     "crates/errors/",
@@ -246,6 +248,7 @@ reth-codecs-derive = { path = "crates/storage/codecs/derive" }
 reth-config = { path = "crates/config" }
 reth-consensus = { path = "crates/consensus/consensus" }
 reth-consensus-common = { path = "crates/consensus/common" }
+reth-consensus-debug-client = { path = "crates/consensus/debug-client" }
 reth-db = { path = "crates/storage/db", default-features = false }
 reth-db-api = { path = "crates/storage/db-api" }
 reth-db-common = { path = "crates/storage/db-common" }
