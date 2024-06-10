@@ -18,7 +18,7 @@ use reth_node_core::{
 };
 use reth_primitives::{stage::PipelineTarget, BlockNumber, Chain, ChainSpec, Head, B256};
 use reth_provider::{
-    providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
+    providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_layer::JwtSecret;
@@ -27,7 +27,7 @@ use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
 use std::{sync::Arc, thread::available_parallelism};
-use tokio::sync::{mpsc::Receiver, oneshot};
+use tokio::sync::{mpsc::Receiver, oneshot, watch};
 
 /// Reusable setup for launching a node.
 ///
@@ -371,12 +371,14 @@ where
             assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
+            
+            let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
             // Builds an unwind-only pipeline
             let pipeline = Pipeline::builder()
                 .add_stages(DefaultStages::new(
                     factory.clone(),
-                    HeaderSyncMode::Continuous,
+                    tip_rx,
                     Arc::new(EthBeaconConsensus::new(self.chain_spec())),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),

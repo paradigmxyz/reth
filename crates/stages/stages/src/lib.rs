@@ -26,7 +26,6 @@
 //! # use reth_evm_ethereum::EthEvmConfig;
 //! # use reth_provider::ProviderFactory;
 //! # use reth_provider::StaticFileProviderFactory;
-//! # use reth_provider::HeaderSyncMode;
 //! # use reth_provider::test_utils::create_test_provider_factory;
 //! # use reth_static_file::StaticFileProducer;
 //! # use reth_config::config::StageConfig;
@@ -57,7 +56,7 @@
 //!     .with_tip_sender(tip_tx)
 //!     .add_stages(DefaultStages::new(
 //!         provider_factory.clone(),
-//!         HeaderSyncMode::Tip(tip_rx),
+//!         tip_rx,
 //!         consensus,
 //!         headers_downloader,
 //!         bodies_downloader,

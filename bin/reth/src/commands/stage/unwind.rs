@@ -11,7 +11,7 @@ use reth_node_core::args::NetworkArgs;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, FinalizedBlockReader,
-    FinalizedBlockWriter, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
+    FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use reth_stages::{
@@ -105,13 +105,13 @@ impl Command {
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let executor = block_executor!(provider_factory.chain_spec());
 
-        let header_mode = HeaderSyncMode::Tip(tip_rx);
+        let tip = tip_rx;
         let pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
                     provider_factory.clone(),
-                    header_mode,
+                    tip,
                     Arc::clone(&consensus),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
