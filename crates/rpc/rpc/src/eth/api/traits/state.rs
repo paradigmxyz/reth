@@ -14,7 +14,7 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
 use crate::{
     eth::{
-        api::{pending_block::PendingBlockEnv, LoadPendingBlock, SpawnBlocking},
+        api::{pending_block::PendingBlockEnv, LoadPendingBlock, LoadStateExt, SpawnBlocking},
         cache::EthStateCache,
         error::{EthApiError, EthResult, RpcInvalidTransactionError},
     },
@@ -23,11 +23,6 @@ use crate::{
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
-    /// Returns a handle for reading data from transaction pool.
-    ///
-    /// Data access in default trait method implementations.
-    fn pool(&self) -> impl TransactionPool;
-
     /// Returns the number of transactions sent from an address at the given block identifier.
     ///
     /// If this is [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this will
@@ -37,22 +32,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = EthResult<U256>> + Send {
-        self.spawn_blocking_io(move |this| {
-            if block_id == Some(BlockId::pending()) {
-                let address_txs = this.pool().get_transactions_by_sender(address);
-                if let Some(highest_nonce) =
-                    address_txs.iter().map(|item| item.transaction.nonce()).max()
-                {
-                    let tx_count = highest_nonce
-                        .checked_add(1)
-                        .ok_or(RpcInvalidTransactionError::NonceMaxValue)?;
-                    return Ok(U256::from(tx_count))
-                }
-            }
-
-            let state = this.state_at_block_id_or_latest(block_id)?;
-            Ok(U256::from(state.account_nonce(address)?.unwrap_or_default()))
-        })
+        LoadState::transaction_count(self, address, block_id)
     }
 
     /// Returns code of given account, at given blocknumber.
@@ -150,6 +130,11 @@ pub trait LoadState {
     /// Data access in default (L1) trait method implementations.
     fn cache(&self) -> &EthStateCache;
 
+    /// Returns a handle for reading data from transaction pool.
+    ///
+    /// Data access in default trait method implementations.
+    fn pool(&self) -> impl TransactionPool;
+
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> EthResult<StateProviderBox> {
         Ok(self.provider().history_by_block_hash(block_hash)?)
@@ -219,7 +204,7 @@ pub trait LoadState {
         header: &Header,
     ) -> impl Future<Output = EthResult<(CfgEnvWithHandlerCfg, BlockEnv)>> + Send
     where
-        Self: LoadState + LoadPendingBlock + SpawnBlocking,
+        Self: LoadStateExt,
     {
         async move {
             // get the parent config first
@@ -230,5 +215,35 @@ pub trait LoadState {
 
             Ok((cfg, block_env))
         }
+    }
+
+    /// Returns the number of transactions sent from an address at the given block identifier.
+    ///
+    /// If this is [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this will
+    /// look up the highest transaction in pool and return the next nonce (highest + 1).
+    fn transaction_count(
+        &self,
+        address: Address,
+        block_id: Option<BlockId>,
+    ) -> impl Future<Output = EthResult<U256>> + Send
+    where
+        Self: SpawnBlocking,
+    {
+        self.spawn_blocking_io(move |this| {
+            if block_id == Some(BlockId::pending()) {
+                let address_txs = this.pool().get_transactions_by_sender(address);
+                if let Some(highest_nonce) =
+                    address_txs.iter().map(|item| item.transaction.nonce()).max()
+                {
+                    let tx_count = highest_nonce
+                        .checked_add(1)
+                        .ok_or(RpcInvalidTransactionError::NonceMaxValue)?;
+                    return Ok(U256::from(tx_count))
+                }
+            }
+
+            let state = this.state_at_block_id_or_latest(block_id)?;
+            Ok(U256::from(state.account_nonce(address)?.unwrap_or_default()))
+        })
     }
 }

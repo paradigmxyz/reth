@@ -6,8 +6,7 @@ use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockId, Bytes, TransactionSignedEcRecovered, B256};
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
-    TransactionsProvider,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory, TransactionsProvider,
 };
 use reth_rpc_types::{Index, Transaction, TransactionInfo};
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;

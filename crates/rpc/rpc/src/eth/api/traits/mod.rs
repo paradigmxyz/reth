@@ -17,5 +17,10 @@ pub use fee::{EthFees, LoadFee};
 pub use pending_block::LoadPendingBlock;
 pub use receipt::BuildReceipt;
 pub use state::{EthState, LoadState};
-pub use trace::{EthTrace, Trace};
+pub use trace::Trace;
 pub use transaction::{EthTransactions, LoadTransaction, RawTransactionForwarder};
+
+/// Extension trait that bundles traits needed for loading execution environment.
+pub trait LoadStateExt: LoadState + LoadPendingBlock + SpawnBlocking {}
+
+impl<T> LoadStateExt for T where T: LoadState + LoadPendingBlock + SpawnBlocking {}

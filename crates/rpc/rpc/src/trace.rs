@@ -29,7 +29,7 @@ use revm_inspectors::{
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 use crate::eth::{
-    api::{EthCall, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace},
+    api::{EthCall, LoadBlock, LoadStateExt, LoadTransaction, Trace},
     error::{EthApiError, EthResult},
     revm_utils::{prepare_call_env, EvmOverrides},
     utils::recover_raw_transaction,
@@ -74,14 +74,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: Trace
-        + LoadState
-        + LoadTransaction
-        + LoadPendingBlock
-        + LoadBlock
-        + EthCall
-        + SpawnBlocking
-        + 'static,
+    Eth: Trace + LoadStateExt + LoadTransaction + LoadBlock + EthCall + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(&self, trace_request: TraceCallRequest) -> EthResult<TraceResults> {
@@ -498,14 +491,7 @@ where
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: Trace
-        + LoadState
-        + LoadBlock
-        + LoadTransaction
-        + LoadPendingBlock
-        + EthCall
-        + SpawnBlocking
-        + 'static,
+    Eth: Trace + LoadStateExt + LoadBlock + LoadTransaction + EthCall + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     ///

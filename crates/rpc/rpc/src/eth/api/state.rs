@@ -10,20 +10,15 @@ use crate::{
 use reth_provider::StateProviderFactory;
 use reth_transaction_pool::TransactionPool;
 
-impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Self: SpawnBlocking + LoadState,
-    Pool: TransactionPool,
+impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig> where
+    Self: LoadState + SpawnBlocking
 {
-    #[inline]
-    fn pool(&self) -> impl TransactionPool {
-        self.inner.pool()
-    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider: StateProviderFactory,
+    Pool: TransactionPool,
 {
     #[inline]
     fn provider(&self) -> impl StateProviderFactory {
@@ -33,6 +28,11 @@ where
     #[inline]
     fn cache(&self) -> &EthStateCache {
         self.inner.cache()
+    }
+
+    #[inline]
+    fn pool(&self) -> impl TransactionPool {
+        self.inner.pool()
     }
 }
 

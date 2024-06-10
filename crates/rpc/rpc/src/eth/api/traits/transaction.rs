@@ -19,16 +19,15 @@ use reth_rpc_types::{
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 
 use crate::eth::{
-    api::{
-        BuildReceipt, EthApiSpec, EthCall, EthState, LoadBlock, LoadFee, LoadPendingBlock,
-        SpawnBlocking,
-    },
+    api::{BuildReceipt, EthApiSpec, LoadBlock, LoadFee, LoadStateExt, SpawnBlocking},
     cache::EthStateCache,
     error::{EthApiError, EthResult, SignError},
     signer::EthSigner,
     utils::recover_raw_transaction,
     TransactionSource,
 };
+
+use super::Call;
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApi) trait in
 /// the `eth_` namespace.
@@ -222,7 +221,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
         mut request: TransactionRequest,
     ) -> impl Future<Output = EthResult<B256>> + Send
     where
-        Self: EthCall + EthState + EthApiSpec + LoadPendingBlock + LoadBlock + LoadFee,
+        Self: EthApiSpec + LoadStateExt + LoadBlock + LoadFee + Call,
     {
         async move {
             let from = match request.from {
