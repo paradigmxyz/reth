@@ -1,9 +1,8 @@
-use reth_evm::execute::BatchBlockExecutionOutput;
 use reth_primitives::{
     logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
-    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StorageEntry, B256,
-    U256,
+    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests, StorageEntry,
+    B256, U256,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -27,23 +26,13 @@ pub struct BundleStateWithReceipts {
     pub receipts: Receipts,
     /// First block of bundle state.
     pub first_block: BlockNumber,
-}
-
-// TODO(mattsse): unify the types, currently there's a cyclic dependency between
-impl From<BatchBlockExecutionOutput> for BundleStateWithReceipts {
-    fn from(value: BatchBlockExecutionOutput) -> Self {
-        let BatchBlockExecutionOutput { bundle, receipts, requests: _, first_block } = value;
-        Self { bundle, receipts, first_block }
-    }
-}
-
-// TODO(mattsse): unify the types, currently there's a cyclic dependency between
-impl From<BundleStateWithReceipts> for BatchBlockExecutionOutput {
-    fn from(value: BundleStateWithReceipts) -> Self {
-        let BundleStateWithReceipts { bundle, receipts, first_block } = value;
-        // TODO(alexey): add requests
-        Self { bundle, receipts, requests: Vec::default(), first_block }
-    }
+    /// The collection of EIP-7685 requests.
+    /// Outer vector stores requests for each block sequentially.
+    /// The inner vector stores requests ordered by transaction number.
+    ///
+    /// A transaction may have zero or more requests, so the length of the inner vector is not
+    /// guaranteed to be the same as the number of transactions.
+    pub requests: Vec<Requests>,
 }
 
 /// Type used to initialize revms bundle state.
@@ -58,8 +47,13 @@ pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>
 
 impl BundleStateWithReceipts {
     /// Create Bundle State.
-    pub const fn new(bundle: BundleState, receipts: Receipts, first_block: BlockNumber) -> Self {
-        Self { bundle, receipts, first_block }
+    pub const fn new(
+        bundle: BundleState,
+        receipts: Receipts,
+        first_block: BlockNumber,
+        requests: Vec<Requests>,
+    ) -> Self {
+        Self { bundle, receipts, first_block, requests }
     }
 
     /// Create new bundle state with receipts.
@@ -69,6 +63,7 @@ impl BundleStateWithReceipts {
         contracts_init: Vec<(B256, Bytecode)>,
         receipts: Receipts,
         first_block: BlockNumber,
+        requests: Vec<Requests>,
     ) -> Self {
         // sort reverts by block number
         let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
@@ -97,7 +92,7 @@ impl BundleStateWithReceipts {
             contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
         );
 
-        Self { bundle, receipts, first_block }
+        Self { bundle, receipts, first_block, requests }
     }
 
     /// Return revm bundle state.

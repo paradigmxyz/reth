@@ -6938,6 +6938,7 @@ dependencies = [
  "futures-util",
  "parking_lot 0.12.3",
  "reth-execution-errors",
+ "reth-execution-types",
  "reth-primitives",
  "reth-prune-types",
  "reth-storage-errors",
@@ -6953,6 +6954,7 @@ dependencies = [
  "alloy-sol-types",
  "reth-ethereum-consensus",
  "reth-evm",
+ "reth-execution-types",
  "reth-primitives",
  "reth-prune-types",
  "reth-revm",
@@ -6995,7 +6997,6 @@ dependencies = [
 name = "reth-execution-types"
 version = "0.2.0-beta.9"
 dependencies = [
- "reth-evm",
  "reth-execution-errors",
  "reth-primitives",
  "reth-trie",

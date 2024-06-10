@@ -3,7 +3,7 @@ use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
-use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
+use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_primitives::{
     stage::{
@@ -289,9 +289,9 @@ where
             }
         }
         let time = Instant::now();
-        let BatchBlockExecutionOutput { bundle, receipts, requests: _, first_block } =
+        let BundleStateWithReceipts { bundle, receipts, requests, first_block } =
             executor.finalize();
-        let state = BundleStateWithReceipts::new(bundle, receipts, first_block);
+        let state = BundleStateWithReceipts::new(bundle, receipts, first_block, requests);
         let write_preparation_duration = time.elapsed();
 
         // Check if we should send a [`ExExNotification`] to execution extensions.

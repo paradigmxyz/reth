@@ -220,8 +220,12 @@ impl PendingBlockEnv {
         // merge all transitions into bundle state.
         db.merge_transitions(BundleRetention::PlainState);
 
-        let bundle =
-            BundleStateWithReceipts::new(db.take_bundle(), vec![receipts].into(), block_number);
+        let bundle = BundleStateWithReceipts::new(
+            db.take_bundle(),
+            vec![receipts].into(),
+            block_number,
+            Vec::new(),
+        );
 
         #[cfg(feature = "optimism")]
         let receipts_root = bundle

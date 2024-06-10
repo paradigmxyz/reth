@@ -132,7 +132,12 @@ where
         // We're reusing receipt writing code internal to
         // `BundleStateWithReceipts::write_to_storage`, so we just use a default empty
         // `BundleState`.
-        let bundled_state = BundleStateWithReceipts::new(Default::default(), receipts, first_block);
+        let bundled_state = BundleStateWithReceipts::new(
+            Default::default(),
+            receipts,
+            first_block,
+            Default::default(),
+        );
 
         let static_file_producer =
             static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;

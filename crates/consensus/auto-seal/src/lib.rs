@@ -389,9 +389,14 @@ impl StorageInner {
         );
 
         // execute the block
-        let BlockExecutionOutput { state, receipts, .. } =
+        let BlockExecutionOutput { state, receipts, requests: block_execution_requests, .. } =
             executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
-        let bundle_state = BundleStateWithReceipts::new(state, receipts.into(), block.number);
+        let bundle_state = BundleStateWithReceipts::new(
+            state,
+            receipts.into(),
+            block.number,
+            vec![block_execution_requests.into()],
+        );
 
         // todo(onbjerg): we should not pass requests around as this is building a block, which
         // means we need to extract the requests from the execution output and compute the requests

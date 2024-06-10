@@ -444,8 +444,12 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let bundle =
-        BundleStateWithReceipts::new(db.take_bundle(), vec![receipts].into(), block_number);
+    let bundle = BundleStateWithReceipts::new(
+        db.take_bundle(),
+        vec![receipts].into(),
+        block_number,
+        vec![requests.clone().unwrap_or_default()],
+    );
     let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
     let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 
