@@ -25,30 +25,35 @@ impl IntoTrieAccount for GenesisAccount {
             })
             .unwrap_or(EMPTY_ROOT_HASH);
 
-        TrieAccount::new(
-            self.nonce.unwrap_or_default(),
-            self.balance,
+        TrieAccount {
+            nonce: self.nonce.unwrap_or_default(),
+            balance: self.balance,
             storage_root,
-            self.code.map_or(KECCAK_EMPTY, keccak256),
-        )
+            code_hash: self.code.map_or(KECCAK_EMPTY, keccak256),
+        }
     }
 }
 
 impl IntoTrieAccount for (Account, B256) {
     fn to_trie_account(self) -> TrieAccount {
         let (account, storage_root) = self;
-        TrieAccount::new(
-            account.nonce,
-            account.balance,
+        TrieAccount {
+            nonce: account.nonce,
+            balance: account.balance,
             storage_root,
-            account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
-        )
+            code_hash: account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+        }
     }
 }
 
 impl IntoTrieAccount for (AccountInfo, B256) {
     fn to_trie_account(self) -> TrieAccount {
         let (account, storage_root) = self;
-        TrieAccount::new(account.nonce, account.balance, storage_root, account.code_hash)
+        TrieAccount {
+            nonce: account.nonce,
+            balance: account.balance,
+            storage_root,
+            code_hash: account.code_hash,
+        }
     }
 }

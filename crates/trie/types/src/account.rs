@@ -5,20 +5,13 @@ use alloy_rlp::{RlpDecodable, RlpEncodable};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 pub struct TrieAccount {
     /// Account nonce.
-    nonce: u64,
+    pub nonce: u64,
     /// Account balance.
-    balance: U256,
+    pub balance: U256,
     /// Account's storage root.
-    storage_root: B256,
+    pub storage_root: B256,
     /// Hash of the account's bytecode.
-    code_hash: B256,
-}
-
-impl TrieAccount {
-    /// Create new trie account structure.
-    pub const fn new(nonce: u64, balance: U256, storage_root: B256, code_hash: B256) -> Self {
-        Self { nonce, balance, storage_root, code_hash }
-    }
+    pub code_hash: B256,
 }
 
 impl TrieAccount {
