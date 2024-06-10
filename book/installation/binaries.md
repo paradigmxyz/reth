@@ -32,7 +32,7 @@ imported the key you can verify a release signature (`.asc` file) using a
 command like this:
 
 ```bash
-gpg --verify reth-v0.1.0-alpha.14-x86_64-unknown-linux-gnu.tar.gz.asc reth-v0.1.0-alpha.14-x86_64-unknown-linux-gnu.tar.gz
+gpg --verify reth-v0.2.0-beta.9-x86_64-unknown-linux-gnu.tar.gz.asc reth-v0.1.0-beta.9-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 Replace the filenames by those corresponding to the downloaded Reth release.
