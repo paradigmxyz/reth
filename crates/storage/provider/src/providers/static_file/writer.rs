@@ -561,7 +561,7 @@ impl StaticFileProviderRW {
 
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
-        // receipts contains atleast one receipt so this would be overwritten
+        // receipts contains at least one receipt so this would be overwritten
         let mut last_tx_number = TxNumber::default();
 
         for (tx_num, receipt) in receipts_iter {
