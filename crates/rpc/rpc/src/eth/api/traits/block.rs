@@ -3,11 +3,9 @@
 use std::sync::Arc;
 
 use futures::Future;
-use reth_primitives::{
-    BlockId, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta,
-};
+use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
-use reth_rpc_types::{Header, AnyTransactionReceipt, Index, RichBlock};
+use reth_rpc_types::{AnyTransactionReceipt, Header, Index, RichBlock};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
 use crate::eth::{
@@ -132,12 +130,38 @@ pub trait EthBlocks: LoadBlock {
         }
     }
 
+    /// Helper method that loads a bock and all its receipts.
+    fn load_block_and_receipts(
+        &self,
+        block_id: BlockId,
+    ) -> impl Future<Output = EthResult<Option<(SealedBlock, Arc<Vec<Receipt>>)>>> + Send
+    where
+        Self: BuildReceipt,
+    {
+        async move {
+            if block_id.is_pending() {
+                return Ok(LoadBlock::provider(self)
+                    .pending_block_and_receipts()?
+                    .map(|(sb, receipts)| (sb, Arc::new(receipts))))
+            }
+
+            if let Some(block_hash) = LoadBlock::provider(self).block_hash_for_id(block_id)? {
+                return Ok(BuildReceipt::cache(self).get_block_and_receipts(block_hash).await?)
+            }
+
+            Ok(None)
+        }
+    }
+
     /// Returns uncle headers of given block.
     ///
     /// Returns an empty vec if there are none.
-    fn ommers(&self, block_id: impl Into<BlockId>) -> EthResult<Option<Vec<Header>>> {
+    fn ommers(
+        &self,
+        block_id: impl Into<BlockId>,
+    ) -> EthResult<Option<Vec<reth_primitives::Header>>> {
         let block_id = block_id.into();
-        Ok(LoadBlock::provider(self).ommers_by_id(block_id)?.map(|ommers| ommers.into_iter().map(|header| header.into()).collect::<Vec<_>>()))
+        Ok(LoadBlock::provider(self).ommers_by_id(block_id)?)
     }
 
     /// Returns uncle block at given index in given block.
@@ -222,30 +246,6 @@ pub trait LoadBlock: Send + Sync {
             };
 
             Ok(self.cache().get_sealed_block_with_senders(block_hash).await?)
-        }
-    }
-
-    /// Helper method that loads a bock and all its receipts.
-    fn load_block_and_receipts(
-        &self,
-        block_id: BlockId,
-    ) -> impl Future<Output = EthResult<Option<(SealedBlock, Arc<Vec<Receipt>>)>>> + Send
-    where
-        Self: BuildReceipt,
-    {
-        async move {
-            if block_id.is_pending() {
-                return Ok(self
-                    .provider()
-                    .pending_block_and_receipts()?
-                    .map(|(sb, receipts)| (sb, Arc::new(receipts))))
-            }
-
-            if let Some(block_hash) = self.provider().block_hash_for_id(block_id)? {
-                return Ok(BuildReceipt::cache(self).get_block_and_receipts(block_hash).await?)
-            }
-
-            Ok(None)
         }
     }
 }

@@ -4,9 +4,8 @@ use reth_provider::{BlockReaderIdExt, HeaderProvider};
 
 use crate::{
     eth::{
-        api::{EthBlocks, LoadBlock, LoadPendingBlock},
+        api::{EthBlocks, LoadBlock},
         cache::EthStateCache,
-        error::EthResult,
     },
     EthApi,
 };
