@@ -240,9 +240,8 @@ pub trait Stage<DB: Database>: Send + Sync {
 
     /// Post execution commit hook.
     ///
-    /// This is called after the stage has been executed and the database transaction has been
-    /// committed. The stage may want to pass some data from [`Self::execute`] via the internal
-    /// field of struct.
+    /// This is called after the stage has been executed and the provider has been committed.
+    /// The stage may want to pass some data from [`Self::execute`] via the internal field.
     fn post_execute_commit(&mut self) -> Result<(), StageError> {
         Ok(())
     }
@@ -256,9 +255,8 @@ pub trait Stage<DB: Database>: Send + Sync {
 
     /// Post unwind commit hook.
     ///
-    /// This is called after the stage has been unwound and the database transaction has been
-    /// committed. The stage may want to pass some data from [`Self::unwind`] via the internal
-    /// field of struct.
+    /// This is called after the stage has been unwound and the provider has been committed.
+    /// The stage may want to pass some data from [`Self::unwind`] via the internal field.
     fn post_unwind_commit(&mut self) -> Result<(), StageError> {
         Ok(())
     }
