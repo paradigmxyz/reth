@@ -42,11 +42,10 @@ impl<DB: Database> Segment<DB> for Receipts {
             let mut receipts_cursor = provider.tx_ref().cursor_read::<tables::Receipts>()?;
             let receipts_walker = receipts_cursor.walk_range(block_body_indices.tx_num_range())?;
 
-            for entry in receipts_walker {
-                let (tx_number, receipt) = entry?;
-
-                static_file_writer.append_receipt(tx_number, receipt)?;
-            }
+            let receipts = receipts_walker
+                .map(|entry| entry.map(|(tx_number, receipt)| (tx_number, receipt)))
+                .collect::<Result<Vec<_>, _>>()?;
+            static_file_writer.append_receipts(receipts)?;
         }
 
         Ok(())

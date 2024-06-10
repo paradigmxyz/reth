@@ -349,9 +349,8 @@ impl TestStageDB {
                 let mut writer = provider.latest_writer(StaticFileSegment::Receipts)?;
                 let res = receipts.into_iter().try_for_each(|(block_num, receipts)| {
                     writer.increment_block(StaticFileSegment::Receipts, block_num)?;
-                    for (tx_num, receipt) in receipts {
-                        writer.append_receipt(tx_num, receipt)?;
-                    }
+                    let receipts = receipts.into_iter().collect::<Vec<_>>();
+                    writer.append_receipts(receipts)?;
                     Ok(())
                 });
                 writer.commit_without_sync_all()?;

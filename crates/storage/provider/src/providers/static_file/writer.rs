@@ -520,31 +520,38 @@ impl StaticFileProviderRW {
         Ok(result)
     }
 
-    /// Appends receipt to static file.
+    /// Appends multiple receipts to the static file.
     ///
     /// It **DOES NOT** call `increment_block()`, it should be handled elsewhere. There might be
     /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
-    pub fn append_receipt(
-        &mut self,
-        tx_num: TxNumber,
-        receipt: Receipt,
-    ) -> ProviderResult<TxNumber> {
+    pub fn append_receipts<I>(&mut self, receipts: I) -> ProviderResult<TxNumber>
+    where
+        I: IntoIterator<Item = (TxNumber, Receipt)>,
+    {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
-        let result = self.append_with_tx_number(StaticFileSegment::Receipts, tx_num, receipt)?;
+        let segment = StaticFileSegment::Receipts;
+        debug_assert!(self.writer.user_header().segment() == segment);
+
+        let mut last_tx_number = None;
+
+        for (tx_num, receipt) in receipts {
+            self.append_with_tx_number(segment, tx_num, receipt)?;
+            last_tx_number = Some(tx_num);
+        }
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
-                StaticFileSegment::Receipts,
+                segment,
                 StaticFileProviderOperation::Append,
                 Some(start.elapsed()),
             );
         }
 
-        Ok(result)
+        Ok(last_tx_number.expect("Receipts iterator should not be empty"))
     }
 
     /// Adds an instruction to prune `to_delete`transactions during commit.
