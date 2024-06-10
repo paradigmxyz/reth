@@ -75,7 +75,13 @@ pub struct ExecutionStage<E> {
     external_clean_threshold: u64,
     /// Pruning configuration.
     prune_modes: PruneModes,
+    /// Input for the post execute commit hook.
+    /// Set after every [`ExecutionStage::execute`] and cleared after
+    /// [`ExecutionStage::post_execute_commit`].
     post_execute_commit_input: Option<Chain>,
+    /// Input for the post unwind commit hook.
+    /// Set after every [`ExecutionStage::unwind`] and cleared after
+    /// [`ExecutionStage::post_unwind_commit`].
     post_unwind_commit_input: Option<Chain>,
     /// Handle to communicate with `ExEx` manager.
     exex_manager_handle: ExExManagerHandle,
