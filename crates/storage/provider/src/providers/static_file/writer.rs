@@ -554,13 +554,19 @@ impl StaticFileProviderRW {
     where
         I: IntoIterator<Item = (TxNumber, Receipt)>,
     {
+        let mut receipts_iter = receipts.into_iter().peekable();
+        if receipts_iter.peek().is_none() {
+            return Err(ProviderError::EmptyReceipts());
+        }
+
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
-        let mut last_tx_number = None;
+        // receipts contains atleast one receipt so this would be overwritten
+        let mut last_tx_number = TxNumber::default();
 
-        for (tx_num, receipt) in receipts {
+        for (tx_num, receipt) in receipts_iter {
             self.append_with_tx_number(StaticFileSegment::Receipts, tx_num, receipt)?;
-            last_tx_number = Some(tx_num);
+            last_tx_number = tx_num;
         }
 
         if let Some(metrics) = &self.metrics {
@@ -571,7 +577,7 @@ impl StaticFileProviderRW {
             );
         }
 
-        Ok(last_tx_number.expect("receipts can't be empty"))
+        Ok(last_tx_number)
     }
 
     /// Adds an instruction to prune `to_delete`transactions during commit.

@@ -62,6 +62,9 @@ pub enum ProviderError {
     /// The specific receipt is missing
     #[error("no receipt found for {0:?}")]
     ReceiptNotFound(TxHashOrNumber),
+    /// The receipts are empty
+    #[error("receipts can not be empty")]
+    EmptyReceipts(),
     /// Unable to find the best block.
     #[error("best block does not exist")]
     BestBlockNotFound,
