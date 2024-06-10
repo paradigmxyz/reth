@@ -7337,6 +7337,7 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-rpc",
+ "reth-rpc-builder",
  "reth-rpc-engine-api",
  "reth-rpc-layer",
  "reth-rpc-types",
@@ -7392,7 +7393,6 @@ dependencies = [
  "reth-prune-types",
  "reth-rpc",
  "reth-rpc-api",
- "reth-rpc-builder",
  "reth-rpc-server-types",
  "reth-rpc-types",
  "reth-rpc-types-compat",
@@ -7824,6 +7824,7 @@ dependencies = [
 name = "reth-rpc-builder"
 version = "0.2.0-beta.9"
 dependencies = [
+ "clap",
  "hyper 0.14.29",
  "jsonrpsee",
  "metrics",
@@ -7836,6 +7837,7 @@ dependencies = [
  "reth-ipc",
  "reth-metrics",
  "reth-network-api",
+ "reth-node-core",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
@@ -7852,7 +7854,6 @@ dependencies = [
  "reth-transaction-pool",
  "serde",
  "serde_json",
- "strum",
  "thiserror",
  "tokio",
  "tower",
@@ -7914,6 +7915,8 @@ name = "reth-rpc-server-types"
 version = "0.2.0-beta.9"
 dependencies = [
  "alloy-primitives",
+ "serde",
+ "strum",
 ]
 
 [[package]]
