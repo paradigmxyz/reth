@@ -2,12 +2,15 @@
 
 use crate::is_database_empty;
 use eyre::Context;
-pub use reth_libmdbx::*;
 use std::path::Path;
+
+pub use reth_libmdbx::*;
 
 pub mod cursor;
 pub mod env;
 pub mod tx;
+
+pub use env::*;
 
 const GIGABYTE: usize = 1024 * 1024 * 1024;
 const TERABYTE: usize = GIGABYTE * 1024;

@@ -1,7 +1,9 @@
 //! Module that interacts with MDBX.
 
+use super::tx::Tx;
 use crate::{
     lockfile::StorageLock,
+    mdbx::{DEFAULT_MAX_READERS, GIGABYTE, TERABYTE},
     metrics::DatabaseEnvMetrics,
     tables::{self, TableType, Tables},
     utils::default_page_size,
@@ -28,7 +30,6 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tx::Tx;
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
@@ -128,8 +129,8 @@ pub struct DatabaseEnv {
 }
 
 impl Database for DatabaseEnv {
-    type TX = tx::Tx<RO>;
-    type TXMut = tx::Tx<RW>;
+    type TX = crate::mdbx::tx::Tx<RO>;
+    type TXMut = crate::mdbx::tx::Tx<RW>;
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Tx::new_with_metrics(
@@ -322,6 +323,7 @@ impl DatabaseEnv {
         });
         // Configure more readers
         inner_env.set_max_readers(DEFAULT_MAX_READERS);
+
         // This parameter sets the maximum size of the "reclaimed list", and the unit of measurement
         // is "pages". Reclaimed list is the list of freed pages that's populated during the
         // lifetime of DB transaction, and through which MDBX searches when it needs to insert new

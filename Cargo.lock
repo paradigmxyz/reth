@@ -6534,7 +6534,7 @@ dependencies = [
 
 [[package]]
 name = "reth-db-mdbx"
-version = "0.2.0-beta.8"
+version = "0.2.0-beta.9"
 dependencies = [
  "arbitrary",
  "assert_matches",
