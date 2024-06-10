@@ -10,14 +10,14 @@ use parking_lot::Mutex;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    keccak256, proofs::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber,
-    BlockId, BlockNumber, BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
+    keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber,
+    BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::updates::TrieUpdates;
+use reth_trie::{updates::TrieUpdates, AccountProof};
 use revm::{
     db::BundleState,
     primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -561,7 +561,7 @@ impl StateProvider for MockEthProvider {
         }))
     }
 
-    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
+    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof<Account>> {
         Ok(AccountProof::new(address))
     }
 }

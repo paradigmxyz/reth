@@ -10,11 +10,11 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_primitives::{
-    constants::EPOCH_SLOTS, proofs::AccountProof, Account, Address, BlockNumber, Bytecode,
-    StaticFileSegment, StorageKey, StorageValue, B256,
+    constants::EPOCH_SLOTS, Account, Address, BlockNumber, Bytecode, StaticFileSegment, StorageKey,
+    StorageValue, B256,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 use revm::db::BundleState;
 use std::fmt::Debug;
 
@@ -308,7 +308,7 @@ impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
     }
 
     /// Get account and storage proofs.
-    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
+    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof<Account>> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
     }
 }

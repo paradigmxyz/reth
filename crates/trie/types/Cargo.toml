@@ -12,15 +12,19 @@ description = "Commonly used types for trie usage in reth."
 workspace = true
 
 [dependencies]
+reth-primitives-traits.workspace = true
 reth-codecs.workspace = true
 
 alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie = { workspace = true, features = ["serde"] }
+alloy-consensus.workspace = true
+alloy-genesis.workspace = true
+
 bytes.workspace = true
 derive_more.workspace = true
 serde.workspace = true
-
+itertools.workspace = true
 nybbles = { workspace = true, features = ["serde", "rlp"] }
 
 [dev-dependencies]

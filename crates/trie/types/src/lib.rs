@@ -31,4 +31,9 @@ pub use storage::StorageTrieEntry;
 mod subnode;
 pub use subnode::StoredSubNode;
 
+mod proofs;
+pub use proofs::{AccountProof, StorageProof};
+
+pub mod root;
+
 pub use alloy_trie::{proof, BranchNodeCompact, HashBuilder, TrieMask, EMPTY_ROOT_HASH};

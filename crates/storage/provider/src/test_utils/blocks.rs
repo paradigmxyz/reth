@@ -5,13 +5,11 @@ use alloy_rlp::Decodable;
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_primitives::{
-    alloy_primitives, b256,
-    hex_literal::hex,
-    proofs::{state_root_unhashed, storage_root_unhashed},
-    revm::compat::into_reth_acc,
-    Address, BlockNumber, Bytes, Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders,
-    TxType, Withdrawal, Withdrawals, B256, U256,
+    alloy_primitives, b256, hex_literal::hex, revm::compat::into_reth_acc, Address, BlockNumber,
+    Bytes, Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders, TxType, Withdrawal,
+    Withdrawals, B256, U256,
 };
+use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::{
     db::BundleState,
     primitives::{AccountInfo, HashMap},

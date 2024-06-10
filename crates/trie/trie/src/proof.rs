@@ -10,13 +10,8 @@ use alloy_rlp::{BufMut, Encodable};
 use reth_db::tables;
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{StateRootError, StorageRootError};
-use reth_primitives::{
-    constants::EMPTY_ROOT_HASH,
-    keccak256,
-    proofs::{AccountProof, IntoTrieAccount, StorageProof},
-    Address, B256,
-};
-use reth_trie_types::proof::ProofRetainer;
+use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Account, Address, B256};
+use reth_trie_types::{proof::ProofRetainer, AccountProof, StorageProof, TrieAccount};
 /// A struct for generating merkle proofs.
 ///
 /// Proof generator adds the target address and slots to the prefix set, enables the proof retainer
@@ -47,7 +42,7 @@ where
         &self,
         address: Address,
         slots: &[B256],
-    ) -> Result<AccountProof, StateRootError> {
+    ) -> Result<AccountProof<Account>, StateRootError> {
         let target_hashed_address = keccak256(address);
         let target_nibbles = Nibbles::unpack(target_hashed_address);
         let mut account_proof = AccountProof::new(address);
@@ -83,7 +78,7 @@ where
                     };
 
                     account_rlp.clear();
-                    let account = IntoTrieAccount::to_trie_account((account, storage_root));
+                    let account = TrieAccount::from((account, storage_root));
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);

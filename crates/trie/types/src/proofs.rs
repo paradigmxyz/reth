@@ -1,20 +1,21 @@
 //! Merkle trie proofs.
 
-use super::{traits::IntoTrieAccount, Nibbles};
-use crate::{keccak256, Account, Address, Bytes, B256, U256};
+use crate::{Nibbles, TrieAccount};
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rlp::encode_fixed_size;
 use alloy_trie::{
     proof::{verify_proof, ProofVerificationError},
     EMPTY_ROOT_HASH,
 };
+use reth_primitives_traits::Account;
 
 /// The merkle proof with the relevant account info.
 #[derive(PartialEq, Eq, Debug)]
-pub struct AccountProof {
+pub struct AccountProof<A: Account> {
     /// The address associated with the account.
     pub address: Address,
     /// Account info.
-    pub info: Option<Account>,
+    pub info: Option<A>,
     /// Array of rlp-serialized merkle trie nodes which starting from the root node and
     /// following the path of the hashed address as key.
     pub proof: Vec<Bytes>,
@@ -24,7 +25,7 @@ pub struct AccountProof {
     pub storage_proofs: Vec<StorageProof>,
 }
 
-impl AccountProof {
+impl<A: Account> AccountProof<A> {
     /// Create new account proof entity.
     pub fn new(address: Address) -> Self {
         Self {
@@ -37,12 +38,7 @@ impl AccountProof {
     }
 
     /// Set account info, storage root and requested storage proofs.
-    pub fn set_account(
-        &mut self,
-        info: Account,
-        storage_root: B256,
-        storage_proofs: Vec<StorageProof>,
-    ) {
+    pub fn set_account(&mut self, info: A, storage_root: B256, storage_proofs: Vec<StorageProof>) {
         self.info = Some(info);
         self.storage_root = storage_root;
         self.storage_proofs = storage_proofs;
@@ -52,7 +48,9 @@ impl AccountProof {
     pub fn set_proof(&mut self, proof: Vec<Bytes>) {
         self.proof = proof;
     }
+}
 
+impl<A: Account + Default + Copy> AccountProof<A> {
     /// Verify the storage proofs and account proof against the provided state root.
     pub fn verify(&self, root: B256) -> Result<(), ProofVerificationError> {
         // Verify storage proofs.
@@ -64,7 +62,7 @@ impl AccountProof {
         let expected = if self.info.is_none() && self.storage_root == EMPTY_ROOT_HASH {
             None
         } else {
-            Some(alloy_rlp::encode(IntoTrieAccount::to_trie_account((
+            Some(alloy_rlp::encode(TrieAccount::from((
                 self.info.unwrap_or_default(),
                 self.storage_root,
             ))))

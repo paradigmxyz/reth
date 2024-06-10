@@ -1,10 +1,9 @@
 use reth_primitives::{
-    keccak256, proofs::AccountProof, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey,
-    B256, U256,
+    keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, B256, U256,
 };
 use reth_storage_api::{AccountReader, BlockHashReader, StateProvider, StateRootProvider};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::updates::TrieUpdates;
+use reth_trie::{updates::TrieUpdates, AccountProof};
 use revm::db::BundleState;
 use std::collections::HashMap;
 
@@ -90,7 +89,7 @@ impl StateProvider for StateProviderTest {
         Ok(self.contracts.get(&code_hash).cloned())
     }
 
-    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
+    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof<Account>> {
         unimplemented!("proof generation is not supported")
     }
 }

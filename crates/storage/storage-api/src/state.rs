@@ -2,10 +2,11 @@ use super::{AccountReader, BlockHashReader, BlockIdReader, StateRootProvider};
 use auto_impl::auto_impl;
 use reth_execution_types::BundleStateWithReceipts;
 use reth_primitives::{
-    proofs::AccountProof, Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
-    Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
+    Account, Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, Bytecode,
+    StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_trie::AccountProof;
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider>;
@@ -24,7 +25,7 @@ pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + S
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>>;
 
     /// Get account and storage proofs.
-    fn proof(&self, address: Address, keys: &[B256]) -> ProviderResult<AccountProof>;
+    fn proof(&self, address: Address, keys: &[B256]) -> ProviderResult<AccountProof<Account>>;
 
     /// Get account code by its address.
     ///

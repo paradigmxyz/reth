@@ -27,7 +27,6 @@ alloy-chains = { workspace = true, features = ["serde", "rlp"] }
 alloy-consensus = { workspace = true, features = ["arbitrary", "serde"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
-alloy-trie = { workspace = true, features = ["serde"] }
 alloy-rpc-types = { workspace = true, optional = true }
 alloy-genesis.workspace = true
 alloy-eips = { workspace = true, features = ["serde"] }
@@ -45,7 +44,6 @@ c-kzg = { workspace = true, features = ["serde"], optional = true }
 bytes.workspace = true
 byteorder = "1"
 derive_more.workspace = true
-itertools.workspace = true
 modular-bitfield.workspace = true
 once_cell.workspace = true
 rayon.workspace = true

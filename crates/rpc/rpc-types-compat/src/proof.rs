@@ -1,12 +1,10 @@
 //! Compatibility functions for rpc proof related types.
 
-use reth_primitives::{
-    proofs::{AccountProof, StorageProof},
-    U64,
-};
+use reth_primitives::{Account, U64};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey, EIP1186AccountProofResponse, EIP1186StorageProof,
 };
+use reth_trie_types::{AccountProof, StorageProof};
 
 /// Creates a new rpc storage proof from a primitive storage proof type.
 pub fn from_primitive_storage_proof(proof: StorageProof) -> EIP1186StorageProof {
@@ -14,7 +12,7 @@ pub fn from_primitive_storage_proof(proof: StorageProof) -> EIP1186StorageProof 
 }
 
 /// Creates a new rpc account proof from a primitive account proof type.
-pub fn from_primitive_account_proof(proof: AccountProof) -> EIP1186AccountProofResponse {
+pub fn from_primitive_account_proof(proof: AccountProof<Account>) -> EIP1186AccountProofResponse {
     let info = proof.info.unwrap_or_default();
     EIP1186AccountProofResponse {
         address: proof.address,

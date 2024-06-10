@@ -9,7 +9,6 @@ use crate::{
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    proofs::AccountProof,
     stage::{StageCheckpoint, StageId},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, BlockWithSenders,
     Bytecode, ChainInfo, ChainSpec, Header, Receipt, SealedBlock, SealedBlockWithSenders,
@@ -18,7 +17,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::updates::TrieUpdates;
+use reth_trie::{updates::TrieUpdates, AccountProof};
 use revm::{
     db::BundleState,
     primitives::{BlockEnv, CfgEnvWithHandlerCfg},
@@ -319,7 +318,7 @@ impl StateProvider for NoopProvider {
         Ok(None)
     }
 
-    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
+    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof<Account>> {
         Ok(AccountProof::new(address))
     }
 }
