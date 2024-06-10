@@ -6,7 +6,7 @@ use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockId, Bytes, TransactionSignedEcRecovered, B256};
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ReceiptProvider, StateProviderFactory,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
     TransactionsProvider,
 };
 use reth_rpc_types::{Index, Transaction, TransactionInfo};
@@ -51,16 +51,9 @@ where
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
+    Self: LoadTransaction + Send + Sync,
     Pool: TransactionPool + 'static,
-    Provider: BlockReaderIdExt
-        + TransactionsProvider
-        + ReceiptProvider
-        + ChainSpecProvider
-        + StateProviderFactory
-        + EvmEnvProvider
-        + 'static,
-    Network: NetworkInfo + 'static,
-    EvmConfig: ConfigureEvm,
+    Provider: BlockReaderIdExt,
 {
     #[inline]
     fn provider(&self) -> impl BlockReaderIdExt {
