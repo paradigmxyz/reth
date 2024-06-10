@@ -13,8 +13,6 @@ use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 #[cfg(feature = "secp256k1")]
-use crate::pk2id;
-#[cfg(feature = "secp256k1")]
 use enr::Enr;
 
 /// Represents a ENR in discovery.
@@ -192,7 +190,7 @@ impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
             return Err(NodeRecordParseError::InvalidUrl("tcp port missing".to_string()))
         };
 
-        let id = pk2id(&enr.public_key());
+        let id = crate::pk2id(&enr.public_key());
 
         Ok(Self { address, tcp_port, udp_port, id }.into_ipv4_mapped())
     }

@@ -32,8 +32,8 @@ pub struct TrustedPeer {
 }
 
 impl TrustedPeer {
-    #[cfg(feature = "secp256k1")]
     /// Derive the [`NodeRecord`] from the secret key and addr
+    #[cfg(feature = "secp256k1")]
     pub fn from_secret_key(host: Host, port: u16, sk: &secp256k1::SecretKey) -> Self {
         let pk = secp256k1::PublicKey::from_secret_key(secp256k1::SECP256K1, sk);
         let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);

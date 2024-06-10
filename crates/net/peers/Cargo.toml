@@ -34,5 +34,4 @@ secp256k1 = { workspace = true, features = ["rand"] }
 serde_json.workspace = true
 
 [features]
-default = []
 secp256k1 = ["dep:secp256k1"]

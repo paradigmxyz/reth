@@ -51,9 +51,6 @@
 use alloy_primitives::B512;
 use std::str::FromStr;
 
-#[cfg(feature = "secp256k1")]
-use std::net::IpAddr;
-
 // Re-export PeerId for ease of use.
 pub use enr::Enr;
 
@@ -104,7 +101,7 @@ pub enum AnyNode {
     /// An "enode:" peer with full ip
     NodeRecord(NodeRecord),
     #[cfg(feature = "secp256k1")]
-    /// An "enr:"
+    /// An "enr:" peer
     Enr(Enr<secp256k1::SecretKey>),
     /// An incomplete "enode" with only a peer id
     PeerId(PeerId),
@@ -128,7 +125,10 @@ impl AnyNode {
             #[cfg(feature = "secp256k1")]
             Self::Enr(enr) => {
                 let node_record = NodeRecord {
-                    address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
+                    address: enr
+                        .ip4()
+                        .map(std::net::IpAddr::from)
+                        .or_else(|| enr.ip6().map(std::net::IpAddr::from))?,
                     tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
                     udp_port: enr.udp4().or_else(|| enr.udp6())?,
                     id: pk2id(&enr.public_key()),
@@ -253,7 +253,7 @@ mod tests {
         let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
         let node: AnyNode = url.parse().unwrap();
         assert_eq!(node, AnyNode::NodeRecord(NodeRecord {
-            address: IpAddr::V4([10,3,58,6].into()),
+            address: std::net::IpAddr::V4([10,3,58,6].into()),
             tcp_port: 30303,
             udp_port: 30301,
             id: "6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0".parse().unwrap(),
