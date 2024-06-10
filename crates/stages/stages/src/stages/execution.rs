@@ -282,7 +282,7 @@ where
             stage_progress = block_number;
             stage_checkpoint.progress.processed += block.gas_used;
 
-            // If we have ExEx's we need to save the block in memory for later
+            // If we have ExExes we need to save the block in memory for later
             if self.exex_manager_handle.has_exexs() {
                 blocks.push(block);
             }
@@ -304,15 +304,16 @@ where
         let state = BundleStateWithReceipts::new(bundle, receipts, first_block);
         let write_preparation_duration = time.elapsed();
 
-        // Check if we should send a [`ExExNotification`] to execution extensions.
+        // Prepare the input for post execute commit hook, where an `ExExNotification` will be sent.
         //
-        // Note: Since we only write to `blocks` if there are any ExEx's we don't need to perform
+        // Note: Since we only write to `blocks` if there are any ExExes, we don't need to perform
         // the `has_exexs` check here as well
         if !blocks.is_empty() {
             let blocks = blocks.into_iter().map(|block| {
                 let hash = block.header.hash_slow();
                 block.seal(hash)
             });
+
             let previous_input =
                 self.post_execute_commit_input.replace(Chain::new(blocks, state.clone(), None));
             debug_assert!(
@@ -380,15 +381,16 @@ where
         // This also updates `PlainStorageState` and `PlainAccountState`.
         let bundle_state_with_receipts = provider.unwind_or_peek_state::<true>(range.clone())?;
 
-        // Construct a `ExExNotification` if we have ExEx's installed.
+        // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
-            // Get the blocks for the unwound range. This is needed for `ExExNotification`.
+            // Get the blocks for the unwound range.
             let blocks = provider.get_take_block_range::<false>(range.clone())?;
             let previous_input = self.post_unwind_commit_input.replace(Chain::new(
                 blocks,
                 bundle_state_with_receipts,
                 None,
             ));
+
             debug_assert!(
                 previous_input.is_none(),
                 "Previous post unwind commit input wasn't processed"
