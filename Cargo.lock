@@ -7511,6 +7511,7 @@ dependencies = [
  "reth-ethereum-forks",
  "reth-network-types",
  "reth-static-file-types",
+ "reth-trie-types",
  "revm",
  "revm-primitives",
  "roaring",
@@ -8102,6 +8103,27 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "reth-trie-types"
+version = "0.2.0-beta.9"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-trie",
+ "arbitrary",
+ "assert_matches",
+ "bytes",
+ "derive_more",
+ "nybbles",
+ "proptest",
+ "proptest-derive",
+ "reth-codecs",
+ "serde",
+ "serde_json",
+ "test-fuzz",
+ "toml",
 ]
 
 [[package]]

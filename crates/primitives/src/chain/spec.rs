@@ -1727,9 +1727,9 @@ impl OptimismGenesisInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount};
+    use crate::{b256, hex, ChainConfig, GenesisAccount};
+    use reth_trie_types::TrieAccount;
     use std::{collections::HashMap, str::FromStr};
-
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);
