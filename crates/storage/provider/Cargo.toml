@@ -28,7 +28,6 @@ reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-evm.workspace = true
-reth-trie-types.workspace = true
 
 # ethereum
 alloy-rpc-types-engine.workspace = true

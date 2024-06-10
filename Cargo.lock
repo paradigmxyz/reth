@@ -7561,7 +7561,6 @@ dependencies = [
  "reth-storage-errors",
  "reth-testing-utils",
  "reth-trie",
- "reth-trie-types",
  "revm",
  "strum",
  "tempfile",

@@ -44,9 +44,8 @@ use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
     updates::TrieUpdates,
-    HashedPostState, StateRoot,
+    HashedPostState, Nibbles, StateRoot,
 };
-use reth_trie_types::Nibbles;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::{
     cmp::Ordering,
