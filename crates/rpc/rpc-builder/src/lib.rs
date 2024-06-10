@@ -191,8 +191,6 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
-use reth_rpc_server_types::RpcModuleSelection;
-pub use reth_rpc_server_types::{constants, RethRpcModule};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
@@ -210,8 +208,10 @@ pub use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
 
-// re-export for convenience
 pub use crate::eth::{EthConfig, EthHandlers};
+
+// re-export for convenience
+pub use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
 
 /// Auth server utilities.
 pub mod auth;
