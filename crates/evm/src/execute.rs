@@ -21,9 +21,6 @@ pub trait EvmExecutor<DB> {
     /// The output produced by the executor.
     type Output;
 
-    /// Updates the state of the executor.
-    fn with_state(self, db: DB) -> Self;
-
     /// Executes the input and returns the output without committing the state.
     fn execute(&mut self, input: Self::Input) -> Self::Output;
 

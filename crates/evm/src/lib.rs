@@ -130,6 +130,10 @@ pub trait EvmContext<DB: Database> {
     /// The executor produced with the context set.
     type Executor: EvmExecutor<DB>;
 
+    /// Sets the EVM database.
+    #[must_use]
+    fn with_db(self, db: DB) -> Self;
+
     /// Sets the EVM environment.
     #[must_use]
     fn with_env(self, env: Env) -> Self;
