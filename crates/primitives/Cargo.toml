@@ -17,6 +17,7 @@ reth-codecs.workspace = true
 reth-ethereum-forks.workspace = true
 reth-network-peers.workspace = true
 reth-static-file-types.workspace = true
+reth-trie-types.workspace = true
 revm.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
@@ -29,7 +30,6 @@ alloy-trie = { workspace = true, features = ["serde"] }
 alloy-rpc-types = { workspace = true, optional = true }
 alloy-genesis.workspace = true
 alloy-eips = { workspace = true, features = ["serde"] }
-nybbles = { workspace = true, features = ["serde", "rlp"] }
 
 # crypto
 secp256k1 = { workspace = true, features = [

@@ -1727,9 +1727,8 @@ impl OptimismGenesisInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount};
+    use crate::{b256, hex, proofs::IntoTrieAccount, ChainConfig, GenesisAccount};
     use std::{collections::HashMap, str::FromStr};
-
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);
@@ -2830,7 +2829,10 @@ Post-merge hard forks (timestamp based):
 
         for (key, expected_rlp) in key_rlp {
             let account = chainspec.genesis.alloc.get(&key).expect("account should exist");
-            assert_eq!(&alloy_rlp::encode(TrieAccount::from(account.clone())), expected_rlp)
+            assert_eq!(
+                &alloy_rlp::encode(IntoTrieAccount::to_trie_account(account.clone())),
+                expected_rlp
+            );
         }
 
         assert_eq!(chainspec.genesis_hash, None);
