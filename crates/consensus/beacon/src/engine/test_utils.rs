@@ -418,7 +418,6 @@ where
             Box::<TokioTaskExecutor>::default(),
             Box::<NoopSyncStateUpdater>::default(),
             None,
-            false,
             payload_builder,
             None,
             self.base_config.pipeline_run_threshold.unwrap_or(MIN_BLOCKS_FOR_PIPELINE_RUN),
