@@ -7,7 +7,7 @@ use crate::{
 use reth_codecs::{main_codec, Compact};
 use reth_primitives::{stage::StageCheckpoint, Address, B256, *};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
-use reth_trie_types::{StoredNibbles, StoredNibblesSubKey, *};
+use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
 
 pub mod accounts;
 pub mod blocks;

@@ -36,7 +36,7 @@ use reth_primitives::{
     IntegerList, Receipt, Requests, StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
-use reth_trie_types::{StorageTrieEntry, StoredBranchNode, StoredNibbles, StoredNibblesSubKey};
+use reth_trie_common::{StorageTrieEntry, StoredBranchNode, StoredNibbles, StoredNibblesSubKey};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

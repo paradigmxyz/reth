@@ -4,7 +4,7 @@ use reth_primitives::{Account, U64};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey, EIP1186AccountProofResponse, EIP1186StorageProof,
 };
-use reth_trie_types::{AccountProof, StorageProof};
+use reth_trie_common::{AccountProof, StorageProof};
 
 /// Creates a new rpc storage proof from a primitive storage proof type.
 pub fn from_primitive_storage_proof(proof: StorageProof) -> EIP1186StorageProof {

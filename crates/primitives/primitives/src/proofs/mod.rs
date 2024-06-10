@@ -4,7 +4,7 @@ use crate::{
     constants::EMPTY_OMMER_ROOT_HASH, keccak256, Header, Receipt, ReceiptWithBloom,
     ReceiptWithBloomRef, Request, TransactionSigned, Withdrawal, B256,
 };
-use reth_trie_types::root::{ordered_trie_root, ordered_trie_root_with_encoder};
+use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
 
 use alloy_eips::eip7685::Encodable7685;
 
@@ -164,7 +164,7 @@ mod tests {
     };
     use alloy_primitives::{b256, Address, LogData};
     use alloy_rlp::Decodable;
-    use reth_trie_types::root::{state_root_ref_unhashed, state_root_unhashed};
+    use reth_trie_common::root::{state_root_ref_unhashed, state_root_unhashed};
     use std::collections::HashMap;
 
     #[test]

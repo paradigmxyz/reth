@@ -2,7 +2,7 @@ use crate::Account;
 use alloy_consensus::constants::{EMPTY_ROOT_HASH, KECCAK_EMPTY};
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, B256, U256};
-use reth_trie_types::TrieAccount;
+use reth_trie_common::TrieAccount;
 use revm_primitives::AccountInfo;
 
 /// Converts a type into a [`TrieAccount`].

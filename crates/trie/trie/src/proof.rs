@@ -11,7 +11,7 @@ use reth_db::tables;
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Account, Address, B256};
-use reth_trie_types::{proof::ProofRetainer, AccountProof, StorageProof, TrieAccount};
+use reth_trie_common::{proof::ProofRetainer, AccountProof, StorageProof, TrieAccount};
 /// A struct for generating merkle proofs.
 ///
 /// Proof generator adds the target address and slots to the prefix set, enables the proof retainer

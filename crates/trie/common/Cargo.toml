@@ -1,5 +1,5 @@
 [package]
-name = "reth-trie-types"
+name = "reth-trie-common"
 version.workspace = true
 edition.workspace = true
 homepage.workspace = true

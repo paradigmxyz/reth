@@ -11,7 +11,7 @@ use crate::{
     MAINNET_DEPOSIT_CONTRACT, U256,
 };
 use once_cell::sync::Lazy;
-use reth_trie_types::root::state_root_ref_unhashed;
+use reth_trie_common::root::state_root_ref_unhashed;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -1726,7 +1726,7 @@ impl OptimismGenesisInfo {
 
 #[cfg(test)]
 mod tests {
-    use reth_trie_types::TrieAccount;
+    use reth_trie_common::TrieAccount;
 
     use super::*;
     use crate::{b256, hex, ChainConfig, GenesisAccount};
