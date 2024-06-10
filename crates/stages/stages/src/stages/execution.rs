@@ -307,7 +307,11 @@ where
                 let hash = block.header.hash_slow();
                 block.seal(hash)
             });
-            self.post_execute_commit_input = Some(Chain::new(blocks, state.clone(), None));
+            let previous_input =
+                self.post_execute_commit_input.replace(Chain::new(blocks, state.clone(), None));
+            if let Some(previous_input) = previous_input {
+                tracing::debug!(target: "sync::stages::execution", ?previous_input, "Previous post execute commit input wasn't processed");
+            }
         }
 
         let time = Instant::now();
@@ -370,8 +374,14 @@ where
         if self.exex_manager_handle.has_exexs() {
             // Get the blocks for the unwound range. This is needed for `ExExNotification`.
             let blocks = provider.get_take_block_range::<false>(range.clone())?;
-            self.post_unwind_commit_input =
-                Some(Chain::new(blocks, bundle_state_with_receipts, None));
+            let previous_input = self.post_unwind_commit_input.replace(Chain::new(
+                blocks,
+                bundle_state_with_receipts,
+                None,
+            ));
+            if let Some(previous_input) = previous_input {
+                tracing::debug!(target: "sync::stages::execution", ?previous_input, "Previous post unwind commit input wasn't processed");
+            }
         }
 
         // Unwind all receipts for transactions in the block range
