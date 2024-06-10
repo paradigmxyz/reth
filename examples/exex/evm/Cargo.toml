@@ -16,6 +16,8 @@ reth-node-ethereum.workspace = true
 reth-primitives.workspace = true
 reth-tracing.workspace = true
 
+alloy-sol-types = { workspace = true, features = ["json"] }
+
 eyre.workspace = true
 tokio.workspace = true
 futures.workspace = true

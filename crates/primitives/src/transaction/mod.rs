@@ -132,6 +132,12 @@ pub enum Transaction {
     Deposit(TxDeposit),
 }
 
+impl AsRef<Self> for Transaction {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
 // === impl Transaction ===
 
 impl Transaction {

@@ -1,3 +1,6 @@
+use std::collections::{HashMap, HashSet};
+
+use alloy_sol_types::{sol, SolEventInterface, SolInterface};
 use eyre::OptionExt;
 use reth::{
     providers::{
@@ -5,20 +8,22 @@ use reth::{
     },
     revm::database::StateProviderDatabase,
 };
-use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+use reth_evm::ConfigureEvm;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::FullNodeComponents;
-use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
+use reth_node_ethereum::EthereumNode;
+use reth_primitives::{revm::env::fill_tx_env, Address, Transaction, TxKind, TxLegacy, U256};
 use reth_tracing::tracing::info;
 
+sol!(ERC20, "erc20.json");
+use crate::ERC20::{ERC20Calls, ERC20Events};
+
 async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Result<()> {
+    let evm_config = EthEvmConfig::default();
+
     while let Some(notification) = ctx.notifications.recv().await {
         if let Some(chain) = notification.committed_chain() {
-            // TODO(alexey): use custom EVM config with tracer
-            let evm_config = EthEvmConfig::default();
-            let executor_provider = EthExecutorProvider::new(ctx.config.chain.clone(), evm_config);
-
             let database_provider = ctx.provider().database_provider_ro()?;
             let provider = BundleStateProvider::new(
                 HistoricalStateProviderRef::new(
@@ -30,24 +35,61 @@ async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Res
             );
             let db = StateProviderDatabase::new(&provider);
 
-            let mut executor = executor_provider.batch_executor(
-                db,
-                ctx.config.prune_config().map(|config| config.segments).unwrap_or_default(),
-            );
+            let mut evm = evm_config.evm(db);
 
-            for block in chain.blocks_iter() {
-                let td = block.header().difficulty;
-                executor.execute_one((&block.clone().unseal(), td).into())?;
+            // Collect all ERC20 contract addresses and addresses that had balance changes
+            let erc20_contracts_and_addresses = chain
+                .block_receipts_iter()
+                .flatten()
+                .flatten()
+                .flat_map(|receipt| receipt.logs.iter())
+                .fold(HashMap::<Address, HashSet<Address>>::new(), |mut acc, log| {
+                    if let Ok(ERC20Events::Transfer(ERC20::Transfer { from, to, value: _ })) =
+                        ERC20Events::decode_raw_log(log.topics(), &log.data.data, true)
+                    {
+                        acc.entry(log.address).or_default().extend([from, to]);
+                    }
+
+                    acc
+                });
+
+            let txs = erc20_contracts_and_addresses.into_iter().map(|(contract, addresses)| {
+                (
+                    contract,
+                    addresses.into_iter().map(move |address| {
+                        (
+                            address,
+                            Transaction::Legacy(TxLegacy {
+                                gas_limit: 50_000_000,
+                                to: TxKind::Call(contract),
+                                input: ERC20Calls::balanceOf(ERC20::balanceOfCall {
+                                    _owner: address,
+                                })
+                                .abi_encode()
+                                .into(),
+                                ..Default::default()
+                            }),
+                        )
+                    }),
+                )
+            });
+
+            for (contract, balance_txs) in txs {
+                for (address, balance_tx) in balance_txs {
+                    fill_tx_env(evm.tx_mut(), &balance_tx, Address::ZERO);
+                    let result = evm.transact()?.result;
+                    let output = result.output().ok_or_eyre("no output for balance tx")?;
+                    if let Some(balance) = U256::try_from_be_slice(output) {
+                        info!(?contract, ?address, %balance, "Balance updated");
+                    } else {
+                        info!(
+                            ?contract,
+                            ?address,
+                            "Balance updated but too large to fit into U256"
+                        );
+                    }
+                }
             }
-
-            let output = executor.finalize();
-
-            let same_state = chain.state() == &output.into();
-            info!(
-                chain = ?chain.range(),
-                %same_state,
-                "Executed chain"
-            );
 
             ctx.events.send(ExExEvent::FinishedHeight(chain.tip().number))?;
         }

@@ -2928,6 +2928,7 @@ dependencies = [
 name = "exex-evm"
 version = "0.0.0"
 dependencies = [
+ "alloy-sol-types",
  "eyre",
  "futures",
  "reth",
