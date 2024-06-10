@@ -22,6 +22,9 @@ impl Account for revm_primitives::AccountInfo {
     }
 
     fn bytecode_hash(&self) -> Option<B256> {
+        if self.is_empty_code_hash() {
+            return None
+        }
         Some(self.code_hash)
     }
 }
