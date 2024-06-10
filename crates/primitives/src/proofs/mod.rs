@@ -4,14 +4,16 @@ use crate::{
     constants::EMPTY_OMMER_ROOT_HASH, keccak256, Address, Header, Receipt, ReceiptWithBloom,
     ReceiptWithBloomRef, Request, TransactionSigned, Withdrawal, B256, U256,
 };
-use reth_trie_types::{hash_builder::HashBuilder, Nibbles, TrieAccount};
+use reth_trie_types::{hash_builder::HashBuilder, Nibbles};
 
+mod types;
+pub use types::{AccountProof, StorageProof};
 mod traits;
+pub use traits::IntoTrieAccount;
 
 use alloy_eips::eip7685::Encodable7685;
 use alloy_rlp::Encodable;
 use itertools::Itertools;
-use traits::IntoTrieAccount;
 
 /// Adjust the index of an item for rlp encoding.
 pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
@@ -195,9 +197,7 @@ pub fn state_root_unhashed<A: IntoTrieAccount>(
 
 /// Sorts the hashed account keys and calculates the root hash of the state represented as MPT.
 /// See [`state_root`] for more info.
-pub fn state_root_unsorted<A: IntoTrieAccount>(
-    state: impl IntoIterator<Item = (B256, A)>,
-) -> B256 {
+pub fn state_root_unsorted<A: IntoTrieAccount>(state: impl IntoIterator<Item = (B256, A)>) -> B256 {
     state_root(state.into_iter().sorted_by_key(|(key, _)| *key))
 }
 

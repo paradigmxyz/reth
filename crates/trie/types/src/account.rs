@@ -1,5 +1,5 @@
+use alloy_primitives::{B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use alloy_primitives::{ B256, U256};
 
 /// An Ethereum account as represented in the trie.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
@@ -14,50 +14,12 @@ pub struct TrieAccount {
     code_hash: B256,
 }
 
-// impl From<(Account, B256)> for TrieAccount {
-//     fn from((account, storage_root): (Account, B256)) -> Self {
-//         Self {
-//             nonce: account.nonce,
-//             balance: account.balance,
-//             storage_root,
-//             code_hash: account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
-//         }
-//     }
-// }
-
-// impl From<(AccountInfo, B256)> for TrieAccount {
-//     fn from((account, storage_root): (AccountInfo, B256)) -> Self {
-//         Self {
-//             nonce: account.nonce,
-//             balance: account.balance,
-//             storage_root,
-//             code_hash: account.code_hash,
-//         }
-//     }
-// }
-
-// impl From<GenesisAccount> for TrieAccount {
-//     fn from(account: GenesisAccount) -> Self {
-//         let storage_root = account
-//             .storage
-//             .map(|storage| {
-//                 proofs::storage_root_unhashed(
-//                     storage
-//                         .into_iter()
-//                         .filter(|(_, value)| *value != B256::ZERO)
-//                         .map(|(slot, value)| (slot, U256::from_be_bytes(*value))),
-//                 )
-//             })
-//             .unwrap_or(EMPTY_ROOT_HASH);
-
-//         Self {
-//             nonce: account.nonce.unwrap_or_default(),
-//             balance: account.balance,
-//             storage_root,
-//             code_hash: account.code.map_or(KECCAK_EMPTY, keccak256),
-//         }
-//     }
-// }
+impl TrieAccount {
+    /// Create new trie account structure.
+    pub const fn new(nonce: u64, balance: U256, storage_root: B256, code_hash: B256) -> Self {
+        Self { nonce, balance, storage_root, code_hash }
+    }
+}
 
 impl TrieAccount {
     /// Get account's storage root.

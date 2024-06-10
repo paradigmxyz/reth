@@ -1,14 +1,11 @@
 use super::{TrieCursor, TrieCursorFactory};
-use crate::updates::TrieKey;
+use crate::{updates::TrieKey, BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey};
 use reth_db::{tables, DatabaseError};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
-use reth_primitives::{
-    trie::{BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey},
-    B256,
-};
+use reth_primitives::B256;
 
 /// Implementation of the trie cursor factory for a database transaction.
 impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
@@ -116,11 +113,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{StorageTrieEntry, StoredBranchNode};
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
-    use reth_primitives::{
-        hex_literal::hex,
-        trie::{StorageTrieEntry, StoredBranchNode},
-    };
+    use reth_primitives::hex_literal::hex;
     use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]

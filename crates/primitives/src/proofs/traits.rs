@@ -1,7 +1,9 @@
+use crate::Account;
 use alloy_consensus::constants::{EMPTY_ROOT_HASH, KECCAK_EMPTY};
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, B256, U256};
 use reth_trie_types::TrieAccount;
+use revm_primitives::AccountInfo;
 
 /// Converts a type into a [`TrieAccount`].
 pub trait IntoTrieAccount {
@@ -29,5 +31,24 @@ impl IntoTrieAccount for GenesisAccount {
             storage_root,
             self.code.map_or(KECCAK_EMPTY, keccak256),
         )
+    }
+}
+
+impl IntoTrieAccount for (Account, B256) {
+    fn to_trie_account(self) -> TrieAccount {
+        let (account, storage_root) = self;
+        TrieAccount::new(
+            account.nonce,
+            account.balance,
+            storage_root,
+            account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+        )
+    }
+}
+
+impl IntoTrieAccount for (AccountInfo, B256) {
+    fn to_trie_account(self) -> TrieAccount {
+        let (account, storage_root) = self;
+        TrieAccount::new(account.nonce, account.balance, storage_root, account.code_hash)
     }
 }

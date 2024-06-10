@@ -33,7 +33,6 @@ use reth_primitives::{
     keccak256,
     revm::{config::revm_spec, env::fill_block_env},
     stage::{StageCheckpoint, StageId},
-    trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, GotExpected, Head, Header, Receipt, Requests, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta,
@@ -47,6 +46,7 @@ use reth_trie::{
     updates::TrieUpdates,
     HashedPostState, StateRoot,
 };
+use reth_trie_types::Nibbles;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::{
     cmp::Ordering,
