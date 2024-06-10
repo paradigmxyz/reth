@@ -199,6 +199,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
         contracts.into_iter().collect(),
         Receipts::default(),
         block,
+        Vec::new(),
     );
 
     bundle.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;

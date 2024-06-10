@@ -166,6 +166,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
         })]]
         .into(),
         number,
+        Vec::new(),
     );
 
     let state_root = bundle_state_root(&bundle);
@@ -225,6 +226,7 @@ fn block2(
         })]]
         .into(),
         number,
+        Vec::new(),
     );
 
     let mut extended = prev_state.clone();
@@ -294,6 +296,7 @@ fn block3(
         })]]
         .into(),
         number,
+        Vec::new(),
     );
 
     let mut extended = prev_state.clone();
@@ -384,6 +387,7 @@ fn block4(
         })]]
         .into(),
         number,
+        Vec::new(),
     );
 
     let mut extended = prev_state.clone();
@@ -469,6 +473,7 @@ fn block5(
         })]]
         .into(),
         number,
+        Vec::new(),
     );
 
     let mut extended = prev_state.clone();

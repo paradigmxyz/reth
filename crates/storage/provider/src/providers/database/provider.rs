@@ -539,6 +539,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             Vec::new(),
             receipts.into(),
             start_block_number,
+            Vec::new(),
         ))
     }
 

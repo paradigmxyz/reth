@@ -345,6 +345,7 @@ mod tests {
                 BundleState::default(),
                 vec![deposit_tx_receipt, withdrawal_tx_receipt].into(),
                 block.number,
+                vec![block.requests.clone().unwrap_or_default()],
             ),
             None,
         );
