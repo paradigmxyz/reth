@@ -14,9 +14,9 @@ use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     errors::provider::ProviderResult,
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockNumReader, BlockExecutionOutcome, ChainSpecProvider,
-    DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
-    ProviderFactory, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
+    BlockExecutionOutcome, BlockHashReader, BlockNumReader, ChainSpecProvider, DatabaseProviderRW,
+    HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory,
+    StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use serde::{Deserialize, Serialize};

@@ -1,7 +1,7 @@
 //! [`BundleStateDataProvider`] implementations used by the tree.
 
 use reth_primitives::{BlockHash, BlockNumber, ForkBlock};
-use reth_provider::{BundleStateDataProvider, BundleStateForkProvider, BlockExecutionOutcome};
+use reth_provider::{BlockExecutionOutcome, BundleStateDataProvider, BundleStateForkProvider};
 use std::collections::BTreeMap;
 
 /// Structure that combines references of required data to be a [`BundleStateDataProvider`].

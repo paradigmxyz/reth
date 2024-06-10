@@ -214,12 +214,8 @@ impl AppendableChain {
             .consensus
             .validate_block_post_execution(&block, PostExecutionInput::new(&receipts, &requests))?;
 
-        let bundle_state = BlockExecutionOutcome::new(
-            state,
-            receipts.into(),
-            block.number,
-            vec![requests.into()],
-        );
+        let bundle_state =
+            BlockExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
 
         // check state root if the block extends the canonical chain __and__ if state root
         // validation was requested.

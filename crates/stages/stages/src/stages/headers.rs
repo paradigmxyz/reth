@@ -384,7 +384,7 @@ mod tests {
         stage::StageUnitCheckpoint, BlockBody, SealedBlock, SealedBlockWithSenders, B256,
     };
     use reth_provider::{
-        BlockWriter, BlockExecutionOutcome, ProviderFactory, StaticFileProviderFactory,
+        BlockExecutionOutcome, BlockWriter, ProviderFactory, StaticFileProviderFactory,
     };
     use reth_testing_utils::generators::{self, random_header, random_header_range};
     use reth_trie::{updates::TrieUpdates, HashedPostState};

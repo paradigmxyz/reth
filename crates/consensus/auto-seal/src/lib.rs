@@ -27,7 +27,7 @@ use reth_primitives::{
     U256,
 };
 use reth_provider::{
-    BlockReaderIdExt, BlockExecutionOutcome, StateProviderFactory, StateRootProvider,
+    BlockExecutionOutcome, BlockReaderIdExt, StateProviderFactory, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::TransactionPool;

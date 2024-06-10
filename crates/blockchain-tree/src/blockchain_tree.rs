@@ -18,7 +18,7 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, BlockWriter, BlockExecutionOutcome,
+    BlockExecutionOutcome, BlockExecutionWriter, BlockNumReader, BlockWriter,
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
     ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
     ProviderError, StaticFileProviderFactory,

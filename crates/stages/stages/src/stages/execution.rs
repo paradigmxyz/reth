@@ -13,7 +13,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, BlockExecutionOutcome, Chain, DatabaseProviderRW, HeaderProvider,
+    BlockExecutionOutcome, BlockReader, Chain, DatabaseProviderRW, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter, StatsReader,
     TransactionVariant,
 };
@@ -289,8 +289,7 @@ where
             }
         }
         let time = Instant::now();
-        let BlockExecutionOutcome { bundle, receipts, requests, first_block } =
-            executor.finalize();
+        let BlockExecutionOutcome { bundle, receipts, requests, first_block } = executor.finalize();
         let state = BlockExecutionOutcome::new(bundle, receipts, first_block, requests);
         let write_preparation_duration = time.elapsed();
 

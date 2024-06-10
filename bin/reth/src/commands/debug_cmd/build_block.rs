@@ -30,9 +30,8 @@ use reth_primitives::{
     SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter,
-    BlockExecutionOutcome, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
-    StateProviderFactory,
+    providers::BlockchainProvider, BlockExecutionOutcome, BlockHashReader, BlockReader,
+    BlockWriter, ChainSpecProvider, ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};

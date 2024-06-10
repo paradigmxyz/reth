@@ -146,12 +146,8 @@ impl Command {
             )
                 .into(),
         )?;
-        let block_state = BlockExecutionOutcome::new(
-            state,
-            receipts.into(),
-            block.number,
-            vec![requests.into()],
-        );
+        let block_state =
+            BlockExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
 
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates) =

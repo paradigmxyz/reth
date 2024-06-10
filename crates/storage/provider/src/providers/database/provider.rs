@@ -1,5 +1,5 @@
 use crate::{
-    bundle_state::{BundleStateInit, BlockExecutionOutcome, HashedStateChanges, RevertsInit},
+    bundle_state::{BlockExecutionOutcome, BundleStateInit, HashedStateChanges, RevertsInit},
     providers::{database::metrics, static_file::StaticFileWriter, StaticFileProvider},
     to_range,
     traits::{
