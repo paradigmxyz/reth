@@ -312,13 +312,12 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     }
 
     /// Returns the initial pipeline target, based on whether or not the node is running in
-    /// `debug.tip` mode, `debug.continuous` mode, or neither.
+    /// `debug.tip` mode or neither.
     ///
     /// If running in `debug.tip` mode, the configured tip is returned.
-    /// Otherwise, if running in `debug.continuous` mode, the genesis hash is returned.
     /// Otherwise, `None` is returned. This is what the node will do by default.
     pub fn initial_pipeline_target(&self) -> Option<B256> {
-        self.node_config().initial_pipeline_target(self.genesis_hash())
+        self.node_config().initial_pipeline_target()
     }
 
     /// Loads the JWT secret for the engine API

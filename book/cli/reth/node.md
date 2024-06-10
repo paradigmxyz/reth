@@ -447,11 +447,6 @@ Builder:
           [default: 3]
 
 Debug:
-      --debug.continuous
-          Prompt the downloader to download blocks one at a time.
-
-          NOTE: This is for testing purposes only.
-
       --debug.terminate
           Flag indicating whether the node should be terminated after the pipeline sync
 

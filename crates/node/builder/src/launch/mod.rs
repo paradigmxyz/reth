@@ -376,7 +376,7 @@ where
             Box::new(ctx.task_executor().clone()),
             Box::new(node_adapter.components.network().clone()),
             max_block,
-            ctx.node_config().debug.continuous,
+            false,
             node_adapter.components.payload_builder().clone(),
             initial_target,
             reth_beacon_consensus::MIN_BLOCKS_FOR_PIPELINE_RUN,
