@@ -7523,6 +7523,7 @@ dependencies = [
  "reth-codecs",
  "reth-ethereum-forks",
  "reth-network-peers",
+ "reth-primitives-traits",
  "reth-static-file-types",
  "revm",
  "revm-primitives",

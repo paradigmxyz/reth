@@ -53,6 +53,20 @@ impl Account {
     }
 }
 
+impl reth_primitives_traits::Account for Account {
+    fn nonce(&self) -> u64 {
+        self.nonce
+    }
+
+    fn balance(&self) -> U256 {
+        self.balance
+    }
+
+    fn bytecode_hash(&self) -> Option<B256> {
+        self.bytecode_hash
+    }
+}
+
 /// Bytecode for an account.
 ///
 /// A wrapper around [`revm::primitives::Bytecode`][RevmBytecode] with encoding/decoding support.
