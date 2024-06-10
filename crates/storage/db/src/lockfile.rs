@@ -15,9 +15,9 @@ const LOCKFILE_NAME: &str = "lock";
 /// A file lock for a storage directory to ensure exclusive read-write access across different
 /// processes.
 ///
-/// This lock stores the PID of the process holding it and is released (deleted) on a graceful
-/// shutdown. On resuming from a crash, the stored PID helps verify that no other process holds the
-/// lock.
+/// This lock stores the PID and start time of the process holding it and is released (deleted)
+/// on a graceful shutdown. On resuming from a crash, the stored data helps to verify that no other
+/// process holds the lock.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageLock(Arc<StorageLockInner>);
 
@@ -26,13 +26,23 @@ impl StorageLock {
     /// unsuccessful.
     ///
     /// Note: In-process exclusivity is not on scope. If called from the same process (or another
-    /// with the same PID), it will succeed.
+    /// with the same PID and start time), it will succeed.
     pub fn try_acquire(path: &Path) -> Result<Self, StorageLockError> {
         let path = path.join(LOCKFILE_NAME);
 
-        if let Some(pid) = parse_lock_file_pid(&path)? {
-            if pid != (process::id() as usize) && System::new_all().process(pid.into()).is_some() {
-                return Err(StorageLockError::Taken(pid))
+        if let (Some(pid), start_time) = parse_lock_file(&path)? {
+            // Check if the process with the stored PID is different from the current process.
+            if pid != (process::id() as usize) {
+                let system = System::new_all();
+                let process = system.process(pid.into());
+                // Check if the process with the stored PID is still running.
+                if let Some(process) = process {
+                    // If we couldn't parse the start time from the file, or the process has the
+                    // same start time as the stored start time, we assume the lock is still taken.
+                    if start_time.map_or(true, |start_time| start_time == process.start_time()) {
+                        return Err(StorageLockError::Taken(pid))
+                    }
+                }
             }
         }
 
@@ -72,13 +82,32 @@ impl StorageLockInner {
     }
 }
 
-/// Parses the PID from the lock file if it exists.
-fn parse_lock_file_pid(path: &Path) -> Result<Option<usize>, StorageLockError> {
+/// Parses the PID and the start time from the lock file, if it exists.
+///
+/// Returns:
+/// - `None` for both values if the file does not exist or we couldn't parse the contents.
+/// - `Some` for PID and `None` for start time if the file was created on an older version.
+/// - `Some` for both values if the file was created on a newer version.
+fn parse_lock_file(path: &Path) -> Result<(Option<usize>, Option<u64>), StorageLockError> {
     if path.exists() {
         let contents = reth_fs_util::read_to_string(path)?;
-        return Ok(contents.trim().parse().ok())
+        let (pid, start_time) = if let Some((pid, start_time)) = contents.split_once('_') {
+            let pid = pid.trim().parse().ok();
+            let start_time = start_time.trim().parse().ok();
+
+            if pid.is_some() && start_time.is_some() {
+                (pid, start_time)
+            } else {
+                (None, None)
+            }
+        } else {
+            (contents.trim().parse().ok(), None)
+        };
+
+        Ok((pid, start_time))
+    } else {
+        Ok((None, None))
     }
-    Ok(None)
 }
 
 #[cfg(test)]
