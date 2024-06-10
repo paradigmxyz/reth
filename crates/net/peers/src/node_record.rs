@@ -8,11 +8,12 @@ use std::{
     str::FromStr,
 };
 
-use crate::{pk2id, PeerId};
+use crate::PeerId;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use enr::Enr;
-use secp256k1::{SecretKey, SECP256K1};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
+
+#[cfg(feature = "secp256k1")]
+use enr::Enr;
 
 /// Represents a ENR in discovery.
 ///
@@ -41,9 +42,10 @@ pub struct NodeRecord {
 }
 
 impl NodeRecord {
+    #[cfg(feature = "secp256k1")]
     /// Derive the [`NodeRecord`] from the secret key and addr
-    pub fn from_secret_key(addr: SocketAddr, sk: &SecretKey) -> Self {
-        let pk = secp256k1::PublicKey::from_secret_key(SECP256K1, sk);
+    pub fn from_secret_key(addr: SocketAddr, sk: &secp256k1::SecretKey) -> Self {
+        let pk = secp256k1::PublicKey::from_secret_key(secp256k1::SECP256K1, sk);
         let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
         Self::new(addr, id)
     }
@@ -170,10 +172,11 @@ impl FromStr for NodeRecord {
     }
 }
 
-impl TryFrom<&Enr<SecretKey>> for NodeRecord {
+#[cfg(feature = "secp256k1")]
+impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
     type Error = NodeRecordParseError;
 
-    fn try_from(enr: &Enr<SecretKey>) -> Result<Self, Self::Error> {
+    fn try_from(enr: &Enr<secp256k1::SecretKey>) -> Result<Self, Self::Error> {
         let Some(address) = enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))
         else {
             return Err(NodeRecordParseError::InvalidUrl("ip missing".to_string()))
@@ -187,7 +190,7 @@ impl TryFrom<&Enr<SecretKey>> for NodeRecord {
             return Err(NodeRecordParseError::InvalidUrl("tcp port missing".to_string()))
         };
 
-        let id = pk2id(&enr.public_key());
+        let id = crate::pk2id(&enr.public_key());
 
         Ok(Self { address, tcp_port, udp_port, id }.into_ipv4_mapped())
     }
@@ -195,10 +198,9 @@ impl TryFrom<&Enr<SecretKey>> for NodeRecord {
 
 #[cfg(test)]
 mod tests {
-    use std::net::Ipv6Addr;
-
     use alloy_rlp::Decodable;
     use rand::{thread_rng, Rng, RngCore};
+    use std::net::Ipv6Addr;
 
     use super::*;
 

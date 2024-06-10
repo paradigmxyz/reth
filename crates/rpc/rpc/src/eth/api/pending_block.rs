@@ -11,7 +11,7 @@ use reth_primitives::{
     },
     trie::EMPTY_ROOT_HASH,
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Receipts, Requests, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Requests, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -223,7 +223,7 @@ impl PendingBlockEnv {
 
         let bundle = BundleStateWithReceipts::new(
             db.take_bundle(),
-            Receipts::from_vec(vec![receipts]),
+            vec![receipts].into(),
             block_number,
             Vec::new(),
         );
