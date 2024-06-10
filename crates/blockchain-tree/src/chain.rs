@@ -214,7 +214,7 @@ impl AppendableChain {
             .consensus
             .validate_block_post_execution(&block, PostExecutionInput::new(&receipts, &requests))?;
 
-        let block_execution_outcome =
+        let initial_block_execution_outcome =
             BlockExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
 
         // check state root if the block extends the canonical chain __and__ if state root
@@ -225,14 +225,14 @@ impl AppendableChain {
             let (state_root, trie_updates) = if block_attachment.is_canonical() {
                 let mut block_execution_outcome =
                     provider.block_execution_data_provider.block_execution_outcome().clone();
-                block_execution_outcome.extend(block_execution_outcome.clone());
+                block_execution_outcome.extend(initial_block_execution_outcome.clone());
                 let hashed_state = block_execution_outcome.hash_state_slow();
                 ParallelStateRoot::new(consistent_view, hashed_state)
                     .incremental_root_with_updates()
                     .map(|(root, updates)| (root, Some(updates)))
                     .map_err(ProviderError::from)?
             } else {
-                (provider.state_root(block_execution_outcome.state())?, None)
+                (provider.state_root(initial_block_execution_outcome.state())?, None)
             };
             if block.state_root != state_root {
                 return Err(ConsensusError::BodyStateRootDiff(
@@ -249,9 +249,9 @@ impl AppendableChain {
                 "Validated state root"
             );
 
-            Ok((block_execution_outcome, trie_updates))
+            Ok((initial_block_execution_outcome, trie_updates))
         } else {
-            Ok((block_execution_outcome, None))
+            Ok((initial_block_execution_outcome, None))
         }
     }
 
