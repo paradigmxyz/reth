@@ -1,7 +1,6 @@
 //! Errors when computing the state root.
-
 use reth_storage_errors::db::DatabaseError;
-use thiserror::Error;
+use thiserror_no_std::Error;
 
 /// State root errors.
 #[derive(Error, Debug, PartialEq, Eq, Clone)]
@@ -23,10 +22,31 @@ impl From<StateRootError> for DatabaseError {
     }
 }
 
+// Implement std::error::Error for StateRootError
+#[cfg(feature = "std")]
+impl std::error::Error for StateRootError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::DB(err) => Some(err),
+            Self::StorageRootError(err) => Some(err),
+        }
+    }
+}
+
 /// Storage root error.
 #[derive(Error, PartialEq, Eq, Clone, Debug)]
 pub enum StorageRootError {
     /// Internal database error.
     #[error(transparent)]
     DB(#[from] DatabaseError),
+}
+
+// Implement std::error::Error for StorageRootError
+#[cfg(feature = "std")]
+impl std::error::Error for StorageRootError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::DB(err) => Some(err),
+        }
+    }
 }

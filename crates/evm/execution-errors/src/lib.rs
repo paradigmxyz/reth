@@ -13,7 +13,7 @@ use reth_primitives::{revm_primitives::EVMError, BlockNumHash, B256};
 use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
 use std::fmt::Display;
-use thiserror::Error;
+use thiserror_no_std::Error;
 
 pub mod trie;
 pub use trie::{StateRootError, StorageRootError};
@@ -98,6 +98,19 @@ pub enum BlockValidationError {
     DepositRequestDecode(String),
 }
 
+// Explicitly implement the std::error::Error trait if needed
+#[cfg(feature = "std")]
+impl std::error::Error for BlockValidationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::EVM { error, .. } => Some(&**error),
+            Self::StateRoot(err) => Some(err),
+            Self::BlockHashAccountLoadingFailed(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
 /// `BlockExecutor` Errors
 #[derive(Error, Debug)]
 pub enum BlockExecutionError {
@@ -136,12 +149,28 @@ pub enum BlockExecutionError {
     #[error(transparent)]
     LatestBlock(#[from] ProviderError),
     /// Arbitrary Block Executor Errors
+    #[cfg(feature = "std")]
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
+#[cfg(feature = "std")]
+impl std::error::Error for BlockExecutionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Validation(err) => Some(err),
+            Self::Pruning(err) => Some(err),
+            Self::Consensus(err) => Some(err),
+            Self::LatestBlock(err) => Some(err),
+            Self::Other(err) => Some(&**err),
+            _ => None,
+        }
+    }
+}
+
 impl BlockExecutionError {
     /// Create a new `BlockExecutionError::Other` variant.
+    #[cfg(feature = "std")]
     pub fn other<E>(error: E) -> Self
     where
         E: std::error::Error + Send + Sync + 'static,
@@ -150,6 +179,7 @@ impl BlockExecutionError {
     }
 
     /// Create a new [`BlockExecutionError::Other`] from a given message.
+    #[cfg(feature = "std")]
     pub fn msg(msg: impl Display) -> Self {
         Self::Other(msg.to_string().into())
     }
