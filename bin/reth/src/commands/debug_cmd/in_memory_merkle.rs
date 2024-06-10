@@ -15,7 +15,7 @@ use reth_errors::BlockValidationError;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{stage::StageId, BlockHashOrNumber, Receipts};
+use reth_primitives::{stage::StageId, BlockHashOrNumber};
 use reth_provider::{
     AccountExtReader, BundleStateWithReceipts, ChainSpecProvider, HashingWriter, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
@@ -146,11 +146,7 @@ impl Command {
             )
                 .into(),
         )?;
-        let block_state = BundleStateWithReceipts::new(
-            state,
-            Receipts::from_block_receipt(receipts),
-            block.number,
-        );
+        let block_state = BundleStateWithReceipts::new(state, receipts.into(), block.number);
 
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates) =

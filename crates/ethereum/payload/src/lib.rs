@@ -27,7 +27,7 @@ use reth_primitives::{
     eip4844::calculate_excess_blob_gas,
     proofs::{self, calculate_requests_root},
     revm::env::tx_env_with_recovered,
-    Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
+    Block, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
 use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
@@ -444,11 +444,8 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let bundle = BundleStateWithReceipts::new(
-        db.take_bundle(),
-        Receipts::from_vec(vec![receipts]),
-        block_number,
-    );
+    let bundle =
+        BundleStateWithReceipts::new(db.take_bundle(), vec![receipts].into(), block_number);
     let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
     let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
 

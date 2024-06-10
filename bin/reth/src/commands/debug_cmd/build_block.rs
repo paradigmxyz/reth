@@ -26,7 +26,7 @@ use reth_primitives::{
     constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
     revm_primitives::KzgSettings,
     stage::StageId,
-    Address, BlobTransaction, BlobTransactionSidecar, Bytes, PooledTransactionsElement, Receipts,
+    Address, BlobTransaction, BlobTransactionSidecar, Bytes, PooledTransactionsElement,
     SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
 };
 use reth_provider::{
@@ -273,11 +273,7 @@ impl Command {
 
                 let BlockExecutionOutput { state, receipts, .. } =
                     executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
-                let state = BundleStateWithReceipts::new(
-                    state,
-                    Receipts::from_block_receipt(receipts),
-                    block.number,
-                );
+                let state = BundleStateWithReceipts::new(state, receipts.into(), block.number);
                 debug!(target: "reth::cli", ?state, "Executed block");
 
                 let hashed_state = state.hash_state_slow();
