@@ -6,7 +6,7 @@ use crate::{
     priority::Priority,
 };
 use parking_lot::Mutex;
-use reth_network_types::{PeerId, WithPeerId};
+use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives::{
     BlockBody, BlockHashOrNumber, BlockNumHash, Header, HeadersDirection, SealedBlock,
     SealedHeader, B256,

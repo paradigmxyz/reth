@@ -1,5 +1,7 @@
 //! `NodeRecord` type that uses a domain instead of an IP.
 
+use crate::{NodeRecord, PeerId};
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use std::{
     fmt::{self, Write},
     io::Error,
@@ -7,10 +9,6 @@ use std::{
     num::ParseIntError,
     str::FromStr,
 };
-
-use crate::{NodeRecord, PeerId};
-use secp256k1::{SecretKey, SECP256K1};
-use serde_with::{DeserializeFromStr, SerializeDisplay};
 use url::Host;
 
 /// Represents the node record of a trusted peer. The only difference between this and a
@@ -35,8 +33,8 @@ pub struct TrustedPeer {
 
 impl TrustedPeer {
     /// Derive the [`NodeRecord`] from the secret key and addr
-    pub fn from_secret_key(host: Host, port: u16, sk: &SecretKey) -> Self {
-        let pk = secp256k1::PublicKey::from_secret_key(SECP256K1, sk);
+    pub fn from_secret_key(host: Host, port: u16, sk: &secp256k1::SecretKey) -> Self {
+        let pk = secp256k1::PublicKey::from_secret_key(secp256k1::SECP256K1, sk);
         let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
         Self::new(host, port, id)
     }
