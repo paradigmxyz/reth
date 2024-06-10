@@ -9,7 +9,7 @@ use crate::{
     walker::TrieWalker,
 };
 use alloy_rlp::{BufMut, Encodable};
-use reth_db::transaction::DbTx;
+use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{
     constants::EMPTY_ROOT_HASH,
@@ -554,12 +554,10 @@ mod tests {
         test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
     };
     use proptest::{prelude::ProptestConfig, proptest};
-    use reth_db::{
+    use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
+    use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
-        tables,
-        test_utils::TempDatabase,
         transaction::DbTxMut,
-        DatabaseEnv,
     };
     use reth_primitives::{
         hex_literal::hex,

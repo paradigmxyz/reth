@@ -7,15 +7,6 @@ $ reth db version --help
 Usage: reth db version [OPTIONS]
 
 Options:
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-
-          Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
-
-          [default: mainnet]
-
       --instance <INSTANCE>
           Add a new instance of a node.
 

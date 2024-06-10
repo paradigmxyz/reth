@@ -12,9 +12,9 @@ use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOV
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
-use reth_network_types::{pk2id, PeerId};
+use reth_network_peers::{pk2id, PeerId};
 use reth_primitives::{
-    mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, MAINNET,
+    mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, TrustedPeer, MAINNET,
 };
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -41,7 +41,7 @@ pub struct NetworkConfig<C> {
     /// The node's secret key, from which the node's identity is derived.
     pub secret_key: SecretKey,
     /// All boot nodes to start network discovery with.
-    pub boot_nodes: HashSet<NodeRecord>,
+    pub boot_nodes: HashSet<TrustedPeer>,
     /// How to set up discovery over DNS.
     pub dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// Address to use for discovery v4.
@@ -147,7 +147,7 @@ pub struct NetworkConfigBuilder {
     #[serde(skip)]
     discovery_v5_builder: Option<reth_discv5::ConfigBuilder>,
     /// All boot nodes to start network discovery with.
-    boot_nodes: HashSet<NodeRecord>,
+    boot_nodes: HashSet<TrustedPeer>,
     /// Address to use for discovery
     discovery_addr: Option<SocketAddr>,
     /// Listener for incoming connections
@@ -365,8 +365,8 @@ impl NetworkConfigBuilder {
     }
 
     /// Sets the boot nodes.
-    pub fn boot_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
-        self.boot_nodes = nodes.into_iter().collect();
+    pub fn boot_nodes<T: Into<TrustedPeer>>(mut self, nodes: impl IntoIterator<Item = T>) -> Self {
+        self.boot_nodes = nodes.into_iter().map(Into::into).collect();
         self
     }
 

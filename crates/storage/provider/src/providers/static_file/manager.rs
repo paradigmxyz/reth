@@ -10,13 +10,14 @@ use crate::{
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use parking_lot::RwLock;
 use reth_db::{
-    codecs::CompactU256,
-    cursor::DbCursorRO,
     lockfile::StorageLock,
-    models::StoredBlockBodyIndices,
     static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
-    table::Table,
     tables,
+};
+use reth_db_api::{
+    cursor::DbCursorRO,
+    models::{CompactU256, StoredBlockBodyIndices},
+    table::Table,
     transaction::DbTx,
 };
 use reth_nippy_jar::NippyJar;
@@ -702,7 +703,7 @@ impl StaticFileProvider {
                 ?segment,
                 "Setting unwind target."
             );
-            return Ok(Some(highest_static_file_block));
+            return Ok(Some(highest_static_file_block))
         }
 
         // If the checkpoint is behind, then we failed to do a database commit **but committed** to

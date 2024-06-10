@@ -1,7 +1,7 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
-    tables,
     transaction::DbTx,
 };
 use reth_primitives::{Account, B256, U256};

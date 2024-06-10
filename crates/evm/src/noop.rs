@@ -1,7 +1,8 @@
 //! A no operation block executor implementation.
 
 use reth_execution_errors::BlockExecutionError;
-use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt};
+use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm_primitives::db::Database;
 

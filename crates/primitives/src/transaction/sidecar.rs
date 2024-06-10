@@ -213,7 +213,7 @@ impl BlobTransaction {
         // decode the _first_ list header for the rest of the transaction
         let outer_header = Header::decode(data)?;
         if !outer_header.list {
-            return Err(RlpError::Custom("PooledTransactions blob tx must be encoded as a list"));
+            return Err(RlpError::Custom("PooledTransactions blob tx must be encoded as a list"))
         }
 
         let outer_remaining_len = data.len();
@@ -225,7 +225,7 @@ impl BlobTransaction {
         if !inner_header.list {
             return Err(RlpError::Custom(
                 "PooledTransactions inner blob tx must be encoded as a list",
-            ));
+            ))
         }
 
         let inner_remaining_len = data.len();
@@ -239,7 +239,7 @@ impl BlobTransaction {
         // the inner header only decodes the transaction and signature, so we check the length here
         let inner_consumed = inner_remaining_len - data.len();
         if inner_consumed != inner_header.payload_length {
-            return Err(RlpError::UnexpectedLength);
+            return Err(RlpError::UnexpectedLength)
         }
 
         // All that's left are the blobs, commitments, and proofs

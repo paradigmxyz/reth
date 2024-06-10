@@ -5,7 +5,7 @@ use super::{
 };
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
-use reth_db::codecs::CompactU256;
+use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{ConsistencyFailStrategy, NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
     static_file::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},
@@ -181,26 +181,28 @@ impl StaticFileProviderRW {
             }
         }
 
-        // Commits offsets and new user_header to disk
-        self.writer.commit().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+        if self.writer.is_dirty() {
+            // Commits offsets and new user_header to disk
+            self.writer.commit().map_err(|e| ProviderError::NippyJar(e.to_string()))?;
 
-        if let Some(metrics) = &self.metrics {
-            metrics.record_segment_operation(
-                self.writer.user_header().segment(),
-                StaticFileProviderOperation::CommitWriter,
-                Some(start.elapsed()),
+            if let Some(metrics) = &self.metrics {
+                metrics.record_segment_operation(
+                    self.writer.user_header().segment(),
+                    StaticFileProviderOperation::CommitWriter,
+                    Some(start.elapsed()),
+                );
+            }
+
+            debug!(
+                target: "provider::static_file",
+                segment = ?self.writer.user_header().segment(),
+                path = ?self.data_path,
+                duration = ?start.elapsed(),
+                "Commit"
             );
+
+            self.update_index()?;
         }
-
-        debug!(
-            target: "provider::static_file",
-            segment = ?self.writer.user_header().segment(),
-            path = ?self.data_path,
-            duration = ?start.elapsed(),
-            "Commit"
-        );
-
-        self.update_index()?;
 
         Ok(())
     }
@@ -593,7 +595,7 @@ impl StaticFileProviderRW {
     fn ensure_no_queued_prune(&self) -> ProviderResult<()> {
         if self.prune_on_commit.is_some() {
             return Err(ProviderError::NippyJar(
-                "Pruning should be comitted before appending or pruning more data".to_string(),
+                "Pruning should be committed before appending or pruning more data".to_string(),
             ))
         }
         Ok(())

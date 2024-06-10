@@ -50,11 +50,6 @@ const PING_TIMEOUT: Duration = Duration::from_secs(15);
 /// when the peer is responsive.
 const PING_INTERVAL: Duration = Duration::from_secs(60);
 
-/// [`GRACE_PERIOD`] determines the amount of time to wait for a peer to disconnect after sending a
-/// [`P2PMessage::Disconnect`] message.
-#[allow(dead_code)]
-const GRACE_PERIOD: Duration = Duration::from_secs(2);
-
 /// [`MAX_P2P_CAPACITY`] is the maximum number of messages that can be buffered to be sent in the
 /// `p2p` stream.
 ///

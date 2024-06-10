@@ -42,9 +42,8 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
-use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{ForkId, NodeRecord};
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
@@ -141,12 +140,6 @@ impl<C> NetworkManager<C> {
         &self.handle
     }
 
-    /// Returns a shareable reference to the [`BandwidthMeter`] stored
-    /// inside of the [`NetworkHandle`]
-    pub fn bandwidth_meter(&self) -> &BandwidthMeter {
-        self.handle.bandwidth_meter()
-    }
-
     /// Returns the secret key used for authenticating sessions.
     pub const fn secret_key(&self) -> SecretKey {
         self.swarm.sessions().secret_key()
@@ -206,9 +199,16 @@ where
         })?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
+        // resolve boot nodes
+        let mut resolved_boot_nodes = vec![];
+        for record in &boot_nodes {
+            let resolved = record.resolve().await?;
+            resolved_boot_nodes.push(resolved);
+        }
+
         discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
             // merge configured boot nodes
-            disc_config.bootstrap_nodes.extend(boot_nodes.clone());
+            disc_config.bootstrap_nodes.extend(resolved_boot_nodes.clone());
             disc_config.add_eip868_pair("eth", status.forkid);
             disc_config
         });
@@ -226,7 +226,6 @@ where
         let discv4 = discovery.discv4();
 
         let num_active_peers = Arc::new(AtomicUsize::new(0));
-        let bandwidth_meter: BandwidthMeter = BandwidthMeter::default();
 
         let sessions = SessionManager::new(
             secret_key,
@@ -236,7 +235,6 @@ where
             hello_message,
             fork_filter,
             extra_protocols,
-            bandwidth_meter.clone(),
         );
 
         let state =
@@ -256,7 +254,6 @@ where
             local_peer_id,
             peers_handle,
             network_mode,
-            bandwidth_meter,
             Arc::new(AtomicU64::new(chain_spec.chain.id())),
             tx_gossip_disabled,
             discv4,

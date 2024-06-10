@@ -281,7 +281,7 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
     /// The components for the node with the given types
     type Components: NodeComponents<Node>;
 
-    /// Consumes the type and returns the crated components.
+    /// Consumes the type and returns the created components.
     fn build_components(
         self,
         ctx: &BuilderContext<Node>,

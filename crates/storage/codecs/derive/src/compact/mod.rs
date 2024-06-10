@@ -156,7 +156,7 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
                     ]
                     .contains(&path.ident.to_string().as_str())
                     {
-                        return true;
+                        return true
                     }
                 }
             }

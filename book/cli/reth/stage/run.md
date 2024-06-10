@@ -6,69 +6,7 @@ Run a single stage.
 $ reth stage run --help
 Usage: reth stage run [OPTIONS] --from <FROM> --to <TO> <STAGE>
 
-Arguments:
-  <STAGE>
-          The name of the stage to run
-
-          Possible values:
-          - headers:         The headers stage within the pipeline
-          - bodies:          The bodies stage within the pipeline
-          - senders:         The senders stage within the pipeline
-          - execution:       The execution stage within the pipeline
-          - account-hashing: The account hashing stage within the pipeline
-          - storage-hashing: The storage hashing stage within the pipeline
-          - hashing:         The account and storage hashing stages within the pipeline
-          - merkle:          The merkle stage within the pipeline
-          - tx-lookup:       The transaction lookup stage within the pipeline
-          - account-history: The account history stage within the pipeline
-          - storage-history: The storage history stage within the pipeline
-
 Options:
-      --config <FILE>
-          The path to the configuration file to use.
-
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-
-          Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
-
-          [default: mainnet]
-
-      --metrics <SOCKET>
-          Enable Prometheus metrics.
-
-          The metrics will be served at the given interface and port.
-
-      --from <FROM>
-          The height to start at
-
-  -t, --to <TO>
-          The end of the stage
-
-      --batch-size <BATCH_SIZE>
-          Batch size for stage execution and unwind
-
-      --etl-file-size <ETL_FILE_SIZE>
-          The maximum size in bytes of data held in memory before being flushed to disk as a file
-
-      --etl-dir <ETL_DIR>
-          Directory where to collect ETL files
-
-  -s, --skip-unwind
-          Normally, running the stage requires unwinding for stages that already have been run, in order to not rewrite to the same database slots.
-
-          You can optionally skip the unwinding phase if you're syncing a block range that has not been synced before.
-
-  -c, --commit
-          Commits the changes in the database. WARNING: potentially destructive.
-
-          Useful when you want to run diagnostics on the database.
-
-      --checkpoints
-          Save stage checkpoints
-
       --instance <INSTANCE>
           Add a new instance of a node.
 
@@ -97,6 +35,80 @@ Datadir:
 
       --datadir.static_files <PATH>
           The absolute path to store static files in.
+
+      --config <FILE>
+          The path to the configuration file to use
+
+      --chain <CHAIN_OR_PATH>
+          The chain this node is running.
+          Possible values are either a built-in chain or the path to a chain specification file.
+
+          Built-in chains:
+              mainnet, sepolia, goerli, holesky, dev
+
+          [default: mainnet]
+
+Database:
+      --db.log-level <LOG_LEVEL>
+          Database logging level. Levels higher than "notice" require a debug build
+
+          Possible values:
+          - fatal:   Enables logging for critical conditions, i.e. assertion failures
+          - error:   Enables logging for error conditions
+          - warn:    Enables logging for warning conditions
+          - notice:  Enables logging for normal but significant condition
+          - verbose: Enables logging for verbose informational
+          - debug:   Enables logging for debug-level messages
+          - trace:   Enables logging for trace debug-level messages
+          - extra:   Enables logging for extra debug-level messages
+
+      --db.exclusive <EXCLUSIVE>
+          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
+
+          [possible values: true, false]
+
+      --metrics <SOCKET>
+          Enable Prometheus metrics.
+
+          The metrics will be served at the given interface and port.
+
+      --from <FROM>
+          The height to start at
+
+  -t, --to <TO>
+          The end of the stage
+
+      --batch-size <BATCH_SIZE>
+          Batch size for stage execution and unwind
+
+  -s, --skip-unwind
+          Normally, running the stage requires unwinding for stages that already have been run, in order to not rewrite to the same database slots.
+
+          You can optionally skip the unwinding phase if you're syncing a block range that has not been synced before.
+
+  -c, --commit
+          Commits the changes in the database. WARNING: potentially destructive.
+
+          Useful when you want to run diagnostics on the database.
+
+      --checkpoints
+          Save stage checkpoints
+
+  <STAGE>
+          The name of the stage to run
+
+          Possible values:
+          - headers:         The headers stage within the pipeline
+          - bodies:          The bodies stage within the pipeline
+          - senders:         The senders stage within the pipeline
+          - execution:       The execution stage within the pipeline
+          - account-hashing: The account hashing stage within the pipeline
+          - storage-hashing: The storage hashing stage within the pipeline
+          - hashing:         The account and storage hashing stages within the pipeline
+          - merkle:          The merkle stage within the pipeline
+          - tx-lookup:       The transaction lookup stage within the pipeline
+          - account-history: The account history stage within the pipeline
+          - storage-history: The storage history stage within the pipeline
 
 Networking:
   -d, --disable-discovery
@@ -165,6 +177,11 @@ Networking:
 
           Will fall back to a network-specific default if not specified.
 
+      --dns-retries <DNS_RETRIES>
+          Amount of DNS resolution requests retries to perform when peering
+
+          [default: 0]
+
       --peers-file <FILE>
           The path to the known peers file. Connected peers are dumped to this file on nodes
           shutdown, and read on startup. Cannot be used with `--no-persist-peers`.
@@ -224,25 +241,6 @@ Networking:
           Default is 128 KiB.
 
           [default: 131072]
-
-Database:
-      --db.log-level <LOG_LEVEL>
-          Database logging level. Levels higher than "notice" require a debug build
-
-          Possible values:
-          - fatal:   Enables logging for critical conditions, i.e. assertion failures
-          - error:   Enables logging for error conditions
-          - warn:    Enables logging for warning conditions
-          - notice:  Enables logging for normal but significant condition
-          - verbose: Enables logging for verbose informational
-          - debug:   Enables logging for debug-level messages
-          - trace:   Enables logging for trace debug-level messages
-          - extra:   Enables logging for extra debug-level messages
-
-      --db.exclusive <EXCLUSIVE>
-          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
-
-          [possible values: true, false]
 
 Logging:
       --log.stdout.format <FORMAT>

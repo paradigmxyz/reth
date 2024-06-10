@@ -89,7 +89,7 @@ fn generate_from_compact(fields: &FieldList, ident: &Ident, is_zstd: bool) -> To
                     let ident = format_ident!("{name}");
                     return Some(quote! {
                         #ident: #ident,
-                    });
+                    })
                 }
                 None
             });

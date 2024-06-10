@@ -1,5 +1,5 @@
 //! Version information for reth.
-use reth_db::models::client_version::ClientVersion;
+use reth_db_api::models::ClientVersion;
 use reth_rpc_types::engine::ClientCode;
 
 /// The client code for Reth

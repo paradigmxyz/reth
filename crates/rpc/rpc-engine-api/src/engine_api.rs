@@ -2,12 +2,13 @@ use crate::{metrics::EngineApiMetrics, EngineApiError, EngineApiResult};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
-use reth_engine_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, EngineTypes, PayloadAttributes,
-    PayloadBuilderAttributes, PayloadOrAttributes,
-};
+use reth_engine_primitives::EngineTypes;
 use reth_evm::provider::EvmEnvProvider;
 use reth_payload_builder::PayloadStore;
+use reth_payload_primitives::{
+    validate_payload_timestamp, EngineApiMessageVersion, PayloadAttributes,
+    PayloadBuilderAttributes, PayloadOrAttributes,
+};
 use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
@@ -24,10 +25,6 @@ use reth_tasks::TaskSpawner;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
 use tracing::{trace, warn};
-
-/// The list of additional V4 caps
-// TODO(mattsse): move to alloy
-const V4_CAPABILITIES: [&str; 2] = ["engine_getPayloadV4", "engine_newPayloadV4"];
 
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
@@ -605,6 +602,8 @@ where
         Ok(res?)
     }
 
+    /// Handler for `engine_newPayloadV4`
+    /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/prague.md#engine_newpayloadv4>
     async fn new_payload_v4(
         &self,
         payload: ExecutionPayloadV4,
@@ -821,7 +820,7 @@ where
     /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
-        Ok(CAPABILITIES.into_iter().chain(V4_CAPABILITIES.into_iter()).map(str::to_owned).collect())
+        Ok(CAPABILITIES.iter().cloned().map(str::to_owned).collect())
     }
 }
 

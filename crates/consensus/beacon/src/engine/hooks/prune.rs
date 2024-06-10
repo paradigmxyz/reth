@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::FutureExt;
 use metrics::Counter;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_errors::{RethError, RethResult};
 use reth_primitives::BlockNumber;
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};

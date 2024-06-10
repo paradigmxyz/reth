@@ -20,7 +20,8 @@ reth-db-common.workspace = true
 reth-exex.workspace = true
 reth-evm.workspace = true
 reth-provider.workspace = true
-reth-db.workspace = true
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-db-api.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-rpc.workspace = true
 reth-rpc-layer.workspace = true
@@ -51,12 +52,23 @@ tokio = { workspace = true, features = [
 ] }
 tokio-stream.workspace = true
 
+# ethereum
+discv5.workspace = true
+
+# crypto
+secp256k1 = { workspace = true, features = [
+    "global-context",
+    "rand-std",
+    "recovery",
+] }
+
 ## misc
 aquamarine.workspace = true
 eyre.workspace = true
 fdlimit.workspace = true
 confy.workspace = true
 rayon.workspace = true
+backon.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

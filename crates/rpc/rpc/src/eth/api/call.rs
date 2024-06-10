@@ -266,7 +266,7 @@ where
             Err(EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh))
                 if tx_request_gas_limit.is_some() || tx_request_gas_price.is_some() =>
             {
-                return Err(self.map_out_of_gas_err(block_env_gas_limit, env, &mut db));
+                return Err(self.map_out_of_gas_err(block_env_gas_limit, env, &mut db))
             }
             // Propagate other results (successful or other errors).
             ethres => ethres?,

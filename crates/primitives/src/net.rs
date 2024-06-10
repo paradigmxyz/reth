@@ -1,4 +1,4 @@
-pub use reth_network_types::{NodeRecord, NodeRecordParseError};
+pub use reth_network_peers::{NodeRecord, NodeRecordParseError, TrustedPeer};
 
 // Ethereum bootnodes come from <https://github.com/ledgerwatch/erigon/blob/devel/params/bootnodes.go>
 // OP bootnodes come from <https://github.com/ethereum-optimism/op-geth/blob/optimism/params/bootnodes.go>

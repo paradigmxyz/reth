@@ -1,11 +1,8 @@
 //! Command for debugging in-memory merkle trie calculation.
 
 use crate::{
-    args::{
-        get_secret_key,
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, DatadirArgs, NetworkArgs,
-    },
+    args::{get_secret_key, NetworkArgs},
+    commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
     utils::{get_single_body, get_single_header},
 };
@@ -13,17 +10,16 @@ use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_cli_runner::CliContext;
 use reth_config::Config;
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::DatabaseEnv;
 use reth_errors::BlockValidationError;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
-use reth_fs_util as fs;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{stage::StageId, BlockHashOrNumber, ChainSpec, Receipts};
+use reth_primitives::{stage::StageId, BlockHashOrNumber, Receipts};
 use reth_provider::{
-    providers::StaticFileProvider, AccountExtReader, BundleStateWithReceipts, HashingWriter,
-    HeaderProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
-    StageCheckpointReader, StateWriter, StaticFileProviderFactory, StorageReader,
+    AccountExtReader, BundleStateWithReceipts, ChainSpecProvider, HashingWriter, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StateWriter, StaticFileProviderFactory, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::TaskExecutor;
@@ -37,23 +33,8 @@ use tracing::*;
 /// merkle root for it.
 #[derive(Debug, Parser)]
 pub struct Command {
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
-    )]
-    chain: Arc<ChainSpec>,
-
     #[command(flatten)]
-    datadir: DatadirArgs,
-
-    #[command(flatten)]
-    db: DatabaseArgs,
+    env: EnvironmentArgs,
 
     #[command(flatten)]
     network: NetworkArgs,
@@ -79,7 +60,7 @@ impl Command {
         let secret_key = get_secret_key(&network_secret_path)?;
         let network = self
             .network
-            .network_config(config, self.chain.clone(), secret_key, default_peers_path)
+            .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
             .listener_addr(SocketAddr::new(self.network.addr, self.network.port))
             .discovery_addr(SocketAddr::new(
@@ -96,19 +77,9 @@ impl Command {
 
     /// Execute `debug in-memory-merkle` command
     pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let config = Config::default();
+        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RW)?;
 
-        // add network name to data dir
-        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
-        let db_path = data_dir.db();
-        fs::create_dir_all(&db_path)?;
-
-        // initialize the database
-        let db = Arc::new(init_db(db_path, self.db.database_args())?);
-        let static_file_provider = StaticFileProvider::read_write(data_dir.static_files())?;
-        let factory =
-            ProviderFactory::new(db.clone(), self.chain.clone(), static_file_provider.clone());
-        let provider = factory.provider()?;
+        let provider = provider_factory.provider()?;
 
         // Look up merkle checkpoint
         let merkle_checkpoint = provider
@@ -124,7 +95,7 @@ impl Command {
             .build_network(
                 &config,
                 ctx.task_executor.clone(),
-                factory.clone(),
+                provider_factory.clone(),
                 network_secret_path,
                 data_dir.known_peers(),
             )
@@ -147,7 +118,7 @@ impl Command {
         .await?;
 
         let client = fetch_client.clone();
-        let chain = Arc::clone(&self.chain);
+        let chain = provider_factory.chain_spec();
         let block = (move || get_single_body(client.clone(), Arc::clone(&chain), header.clone()))
             .retry(&backoff)
             .notify(
@@ -157,10 +128,10 @@ impl Command {
 
         let db = StateProviderDatabase::new(LatestStateProviderRef::new(
             provider.tx_ref(),
-            factory.static_file_provider(),
+            provider_factory.static_file_provider(),
         ));
 
-        let executor = block_executor!(self.chain.clone()).executor(db);
+        let executor = block_executor!(provider_factory.chain_spec()).executor(db);
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
@@ -190,7 +161,7 @@ impl Command {
             return Ok(())
         }
 
-        let provider_rw = factory.provider_rw()?;
+        let provider_rw = provider_factory.provider_rw()?;
 
         // Insert block, state and hashes
         provider_rw.insert_historical_block(

@@ -4,8 +4,8 @@ use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
     BlockStatus, BlockValidationKind, BlockchainTreeEngine, CanonicalOutcome, InsertPayloadOk,
 };
-use reth_db::database::Database;
-use reth_engine_primitives::{EngineTypes, PayloadAttributes, PayloadBuilderAttributes};
+use reth_db_api::database::Database;
+use reth_engine_primitives::EngineTypes;
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
     bodies::client::BodiesClient,
@@ -13,6 +13,7 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
 };
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
     constants::EPOCH_SLOTS,
@@ -960,7 +961,7 @@ where
                 .blockchain
                 .find_block_by_hash(finalized_block_hash, BlockSource::Any)?
                 .ok_or_else(|| ProviderError::UnknownBlockHash(finalized_block_hash))?;
-            self.blockchain.finalize_block(finalized.number);
+            self.blockchain.finalize_block(finalized.number)?;
             self.blockchain.set_finalized(finalized.header.seal(finalized_block_hash));
         }
         Ok(())
@@ -2178,7 +2179,8 @@ mod tests {
 
     mod fork_choice_updated {
         use super::*;
-        use reth_db::{tables, test_utils::create_test_static_files_dir, transaction::DbTxMut};
+        use reth_db::{tables, test_utils::create_test_static_files_dir};
+        use reth_db_api::transaction::DbTxMut;
         use reth_primitives::U256;
         use reth_provider::providers::StaticFileProvider;
         use reth_rpc_types::engine::ForkchoiceUpdateError;

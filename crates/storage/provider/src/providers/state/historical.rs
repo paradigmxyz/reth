@@ -2,13 +2,12 @@ use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, ProviderError, StateProvider, StateRootProvider,
 };
-use reth_db::{
+use reth_db::{tables, BlockNumberList};
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
     table::Table,
-    tables,
     transaction::DbTx,
-    BlockNumberList,
 };
 use reth_primitives::{
     constants::EPOCH_SLOTS, trie::AccountProof, Account, Address, BlockNumber, Bytecode,
@@ -376,11 +375,11 @@ delegate_provider_impls!(HistoricalStateProvider<TX> where [TX: DbTx]);
 #[derive(Clone, Copy, Debug, Default)]
 pub struct LowestAvailableBlocks {
     /// Lowest block number at which the account history is available. It may not be available if
-    /// [`reth_primitives::PruneSegment::AccountHistory`] was pruned.
+    /// [`reth_prune_types::PruneSegment::AccountHistory`] was pruned.
     /// [`Option::None`] means all history is available.
     pub account_history_block_number: Option<BlockNumber>,
     /// Lowest block number at which the storage history is available. It may not be available if
-    /// [`reth_primitives::PruneSegment::StorageHistory`] was pruned.
+    /// [`reth_prune_types::PruneSegment::StorageHistory`] was pruned.
     /// [`Option::None`] means all history is available.
     pub storage_history_block_number: Option<BlockNumber>,
 }
@@ -407,11 +406,10 @@ mod tests {
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
         StaticFileProviderFactory,
     };
-    use reth_db::{
+    use reth_db::{tables, BlockNumberList};
+    use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, AccountBeforeTx, ShardedKey},
-        tables,
         transaction::{DbTx, DbTxMut},
-        BlockNumberList,
     };
     use reth_primitives::{address, b256, Account, Address, StorageEntry, B256, U256};
     use reth_storage_errors::provider::ProviderError;

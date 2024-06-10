@@ -60,10 +60,12 @@ mod tests {
     use crate::{test_utils::create_test_provider_factory, HeaderProvider};
     use rand::seq::SliceRandom;
     use reth_db::{
+        static_file::create_static_file_T1_T2_T3, CanonicalHeaders, HeaderNumbers,
+        HeaderTerminalDifficulties, Headers, RawTable,
+    };
+    use reth_db_api::{
         cursor::DbCursorRO,
-        static_file::create_static_file_T1_T2_T3,
         transaction::{DbTx, DbTxMut},
-        CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers, RawTable,
     };
     use reth_primitives::{static_file::find_fixed_range, BlockNumber, B256, U256};
     use reth_testing_utils::generators::{self, random_header_range};

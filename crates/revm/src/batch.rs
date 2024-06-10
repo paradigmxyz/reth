@@ -2,10 +2,8 @@
 
 use crate::{precompile::Address, primitives::alloy_primitives::BlockNumber};
 use reth_execution_errors::BlockExecutionError;
-use reth_primitives::{
-    PruneMode, PruneModes, PruneSegmentError, Receipt, Receipts, Request, Requests,
-    MINIMUM_PRUNING_DISTANCE,
-};
+use reth_primitives::{Receipt, Receipts, Request, Requests};
+use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
 use std::time::Duration;
 use tracing::debug;

@@ -43,13 +43,15 @@ mod tests {
     use crate::test_utils::{StorageKind, TestStageDB};
     use alloy_rlp::Decodable;
     use reth_db::{
-        cursor::{DbCursorRO, DbCursorRW},
         mdbx::{cursor::Cursor, RW},
-        table::Table,
         tables,
         test_utils::TempDatabase,
-        transaction::{DbTx, DbTxMut},
         AccountsHistory, DatabaseEnv,
+    };
+    use reth_db_api::{
+        cursor::{DbCursorRO, DbCursorRW},
+        table::Table,
+        transaction::{DbTx, DbTxMut},
     };
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;
@@ -58,14 +60,15 @@ mod tests {
         hex_literal::hex,
         keccak256,
         stage::{PipelineTarget, StageCheckpoint, StageId},
-        Account, BlockNumber, Bytecode, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock,
-        StaticFileSegment, B256, U256,
+        Account, BlockNumber, Bytecode, ChainSpecBuilder, SealedBlock, StaticFileSegment, B256,
+        U256,
     };
     use reth_provider::{
         providers::StaticFileWriter, AccountExtReader, BlockReader, DatabaseProviderFactory,
         ProviderFactory, ProviderResult, ReceiptProvider, StageCheckpointWriter,
         StaticFileProviderFactory, StorageReader,
     };
+    use reth_prune_types::{PruneMode, PruneModes};
     use reth_stages_api::{ExecInput, Stage};
     use reth_testing_utils::generators::{self, random_block, random_block_range, random_receipt};
     use std::{io::Write, sync::Arc};

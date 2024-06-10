@@ -374,9 +374,8 @@ mod tests {
     use super::*;
     use crate::{HashedPostState, HashedStorage};
     use proptest::prelude::*;
-    use reth_db::{
-        database::Database, tables, test_utils::create_test_rw_db, transaction::DbTxMut,
-    };
+    use reth_db::{tables, test_utils::create_test_rw_db};
+    use reth_db_api::{database::Database, transaction::DbTxMut};
     use reth_primitives::StorageEntry;
     use std::collections::BTreeMap;
 

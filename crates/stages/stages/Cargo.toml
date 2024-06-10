@@ -17,12 +17,14 @@ reth-codecs.workspace = true
 reth-config.workspace = true
 reth-consensus.workspace = true
 reth-db.workspace = true
+reth-db-api.workspace = true
 reth-etl.workspace = true
 reth-evm.workspace = true
 reth-exex.workspace = true
 reth-network-p2p.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
+reth-prune-types.workspace = true
 reth-storage-errors.workspace = true
 reth-revm.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
@@ -58,7 +60,7 @@ reth-static-file.workspace = true
 reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
-reth-network-types.workspace = true
+reth-network-peers.workspace = true
 
 alloy-rlp.workspace = true
 itertools.workspace = true

@@ -14,9 +14,10 @@ workspace = true
 # reth
 reth-evm.workspace = true
 reth-provider.workspace = true
-reth-db.workspace = true
+reth-db-api.workspace = true
 reth-engine-primitives.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
