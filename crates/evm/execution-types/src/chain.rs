@@ -476,7 +476,7 @@ pub enum ChainSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Receipts, B256};
+    use reth_primitives::B256;
     use revm::primitives::{AccountInfo, HashMap};
 
     #[test]
@@ -524,7 +524,7 @@ mod tests {
                 vec![vec![(Address::new([2; 20]), None, vec![])]],
                 vec![],
             ),
-            Receipts::from_vec(vec![vec![]]),
+            vec![vec![]].into(),
             1,
         );
 
@@ -539,7 +539,7 @@ mod tests {
                 vec![vec![(Address::new([3; 20]), None, vec![])]],
                 vec![],
             ),
-            Receipts::from_vec(vec![vec![]]),
+            vec![vec![]].into(),
             2,
         );
 

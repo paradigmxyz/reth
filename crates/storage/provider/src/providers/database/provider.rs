@@ -538,7 +538,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             state,
             reverts,
             Vec::new(),
-            reth_primitives::Receipts::from_vec(receipts),
+            receipts.into(),
             start_block_number,
         ))
     }
