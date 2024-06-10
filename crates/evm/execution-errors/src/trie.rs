@@ -1,4 +1,5 @@
 //! Errors when computing the state root.
+
 use reth_storage_errors::db::DatabaseError;
 use thiserror_no_std::Error;
 
@@ -22,7 +23,6 @@ impl From<StateRootError> for DatabaseError {
     }
 }
 
-// Implement std::error::Error for StateRootError
 #[cfg(feature = "std")]
 impl std::error::Error for StateRootError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
@@ -41,7 +41,6 @@ pub enum StorageRootError {
     DB(#[from] DatabaseError),
 }
 
-// Implement std::error::Error for StorageRootError
 #[cfg(feature = "std")]
 impl std::error::Error for StorageRootError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {

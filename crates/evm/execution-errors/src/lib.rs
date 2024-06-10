@@ -98,7 +98,6 @@ pub enum BlockValidationError {
     DepositRequestDecode(String),
 }
 
-// Explicitly implement the std::error::Error trait if needed
 #[cfg(feature = "std")]
 impl std::error::Error for BlockValidationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
