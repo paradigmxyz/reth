@@ -75,14 +75,14 @@ impl BlockchainTestData {
     /// Create test data with two blocks that are connected, specifying their block numbers.
     pub fn default_from_number(first: BlockNumber) -> Self {
         let one = block1(first);
-        let mut extended_state = one.1.clone();
-        let two = block2(first + 1, one.0.hash(), &extended_state);
-        extended_state.extend(two.1.clone());
-        let three = block3(first + 2, two.0.hash(), &extended_state);
-        extended_state.extend(three.1.clone());
-        let four = block4(first + 3, three.0.hash(), &extended_state);
-        extended_state.extend(four.1.clone());
-        let five = block5(first + 4, four.0.hash(), &extended_state);
+        let mut extended_execution_outcome = one.1.clone();
+        let two = block2(first + 1, one.0.hash(), &extended_execution_outcome);
+        extended_execution_outcome.extend(two.1.clone());
+        let three = block3(first + 2, two.0.hash(), &extended_execution_outcome);
+        extended_execution_outcome.extend(three.1.clone());
+        let four = block4(first + 3, three.0.hash(), &extended_execution_outcome);
+        extended_execution_outcome.extend(four.1.clone());
+        let five = block5(first + 4, four.0.hash(), &extended_execution_outcome);
         Self { genesis: genesis(), blocks: vec![one, two, three, four, five] }
     }
 }
@@ -90,14 +90,14 @@ impl BlockchainTestData {
 impl Default for BlockchainTestData {
     fn default() -> Self {
         let one = block1(1);
-        let mut extended_state = one.1.clone();
-        let two = block2(2, one.0.hash(), &extended_state);
-        extended_state.extend(two.1.clone());
-        let three = block3(3, two.0.hash(), &extended_state);
-        extended_state.extend(three.1.clone());
-        let four = block4(4, three.0.hash(), &extended_state);
-        extended_state.extend(four.1.clone());
-        let five = block5(5, four.0.hash(), &extended_state);
+        let mut extended_execution_outcome = one.1.clone();
+        let two = block2(2, one.0.hash(), &extended_execution_outcome);
+        extended_execution_outcome.extend(two.1.clone());
+        let three = block3(3, two.0.hash(), &extended_execution_outcome);
+        extended_execution_outcome.extend(three.1.clone());
+        let four = block4(4, three.0.hash(), &extended_execution_outcome);
+        extended_execution_outcome.extend(four.1.clone());
+        let five = block5(5, four.0.hash(), &extended_execution_outcome);
         Self { genesis: genesis(), blocks: vec![one, two, three, four, five] }
     }
 }
