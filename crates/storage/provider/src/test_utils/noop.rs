@@ -9,8 +9,8 @@ use crate::{
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
+    proofs::AccountProof,
     stage::{StageCheckpoint, StageId},
-    trie::AccountProof,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, BlockWithSenders,
     Bytecode, ChainInfo, ChainSpec, Header, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,

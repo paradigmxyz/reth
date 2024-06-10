@@ -1,5 +1,5 @@
 use reth_primitives::{
-    keccak256, trie::AccountProof, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey,
+    keccak256, proofs::AccountProof, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey,
     B256, U256,
 };
 use reth_storage_api::{AccountReader, BlockHashReader, StateProvider, StateRootProvider};
