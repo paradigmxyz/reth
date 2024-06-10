@@ -8,11 +8,14 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use execute::EvmExecutor;
 use reth_primitives::{
     revm::env::fill_block_env, Address, ChainSpec, Header, TransactionSigned, U256,
 };
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv};
+use revm_primitives::{
+    BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv,
+};
 
 pub mod either;
 pub mod execute;
@@ -120,4 +123,39 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
         fill_block_env(block_env, chain_spec, header, after_merge);
     }
+}
+
+/// Trait for managing the EVM context.
+pub trait EvmContext<DB: Database> {
+    /// The executor produced with the context set.
+    type Executor: EvmExecutor<DB>;
+
+    /// Sets the EVM environment.
+    #[must_use]
+    fn with_env(self, env: Env) -> Self;
+
+    /// Sets the EVM configuration environment.
+    #[must_use]
+    fn with_cfg_env(self, cfg: CfgEnv) -> Self;
+
+    /// Sets the block environment.
+    #[must_use]
+    fn with_block_env(self, block: BlockEnv) -> Self;
+
+    /// Sets the transaction environment.
+    #[must_use]
+    fn with_tx_env(self, tx: TxEnv) -> Self;
+
+    /// Sets the specification (hardfork) for the EVM instance.
+    #[must_use]
+    fn with_spec_id(self, spec_id: SpecId) -> Self;
+
+    /// Sets the inspector for the EVM instance.
+    #[must_use]
+    fn with_inspector<I>(self, inspector: I) -> Self
+    where
+        I: GetInspector<DB>;
+
+    /// Returns the EVM executor.
+    fn executor(self) -> Self::Executor;
 }

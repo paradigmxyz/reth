@@ -9,6 +9,37 @@ use revm_primitives::db::Database;
 pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_storage_errors::provider::ProviderError;
 
+/// An EVM executor trait that executes an input (e.g. transaction and height) and produces an output
+/// (e.g. state changes).
+///
+/// The executor can also commit the state changes to the database.
+pub trait EvmExecutor<DB> {
+    /// The input type for the executor.
+    type Input;
+    /// The configuration for the evm executor.
+    type Config;
+    /// The output produced by the executor.
+    type Output;
+
+    /// Updates the state of the executor.
+    fn with_state(self, db: DB) -> Self;
+
+    /// Executes the input and returns the output without committing the state.
+    fn execute(&mut self, input: Self::Input) -> Self::Output;
+
+    /// Commit the state changes to the database.
+    fn commit(&mut self, output: Self::Output);
+
+    /// Execute the input and commit the state changes to the database.
+    fn execute_and_commit(&mut self, input: Self::Input) {
+        let output = self.execute(input);
+        self.commit(output);
+    }
+
+    /// Returns the current config of the executor.
+    fn config(&self) -> Self::Config;
+}
+
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
 ///
