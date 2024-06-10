@@ -3,7 +3,7 @@ use bytes::Buf;
 use reth_codecs::Compact;
 
 /// Walker sub node for storing intermediate state root calculation state in the database.
-/// See [`crate::stage::MerkleCheckpoint`].
+/// See `MerkleCheckpoint`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StoredSubNode {
     /// The key of the current node.
