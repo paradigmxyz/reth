@@ -21,7 +21,7 @@ use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 
 use crate::eth::{
     api::{
-        BuildReceipt, EthApiSpec, EthCall, EthState, LoadBlock, LoadFee, LoadPendingBlock,
+        EthApiSpec, EthCall, EthState, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt,
         SpawnBlocking,
     },
     cache::EthStateCache,
@@ -151,7 +151,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
         hash: B256,
     ) -> impl Future<Output = EthResult<Option<AnyTransactionReceipt>>> + Send
     where
-        Self: BuildReceipt + SpawnBlocking + 'static,
+        Self: LoadReceipt + SpawnBlocking + 'static,
     {
         async move {
             let result = self.load_transaction_and_receipt(hash).await?;
@@ -496,6 +496,8 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
 }
 
 /// Loads a transaction from database.
+///
+/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadTransaction {
     /// Transaction pool with pending transactions. [`TransactionPool::Transaction`] is the
     /// supported transaction type.

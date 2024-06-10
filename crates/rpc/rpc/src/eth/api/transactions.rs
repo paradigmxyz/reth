@@ -15,7 +15,7 @@ use reth_transaction_pool::TransactionPool;
 
 use crate::{
     eth::{
-        api::{BuildReceipt, EthTransactions, LoadTransaction, RawTransactionForwarder},
+        api::{EthTransactions, LoadReceipt, LoadTransaction, RawTransactionForwarder},
         cache::EthStateCache,
         revm_utils::FillableTransaction,
         signer::EthSigner,
@@ -77,7 +77,7 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> BuildReceipt
+impl<Provider, Pool, Network, EvmConfig> LoadReceipt
     for EthApi<Provider, Pool, Network, EvmConfig>
 {
     #[inline]

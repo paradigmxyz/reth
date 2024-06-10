@@ -12,8 +12,10 @@ use crate::eth::{
 };
 
 /// Assembles transaction receipt data w.r.t to network.
+///
+/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BuildReceipt {
+pub trait LoadReceipt {
     /// Returns a handle for reading data from memory.
     ///
     /// Data access in default (L1) trait method implementations.

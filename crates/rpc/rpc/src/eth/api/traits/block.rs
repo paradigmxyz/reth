@@ -9,7 +9,7 @@ use reth_rpc_types::{AnyTransactionReceipt, Header, Index, RichBlock};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
 use crate::eth::{
-    api::{BuildReceipt, LoadPendingBlock, ReceiptBuilder, SpawnBlocking},
+    api::{LoadPendingBlock, LoadReceipt, ReceiptBuilder, SpawnBlocking},
     cache::EthStateCache,
     error::{EthApiError, EthResult},
 };
@@ -92,7 +92,7 @@ pub trait EthBlocks: LoadBlock {
         block_id: BlockId,
     ) -> impl Future<Output = EthResult<Option<Vec<AnyTransactionReceipt>>>> + Send
     where
-        Self: BuildReceipt,
+        Self: LoadReceipt,
     {
         async move {
             if let Some((block, receipts)) = self.load_block_and_receipts(block_id).await? {
@@ -136,7 +136,7 @@ pub trait EthBlocks: LoadBlock {
         block_id: BlockId,
     ) -> impl Future<Output = EthResult<Option<(SealedBlock, Arc<Vec<Receipt>>)>>> + Send
     where
-        Self: BuildReceipt,
+        Self: LoadReceipt,
     {
         async move {
             if block_id.is_pending() {
@@ -146,7 +146,7 @@ pub trait EthBlocks: LoadBlock {
             }
 
             if let Some(block_hash) = LoadBlock::provider(self).block_hash_for_id(block_id)? {
-                return Ok(BuildReceipt::cache(self).get_block_and_receipts(block_hash).await?)
+                return Ok(LoadReceipt::cache(self).get_block_and_receipts(block_hash).await?)
             }
 
             Ok(None)
@@ -192,6 +192,8 @@ pub trait EthBlocks: LoadBlock {
 }
 
 /// Loads a block from database.
+///
+/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadBlock: Send + Sync {
     // Returns a handle for reading data from disk.
     ///

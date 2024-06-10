@@ -15,7 +15,7 @@ pub use blocking_task::SpawnBlocking;
 pub use call::{Call, EthCall, StateCacheDB};
 pub use fee::{EthFees, LoadFee};
 pub use pending_block::LoadPendingBlock;
-pub use receipt::BuildReceipt;
+pub use receipt::LoadReceipt;
 pub use state::{EthState, LoadState};
 pub use trace::{EthTrace, Trace};
 pub use transaction::{EthTransactions, LoadTransaction, RawTransactionForwarder};

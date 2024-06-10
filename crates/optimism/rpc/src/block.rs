@@ -3,7 +3,7 @@
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, HeaderProvider};
 use reth_rpc::eth::{
-    api::{BuildReceipt, EthBlocks, LoadBlock, ReceiptBuilder},
+    api::{EthBlocks, LoadBlock, LoadReceipt, ReceiptBuilder},
     cache::EthStateCache,
     error::EthResult,
 };
@@ -27,7 +27,7 @@ where
         block_id: BlockId,
     ) -> EthResult<Option<Vec<AnyTransactionReceipt>>>
     where
-        Self: BuildReceipt,
+        Self: LoadReceipt,
     {
         if let Some((block, receipts)) = self.load_block_and_receipts(block_id).await? {
             let block_number = block.number;

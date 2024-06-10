@@ -139,6 +139,8 @@ pub trait EthState: LoadState + SpawnBlocking {
 }
 
 /// Loads state from database.
+///
+/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadState {
     /// Returns a handle for reading state from database.
     ///

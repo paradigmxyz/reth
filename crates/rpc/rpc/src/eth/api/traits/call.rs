@@ -564,6 +564,8 @@ pub trait EthCall: Call {
 }
 
 /// Executes code on state.
+///
+/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait Call {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     ///

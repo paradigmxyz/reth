@@ -21,7 +21,7 @@ use tracing::trace;
 use crate::{
     eth::{
         api::{
-            BuildReceipt, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions,
+            EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadReceipt,
             SpawnBlocking, Trace,
         },
         error::EthApiError,
@@ -41,7 +41,7 @@ where
         + EthCall
         + EthFees
         + Trace
-        + BuildReceipt
+        + LoadReceipt
         + SpawnBlocking,
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt
