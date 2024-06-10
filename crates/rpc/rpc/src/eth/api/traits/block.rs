@@ -3,19 +3,89 @@
 use std::sync::Arc;
 
 use futures::Future;
-use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta};
-use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt};
-use reth_rpc_types::AnyTransactionReceipt;
+use reth_primitives::{
+    BlockId, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta,
+};
+use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
+use reth_rpc_types::{Header, AnyTransactionReceipt, Index, RichBlock};
+use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 
 use crate::eth::{
     api::{BuildReceipt, LoadPendingBlock, ReceiptBuilder, SpawnBlocking},
     cache::EthStateCache,
-    error::EthResult,
+    error::{EthApiError, EthResult},
 };
 
 /// Block related functions for the [`EthApiServer`](crate::EthApi) trait in the
 /// `eth_` namespace.
 pub trait EthBlocks: LoadBlock {
+    /// Returns a handle for reading data from disk.
+    ///
+    /// Data access in default (L1) trait method implementations.
+    fn provider(&self) -> impl HeaderProvider;
+
+    /// Returns the block header for the given block id.
+    fn rpc_block_header(
+        &self,
+        block_id: impl Into<BlockId> + Send,
+    ) -> impl Future<Output = EthResult<Option<Header>>> + Send
+    where
+        Self: LoadPendingBlock + SpawnBlocking,
+    {
+        async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.inner.header)) }
+    }
+
+    /// Returns the populated rpc block object for the given block id.
+    ///
+    /// If `full` is true, the block object will contain all transaction objects, otherwise it will
+    /// only contain the transaction hashes.
+    fn rpc_block(
+        &self,
+        block_id: impl Into<BlockId> + Send,
+        full: bool,
+    ) -> impl Future<Output = EthResult<Option<RichBlock>>> + Send
+    where
+        Self: LoadPendingBlock + SpawnBlocking,
+    {
+        async move {
+            let block = match self.block_with_senders(block_id).await? {
+                Some(block) => block,
+                None => return Ok(None),
+            };
+            let block_hash = block.hash();
+            let total_difficulty = EthBlocks::provider(self)
+                .header_td_by_number(block.number)?
+                .ok_or(EthApiError::UnknownBlockNumber)?;
+            let block =
+                from_block(block.unseal(), total_difficulty, full.into(), Some(block_hash))?;
+            Ok(Some(block.into()))
+        }
+    }
+
+    /// Returns the number transactions in the given block.
+    ///
+    /// Returns `None` if the block does not exist
+    fn block_transaction_count(
+        &self,
+        block_id: impl Into<BlockId>,
+    ) -> impl Future<Output = EthResult<Option<usize>>> + Send {
+        let block_id = block_id.into();
+
+        async move {
+            if block_id.is_pending() {
+                // Pending block can be fetched directly without need for caching
+                return Ok(LoadBlock::provider(self).pending_block()?.map(|block| block.body.len()))
+            }
+
+            let block_hash = match LoadBlock::provider(self).block_hash_for_id(block_id)? {
+                Some(block_hash) => block_hash,
+                None => return Ok(None),
+            };
+
+            Ok(self.cache().get_block_transactions(block_hash).await?.map(|txs| txs.len()))
+        }
+    }
+
     /// Helper function for `eth_getBlockReceipts`.
     ///
     /// Returns all transaction receipts in block, or `None` if block wasn't found.
@@ -59,6 +129,40 @@ pub trait EthBlocks: LoadBlock {
             }
 
             Ok(None)
+        }
+    }
+
+    /// Returns uncle headers of given block.
+    ///
+    /// Returns an empty vec if there are none.
+    fn ommers(&self, block_id: impl Into<BlockId>) -> EthResult<Option<Vec<Header>>> {
+        let block_id = block_id.into();
+        Ok(LoadBlock::provider(self).ommers_by_id(block_id)?.map(|ommers| ommers.into_iter().map(|header| header.into()).collect::<Vec<_>>()))
+    }
+
+    /// Returns uncle block at given index in given block.
+    ///
+    /// Returns `None` if index out of range.
+    fn ommer_by_block_and_index(
+        &self,
+        block_id: impl Into<BlockId>,
+        index: Index,
+    ) -> impl Future<Output = EthResult<Option<RichBlock>>> + Send {
+        let block_id = block_id.into();
+
+        async move {
+            let uncles = if block_id.is_pending() {
+                // Pending block can be fetched directly without need for caching
+                LoadBlock::provider(self).pending_block()?.map(|block| block.ommers)
+            } else {
+                LoadBlock::provider(self).ommers_by_id(block_id)?
+            }
+            .unwrap_or_default();
+
+            let index = usize::from(index);
+            let uncle =
+                uncles.into_iter().nth(index).map(|header| uncle_block_from_header(header).into());
+            Ok(uncle)
         }
     }
 }
