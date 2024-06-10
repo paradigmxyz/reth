@@ -2,15 +2,16 @@ use crate::{chain::PipelineAction, engine::DownloadRequest};
 use parking_lot::Mutex;
 use reth_beacon_consensus::{ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated};
 use reth_engine_primitives::EngineTypes;
+use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::SealedBlockWithSenders;
 use reth_rpc_types::{
     engine::{CancunPayloadFields, ForkchoiceState, PayloadStatus},
     ExecutionPayload,
 };
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 /// Keeps track of the state of the tree.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TreeState {
     // TODO: this is shared state for the blocks etc.
 }
@@ -24,7 +25,7 @@ impl TreeState {
 /// Tracks the state of the engine api internals.
 ///
 /// This type is shareable.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EngineApiTreeState {
     /// Tracks the received forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
@@ -45,9 +46,7 @@ pub trait EngineApiTreeHandler: Send + Sync + Clone {
     type Engine: EngineTypes;
 
     /// Invoked when previously requested blocks were downloaded.
-    fn on_downloaded(&self, blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
-        todo!()
-    }
+    fn on_downloaded(&self, blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent>;
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
     /// the transactions in the block are sent to the execution layer in the form of a
@@ -65,9 +64,7 @@ pub trait EngineApiTreeHandler: Send + Sync + Clone {
         &self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
-    ) -> TreeOutcome<PayloadStatus> {
-        todo!()
-    }
+    ) -> TreeOutcome<PayloadStatus>;
 
     /// Invoked when we receive a new forkchoice update message. Calls into the blockchain tree
     /// to resolve chain forks and ensure that the Execution Layer is working with the latest valid
@@ -81,12 +78,11 @@ pub trait EngineApiTreeHandler: Send + Sync + Clone {
         &self,
         state: ForkchoiceState,
         attrs: Option<<Self::Engine as EngineTypes>::PayloadAttributes>,
-    ) -> TreeOutcome<Result<OnForkChoiceUpdated, String>> {
-        todo!()
-    }
+    ) -> TreeOutcome<Result<OnForkChoiceUpdated, String>>;
 }
 
 /// The outcome of a tree operation.
+#[derive(Debug)]
 pub struct TreeOutcome<T> {
     /// The outcome of the operation.
     pub outcome: T,
@@ -95,18 +91,25 @@ pub struct TreeOutcome<T> {
 }
 
 /// Events that can be emitted by the [EngineApiTreeHandler].
+#[derive(Debug)]
 pub enum TreeEvent {
     PipelineAction(PipelineAction),
     Download(DownloadRequest),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EngineApiTreeHandlerImpl<T: EngineTypes> {
     state: EngineApiTreeState,
+    payload_validator: ExecutionPayloadValidator,
+    _marker: PhantomData<T>,
 }
 
 impl<T: EngineTypes> EngineApiTreeHandler for EngineApiTreeHandlerImpl<T> {
     type Engine = T;
+
+    fn on_downloaded(&self, blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
+        todo!()
+    }
 
     fn on_new_payload(
         &self,

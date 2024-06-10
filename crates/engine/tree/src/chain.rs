@@ -25,6 +25,7 @@ use std::{
 /// emitted events. Requests and events are passed to the [`ChainHandler`] via
 /// [`ChainHandler::on_event`].
 #[must_use = "Stream does nothing unless polled"]
+#[derive(Debug)]
 pub struct ChainOrchestrator<T>
 where
     T: ChainHandler,
@@ -74,6 +75,7 @@ where
 /// Event emitted by the [`ChainOrchestrator`]
 ///
 /// These are meant to be used for observability and debugging purposes.
+#[derive(Debug)]
 pub enum ChainEvent {
     /// Pipeline sync started
     PipelineStarted,
@@ -91,7 +93,7 @@ pub trait ChainHandler: Send + Sync {
 }
 
 /// Events/Requests that the [`ChainHandler`] can emit to the [`ChainOrchestrator`].
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub enum HandlerEvent {
     Pipeline(PipelineAction),
     /// Ack paused write access to the database
@@ -100,7 +102,7 @@ pub enum HandlerEvent {
     WriteAccess,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub enum PipelineAction {
     /// Start pipeline sync
     SyncPipeline,
@@ -109,7 +111,7 @@ pub enum PipelineAction {
 }
 
 /// Internal events issued by the [`ChainOrchestrator`].
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub enum FromOrchestrator {
     /// Request to temporarily freeze write access to the database.
     PausedWriteHookAccess,
@@ -120,7 +122,7 @@ pub enum FromOrchestrator {
 }
 
 /// Represents the state of the chain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum OrchestratorState {
     /// Orchestrator has exclusive write access to the database.
     WriteAccess,
