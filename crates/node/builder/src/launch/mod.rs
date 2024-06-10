@@ -398,23 +398,24 @@ where
             let _ = tx.send(res);
         });
 
-        if let Some(custom_etherscan_url) = &ctx.node_config().debug.etherscan {
+        if let Some(maybe_custom_etherscan_url) = ctx.node_config().debug.etherscan.clone() {
+            info!(target: "reth::cli", "Using etherscan as consensus client");
+
             let chain = ctx.node_config().chain.chain;
-            let etherscan_url = match custom_etherscan_url {
-                Some(url) => url.to_owned(),
-                None => {
-                    // If URL isn't provided, use default Etherscan URL for the chain
-                    chain
-                        .etherscan_urls()
-                        .ok_or_else(|| eyre::eyre!("failed to get etherscan url for chain"))?
-                        .0
-                        .to_owned()
-                }
-            };
+            let etherscan_url = maybe_custom_etherscan_url.map(Ok).unwrap_or_else(|| {
+                // If URL isn't provided, use default Etherscan URL for the chain if it is known
+                chain
+                    .etherscan_urls()
+                    .map(|urls| urls.0.to_string())
+                    .ok_or_else(|| eyre::eyre!("failed to get etherscan url for chain: {chain}"))
+            })?;
+
             let block_provider = EtherscanBlockProvider::new(
                 etherscan_url,
                 chain.etherscan_api_key().ok_or_else(|| {
-                    eyre::eyre!("etherscan api key not found for rpc consensus client")
+                    eyre::eyre!(
+                        "etherscan api key not found for rpc consensus client for chain: {chain}"
+                    )
                 })?,
             );
             let rpc_consensus_client = DebugConsensusClient::new(
@@ -425,8 +426,11 @@ where
                 rpc_consensus_client.run::<T::Engine>().await
             });
         }
-        if let Some(rpc_ws_url) = &ctx.node_config().debug.rpc_consensus_ws {
-            let block_provider = RpcBlockProvider::new(rpc_ws_url.clone());
+
+        if let Some(rpc_ws_url) = ctx.node_config().debug.rpc_consensus_ws.clone() {
+            info!(target: "reth::cli", "Using rpc provider as consensus client");
+
+            let block_provider = RpcBlockProvider::new(rpc_ws_url);
             let rpc_consensus_client = DebugConsensusClient::new(
                 rpc_server_handles.auth.clone(),
                 Arc::new(block_provider),
