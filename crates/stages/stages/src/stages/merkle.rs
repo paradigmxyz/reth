@@ -7,7 +7,6 @@ use reth_db_api::{
 };
 use reth_primitives::{
     stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
-    trie::StoredSubNode,
     BlockNumber, GotExpected, SealedHeader, B256,
 };
 use reth_provider::{
@@ -17,7 +16,7 @@ use reth_provider::{
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
-use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
+use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
 use std::fmt::Debug;
 use tracing::*;
 

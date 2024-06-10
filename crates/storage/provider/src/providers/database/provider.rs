@@ -33,7 +33,6 @@ use reth_primitives::{
     keccak256,
     revm::{config::revm_spec, env::fill_block_env},
     stage::{StageCheckpoint, StageId},
-    trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, GotExpected, Head, Header, Receipt, Requests, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta,
@@ -45,7 +44,7 @@ use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
     updates::TrieUpdates,
-    HashedPostState, StateRoot,
+    HashedPostState, Nibbles, StateRoot,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::{

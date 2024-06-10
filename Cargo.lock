@@ -6472,6 +6472,7 @@ dependencies = [
  "reth-prune-types",
  "reth-storage-errors",
  "reth-tracing",
+ "reth-trie-types",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -6504,6 +6505,7 @@ dependencies = [
  "reth-primitives",
  "reth-prune-types",
  "reth-storage-errors",
+ "reth-trie-types",
  "serde",
  "serde_json",
  "test-fuzz",
@@ -7525,6 +7527,7 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives-traits",
  "reth-static-file-types",
+ "reth-trie-types",
  "revm",
  "revm-primitives",
  "roaring",
@@ -8093,6 +8096,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-storage-errors",
+ "reth-trie-types",
  "revm",
  "serde_json",
  "similar-asserts",
@@ -8125,6 +8129,27 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "reth-trie-types"
+version = "0.2.0-beta.9"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-trie",
+ "arbitrary",
+ "assert_matches",
+ "bytes",
+ "derive_more",
+ "nybbles",
+ "proptest",
+ "proptest-derive",
+ "reth-codecs",
+ "serde",
+ "serde_json",
+ "test-fuzz",
+ "toml",
 ]
 
 [[package]]
