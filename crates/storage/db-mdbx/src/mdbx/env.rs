@@ -1,7 +1,9 @@
 //! Module that interacts with MDBX.
 
+use super::tx::Tx;
 use crate::{
     lockfile::StorageLock,
+    mdbx::{DEFAULT_MAX_READERS, GIGABYTE, TERABYTE},
     metrics::DatabaseEnvMetrics,
     tables::{self, TableType, Tables},
     utils::default_page_size,
@@ -28,21 +30,6 @@ use std::{
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tx::Tx;
-
-pub mod cursor;
-pub mod tx;
-
-const GIGABYTE: usize = 1024 * 1024 * 1024;
-const TERABYTE: usize = GIGABYTE * 1024;
-
-/// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
-const DEFAULT_MAX_READERS: u64 = 32_000;
-
-/// Space that a read-only transaction can occupy until the warning is emitted.
-/// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
-#[cfg(not(windows))]
-const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Debug)]
@@ -142,8 +129,8 @@ pub struct DatabaseEnv {
 }
 
 impl Database for DatabaseEnv {
-    type TX = tx::Tx<RO>;
-    type TXMut = tx::Tx<RW>;
+    type TX = crate::mdbx::tx::Tx<RO>;
+    type TXMut = crate::mdbx::tx::Tx<RW>;
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Tx::new_with_metrics(
@@ -336,6 +323,7 @@ impl DatabaseEnv {
         });
         // Configure more readers
         inner_env.set_max_readers(DEFAULT_MAX_READERS);
+
         // This parameter sets the maximum size of the "reclaimed list", and the unit of measurement
         // is "pages". Reclaimed list is the list of freed pages that's populated during the
         // lifetime of DB transaction, and through which MDBX searches when it needs to insert new

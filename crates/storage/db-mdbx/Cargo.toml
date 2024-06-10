@@ -1,12 +1,12 @@
 [package]
-name = "reth-db"
+name = "reth-db-mdbx"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Database primitives used in reth."
+description = "Implementation of Reth's DB abstraction for MDBX"
 
 [lints]
 workspace = true
@@ -17,9 +17,11 @@ reth-db-api.workspace = true
 reth-primitives.workspace = true
 reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
-reth-db-mdbx = { workspace = true, optional = true }
+reth-libmdbx = { workspace = true, features = [
+    "return-borrowed",
+    "read-tx-timeouts",
+] }
 reth-nippy-jar.workspace = true
-reth-prune-types.workspace = true
 reth-tracing.workspace = true
 
 # codecs
@@ -68,24 +70,7 @@ paste.workspace = true
 assert_matches.workspace = true
 
 [features]
-default = ["mdbx"]
 test-utils = ["tempfile", "arbitrary"]
-mdbx = ["dep:reth-db-mdbx"]
 bench = []
 arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
 optimism = []
-
-[[bench]]
-name = "hash_keys"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "criterion"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "iai"
-required-features = ["test-utils"]
-harness = false
