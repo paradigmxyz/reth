@@ -24,21 +24,21 @@ pub struct Account {
 
 impl Account {
     /// Whether the account has bytecode.
-    pub fn has_bytecode(&self) -> bool {
+    pub const fn has_bytecode(&self) -> bool {
         self.bytecode_hash.is_some()
     }
 
-    /// After SpuriousDragon empty account is defined as account with nonce == 0 && balance == 0 &&
-    /// bytecode = None (or hash is [`KECCAK_EMPTY`]).
+    /// After `SpuriousDragon` empty account is defined as account with nonce == 0 && balance == 0
+    /// && bytecode = None (or hash is [`KECCAK_EMPTY`]).
     pub fn is_empty(&self) -> bool {
         self.nonce == 0 &&
             self.balance.is_zero() &&
             self.bytecode_hash.map_or(true, |hash| hash == KECCAK_EMPTY)
     }
 
-    /// Makes an [Account] from [GenesisAccount] type
+    /// Makes an [Account] from [`GenesisAccount`] type
     pub fn from_genesis_account(value: &GenesisAccount) -> Self {
-        Account {
+        Self {
             // nonce must exist, so we default to zero when converting a genesis account
             nonce: value.nonce.unwrap_or_default(),
             balance: value.balance,
@@ -106,14 +106,18 @@ impl Compact for Bytecode {
         len + bytecode.len() + 4
     }
 
+    // # Panics
+    //
+    // A panic will be triggered if a bytecode variant of 1 or greater than 2 is passed from the
+    // database.
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
         let len = buf.read_u32::<BigEndian>().expect("could not read bytecode length");
         let bytes = Bytes::from(buf.copy_to_bytes(len as usize));
         let variant = buf.read_u8().expect("could not read bytecode variant");
         let decoded = match variant {
-            0 => Bytecode(RevmBytecode::new_raw(bytes)),
+            0 => Self(RevmBytecode::new_raw(bytes)),
             1 => unreachable!("Junk data in database: checked Bytecode variant was removed"),
-            2 => Bytecode(unsafe {
+            2 => Self(unsafe {
                 RevmBytecode::new_analyzed(
                     bytes,
                     buf.read_u64::<BigEndian>().unwrap() as usize,

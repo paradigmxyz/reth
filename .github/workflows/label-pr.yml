@@ -21,4 +21,3 @@ jobs:
           script: |
             const label_pr = require('./.github/scripts/label_pr.js')
             await label_pr({github, context})
-

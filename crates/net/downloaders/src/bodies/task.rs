@@ -1,7 +1,7 @@
 use futures::Stream;
 use futures_util::{FutureExt, StreamExt};
 use pin_project::pin_project;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::downloader::{BodyDownloader, BodyDownloaderResult},
     error::DownloadResult,
 };
@@ -17,7 +17,7 @@ use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tokio_util::sync::PollSender;
 
-/// The maximum number of [BodyDownloaderResult]s to hold in the buffer.
+/// The maximum number of [`BodyDownloaderResult`]s to hold in the buffer.
 pub const BODIES_TASK_BUFFER_SIZE: usize = 4;
 
 /// A [BodyDownloader] that drives a spawned [BodyDownloader] on a spawned task.
@@ -32,7 +32,7 @@ pub struct TaskDownloader {
 // === impl TaskDownloader ===
 
 impl TaskDownloader {
-    /// Spawns the given `downloader` via [tokio::task::spawn] returns a [TaskDownloader] that's
+    /// Spawns the given `downloader` via [`tokio::task::spawn`] returns a [`TaskDownloader`] that's
     /// connected to that task.
     ///
     /// # Panics
@@ -44,7 +44,7 @@ impl TaskDownloader {
     /// ```
     /// use reth_consensus::Consensus;
     /// use reth_downloaders::bodies::{bodies::BodiesDownloaderBuilder, task::TaskDownloader};
-    /// use reth_interfaces::p2p::bodies::client::BodiesClient;
+    /// use reth_network_p2p::bodies::client::BodiesClient;
     /// use reth_provider::HeaderProvider;
     /// use std::sync::Arc;
     ///
@@ -64,8 +64,8 @@ impl TaskDownloader {
         Self::spawn_with(downloader, &TokioTaskExecutor::default())
     }
 
-    /// Spawns the given `downloader` via the given [TaskSpawner] returns a [TaskDownloader] that's
-    /// connected to that task.
+    /// Spawns the given `downloader` via the given [`TaskSpawner`] returns a [`TaskDownloader`]
+    /// that's connected to that task.
     pub fn spawn_with<T, S>(downloader: T, spawner: &S) -> Self
     where
         T: BodyDownloader + 'static,
@@ -101,7 +101,7 @@ impl Stream for TaskDownloader {
     }
 }
 
-/// A [BodyDownloader] that runs on its own task
+/// A [`BodyDownloader`] that runs on its own task
 struct SpawnedDownloader<T> {
     updates: UnboundedReceiverStream<RangeInclusive<BlockNumber>>,
     bodies_tx: PollSender<BodyDownloaderResult>,
@@ -171,7 +171,7 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_consensus::test_utils::TestConsensus;
-    use reth_interfaces::p2p::error::DownloadError;
+    use reth_network_p2p::error::DownloadError;
     use reth_provider::test_utils::create_test_provider_factory;
     use std::sync::Arc;
 

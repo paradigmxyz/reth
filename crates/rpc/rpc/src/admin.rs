@@ -3,7 +3,7 @@ use alloy_primitives::B256;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_network_api::{NetworkInfo, PeerKind, Peers};
-use reth_network_types::AnyNode;
+use reth_network_peers::AnyNode;
 use reth_primitives::{ChainSpec, NodeRecord};
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_types::{
@@ -25,7 +25,7 @@ pub struct AdminApi<N> {
 impl<N> AdminApi<N> {
     /// Creates a new instance of `AdminApi`.
     pub fn new(network: N, chain_spec: Arc<ChainSpec>) -> Self {
-        AdminApi { network, chain_spec }
+        Self { network, chain_spec }
     }
 }
 

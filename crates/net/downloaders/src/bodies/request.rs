@@ -1,12 +1,12 @@
 use crate::metrics::{BodyDownloaderMetrics, ResponseMetrics};
 use futures::{Future, FutureExt};
 use reth_consensus::Consensus;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::{client::BodiesClient, response::BlockResponse},
     error::{DownloadError, DownloadResult},
     priority::Priority,
 };
-use reth_network_types::{PeerId, WithPeerId};
+use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives::{BlockBody, GotExpected, SealedBlock, SealedHeader, B256};
 use std::{
     collections::VecDeque,
@@ -25,9 +25,9 @@ use std::{
 /// It then proceeds to verify the downloaded bodies. In case of an validation error,
 /// the future will start over.
 ///
-/// The future will filter out any empty headers (see [reth_primitives::Header::is_empty]) from the
-/// request. If [BodiesRequestFuture] was initialized with all empty headers, no request will be
-/// dispatched and they will be immediately returned upon polling.
+/// The future will filter out any empty headers (see [`reth_primitives::Header::is_empty`]) from
+/// the request. If [`BodiesRequestFuture`] was initialized with all empty headers, no request will
+/// be dispatched and they will be immediately returned upon polling.
 ///
 /// NB: This assumes that peers respond with bodies in the order that they were requested.
 /// This is a reasonable assumption to make as that's [what Geth
@@ -55,7 +55,7 @@ impl<B> BodiesRequestFuture<B>
 where
     B: BodiesClient + 'static,
 {
-    /// Returns an empty future. Use [BodiesRequestFuture::with_headers] to set the request.
+    /// Returns an empty future. Use [`BodiesRequestFuture::with_headers`] to set the request.
     pub(crate) fn new(
         client: Arc<B>,
         consensus: Arc<dyn Consensus>,
@@ -180,7 +180,7 @@ where
 
                 let block = SealedBlock::new(next_header, next_body);
 
-                if let Err(error) = self.consensus.validate_block(&block) {
+                if let Err(error) = self.consensus.validate_block_pre_execution(&block) {
                     // Body is invalid, put the header back and return an error
                     let hash = block.hash();
                     let number = block.number;
@@ -255,7 +255,7 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use reth_consensus::test_utils::TestConsensus;
-    use reth_interfaces::test_utils::{generators, generators::random_header_range};
+    use reth_testing_utils::{generators, generators::random_header_range};
 
     /// Check if future returns empty bodies without dispatching any requests.
     #[tokio::test]

@@ -35,6 +35,10 @@ First, in your home directory, create a file with the name `network_params.json`
   "launch_additional_services": false
 }
 ```
+
+> [!TIP]
+> If you would like to use a modified reth node, you can build an image locally with a custom tag. The tag can then be used in the `el_image` field in the `network_params.json` file.
+
 ### Step 2: Spin up your network
 
 Next, run the following command from your command line:

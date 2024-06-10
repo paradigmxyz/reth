@@ -29,12 +29,12 @@ Options:
 
   -f, --from <FROM>
           Starting block for the static_file
-          
+
           [default: 0]
 
   -b, --block-interval <BLOCK_INTERVAL>
           Number of blocks in the static_file
-          
+
           [default: 500000]
 
       --chain <CHAIN_OR_PATH>
@@ -48,7 +48,7 @@ Options:
 
   -p, --parallel <PARALLEL>
           Sets the number of static files built in parallel. Note: Each parallel build is memory-intensive
-          
+
           [default: 1]
 
       --only-stats
@@ -88,7 +88,7 @@ Options:
 
           Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
 
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
 
           [default: 1]
 

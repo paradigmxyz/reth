@@ -1,3 +1,3 @@
 mod trace;
 
-fn main() {}
+const fn main() {}

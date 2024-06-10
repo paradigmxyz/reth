@@ -1,9 +1,11 @@
+//! Helpers for working with revm.
+
 /// The `compat` module contains utility functions that perform conversions between reth and revm,
 /// compare analogous types from the two implementations, and calculate intrinsic gas usage.
 ///
 /// The included conversion methods can be used to convert between:
 /// * reth's [Log](crate::Log) type and revm's [Log](revm_primitives::Log) type.
-/// * reth's [Account](crate::Account) type and revm's [AccountInfo](revm_primitives::AccountInfo)
+/// * reth's [Account](crate::Account) type and revm's [`AccountInfo`](revm_primitives::AccountInfo)
 ///   type.
 pub mod compat;
 

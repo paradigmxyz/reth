@@ -1,11 +1,11 @@
 use futures::Stream;
-use reth_interfaces::p2p::headers::{
+use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, SyncTarget},
     error::HeadersDownloaderError,
 };
 use reth_primitives::SealedHeader;
 
-/// A [HeaderDownloader] implementation that does nothing.
+/// A [`HeaderDownloader`] implementation that does nothing.
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct NoopHeaderDownloader;

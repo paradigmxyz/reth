@@ -1,8 +1,9 @@
 //! Common conversions from alloy types.
 
 use crate::{
-    transaction::extract_chain_id, Block, Header, Signature, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy, TxType,
+    constants::EMPTY_TRANSACTIONS, transaction::extract_chain_id, Block, Header, Signature,
+    Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844,
+    TxLegacy, TxType,
 };
 use alloy_primitives::TxKind;
 use alloy_rlp::Error as RlpError;
@@ -28,7 +29,7 @@ impl TryFrom<alloy_rpc_types::Block> for Block {
                                 s: signature.s,
                                 odd_y_parity: signature
                                     .y_parity
-                                    .unwrap_or(alloy_rpc_types::Parity(false))
+                                    .unwrap_or_else(|| alloy_rpc_types::Parity(!signature.v.bit(0)))
                                     .0,
                             },
                         ))
@@ -36,7 +37,13 @@ impl TryFrom<alloy_rpc_types::Block> for Block {
                     .collect(),
                 alloy_rpc_types::BlockTransactions::Hashes(_) |
                 alloy_rpc_types::BlockTransactions::Uncle => {
-                    return Err(ConversionError::MissingFullTransactions)
+                    // alloy deserializes empty blocks into `BlockTransactions::Hashes`, if the tx
+                    // root is the empty root then we can just return an empty vec.
+                    if block.header.transactions_root == EMPTY_TRANSACTIONS {
+                        Ok(vec![])
+                    } else {
+                        Err(ConversionError::MissingFullTransactions)
+                    }
                 }
             };
             transactions?
@@ -47,6 +54,9 @@ impl TryFrom<alloy_rpc_types::Block> for Block {
             body,
             ommers: Default::default(),
             withdrawals: block.withdrawals.map(Into::into),
+            // todo(onbjerg): we don't know if this is added to rpc yet, so for now we leave it as
+            // empty.
+            requests: None,
         })
     }
 }
@@ -93,6 +103,8 @@ impl TryFrom<alloy_rpc_types::Header> for Header {
             timestamp: header.timestamp,
             transactions_root: header.transactions_root,
             withdrawals_root: header.withdrawals_root,
+            // TODO: requests_root: header.requests_root,
+            requests_root: None,
         })
     }
 }
@@ -115,10 +127,29 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                     return Err(ConversionError::Eip2718Error(
                         RlpError::Custom("EIP-1559 fields are present in a legacy transaction")
                             .into(),
-                    ));
+                    ))
                 }
-                Ok(Transaction::Legacy(TxLegacy {
-                    chain_id: tx.chain_id,
+
+                // extract the chain id if possible
+                let chain_id = match tx.chain_id {
+                    Some(chain_id) => Some(chain_id),
+                    None => {
+                        if let Some(signature) = tx.signature {
+                            // TODO: make this error conversion better. This is needed because
+                            // sometimes rpc providers return legacy transactions without a chain id
+                            // explicitly in the response, however those transactions may also have
+                            // a chain id in the signature from eip155
+                            extract_chain_id(signature.v.to())
+                                .map_err(|err| ConversionError::Eip2718Error(err.into()))?
+                                .1
+                        } else {
+                            return Err(ConversionError::MissingChainId)
+                        }
+                    }
+                };
+
+                Ok(Self::Legacy(TxLegacy {
+                    chain_id,
                     nonce: tx.nonce,
                     gas_price: tx.gas_price.ok_or(ConversionError::MissingGasPrice)?,
                     gas_limit: tx
@@ -132,7 +163,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             }
             Some(TxType::Eip2930) => {
                 // eip2930
-                Ok(Transaction::Eip2930(TxEip2930 {
+                Ok(Self::Eip2930(TxEip2930 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
                     nonce: tx.nonce,
                     gas_limit: tx
@@ -148,7 +179,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             }
             Some(TxType::Eip1559) => {
                 // EIP-1559
-                Ok(Transaction::Eip1559(TxEip1559 {
+                Ok(Self::Eip1559(TxEip1559 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
                     nonce: tx.nonce,
                     max_priority_fee_per_gas: tx
@@ -169,7 +200,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             }
             Some(TxType::Eip4844) => {
                 // EIP-4844
-                Ok(Transaction::Eip4844(TxEip4844 {
+                Ok(Self::Eip4844(TxEip4844 {
                     chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
                     nonce: tx.nonce,
                     max_priority_fee_per_gas: tx
@@ -182,7 +213,8 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                         .gas
                         .try_into()
                         .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
+                    placeholder: tx.to.map(|_| ()),
+                    to: tx.to.unwrap_or_default(),
                     value: tx.value,
                     access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
                     input: tx.input,
@@ -209,7 +241,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for TransactionSigned {
         let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
         let transaction: Transaction = tx.try_into()?;
 
-        Ok(TransactionSigned::from_transaction_and_signature(
+        Ok(Self::from_transaction_and_signature(
             transaction.clone(),
             Signature {
                 r: signature.r,

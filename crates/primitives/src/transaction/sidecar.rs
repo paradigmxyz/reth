@@ -30,10 +30,10 @@ pub struct BlobTransaction {
 }
 
 impl BlobTransaction {
-    /// Constructs a new [BlobTransaction] from a [TransactionSigned] and a
-    /// [BlobTransactionSidecar].
+    /// Constructs a new [`BlobTransaction`] from a [`TransactionSigned`] and a
+    /// [`BlobTransactionSidecar`].
     ///
-    /// Returns an error if the signed transaction is not [TxEip4844]
+    /// Returns an error if the signed transaction is not [`TxEip4844`]
     pub fn try_from_signed(
         tx: TransactionSigned,
         sidecar: BlobTransactionSidecar,
@@ -50,7 +50,7 @@ impl BlobTransaction {
 
     /// Verifies that the transaction's blob data, commitments, and proofs are all valid.
     ///
-    /// See also [TxEip4844::validate_blob]
+    /// See also [`TxEip4844::validate_blob`]
     #[cfg(feature = "c-kzg")]
     pub fn validate(
         &self,
@@ -59,7 +59,7 @@ impl BlobTransaction {
         self.transaction.validate_blob(&self.sidecar, proof_settings)
     }
 
-    /// Splits the [BlobTransaction] into its [TransactionSigned] and [BlobTransactionSidecar]
+    /// Splits the [`BlobTransaction`] into its [`TransactionSigned`] and [`BlobTransactionSidecar`]
     /// components.
     pub fn into_parts(self) -> (TransactionSigned, BlobTransactionSidecar) {
         let transaction = TransactionSigned {
@@ -71,7 +71,7 @@ impl BlobTransaction {
         (transaction, self.sidecar)
     }
 
-    /// Encodes the [BlobTransaction] fields as RLP, with a tx type. If `with_header` is `false`,
+    /// Encodes the [`BlobTransaction`] fields as RLP, with a tx type. If `with_header` is `false`,
     /// the following will be encoded:
     /// `tx_type (0x03) || rlp([transaction_payload_body, blobs, commitments, proofs])`
     ///
@@ -99,7 +99,7 @@ impl BlobTransaction {
         self.encode_inner(out);
     }
 
-    /// Encodes the [BlobTransaction] fields as RLP, with the following format:
+    /// Encodes the [`BlobTransaction`] fields as RLP, with the following format:
     /// `rlp([transaction_payload_body, blobs, commitments, proofs])`
     ///
     /// where `transaction_payload_body` is a list:
@@ -201,7 +201,7 @@ impl BlobTransaction {
         blob_tx_header.length() + blob_tx_header.payload_length
     }
 
-    /// Decodes a [BlobTransaction] from RLP. This expects the encoding to be:
+    /// Decodes a [`BlobTransaction`] from RLP. This expects the encoding to be:
     /// `rlp([transaction_payload_body, blobs, commitments, proofs])`
     ///
     /// where `transaction_payload_body` is a list:

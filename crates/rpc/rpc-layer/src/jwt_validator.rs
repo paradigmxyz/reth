@@ -16,7 +16,7 @@ impl JwtAuthValidator {
     /// Creates a new instance of [`JwtAuthValidator`].
     /// Validation logics are implemented by the `secret`
     /// argument (see [`JwtSecret`]).
-    pub fn new(secret: JwtSecret) -> Self {
+    pub const fn new(secret: JwtSecret) -> Self {
         Self { secret }
     }
 }
@@ -26,7 +26,7 @@ impl AuthValidator for JwtAuthValidator {
 
     fn validate(&self, headers: &HeaderMap) -> Result<(), Response<Self::ResponseBody>> {
         match get_bearer(headers) {
-            Some(jwt) => match self.secret.validate(jwt) {
+            Some(jwt) => match self.secret.validate(&jwt) {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     error!(target: "engine::jwt-validator", "Invalid JWT: {e}");

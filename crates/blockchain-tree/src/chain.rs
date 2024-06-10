@@ -5,19 +5,16 @@
 
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
-use reth_consensus::{Consensus, ConsensusError};
-use reth_db::database::Database;
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
-use reth_interfaces::{
-    blockchain_tree::{
-        error::{BlockchainTreeError, InsertBlockErrorKind},
-        BlockAttachment, BlockValidationKind,
-    },
-    RethResult,
+use reth_blockchain_tree_api::{
+    error::{BlockchainTreeError, InsertBlockErrorKind},
+    BlockAttachment, BlockValidationKind,
 };
+use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
+use reth_db_api::database::Database;
+use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{
-    BlockHash, BlockNumber, ForkBlock, GotExpected, Receipts, SealedBlockWithSenders, SealedHeader,
-    U256,
+    BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView},
@@ -55,7 +52,7 @@ impl DerefMut for AppendableChain {
 
 impl AppendableChain {
     /// Create a new appendable chain from a given chain.
-    pub fn new(chain: Chain) -> Self {
+    pub const fn new(chain: Chain) -> Self {
         Self { chain }
     }
 
@@ -66,8 +63,8 @@ impl AppendableChain {
 
     /// Create a new chain that forks off of the canonical chain.
     ///
-    /// if [BlockValidationKind::Exhaustive] is specified, the method will verify the state root of
-    /// the block.
+    /// if [`BlockValidationKind::Exhaustive`] is specified, the method will verify the state root
+    /// of the block.
     pub fn new_canonical_fork<DB, E>(
         block: SealedBlockWithSenders,
         parent_header: &SealedHeader,
@@ -105,7 +102,7 @@ impl AppendableChain {
 
     /// Create a new chain that forks off of an existing sidechain.
     ///
-    /// This differs from [AppendableChain::new_canonical_fork] in that this starts a new fork.
+    /// This differs from [`AppendableChain::new_canonical_fork`] in that this starts a new fork.
     pub(crate) fn new_chain_fork<DB, E>(
         &self,
         block: SealedBlockWithSenders,
@@ -164,11 +161,11 @@ impl AppendableChain {
     /// state root after execution if possible and requested.
     ///
     /// Note: State root validation is limited to blocks that extend the canonical chain and is
-    /// optional, see [BlockValidationKind]. So this function takes two parameters to determine
+    /// optional, see [`BlockValidationKind`]. So this function takes two parameters to determine
     /// if the state can and should be validated.
-    ///   - [BlockAttachment] represents if the block extends the canonical chain, and thus we can
+    ///   - [`BlockAttachment`] represents if the block extends the canonical chain, and thus we can
     ///     cache the trie state updates.
-    ///   - [BlockValidationKind] determines if the state root __should__ be validated.
+    ///   - [`BlockValidationKind`] determines if the state root __should__ be validated.
     fn validate_and_execute<BSDP, DB, E>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
@@ -176,7 +173,7 @@ impl AppendableChain {
         externals: &TreeExternals<DB, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
-    ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
+    ) -> Result<(BundleStateWithReceipts, Option<TrieUpdates>), BlockExecutionError>
     where
         BSDP: FullBundleStateDataProvider,
         DB: Database + Clone,
@@ -210,12 +207,18 @@ impl AppendableChain {
         let executor = externals.executor_factory.executor(db);
         let block_hash = block.hash();
         let block = block.unseal();
+
         let state = executor.execute((&block, U256::MAX).into())?;
-        let BlockExecutionOutput { state, receipts, .. } = state;
+        let BlockExecutionOutput { state, receipts, requests, .. } = state;
+        externals
+            .consensus
+            .validate_block_post_execution(&block, PostExecutionInput::new(&receipts, &requests))?;
+
         let bundle_state = BundleStateWithReceipts::new(
             state,
-            Receipts::from_block_receipt(receipts),
+            receipts.into(),
             block.number,
+            vec![requests.into()],
         );
 
         // check state root if the block extends the canonical chain __and__ if state root

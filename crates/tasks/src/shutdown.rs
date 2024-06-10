@@ -14,7 +14,7 @@ use tokio::sync::oneshot;
 
 /// A Future that resolves when the shutdown event has been fired.
 ///
-/// The [TaskManager](crate)
+/// The [`TaskManager`](crate)
 #[derive(Debug)]
 pub struct GracefulShutdown {
     shutdown: Shutdown,
@@ -45,8 +45,8 @@ impl Clone for GracefulShutdown {
     }
 }
 
-/// A guard that fires once dropped to signal the [TaskManager](crate::TaskManager) that the
-/// [GracefulShutdown] has completed.
+/// A guard that fires once dropped to signal the [`TaskManager`](crate::TaskManager) that the
+/// [`GracefulShutdown`] has completed.
 #[derive(Debug)]
 #[must_use = "if unused the task will not be gracefully shutdown"]
 pub struct GracefulShutdownGuard(Arc<AtomicUsize>);

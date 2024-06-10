@@ -53,12 +53,12 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     }
 
     /// Returns a reference to the related [`NippyJar`]
-    pub fn jar(&self) -> &NippyJar<H> {
+    pub const fn jar(&self) -> &NippyJar<H> {
         self.jar
     }
 
     /// Returns current row index of the cursor
-    pub fn row_index(&self) -> u64 {
+    pub const fn row_index(&self) -> u64 {
         self.row
     }
 

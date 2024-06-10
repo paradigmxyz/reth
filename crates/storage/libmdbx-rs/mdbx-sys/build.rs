@@ -83,22 +83,27 @@ fn main() {
     let mut cc_builder = cc::Build::new();
     cc_builder.flag_if_supported("-Wno-unused-parameter").flag_if_supported("-Wuninitialized");
 
-    #[cfg(not(target_os = "linux"))]
-    cc_builder.flag_if_supported("-Wbad-function-cast");
+    if env::var("CARGO_CFG_TARGET_OS").unwrap() != "linux" {
+        cc_builder.flag_if_supported("-Wbad-function-cast");
+    }
 
     let flags = format!("{:?}", cc_builder.get_compiler().cflags_env());
     cc_builder.define("MDBX_BUILD_FLAGS", flags.as_str()).define("MDBX_TXN_CHECKOWNER", "0");
 
     // Enable debugging on debug builds
     #[cfg(debug_assertions)]
-    {
-        cc_builder.define("MDBX_DEBUG", "1").define("MDBX_ENABLE_PROFGC", "1");
-    }
+    cc_builder.define("MDBX_DEBUG", "1").define("MDBX_ENABLE_PROFGC", "1");
 
     // Disables debug logging on optimized builds
     #[cfg(not(debug_assertions))]
+    cc_builder.define("MDBX_DEBUG", "0").define("NDEBUG", None);
+
+    // Propagate `-C target-cpu=native`
+    let rustflags = env::var("CARGO_ENCODED_RUSTFLAGS").unwrap();
+    if rustflags.contains("target-cpu=native") &&
+        env::var("CARGO_CFG_TARGET_ENV").unwrap() != "msvc"
     {
-        cc_builder.define("MDBX_DEBUG", "0").define("NDEBUG", None);
+        cc_builder.flag("-march=native");
     }
 
     cc_builder.file(mdbx.join("mdbx.c")).compile("libmdbx.a");
