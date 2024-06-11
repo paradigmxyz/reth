@@ -8,14 +8,10 @@ use reth_beacon_consensus::{
 use reth_db_api::{database::Database, database_metrics::DatabaseMetadata};
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
-use reth_primitives::{
-    constants,
-    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    BlockNumber, B256,
-};
+use reth_primitives::{constants, BlockNumber, B256};
 use reth_prune::PrunerEvent;
 use reth_rpc_types::engine::ForkchoiceState;
-use reth_stages::{ExecOutput, PipelineEvent};
+use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
 use reth_static_file::StaticFileProducerEvent;
 use std::{
     fmt::{Display, Formatter},
