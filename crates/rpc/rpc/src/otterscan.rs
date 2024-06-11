@@ -14,7 +14,7 @@ use revm_inspectors::transfer::{TransferInspector, TransferKind};
 use revm_primitives::ExecutionResult;
 
 use crate::{
-    eth::api::{Call, LoadBlock, LoadStateExt, LoadTransaction, Trace},
+    eth::api::{LoadBlock, LoadTransaction, TraceExt},
     result::internal_rpc_err,
 };
 
@@ -36,7 +36,7 @@ impl<Eth> OtterscanApi<Eth> {
 #[async_trait]
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
-    Eth: EthApiServer + LoadStateExt + LoadBlock + LoadTransaction + Call + Trace + 'static,
+    Eth: EthApiServer + LoadBlock + LoadTransaction + TraceExt + 'static,
 {
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool> {
