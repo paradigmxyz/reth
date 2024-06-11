@@ -9,7 +9,7 @@ use std::{
     process,
     sync::Arc,
 };
-use sysinfo::System;
+use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 
 /// File lock name.
 const LOCKFILE_NAME: &str = "lock";
@@ -95,7 +95,7 @@ struct ProcessUID {
 impl ProcessUID {
     /// Creates [`Self`] for the provided PID.
     fn new(pid: usize) -> Option<Self> {
-        System::new_all()
+        System::new_with_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::new()))
             .process(pid.into())
             .map(|process| Self { pid, start_time: process.start_time() })
     }
@@ -123,7 +123,7 @@ impl ProcessUID {
 
     /// Whether a process with this `pid` and `start_time` exists.
     fn is_active(&self) -> bool {
-        System::new_all()
+        System::new_with_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::new()))
             .process(self.pid.into())
             .is_some_and(|p| p.start_time() == self.start_time)
     }
