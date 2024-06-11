@@ -1,6 +1,6 @@
 //! Traits for execution.
 
-use reth_execution_types::BundleStateWithReceipts;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Request, U256};
 use reth_prune_types::PruneModes;
 use revm::db::BundleState;
@@ -91,7 +91,7 @@ pub trait BatchExecutor<DB> {
 ///
 /// Contains the state changes, transaction receipts, and total gas used in the block.
 ///
-/// TODO(mattsse): combine with `BundleStateWithReceipts`
+/// TODO(mattsse): combine with `ExecutionOutcome`
 #[derive(Debug)]
 pub struct BlockExecutionOutput<T> {
     /// The changed state of the block after execution.
@@ -150,7 +150,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     type BatchExecutor<DB: Database<Error = ProviderError>>: for<'a> BatchExecutor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BundleStateWithReceipts,
+        Output = ExecutionOutcome,
         Error = BlockExecutionError,
     >;
 
@@ -216,7 +216,7 @@ mod tests {
 
     impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
         type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-        type Output = BundleStateWithReceipts;
+        type Output = ExecutionOutcome;
         type Error = BlockExecutionError;
 
         fn execute_and_verify_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {

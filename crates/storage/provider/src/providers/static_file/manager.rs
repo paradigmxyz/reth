@@ -1467,6 +1467,13 @@ impl BlockReader for StaticFileProvider {
     ) -> ProviderResult<Vec<BlockWithSenders>> {
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn sealed_block_with_senders_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl WithdrawalsProvider for StaticFileProvider {

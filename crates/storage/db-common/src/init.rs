@@ -13,9 +13,9 @@ use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
     errors::provider::ProviderResult,
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockNumReader, BundleStateWithReceipts, ChainSpecProvider,
-    DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
-    ProviderFactory, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
+    BlockHashReader, BlockNumReader, ChainSpecProvider, DatabaseProviderRW, ExecutionOutcome,
+    HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory,
+    StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
@@ -193,7 +193,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
     }
     let all_reverts_init: RevertsInit = HashMap::from([(block, reverts_init)]);
 
-    let bundle = BundleStateWithReceipts::new_init(
+    let execution_outcome = ExecutionOutcome::new_init(
         state_init,
         all_reverts_init,
         contracts.into_iter().collect(),
@@ -202,7 +202,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
         Vec::new(),
     );
 
-    bundle.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;
+    execution_outcome.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;
 
     trace!(target: "reth::cli", "Inserted state");
 

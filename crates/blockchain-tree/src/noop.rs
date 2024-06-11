@@ -10,7 +10,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateNotificationSender, CanonStateNotifications,
-    CanonStateSubscriptions, FullBundleStateDataProvider,
+    CanonStateSubscriptions, FullExecutionDataProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::collections::BTreeMap;
@@ -122,7 +122,7 @@ impl BlockchainTreePendingStateProvider for NoopBlockchainTree {
     fn find_pending_state_provider(
         &self,
         _block_hash: BlockHash,
-    ) -> Option<Box<dyn FullBundleStateDataProvider>> {
+    ) -> Option<Box<dyn FullExecutionDataProvider>> {
         None
     }
 }

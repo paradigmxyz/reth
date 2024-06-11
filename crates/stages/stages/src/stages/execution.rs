@@ -8,7 +8,7 @@ use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_primitives::{BlockNumber, Header, StaticFileSegment};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, BundleStateWithReceipts, Chain, DatabaseProviderRW, HeaderProvider,
+    BlockReader, Chain, DatabaseProviderRW, ExecutionOutcome, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter, StatsReader,
     TransactionVariant,
 };
@@ -297,9 +297,8 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let BundleStateWithReceipts { bundle, receipts, requests, first_block } =
-            executor.finalize();
-        let state = BundleStateWithReceipts::new(bundle, receipts, first_block, requests);
+        let ExecutionOutcome { bundle, receipts, requests, first_block } = executor.finalize();
+        let state = ExecutionOutcome::new(bundle, receipts, first_block, requests);
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
@@ -391,7 +390,7 @@ where
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
             // Get the blocks for the unwound range.
-            let blocks = provider.get_take_block_range::<false>(range.clone())?;
+            let blocks = provider.sealed_block_with_senders_range(range.clone())?;
             let previous_input = self.post_unwind_commit_input.replace(Chain::new(
                 blocks,
                 bundle_state_with_receipts,

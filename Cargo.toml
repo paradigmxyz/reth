@@ -65,6 +65,7 @@ members = [
     "crates/payload/primitives/",
     "crates/payload/validator/",
     "crates/primitives/",
+    "crates/primitives-traits/",
     "crates/prune/prune",
     "crates/prune/types",
     "crates/revm/",
@@ -302,6 +303,7 @@ reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-primitives = { path = "crates/primitives" }
+reth-primitives-traits = { path = "crates/primitives-traits" }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types" }
