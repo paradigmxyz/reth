@@ -549,16 +549,15 @@ impl StaticFileProviderRW {
 
     /// Appends multiple receipts to the static file.
     ///
-    /// Returns the current [`TxNumber`] as seen in the static file.
-    pub fn append_receipts<I>(&mut self, receipts: I) -> ProviderResult<TxNumber>
+    /// Returns the current [`TxNumber`] as seen in the static file, if any.
+    pub fn append_receipts<I>(&mut self, receipts: I) -> ProviderResult<Option<TxNumber>>
     where
         I: IntoIterator<Item = Result<(TxNumber, Receipt), ProviderError>>,
     {
         let mut receipts_iter = receipts.into_iter().peekable();
-        // If receipts are empty, we can simply return the current TxNumber as seen in the static
-        // file.
+        // If receipts are empty, we can simply return None
         if receipts_iter.peek().is_none() {
-            return Ok(self.writer.user_header().tx_end().expect("qed"));
+            return Ok(None);
         }
 
         let start = Instant::now();
@@ -583,7 +582,7 @@ impl StaticFileProviderRW {
             );
         }
 
-        Ok(tx_number)
+        Ok(Some(tx_number))
     }
 
     /// Adds an instruction to prune `to_delete`transactions during commit.
