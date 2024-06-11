@@ -42,14 +42,19 @@ impl StateWriter for BundleStateWithReceipts {
             if let Some(static_file_producer) = &mut static_file_producer {
                 // Increment block on static file header.
                 static_file_producer.increment_block(StaticFileSegment::Receipts, block_number)?;
-                let receipts = receipts.into_iter().enumerate().map(|(tx_idx, receipt)| {
-                    (
-                        first_tx_index + tx_idx as u64,
-                        receipt
-                            .expect("receipt should not be filtered when saving to static files."),
-                    )
-                });
-                static_file_producer.append_receipts(receipts.into_iter().map(Ok))?;
+                let receipts = receipts
+                    .into_iter()
+                    .enumerate()
+                    .map(|(tx_idx, receipt)| {
+                        (
+                            first_tx_index + tx_idx as u64,
+                            receipt.expect(
+                                "receipt should not be filtered when saving to static files.",
+                            ),
+                        )
+                    })
+                    .map(Ok);
+                static_file_producer.append_receipts(receipts)?;
             } else if !receipts.is_empty() {
                 for (tx_idx, receipt) in receipts.into_iter().enumerate() {
                     if let Some(receipt) = receipt {
