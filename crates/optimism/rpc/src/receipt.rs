@@ -13,6 +13,7 @@ use reth_rpc_types::{AnyTransactionReceipt, OptimismTransactionReceiptFields};
 impl<Provider, Pool, Network, EvmConfig> LoadReceipt
     for OptimismApi<Provider, Pool, Network, EvmConfig>
 where
+    Self: Send + Sync,
     Provider: BlockIdReader + ChainSpecProvider,
 {
     #[inline]
@@ -25,10 +26,7 @@ where
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> EthResult<AnyTransactionReceipt>
-    where
-        Self: Send + Sync,
-    {
+    ) -> EthResult<AnyTransactionReceipt> {
         let (block, receipts) = self
             .cache()
             .get_block_and_receipts(meta.block_hash)

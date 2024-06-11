@@ -35,9 +35,9 @@ pub mod transactions;
 pub use pending_block::PendingBlock;
 pub use receipt::ReceiptBuilder;
 pub use traits::{
-    Call, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadBlock, LoadBlockExt, LoadFee,
-    LoadPendingBlock, LoadReceipt, LoadState, LoadStateExt, LoadTransaction,
-    RawTransactionForwarder, SpawnBlocking, StateCacheDB, Trace, TraceExt,
+    Call, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadBlock, LoadFee,
+    LoadPendingBlock, LoadReceipt, LoadState, LoadTransaction, RawTransactionForwarder,
+    SpawnBlocking, StateCacheDB, Trace, TraceExt,
 };
 pub use transactions::TransactionSource;
 
@@ -46,7 +46,7 @@ pub use transactions::TransactionSource;
 /// Defines core functionality of the `eth` API implementation.
 #[async_trait]
 #[auto_impl::auto_impl(&, Arc)]
-pub trait EthApiSpec: EthTransactions + Send + Sync {
+pub trait EthApiSpec: Send + Sync {
     /// Returns the current ethereum protocol version.
     async fn protocol_version(&self) -> RethResult<U64>;
 
@@ -272,7 +272,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: Send + Sync + 'static,
+    Self: Clone + Send + Sync + 'static,
 {
     fn io_task_spawner(&self) -> impl TaskSpawner {
         self.inner.task_spawner()

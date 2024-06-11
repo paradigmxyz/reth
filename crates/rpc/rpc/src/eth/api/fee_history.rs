@@ -1,6 +1,11 @@
 //! Consist of types adjacent to the fee history cache and its configs
 
-use crate::eth::{cache::EthStateCache, error::EthApiError};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    fmt::Debug,
+    sync::{atomic::Ordering::SeqCst, Arc},
+};
+
 use futures::{
     future::{Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
@@ -15,12 +20,9 @@ use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider}
 use reth_rpc_server_types::constants::gas_oracle::MAX_HEADER_HISTORY;
 use reth_rpc_types::TxGasAndReward;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::{BTreeMap, VecDeque},
-    fmt::Debug,
-    sync::{atomic::Ordering::SeqCst, Arc},
-};
 use tracing::trace;
+
+use crate::eth::{cache::EthStateCache, error::EthApiError};
 
 /// Contains cached fee history entries for blocks.
 ///

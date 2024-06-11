@@ -20,15 +20,13 @@ use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 
 use crate::eth::{
-    api::{EthApiSpec, LoadBlock, LoadBlockExt, LoadFee, LoadReceipt, LoadStateExt, SpawnBlocking},
+    api::{Call, EthApiSpec, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     cache::EthStateCache,
     error::{EthApiError, EthResult, SignError},
     signer::EthSigner,
     utils::recover_raw_transaction,
     TransactionSource,
 };
-
-use super::Call;
 
 /// Transaction related functions for the [`EthApiServer`](reth_rpc_api::EthApiServer) trait in
 /// the `eth_` namespace.
@@ -53,7 +51,7 @@ use super::Call;
 /// See also <https://github.com/paradigmxyz/reth/issues/6240>
 ///
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
-pub trait EthTransactions: LoadTransaction + Send + Sync {
+pub trait EthTransactions: LoadTransaction {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -77,10 +75,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
     fn transaction_by_hash(
         &self,
         hash: B256,
-    ) -> impl Future<Output = EthResult<Option<TransactionSource>>> + Send
-    where
-        Self: SpawnBlocking,
-    {
+    ) -> impl Future<Output = EthResult<Option<TransactionSource>>> + Send {
         LoadTransaction::transaction_by_hash(self, hash)
     }
 
@@ -104,10 +99,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
     fn raw_transaction_by_hash(
         &self,
         hash: B256,
-    ) -> impl Future<Output = EthResult<Option<Bytes>>> + Send
-    where
-        Self: SpawnBlocking,
-    {
+    ) -> impl Future<Output = EthResult<Option<Bytes>>> + Send {
         async move {
             // Note: this is mostly used to fetch pooled transactions so we check the pool first
             if let Some(tx) =
@@ -129,10 +121,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
     fn historical_transaction_by_hash_at(
         &self,
         hash: B256,
-    ) -> impl Future<Output = EthResult<Option<(TransactionSource, B256)>>> + Send
-    where
-        Self: SpawnBlocking,
-    {
+    ) -> impl Future<Output = EthResult<Option<(TransactionSource, B256)>>> + Send {
         async move {
             match self.transaction_by_hash_at(hash).await? {
                 None => Ok(None),
@@ -150,7 +139,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
         hash: B256,
     ) -> impl Future<Output = EthResult<Option<AnyTransactionReceipt>>> + Send
     where
-        Self: LoadReceipt + SpawnBlocking + 'static,
+        Self: LoadReceipt + 'static,
     {
         async move {
             let result = self.load_transaction_and_receipt(hash).await?;
@@ -170,7 +159,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
         hash: TxHash,
     ) -> impl Future<Output = EthResult<Option<(TransactionSigned, TransactionMeta, Receipt)>>> + Send
     where
-        Self: SpawnBlocking + 'static,
+        Self: 'static,
     {
         let this = self.clone();
         self.spawn_blocking_io(move |_| {
@@ -198,7 +187,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
         index: Index,
     ) -> impl Future<Output = EthResult<Option<Transaction>>> + Send
     where
-        Self: LoadBlockExt,
+        Self: LoadBlock,
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id.into()).await? {
@@ -229,7 +218,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
         index: Index,
     ) -> impl Future<Output = EthResult<Option<Bytes>>> + Send
     where
-        Self: LoadBlockExt,
+        Self: LoadBlock,
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id.into()).await? {
@@ -275,7 +264,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
         mut request: TransactionRequest,
     ) -> impl Future<Output = EthResult<B256>> + Send
     where
-        Self: EthApiSpec + LoadStateExt + LoadBlock + LoadFee + Call,
+        Self: EthApiSpec + LoadBlock + LoadPendingBlock + LoadFee + Call,
     {
         async move {
             let from = match request.from {
@@ -498,7 +487,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` transactions RPC
 /// methods.
-pub trait LoadTransaction {
+pub trait LoadTransaction: SpawnBlocking {
     /// Transaction pool with pending transactions. [`TransactionPool::Transaction`] is the
     /// supported transaction type.
     type Pool: TransactionPool;
@@ -526,10 +515,7 @@ pub trait LoadTransaction {
     fn transaction_by_hash(
         &self,
         hash: B256,
-    ) -> impl Future<Output = EthResult<Option<TransactionSource>>> + Send
-    where
-        Self: SpawnBlocking,
-    {
+    ) -> impl Future<Output = EthResult<Option<TransactionSource>>> + Send {
         async move {
             // Try to find the transaction on disk
             let mut resp = self
@@ -576,10 +562,7 @@ pub trait LoadTransaction {
     fn transaction_by_hash_at(
         &self,
         transaction_hash: B256,
-    ) -> impl Future<Output = EthResult<Option<(TransactionSource, BlockId)>>> + Send
-    where
-        Self: SpawnBlocking,
-    {
+    ) -> impl Future<Output = EthResult<Option<(TransactionSource, BlockId)>>> + Send {
         async move {
             match self.transaction_by_hash(transaction_hash).await? {
                 None => Ok(None),
@@ -615,8 +598,6 @@ pub trait LoadTransaction {
         &self,
         hash: B256,
     ) -> impl Future<Output = EthResult<Option<(TransactionSource, SealedBlockWithSenders)>>> + Send
-    where
-        Self: SpawnBlocking,
     {
         async move {
             let (transaction, at) = match self.transaction_by_hash_at(hash).await? {

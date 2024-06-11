@@ -10,7 +10,24 @@ use reth_rpc_types::{
     TransactionReceipt, WithOtherFields,
 };
 
-use crate::eth::error::{EthApiError, EthResult};
+use crate::{
+    eth::{
+        api::LoadReceipt,
+        cache::EthStateCache,
+        error::{EthApiError, EthResult},
+    },
+    EthApi,
+};
+
+impl<Provider, Pool, Network, EvmConfig> LoadReceipt for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: Send + Sync,
+{
+    #[inline]
+    fn cache(&self) -> &EthStateCache {
+        &self.inner.eth_cache
+    }
+}
 
 /// Receipt response builder.
 #[derive(Debug)]

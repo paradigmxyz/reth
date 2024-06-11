@@ -194,7 +194,7 @@ pub trait EthBlocks: LoadBlock {
 /// Loads a block from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
-pub trait LoadBlock: Send + Sync {
+pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
     // Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -209,10 +209,7 @@ pub trait LoadBlock: Send + Sync {
     fn block(
         &self,
         block_id: impl Into<BlockId> + Send,
-    ) -> impl Future<Output = EthResult<Option<SealedBlock>>> + Send
-    where
-        Self: LoadPendingBlock + SpawnBlocking,
-    {
+    ) -> impl Future<Output = EthResult<Option<SealedBlock>>> + Send {
         async move {
             self.block_with_senders(block_id)
                 .await
@@ -224,10 +221,7 @@ pub trait LoadBlock: Send + Sync {
     fn block_with_senders(
         &self,
         block_id: impl Into<BlockId> + Send,
-    ) -> impl Future<Output = EthResult<Option<SealedBlockWithSenders>>> + Send
-    where
-        Self: LoadPendingBlock + SpawnBlocking,
-    {
+    ) -> impl Future<Output = EthResult<Option<SealedBlockWithSenders>>> + Send {
         async move {
             let block_id = block_id.into();
 

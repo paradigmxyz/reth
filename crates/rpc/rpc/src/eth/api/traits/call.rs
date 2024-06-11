@@ -19,7 +19,7 @@ use revm_primitives::{
 use tracing::trace;
 
 use crate::eth::{
-    api::{LoadBlock, LoadState, LoadStateExt, LoadTransaction, SpawnBlocking, Trace},
+    api::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace},
     error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
     revm_utils::{
         apply_state_overrides, build_call_evm_env, caller_gas_allowance,
@@ -40,17 +40,14 @@ pub type StateCacheDB<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjW
 
 /// Execution related functions for the [`EthApiServer`](reth_rpc_api::EthApiServer) trait in the
 /// `eth_` namespace.
-pub trait EthCall: Call {
+pub trait EthCall: Call + LoadPendingBlock {
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].
     fn estimate_gas_at(
         &self,
         request: TransactionRequest,
         at: BlockId,
         state_override: Option<StateOverride>,
-    ) -> impl Future<Output = EthResult<U256>> + Send
-    where
-        Self: LoadStateExt,
-    {
+    ) -> impl Future<Output = EthResult<U256>> + Send {
         Call::estimate_gas_at(self, request, at, state_override)
     }
 
@@ -60,10 +57,7 @@ pub trait EthCall: Call {
         request: TransactionRequest,
         block_number: Option<BlockId>,
         overrides: EvmOverrides,
-    ) -> impl Future<Output = EthResult<Bytes>> + Send
-    where
-        Self: LoadStateExt,
-    {
+    ) -> impl Future<Output = EthResult<Bytes>> + Send {
         async move {
             let (res, _env) =
                 self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
@@ -81,7 +75,7 @@ pub trait EthCall: Call {
         mut state_override: Option<StateOverride>,
     ) -> impl Future<Output = EthResult<Vec<EthCallResponse>>> + Send
     where
-        Self: LoadStateExt + LoadBlock,
+        Self: LoadBlock,
     {
         async move {
             let Bundle { transactions, block_override } = bundle;
@@ -188,7 +182,7 @@ pub trait EthCall: Call {
         block_number: Option<BlockId>,
     ) -> impl Future<Output = EthResult<AccessListWithGasUsed>> + Send
     where
-        Self: LoadStateExt + Trace,
+        Self: Trace,
     {
         async move {
             let block_id = block_number.unwrap_or_default();
@@ -211,7 +205,7 @@ pub trait EthCall: Call {
         mut request: TransactionRequest,
     ) -> EthResult<AccessListWithGasUsed>
     where
-        Self: LoadState + Trace,
+        Self: Trace,
     {
         let state = self.state_at_block_id(at)?;
 
@@ -274,7 +268,7 @@ pub trait EthCall: Call {
 }
 
 /// Executes code on state.
-pub trait Call {
+pub trait Call: LoadState + SpawnBlocking {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     ///
     /// Data access in default trait method implementations.
@@ -283,7 +277,6 @@ pub trait Call {
     /// Executes the closure with the state that corresponds to the given [`BlockId`].
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
-        Self: LoadState,
         F: FnOnce(StateProviderTraitObjWrapper<'_>) -> EthResult<T>,
     {
         let state = self.state_at_block_id(at)?;
@@ -320,7 +313,7 @@ pub trait Call {
         overrides: EvmOverrides,
     ) -> impl Future<Output = EthResult<(ResultAndState, EnvWithHandlerCfg)>> + Send
     where
-        Self: LoadStateExt,
+        Self: LoadPendingBlock,
     {
         let this = self.clone();
         self.spawn_with_call_at(request, at, overrides, move |db, env| this.transact(db, env))
@@ -333,7 +326,6 @@ pub trait Call {
         f: F,
     ) -> impl Future<Output = EthResult<T>> + Send
     where
-        Self: LoadState + SpawnBlocking,
         F: FnOnce(StateProviderTraitObjWrapper<'_>) -> EthResult<T> + Send + 'static,
         T: Send + 'static,
     {
@@ -356,7 +348,7 @@ pub trait Call {
         f: F,
     ) -> impl Future<Output = EthResult<R>> + Send
     where
-        Self: LoadStateExt,
+        Self: LoadPendingBlock,
         F: FnOnce(StateCacheDBRefMutWrapper<'_, '_>, EnvWithHandlerCfg) -> EthResult<R>
             + Send
             + 'static,
@@ -401,7 +393,7 @@ pub trait Call {
         f: F,
     ) -> impl Future<Output = EthResult<Option<R>>> + Send
     where
-        Self: LoadStateExt + LoadTransaction + LoadBlock,
+        Self: LoadBlock + LoadPendingBlock + LoadTransaction,
         F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB<'_>) -> EthResult<R>
             + Send
             + 'static,
@@ -491,7 +483,7 @@ pub trait Call {
         state_override: Option<StateOverride>,
     ) -> impl Future<Output = EthResult<U256>> + Send
     where
-        Self: LoadStateExt,
+        Self: LoadPendingBlock,
     {
         async move {
             let (cfg, block_env, at) = self.evm_env_at(at).await?;

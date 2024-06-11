@@ -10,7 +10,7 @@ use reth_transaction_pool::TransactionPool;
 
 use crate::{
     eth::{
-        api::{EthTransactions, LoadReceipt, LoadTransaction, RawTransactionForwarder},
+        api::{EthTransactions, LoadTransaction, RawTransactionForwarder, SpawnBlocking},
         cache::EthStateCache,
         revm_utils::FillableTransaction,
         signer::EthSigner,
@@ -18,34 +18,10 @@ use crate::{
     EthApi,
 };
 
-impl<Provider, Pool, Network, EvmConfig> LoadTransaction
-    for EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Provider: TransactionsProvider,
-    Pool: TransactionPool,
-{
-    type Pool = Pool;
-
-    #[inline]
-    fn provider(&self) -> impl TransactionsProvider {
-        self.inner.provider()
-    }
-
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
-
-    #[inline]
-    fn pool(&self) -> &Self::Pool {
-        self.inner.pool()
-    }
-}
-
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadTransaction + Send + Sync,
+    Self: LoadTransaction,
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt,
 {
@@ -65,12 +41,28 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadReceipt
+impl<Provider, Pool, Network, EvmConfig> LoadTransaction
     for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: SpawnBlocking,
+    Provider: TransactionsProvider,
+    Pool: TransactionPool,
 {
+    type Pool = Pool;
+
+    #[inline]
+    fn provider(&self) -> impl TransactionsProvider {
+        self.inner.provider()
+    }
+
     #[inline]
     fn cache(&self) -> &EthStateCache {
-        &self.inner.eth_cache
+        self.inner.cache()
+    }
+
+    #[inline]
+    fn pool(&self) -> &Self::Pool {
+        self.inner.pool()
     }
 }
 

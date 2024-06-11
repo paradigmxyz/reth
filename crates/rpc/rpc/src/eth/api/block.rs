@@ -10,6 +10,8 @@ use crate::{
     EthApi,
 };
 
+use super::{LoadPendingBlock, SpawnBlocking};
+
 impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadBlock,
@@ -23,7 +25,7 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> LoadBlock for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: Send + Sync,
+    Self: LoadPendingBlock + SpawnBlocking,
     Provider: BlockReaderIdExt,
 {
     #[inline]

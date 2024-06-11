@@ -20,9 +20,7 @@ use tracing::trace;
 
 use crate::{
     eth::{
-        api::{
-            EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadReceipt, Trace,
-        },
+        api::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions},
         error::EthApiError,
         revm_utils::EvmOverrides,
         EthApi,
@@ -33,14 +31,7 @@ use crate::{
 #[async_trait::async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthApiServer for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: EthApiSpec
-        + EthTransactions
-        + EthBlocks
-        + EthState
-        + EthCall
-        + EthFees
-        + Trace
-        + LoadReceipt,
+    Self: EthApiSpec + EthTransactions + EthBlocks + EthState + EthCall + EthFees,
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt
         + ChainSpecProvider
