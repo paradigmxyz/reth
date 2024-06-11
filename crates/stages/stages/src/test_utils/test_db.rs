@@ -349,7 +349,7 @@ impl TestStageDB {
                 let mut writer = provider.latest_writer(StaticFileSegment::Receipts)?;
                 let res = receipts.into_iter().try_for_each(|(block_num, receipts)| {
                     writer.increment_block(StaticFileSegment::Receipts, block_num)?;
-                    writer.append_receipts(receipts.into_iter().map(Ok))?;
+                    writer.append_receipts(receipts.map(Ok))?;
                     Ok(())
                 });
                 writer.commit_without_sync_all()?;
