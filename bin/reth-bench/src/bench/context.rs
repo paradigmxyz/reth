@@ -87,8 +87,9 @@ impl BenchContext {
                             .unwrap()
                     }
                     None => {
-                        // return an error
-                        panic!("RangeEmpty");
+                        return Err(eyre::eyre!(
+                            "Benchmark mode range is empty, please provide a larger range"
+                        ));
                     }
                 }
             }
