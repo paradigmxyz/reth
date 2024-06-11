@@ -1,4 +1,4 @@
-//! Helper macros for implementing traits for various [StateProvider](crate::StateProvider)
+//! Helper macros for implementing traits for various [`StateProvider`](crate::StateProvider)
 //! implementations
 
 /// A macro that delegates trait implementations to the `as_ref` function of the type.
@@ -23,9 +23,9 @@ pub(crate) use delegate_impls_to_as_ref;
 
 /// Delegates the provider trait implementations to the `as_ref` function of the type:
 ///
-/// [AccountReader](crate::AccountReader)
-/// [BlockHashReader](crate::BlockHashReader)
-/// [StateProvider](crate::StateProvider)
+/// [`AccountReader`](crate::AccountReader)
+/// [`BlockHashReader`](crate::BlockHashReader)
+/// [`StateProvider`](crate::StateProvider)
 macro_rules! delegate_provider_impls {
     ($target:ty $(where [$($generics:tt)*])?) => {
         $crate::providers::state::macros::delegate_impls_to_as_ref!(
@@ -43,7 +43,7 @@ macro_rules! delegate_provider_impls {
             }
             StateProvider $(where [$($generics)*])?{
                 fn storage(&self, account: reth_primitives::Address, storage_key: reth_primitives::StorageKey) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives::StorageValue>>;
-                fn proof(&self, address: reth_primitives::Address, keys: &[reth_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_primitives::trie::AccountProof>;
+                fn proof(&self, address: reth_primitives::Address, keys: &[reth_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_primitives::proofs::AccountProof>;
                 fn bytecode_by_hash(&self, code_hash: reth_primitives::B256) -> reth_storage_errors::provider::ProviderResult<Option<reth_primitives::Bytecode>>;
             }
         );

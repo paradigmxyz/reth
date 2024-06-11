@@ -1,7 +1,7 @@
 //! Capability messaging
 //!
-//! An RLPx stream is multiplexed via the prepended message-id of a framed message.
-//! Capabilities are exchanged via the RLPx `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
+//! An `RLPx` stream is multiplexed via the prepended message-id of a framed message.
+//! Capabilities are exchanged via the `RLPx` `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
 use futures::FutureExt;
 use reth_eth_wire::{
@@ -11,7 +11,7 @@ use reth_eth_wire::{
     SharedTransactions, Transactions,
 };
 use reth_network_p2p::error::{RequestError, RequestResult};
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{
     BlockBody, Bytes, Header, PooledTransactionsElement, ReceiptWithBloom, B256,
 };
@@ -104,13 +104,13 @@ pub enum PeerRequest {
         /// The channel to send the response for pooled transactions.
         response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
-    /// Requests NodeData from the peer.
+    /// Requests `NodeData` from the peer.
     ///
     /// The response should be sent through the channel.
     GetNodeData {
-        /// The request for NodeData.
+        /// The request for `NodeData`.
         request: GetNodeData,
-        /// The channel to send the response for NodeData.
+        /// The channel to send the response for `NodeData`.
         response: oneshot::Sender<RequestResult<NodeData>>,
     },
     /// Requests receipts from the peer.
@@ -194,9 +194,9 @@ pub enum PeerResponse {
         /// The receiver channel for the response to a pooled transactions request.
         response: oneshot::Receiver<RequestResult<PooledTransactions>>,
     },
-    /// Represents a response to a request for NodeData.
+    /// Represents a response to a request for `NodeData`.
     NodeData {
-        /// The receiver channel for the response to a NodeData request.
+        /// The receiver channel for the response to a `NodeData` request.
         response: oneshot::Receiver<RequestResult<NodeData>>,
     },
     /// Represents a response to a request for receipts.

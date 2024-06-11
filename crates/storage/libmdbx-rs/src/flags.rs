@@ -13,8 +13,8 @@ pub enum SyncMode {
     ///
     /// Flush system buffers to disk only once per transaction commit, omit the metadata flush.
     /// Defer that until the system flushes files to disk, or next non-read-only commit or
-    /// [Environment::sync()](crate::Environment::sync). Depending on the platform and
-    /// hardware, with [SyncMode::NoMetaSync] you may get a doubling of write performance.
+    /// [`Environment::sync()`](crate::Environment::sync). Depending on the platform and
+    /// hardware, with [`SyncMode::NoMetaSync`] you may get a doubling of write performance.
     ///
     /// This trade-off maintains database integrity, but a system crash may undo the last committed
     /// transaction. I.e. it preserves the ACPI (atomicity, consistency, isolation) but not D
@@ -23,24 +23,24 @@ pub enum SyncMode {
 
     /// Don't sync anything but keep previous steady commits.
     ///
-    /// [SyncMode::UtterlyNoSync] the [SyncMode::SafeNoSync] flag disable similarly flush system
-    /// buffers to disk when committing a transaction. But there is a huge difference in how
-    /// are recycled the MVCC snapshots corresponding to previous "steady" transactions (see
-    /// below).
+    /// [`SyncMode::UtterlyNoSync`] the [`SyncMode::SafeNoSync`] flag disable similarly flush
+    /// system buffers to disk when committing a transaction. But there is a huge difference in
+    /// how are recycled the MVCC snapshots corresponding to previous "steady" transactions
+    /// (see below).
     ///
-    /// With [crate::EnvironmentKind::WriteMap] the [SyncMode::SafeNoSync] instructs MDBX to use
-    /// asynchronous mmap-flushes to disk. Asynchronous mmap-flushes means that actually all
-    /// writes will scheduled and performed by operation system on it own manner, i.e.
+    /// With [`crate::EnvironmentKind::WriteMap`] the [`SyncMode::SafeNoSync`] instructs MDBX to
+    /// use asynchronous mmap-flushes to disk. Asynchronous mmap-flushes means that actually
+    /// all writes will scheduled and performed by operation system on it own manner, i.e.
     /// unordered. MDBX itself just notify operating system that it would be nice to write data
     /// to disk, but no more.
     ///
-    /// Depending on the platform and hardware, with [SyncMode::SafeNoSync] you may get a multiple
-    /// increase of write performance, even 10 times or more.
+    /// Depending on the platform and hardware, with [`SyncMode::SafeNoSync`] you may get a
+    /// multiple increase of write performance, even 10 times or more.
     ///
-    /// In contrast to [SyncMode::UtterlyNoSync] mode, with [SyncMode::SafeNoSync] flag MDBX will
-    /// keeps untouched pages within B-tree of the last transaction "steady" which was synced to
-    /// disk completely. This has big implications for both data durability and (unfortunately)
-    /// performance:
+    /// In contrast to [`SyncMode::UtterlyNoSync`] mode, with [`SyncMode::SafeNoSync`] flag MDBX
+    /// will keeps untouched pages within B-tree of the last transaction "steady" which was
+    /// synced to disk completely. This has big implications for both data durability and
+    /// (unfortunately) performance:
     /// - A system crash can't corrupt the database, but you will lose the last transactions;
     ///   because MDBX will rollback to last steady commit since it kept explicitly.
     /// - The last steady transaction makes an effect similar to "long-lived" read transaction
@@ -51,49 +51,49 @@ pub enum SyncMode {
     ///   size of the file on disk.
     ///
     /// In other words, with
-    /// [SyncMode::SafeNoSync] flag MDBX protects you from the whole database corruption, at the
-    /// cost increasing database size and/or number of disk IOPs. So, [SyncMode::SafeNoSync]
-    /// flag could be used with [Environment::sync()](crate::Environment::sync) as alternatively
+    /// [`SyncMode::SafeNoSync`] flag MDBX protects you from the whole database corruption, at the
+    /// cost increasing database size and/or number of disk IOPs. So, [`SyncMode::SafeNoSync`]
+    /// flag could be used with [`Environment::sync()`](crate::Environment::sync) as alternatively
     /// for batch committing or nested transaction (in some cases).
     ///
-    /// The number and volume of of disk IOPs with [SyncMode::SafeNoSync] flag will exactly the as
-    /// without any no-sync flags. However, you should expect a larger process's work set and
-    /// significantly worse a locality of reference, due to the more intensive allocation of
-    /// previously unused pages and increase the size of the database.
+    /// The number and volume of of disk IOPs with [`SyncMode::SafeNoSync`] flag will exactly the
+    /// as without any no-sync flags. However, you should expect a larger process's work set
+    /// and significantly worse a locality of reference, due to the more intensive allocation
+    /// of previously unused pages and increase the size of the database.
     SafeNoSync,
 
     /// Don't sync anything and wipe previous steady commits.
     ///
     /// Don't flush system buffers to disk when committing a transaction.
     /// This optimization means a system crash can corrupt the database, if buffers are not yet
-    /// flushed to disk. Depending on the platform and hardware, with [SyncMode::UtterlyNoSync]
+    /// flushed to disk. Depending on the platform and hardware, with [`SyncMode::UtterlyNoSync`]
     /// you may get a multiple increase of write performance, even 100 times or more.
     ///
     /// If the filesystem preserves write order (which is rare and never provided unless explicitly
-    /// noted) and the [WriteMap](crate::EnvironmentKind::WriteMap) and
-    /// [EnvironmentFlags::liforeclaim] flags are not used, then a system crash can't corrupt
+    /// noted) and the [`WriteMap`](crate::EnvironmentKind::WriteMap) and
+    /// [`EnvironmentFlags::liforeclaim`] flags are not used, then a system crash can't corrupt
     /// the database, but you can lose the last transactions, if at least one buffer is not yet
     /// flushed to disk. The risk is governed by how often the system flushes dirty buffers to
-    /// disk and how often [Environment::sync()](crate::Environment::sync) is called. So,
+    /// disk and how often [`Environment::sync()`](crate::Environment::sync) is called. So,
     /// transactions exhibit ACPI (atomicity, consistency, isolation) properties and only lose D
     /// (durability). I.e. database integrity is maintained, but a system crash may undo the
     /// final transactions.
     ///
     /// Otherwise, if the filesystem not preserves write order (which is typically) or
-    /// [WriteMap](crate::EnvironmentKind::WriteMap) or [EnvironmentFlags::liforeclaim] flags are
-    /// used, you should expect the corrupted database after a system crash.
+    /// [`WriteMap`](crate::EnvironmentKind::WriteMap) or [`EnvironmentFlags::liforeclaim`] flags
+    /// are used, you should expect the corrupted database after a system crash.
     ///
-    /// So, most important thing about [SyncMode::UtterlyNoSync]:
+    /// So, most important thing about [`SyncMode::UtterlyNoSync`]:
     /// - A system crash immediately after commit the write transaction high likely lead to
     ///   database corruption.
-    /// - Successful completion of [Environment::sync(force=true)](crate::Environment::sync) after
-    ///   one or more committed transactions guarantees consistency and durability.
+    /// - Successful completion of [`Environment::sync(force=true`)](crate::Environment::sync)
+    ///   after one or more committed transactions guarantees consistency and durability.
     /// - BUT by committing two or more transactions you back database into a weak state, in which
     ///   a system crash may lead to database corruption! In case single transaction after
-    ///   [Environment::sync()](crate::Environment::sync), you may lose transaction itself, but not
-    ///   a whole database.
+    ///   [`Environment::sync()`](crate::Environment::sync), you may lose transaction itself, but
+    ///   not a whole database.
     ///
-    /// Nevertheless, [SyncMode::UtterlyNoSync] provides "weak" durability in
+    /// Nevertheless, [`SyncMode::UtterlyNoSync`] provides "weak" durability in
     /// case of an application crash (but no durability on system failure), and therefore may
     /// be very useful in scenarios where data durability is not required over a system failure
     /// (e.g for short-lived data), or if you can take such risk.

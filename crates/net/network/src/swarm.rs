@@ -12,7 +12,7 @@ use reth_eth_wire::{
     errors::EthStreamError,
     EthVersion, Status,
 };
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_provider::{BlockNumReader, BlockReader};
 use std::{
     io,
@@ -36,7 +36,7 @@ use tracing::trace;
 /// Following diagram gives displays the dataflow contained in the [`Swarm`]
 ///
 /// The [`ConnectionListener`] yields incoming [`TcpStream`]s from peers that are spawned as session
-/// tasks. After a successful RLPx authentication, the task is ready to accept ETH requests or
+/// tasks. After a successful `RLPx` authentication, the task is ready to accept ETH requests or
 /// broadcast messages. A task listens for messages from the [`SessionManager`] which include
 /// broadcast messages like `Transactions` or internal commands, for example to disconnect the
 /// session.
@@ -47,7 +47,7 @@ use tracing::trace;
 /// [`StateFetcher`], which receives request objects from the client interfaces responsible for
 /// downloading headers and bodies.
 ///
-/// include_mmd!("docs/mermaid/swarm.mmd")
+/// `include_mmd!("docs/mermaid/swarm.mmd`")
 #[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
 pub(crate) struct Swarm<C> {
@@ -71,7 +71,7 @@ impl<C> Swarm<C> {
         Self { incoming, sessions, state }
     }
 
-    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
     pub(crate) fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.sessions_mut().add_rlpx_sub_protocol(protocol);
     }
@@ -273,7 +273,7 @@ where
         self.state_mut().peers_mut().on_shutdown();
     }
 
-    /// Checks if the node's network connection state is 'ShuttingDown'
+    /// Checks if the node's network connection state is '`ShuttingDown`'
     #[inline]
     pub(crate) const fn is_shutting_down(&self) -> bool {
         self.state().peers().connection_state().is_shutting_down()

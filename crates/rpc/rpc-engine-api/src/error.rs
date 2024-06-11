@@ -2,8 +2,8 @@ use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
 use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
-use reth_engine_primitives::EngineObjectValidationError;
 use reth_payload_builder::error::PayloadBuilderError;
+use reth_payload_primitives::EngineObjectValidationError;
 use reth_primitives::{B256, U256};
 use reth_rpc_types::ToRpcError;
 use thiserror::Error;
@@ -42,7 +42,7 @@ pub enum EngineApiError {
         /// The length that was requested.
         len: u64,
     },
-    /// Thrown if engine_getPayloadBodiesByRangeV1 contains an invalid range
+    /// Thrown if `engine_getPayloadBodiesByRangeV1` contains an invalid range
     #[error("invalid start ({start}) or count ({count})")]
     InvalidBodiesRange {
         /// Start of the range
@@ -93,7 +93,7 @@ pub enum EngineApiError {
 }
 
 impl EngineApiError {
-    /// Crates a new [EngineApiError::Other] variant.
+    /// Crates a new [`EngineApiError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }

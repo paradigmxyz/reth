@@ -7,7 +7,7 @@ use itertools::Itertools;
 use schnellru::{ByLength, Limiter, RandomState, Unlimited};
 use std::{fmt, hash::Hash};
 
-/// A minimal LRU cache based on a `LinkedHashSet` with limited capacity.
+/// A minimal LRU cache based on a [`LruMap`](schnellru::LruMap) with limited capacity.
 ///
 /// If the length exceeds the set capacity, the oldest element will be removed
 /// In the limit, for each element inserted the oldest existing element will be removed.
@@ -26,7 +26,7 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
 
     /// Insert an element into the set.
     ///
-    /// If the element is new (did not exist before [`LruCache::insert()`]) was called, then the
+    /// If the element is new (did not exist before [`insert`](Self::insert)) was called, then the
     /// given length will be enforced and the oldest element will be removed if the limit was
     /// exceeded.
     ///
@@ -37,8 +37,8 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
         new_entry
     }
 
-    /// Same as [`Self::insert`] but returns a tuple, where the second index is the evicted value,
-    /// if one was evicted.
+    /// Same as [`insert`](Self::insert) but returns a tuple, where the second index is the evicted
+    /// value, if one was evicted.
     pub fn insert_and_get_evicted(&mut self, entry: T) -> (bool, Option<T>) {
         let new = self.inner.peek(&entry).is_none();
         let evicted =
@@ -48,13 +48,29 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
         (new, evicted)
     }
 
+    /// Gets the given element, if exists, and promotes to lru.
+    pub fn get(&mut self, entry: &T) -> Option<&T> {
+        let _ = self.inner.get(entry)?;
+        self.iter().next()
+    }
+
+    /// Iterates through entries and returns a reference to the given entry, if exists, without
+    /// promoting to lru.
+    ///
+    /// NOTE: Use this for type that have custom impl of [`PartialEq`] and [`Eq`], that aren't
+    /// unique by all fields. If `PartialEq` and `Eq` are derived for a type, it's more efficient to
+    /// call [`contains`](Self::contains).
+    pub fn find(&self, entry: &T) -> Option<&T> {
+        self.iter().find(|key| *key == entry)
+    }
+
     /// Remove the least recently used entry and return it.
     ///
     /// If the `LruCache` is empty or if the eviction feedback is
     /// configured, this will return None.
     #[inline]
     fn remove_lru(&mut self) -> Option<T> {
-        self.inner.pop_oldest().map(|(k, _v)| k)
+        self.inner.pop_oldest().map(|(k, ())| k)
     }
 
     /// Expels the given value. Returns true if the value existed.
@@ -69,7 +85,7 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
 
     /// Returns an iterator over all cached entries in lru order
     pub fn iter(&self) -> impl Iterator<Item = &T> + '_ {
-        self.inner.iter().map(|(k, _v)| k)
+        self.inner.iter().map(|(k, ())| k)
     }
 
     /// Returns number of elements currently in cache.
@@ -90,7 +106,7 @@ where
     T: Eq + Hash + fmt::Debug,
 {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
-        for item in iter.into_iter() {
+        for item in iter {
             _ = self.insert(item);
         }
     }
@@ -106,7 +122,7 @@ where
         debug_struct.field("limit", &self.limit);
 
         debug_struct.field(
-            "res_fn_iter",
+            "ret %iter",
             &format_args!("Iter: {{{} }}", self.iter().map(|k| format!(" {k:?}")).format(",")),
         );
 
@@ -135,7 +151,7 @@ where
         debug_struct.field("limiter", self.limiter());
 
         debug_struct.field(
-            "res_fn_iter",
+            "ret %iter",
             &format_args!(
                 "Iter: {{{} }}",
                 self.iter().map(|(k, v)| format!(" {k}: {v:?}")).format(",")
@@ -169,6 +185,30 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use derive_more::{Constructor, Display};
+    use std::hash::Hasher;
+
+    #[derive(Debug, Hash, PartialEq, Eq, Display, Clone, Copy)]
+    struct Key(i8);
+
+    #[derive(Debug, Eq, Constructor, Clone, Copy)]
+    struct CompoundKey {
+        // type unique for id
+        id: i8,
+        other: i8,
+    }
+
+    impl PartialEq for CompoundKey {
+        fn eq(&self, other: &Self) -> bool {
+            self.id == other.id
+        }
+    }
+
+    impl Hash for CompoundKey {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.id.hash(state)
+        }
+    }
 
     #[test]
     fn test_cache_should_insert_into_empty_set() {
@@ -211,11 +251,6 @@ mod test {
     #[test]
     #[allow(dead_code)]
     fn test_debug_impl_lru_map() {
-        use derive_more::Display;
-
-        #[derive(Debug, Hash, PartialEq, Eq, Display)]
-        struct Key(i8);
-
         #[derive(Debug)]
         struct Value(i8);
 
@@ -227,15 +262,12 @@ mod test {
         let value_2 = Value(22);
         cache.insert(key_2, value_2);
 
-        assert_eq!("LruMap { limiter: ByLength { max_length: 2 }, res_fn_iter: Iter: { 2: Value(22), 1: Value(11) } }", format!("{cache:?}"))
+        assert_eq!("LruMap { limiter: ByLength { max_length: 2 }, ret %iter: Iter: { 2: Value(22), 1: Value(11) } }", format!("{cache:?}"))
     }
 
     #[test]
     #[allow(dead_code)]
     fn test_debug_impl_lru_cache() {
-        #[derive(Debug, Hash, PartialEq, Eq)]
-        struct Key(i8);
-
         let mut cache = LruCache::new(2);
         let key_1 = Key(1);
         cache.insert(key_1);
@@ -243,8 +275,68 @@ mod test {
         cache.insert(key_2);
 
         assert_eq!(
-            "LruCache { limit: 2, res_fn_iter: Iter: { Key(2), Key(1) } }",
+            "LruCache { limit: 2, ret %iter: Iter: { Key(2), Key(1) } }",
             format!("{cache:?}")
         )
+    }
+
+    #[test]
+    fn get() {
+        let mut cache = LruCache::new(2);
+        let key_1 = Key(1);
+        cache.insert(key_1);
+        let key_2 = Key(2);
+        cache.insert(key_2);
+
+        // promotes key 1 to lru
+        _ = cache.get(&key_1);
+
+        assert_eq!(
+            "LruCache { limit: 2, ret %iter: Iter: { Key(1), Key(2) } }",
+            format!("{cache:?}")
+        )
+    }
+
+    #[test]
+    fn get_ty_custom_eq_impl() {
+        let mut cache = LruCache::new(2);
+        let key_1 = CompoundKey::new(1, 11);
+        cache.insert(key_1);
+        let key_2 = CompoundKey::new(2, 22);
+        cache.insert(key_2);
+
+        let key = cache.get(&key_1);
+
+        assert_eq!(key_1.other, key.unwrap().other)
+    }
+
+    #[test]
+    fn peek() {
+        let mut cache = LruCache::new(2);
+        let key_1 = Key(1);
+        cache.insert(key_1);
+        let key_2 = Key(2);
+        cache.insert(key_2);
+
+        // doesn't promote key 1 to lru
+        _ = cache.find(&key_1);
+
+        assert_eq!(
+            "LruCache { limit: 2, ret %iter: Iter: { Key(2), Key(1) } }",
+            format!("{cache:?}")
+        )
+    }
+
+    #[test]
+    fn peek_ty_custom_eq_impl() {
+        let mut cache = LruCache::new(2);
+        let key_1 = CompoundKey::new(1, 11);
+        cache.insert(key_1);
+        let key_2 = CompoundKey::new(2, 22);
+        cache.insert(key_2);
+
+        let key = cache.find(&key_1);
+
+        assert_eq!(key_1.other, key.unwrap().other)
     }
 }

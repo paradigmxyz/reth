@@ -86,7 +86,7 @@ impl P2PStreamError {
     /// Returns the [`DisconnectReason`] if it is the `Disconnected` variant.
     pub const fn as_disconnected(&self) -> Option<DisconnectReason> {
         let reason = match self {
-            Self::HandshakeError(P2PHandshakeError::Disconnected(reason)) => reason,
+            Self::HandshakeError(P2PHandshakeError::Disconnected(reason)) |
             Self::Disconnected(reason) => reason,
             _ => return None,
         };

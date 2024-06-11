@@ -5,13 +5,19 @@ use std::time::{Duration, Instant};
 #[derive(Debug)]
 pub(crate) struct DurationsRecorder {
     start: Instant,
+    current_metrics: DatabaseProviderMetrics,
     pub(crate) actions: Vec<(Action, Duration)>,
     latest: Option<Duration>,
 }
 
 impl Default for DurationsRecorder {
     fn default() -> Self {
-        Self { start: Instant::now(), actions: Vec::new(), latest: None }
+        Self {
+            start: Instant::now(),
+            actions: Vec::new(),
+            latest: None,
+            current_metrics: DatabaseProviderMetrics::default(),
+        }
     }
 }
 
@@ -20,7 +26,7 @@ impl DurationsRecorder {
     /// `action` label.
     pub(crate) fn record_duration(&mut self, action: Action, duration: Duration) {
         self.actions.push((action, duration));
-        Metrics::new_with_labels(&[("action", action.as_str())]).duration.record(duration);
+        self.current_metrics.record_duration(action, duration);
         self.latest = Some(self.start.elapsed());
     }
 
@@ -31,8 +37,7 @@ impl DurationsRecorder {
         let duration = elapsed - self.latest.unwrap_or_default();
 
         self.actions.push((action, duration));
-        Metrics::new_with_labels(&[("action", action.as_str())]).duration.record(duration);
-
+        self.current_metrics.record_duration(action, duration);
         self.latest = Some(elapsed);
     }
 }
@@ -59,44 +64,86 @@ pub(crate) enum Action {
     InsertBlockRequests,
     InsertBlockBodyIndices,
     InsertTransactionBlocks,
-
     GetNextTxNum,
     GetParentTD,
 }
 
-impl Action {
-    const fn as_str(&self) -> &'static str {
-        match self {
-            Self::InsertStorageHashing => "insert storage hashing",
-            Self::InsertAccountHashing => "insert account hashing",
-            Self::InsertMerkleTree => "insert merkle tree",
-            Self::InsertBlock => "insert block",
-            Self::InsertState => "insert state",
-            Self::InsertHashes => "insert hashes",
-            Self::InsertHistoryIndices => "insert history indices",
-            Self::UpdatePipelineStages => "update pipeline stages",
-            Self::InsertCanonicalHeaders => "insert canonical headers",
-            Self::InsertHeaders => "insert headers",
-            Self::InsertHeaderNumbers => "insert header numbers",
-            Self::InsertHeaderTerminalDifficulties => "insert header TD",
-            Self::InsertBlockOmmers => "insert block ommers",
-            Self::InsertTransactionSenders => "insert tx senders",
-            Self::InsertTransactions => "insert transactions",
-            Self::InsertTransactionHashNumbers => "insert transaction hash numbers",
-            Self::InsertBlockWithdrawals => "insert block withdrawals",
-            Self::InsertBlockRequests => "insert block withdrawals",
-            Self::InsertBlockBodyIndices => "insert block body indices",
-            Self::InsertTransactionBlocks => "insert transaction blocks",
-            Self::GetNextTxNum => "get next tx num",
-            Self::GetParentTD => "get parent TD",
-        }
-    }
-}
-
+/// Database provider metrics
 #[derive(Metrics)]
 #[metrics(scope = "storage.providers.database")]
-/// Database provider metrics
-struct Metrics {
-    /// The time it took to execute an action
-    duration: Histogram,
+struct DatabaseProviderMetrics {
+    /// Duration of insert storage hashing
+    insert_storage_hashing: Histogram,
+    /// Duration of insert account hashing
+    insert_account_hashing: Histogram,
+    /// Duration of insert merkle tree
+    insert_merkle_tree: Histogram,
+    /// Duration of insert block
+    insert_block: Histogram,
+    /// Duration of insert state
+    insert_state: Histogram,
+    /// Duration of insert hashes
+    insert_hashes: Histogram,
+    /// Duration of insert history indices
+    insert_history_indices: Histogram,
+    /// Duration of update pipeline stages
+    update_pipeline_stages: Histogram,
+    /// Duration of insert canonical headers
+    insert_canonical_headers: Histogram,
+    /// Duration of insert headers
+    insert_headers: Histogram,
+    /// Duration of insert header numbers
+    insert_header_numbers: Histogram,
+    /// Duration of insert header TD
+    insert_header_td: Histogram,
+    /// Duration of insert block ommers
+    insert_block_ommers: Histogram,
+    /// Duration of insert tx senders
+    insert_tx_senders: Histogram,
+    /// Duration of insert transactions
+    insert_transactions: Histogram,
+    /// Duration of insert transaction hash numbers
+    insert_tx_hash_numbers: Histogram,
+    /// Duration of insert block withdrawals
+    insert_block_withdrawals: Histogram,
+    /// Duration of insert block requests
+    insert_block_requests: Histogram,
+    /// Duration of insert block body indices
+    insert_block_body_indices: Histogram,
+    /// Duration of insert transaction blocks
+    insert_tx_blocks: Histogram,
+    /// Duration of get next tx num
+    get_next_tx_num: Histogram,
+    /// Duration of get parent TD
+    get_parent_td: Histogram,
+}
+
+impl DatabaseProviderMetrics {
+    /// Records the duration for the given action.
+    pub(crate) fn record_duration(&self, action: Action, duration: Duration) {
+        match action {
+            Action::InsertStorageHashing => self.insert_storage_hashing.record(duration),
+            Action::InsertAccountHashing => self.insert_account_hashing.record(duration),
+            Action::InsertMerkleTree => self.insert_merkle_tree.record(duration),
+            Action::InsertBlock => self.insert_block.record(duration),
+            Action::InsertState => self.insert_state.record(duration),
+            Action::InsertHashes => self.insert_hashes.record(duration),
+            Action::InsertHistoryIndices => self.insert_history_indices.record(duration),
+            Action::UpdatePipelineStages => self.update_pipeline_stages.record(duration),
+            Action::InsertCanonicalHeaders => self.insert_canonical_headers.record(duration),
+            Action::InsertHeaders => self.insert_headers.record(duration),
+            Action::InsertHeaderNumbers => self.insert_header_numbers.record(duration),
+            Action::InsertHeaderTerminalDifficulties => self.insert_header_td.record(duration),
+            Action::InsertBlockOmmers => self.insert_block_ommers.record(duration),
+            Action::InsertTransactionSenders => self.insert_tx_senders.record(duration),
+            Action::InsertTransactions => self.insert_transactions.record(duration),
+            Action::InsertTransactionHashNumbers => self.insert_tx_hash_numbers.record(duration),
+            Action::InsertBlockWithdrawals => self.insert_block_withdrawals.record(duration),
+            Action::InsertBlockRequests => self.insert_block_requests.record(duration),
+            Action::InsertBlockBodyIndices => self.insert_block_body_indices.record(duration),
+            Action::InsertTransactionBlocks => self.insert_tx_blocks.record(duration),
+            Action::GetNextTxNum => self.get_next_tx_num.record(duration),
+            Action::GetParentTD => self.get_parent_td.record(duration),
+        }
+    }
 }

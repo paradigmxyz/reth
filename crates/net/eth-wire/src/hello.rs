@@ -2,22 +2,22 @@ use crate::{capability::Capability, EthVersion, ProtocolVersion};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_codecs::derive_arbitrary;
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::constants::RETH_CLIENT_VERSION;
 
 use crate::protocol::Protocol;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// This is a superset of [HelloMessage] that provides additional protocol [Protocol] information
+/// This is a superset of [`HelloMessage`] that provides additional protocol [Protocol] information
 /// about the number of messages used by each capability in order to do proper message ID
 /// multiplexing.
 ///
-/// This type is required for the `p2p` handshake because the [HelloMessage] does not share the
+/// This type is required for the `p2p` handshake because the [`HelloMessage`] does not share the
 /// number of messages used by each capability.
 ///
-/// To get the encodable [HelloMessage] without the additional protocol information, use the
-/// [HelloMessageWithProtocols::message].
+/// To get the encodable [`HelloMessage`] without the additional protocol information, use the
+/// [`HelloMessageWithProtocols::message`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct HelloMessageWithProtocols {
@@ -39,7 +39,7 @@ impl HelloMessageWithProtocols {
     ///
     /// ```
     /// use reth_eth_wire::HelloMessageWithProtocols;
-    /// use reth_network_types::pk2id;
+    /// use reth_network_peers::pk2id;
     /// use secp256k1::{SecretKey, SECP256K1};
     /// let secret_key = SecretKey::new(&mut rand::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
@@ -49,7 +49,7 @@ impl HelloMessageWithProtocols {
         HelloMessageBuilder::new(id)
     }
 
-    /// Returns the raw [HelloMessage] without the additional protocol information.
+    /// Returns the raw [`HelloMessage`] without the additional protocol information.
     #[inline]
     pub fn message(&self) -> HelloMessage {
         HelloMessage {
@@ -61,7 +61,7 @@ impl HelloMessageWithProtocols {
         }
     }
 
-    /// Converts the type into a [HelloMessage] without the additional protocol information.
+    /// Converts the type into a [`HelloMessage`] without the additional protocol information.
     pub fn into_message(self) -> HelloMessage {
         HelloMessage {
             protocol_version: self.protocol_version,
@@ -121,7 +121,7 @@ impl HelloMessage {
     ///
     /// ```
     /// use reth_eth_wire::HelloMessage;
-    /// use reth_network_types::pk2id;
+    /// use reth_network_peers::pk2id;
     /// use secp256k1::{SecretKey, SECP256K1};
     /// let secret_key = SecretKey::new(&mut rand::thread_rng());
     /// let id = pk2id(&secret_key.public_key(SECP256K1));
@@ -191,7 +191,7 @@ impl HelloMessageBuilder {
     /// Unset fields will be set to their default values:
     /// - `protocol_version`: [`ProtocolVersion::V5`]
     /// - `client_version`: [`RETH_CLIENT_VERSION`]
-    /// - `capabilities`: All [EthVersion]
+    /// - `capabilities`: All [`EthVersion`]
     pub fn build(self) -> HelloMessageWithProtocols {
         let Self { protocol_version, client_version, protocols, port, id } = self;
         HelloMessageWithProtocols {
@@ -210,7 +210,7 @@ impl HelloMessageBuilder {
 mod tests {
     use alloy_rlp::{Decodable, Encodable, EMPTY_STRING_CODE};
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use reth_network_types::pk2id;
+    use reth_network_peers::pk2id;
     use secp256k1::{SecretKey, SECP256K1};
 
     use crate::{

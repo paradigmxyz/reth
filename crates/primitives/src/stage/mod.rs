@@ -12,7 +12,7 @@ pub use checkpoints::{
 };
 
 /// Direction and target block for pipeline operations.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipelineTarget {
     /// Target for forward synchronization, indicating a block hash to sync to.
     Sync(BlockHash),
@@ -51,5 +51,16 @@ impl PipelineTarget {
 impl From<BlockHash> for PipelineTarget {
     fn from(hash: BlockHash) -> Self {
         Self::Sync(hash)
+    }
+}
+
+impl std::fmt::Display for PipelineTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Sync(block) => {
+                write!(f, "Sync({block})")
+            }
+            Self::Unwind(block) => write!(f, "Unwind({block})"),
+        }
     }
 }

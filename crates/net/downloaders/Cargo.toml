@@ -19,10 +19,11 @@ reth-tasks.workspace = true
 reth-provider.workspace = true
 reth-config.workspace = true
 reth-consensus.workspace = true
-reth-network-types.workspace = true
+reth-network-peers.workspace = true
 
 # optional deps for the test-utils feature
 reth-db = { workspace = true, optional = true }
+reth-db-api = { workspace = true, optional = true }
 reth-testing-utils = { workspace = true, optional = true }
 
 # eth
@@ -50,6 +51,7 @@ itertools.workspace = true
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
+reth-db-api.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -65,5 +67,11 @@ rand.workspace = true
 tempfile.workspace = true
 
 [features]
-test-utils = ["dep:tempfile", "reth-db/test-utils", "reth-consensus/test-utils", "reth-network-p2p/test-utils", "reth-testing-utils"]
-
+test-utils = [
+    "dep:tempfile",
+    "dep:reth-db-api",
+    "reth-db/test-utils",
+    "reth-consensus/test-utils",
+    "reth-network-p2p/test-utils",
+    "reth-testing-utils",
+]

@@ -8,7 +8,6 @@ use reth_eth_wire::{
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
     EthMessage, EthStream, EthVersion, P2PStream,
 };
-use reth_net_common::bandwidth_meter::MeteredStream;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -16,11 +15,11 @@ use std::{
 use tokio::net::TcpStream;
 
 /// The type of the underlying peer network connection.
-pub type EthPeerConnection = EthStream<P2PStream<ECIESStream<MeteredStream<TcpStream>>>>;
+pub type EthPeerConnection = EthStream<P2PStream<ECIESStream<TcpStream>>>;
 
 /// Various connection types that at least support the ETH protocol.
 pub type EthSatelliteConnection =
-    RlpxSatelliteStream<ECIESStream<MeteredStream<TcpStream>>, EthStream<ProtocolProxy>>;
+    RlpxSatelliteStream<ECIESStream<TcpStream>, EthStream<ProtocolProxy>>;
 
 /// Connection types that support the ETH protocol.
 ///
@@ -31,7 +30,7 @@ pub type EthSatelliteConnection =
 pub enum EthRlpxConnection {
     /// A That only supports the ETH protocol.
     EthOnly(Box<EthPeerConnection>),
-    /// A connection that supports the ETH protocol and __at least one other__ RLPx protocol.
+    /// A connection that supports the ETH protocol and __at least one other__ `RLPx` protocol.
     Satellite(Box<EthSatelliteConnection>),
 }
 
@@ -45,9 +44,9 @@ impl EthRlpxConnection {
         }
     }
 
-    /// Consumes this type and returns the wrapped [P2PStream].
+    /// Consumes this type and returns the wrapped [`P2PStream`].
     #[inline]
-    pub(crate) fn into_inner(self) -> P2PStream<ECIESStream<MeteredStream<TcpStream>>> {
+    pub(crate) fn into_inner(self) -> P2PStream<ECIESStream<TcpStream>> {
         match self {
             Self::EthOnly(conn) => conn.into_inner(),
             Self::Satellite(conn) => conn.into_inner(),
@@ -56,7 +55,7 @@ impl EthRlpxConnection {
 
     /// Returns mutable access to the underlying stream.
     #[inline]
-    pub(crate) fn inner_mut(&mut self) -> &mut P2PStream<ECIESStream<MeteredStream<TcpStream>>> {
+    pub(crate) fn inner_mut(&mut self) -> &mut P2PStream<ECIESStream<TcpStream>> {
         match self {
             Self::EthOnly(conn) => conn.inner_mut(),
             Self::Satellite(conn) => conn.inner_mut(),
@@ -65,7 +64,7 @@ impl EthRlpxConnection {
 
     /// Returns  access to the underlying stream.
     #[inline]
-    pub(crate) const fn inner(&self) -> &P2PStream<ECIESStream<MeteredStream<TcpStream>>> {
+    pub(crate) const fn inner(&self) -> &P2PStream<ECIESStream<TcpStream>> {
         match self {
             Self::EthOnly(conn) => conn.inner(),
             Self::Satellite(conn) => conn.inner(),

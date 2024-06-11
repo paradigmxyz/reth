@@ -17,8 +17,9 @@
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_network_p2p::test_utils::{TestBodiesClient, TestHeadersClient};
 //! # use reth_evm_ethereum::execute::EthExecutorProvider;
-//! # use reth_primitives::{MAINNET, B256, PruneModes};
-//! # use reth_network_types::PeerId;
+//! # use reth_primitives::{MAINNET, B256};
+//! # use reth_prune_types::PruneModes;
+//! # use reth_network_peers::PeerId;
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # use tokio::sync::watch;
@@ -48,7 +49,6 @@
 //! # let executor_provider = EthExecutorProvider::mainnet();
 //! # let static_file_producer = StaticFileProducer::new(
 //! #    provider_factory.clone(),
-//! #    provider_factory.static_file_provider(),
 //! #    PruneModes::default()
 //! # );
 //! // Create a pipeline that can fully sync

@@ -16,7 +16,7 @@ use reth_network_p2p::{
     },
     priority::Priority,
 };
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{
     BlockHashOrNumber, BlockNumber, GotExpected, Header, HeadersDirection, SealedHeader, B256,
 };
@@ -54,14 +54,14 @@ impl From<HeadersResponseError> for ReverseHeadersDownloaderError {
 
 /// Downloads headers concurrently.
 ///
-/// This [HeaderDownloader] downloads headers using the configured [HeadersClient].
+/// This [`HeaderDownloader`] downloads headers using the configured [`HeadersClient`].
 /// Headers can be requested by hash or block number and take a `limit` parameter. This downloader
 /// tries to fill the gap between the local head of the node and the chain tip by issuing multiple
-/// requests at a time but yielding them in batches on [Stream::poll_next].
+/// requests at a time but yielding them in batches on [`Stream::poll_next`].
 ///
-/// **Note:** This downloader downloads in reverse, see also [HeadersDirection::Falling], this means
-/// the batches of headers that this downloader yields will start at the chain tip and move towards
-/// the local head: falling block numbers.
+/// **Note:** This downloader downloads in reverse, see also [`HeadersDirection::Falling`], this
+/// means the batches of headers that this downloader yields will start at the chain tip and move
+/// towards the local head: falling block numbers.
 #[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
 pub struct ReverseHeadersDownloader<H: HeadersClient> {
@@ -112,7 +112,7 @@ impl<H> ReverseHeadersDownloader<H>
 where
     H: HeadersClient + 'static,
 {
-    /// Convenience method to create a [ReverseHeadersDownloaderBuilder] without importing it
+    /// Convenience method to create a [`ReverseHeadersDownloaderBuilder`] without importing it
     pub fn builder() -> ReverseHeadersDownloaderBuilder {
         ReverseHeadersDownloaderBuilder::default()
     }
@@ -378,7 +378,7 @@ where
                 let target = headers.remove(0).seal_slow();
 
                 match sync_target {
-                    SyncTargetBlock::Hash(hash) => {
+                    SyncTargetBlock::Hash(hash) | SyncTargetBlock::HashAndNumber { hash, .. } => {
                         if target.hash() != hash {
                             return Err(HeadersResponseError {
                                 request,
@@ -399,18 +399,6 @@ where
                                     got: target.number,
                                     expected: number,
                                 }),
-                            }
-                            .into())
-                        }
-                    }
-                    SyncTargetBlock::HashAndNumber { hash, .. } => {
-                        if target.hash() != hash {
-                            return Err(HeadersResponseError {
-                                request,
-                                peer_id: Some(peer_id),
-                                error: DownloadError::InvalidTip(
-                                    GotExpected { got: target.hash(), expected: hash }.into(),
-                                ),
                             }
                             .into())
                         }
@@ -645,7 +633,7 @@ where
     H: HeadersClient,
     Self: HeaderDownloader + 'static,
 {
-    /// Spawns the downloader task via [tokio::task::spawn]
+    /// Spawns the downloader task via [`tokio::task::spawn`]
     pub fn into_task(self) -> TaskDownloader {
         self.into_task_with(&TokioTaskExecutor::default())
     }
@@ -912,7 +900,7 @@ where
     }
 }
 
-/// The outcome of the [HeadersRequestFuture]
+/// The outcome of the [`HeadersRequestFuture`]
 struct HeadersRequestOutcome {
     request: HeadersRequest,
     outcome: PeerRequestResult<Vec<Header>>,
@@ -1014,17 +1002,19 @@ impl SyncTargetBlock {
     const fn with_hash(self, hash: B256) -> Self {
         match self {
             Self::Hash(_) => Self::Hash(hash),
-            Self::Number(number) => Self::HashAndNumber { hash, number },
-            Self::HashAndNumber { number, .. } => Self::HashAndNumber { hash, number },
+            Self::Number(number) | Self::HashAndNumber { number, .. } => {
+                Self::HashAndNumber { hash, number }
+            }
         }
     }
 
     /// Set a number on the instance.
     const fn with_number(self, number: u64) -> Self {
         match self {
-            Self::Hash(hash) => Self::HashAndNumber { hash, number },
+            Self::Hash(hash) | Self::HashAndNumber { hash, .. } => {
+                Self::HashAndNumber { hash, number }
+            }
             Self::Number(_) => Self::Number(number),
-            Self::HashAndNumber { hash, .. } => Self::HashAndNumber { hash, number },
         }
     }
 
@@ -1054,9 +1044,8 @@ impl SyncTargetBlock {
     /// Return the hash of the target block, if it is set.
     const fn hash(&self) -> Option<B256> {
         match self {
-            Self::Hash(hash) => Some(*hash),
+            Self::Hash(hash) | Self::HashAndNumber { hash, .. } => Some(*hash),
             Self::Number(_) => None,
-            Self::HashAndNumber { hash, .. } => Some(*hash),
         }
     }
 
@@ -1064,13 +1053,12 @@ impl SyncTargetBlock {
     const fn number(&self) -> Option<u64> {
         match self {
             Self::Hash(_) => None,
-            Self::Number(number) => Some(*number),
-            Self::HashAndNumber { number, .. } => Some(*number),
+            Self::Number(number) | Self::HashAndNumber { number, .. } => Some(*number),
         }
     }
 }
 
-/// The builder for [ReverseHeadersDownloader] with
+/// The builder for [`ReverseHeadersDownloader`] with
 /// some default settings
 #[derive(Debug)]
 pub struct ReverseHeadersDownloaderBuilder {
@@ -1087,8 +1075,8 @@ pub struct ReverseHeadersDownloaderBuilder {
 }
 
 impl ReverseHeadersDownloaderBuilder {
-    /// Creates a new [ReverseHeadersDownloaderBuilder] with configurations based on the provided
-    /// [HeadersConfig].
+    /// Creates a new [`ReverseHeadersDownloaderBuilder`] with configurations based on the provided
+    /// [`HeadersConfig`].
     pub fn new(config: HeadersConfig) -> Self {
         Self::default()
             .request_limit(config.downloader_request_limit)
@@ -1125,7 +1113,7 @@ impl ReverseHeadersDownloaderBuilder {
 
     /// Set the stream batch size
     ///
-    /// This determines the number of headers the [ReverseHeadersDownloader] will yield on
+    /// This determines the number of headers the [`ReverseHeadersDownloader`] will yield on
     /// `Stream::next`. This will be the amount of headers the headers stage will commit at a
     /// time.
     pub const fn stream_batch_size(mut self, size: usize) -> Self {
@@ -1135,7 +1123,7 @@ impl ReverseHeadersDownloaderBuilder {
 
     /// Set the min amount of concurrent requests.
     ///
-    /// If there's capacity the [ReverseHeadersDownloader] will keep at least this many requests
+    /// If there's capacity the [`ReverseHeadersDownloader`] will keep at least this many requests
     /// active at a time.
     pub const fn min_concurrent_requests(mut self, min_concurrent_requests: usize) -> Self {
         self.min_concurrent_requests = min_concurrent_requests;
@@ -1154,14 +1142,14 @@ impl ReverseHeadersDownloaderBuilder {
     ///
     /// This essentially determines how much memory the downloader can use for buffering responses
     /// that arrive out of order. The total number of buffered headers is `request_limit *
-    /// max_buffered_responses`. If the [ReverseHeadersDownloader]'s buffered responses exceeds this
-    /// threshold it waits until there's capacity again before sending new requests.
+    /// max_buffered_responses`. If the [`ReverseHeadersDownloader`]'s buffered responses exceeds
+    /// this threshold it waits until there's capacity again before sending new requests.
     pub const fn max_buffered_responses(mut self, max_buffered_responses: usize) -> Self {
         self.max_buffered_responses = max_buffered_responses;
         self
     }
 
-    /// Build [ReverseHeadersDownloader] with provided consensus
+    /// Build [`ReverseHeadersDownloader`] with provided consensus
     /// and header client implementations
     pub fn build<H>(self, client: H, consensus: Arc<dyn Consensus>) -> ReverseHeadersDownloader<H>
     where
@@ -1198,7 +1186,7 @@ impl ReverseHeadersDownloaderBuilder {
     }
 }
 
-/// Configures and returns the next [HeadersRequest] based on the given parameters
+/// Configures and returns the next [`HeadersRequest`] based on the given parameters
 ///
 /// The request will start at the given `next_request_block_number` block.
 /// The `limit` of the request will either be the targeted `request_limit` or the difference of
@@ -1225,7 +1213,7 @@ mod tests {
     use reth_consensus::test_utils::TestConsensus;
     use reth_network_p2p::test_utils::TestHeadersClient;
 
-    /// Tests that `replace_number` works the same way as Option::replace
+    /// Tests that `replace_number` works the same way as `Option::replace`
     #[test]
     fn test_replace_number_semantics() {
         struct Fixture {

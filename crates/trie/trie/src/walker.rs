@@ -2,12 +2,10 @@ use crate::{
     prefix_set::PrefixSet,
     trie_cursor::{CursorSubNode, TrieCursor},
     updates::TrieUpdates,
+    BranchNodeCompact, Nibbles,
 };
 use reth_db::DatabaseError;
-use reth_primitives::{
-    trie::{BranchNodeCompact, Nibbles},
-    B256,
-};
+use reth_primitives::B256;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
 /// It allows moving through the trie in a depth-first manner, skipping certain branches
@@ -29,7 +27,7 @@ pub struct TrieWalker<C> {
 }
 
 impl<C> TrieWalker<C> {
-    /// Constructs a new TrieWalker from existing stack and a cursor.
+    /// Constructs a new `TrieWalker` from existing stack and a cursor.
     pub fn from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
         let mut this =
             Self { cursor, changes, stack, can_skip_current_node: false, trie_updates: None };
@@ -111,7 +109,7 @@ impl<C> TrieWalker<C> {
 }
 
 impl<C: TrieCursor> TrieWalker<C> {
-    /// Constructs a new TrieWalker, setting up the initial state of the stack and cursor.
+    /// Constructs a new `TrieWalker`, setting up the initial state of the stack and cursor.
     pub fn new(cursor: C, changes: PrefixSet) -> Self {
         // Initialize the walker with a single empty stack element.
         let mut this = Self {
@@ -249,9 +247,10 @@ mod tests {
     use crate::{
         prefix_set::PrefixSetMut,
         trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
+        StorageTrieEntry, StoredBranchNode,
     };
-    use reth_db::{cursor::DbCursorRW, tables, transaction::DbTxMut};
-    use reth_primitives::trie::{StorageTrieEntry, StoredBranchNode};
+    use reth_db::tables;
+    use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]

@@ -50,7 +50,7 @@ where
         Self::connect_with_timeout(transport, secret_key, remote_id, HANDSHAKE_TIMEOUT).await
     }
 
-    /// Wrapper around connect_no_timeout which enforces a timeout.
+    /// Wrapper around `connect_no_timeout` which enforces a timeout.
     pub async fn connect_with_timeout(
         transport: Io,
         secret_key: SecretKey,
@@ -175,7 +175,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_network_types::pk2id;
+    use reth_network_peers::pk2id;
     use secp256k1::SECP256K1;
     use tokio::net::{TcpListener, TcpStream};
 

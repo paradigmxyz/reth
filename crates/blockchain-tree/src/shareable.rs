@@ -1,4 +1,4 @@
-//! Wrapper around BlockchainTree that allows for it to be shared.
+//! Wrapper around `BlockchainTree` that allows for it to be shared.
 
 use super::BlockchainTree;
 use parking_lot::RwLock;
@@ -7,7 +7,7 @@ use reth_blockchain_tree_api::{
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
@@ -17,13 +17,14 @@ use reth_provider::{
     BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullBundleStateDataProvider,
     ProviderError,
 };
+use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
 use tracing::trace;
 
-/// Shareable blockchain tree that is behind a RwLock
+/// Shareable blockchain tree that is behind a `RwLock`
 #[derive(Clone, Debug)]
 pub struct ShareableBlockchainTree<DB, E> {
-    /// BlockchainTree
+    /// `BlockchainTree`
     pub tree: Arc<RwLock<BlockchainTree<DB, E>>>,
 }
 
@@ -58,11 +59,13 @@ where
         res
     }
 
-    fn finalize_block(&self, finalized_block: BlockNumber) {
+    fn finalize_block(&self, finalized_block: BlockNumber) -> ProviderResult<()> {
         trace!(target: "blockchain_tree", finalized_block, "Finalizing block");
         let mut tree = self.tree.write();
-        tree.finalize_block(finalized_block);
+        tree.finalize_block(finalized_block)?;
         tree.update_chains_metrics();
+
+        Ok(())
     }
 
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(

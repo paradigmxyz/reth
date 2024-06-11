@@ -19,9 +19,9 @@ use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
-use reth_network_types::NodeRecord;
+use reth_network_peers::NodeRecord;
 
-/// The PeerId type.
+/// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;
 
 /// Network Error
@@ -71,7 +71,7 @@ pub trait Peers: PeersInfo {
         self.add_peer_kind(peer, PeerKind::Basic, addr);
     }
 
-    /// Adds a trusted [PeerId] to the peer set.
+    /// Adds a trusted [`PeerId`] to the peer set.
     ///
     /// This allows marking a peer as trusted without having to know the peer's address.
     fn add_trusted_peer_id(&self, peer: PeerId);
@@ -84,28 +84,28 @@ pub trait Peers: PeersInfo {
     /// Adds a peer to the known peer set, with the given kind.
     fn add_peer_kind(&self, peer: PeerId, kind: PeerKind, addr: SocketAddr);
 
-    /// Returns the rpc [PeerInfo] for all connected [PeerKind::Trusted] peers.
+    /// Returns the rpc [`PeerInfo`] for all connected [`PeerKind::Trusted`] peers.
     fn get_trusted_peers(
         &self,
     ) -> impl Future<Output = Result<Vec<PeerInfo>, NetworkError>> + Send {
         self.get_peers_by_kind(PeerKind::Trusted)
     }
 
-    /// Returns the rpc [PeerInfo] for all connected [PeerKind::Basic] peers.
+    /// Returns the rpc [`PeerInfo`] for all connected [`PeerKind::Basic`] peers.
     fn get_basic_peers(&self) -> impl Future<Output = Result<Vec<PeerInfo>, NetworkError>> + Send {
         self.get_peers_by_kind(PeerKind::Basic)
     }
 
-    /// Returns the rpc [PeerInfo] for all connected peers with the given kind.
+    /// Returns the rpc [`PeerInfo`] for all connected peers with the given kind.
     fn get_peers_by_kind(
         &self,
         kind: PeerKind,
     ) -> impl Future<Output = Result<Vec<PeerInfo>, NetworkError>> + Send;
 
-    /// Returns the rpc [PeerInfo] for all connected peers.
+    /// Returns the rpc [`PeerInfo`] for all connected peers.
     fn get_all_peers(&self) -> impl Future<Output = Result<Vec<PeerInfo>, NetworkError>> + Send;
 
-    /// Returns the rpc [PeerInfo] for the given peer id.
+    /// Returns the rpc [`PeerInfo`] for the given peer id.
     ///
     /// Returns `None` if the peer is not connected.
     fn get_peer_by_id(
@@ -113,7 +113,7 @@ pub trait Peers: PeersInfo {
         peer_id: PeerId,
     ) -> impl Future<Output = Result<Option<PeerInfo>, NetworkError>> + Send;
 
-    /// Returns the rpc [PeerInfo] for the given peers if they are connected.
+    /// Returns the rpc [`PeerInfo`] for the given peers if they are connected.
     ///
     /// Note: This only returns peers that are connected, unconnected peers are ignored but keeping
     /// the order in which they were requested.

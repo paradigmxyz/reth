@@ -3,7 +3,7 @@ use reth_network_p2p::{
     download::DownloadClient,
     priority::Priority,
 };
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{BlockBody, B256};
 use std::{
     collections::HashMap,
@@ -16,7 +16,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 
-/// A [BodiesClient] for testing.
+/// A [`BodiesClient`] for testing.
 #[derive(Debug, Default)]
 pub struct TestBodiesClient {
     bodies: Arc<Mutex<HashMap<B256, BlockBody>>>,

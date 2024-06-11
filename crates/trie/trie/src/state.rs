@@ -2,19 +2,18 @@ use crate::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::{PrefixSetMut, TriePrefixSets},
     updates::TrieUpdates,
-    StateRoot,
+    Nibbles, StateRoot,
 };
-use reth_db::{
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use reth_db::{tables, DatabaseError};
+use reth_db_api::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
-    tables,
     transaction::DbTx,
-    DatabaseError,
 };
 use reth_execution_errors::StateRootError;
 use reth_primitives::{
-    keccak256, revm::compat::into_reth_acc, trie::Nibbles, Account, Address, BlockNumber, B256,
-    U256,
+    keccak256, revm::compat::into_reth_acc, Account, Address, BlockNumber, B256, U256,
 };
 use revm::db::BundleAccount;
 use std::{
@@ -32,33 +31,41 @@ pub struct HashedPostState {
 }
 
 impl HashedPostState {
-    /// Initialize [HashedPostState] from bundle state.
+    /// Initialize [`HashedPostState`] from bundle state.
     /// Hashes all changed accounts and storage entries that are currently stored in the bundle
     /// state.
     pub fn from_bundle_state<'a>(
-        state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
+        state: impl IntoParallelIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
-        let mut this = Self::default();
-        for (address, account) in state {
-            let hashed_address = keccak256(address);
-            this.accounts.insert(hashed_address, account.info.clone().map(into_reth_acc));
+        let hashed = state
+            .into_par_iter()
+            .map(|(address, account)| {
+                let hashed_address = keccak256(address);
+                let hashed_account = account.info.clone().map(into_reth_acc);
+                let hashed_storage = HashedStorage::from_iter(
+                    account.status.was_destroyed(),
+                    account.storage.iter().map(|(key, value)| {
+                        (keccak256(B256::new(key.to_be_bytes())), value.present_value)
+                    }),
+                );
+                (hashed_address, (hashed_account, hashed_storage))
+            })
+            .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
 
-            let hashed_storage = HashedStorage::from_iter(
-                account.status.was_destroyed(),
-                account.storage.iter().map(|(key, value)| {
-                    (keccak256(B256::new(key.to_be_bytes())), value.present_value)
-                }),
-            );
-            this.storages.insert(hashed_address, hashed_storage);
+        let mut accounts = HashMap::with_capacity(hashed.len());
+        let mut storages = HashMap::with_capacity(hashed.len());
+        for (address, (account, storage)) in hashed {
+            accounts.insert(address, account);
+            storages.insert(address, storage);
         }
-        this
+        Self { accounts, storages }
     }
 
-    /// Initialize [HashedPostState] from revert range.
+    /// Initialize [`HashedPostState`] from revert range.
     /// Iterate over state reverts in the specified block range and
     /// apply them to hashed state in reverse.
     ///
-    /// NOTE: In order to have the resulting [HashedPostState] be a correct
+    /// NOTE: In order to have the resulting [`HashedPostState`] be a correct
     /// overlay of the plain state, the end of the range must be the current tip.
     pub fn from_revert_range<TX: DbTx>(
         tx: &TX,
@@ -142,7 +149,7 @@ impl HashedPostState {
         }
     }
 
-    /// Converts hashed post state into [HashedPostStateSorted].
+    /// Converts hashed post state into [`HashedPostStateSorted`].
     pub fn into_sorted(self) -> HashedPostStateSorted {
         let mut accounts = Vec::new();
         let mut destroyed_accounts = HashSet::default();
@@ -164,7 +171,7 @@ impl HashedPostState {
         HashedPostStateSorted { accounts, destroyed_accounts, storages }
     }
 
-    /// Construct [TriePrefixSets] from hashed post state.
+    /// Construct [`TriePrefixSets`] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
     pub fn construct_prefix_sets(&self) -> TriePrefixSets {
@@ -181,7 +188,7 @@ impl HashedPostState {
 
         // Populate storage prefix sets.
         let mut storage_prefix_sets = HashMap::with_capacity(self.storages.len());
-        for (hashed_address, hashed_storage) in self.storages.iter() {
+        for (hashed_address, hashed_storage) in &self.storages {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
             let mut prefix_set = PrefixSetMut::with_capacity(hashed_storage.storage.len());
@@ -198,14 +205,15 @@ impl HashedPostState {
         }
     }
 
-    /// Calculate the state root for this [HashedPostState].
+    /// Calculate the state root for this [`HashedPostState`].
     /// Internally, this method retrieves prefixsets and uses them
     /// to calculate incremental state root.
     ///
     /// # Example
     ///
     /// ```
-    /// use reth_db::{database::Database, test_utils::create_test_rw_db};
+    /// use reth_db::test_utils::create_test_rw_db;
+    /// use reth_db_api::database::Database;
     /// use reth_primitives::{Account, U256};
     /// use reth_trie::HashedPostState;
     ///
@@ -226,7 +234,7 @@ impl HashedPostState {
     ///
     /// # Returns
     ///
-    /// The state root for this [HashedPostState].
+    /// The state root for this [`HashedPostState`].
     pub fn state_root<TX: DbTx>(&self, tx: &TX) -> Result<B256, StateRootError> {
         let sorted = self.clone().into_sorted();
         let prefix_sets = self.construct_prefix_sets();
@@ -236,8 +244,8 @@ impl HashedPostState {
             .root()
     }
 
-    /// Calculates the state root for this [HashedPostState] and returns it alongside trie updates.
-    /// See [Self::state_root] for more info.
+    /// Calculates the state root for this [`HashedPostState`] and returns it alongside trie
+    /// updates. See [`Self::state_root`] for more info.
     pub fn state_root_with_updates<TX: DbTx>(
         &self,
         tx: &TX,
@@ -261,7 +269,7 @@ pub struct HashedStorage {
 }
 
 impl HashedStorage {
-    /// Create new instance of [HashedStorage].
+    /// Create new instance of [`HashedStorage`].
     pub fn new(wiped: bool) -> Self {
         Self { wiped, storage: HashMap::default() }
     }
@@ -283,7 +291,7 @@ impl HashedStorage {
         }
     }
 
-    /// Converts hashed storage into [HashedStorageSorted].
+    /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
         let mut non_zero_valued_slots = Vec::new();
         let mut zero_valued_slots = HashSet::default();
@@ -325,6 +333,13 @@ pub struct HashedStorageSorted {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_db::test_utils::create_test_rw_db;
+    use reth_db_api::database::Database;
+    use reth_primitives::hex;
+    use revm::{
+        db::states::BundleState,
+        primitives::{AccountInfo, HashMap},
+    };
 
     #[test]
     fn hashed_state_wiped_extension() {
@@ -398,5 +413,35 @@ mod tests {
             Some(&updated_slot_value)
         );
         assert_eq!(account_storage.map(|st| st.wiped), Some(true));
+    }
+
+    #[test]
+    fn from_bundle_state_with_rayon() {
+        let address1 = Address::with_last_byte(1);
+        let address2 = Address::with_last_byte(2);
+        let slot1 = U256::from(1015);
+        let slot2 = U256::from(2015);
+
+        let account1 = AccountInfo { nonce: 1, ..Default::default() };
+        let account2 = AccountInfo { nonce: 2, ..Default::default() };
+
+        let bundle_state = BundleState::builder(2..=2)
+            .state_present_account_info(address1, account1)
+            .state_present_account_info(address2, account2)
+            .state_storage(address1, HashMap::from([(slot1, (U256::ZERO, U256::from(10)))]))
+            .state_storage(address2, HashMap::from([(slot2, (U256::ZERO, U256::from(20)))]))
+            .build();
+        assert_eq!(bundle_state.reverts.len(), 1);
+
+        let post_state = HashedPostState::from_bundle_state(&bundle_state.state);
+        assert_eq!(post_state.accounts.len(), 2);
+        assert_eq!(post_state.storages.len(), 2);
+
+        let db = create_test_rw_db();
+        let tx = db.tx().expect("failed to create transaction");
+        assert_eq!(
+            post_state.state_root(&tx).unwrap(),
+            hex!("b464525710cafcf5d4044ac85b72c08b1e76231b8d91f288fe438cc41d8eaafd")
+        );
     }
 }

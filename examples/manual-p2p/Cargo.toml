@@ -11,7 +11,7 @@ reth-network.workspace = true
 reth-discv4.workspace = true
 reth-eth-wire.workspace = true
 reth-ecies.workspace = true
-reth-network-types.workspace = true
+reth-network-peers.workspace = true
 
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 

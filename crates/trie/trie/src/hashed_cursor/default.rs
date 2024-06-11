@@ -1,7 +1,7 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
-    tables,
     transaction::DbTx,
 };
 use reth_primitives::{Account, B256, U256};
@@ -42,7 +42,7 @@ where
 }
 
 /// The structure wrapping a database cursor for hashed storage and
-/// a target hashed address. Implements [HashedCursor] and [HashedStorageCursor]
+/// a target hashed address. Implements [`HashedCursor`] and [`HashedStorageCursor`]
 /// for iterating over hashed storage.
 #[derive(Debug)]
 pub struct DatabaseHashedStorageCursor<C> {
@@ -53,7 +53,7 @@ pub struct DatabaseHashedStorageCursor<C> {
 }
 
 impl<C> DatabaseHashedStorageCursor<C> {
-    /// Create new [DatabaseHashedStorageCursor].
+    /// Create new [`DatabaseHashedStorageCursor`].
     pub const fn new(cursor: C, hashed_address: B256) -> Self {
         Self { cursor, hashed_address }
     }

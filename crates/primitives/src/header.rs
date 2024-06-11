@@ -244,7 +244,7 @@ impl Header {
     ///
     /// Returns `None` if `excess_blob_gas` is None.
     ///
-    /// See also [Self::next_block_excess_blob_gas]
+    /// See also [`Self::next_block_excess_blob_gas`]
     pub fn next_block_blob_fee(&self) -> Option<u128> {
         self.next_block_excess_blob_gas().map(calc_blob_gasprice)
     }
@@ -861,7 +861,7 @@ impl SealedHeader {
         self.header
     }
 
-    /// This is the inverse of [Header::seal_slow] which returns the raw header and hash.
+    /// This is the inverse of [`Header::seal_slow`] which returns the raw header and hash.
     pub fn split(self) -> (Header, BlockHash) {
         (self.header, self.hash)
     }
@@ -871,7 +871,7 @@ impl SealedHeader {
         BlockNumHash::new(self.number, self.hash)
     }
 
-    /// Calculates a heuristic for the in-memory size of the [SealedHeader].
+    /// Calculates a heuristic for the in-memory size of the [`SealedHeader`].
     #[inline]
     pub fn size(&self) -> usize {
         self.header.size() + mem::size_of::<BlockHash>()

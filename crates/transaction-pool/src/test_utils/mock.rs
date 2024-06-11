@@ -23,12 +23,12 @@ use reth_primitives::{
 };
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
-/// A transaction pool implementation using [MockOrdering] for transaction ordering.
+/// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
 ///
 /// This type is an alias for [`TxPool<MockOrdering>`].
 pub type MockTxPool = TxPool<MockOrdering>;
 
-/// A validated transaction in the transaction pool, using [MockTransaction] as the transaction
+/// A validated transaction in the transaction pool, using [`MockTransaction`] as the transaction
 /// type.
 ///
 /// This type is an alias for [`ValidPoolTransaction<MockTransaction>`].
@@ -113,7 +113,7 @@ pub enum MockTransaction {
         value: U256,
         /// The transaction input data.
         input: Bytes,
-        /// The size of the transaction, returned in the implementation of [PoolTransaction].
+        /// The size of the transaction, returned in the implementation of [`PoolTransaction`].
         size: usize,
     },
     /// EIP-2930 transaction type.
@@ -138,7 +138,7 @@ pub enum MockTransaction {
         gas_price: u128,
         /// The access list associated with the transaction.
         access_list: AccessList,
-        /// The size of the transaction, returned in the implementation of [PoolTransaction].
+        /// The size of the transaction, returned in the implementation of [`PoolTransaction`].
         size: usize,
     },
     /// EIP-1559 transaction type.
@@ -165,7 +165,7 @@ pub enum MockTransaction {
         access_list: AccessList,
         /// The transaction input data.
         input: Bytes,
-        /// The size of the transaction, returned in the implementation of [PoolTransaction].
+        /// The size of the transaction, returned in the implementation of [`PoolTransaction`].
         size: usize,
     },
     /// EIP-4844 transaction type.
@@ -198,7 +198,7 @@ pub enum MockTransaction {
         input: Bytes,
         /// The sidecar information for the transaction.
         sidecar: BlobTransactionSidecar,
-        /// The size of the transaction, returned in the implementation of [PoolTransaction].
+        /// The size of the transaction, returned in the implementation of [`PoolTransaction`].
         size: usize,
     },
 }
@@ -297,14 +297,14 @@ impl MockTransaction {
         transaction
     }
 
-    /// Creates a new transaction with the given [TxType].
+    /// Creates a new transaction with the given [`TxType`].
     ///
     /// See the default constructors for each of the transaction types:
     ///
-    /// * [MockTransaction::legacy]
-    /// * [MockTransaction::eip2930]
-    /// * [MockTransaction::eip1559]
-    /// * [MockTransaction::eip4844]
+    /// * [`MockTransaction::legacy`]
+    /// * [`MockTransaction::eip2930`]
+    /// * [`MockTransaction::eip1559`]
+    /// * [`MockTransaction::eip4844`]
     pub fn new_from_type(tx_type: TxType) -> Self {
         #[allow(unreachable_patterns)]
         match tx_type {
@@ -526,7 +526,7 @@ impl MockTransaction {
         this
     }
 
-    /// Returns the transaction type identifier associated with the current [MockTransaction].
+    /// Returns the transaction type identifier associated with the current [`MockTransaction`].
     pub const fn tx_type(&self) -> u8 {
         match self {
             Self::Legacy { .. } => LEGACY_TX_TYPE_ID,
@@ -1108,18 +1108,18 @@ pub struct MockTransactionFactory {
 // === impl MockTransactionFactory ===
 
 impl MockTransactionFactory {
-    /// Generates a transaction ID for the given [MockTransaction].
+    /// Generates a transaction ID for the given [`MockTransaction`].
     pub fn tx_id(&mut self, tx: &MockTransaction) -> TransactionId {
         let sender = self.ids.sender_id_or_create(tx.get_sender());
         TransactionId::new(sender, tx.get_nonce())
     }
 
-    /// Validates a [MockTransaction] and returns a [MockValidTx].
+    /// Validates a [`MockTransaction`] and returns a [`MockValidTx`].
     pub fn validated(&mut self, transaction: MockTransaction) -> MockValidTx {
         self.validated_with_origin(TransactionOrigin::External, transaction)
     }
 
-    /// Validates a [MockTransaction] and returns a shared [`Arc<MockValidTx>`].
+    /// Validates a [`MockTransaction`] and returns a shared [`Arc<MockValidTx>`].
     pub fn validated_arc(&mut self, transaction: MockTransaction) -> Arc<MockValidTx> {
         Arc::new(self.validated(transaction))
     }
@@ -1139,27 +1139,27 @@ impl MockTransactionFactory {
         }
     }
 
-    /// Creates a validated legacy [MockTransaction].
+    /// Creates a validated legacy [`MockTransaction`].
     pub fn create_legacy(&mut self) -> MockValidTx {
         self.validated(MockTransaction::legacy())
     }
 
-    /// Creates a validated EIP-1559 [MockTransaction].
+    /// Creates a validated EIP-1559 [`MockTransaction`].
     pub fn create_eip1559(&mut self) -> MockValidTx {
         self.validated(MockTransaction::eip1559())
     }
 
-    /// Creates a validated EIP-4844 [MockTransaction].
+    /// Creates a validated EIP-4844 [`MockTransaction`].
     pub fn create_eip4844(&mut self) -> MockValidTx {
         self.validated(MockTransaction::eip4844())
     }
 }
 
-/// MockOrdering is just a CoinbaseTipOrdering with MockTransaction
+/// `MockOrdering` is just a `CoinbaseTipOrdering` with `MockTransaction`
 pub type MockOrdering = CoinbaseTipOrdering<MockTransaction>;
 
 /// A ratio of each of the configured transaction types. The percentages sum up to 100, this is
-/// enforced in [MockTransactionRatio::new] by an assert.
+/// enforced in [`MockTransactionRatio::new`] by an assert.
 #[derive(Debug, Clone)]
 pub struct MockTransactionRatio {
     /// Percent of transactions that are legacy transactions
@@ -1173,7 +1173,7 @@ pub struct MockTransactionRatio {
 }
 
 impl MockTransactionRatio {
-    /// Creates a new [MockTransactionRatio] with the given percentages.
+    /// Creates a new [`MockTransactionRatio`] with the given percentages.
     ///
     /// Each argument is treated as a full percent, for example `30u32` is `30%`.
     ///
@@ -1189,7 +1189,7 @@ impl MockTransactionRatio {
         Self { legacy_pct, access_list_pct, dynamic_fee_pct, blob_pct }
     }
 
-    /// Create a [WeightedIndex] from this transaction ratio.
+    /// Create a [`WeightedIndex`] from this transaction ratio.
     ///
     /// This index will sample in the following order:
     /// * Legacy transaction => 0
@@ -1210,7 +1210,7 @@ impl MockTransactionRatio {
 /// The range of each type of fee, for the different transaction types
 #[derive(Debug, Clone)]
 pub struct MockFeeRange {
-    /// The range of gas_price or legacy and access list transactions
+    /// The range of `gas_price` or legacy and access list transactions
     pub gas_price: Uniform<u128>,
     /// The range of priority fees for EIP-1559 and EIP-4844 transactions
     pub priority_fee: Uniform<u128>,
@@ -1221,7 +1221,7 @@ pub struct MockFeeRange {
 }
 
 impl MockFeeRange {
-    /// Creates a new [MockFeeRange] with the given ranges.
+    /// Creates a new [`MockFeeRange`] with the given ranges.
     ///
     /// Expects the bottom of the `priority_fee_range` to be greater than the top of the
     /// `max_fee_range`.
@@ -1412,7 +1412,7 @@ pub enum NonConflictingSetOutcome {
 }
 
 impl NonConflictingSetOutcome {
-    /// Returns the inner [MockTransactionSet]
+    /// Returns the inner [`MockTransactionSet`]
     pub fn into_inner(self) -> MockTransactionSet {
         match self {
             Self::BlobsOnly(set) | Self::Mixed(set) => set,
@@ -1422,10 +1422,10 @@ impl NonConflictingSetOutcome {
     /// Introduces artificial nonce gaps into the transaction set, at random, with a range of gap
     /// sizes.
     ///
-    /// If this is a [NonConflictingSetOutcome::BlobsOnly], then nonce gaps will not be introduced.
-    /// Otherwise, the nonce gaps will be introduced to the mixed transaction set.
+    /// If this is a [`NonConflictingSetOutcome::BlobsOnly`], then nonce gaps will not be
+    /// introduced. Otherwise, the nonce gaps will be introduced to the mixed transaction set.
     ///
-    /// See [MockTransactionSet::with_nonce_gaps] for more information on the generation process.
+    /// See [`MockTransactionSet::with_nonce_gaps`] for more information on the generation process.
     pub fn with_nonce_gaps(
         &mut self,
         gap_pct: u32,
@@ -1439,14 +1439,14 @@ impl NonConflictingSetOutcome {
     }
 }
 
-/// A set of [MockTransaction]s that can be modified at once
+/// A set of [`MockTransaction`]s that can be modified at once
 #[derive(Debug, Clone)]
 pub struct MockTransactionSet {
     pub(crate) transactions: Vec<MockTransaction>,
 }
 
 impl MockTransactionSet {
-    /// Create a new [MockTransactionSet] from a list of transactions
+    /// Create a new [`MockTransactionSet`] from a list of transactions
     fn new(transactions: Vec<MockTransaction>) -> Self {
         Self { transactions }
     }
@@ -1504,7 +1504,7 @@ impl MockTransactionSet {
         assert!(gap_range.start >= 1, "gap_range must have a lower bound of at least one");
 
         let mut prev_nonce = 0;
-        for tx in self.transactions.iter_mut() {
+        for tx in &mut self.transactions {
             if rng.gen_bool(gap_pct as f64 / 100.0) {
                 prev_nonce += gap_range.start;
             } else {
@@ -1514,12 +1514,12 @@ impl MockTransactionSet {
         }
     }
 
-    /// Add transactions to the [MockTransactionSet]
+    /// Add transactions to the [`MockTransactionSet`]
     pub fn extend<T: IntoIterator<Item = MockTransaction>>(&mut self, txs: T) {
         self.transactions.extend(txs);
     }
 
-    /// Extract the inner [Vec] of [MockTransaction]s
+    /// Extract the inner [Vec] of [`MockTransaction`]s
     pub fn into_vec(self) -> Vec<MockTransaction> {
         self.transactions
     }

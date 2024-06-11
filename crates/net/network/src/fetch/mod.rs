@@ -9,7 +9,7 @@ use reth_network_p2p::{
     headers::client::HeadersRequest,
     priority::Priority,
 };
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{BlockBody, Header, B256};
 use std::{
     collections::{HashMap, VecDeque},
@@ -249,9 +249,9 @@ impl StateFetcher {
 
     /// Called on a `GetBlockHeaders` response from a peer.
     ///
-    /// This delegates the response and returns a [BlockResponseOutcome] to either queue in a direct
-    /// followup request or get the peer reported if the response was a
-    /// [EthResponseValidator::reputation_change_err]
+    /// This delegates the response and returns a [`BlockResponseOutcome`] to either queue in a
+    /// direct followup request or get the peer reported if the response was a
+    /// [`EthResponseValidator::reputation_change_err`]
     pub(crate) fn on_block_headers_response(
         &mut self,
         peer_id: PeerId,
@@ -431,8 +431,9 @@ impl DownloadRequest {
     /// Returns the requested priority of this request
     const fn get_priority(&self) -> &Priority {
         match self {
-            Self::GetBlockHeaders { priority, .. } => priority,
-            Self::GetBlockBodies { priority, .. } => priority,
+            Self::GetBlockHeaders { priority, .. } | Self::GetBlockBodies { priority, .. } => {
+                priority
+            }
         }
     }
 

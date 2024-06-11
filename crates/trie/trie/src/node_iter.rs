@@ -1,6 +1,6 @@
-use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker};
+use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
 use reth_db::DatabaseError;
-use reth_primitives::{trie::Nibbles, B256};
+use reth_primitives::B256;
 
 /// Represents a branch node in the trie.
 #[derive(Debug)]
@@ -47,7 +47,7 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
 }
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H> {
-    /// Creates a new [TrieNodeIter].
+    /// Creates a new [`TrieNodeIter`].
     pub const fn new(walker: TrieWalker<C>, hashed_cursor: H) -> Self {
         Self {
             walker,
@@ -58,7 +58,7 @@ impl<C, H: HashedCursor> TrieNodeIter<C, H> {
         }
     }
 
-    /// Sets the last iterated hashed key and returns the modified [TrieNodeIter].
+    /// Sets the last iterated hashed key and returns the modified [`TrieNodeIter`].
     /// This is used to resume iteration from the last checkpoint.
     pub const fn with_last_hashed_key(mut self, previous_hashed_key: B256) -> Self {
         self.previous_hashed_key = Some(previous_hashed_key);

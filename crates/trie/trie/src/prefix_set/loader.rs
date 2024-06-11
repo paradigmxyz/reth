@@ -1,18 +1,18 @@
 use super::{PrefixSetMut, TriePrefixSets};
+use crate::Nibbles;
 use derive_more::Deref;
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::DbCursorRO,
     models::{AccountBeforeTx, BlockNumberAddress},
-    tables,
     transaction::DbTx,
     DatabaseError,
 };
-use reth_primitives::{keccak256, trie::Nibbles, BlockNumber, StorageEntry, B256};
+use reth_primitives::{keccak256, BlockNumber, StorageEntry, B256};
 use std::{
     collections::{HashMap, HashSet},
     ops::RangeInclusive,
 };
-
 /// A wrapper around a database transaction that loads prefix sets within a given block range.
 #[derive(Deref, Debug)]
 pub struct PrefixSetLoader<'a, TX>(&'a TX);

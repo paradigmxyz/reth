@@ -6,27 +6,22 @@ Initialize the database from a state dump file
 $ reth init-state --help
 Usage: reth init-state [OPTIONS] <STATE_DUMP_FILE>
 
-Arguments:
-  <STATE_DUMP_FILE>
-          JSONL file with state dump.
-
-          Must contain accounts in following format, additional account fields are ignored. Must
-          also contain { "root": \<state-root\> } as first line.
-          {
-              "balance": "\<balance\>",
-              "nonce": \<nonce\>,
-              "code": "\<bytecode\>",
-              "storage": {
-                  "\<key\>": "\<value\>",
-                  ..
-              },
-              "address": "\<address\>",
-          }
-
-          Allows init at a non-genesis block. Caution! Blocks must be manually imported up until
-          and including the non-genesis block to init chain at. See 'import' command.
-
 Options:
+      --instance <INSTANCE>
+          Add a new instance of a node.
+
+          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
+
+          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
+
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
+
+          [default: 1]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Datadir:
       --datadir <DATA_DIR>
           The path to the data dir for all reth files and subdirectories.
 
@@ -38,6 +33,12 @@ Options:
 
           [default: default]
 
+      --datadir.static_files <PATH>
+          The absolute path to store static files in.
+
+      --config <FILE>
+          The path to the configuration file to use
+
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -46,20 +47,6 @@ Options:
               mainnet, sepolia, goerli, holesky, dev
 
           [default: mainnet]
-
-      --instance <INSTANCE>
-          Add a new instance of a node.
-
-          Configures the ports of the node to avoid conflicts with the defaults. This is useful for running multiple nodes on the same machine.
-
-          Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
-
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
-
-          [default: 1]
-
-  -h, --help
-          Print help (see a summary with '-h')
 
 Database:
       --db.log-level <LOG_LEVEL>
@@ -79,6 +66,25 @@ Database:
           Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
 
           [possible values: true, false]
+
+  <STATE_DUMP_FILE>
+          JSONL file with state dump.
+
+          Must contain accounts in following format, additional account fields are ignored. Must
+          also contain { "root": \<state-root\> } as first line.
+          {
+              "balance": "\<balance\>",
+              "nonce": \<nonce\>,
+              "code": "\<bytecode\>",
+              "storage": {
+                  "\<key\>": "\<value\>",
+                  ..
+              },
+              "address": "\<address\>",
+          }
+
+          Allows init at a non-genesis block. Caution! Blocks must be manually imported up until
+          and including the non-genesis block to init chain at. See 'import' command.
 
 Logging:
       --log.stdout.format <FORMAT>

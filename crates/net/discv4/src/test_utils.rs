@@ -6,7 +6,7 @@ use crate::{
     IngressReceiver, PeerId, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
 };
 use rand::{thread_rng, Rng, RngCore};
-use reth_network_types::pk2id;
+use reth_network_peers::pk2id;
 use reth_primitives::{hex, ForkHash, ForkId, NodeRecord, B256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::{
@@ -167,7 +167,7 @@ impl Stream for MockDiscovery {
                             }))
                         }
                     }
-                    Message::Pong(_) => {}
+                    Message::Pong(_) | Message::Neighbours(_) => {}
                     Message::FindNode(msg) => {
                         if let Some(nodes) = this.pending_neighbours.remove(&msg.id) {
                             let msg = Message::Neighbours(Neighbours {
@@ -181,7 +181,6 @@ impl Stream for MockDiscovery {
                             }))
                         }
                     }
-                    Message::Neighbours(_) => {}
                     Message::EnrRequest(_) | Message::EnrResponse(_) => todo!(),
                 },
             }

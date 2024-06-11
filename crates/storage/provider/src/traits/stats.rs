@@ -1,4 +1,4 @@
-use reth_db::table::Table;
+use reth_db_api::table::Table;
 use reth_storage_errors::provider::ProviderResult;
 
 /// The trait for fetching provider statistics.

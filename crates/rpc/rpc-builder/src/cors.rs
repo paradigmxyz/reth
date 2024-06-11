@@ -10,7 +10,7 @@ pub enum CorsDomainError {
     WildCardNotAllowed { input: String },
 }
 
-/// Creates a [CorsLayer] from the given domains
+/// Creates a [`CorsLayer`] from the given domains
 pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, CorsDomainError> {
     let cors = match http_cors_domains.trim() {
         "*" => CorsLayer::new()

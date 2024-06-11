@@ -7,13 +7,12 @@ use enr::Enr;
 use parking_lot::Mutex;
 use reth_discv4::Discv4;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
-use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
     NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
     ReputationChangeKind,
 };
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{Head, NodeRecord, TransactionSigned, B256};
 use reth_rpc_types::NetworkStatus;
 use reth_tokio_util::{EventSender, EventStream};
@@ -53,7 +52,6 @@ impl NetworkHandle {
         local_peer_id: PeerId,
         peers: PeersHandle,
         network_mode: NetworkMode,
-        bandwidth_meter: BandwidthMeter,
         chain_id: Arc<AtomicU64>,
         tx_gossip_disabled: bool,
         discv4: Option<Discv4>,
@@ -67,7 +65,6 @@ impl NetworkHandle {
             local_peer_id,
             peers,
             network_mode,
-            bandwidth_meter,
             is_syncing: Arc::new(AtomicBool::new(false)),
             initial_sync_done: Arc::new(AtomicBool::new(false)),
             chain_id,
@@ -120,7 +117,7 @@ impl NetworkHandle {
 
     /// Announce a block over devp2p
     ///
-    /// Caution: in PoS this is a noop because new blocks are no longer announced over devp2p.
+    /// Caution: in `PoS` this is a noop because new blocks are no longer announced over devp2p.
     /// Instead they are sent to the node by CL and can be requested over devp2p.
     /// Broadcasting new blocks is considered a protocol violation.
     pub fn announce_block(&self, block: NewBlock, hash: B256) {
@@ -152,11 +149,6 @@ impl NetworkHandle {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::GetTransactionsHandle(tx));
         rx.await.unwrap()
-    }
-
-    /// Provides a shareable reference to the [`BandwidthMeter`] stored on the `NetworkInner`.
-    pub fn bandwidth_meter(&self) -> &BandwidthMeter {
-        &self.inner.bandwidth_meter
     }
 
     /// Send message to gracefully shutdown node.
@@ -393,8 +385,6 @@ struct NetworkInner {
     peers: PeersHandle,
     /// The mode of the network
     network_mode: NetworkMode,
-    /// Used to measure inbound & outbound bandwidth across network streams (currently unused)
-    bandwidth_meter: BandwidthMeter,
     /// Represents if the network is currently syncing.
     is_syncing: Arc<AtomicBool>,
     /// Used to differentiate between an initial pipeline sync or a live sync
@@ -421,7 +411,7 @@ pub trait NetworkEvents: Send + Sync {
 
 /// Provides access to modify the network's additional protocol handlers.
 pub trait NetworkProtocols: Send + Sync {
-    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
     fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol);
 }
 

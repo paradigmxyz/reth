@@ -12,7 +12,7 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_network_api::PeerInfo;
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::{
     mpsc::{self, error::SendError},
@@ -135,7 +135,7 @@ impl ActiveSessionHandle {
         self.remote_addr
     }
 
-    /// Extracts the [PeerInfo] from the session handle.
+    /// Extracts the [`PeerInfo`] from the session handle.
     pub(crate) fn peer_info(&self) -> PeerInfo {
         PeerInfo {
             remote_id: self.remote_id,
@@ -247,7 +247,7 @@ pub enum ActiveSessionMessage {
         /// The error that caused the session to close
         error: EthStreamError,
     },
-    /// A session received a valid message via RLPx.
+    /// A session received a valid message via `RLPx`.
     ValidMessage {
         /// Identifier of the remote peer.
         peer_id: PeerId,

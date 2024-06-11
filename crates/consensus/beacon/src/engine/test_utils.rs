@@ -16,17 +16,19 @@ use reth_downloaders::{
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;
+use reth_exex_types::FinishedExExHeight;
 use reth_network_p2p::{
     bodies::client::BodiesClient, headers::client::HeadersClient, sync::NoopSyncStateUpdater,
     test_utils::NoopFullBlockClient,
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, FinishedExExHeight, PruneModes, B256};
+use reth_primitives::{BlockNumber, ChainSpec, B256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-    BundleStateWithReceipts, HeaderSyncMode, StaticFileProviderFactory,
+    BundleStateWithReceipts, HeaderSyncMode,
 };
 use reth_prune::Pruner;
+use reth_prune_types::PruneModes;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
@@ -349,11 +351,8 @@ where
             }
         };
 
-        let static_file_producer = StaticFileProducer::new(
-            provider_factory.clone(),
-            provider_factory.static_file_provider(),
-            PruneModes::default(),
-        );
+        let static_file_producer =
+            StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 
         // Setup pipeline
         let (tip_tx, tip_rx) = watch::channel(B256::default());

@@ -1,5 +1,5 @@
 use crate::error::StageError;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_primitives::{
     stage::{StageCheckpoint, StageId},
     BlockNumber, TxNumber,
@@ -12,7 +12,7 @@ use std::{
     task::{Context, Poll},
 };
 
-/// Stage execution input, see [Stage::execute].
+/// Stage execution input, see [`Stage::execute`].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct ExecInput {
     /// The target block number the stage needs to execute towards.
@@ -121,7 +121,7 @@ impl ExecInput {
     }
 }
 
-/// Stage unwind input, see [Stage::unwind].
+/// Stage unwind input, see [`Stage::unwind`].
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
 pub struct UnwindInput {
     /// The current highest checkpoint of the stage.
@@ -238,18 +238,36 @@ pub trait Stage<DB: Database>: Send + Sync {
         input: ExecInput,
     ) -> Result<ExecOutput, StageError>;
 
+    /// Post execution commit hook.
+    ///
+    /// This is called after the stage has been executed and the data has been committed by the
+    /// provider. The stage may want to pass some data from [`Self::execute`] via the internal
+    /// field.
+    fn post_execute_commit(&mut self) -> Result<(), StageError> {
+        Ok(())
+    }
+
     /// Unwind the stage.
     fn unwind(
         &mut self,
         provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError>;
+
+    /// Post unwind commit hook.
+    ///
+    /// This is called after the stage has been unwound and the data has been committed by the
+    /// provider. The stage may want to pass some data from [`Self::unwind`] via the internal
+    /// field.
+    fn post_unwind_commit(&mut self) -> Result<(), StageError> {
+        Ok(())
+    }
 }
 
 /// [Stage] trait extension.
 pub trait StageExt<DB: Database>: Stage<DB> {
     /// Utility extension for the `Stage` trait that invokes `Stage::poll_execute_ready`
-    /// with [poll_fn] context. For more information see [Stage::poll_execute_ready].
+    /// with [`poll_fn`] context. For more information see [`Stage::poll_execute_ready`].
     fn execute_ready(
         &mut self,
         input: ExecInput,

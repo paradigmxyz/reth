@@ -1,9 +1,8 @@
-use reth_evm::execute::BatchBlockExecutionOutput;
 use reth_primitives::{
     logs_bloom,
     revm::compat::{into_reth_acc, into_revm_acc},
-    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StorageEntry, B256,
-    U256,
+    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests, StorageEntry,
+    B256, U256,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -27,30 +26,20 @@ pub struct BundleStateWithReceipts {
     pub receipts: Receipts,
     /// First block of bundle state.
     pub first_block: BlockNumber,
-}
-
-// TODO(mattsse): unify the types, currently there's a cyclic dependency between
-impl From<BatchBlockExecutionOutput> for BundleStateWithReceipts {
-    fn from(value: BatchBlockExecutionOutput) -> Self {
-        let BatchBlockExecutionOutput { bundle, receipts, requests: _, first_block } = value;
-        Self { bundle, receipts, first_block }
-    }
-}
-
-// TODO(mattsse): unify the types, currently there's a cyclic dependency between
-impl From<BundleStateWithReceipts> for BatchBlockExecutionOutput {
-    fn from(value: BundleStateWithReceipts) -> Self {
-        let BundleStateWithReceipts { bundle, receipts, first_block } = value;
-        // TODO(alexey): add requests
-        Self { bundle, receipts, requests: Vec::default(), first_block }
-    }
+    /// The collection of EIP-7685 requests.
+    /// Outer vector stores requests for each block sequentially.
+    /// The inner vector stores requests ordered by transaction number.
+    ///
+    /// A transaction may have zero or more requests, so the length of the inner vector is not
+    /// guaranteed to be the same as the number of transactions.
+    pub requests: Vec<Requests>,
 }
 
 /// Type used to initialize revms bundle state.
 pub type BundleStateInit =
     HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
 
-/// Types used inside RevertsInit to initialize revms reverts.
+/// Types used inside `RevertsInit` to initialize revms reverts.
 pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 
 /// Type used to initialize revms reverts.
@@ -58,8 +47,13 @@ pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>
 
 impl BundleStateWithReceipts {
     /// Create Bundle State.
-    pub const fn new(bundle: BundleState, receipts: Receipts, first_block: BlockNumber) -> Self {
-        Self { bundle, receipts, first_block }
+    pub const fn new(
+        bundle: BundleState,
+        receipts: Receipts,
+        first_block: BlockNumber,
+        requests: Vec<Requests>,
+    ) -> Self {
+        Self { bundle, receipts, first_block, requests }
     }
 
     /// Create new bundle state with receipts.
@@ -69,6 +63,7 @@ impl BundleStateWithReceipts {
         contracts_init: Vec<(B256, Bytecode)>,
         receipts: Receipts,
         first_block: BlockNumber,
+        requests: Vec<Requests>,
     ) -> Self {
         // sort reverts by block number
         let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
@@ -97,7 +92,7 @@ impl BundleStateWithReceipts {
             contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
         );
 
-        Self { bundle, receipts, first_block }
+        Self { bundle, receipts, first_block, requests }
     }
 
     /// Return revm bundle state.
@@ -120,7 +115,7 @@ impl BundleStateWithReceipts {
         self.bundle.state().iter().map(|(a, acc)| (*a, acc.info.as_ref()))
     }
 
-    /// Return iterator over all [BundleAccount]s in the bundle
+    /// Return iterator over all [`BundleAccount`]s in the bundle
     pub fn bundle_accounts_iter(&self) -> impl Iterator<Item = (Address, &BundleAccount)> {
         self.bundle.state().iter().map(|(a, acc)| (*a, acc))
     }
@@ -132,7 +127,7 @@ impl BundleStateWithReceipts {
 
     /// Get storage if value is known.
     ///
-    /// This means that depending on status we can potentially return U256::ZERO.
+    /// This means that depending on status we can potentially return `U256::ZERO`.
     pub fn storage(&self, address: &Address, storage_key: U256) -> Option<U256> {
         self.bundle.account(address).and_then(|a| a.storage_slot(storage_key))
     }
@@ -142,8 +137,8 @@ impl BundleStateWithReceipts {
         self.bundle.bytecode(code_hash).map(Bytecode)
     }
 
-    /// Returns [HashedPostState] for this bundle state.
-    /// See [HashedPostState::from_bundle_state] for more info.
+    /// Returns [`HashedPostState`] for this bundle state.
+    /// See [`HashedPostState::from_bundle_state`] for more info.
     pub fn hash_state_slow(&self) -> HashedPostState {
         HashedPostState::from_bundle_state(&self.bundle.state)
     }
@@ -271,7 +266,7 @@ impl BundleStateWithReceipts {
 
         // Truncate higher state to [at..].
         let at_idx = higher_state.block_number_to_index(at).unwrap();
-        higher_state.receipts = Receipts::from_vec(higher_state.receipts.split_off(at_idx));
+        higher_state.receipts = higher_state.receipts.split_off(at_idx).into();
         higher_state.bundle.take_n_reverts(at_idx);
         higher_state.first_block = at;
 
@@ -288,7 +283,7 @@ impl BundleStateWithReceipts {
         self.receipts.extend(other.receipts.receipt_vec);
     }
 
-    /// Prepends present the state with the given BundleState.
+    /// Prepends present the state with the given `BundleState`.
     /// It adds changes from the given state but does not override any existing changes.
     ///
     /// Reverts  and receipts are not updated.

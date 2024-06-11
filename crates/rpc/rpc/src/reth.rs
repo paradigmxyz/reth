@@ -24,7 +24,7 @@ impl<Provider> RethApi<Provider> {
         &self.inner.provider
     }
 
-    /// Create a new instance of the [RethApi]
+    /// Create a new instance of the [`RethApi`]
     pub fn new(provider: Provider, task_spawner: Box<dyn TaskSpawner>) -> Self {
         let inner = Arc::new(RethApiInner { provider, task_spawner });
         Self { inner }

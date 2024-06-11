@@ -14,5 +14,5 @@ const LABELS: [(&str, &str); 6] = [
 
 /// This exposes reth's version information over prometheus.
 pub fn register_version_metrics() {
-    let _gauge = gauge!("reth_version_info", &LABELS);
+    let _gauge = gauge!("info", &LABELS);
 }

@@ -40,7 +40,7 @@ impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorF
 pub struct HashedPostStateAccountCursor<'b, C> {
     /// The database cursor.
     cursor: C,
-    /// The reference to the in-memory [HashedPostStateSorted].
+    /// The reference to the in-memory [`HashedPostStateSorted`].
     post_state: &'b HashedPostStateSorted,
     /// The post state account index where the cursor is currently at.
     post_state_account_index: usize,
@@ -50,7 +50,7 @@ pub struct HashedPostStateAccountCursor<'b, C> {
 }
 
 impl<'b, C> HashedPostStateAccountCursor<'b, C> {
-    /// Create new instance of [HashedPostStateAccountCursor].
+    /// Create new instance of [`HashedPostStateAccountCursor`].
     pub const fn new(cursor: C, post_state: &'b HashedPostStateSorted) -> Self {
         Self { cursor, post_state, last_account: None, post_state_account_index: 0 }
     }
@@ -101,7 +101,7 @@ where
     /// database and the post state. The two entries are compared and the lowest is returned.
     ///
     /// The returned account key is memoized and the cursor remains positioned at that key until
-    /// [HashedCursor::seek] or [HashedCursor::next] are called.
+    /// [`HashedCursor::seek`] or [`HashedCursor::next`] are called.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
         self.last_account = None;
 
@@ -144,7 +144,7 @@ where
     /// If the cursor is positioned at the entry, return the entry with next greater key.
     /// Returns [None] if the previous memoized or the next greater entries are missing.
     ///
-    /// NOTE: This function will not return any entry unless [HashedCursor::seek] has been
+    /// NOTE: This function will not return any entry unless [`HashedCursor::seek`] has been
     /// called.
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
         let last_account = match self.last_account.as_ref() {
@@ -194,7 +194,7 @@ pub struct HashedPostStateStorageCursor<'b, C> {
 }
 
 impl<'b, C> HashedPostStateStorageCursor<'b, C> {
-    /// Create new instance of [HashedPostStateStorageCursor] for the given hashed address.
+    /// Create new instance of [`HashedPostStateStorageCursor`] for the given hashed address.
     pub const fn new(
         cursor: C,
         post_state: &'b HashedPostStateSorted,
@@ -304,7 +304,7 @@ where
     ///
     /// # Panics
     ///
-    /// If the account key is not set. [HashedCursor::seek] must be called first in order to
+    /// If the account key is not set. [`HashedCursor::seek`] must be called first in order to
     /// position the cursor.
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
         let last_slot = match self.last_slot.as_ref() {
@@ -353,8 +353,8 @@ where
 {
     /// Returns `true` if the account has no storage entries.
     ///
-    /// This function should be called before attempting to call [HashedCursor::seek] or
-    /// [HashedCursor::next].
+    /// This function should be called before attempting to call [`HashedCursor::seek`] or
+    /// [`HashedCursor::next`].
     fn is_storage_empty(&mut self) -> Result<bool, reth_db::DatabaseError> {
         let is_empty = match self.post_state.storages.get(&self.hashed_address) {
             Some(storage) => {
@@ -374,9 +374,8 @@ mod tests {
     use super::*;
     use crate::{HashedPostState, HashedStorage};
     use proptest::prelude::*;
-    use reth_db::{
-        database::Database, tables, test_utils::create_test_rw_db, transaction::DbTxMut,
-    };
+    use reth_db::{tables, test_utils::create_test_rw_db};
+    use reth_db_api::{database::Database, transaction::DbTxMut};
     use reth_primitives::StorageEntry;
     use std::collections::BTreeMap;
 
@@ -442,7 +441,7 @@ mod tests {
 
         let db = create_test_rw_db();
         db.update(|tx| {
-            for (key, account) in accounts.iter() {
+            for (key, account) in &accounts {
                 tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
             }
         })
@@ -518,7 +517,7 @@ mod tests {
 
         let db = create_test_rw_db();
         db.update(|tx| {
-            for (key, _) in accounts.iter() {
+            for (key, _) in &accounts {
                 // insert zero value accounts to the database
                 tx.put::<tables::HashedAccounts>(*key, Account::default()).unwrap();
             }
@@ -541,7 +540,7 @@ mod tests {
         proptest!(ProptestConfig::with_cases(10), |(db_accounts: BTreeMap<B256, Account>, post_state_accounts: BTreeMap<B256, Option<Account>>)| {
                 let db = create_test_rw_db();
                 db.update(|tx| {
-                    for (key, account) in db_accounts.iter() {
+                    for (key, account) in &db_accounts {
                         tx.put::<tables::HashedAccounts>(*key, *account).unwrap();
                     }
                 })
@@ -554,7 +553,7 @@ mod tests {
 
                 let mut expected = db_accounts;
                 // overwrite or remove accounts from the expected result
-                for (key, account) in post_state_accounts.iter() {
+                for (key, account) in &post_state_accounts {
                     if let Some(account) = account {
                         expected.insert(*key, *account);
                     } else {
@@ -587,7 +586,7 @@ mod tests {
         let db_storage =
             BTreeMap::from_iter((0..10).map(|key| (B256::with_last_byte(key), U256::from(key))));
         db.update(|tx| {
-            for (slot, value) in db_storage.iter() {
+            for (slot, value) in &db_storage {
                 // insert zero value accounts to the database
                 tx.put::<tables::HashedStorages>(
                     address,
@@ -665,7 +664,7 @@ mod tests {
 
         let db = create_test_rw_db();
         db.update(|tx| {
-            for (slot, value) in db_storage.iter() {
+            for (slot, value) in &db_storage {
                 // insert zero value accounts to the database
                 tx.put::<tables::HashedStorages>(
                     address,
@@ -678,7 +677,7 @@ mod tests {
 
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
-        for (slot, value) in post_state_storage.iter() {
+        for (slot, value) in &post_state_storage {
             hashed_storage.storage.insert(*slot, *value);
         }
 
@@ -689,7 +688,7 @@ mod tests {
         let tx = db.tx().unwrap();
         let factory = HashedPostStateCursorFactory::new(&tx, &sorted);
         let expected =
-            [(address, db_storage.into_iter().chain(post_state_storage).collect())].into_iter();
+            std::iter::once((address, db_storage.into_iter().chain(post_state_storage).collect()));
         assert_storage_cursor_order(&factory, expected);
     }
 
@@ -714,7 +713,7 @@ mod tests {
 
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
-        for (slot, value) in post_state_storage.iter() {
+        for (slot, value) in &post_state_storage {
             hashed_storage.storage.insert(*slot, *value);
         }
 
@@ -724,11 +723,10 @@ mod tests {
         let sorted = hashed_post_state.into_sorted();
         let tx = db.tx().unwrap();
         let factory = HashedPostStateCursorFactory::new(&tx, &sorted);
-        let expected = [(
+        let expected = std::iter::once((
             address,
             post_state_storage.into_iter().filter(|(_, value)| *value > U256::ZERO).collect(),
-        )]
-        .into_iter();
+        ));
         assert_storage_cursor_order(&factory, expected);
     }
 
@@ -752,7 +750,7 @@ mod tests {
 
         let wiped = true;
         let mut hashed_storage = HashedStorage::new(wiped);
-        for (slot, value) in post_state_storage.iter() {
+        for (slot, value) in &post_state_storage {
             hashed_storage.storage.insert(*slot, *value);
         }
 
@@ -762,7 +760,7 @@ mod tests {
         let sorted = hashed_post_state.into_sorted();
         let tx = db.tx().unwrap();
         let factory = HashedPostStateCursorFactory::new(&tx, &sorted);
-        let expected = [(address, post_state_storage)].into_iter();
+        let expected = std::iter::once((address, post_state_storage));
         assert_storage_cursor_order(&factory, expected);
     }
 
@@ -774,7 +772,7 @@ mod tests {
 
         let db = create_test_rw_db();
         db.update(|tx| {
-            for (slot, _) in storage.iter() {
+            for slot in storage.keys() {
                 // insert zero value accounts to the database
                 tx.put::<tables::HashedStorages>(
                     address,
@@ -787,7 +785,7 @@ mod tests {
 
         let wiped = false;
         let mut hashed_storage = HashedStorage::new(wiped);
-        for (slot, value) in storage.iter() {
+        for (slot, value) in &storage {
             hashed_storage.storage.insert(*slot, *value);
         }
 
@@ -797,7 +795,7 @@ mod tests {
         let sorted = hashed_post_state.into_sorted();
         let tx = db.tx().unwrap();
         let factory = HashedPostStateCursorFactory::new(&tx, &sorted);
-        let expected = [(address, storage)].into_iter();
+        let expected = std::iter::once((address, storage));
         assert_storage_cursor_order(&factory, expected);
     }
 
@@ -811,7 +809,7 @@ mod tests {
         {
             let db = create_test_rw_db();
             db.update(|tx| {
-                for (address, storage) in db_storages.iter() {
+                for (address, storage) in &db_storages {
                     for (slot, value) in storage {
                         let entry = StorageEntry { key: *slot, value: *value };
                         tx.put::<tables::HashedStorages>(*address, entry).unwrap();

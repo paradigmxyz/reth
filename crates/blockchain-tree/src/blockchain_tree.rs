@@ -10,12 +10,12 @@ use reth_blockchain_tree_api::{
     BlockAttachment, BlockStatus, BlockValidationKind, CanonicalOutcome, InsertPayloadOk,
 };
 use reth_consensus::{Consensus, ConsensusError};
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, Hardfork, PruneModes, Receipt,
-    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
+    BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, Hardfork, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, BlockWriter, BundleStateWithReceipts,
@@ -23,6 +23,7 @@ use reth_provider::{
     ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
     ProviderError, StaticFileProviderFactory,
 };
+use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use std::{
@@ -46,13 +47,13 @@ use tracing::{debug, error, info, instrument, trace, warn};
 /// canonical blocks to the tree (by removing them from the database), and commit the sidechain
 /// blocks to the database to become the canonical chain (reorg).
 ///
-/// include_mmd!("docs/mermaid/tree.mmd")
+/// `include_mmd!("docs/mermaid/tree.mmd`")
 ///
 /// # Main functions
-/// * [BlockchainTree::insert_block]: Connect a block to a chain, execute it, and if valid, insert
+/// * [`BlockchainTree::insert_block`]: Connect a block to a chain, execute it, and if valid, insert
 ///   the block into the tree.
-/// * [BlockchainTree::finalize_block]: Remove chains that branch off of the now finalized block.
-/// * [BlockchainTree::make_canonical]: Check if we have the hash of a block that is the current
+/// * [`BlockchainTree::finalize_block`]: Remove chains that branch off of the now finalized block.
+/// * [`BlockchainTree::make_canonical`]: Check if we have the hash of a block that is the current
 ///   canonical head and commit it to db.
 #[derive(Debug)]
 pub struct BlockchainTree<DB, E> {
@@ -127,18 +128,7 @@ where
         let last_canonical_hashes =
             externals.fetch_latest_canonical_hashes(config.num_of_canonical_hashes() as usize)?;
 
-        // TODO(rakita) save last finalized block inside database but for now just take
-        // `tip - max_reorg_depth`
-        // https://github.com/paradigmxyz/reth/issues/1712
-        let last_finalized_block_number = if last_canonical_hashes.len() > max_reorg_depth {
-            // we pick `Highest - max_reorg_depth` block as last finalized block.
-            last_canonical_hashes.keys().nth_back(max_reorg_depth)
-        } else {
-            // we pick the lowest block as last finalized block.
-            last_canonical_hashes.keys().next()
-        }
-        .copied()
-        .unwrap_or_default();
+        let last_finalized_block_number = externals.fetch_latest_finalized_block_number()?;
 
         Ok(Self {
             externals,
@@ -179,9 +169,9 @@ where
     /// Check if the block is known to blockchain tree or database and return its status.
     ///
     /// Function will check:
-    /// * if block is inside database returns [BlockStatus::Valid].
-    /// * if block is inside buffer returns [BlockStatus::Disconnected].
-    /// * if block is part of the canonical returns [BlockStatus::Valid].
+    /// * if block is inside database returns [`BlockStatus::Valid`].
+    /// * if block is inside buffer returns [`BlockStatus::Disconnected`].
+    /// * if block is part of the canonical returns [`BlockStatus::Valid`].
     ///
     /// Returns an error if
     ///    - an error occurred while reading from the database.
@@ -225,7 +215,7 @@ where
         Ok(None)
     }
 
-    /// Expose internal indices of the BlockchainTree.
+    /// Expose internal indices of the `BlockchainTree`.
     #[inline]
     pub const fn block_indices(&self) -> &BlockIndices {
         self.state.block_indices()
@@ -272,7 +262,7 @@ where
     ///       needed for evm `BLOCKHASH` opcode.
     /// Return none if:
     ///     * block unknown.
-    ///     * chain_id not present in state.
+    ///     * `chain_id` not present in state.
     ///     * there are no parent hashes stored.
     pub fn post_state_data(&self, block_hash: BlockHash) -> Option<BundleStateData> {
         trace!(target: "blockchain_tree", ?block_hash, "Searching for post state data");
@@ -632,7 +622,7 @@ where
     /// in the tree.
     fn insert_unwound_chain(&mut self, chain: AppendableChain) -> Option<BlockchainId> {
         // iterate over all blocks in chain and find any fork blocks that are in tree.
-        for (number, block) in chain.blocks().iter() {
+        for (number, block) in chain.blocks() {
             let hash = block.hash();
 
             // find all chains that fork from this block.
@@ -730,8 +720,8 @@ where
 
     /// Check if block is found inside a sidechain and its attachment.
     ///
-    /// if it is canonical or extends the canonical chain, return [BlockAttachment::Canonical]
-    /// if it does not extend the canonical chain, return [BlockAttachment::HistoricalFork]
+    /// if it is canonical or extends the canonical chain, return [`BlockAttachment::Canonical`]
+    /// if it does not extend the canonical chain, return [`BlockAttachment::HistoricalFork`]
     /// if the block is not in the tree or its chain id is not valid, return None
     #[track_caller]
     fn is_block_inside_sidechain(&self, block: &BlockNumHash) -> Option<BlockAttachment> {
@@ -754,7 +744,7 @@ where
 
     /// Insert a block (with recovered senders) into the tree.
     ///
-    /// Returns the [BlockStatus] on success:
+    /// Returns the [`BlockStatus`] on success:
     ///
     /// - The block is already part of a sidechain in the tree, or
     /// - The block is already part of the canonical chain, or
@@ -767,8 +757,8 @@ where
     /// This means that if the block becomes canonical, we need to fetch the missing blocks over
     /// P2P.
     ///
-    /// If the [BlockValidationKind::SkipStateRootValidation] variant is provided the state root is
-    /// not validated.
+    /// If the [`BlockValidationKind::SkipStateRootValidation`] variant is provided the state root
+    /// is not validated.
     ///
     /// # Note
     ///
@@ -803,7 +793,7 @@ where
     }
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
-    pub fn finalize_block(&mut self, finalized_block: BlockNumber) {
+    pub fn finalize_block(&mut self, finalized_block: BlockNumber) -> ProviderResult<()> {
         // remove blocks
         let mut remove_chains = self.state.block_indices.finalize_canonical_blocks(
             finalized_block,
@@ -817,6 +807,11 @@ where
         }
         // clean block buffer.
         self.remove_old_blocks(finalized_block);
+
+        // save finalized block in db.
+        self.externals.save_finalized_block_number(finalized_block)?;
+
+        Ok(())
     }
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
@@ -834,7 +829,7 @@ where
         &mut self,
         last_finalized_block: BlockNumber,
     ) -> ProviderResult<()> {
-        self.finalize_block(last_finalized_block);
+        self.finalize_block(last_finalized_block)?;
 
         let last_canonical_hashes = self.update_block_hashes()?;
 
@@ -897,18 +892,18 @@ where
         hashes: impl IntoIterator<Item = impl Into<BlockNumHash>>,
     ) -> ProviderResult<()> {
         // check unconnected block buffer for children of the canonical hashes
-        for added_block in hashes.into_iter() {
+        for added_block in hashes {
             self.try_connect_buffered_blocks(added_block.into())
         }
 
         // check unconnected block buffer for children of the chains
         let mut all_chain_blocks = Vec::new();
-        for (_, chain) in self.state.chains.iter() {
-            for (&number, block) in chain.blocks().iter() {
+        for chain in self.state.chains.values() {
+            for (&number, block) in chain.blocks() {
                 all_chain_blocks.push(BlockNumHash { number, hash: block.hash() })
             }
         }
-        for block in all_chain_blocks.into_iter() {
+        for block in all_chain_blocks {
             self.try_connect_buffered_blocks(block)
         }
 
@@ -927,7 +922,7 @@ where
         // first remove all the children of the new block from the buffer
         let include_blocks = self.state.buffered_blocks.remove_block_with_children(&new_block.hash);
         // then try to reinsert them into the tree
-        for block in include_blocks.into_iter() {
+        for block in include_blocks {
             // don't fail on error, just ignore the block.
             let _ = self
                 .try_insert_validated_block(block, BlockValidationKind::SkipStateRootValidation)
@@ -1190,7 +1185,7 @@ where
             "Canonicalization finished"
         );
 
-        // clear trie updates for other childs
+        // clear trie updates for other children
         self.block_indices()
             .fork_to_child()
             .get(&old_tip.hash)
@@ -1353,7 +1348,7 @@ where
     ///
     /// NOTE: this method should not be called during the pipeline sync, because otherwise the sync
     /// checkpoint metric will get overwritten. Buffered blocks metrics are updated in
-    /// [BlockBuffer](crate::block_buffer::BlockBuffer) during the pipeline sync.
+    /// [`BlockBuffer`](crate::block_buffer::BlockBuffer) during the pipeline sync.
     pub(crate) fn update_chains_metrics(&mut self) {
         let height = self.state.block_indices.canonical_tip().number;
 
@@ -1377,7 +1372,8 @@ mod tests {
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_consensus::test_utils::TestConsensus;
-    use reth_db::{tables, test_utils::TempDatabase, transaction::DbTxMut, DatabaseEnv};
+    use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
+    use reth_db_api::transaction::DbTxMut;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     #[cfg(not(feature = "optimism"))]
@@ -1506,7 +1502,7 @@ mod tests {
             }
             if let Some(fork_to_child) = self.fork_to_child {
                 let mut x: HashMap<BlockHash, LinkedHashSet<BlockHash>> = HashMap::new();
-                for (key, hash_set) in fork_to_child.into_iter() {
+                for (key, hash_set) in fork_to_child {
                     x.insert(key, hash_set.into_iter().collect());
                 }
                 assert_eq!(*tree.state.block_indices.fork_to_child(), x);
@@ -1737,7 +1733,7 @@ mod tests {
         tree.make_canonical(B256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
-        tree.finalize_block(10);
+        tree.finalize_block(10).unwrap();
 
         assert_eq!(
             tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
@@ -1813,7 +1809,7 @@ mod tests {
         tree.make_canonical(B256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
-        tree.finalize_block(10);
+        tree.finalize_block(10).unwrap();
 
         assert_eq!(
             tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
@@ -1898,7 +1894,7 @@ mod tests {
         tree.make_canonical(B256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
-        tree.finalize_block(10);
+        tree.finalize_block(10).unwrap();
 
         assert_eq!(
             tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
@@ -2002,7 +1998,7 @@ mod tests {
         tree.is_block_hash_canonical(&B256::ZERO).unwrap();
 
         // make genesis block 10 as finalized
-        tree.finalize_block(head.number);
+        tree.finalize_block(head.number).unwrap();
 
         // block 2 parent is not known, block2 is buffered.
         assert_eq!(
@@ -2252,7 +2248,7 @@ mod tests {
         assert!(tree.is_block_hash_canonical(&block2.hash()).unwrap());
 
         // finalize b1 that would make b1a removed from tree
-        tree.finalize_block(11);
+        tree.finalize_block(11).unwrap();
         // Trie state:
         // b2   b2a (side chain)
         // |   /
@@ -2355,5 +2351,75 @@ mod tests {
             .with_pending_blocks((block2.number + 1, HashSet::default()))
             .with_buffered_blocks(HashMap::default())
             .assert(&tree);
+    }
+
+    #[test]
+    fn last_finalized_block_initialization() {
+        let data = BlockchainTestData::default_from_number(11);
+        let (block1, exec1) = data.blocks[0].clone();
+        let (block2, exec2) = data.blocks[1].clone();
+        let (block3, exec3) = data.blocks[2].clone();
+        let genesis = data.genesis;
+
+        // test pops execution results from vector, so order is from last to first.
+        let externals =
+            setup_externals(vec![exec3.clone(), exec2.clone(), exec1.clone(), exec3, exec2, exec1]);
+        let cloned_externals_1 = TreeExternals {
+            provider_factory: externals.provider_factory.clone(),
+            executor_factory: externals.executor_factory.clone(),
+            consensus: externals.consensus.clone(),
+        };
+        let cloned_externals_2 = TreeExternals {
+            provider_factory: externals.provider_factory.clone(),
+            executor_factory: externals.executor_factory.clone(),
+            consensus: externals.consensus.clone(),
+        };
+
+        // last finalized block would be number 9.
+        setup_genesis(&externals.provider_factory, genesis);
+
+        // make tree
+        let config = BlockchainTreeConfig::new(1, 2, 3, 2);
+        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+
+        assert_eq!(
+            tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        assert_eq!(
+            tree.insert_block(block2.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        assert_eq!(
+            tree.insert_block(block3, BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::Canonical))
+        );
+
+        tree.make_canonical(block2.hash()).unwrap();
+
+        // restart
+        let mut tree =
+            BlockchainTree::new(cloned_externals_1, config, None).expect("failed to create tree");
+        assert_eq!(tree.block_indices().last_finalized_block(), 0);
+
+        let mut block1a = block1;
+        let block1a_hash = B256::new([0x33; 32]);
+        block1a.set_hash(block1a_hash);
+
+        assert_eq!(
+            tree.insert_block(block1a.clone(), BlockValidationKind::Exhaustive).unwrap(),
+            InsertPayloadOk::Inserted(BlockStatus::Valid(BlockAttachment::HistoricalFork))
+        );
+
+        tree.make_canonical(block1a.hash()).unwrap();
+        tree.finalize_block(block1a.number).unwrap();
+
+        // restart
+        let tree =
+            BlockchainTree::new(cloned_externals_2, config, None).expect("failed to create tree");
+
+        assert_eq!(tree.block_indices().last_finalized_block(), block1a.number);
     }
 }

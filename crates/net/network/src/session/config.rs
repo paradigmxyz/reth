@@ -1,4 +1,4 @@
-//! Configuration types for [SessionManager](crate::session::SessionManager).
+//! Configuration types for [`SessionManager`](crate::session::SessionManager).
 
 use crate::{
     peers::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND},
@@ -29,7 +29,7 @@ const DEFAULT_MAX_PEERS: usize =
 /// With maxed out peers, this will allow for 3 messages per session (average)
 const DEFAULT_SESSION_EVENT_BUFFER_SIZE: usize = DEFAULT_MAX_PEERS * 2;
 
-/// Configuration options when creating a [SessionManager](crate::session::SessionManager).
+/// Configuration options when creating a [`SessionManager`](crate::session::SessionManager).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]

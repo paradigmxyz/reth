@@ -31,7 +31,7 @@ pub fn parse_duration_from_secs(arg: &str) -> eyre::Result<Duration, std::num::P
     Ok(Duration::from_secs(seconds))
 }
 
-/// Clap value parser for [ChainSpec]s that takes either a built-in chainspec or the path
+/// Clap value parser for [`ChainSpec`]s that takes either a built-in chainspec or the path
 /// to a custom one.
 pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
@@ -65,11 +65,11 @@ pub fn chain_help() -> String {
     format!("The chain this node is running.\nPossible values are either a built-in chain or the path to a chain specification file.\n\nBuilt-in chains:\n    {}", SUPPORTED_CHAINS.join(", "))
 }
 
-/// Clap value parser for [ChainSpec]s.
+/// Clap value parser for [`ChainSpec`]s.
 ///
 /// The value parser matches either a known chain, the path
 /// to a json file, or a json formatted string in-memory. The json can be either
-/// a serialized [ChainSpec] or Genesis struct.
+/// a serialized [`ChainSpec`] or Genesis struct.
 pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
         #[cfg(not(feature = "optimism"))]
@@ -111,7 +111,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
     })
 }
 
-/// Parse [BlockHashOrNumber]
+/// Parse [`BlockHashOrNumber`]
 pub fn hash_or_num_value_parser(value: &str) -> eyre::Result<BlockHashOrNumber, eyre::Error> {
     match B256::from_str(value) {
         Ok(hash) => Ok(BlockHashOrNumber::Hash(hash)),
@@ -136,7 +136,7 @@ pub enum SocketAddressParsingError {
     Port(#[from] std::num::ParseIntError),
 }
 
-/// Parse a [SocketAddr] from a `str`.
+/// Parse a [`SocketAddr`] from a `str`.
 ///
 /// The following formats are checked:
 ///

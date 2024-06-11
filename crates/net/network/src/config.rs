@@ -12,9 +12,9 @@ use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOV
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
-use reth_network_types::{pk2id, PeerId};
+use reth_network_peers::{pk2id, PeerId};
 use reth_primitives::{
-    mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, NodeRecord, MAINNET,
+    mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, TrustedPeer, MAINNET,
 };
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -41,7 +41,7 @@ pub struct NetworkConfig<C> {
     /// The node's secret key, from which the node's identity is derived.
     pub secret_key: SecretKey,
     /// All boot nodes to start network discovery with.
-    pub boot_nodes: HashSet<NodeRecord>,
+    pub boot_nodes: HashSet<TrustedPeer>,
     /// How to set up discovery over DNS.
     pub dns_discovery_config: Option<DnsDiscoveryConfig>,
     /// Address to use for discovery v4.
@@ -54,7 +54,7 @@ pub struct NetworkConfig<C> {
     pub listener_addr: SocketAddr,
     /// How to instantiate peer manager.
     pub peers_config: PeersConfig,
-    /// How to configure the [SessionManager](crate::session::SessionManager).
+    /// How to configure the [`SessionManager`](crate::session::SessionManager).
     pub sessions_config: SessionsConfig,
     /// The chain spec
     pub chain_spec: Arc<ChainSpec>,
@@ -73,9 +73,9 @@ pub struct NetworkConfig<C> {
     pub executor: Box<dyn TaskSpawner>,
     /// The `Status` message to send to peers at the beginning.
     pub status: Status,
-    /// Sets the hello message for the p2p handshake in RLPx
+    /// Sets the hello message for the p2p handshake in `RLPx`
     pub hello_message: HelloMessageWithProtocols,
-    /// Additional protocols to announce and handle in RLPx
+    /// Additional protocols to announce and handle in `RLPx`
     pub extra_protocols: RlpxSubProtocols,
     /// Whether to disable transaction gossip
     pub tx_gossip_disabled: bool,
@@ -104,13 +104,13 @@ impl<C> NetworkConfig<C> {
         self
     }
 
-    /// Sets the address for the incoming RLPx connection listener.
+    /// Sets the address for the incoming `RLPx` connection listener.
     pub const fn set_listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = listener_addr;
         self
     }
 
-    /// Returns the address for the incoming RLPx connection listener.
+    /// Returns the address for the incoming `RLPx` connection listener.
     pub const fn listener_addr(&self) -> &SocketAddr {
         &self.listener_addr
     }
@@ -120,7 +120,7 @@ impl<C> NetworkConfig<C>
 where
     C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
 {
-    /// Starts the networking stack given a [NetworkConfig] and returns a handle to the network.
+    /// Starts the networking stack given a [`NetworkConfig`] and returns a handle to the network.
     pub async fn start_network(self) -> Result<NetworkHandle, NetworkError> {
         let client = self.client.clone();
         let (handle, network, _txpool, eth) =
@@ -147,7 +147,7 @@ pub struct NetworkConfigBuilder {
     #[serde(skip)]
     discovery_v5_builder: Option<reth_discv5::ConfigBuilder>,
     /// All boot nodes to start network discovery with.
-    boot_nodes: HashSet<NodeRecord>,
+    boot_nodes: HashSet<TrustedPeer>,
     /// Address to use for discovery
     discovery_addr: Option<SocketAddr>,
     /// Listener for incoming connections
@@ -163,7 +163,7 @@ pub struct NetworkConfigBuilder {
     /// The executor to use for spawning tasks.
     #[serde(skip)]
     executor: Option<Box<dyn TaskSpawner>>,
-    /// Sets the hello message for the p2p handshake in RLPx
+    /// Sets the hello message for the p2p handshake in `RLPx`
     hello_message: Option<HelloMessageWithProtocols>,
     /// The executor to use for spawning tasks.
     #[serde(skip)]
@@ -264,7 +264,7 @@ impl NetworkConfigBuilder {
 
     /// Sets the executor to use for spawning tasks.
     ///
-    /// If `None`, then [tokio::spawn] is used for spawning tasks.
+    /// If `None`, then [`tokio::spawn`] is used for spawning tasks.
     pub fn with_task_executor(mut self, executor: Box<dyn TaskSpawner>) -> Self {
         self.executor = Some(executor);
         self
@@ -284,18 +284,18 @@ impl NetworkConfigBuilder {
 
     /// Sets the discovery and listener address
     ///
-    /// This is a convenience function for both [NetworkConfigBuilder::listener_addr] and
-    /// [NetworkConfigBuilder::discovery_addr].
+    /// This is a convenience function for both [`NetworkConfigBuilder::listener_addr`] and
+    /// [`NetworkConfigBuilder::discovery_addr`].
     ///
     /// By default, both are on the same port:
-    /// [DEFAULT_DISCOVERY_PORT](reth_discv4::DEFAULT_DISCOVERY_PORT)
+    /// [`DEFAULT_DISCOVERY_PORT`](reth_discv4::DEFAULT_DISCOVERY_PORT)
     pub const fn set_addrs(self, addr: SocketAddr) -> Self {
         self.listener_addr(addr).discovery_addr(addr)
     }
 
     /// Sets the socket address the network will listen on.
     ///
-    /// By default, this is [DEFAULT_DISCOVERY_ADDRESS]
+    /// By default, this is [`DEFAULT_DISCOVERY_ADDRESS`]
     pub const fn listener_addr(mut self, listener_addr: SocketAddr) -> Self {
         self.listener_addr = Some(listener_addr);
         self
@@ -303,7 +303,7 @@ impl NetworkConfigBuilder {
 
     /// Sets the port of the address the network will listen on.
     ///
-    /// By default, this is [DEFAULT_DISCOVERY_PORT](reth_discv4::DEFAULT_DISCOVERY_PORT)
+    /// By default, this is [`DEFAULT_DISCOVERY_PORT`](reth_discv4::DEFAULT_DISCOVERY_PORT)
     pub fn listener_port(mut self, port: u16) -> Self {
         self.listener_addr.get_or_insert(DEFAULT_DISCOVERY_ADDRESS).set_port(port);
         self
@@ -317,7 +317,7 @@ impl NetworkConfigBuilder {
 
     /// Sets the port of the address the discovery network will listen on.
     ///
-    /// By default, this is [DEFAULT_DISCOVERY_PORT](reth_discv4::DEFAULT_DISCOVERY_PORT)
+    /// By default, this is [`DEFAULT_DISCOVERY_PORT`](reth_discv4::DEFAULT_DISCOVERY_PORT)
     pub fn discovery_port(mut self, port: u16) -> Self {
         self.discovery_addr.get_or_insert(DEFAULT_DISCOVERY_ADDRESS).set_port(port);
         self
@@ -325,10 +325,10 @@ impl NetworkConfigBuilder {
 
     /// Sets the external ip resolver to use for discovery v4.
     ///
-    /// If no [Discv4ConfigBuilder] is set via [Self::discovery], this will create a new one.
+    /// If no [`Discv4ConfigBuilder`] is set via [`Self::discovery`], this will create a new one.
     ///
     /// This is a convenience function for setting the external ip resolver on the default
-    /// [Discv4Config] config.
+    /// [`Discv4Config`] config.
     pub fn external_ip_resolver(mut self, resolver: NatResolver) -> Self {
         self.discovery_v4_builder
             .get_or_insert_with(Discv4Config::builder)
@@ -354,19 +354,19 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// Convenience function for setting [Self::boot_nodes] to the mainnet boot nodes.
+    /// Convenience function for setting [`Self::boot_nodes`] to the mainnet boot nodes.
     pub fn mainnet_boot_nodes(self) -> Self {
         self.boot_nodes(mainnet_nodes())
     }
 
-    /// Convenience function for setting [Self::boot_nodes] to the sepolia boot nodes.
+    /// Convenience function for setting [`Self::boot_nodes`] to the sepolia boot nodes.
     pub fn sepolia_boot_nodes(self) -> Self {
         self.boot_nodes(sepolia_nodes())
     }
 
     /// Sets the boot nodes.
-    pub fn boot_nodes(mut self, nodes: impl IntoIterator<Item = NodeRecord>) -> Self {
-        self.boot_nodes = nodes.into_iter().collect();
+    pub fn boot_nodes<T: Into<TrustedPeer>>(mut self, nodes: impl IntoIterator<Item = T>) -> Self {
+        self.boot_nodes = nodes.into_iter().map(Into::into).collect();
         self
     }
 
@@ -444,7 +444,7 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// Adds a new additional protocol to the RLPx sub-protocol list.
+    /// Adds a new additional protocol to the `RLPx` sub-protocol list.
     pub fn add_rlpx_sub_protocol(mut self, protocol: impl IntoRlpxSubProtocol) -> Self {
         self.extra_protocols.push(protocol);
         self
@@ -462,7 +462,8 @@ impl NetworkConfigBuilder {
         self
     }
 
-    /// Convenience function for creating a [NetworkConfig] with a noop provider that does nothing.
+    /// Convenience function for creating a [`NetworkConfig`] with a noop provider that does
+    /// nothing.
     #[cfg(any(test, feature = "test-utils"))]
     pub fn build_with_noop_provider(
         self,

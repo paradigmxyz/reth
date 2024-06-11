@@ -18,7 +18,7 @@ use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
 use reth_network_api::PeerKind;
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{ForkId, B256};
 use reth_provider::BlockNumReader;
 use std::{
@@ -63,8 +63,9 @@ pub struct NetworkState<C> {
     discovery: Discovery,
     /// The type that handles requests.
     ///
-    /// The fetcher streams RLPx related requests on a per-peer basis to this type. This type will
-    /// then queue in the request and notify the fetcher once the result has been received.
+    /// The fetcher streams `RLPx` related requests on a per-peer basis to this type. This type
+    /// will then queue in the request and notify the fetcher once the result has been
+    /// received.
     state_fetcher: StateFetcher,
 }
 
@@ -174,7 +175,7 @@ where
         let mut peers: Vec<_> = self.active_peers.iter_mut().collect();
         peers.shuffle(&mut rand::thread_rng());
 
-        for (peer_id, peer) in peers.into_iter() {
+        for (peer_id, peer) in peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
                 continue
@@ -207,7 +208,7 @@ where
     pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage) {
         let number = msg.block.block.header.number;
         let hashes = NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]);
-        for (peer_id, peer) in self.active_peers.iter_mut() {
+        for (peer_id, peer) in &mut self.active_peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
                 continue
@@ -315,10 +316,7 @@ where
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason });
             }
-            PeerAction::DisconnectBannedIncoming { peer_id } => {
-                self.state_fetcher.on_pending_disconnect(&peer_id);
-                self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
-            }
+            PeerAction::DisconnectBannedIncoming { peer_id } |
             PeerAction::DisconnectUntrustedIncoming { peer_id } => {
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
@@ -333,8 +331,7 @@ where
             PeerAction::PeerRemoved(peer_id) => {
                 self.queued_messages.push_back(StateAction::PeerRemoved(peer_id))
             }
-            PeerAction::BanPeer { .. } => {}
-            PeerAction::UnBanPeer { .. } => {}
+            PeerAction::BanPeer { .. } | PeerAction::UnBanPeer { .. } => {}
         }
     }
 
@@ -379,7 +376,7 @@ where
     /// Invoked when received a response from a connected peer.
     ///
     /// Delegates the response result to the fetcher which may return an outcome specific
-    /// instruction that needs to be handled in [Self::on_block_response_outcome]. This could be
+    /// instruction that needs to be handled in [`Self::on_block_response_outcome`]. This could be
     /// a follow-up request or an instruction to slash the peer's reputation.
     fn on_eth_response(&mut self, peer: PeerId, resp: PeerResponseResult) -> Option<StateAction> {
         match resp {
@@ -420,7 +417,7 @@ where
             let mut received_responses = Vec::new();
 
             // poll all connected peers for responses
-            for (id, peer) in self.active_peers.iter_mut() {
+            for (id, peer) in &mut self.active_peers {
                 if let Some(mut response) = peer.pending_response.take() {
                     match response.poll(cx) {
                         Poll::Ready(res) => {
@@ -518,7 +515,7 @@ pub(crate) enum StateAction {
         /// The reported [`ForkId`] by this peer.
         fork_id: ForkId,
     },
-    /// A new node was found through the discovery, possibly with a ForkId
+    /// A new node was found through the discovery, possibly with a `ForkId`
     DiscoveredNode { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
     /// A peer was added
     PeerAdded(PeerId),
@@ -537,7 +534,7 @@ mod tests {
         BlockBodies, EthVersion,
     };
     use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
-    use reth_network_types::PeerId;
+    use reth_network_peers::PeerId;
     use reth_primitives::{BlockBody, Header, B256};
     use reth_provider::test_utils::NoopProvider;
     use std::{
@@ -547,7 +544,7 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
-    /// Returns a testing instance of the [NetworkState].
+    /// Returns a testing instance of the [`NetworkState`].
     fn state() -> NetworkState<NoopProvider> {
         let peers = PeersManager::default();
         let handle = peers.handle();

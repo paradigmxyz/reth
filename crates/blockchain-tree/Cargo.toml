@@ -17,9 +17,11 @@ reth-primitives.workspace = true
 reth-storage-errors.workspace = true
 reth-execution-errors.workspace = true
 reth-db.workspace = true
+reth-db-api.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace = true
 reth-provider.workspace = true
+reth-prune-types.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-parallel = { workspace = true, features = ["parallel"] }
@@ -41,9 +43,10 @@ linked_hash_set = "0.1.4"
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
-reth-primitives = { workspace = true , features = ["test-utils"] }
+reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm = { workspace = true, features = ["test-utils"] }
+reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-revm.workspace = true
 reth-evm-ethereum.workspace = true

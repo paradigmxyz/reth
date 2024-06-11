@@ -18,8 +18,8 @@ pub(crate) struct PolledHook {
 /// Manages hooks under the control of the engine.
 ///
 /// This type polls the initialized hooks one by one, respecting the DB access level
-/// (i.e. [crate::hooks::EngineHookDBAccessLevel::ReadWrite] that enforces running at most one such
-/// hook).
+/// (i.e. [`crate::hooks::EngineHookDBAccessLevel::ReadWrite`] that enforces running at most one
+/// such hook).
 pub(crate) struct EngineHooksController {
     /// Collection of hooks.
     ///

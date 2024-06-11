@@ -1,17 +1,14 @@
-use crate::walker::TrieWalker;
+use crate::{
+    walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles, StorageTrieEntry,
+    StoredBranchNode, StoredNibbles, StoredNibblesSubKey,
+};
 use derive_more::Deref;
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{
-    trie::{
-        BranchNodeCompact, HashBuilder, Nibbles, StorageTrieEntry, StoredBranchNode, StoredNibbles,
-        StoredNibblesSubKey,
-    },
-    B256,
-};
+use reth_primitives::B256;
 use std::collections::{hash_map::IntoIter, HashMap, HashSet};
 
 /// The key of a trie node.

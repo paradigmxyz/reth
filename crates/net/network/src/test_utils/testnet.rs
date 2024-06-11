@@ -14,7 +14,7 @@ use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{protocol::Protocol, DisconnectReason, HelloMessageWithProtocols};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::MAINNET;
 use reth_provider::{
     test_utils::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
@@ -260,7 +260,7 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        for peer in this.peers.iter_mut() {
+        for peer in &mut this.peers {
             let _ = peer.poll_unpin(cx);
         }
         Poll::Pending
@@ -368,7 +368,7 @@ where
         self.network.local_addr()
     }
 
-    /// The [PeerId] of this peer.
+    /// The [`PeerId`] of this peer.
     pub fn peer_id(&self) -> PeerId {
         *self.network.peer_id()
     }
@@ -440,7 +440,7 @@ impl<C> Peer<C>
 where
     C: BlockReader + HeaderProvider + Clone,
 {
-    /// Installs a new [TestPool]
+    /// Installs a new [`TestPool`]
     pub fn install_test_pool(&mut self) {
         self.install_transactions_manager(TestPoolBuilder::default().into())
     }

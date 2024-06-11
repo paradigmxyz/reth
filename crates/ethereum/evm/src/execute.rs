@@ -7,15 +7,17 @@ use crate::{
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{
-        BatchBlockExecutionOutput, BatchExecutor, BlockExecutionError, BlockExecutionInput,
-        BlockExecutionOutput, BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
+        BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
+        BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     ConfigureEvm,
 };
+use reth_execution_types::BundleStateWithReceipts;
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, PruneModes, Receipt, Request,
-    Withdrawals, MAINNET, U256,
+    BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, Receipt, Request, Withdrawals,
+    MAINNET, U256,
 };
+use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
@@ -131,7 +133,7 @@ where
     /// # Note
     ///
     /// It does __not__ apply post-execution changes that do not require an [EVM](Evm), for that see
-    /// [EthBlockExecutor::post_execution].
+    /// [`EthBlockExecutor::post_execution`].
     fn execute_state_transitions<Ext, DB>(
         &self,
         block: &BlockWithSenders,
@@ -404,7 +406,7 @@ where
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BatchBlockExecutionOutput;
+    type Output = BundleStateWithReceipts;
     type Error = BlockExecutionError;
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
@@ -412,7 +414,7 @@ where
         let EthExecuteOutput { receipts, requests, gas_used: _ } =
             self.executor.execute_without_verification(block, total_difficulty)?;
 
-        validate_block_post_execution(block, self.executor.chain_spec(), &receipts, &[])?;
+        validate_block_post_execution(block, self.executor.chain_spec(), &receipts, &requests)?;
 
         // prepare the state according to the prune mode
         let retention = self.batch_record.bundle_retention(block.number);
@@ -434,11 +436,11 @@ where
     fn finalize(mut self) -> Self::Output {
         self.stats.log_debug();
 
-        BatchBlockExecutionOutput::new(
+        BundleStateWithReceipts::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
-            self.batch_record.take_requests(),
             self.batch_record.first_block().unwrap_or_default(),
+            self.batch_record.take_requests(),
         )
     }
 
@@ -460,8 +462,9 @@ mod tests {
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
     use reth_primitives::{
-        constants::ETH_TO_WEI, keccak256, public_key_to_address, trie::EMPTY_ROOT_HASH, Account,
-        Block, ChainSpecBuilder, ForkCondition, Transaction, TxKind, TxLegacy, B256,
+        constants::{EMPTY_ROOT_HASH, ETH_TO_WEI},
+        keccak256, public_key_to_address, Account, Block, ChainSpecBuilder, ForkCondition,
+        Transaction, TxKind, TxLegacy, B256,
     };
     use reth_revm::{
         database::StateProviderDatabase, state_change::HISTORY_SERVE_WINDOW,

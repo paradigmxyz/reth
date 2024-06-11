@@ -3,15 +3,14 @@
 use crate::eth::error::{EthApiError, EthResult};
 use reth_errors::ProviderError;
 use reth_primitives::{
-    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
+    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
     proofs,
     revm::env::tx_env_with_recovered,
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
-    trie::EMPTY_ROOT_HASH,
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Receipts, Requests, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Requests, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -26,12 +25,12 @@ use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, 
 use revm_primitives::EnvWithHandlerCfg;
 use std::time::Instant;
 
-/// Configured [BlockEnv] and [CfgEnvWithHandlerCfg] for a pending block
+/// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block
 #[derive(Debug, Clone)]
 pub(crate) struct PendingBlockEnv {
-    /// Configured [CfgEnvWithHandlerCfg] for the pending block.
+    /// Configured [`CfgEnvWithHandlerCfg`] for the pending block.
     pub(crate) cfg: CfgEnvWithHandlerCfg,
-    /// Configured [BlockEnv] for the pending block.
+    /// Configured [`BlockEnv`] for the pending block.
     pub(crate) block_env: BlockEnv,
     /// Origin block for the config
     pub(crate) origin: PendingBlockEnvOrigin,
@@ -223,8 +222,9 @@ impl PendingBlockEnv {
 
         let bundle = BundleStateWithReceipts::new(
             db.take_bundle(),
-            Receipts::from_vec(vec![receipts]),
+            vec![receipts].into(),
             block_number,
+            Vec::new(),
         );
 
         #[cfg(feature = "optimism")]
@@ -293,10 +293,10 @@ impl PendingBlockEnv {
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [Evm](revm::Evm) with the given DB, and environment [CfgEnvWithHandlerCfg]
-/// and [BlockEnv] to execute the pre block contract call.
+/// This constructs a new [Evm](revm::Evm) with the given DB, and environment
+/// [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] to execute the pre block contract call.
 ///
-/// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
+/// This uses [`apply_beacon_root_contract_call`] to ultimately apply the beacon root contract state
 /// change.
 fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
     db: &mut DB,
@@ -332,10 +332,10 @@ where
 
 /// Apply the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) pre block state transitions.
 ///
-/// This constructs a new [Evm](revm::Evm) with the given DB, and environment [CfgEnvWithHandlerCfg]
-/// and [BlockEnv].
+/// This constructs a new [Evm](revm::Evm) with the given DB, and environment
+/// [`CfgEnvWithHandlerCfg`] and [`BlockEnv`].
 ///
-/// This uses [apply_blockhashes_update].
+/// This uses [`apply_blockhashes_update`].
 fn pre_block_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
@@ -356,7 +356,7 @@ where
     .map_err(|err| EthApiError::Internal(err.into()))
 }
 
-/// The origin for a configured [PendingBlockEnv]
+/// The origin for a configured [`PendingBlockEnv`]
 #[derive(Clone, Debug)]
 pub(crate) enum PendingBlockEnvOrigin {
     /// The pending block as received from the CL.
@@ -384,7 +384,7 @@ impl PendingBlockEnvOrigin {
         }
     }
 
-    /// Returns the [BlockId] that represents the state of the block.
+    /// Returns the [`BlockId`] that represents the state of the block.
     ///
     /// If this is the actual pending block, the state is the "Pending" tag, otherwise we can safely
     /// identify the block by its hash (latest block).
@@ -397,8 +397,9 @@ impl PendingBlockEnvOrigin {
 
     /// Returns the hash of the block the pending block should be built on.
     ///
-    /// For the [PendingBlockEnvOrigin::ActualPending] this is the parent hash of the block.
-    /// For the [PendingBlockEnvOrigin::DerivedFromLatest] this is the hash of the _latest_ header.
+    /// For the [`PendingBlockEnvOrigin::ActualPending`] this is the parent hash of the block.
+    /// For the [`PendingBlockEnvOrigin::DerivedFromLatest`] this is the hash of the _latest_
+    /// header.
     fn build_target_hash(&self) -> B256 {
         match self {
             Self::ActualPending(block) => block.parent_hash,

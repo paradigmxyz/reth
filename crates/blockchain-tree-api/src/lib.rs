@@ -13,16 +13,16 @@ use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
 };
-use reth_storage_errors::provider::ProviderError;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::collections::BTreeMap;
 
 pub mod error;
 
-/// * [BlockchainTreeEngine::insert_block]: Connect block to chain, execute it and if valid insert
+/// * [`BlockchainTreeEngine::insert_block`]: Connect block to chain, execute it and if valid insert
 ///   block inside tree.
-/// * [BlockchainTreeEngine::finalize_block]: Remove chains that join to now finalized block, as
+/// * [`BlockchainTreeEngine::finalize_block`]: Remove chains that join to now finalized block, as
 ///   chain becomes invalid.
-/// * [BlockchainTreeEngine::make_canonical]: Check if we have the hash of block that we want to
+/// * [`BlockchainTreeEngine::make_canonical`]: Check if we have the hash of block that we want to
 ///   finalize and commit it to db. If we don't have the block, syncing should start to fetch the
 ///   blocks from p2p. Do reorg in tables if canonical chain if needed.
 pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
@@ -60,8 +60,8 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     /// The `validation_kind` parameter controls which validation checks are performed.
     ///
     /// Caution: If the block was received from the consensus layer, this should always be called
-    /// with [BlockValidationKind::Exhaustive] to validate the state root, if possible to adhere to
-    /// the engine API spec.
+    /// with [`BlockValidationKind::Exhaustive`] to validate the state root, if possible to adhere
+    /// to the engine API spec.
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,
@@ -69,7 +69,7 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     ) -> Result<InsertPayloadOk, InsertBlockError>;
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
-    fn finalize_block(&self, finalized_block: BlockNumber);
+    fn finalize_block(&self, finalized_block: BlockNumber) -> ProviderResult<()>;
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree by attempting to connect the buffered blocks to canonical hashes.
@@ -157,14 +157,14 @@ impl std::fmt::Display for BlockValidationKind {
     }
 }
 
-/// All possible outcomes of a canonicalization attempt of [BlockchainTreeEngine::make_canonical].
+/// All possible outcomes of a canonicalization attempt of [`BlockchainTreeEngine::make_canonical`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CanonicalOutcome {
     /// The block is already canonical.
     AlreadyCanonical {
         /// Block number and hash of current head.
         head: BlockNumHash,
-        /// The corresponding [SealedHeader] that was attempted to be made a current head and
+        /// The corresponding [`SealedHeader`] that was attempted to be made a current head and
         /// is already canonical.
         header: SealedHeader,
     },
@@ -201,13 +201,13 @@ impl CanonicalOutcome {
 /// From Engine API spec, block inclusion can be valid, accepted or invalid.
 /// Invalid case is already covered by error, but we need to make distinction
 /// between valid blocks that extend canonical chain and the ones that fork off
-/// into side chains (see [BlockAttachment]). If we don't know the block
+/// into side chains (see [`BlockAttachment`]). If we don't know the block
 /// parent we are returning Disconnected status as we can't make a claim if
 /// block is valid or not.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BlockStatus {
     /// If block is valid and block extends canonical chain.
-    /// In BlockchainTree terms, it forks off canonical tip.
+    /// In `BlockchainTree` terms, it forks off canonical tip.
     Valid(BlockAttachment),
     /// If block is valid and block forks off canonical chain.
     /// If blocks is not connected to canonical chain.
@@ -286,7 +286,7 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Returns the _buffered_ (disconnected) header with matching hash from the internal buffer if
     /// it exists.
     ///
-    /// Caution: Unlike [Self::block_by_hash] this will only return headers that are currently
+    /// Caution: Unlike [`Self::block_by_hash`] this will only return headers that are currently
     /// disconnected from the canonical chain.
     fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader>;
 
@@ -304,7 +304,7 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// If there is a buffered block with the given hash, this returns the block itself.
     fn lowest_buffered_ancestor(&self, hash: BlockHash) -> Option<SealedBlockWithSenders>;
 
-    /// Return BlockchainTree best known canonical chain tip (BlockHash, BlockNumber)
+    /// Return `BlockchainTree` best known canonical chain tip (`BlockHash`, `BlockNumber`)
     fn canonical_tip(&self) -> BlockNumHash;
 
     /// Return block number and hash that extends the canonical chain tip by one.
@@ -325,7 +325,7 @@ pub trait BlockchainTreeViewer: Send + Sync {
     /// Returns the pending block and its receipts in one call.
     ///
     /// This exists to prevent a potential data race if the pending block changes in between
-    /// [Self::pending_block] and [Self::pending_receipts] calls.
+    /// [`Self::pending_block`] and [`Self::pending_receipts`] calls.
     fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<Receipt>)>;
 
     /// Returns the pending receipts if there is one.

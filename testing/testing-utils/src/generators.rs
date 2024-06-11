@@ -29,7 +29,7 @@ pub fn rng() -> StdRng {
     }
 }
 
-/// Generates a range of random [SealedHeader]s.
+/// Generates a range of random [`SealedHeader`]s.
 ///
 /// The parent hash of the first header
 /// in the result will be equal to `head`.
@@ -51,7 +51,7 @@ pub fn random_header_range<R: Rng>(
     headers
 }
 
-/// Generate a random [SealedHeader].
+/// Generate a random [`SealedHeader`].
 ///
 /// The header is assumed to not be correct if validated.
 pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> SealedHeader {
@@ -85,13 +85,18 @@ pub fn random_tx<R: Rng>(rng: &mut R) -> Transaction {
 
 /// Generates a random legacy [Transaction] that is signed.
 ///
-/// On top of the considerations of [random_tx], these apply as well:
+/// On top of the considerations of [`random_tx`], these apply as well:
 ///
 /// - There is no guarantee that the nonce is not used twice for the same account
 pub fn random_signed_tx<R: Rng>(rng: &mut R) -> TransactionSigned {
+    let tx = random_tx(rng);
+    sign_tx_with_random_key_pair(rng, tx)
+}
+
+/// Signs the [Transaction] with a random key pair.
+pub fn sign_tx_with_random_key_pair<R: Rng>(rng: &mut R, tx: Transaction) -> TransactionSigned {
     let secp = Secp256k1::new();
     let key_pair = Keypair::new(&secp, rng);
-    let tx = random_tx(rng);
     sign_tx_with_key_pair(key_pair, tx)
 }
 
@@ -109,7 +114,7 @@ pub fn generate_keys<R: Rng>(rng: &mut R, count: usize) -> Vec<Keypair> {
 }
 
 /// Generate a random block filled with signed transactions (generated using
-/// [random_signed_tx]). If no transaction count is provided, the number of transactions
+/// [`random_signed_tx`]). If no transaction count is provided, the number of transactions
 /// will be random, otherwise the provided count will be used.
 ///
 /// All fields use the default values (and are assumed to be invalid) except for:
@@ -168,7 +173,7 @@ pub fn random_block<R: Rng>(
 /// The parent hash of the first block
 /// in the result will be equal to `head`.
 ///
-/// See [random_block] for considerations when validating the generated blocks.
+/// See [`random_block`] for considerations when validating the generated blocks.
 pub fn random_block_range<R: Rng>(
     rng: &mut R,
     block_numbers: RangeInclusive<BlockNumber>,
@@ -274,7 +279,7 @@ where
 
 /// Generate a random account change.
 ///
-/// Returns two addresses, a balance_change, and a Vec of new storage entries.
+/// Returns two addresses, a `balance_change`, and a Vec of new storage entries.
 pub fn random_account_change<R: Rng>(
     rng: &mut R,
     valid_addresses: &[Address],

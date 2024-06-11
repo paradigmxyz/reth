@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::FutureExt;
 use metrics::Counter;
-use reth_db::database::Database;
+use reth_db_api::database::Database;
 use reth_errors::{RethError, RethResult};
 use reth_primitives::BlockNumber;
 use reth_prune::{Pruner, PrunerError, PrunerWithResult};
@@ -77,11 +77,11 @@ impl<DB: Database + 'static> PruneHook<DB> {
     }
 
     /// This will try to spawn the pruner if it is idle:
-    /// 1. Check if pruning is needed through [Pruner::is_pruning_needed].
+    /// 1. Check if pruning is needed through [`Pruner::is_pruning_needed`].
     ///
-    /// 2.1. If pruning is needed, pass tip block number to the [Pruner::run] and spawn it in a
-    ///      separate task. Set pruner state to [PrunerState::Running].
-    /// 2.2. If pruning is not needed, set pruner state back to [PrunerState::Idle].
+    /// 2.1. If pruning is needed, pass tip block number to the [`Pruner::run`] and spawn it in a
+    ///      separate task. Set pruner state to [`PrunerState::Running`].
+    /// 2.2. If pruning is not needed, set pruner state back to [`PrunerState::Idle`].
     ///
     /// If pruner is already running, do nothing.
     fn try_spawn_pruner(&mut self, tip_block_number: BlockNumber) -> Option<EngineHookEvent> {
@@ -141,8 +141,8 @@ impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
 
 /// The possible pruner states within the sync controller.
 ///
-/// [PrunerState::Idle] means that the pruner is currently idle.
-/// [PrunerState::Running] means that the pruner is currently running.
+/// [`PrunerState::Idle`] means that the pruner is currently idle.
+/// [`PrunerState::Running`] means that the pruner is currently running.
 ///
 /// NOTE: The differentiation between these two states is important, because when the pruner is
 /// running, it acquires the write lock over the database. This means that we cannot forward to the

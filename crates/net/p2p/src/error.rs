@@ -1,7 +1,7 @@
 use super::headers::client::HeadersRequest;
 use reth_consensus::ConsensusError;
 use reth_network_api::ReputationChangeKind;
-use reth_network_types::WithPeerId;
+use reth_network_peers::WithPeerId;
 use reth_primitives::{
     BlockHashOrNumber, BlockNumber, GotExpected, GotExpectedBoxed, Header, B256,
 };
@@ -13,12 +13,12 @@ use tokio::sync::{mpsc, oneshot};
 /// Result alias for result of a request.
 pub type RequestResult<T> = Result<T, RequestError>;
 
-/// Result with [PeerId][reth_network_types::PeerId]
+/// Result with [`PeerId`][reth_network_peers::PeerId]
 pub type PeerRequestResult<T> = RequestResult<WithPeerId<T>>;
 
 /// Helper trait used to validate responses.
 pub trait EthResponseValidator {
-    /// Determine whether the response matches what we requested in [HeadersRequest]
+    /// Determine whether the response matches what we requested in [`HeadersRequest`]
     fn is_likely_bad_headers_response(&self, request: &HeadersRequest) -> bool;
 
     /// Return the response reputation impact if any
@@ -50,22 +50,22 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
         }
     }
 
-    /// [RequestError::ChannelClosed] is not possible here since these errors are mapped to
+    /// [`RequestError::ChannelClosed`] is not possible here since these errors are mapped to
     /// `ConnectionDropped`, which will be handled when the dropped connection is cleaned up.
     ///
-    /// [RequestError::ConnectionDropped] should be ignored here because this is already handled
+    /// [`RequestError::ConnectionDropped`] should be ignored here because this is already handled
     /// when the dropped connection is handled.
     ///
-    /// [RequestError::UnsupportedCapability] is not used yet because we only support active session
-    /// for eth protocol.
+    /// [`RequestError::UnsupportedCapability`] is not used yet because we only support active
+    /// session for eth protocol.
     fn reputation_change_err(&self) -> Option<ReputationChangeKind> {
         if let Err(err) = self {
             match err {
-                RequestError::ChannelClosed => None,
-                RequestError::ConnectionDropped => None,
-                RequestError::UnsupportedCapability => None,
-                RequestError::Timeout => Some(ReputationChangeKind::Timeout),
+                RequestError::ChannelClosed |
+                RequestError::ConnectionDropped |
+                RequestError::UnsupportedCapability |
                 RequestError::BadResponse => None,
+                RequestError::Timeout => Some(ReputationChangeKind::Timeout),
             }
         } else {
             None

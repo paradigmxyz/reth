@@ -8,7 +8,7 @@ use std::collections::HashMap;
 /// This assigns a _unique_ `SenderId` for a new `Address`.
 /// It has capacity for 2^64 unique addresses.
 #[derive(Debug, Default)]
-pub(crate) struct SenderIdentifiers {
+pub struct SenderIdentifiers {
     /// The identifier to use next.
     id: u64,
     /// Assigned `SenderId` for an `Address`.
@@ -20,17 +20,17 @@ pub(crate) struct SenderIdentifiers {
 impl SenderIdentifiers {
     /// Returns the address for the given identifier.
     #[allow(dead_code)]
-    pub(crate) fn address(&self, id: &SenderId) -> Option<&Address> {
+    pub fn address(&self, id: &SenderId) -> Option<&Address> {
         self.sender_to_address.get(id)
     }
 
     /// Returns the `SenderId` that belongs to the given address, if it exists
-    pub(crate) fn sender_id(&self, addr: &Address) -> Option<SenderId> {
+    pub fn sender_id(&self, addr: &Address) -> Option<SenderId> {
         self.address_to_id.get(addr).copied()
     }
 
     /// Returns the existing `SendId` or assigns a new one if it's missing
-    pub(crate) fn sender_id_or_create(&mut self, addr: Address) -> SenderId {
+    pub fn sender_id_or_create(&mut self, addr: Address) -> SenderId {
         self.sender_id(&addr).unwrap_or_else(|| {
             let id = self.next_id();
             self.address_to_id.insert(addr, id);
@@ -58,7 +58,7 @@ pub struct SenderId(u64);
 
 impl SenderId {
     /// Returns a `Bound` for `TransactionId` starting with nonce `0`
-    pub(crate) const fn start_bound(self) -> std::ops::Bound<TransactionId> {
+    pub const fn start_bound(self) -> std::ops::Bound<TransactionId> {
         std::ops::Bound::Included(TransactionId::new(self, 0))
     }
 }
@@ -102,7 +102,7 @@ impl TransactionId {
     }
 
     /// Returns the `TransactionId` that would come before this transaction.
-    pub(crate) fn unchecked_ancestor(&self) -> Option<Self> {
+    pub fn unchecked_ancestor(&self) -> Option<Self> {
         (self.nonce != 0).then(|| Self::new(self.sender, self.nonce - 1))
     }
 
@@ -113,7 +113,7 @@ impl TransactionId {
 
     /// Returns the nonce that follows immediately after this one.
     #[inline]
-    pub(crate) const fn next_nonce(&self) -> u64 {
+    pub const fn next_nonce(&self) -> u64 {
         self.nonce + 1
     }
 }

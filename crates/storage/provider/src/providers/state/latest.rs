@@ -2,13 +2,13 @@ use crate::{
     providers::{state::macros::delegate_provider_impls, StaticFileProvider},
     AccountReader, BlockHashReader, StateProvider, StateRootProvider,
 };
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
-    tables,
     transaction::DbTx,
 };
 use reth_primitives::{
-    trie::AccountProof, Account, Address, BlockNumber, Bytecode, StaticFileSegment, StorageKey,
+    proofs::AccountProof, Account, Address, BlockNumber, Bytecode, StaticFileSegment, StorageKey,
     StorageValue, B256,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};

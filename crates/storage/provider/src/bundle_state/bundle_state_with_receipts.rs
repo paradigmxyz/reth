@@ -1,7 +1,7 @@
 use crate::{providers::StaticFileProviderRWRefMut, StateChanges, StateReverts, StateWriter};
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    tables,
     transaction::{DbTx, DbTxMut},
 };
 pub use reth_execution_types::*;
@@ -67,11 +67,11 @@ impl StateWriter for BundleStateWithReceipts {
 mod tests {
     use super::*;
     use crate::{test_utils::create_test_provider_factory, AccountReader};
-    use reth_db::{
+    use reth_db::test_utils::create_test_rw_db;
+    use reth_db_api::{
         cursor::DbDupCursorRO,
         database::Database,
         models::{AccountBeforeTx, BlockNumberAddress},
-        test_utils::create_test_rw_db,
     };
     use reth_primitives::{
         keccak256,
@@ -288,7 +288,7 @@ mod tests {
 
         state.merge_transitions(BundleRetention::Reverts);
 
-        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1)
+        BundleStateWithReceipts::new(state.take_bundle(), Receipts::default(), 1, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -386,7 +386,7 @@ mod tests {
         )]));
 
         state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 2)
+        BundleStateWithReceipts::new(state.take_bundle(), Receipts::default(), 2, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -450,7 +450,7 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0)
+        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
@@ -592,7 +592,7 @@ mod tests {
 
         let bundle = state.take_bundle();
 
-        BundleStateWithReceipts::new(bundle, Receipts::new(), 1)
+        BundleStateWithReceipts::new(bundle, Receipts::default(), 1, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -755,7 +755,7 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0)
+        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
@@ -800,7 +800,7 @@ mod tests {
 
         // Commit block #1 changes to the database.
         state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1)
+        BundleStateWithReceipts::new(state.take_bundle(), Receipts::default(), 1, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -832,8 +832,9 @@ mod tests {
     fn revert_to_indices() {
         let base = BundleStateWithReceipts {
             bundle: BundleState::default(),
-            receipts: Receipts::from_vec(vec![vec![Some(Receipt::default()); 2]; 7]),
+            receipts: vec![vec![Some(Receipt::default()); 2]; 7].into(),
             first_block: 10,
+            requests: Vec::new(),
         };
 
         let mut this = base.clone();
@@ -873,7 +874,7 @@ mod tests {
 
         // insert initial state to the database
         db.update(|tx| {
-            for (address, (account, storage)) in prestate.iter() {
+            for (address, (account, storage)) in &prestate {
                 let hashed_address = keccak256(address);
                 tx.put::<tables::HashedAccounts>(hashed_address, *account).unwrap();
                 for (slot, value) in storage {
@@ -895,10 +896,15 @@ mod tests {
 
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
             assert_eq!(
-                BundleStateWithReceipts::new(state.bundle_state.clone(), Receipts::default(), 0)
-                    .hash_state_slow()
-                    .state_root(&tx)
-                    .unwrap(),
+                BundleStateWithReceipts::new(
+                    state.bundle_state.clone(),
+                    Receipts::default(),
+                    0,
+                    Vec::new()
+                )
+                .hash_state_slow()
+                .state_root(&tx)
+                .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
                     address,
                     (account, storage.into_iter())
@@ -1043,8 +1049,9 @@ mod tests {
 
         let mut test = BundleStateWithReceipts {
             bundle: present_state,
-            receipts: Receipts::from_vec(vec![vec![Some(Receipt::default()); 2]; 1]),
+            receipts: vec![vec![Some(Receipt::default()); 2]; 1].into(),
             first_block: 2,
+            requests: Vec::new(),
         };
 
         test.prepend_state(previous_state);

@@ -43,7 +43,7 @@ pub struct TxLegacy {
 }
 
 impl TxLegacy {
-    /// Calculates a heuristic for the in-memory size of the [TxLegacy] transaction.
+    /// Calculates a heuristic for the in-memory size of the [`TxLegacy`] transaction.
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<Option<ChainId>>() + // chain_id
@@ -161,7 +161,7 @@ impl TxLegacy {
     /// Outputs the signature hash of the transaction by first encoding without a signature, then
     /// hashing.
     ///
-    /// See [Self::encode_for_signing] for more information on the encoding format.
+    /// See [`Self::encode_for_signing`] for more information on the encoding format.
     pub(crate) fn signature_hash(&self) -> B256 {
         let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
         self.encode_for_signing(&mut buf);

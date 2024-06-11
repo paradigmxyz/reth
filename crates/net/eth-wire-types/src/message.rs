@@ -45,7 +45,7 @@ pub struct ProtocolMessage {
 }
 
 impl ProtocolMessage {
-    /// Create a new ProtocolMessage from a message type and message rlp bytes.
+    /// Create a new `ProtocolMessage` from a message type and message rlp bytes.
     pub fn decode_message(version: EthVersion, buf: &mut &[u8]) -> Result<Self, MessageError> {
         let message_type = EthMessageID::decode(buf)?;
 
@@ -176,44 +176,44 @@ impl From<EthBroadcastMessage> for ProtocolBroadcastMessage {
 /// correlate request-response message pairs. This allows for request multiplexing.
 ///
 /// The `eth/67` is based on `eth/66` but only removes two messages, [`GetNodeData`] and
-/// [``NodeData].
+/// [`NodeData`].
 ///
-/// The `eth/68` changes only NewPooledTransactionHashes to include `types` and `sized`. For
-/// it, NewPooledTransactionHashes is renamed as [`NewPooledTransactionHashes66`] and
+/// The `eth/68` changes only `NewPooledTransactionHashes` to include `types` and `sized`. For
+/// it, `NewPooledTransactionHashes` is renamed as [`NewPooledTransactionHashes66`] and
 /// [`NewPooledTransactionHashes68`] is defined.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EthMessage {
     /// Represents a Status message required for the protocol handshake.
     Status(Status),
-    /// Represents a NewBlockHashes message broadcast to the network.
+    /// Represents a `NewBlockHashes` message broadcast to the network.
     NewBlockHashes(NewBlockHashes),
-    /// Represents a NewBlock message broadcast to the network.
+    /// Represents a `NewBlock` message broadcast to the network.
     NewBlock(Box<NewBlock>),
     /// Represents a Transactions message broadcast to the network.
     Transactions(Transactions),
-    /// Represents a NewPooledTransactionHashes message for eth/66 version.
+    /// Represents a `NewPooledTransactionHashes` message for eth/66 version.
     NewPooledTransactionHashes66(NewPooledTransactionHashes66),
-    /// Represents a NewPooledTransactionHashes message for eth/68 version.
+    /// Represents a `NewPooledTransactionHashes` message for eth/68 version.
     NewPooledTransactionHashes68(NewPooledTransactionHashes68),
     // The following messages are request-response message pairs
-    /// Represents a GetBlockHeaders request-response pair.
+    /// Represents a `GetBlockHeaders` request-response pair.
     GetBlockHeaders(RequestPair<GetBlockHeaders>),
-    /// Represents a BlockHeaders request-response pair.
+    /// Represents a `BlockHeaders` request-response pair.
     BlockHeaders(RequestPair<BlockHeaders>),
-    /// Represents a GetBlockBodies request-response pair.
+    /// Represents a `GetBlockBodies` request-response pair.
     GetBlockBodies(RequestPair<GetBlockBodies>),
-    /// Represents a BlockBodies request-response pair.
+    /// Represents a `BlockBodies` request-response pair.
     BlockBodies(RequestPair<BlockBodies>),
-    /// Represents a GetPooledTransactions request-response pair.
+    /// Represents a `GetPooledTransactions` request-response pair.
     GetPooledTransactions(RequestPair<GetPooledTransactions>),
-    /// Represents a PooledTransactions request-response pair.
+    /// Represents a `PooledTransactions` request-response pair.
     PooledTransactions(RequestPair<PooledTransactions>),
-    /// Represents a GetNodeData request-response pair.
+    /// Represents a `GetNodeData` request-response pair.
     GetNodeData(RequestPair<GetNodeData>),
-    /// Represents a NodeData request-response pair.
+    /// Represents a `NodeData` request-response pair.
     NodeData(RequestPair<NodeData>),
-    /// Represents a GetReceipts request-response pair.
+    /// Represents a `GetReceipts` request-response pair.
     GetReceipts(RequestPair<GetReceipts>),
     /// Represents a Receipts request-response pair.
     Receipts(RequestPair<Receipts>),
