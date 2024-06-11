@@ -9,6 +9,7 @@ use futures_util::Future;
 use reth::{
     api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
     builder::FullNode,
+    payload::PayloadTypes,
     providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
     rpc::types::engine::PayloadStatusEnum,
 };
@@ -65,12 +66,12 @@ where
         &mut self,
         length: u64,
         tx_generator: impl Fn(u64) -> Pin<Box<dyn Future<Output = Bytes>>>,
-        attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes
+        attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes
             + Copy,
     ) -> eyre::Result<
         Vec<(
             <Node::Engine as EngineTypes>::BuiltPayload,
-            <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
+            <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
         )>,
     >
     where
@@ -96,10 +97,10 @@ where
     /// It triggers the resolve payload via engine api and expects the built payload event.
     pub async fn new_payload(
         &mut self,
-        attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
+        attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
     ) -> eyre::Result<(
         <<Node as NodeTypes>::Engine as EngineTypes>::BuiltPayload,
-        <<Node as NodeTypes>::Engine as EngineTypes>::PayloadBuilderAttributes,
+        <<Node as NodeTypes>::Engine as PayloadTypes>::PayloadBuilderAttributes,
     )>
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
@@ -121,10 +122,10 @@ where
     pub async fn advance_block(
         &mut self,
         versioned_hashes: Vec<B256>,
-        attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
+        attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
     ) -> eyre::Result<(
         <Node::Engine as EngineTypes>::BuiltPayload,
-        <<Node as NodeTypes>::Engine as EngineTypes>::PayloadBuilderAttributes,
+        <<Node as NodeTypes>::Engine as PayloadTypes>::PayloadBuilderAttributes,
     )>
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
