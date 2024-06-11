@@ -1,12 +1,15 @@
 //! Ethereum Node types config.
 
 use crate::{EthEngineTypes, EthEvmConfig};
+use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ExecutorBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder,
+        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
+        PayloadServiceBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes},
     BuilderContext, Node, PayloadBuilderConfig,
@@ -18,6 +21,7 @@ use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
     TransactionValidationTaskExecutor,
 };
+use std::sync::Arc;
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -32,6 +36,7 @@ impl EthereumNode {
         EthereumPayloadBuilder,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
+        EthereumConsensusBuilder,
     >
     where
         Node: FullNodeTypes<Engine = EthEngineTypes>,
@@ -42,6 +47,7 @@ impl EthereumNode {
             .payload(EthereumPayloadBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
+            .consensus(EthereumConsensusBuilder::default())
     }
 }
 
@@ -60,6 +66,7 @@ where
         EthereumPayloadBuilder,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
+        EthereumConsensusBuilder,
     >;
 
     fn components_builder(self) -> Self::ComponentsBuilder {
@@ -225,5 +232,26 @@ where
         let handle = ctx.start_network(network, pool);
 
         Ok(handle)
+    }
+}
+
+/// A basic ethereum consensus builder.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct EthereumConsensusBuilder {
+    // TODO add closure to modify consensus
+}
+
+impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
+where
+    Node: FullNodeTypes,
+{
+    type Consensus = Arc<dyn reth_consensus::Consensus>;
+
+    async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
+        if ctx.is_dev() {
+            Ok(Arc::new(AutoSealConsensus::new(ctx.chain_spec())))
+        } else {
+            Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
+        }
     }
 }

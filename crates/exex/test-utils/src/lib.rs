@@ -10,6 +10,7 @@
 
 use futures_util::FutureExt;
 use reth_blockchain_tree::noop::NoopBlockchainTree;
+use reth_consensus::test_utils::TestConsensus;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_evm::test_utils::MockExecutorProvider;
@@ -18,7 +19,8 @@ use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_builder::{
     components::{
-        Components, ComponentsBuilder, ExecutorBuilder, NodeComponentsBuilder, PoolBuilder,
+        Components, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NodeComponentsBuilder,
+        PoolBuilder,
     },
     BuilderContext, Node, NodeAdapter, RethFullAdapter,
 };
@@ -83,6 +85,22 @@ where
     }
 }
 
+/// A test [`ConsensusBuilder`] that builds a [`TestConsensus`].
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct TestConsensusBuilder;
+
+impl<Node> ConsensusBuilder<Node> for TestConsensusBuilder
+where
+    Node: FullNodeTypes,
+{
+    type Consensus = Arc<TestConsensus>;
+
+    async fn build_consensus(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
+        Ok(Arc::new(TestConsensus::default()))
+    }
+}
+
 /// A test [`Node`].
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
@@ -103,6 +121,7 @@ where
         EthereumPayloadBuilder,
         EthereumNetworkBuilder,
         TestExecutorBuilder,
+        TestConsensusBuilder,
     >;
 
     fn components_builder(self) -> Self::ComponentsBuilder {
@@ -112,6 +131,7 @@ where
             .payload(EthereumPayloadBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(TestExecutorBuilder::default())
+            .consensus(TestConsensusBuilder::default())
     }
 }
 
@@ -198,6 +218,7 @@ pub async fn test_exex_context_with_chain_spec(
     let transaction_pool = testing_pool();
     let evm_config = EthEvmConfig::default();
     let executor = MockExecutorProvider::default();
+    let consensus = Arc::new(TestConsensus::default());
 
     let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
     let genesis_hash = init_genesis(provider_factory.clone())?;
@@ -217,7 +238,14 @@ pub async fn test_exex_context_with_chain_spec(
     let task_executor = tasks.executor();
 
     let components = NodeAdapter::<FullNodeTypesAdapter<TestNode, _, _>, _> {
-        components: Components { transaction_pool, evm_config, executor, network, payload_builder },
+        components: Components {
+            transaction_pool,
+            evm_config,
+            executor,
+            consensus,
+            network,
+            payload_builder,
+        },
         task_executor,
         provider,
     };
