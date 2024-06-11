@@ -75,6 +75,14 @@ pub struct ExecutionStage<E> {
     external_clean_threshold: u64,
     /// Pruning configuration.
     prune_modes: PruneModes,
+    /// Input for the post execute commit hook.
+    /// Set after every [`ExecutionStage::execute`] and cleared after
+    /// [`ExecutionStage::post_execute_commit`].
+    post_execute_commit_input: Option<Chain>,
+    /// Input for the post unwind commit hook.
+    /// Set after every [`ExecutionStage::unwind`] and cleared after
+    /// [`ExecutionStage::post_unwind_commit`].
+    post_unwind_commit_input: Option<Chain>,
     /// Handle to communicate with `ExEx` manager.
     exex_manager_handle: ExExManagerHandle,
 }
@@ -94,6 +102,8 @@ impl<E> ExecutionStage<E> {
             executor_provider,
             thresholds,
             prune_modes,
+            post_execute_commit_input: None,
+            post_unwind_commit_input: None,
             exex_manager_handle,
         }
     }
@@ -272,7 +282,7 @@ where
             stage_progress = block_number;
             stage_checkpoint.progress.processed += block.gas_used;
 
-            // If we have ExEx's we need to save the block in memory for later
+            // If we have ExExes we need to save the block in memory for later
             if self.exex_manager_handle.has_exexs() {
                 blocks.push(block);
             }
@@ -294,23 +304,25 @@ where
         let state = BundleStateWithReceipts::new(bundle, receipts, first_block, requests);
         let write_preparation_duration = time.elapsed();
 
-        // Check if we should send a [`ExExNotification`] to execution extensions.
+        // Prepare the input for post execute commit hook, where an `ExExNotification` will be sent.
         //
-        // Note: Since we only write to `blocks` if there are any ExEx's we don't need to perform
+        // Note: Since we only write to `blocks` if there are any ExExes, we don't need to perform
         // the `has_exexs` check here as well
         if !blocks.is_empty() {
-            let chain = Arc::new(Chain::new(
-                blocks.into_iter().map(|block| {
-                    let hash = block.header.hash_slow();
-                    block.seal(hash)
-                }),
-                state.clone(),
-                None,
-            ));
+            let blocks = blocks.into_iter().map(|block| {
+                let hash = block.header.hash_slow();
+                block.seal(hash)
+            });
 
-            // NOTE: We can ignore the error here, since an error means that the channel is closed,
-            // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = self.exex_manager_handle.send(ExExNotification::ChainCommitted { new: chain });
+            let previous_input =
+                self.post_execute_commit_input.replace(Chain::new(blocks, state.clone(), None));
+            debug_assert!(
+                previous_input.is_none(),
+                "Previous post execute commit input wasn't processed"
+            );
+            if let Some(previous_input) = previous_input {
+                tracing::debug!(target: "sync::stages::execution", ?previous_input, "Previous post execute commit input wasn't processed");
+            }
         }
 
         let time = Instant::now();
@@ -338,6 +350,18 @@ where
         })
     }
 
+    fn post_execute_commit(&mut self) -> Result<(), StageError> {
+        let Some(chain) = self.post_execute_commit_input.take() else { return Ok(()) };
+
+        // NOTE: We can ignore the error here, since an error means that the channel is closed,
+        // which means the manager has died, which then in turn means the node is shutting down.
+        let _ = self
+            .exex_manager_handle
+            .send(ExExNotification::ChainCommitted { new: Arc::new(chain) });
+
+        Ok(())
+    }
+
     /// Unwind the stage.
     fn unwind(
         &mut self,
@@ -357,17 +381,23 @@ where
         // This also updates `PlainStorageState` and `PlainAccountState`.
         let bundle_state_with_receipts = provider.unwind_or_peek_state::<true>(range.clone())?;
 
-        // Construct a `ExExNotification` if we have ExEx's installed.
+        // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
-            // Get the blocks for the unwound range. This is needed for `ExExNotification`.
+            // Get the blocks for the unwound range.
             let blocks = provider.get_take_block_range::<false>(range.clone())?;
-            let chain = Chain::new(blocks, bundle_state_with_receipts, None);
+            let previous_input = self.post_unwind_commit_input.replace(Chain::new(
+                blocks,
+                bundle_state_with_receipts,
+                None,
+            ));
 
-            // NOTE: We can ignore the error here, since an error means that the channel is closed,
-            // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = self
-                .exex_manager_handle
-                .send(ExExNotification::ChainReverted { old: Arc::new(chain) });
+            debug_assert!(
+                previous_input.is_none(),
+                "Previous post unwind commit input wasn't processed"
+            );
+            if let Some(previous_input) = previous_input {
+                tracing::debug!(target: "sync::stages::execution", ?previous_input, "Previous post unwind commit input wasn't processed");
+            }
         }
 
         // Unwind all receipts for transactions in the block range
@@ -403,6 +433,17 @@ where
         };
 
         Ok(UnwindOutput { checkpoint })
+    }
+
+    fn post_unwind_commit(&mut self) -> Result<(), StageError> {
+        let Some(chain) = self.post_unwind_commit_input.take() else { return Ok(()) };
+
+        // NOTE: We can ignore the error here, since an error means that the channel is closed,
+        // which means the manager has died, which then in turn means the node is shutting down.
+        let _ =
+            self.exex_manager_handle.send(ExExNotification::ChainReverted { old: Arc::new(chain) });
+
+        Ok(())
     }
 }
 
