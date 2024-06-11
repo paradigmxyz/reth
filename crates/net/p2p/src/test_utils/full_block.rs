@@ -97,10 +97,14 @@ impl HeadersClient for NoopFullBlockClient {
 /// This full block client can be [Clone]d and shared between multiple tasks.
 #[derive(Clone, Debug)]
 pub struct TestFullBlockClient {
-    headers: Arc<Mutex<HashMap<B256, Header>>>,
-    bodies: Arc<Mutex<HashMap<B256, BlockBody>>>,
-    // soft response limit, max number of bodies to respond with
-    soft_limit: usize,
+    /// Headers in memory
+    pub headers: Arc<Mutex<HashMap<B256, Header>>>,
+    /// Bodies in memory
+    pub bodies: Arc<Mutex<HashMap<B256, BlockBody>>>,
+    /// Soft response limit, max number of bodies to respond with
+    pub soft_limit: usize,
+    /// Whether return bad block body
+    pub bad_block_body: bool,
 }
 
 impl Default for TestFullBlockClient {
@@ -109,6 +113,7 @@ impl Default for TestFullBlockClient {
             headers: Arc::new(Mutex::new(HashMap::new())),
             bodies: Arc::new(Mutex::new(HashMap::new())),
             soft_limit: 20,
+            bad_block_body: false,
         }
     }
 }
@@ -227,15 +232,32 @@ impl BodiesClient for TestFullBlockClient {
         // Acquire a lock on the bodies.
         let bodies = self.bodies.lock();
 
+        let mut block_bodies: Vec<_> = hashes
+            .iter()
+            .filter_map(|hash| bodies.get(hash).cloned())
+            .take(self.soft_limit)
+            .collect();
+
+        if self.bad_block_body && hashes.len() > 1 {
+            // Make a bad block body
+            let header = Header {
+                parent_hash: B256::random(),
+                ..Default::default()
+            };
+            block_bodies[0] = BlockBody {
+                transactions: vec![],
+                ommers: vec![header],
+                withdrawals: None,
+                requests: None
+            }
+        }
+        println!("{:?}", hashes);
+
         // Create a future that immediately returns the result of the block body retrieval
         // operation.
         futures::future::ready(Ok(WithPeerId::new(
             PeerId::random(),
-            hashes
-                .iter()
-                .filter_map(|hash| bodies.get(hash).cloned())
-                .take(self.soft_limit)
-                .collect(),
+            block_bodies
         )))
     }
 }

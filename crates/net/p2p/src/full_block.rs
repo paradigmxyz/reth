@@ -810,6 +810,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn download_full_block_with_bad_block() {
+        let client = TestFullBlockClient {
+            bad_block_body: true,
+            ..Default::default()
+        };
+
+        let (header, body) = insert_headers_into_client(&client, 0..50);
+        let client = FullBlockClient::test_client(client);
+
+        let received = client.get_full_block_range(header.hash(), 1).await;
+        let received = received.first().expect("response should include a block");
+        assert_eq!(*received, SealedBlock::new(header.clone(), body));
+
+        let received = client.get_full_block_range(header.hash(), 40).await;
+        assert_eq!(received.len(), 40);
+        for (i, block) in received.iter().enumerate() {
+            let expected_number: u64 = header.number - i as u64;
+            assert_eq!(block.header.number, expected_number);
+        }
+    }
+
+    #[tokio::test]
     async fn download_full_block_range_stream() {
         let client = TestFullBlockClient::default();
         let (header, body) = insert_headers_into_client(&client, 0..50);
