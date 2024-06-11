@@ -77,7 +77,7 @@ pub const MAINNET_DEPOSIT_CONTRACT: DepositContract = DepositContract::new(
 
 /// From address from Optimism system txs.
 #[cfg(feature = "optimism")]
-pub const OP_SYSTEM_TX_FROM_ADDR: Address = address!("0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001");
+pub const OP_SYSTEM_TX_FROM_ADDR: Address = address!("deaddeaddeaddeaddeaddeaddeaddeaddead0001");
 
 /// Base fee max change denominator for Optimism Mainnet as defined in the Optimism
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.

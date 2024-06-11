@@ -235,13 +235,19 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             #[cfg(feature = "optimism")]
             Some(TxType::Deposit) => {
                 Ok(Self::Deposit(TxDeposit {
-                    source_hash: tx.other["sourceHash"].parse().ok_or(ConversionError::MissingSourceHash),
+                    source_hash: match tx.other["sourceHash"] {
+                        String(source_hash) => source_hash.parse().ok_or(ConversionError::MissingSourceHash),
+                        _ => Err(ConversionError::MissingSourceHash),
+                    },
                     from: tx.from,
                     to: match tx.to {
                         Some(to) => TxKind::Call(to),
                         None => TxKind::Create,
                     },
-                    mint: tx.other["mint"].parse::<u128>().ok().and_then(|num| if num == 0 { None } else { Some(num) }),
+                    mint: match tx.other["mint"] {
+                        String(mint) => mint.parse::<u128>().ok().and_then(|num| if num == 0 { None } else { Some(num) }),
+                        _ => Err(ConversionError::MissingSourceHash),
+                    },
                     value: tx.value,
                     gas_limit: tx
                         .gas
