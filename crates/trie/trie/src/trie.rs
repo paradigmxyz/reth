@@ -7,15 +7,13 @@ use crate::{
     trie_cursor::TrieCursorFactory,
     updates::{TrieKey, TrieOp, TrieUpdates},
     walker::TrieWalker,
+    HashBuilder, Nibbles,
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{
-    constants::EMPTY_ROOT_HASH,
-    keccak256,
-    trie::{HashBuilder, Nibbles, TrieAccount},
-    Address, BlockNumber, B256,
+    constants::EMPTY_ROOT_HASH, keccak256, proofs::IntoTrieAccount, Address, BlockNumber, B256,
 };
 use std::ops::RangeInclusive;
 use tracing::{debug, trace};
@@ -284,7 +282,7 @@ where
                     };
 
                     account_rlp.clear();
-                    let account = TrieAccount::from((account, storage_root));
+                    let account = IntoTrieAccount::to_trie_account((account, storage_root));
                     account.encode(&mut account_rlp as &mut dyn BufMut);
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 
@@ -552,6 +550,7 @@ mod tests {
     use crate::{
         prefix_set::PrefixSetMut,
         test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
+        BranchNodeCompact, TrieMask,
     };
     use proptest::{prelude::ProptestConfig, proptest};
     use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
@@ -560,10 +559,7 @@ mod tests {
         transaction::DbTxMut,
     };
     use reth_primitives::{
-        hex_literal::hex,
-        proofs::triehash::KeccakHasher,
-        trie::{BranchNodeCompact, TrieMask},
-        Account, StorageEntry, U256,
+        hex_literal::hex, proofs::triehash::KeccakHasher, Account, StorageEntry, U256,
     };
     use reth_provider::{test_utils::create_test_provider_factory, DatabaseProviderRW};
     use std::{
@@ -832,7 +828,8 @@ mod tests {
     }
 
     fn encode_account(account: Account, storage_root: Option<B256>) -> Vec<u8> {
-        let account = TrieAccount::from((account, storage_root.unwrap_or(EMPTY_ROOT_HASH)));
+        let account =
+            IntoTrieAccount::to_trie_account((account, storage_root.unwrap_or(EMPTY_ROOT_HASH)));
         let mut account_rlp = Vec::with_capacity(account.length());
         account.encode(&mut account_rlp);
         account_rlp

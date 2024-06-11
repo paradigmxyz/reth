@@ -3,7 +3,7 @@
 use crate::{
     metrics::{MakeCanonicalAction, MakeCanonicalDurationsRecorder, TreeMetrics},
     state::{BlockchainId, TreeState},
-    AppendableChain, BlockIndices, BlockchainTreeConfig, BundleStateData, TreeExternals,
+    AppendableChain, BlockIndices, BlockchainTreeConfig, ExecutionData, TreeExternals,
 };
 use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, CanonicalError, InsertBlockError, InsertBlockErrorKind},
@@ -18,10 +18,10 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, BlockWriter, BundleStateWithReceipts,
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, Chain,
-    ChainSpecProvider, ChainSplit, ChainSplitTarget, DisplayBlocksChain, HeaderProvider,
-    ProviderError, StaticFileProviderFactory,
+    BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
+    CanonStateNotificationSender, CanonStateNotifications, Chain, ChainSpecProvider, ChainSplit,
+    ChainSplitTarget, DisplayBlocksChain, ExecutionOutcome, HeaderProvider, ProviderError,
+    StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -264,7 +264,7 @@ where
     ///     * block unknown.
     ///     * `chain_id` not present in state.
     ///     * there are no parent hashes stored.
-    pub fn post_state_data(&self, block_hash: BlockHash) -> Option<BundleStateData> {
+    pub fn post_state_data(&self, block_hash: BlockHash) -> Option<ExecutionData> {
         trace!(target: "blockchain_tree", ?block_hash, "Searching for post state data");
 
         let canonical_chain = self.state.block_indices.canonical_chain();
@@ -278,7 +278,7 @@ where
                 return None;
             };
             let block_number = chain.block_number(block_hash)?;
-            let state = chain.state_at_block(block_number)?;
+            let execution_outcome = chain.execution_outcome_at_block(block_number)?;
 
             // get parent hashes
             let mut parent_block_hashes = self.all_chain_hashes(chain_id);
@@ -295,15 +295,15 @@ where
 
             // get canonical fork.
             let canonical_fork = self.canonical_fork(chain_id)?;
-            return Some(BundleStateData { state, parent_block_hashes, canonical_fork })
+            return Some(ExecutionData { execution_outcome, parent_block_hashes, canonical_fork })
         }
 
         // check if there is canonical block
         if let Some(canonical_number) = canonical_chain.canonical_number(&block_hash) {
             trace!(target: "blockchain_tree", %block_hash, "Constructing post state data based on canonical chain");
-            return Some(BundleStateData {
+            return Some(ExecutionData {
                 canonical_fork: ForkBlock { number: canonical_number, hash: block_hash },
-                state: BundleStateWithReceipts::default(),
+                execution_outcome: ExecutionOutcome::default(),
                 parent_block_hashes: canonical_chain.inner().clone(),
             })
         }
@@ -629,8 +629,8 @@ where
             let chains_to_bump = self.find_all_dependent_chains(&hash);
             if !chains_to_bump.is_empty() {
                 // if there is such chain, revert state to this block.
-                let mut cloned_state = chain.state().clone();
-                cloned_state.revert_to(*number);
+                let mut cloned_execution_outcome = chain.execution_outcome().clone();
+                cloned_execution_outcome.revert_to(*number);
 
                 // prepend state to all chains that fork from this block.
                 for chain_id in chains_to_bump {
@@ -645,7 +645,7 @@ where
                         chain_tip = ?chain.tip().num_hash(),
                         "Prepend unwound block state to blockchain tree chain");
 
-                    chain.prepend_state(cloned_state.state().clone())
+                    chain.prepend_state(cloned_execution_outcome.state().clone())
                 }
             }
         }
@@ -1385,7 +1385,6 @@ mod tests {
         keccak256,
         proofs::{calculate_transaction_root, state_root_unhashed},
         revm_primitives::AccountInfo,
-        stage::StageCheckpoint,
         Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
         Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
         MAINNET,
@@ -1394,11 +1393,12 @@ mod tests {
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec},
         ProviderFactory,
     };
+    use reth_stages_api::StageCheckpoint;
     use reth_trie::StateRoot;
     use std::collections::HashMap;
 
     fn setup_externals(
-        exec_res: Vec<BundleStateWithReceipts>,
+        exec_res: Vec<ExecutionOutcome>,
     ) -> TreeExternals<Arc<TempDatabase<DatabaseEnv>>, MockExecutorProvider> {
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
@@ -1961,12 +1961,12 @@ mod tests {
             ]))
             .assert(&tree);
         // chain 0 has two blocks so receipts and reverts len is 2
-        let chain0 = tree.state.chains.get(&0.into()).unwrap().state();
+        let chain0 = tree.state.chains.get(&0.into()).unwrap().execution_outcome();
         assert_eq!(chain0.receipts().len(), 2);
         assert_eq!(chain0.state().reverts.len(), 2);
         assert_eq!(chain0.first_block(), block1.number);
         // chain 1 has one block so receipts and reverts len is 1
-        let chain1 = tree.state.chains.get(&1.into()).unwrap().state();
+        let chain1 = tree.state.chains.get(&1.into()).unwrap().execution_outcome();
         assert_eq!(chain1.receipts().len(), 1);
         assert_eq!(chain1.state().reverts.len(), 1);
         assert_eq!(chain1.first_block(), block2.number);

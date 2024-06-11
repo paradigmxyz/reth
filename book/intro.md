@@ -5,7 +5,10 @@ _Documentation for Reth users and developers._
 
 Reth (short for Rust Ethereum, [pronunciation](https://twitter.com/kelvinfichter/status/1597653609411268608)) is an **Ethereum full node implementation that is focused on being user-friendly, highly modular, as well as being fast and efficient.** 
 
-<img src="https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-alpha.png" style="border-radius: 20px">
+Reth is production ready, and suitable for usage in mission-critical environments such as staking or high-uptime servi
+ces. We also actively recommend professional node operators to switch to Reth in production for performance and cost reasons in use cases where high performance with great margins is required such as RPC, MEV, Indexing, Simulations, and P2P activities.
+
+<img src="https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-prod.png" style="border-radius: 20px">
 
 <!-- Add a quick description about Reth, what it is, the goals of the build, and any other quick overview information   -->
 

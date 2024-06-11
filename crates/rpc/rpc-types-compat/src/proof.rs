@@ -1,7 +1,7 @@
 //! Compatibility functions for rpc proof related types.
 
 use reth_primitives::{
-    trie::{AccountProof, StorageProof},
+    proofs::{AccountProof, StorageProof},
     U64,
 };
 use reth_rpc_types::{

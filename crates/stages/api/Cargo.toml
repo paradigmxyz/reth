@@ -21,6 +21,7 @@ reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-prune.workspace = true
 reth-errors.workspace = true
+reth-stages-types.workspace = true
 
 # metrics
 reth-metrics.workspace = true

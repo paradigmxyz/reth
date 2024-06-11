@@ -16,9 +16,9 @@ use reth_downloaders::file_client::{
     ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
 };
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
-use reth_primitives::stage::StageId;
 use reth_provider::StageCheckpointReader;
 use reth_prune_types::PruneModes;
+use reth_stages::StageId;
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tracing::{debug, error, info};

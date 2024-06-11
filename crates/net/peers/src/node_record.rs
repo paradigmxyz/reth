@@ -8,10 +8,12 @@ use std::{
     str::FromStr,
 };
 
-use crate::{pk2id, PeerId};
+use crate::PeerId;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use enr::Enr;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
+
+#[cfg(feature = "secp256k1")]
+use enr::Enr;
 
 /// Represents a ENR in discovery.
 ///
@@ -40,6 +42,7 @@ pub struct NodeRecord {
 }
 
 impl NodeRecord {
+    #[cfg(feature = "secp256k1")]
     /// Derive the [`NodeRecord`] from the secret key and addr
     pub fn from_secret_key(addr: SocketAddr, sk: &secp256k1::SecretKey) -> Self {
         let pk = secp256k1::PublicKey::from_secret_key(secp256k1::SECP256K1, sk);
@@ -169,6 +172,7 @@ impl FromStr for NodeRecord {
     }
 }
 
+#[cfg(feature = "secp256k1")]
 impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
     type Error = NodeRecordParseError;
 
@@ -186,7 +190,7 @@ impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
             return Err(NodeRecordParseError::InvalidUrl("tcp port missing".to_string()))
         };
 
-        let id = pk2id(&enr.public_key());
+        let id = crate::pk2id(&enr.public_key());
 
         Ok(Self { address, tcp_port, udp_port, id }.into_ipv4_mapped())
     }

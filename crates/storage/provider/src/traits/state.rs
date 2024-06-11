@@ -3,7 +3,7 @@ use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_storage_errors::provider::ProviderResult;
 use revm::db::OriginalValuesKnown;
 
-/// A helper trait for [`BundleStateWithReceipts`](reth_execution_types::BundleStateWithReceipts) to
+/// A helper trait for [`ExecutionOutcome`](reth_execution_types::ExecutionOutcome) to
 /// write state and receipts to storage.
 pub trait StateWriter {
     /// Write the data and receipts to the database or static files if `static_file_producer` is
