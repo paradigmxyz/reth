@@ -366,13 +366,13 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     fn block_with_senders_range<H, HF, B, BF>(
         &self,
         headers_range: HF,
-        mut assemble_block: BF,
+        assemble_block: BF,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<B>>
     where
         H: AsRef<Header>,
-        HF: FnOnce(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
-        BF: FnMut(
+        HF: Fn(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
+        BF: Fn(
             H,
             Vec<TransactionSigned>,
             Vec<Header>,
