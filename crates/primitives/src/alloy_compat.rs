@@ -235,9 +235,10 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             #[cfg(feature = "optimism")]
             Some(TxType::Deposit) => {
                 Ok(Self::Deposit(TxDeposit {
+                    // TODO: Uses the wrong error here, need alloy ConversionError enum updated with new errors for this.
                     source_hash: match &tx.other["sourceHash"] {
-                        serde_json::Value::String(source_hash) => source_hash.parse().map_err(|_| ConversionError::MissingSourceHash)?,
-                        _ => return Err(ConversionError::MissingSourceHash),
+                        serde_json::Value::String(source_hash) => source_hash.parse().map_err(|_| ConversionError::MissingBlockNumber)?,
+                        _ => return Err(ConversionError::MissingBlockNumber),
                     },
                     from: tx.from,
                     to: match tx.to {
