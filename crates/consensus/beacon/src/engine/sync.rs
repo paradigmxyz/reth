@@ -435,7 +435,7 @@ mod tests {
         MAINNET,
     };
     use reth_provider::{
-        test_utils::create_test_provider_factory_with_chain_spec, BundleStateWithReceipts,
+        test_utils::create_test_provider_factory_with_chain_spec, ExecutionOutcome,
     };
     use reth_prune_types::PruneModes;
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
@@ -447,7 +447,7 @@ mod tests {
 
     struct TestPipelineBuilder {
         pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-        executor_results: Vec<BundleStateWithReceipts>,
+        executor_results: Vec<ExecutionOutcome>,
         max_block: Option<BlockNumber>,
     }
 
@@ -472,7 +472,7 @@ mod tests {
 
         /// Set the executor results to use for the test consensus engine.
         #[allow(dead_code)]
-        fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
+        fn with_executor_results(mut self, executor_results: Vec<ExecutionOutcome>) -> Self {
             self.executor_results = executor_results;
             self
         }

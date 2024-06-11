@@ -339,6 +339,13 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
     ) -> ProviderResult<Vec<BlockWithSenders>> {
         self.provider()?.block_with_senders_range(range)
     }
+
+    fn sealed_block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+        self.provider()?.sealed_block_with_senders_range(range)
+    }
 }
 
 impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {

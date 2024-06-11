@@ -122,6 +122,13 @@ impl BlockReader for NoopProvider {
     ) -> ProviderResult<Vec<BlockWithSenders>> {
         Ok(vec![])
     }
+
+    fn sealed_block_with_senders_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+        Ok(vec![])
+    }
 }
 
 impl BlockReaderIdExt for NoopProvider {
@@ -418,7 +425,7 @@ impl StateProviderFactory for NoopProvider {
 
     fn pending_with_provider<'a>(
         &'a self,
-        _bundle_state_data: Box<dyn crate::FullBundleStateDataProvider + 'a>,
+        _bundle_state_data: Box<dyn crate::FullExecutionDataProvider + 'a>,
     ) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(*self))
     }

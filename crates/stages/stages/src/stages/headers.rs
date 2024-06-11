@@ -378,7 +378,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders, B256};
     use reth_provider::{
-        BlockWriter, BundleStateWithReceipts, ProviderFactory, StaticFileProviderFactory,
+        BlockWriter, ExecutionOutcome, ProviderFactory, StaticFileProviderFactory,
     };
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
@@ -629,7 +629,7 @@ mod tests {
         provider
             .append_blocks_with_state(
                 sealed_blocks,
-                BundleStateWithReceipts::default(),
+                ExecutionOutcome::default(),
                 HashedPostState::default(),
                 TrieUpdates::default(),
                 None,
