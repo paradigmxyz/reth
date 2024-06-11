@@ -3,6 +3,7 @@
 
 use std::{fmt, sync::Arc};
 
+use alloy_dyn_abi::TypedData;
 use futures::Future;
 use reth_primitives::{
     Address, BlockId, Bytes, FromRecoveredPooledTransaction, IntoRecoveredTransaction, Receipt,
@@ -480,6 +481,37 @@ pub trait EthTransactions: LoadTransaction {
             }
         }
         Err(EthApiError::InvalidTransactionSignature)
+    }
+
+    /// Signs given message. Returns the signature.
+    fn sign(
+        &self,
+        account: Address,
+        message: Bytes,
+    ) -> impl Future<Output = EthResult<Bytes>> + Send {
+        async move { Ok(self.find_signer(&account)?.sign(account, &message).await?.to_hex_bytes()) }
+    }
+
+    /// Encodes and signs the typed data according EIP-712. Payload must implement Eip712 trait.
+    fn sign_typed_data(&self, data: serde_json::Value, account: Address) -> EthResult<Bytes> {
+        Ok(self
+            .find_signer(&account)?
+            .sign_typed_data(
+                account,
+                &serde_json::from_value::<TypedData>(data)
+                    .map_err(|_| SignError::InvalidTypedData)?,
+            )?
+            .to_hex_bytes())
+    }
+
+    /// Returns the signer for the given account, if found in configured signers.
+    fn find_signer(&self, account: &Address) -> Result<Box<(dyn EthSigner + 'static)>, SignError> {
+        self.signers()
+            .read()
+            .iter()
+            .find(|signer| signer.is_signer_for(account))
+            .map(|signer| dyn_clone::clone_box(&**signer))
+            .ok_or(SignError::NoAccount)
     }
 }
 

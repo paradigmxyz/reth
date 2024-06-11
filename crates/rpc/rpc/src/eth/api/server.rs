@@ -393,7 +393,7 @@ where
     /// Handler for: `eth_sign`
     async fn sign(&self, address: Address, message: Bytes) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?address, ?message, "Serving eth_sign");
-        Ok(Self::sign(self, address, message).await?)
+        Ok(EthTransactions::sign(self, address, message).await?)
     }
 
     /// Handler for: `eth_signTransaction`
@@ -404,7 +404,7 @@ where
     /// Handler for: `eth_signTypedData`
     async fn sign_typed_data(&self, address: Address, data: Value) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?address, ?data, "Serving eth_signTypedData");
-        Ok(Self::sign_typed_data(self, data, address)?)
+        Ok(EthTransactions::sign_typed_data(self, data, address)?)
     }
 
     /// Handler for: `eth_getProof`
