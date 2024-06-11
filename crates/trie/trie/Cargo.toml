@@ -46,6 +46,7 @@ reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-storage-errors.workspace = true
+reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 
 # trie
 triehash = "0.8"
