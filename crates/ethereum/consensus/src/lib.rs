@@ -52,27 +52,18 @@ impl Consensus for EthBeaconConsensus {
         Ok(())
     }
 
-    #[allow(unused_assignments)]
-    #[allow(unused_mut)]
     fn validate_header_with_total_difficulty(
         &self,
         header: &Header,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
-        let mut is_post_merge = self
+        let is_post_merge = self
             .chain_spec
             .fork(Hardfork::Paris)
             .active_at_ttd(total_difficulty, header.difficulty);
 
-        #[cfg(feature = "optimism")]
-        {
-            // If OP-Stack then bedrock activation number determines when TTD (eth Merge) has been
-            // reached.
-            is_post_merge = self.chain_spec.is_bedrock_active_at_block(header.number);
-        }
-
         if is_post_merge {
-            if !self.chain_spec.is_optimism() && !header.is_zero_difficulty() {
+            if !header.is_zero_difficulty() {
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
 
