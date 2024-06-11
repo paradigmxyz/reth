@@ -8,6 +8,12 @@ use crate::{
 use alloy_primitives::TxKind;
 use alloy_rlp::Error as RlpError;
 
+#[cfg(feature = "optimism")]
+use crate::{
+    transaction::TxDeposit,
+    constants::OP_SYSTEM_TX_FROM_ADDR,
+};
+
 impl TryFrom<alloy_rpc_types::Block> for Block {
     type Error = alloy_rpc_types::ConversionError;
 
@@ -227,7 +233,21 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                 }))
             }
             #[cfg(feature = "optimism")]
-            Some(TxType::Deposit) => todo!(),
+            Some(TxType::Deposit) => {
+                Ok(Self::Deposit(TxDeposit {
+                    source_hash: tx.other.sourceHash.parse().ok_or(ConversionError::MissingSourceHash),
+                    from: tx.from.ok_or(ConversionError::MissingFrom)?,
+                    to: tx.to.unwrap_or_default(),
+                    mint: tx.other.mint.parse::<u128>().ok().and_then(|num| if num == 0 { None } else { Some(num) }),
+                    value: tx.value,
+                    gas_limit: tx
+                        .gas
+                        .try_into()
+                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
+                    is_system_transaction: tx.from == OP_SYSTEM_TX_FROM_ADDR,
+                    input: tx.input,
+                }))
+            }
         }
     }
 }
