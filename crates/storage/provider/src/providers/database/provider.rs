@@ -360,12 +360,12 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     ///
     /// Uses the provided `headers_range` to get the headers for the range, and `assemble_block` to
     /// construct blocks from the following inputs:
-    /// – Header
-    /// - Range of transaction numbers
-    /// – Ommers
-    /// – Withdrawals
-    /// – Requests
-    /// – Senders
+    ///     – Header
+    ///     - Range of transaction numbers
+    ///     – Ommers
+    ///     – Withdrawals
+    ///     – Requests
+    ///     – Senders
     fn block_range<F, H, HF, R>(
         &self,
         range: RangeInclusive<BlockNumber>,
@@ -451,12 +451,12 @@ impl<TX: DbTx> DatabaseProvider<TX> {
     ///
     /// Uses the provided `headers_range` to get the headers for the range, and `assemble_block` to
     /// construct blocks from the following inputs:
-    /// – Header
-    /// - Transactions
-    /// – Ommers
-    /// – Withdrawals
-    /// – Requests
-    /// – Senders
+    ///     – Header
+    ///     - Transactions
+    ///     – Ommers
+    ///     – Withdrawals
+    ///     – Requests
+    ///     – Senders
     fn block_with_senders_range<H, HF, B, BF>(
         &self,
         range: RangeInclusive<BlockNumber>,
