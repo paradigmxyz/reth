@@ -99,6 +99,7 @@ secp256k1.workspace = true
 default = ["c-kzg", "zstd-codec", "alloy-compat"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
+    "reth-primitives-traits/arbitrary",
     "revm-primitives/arbitrary",
     "reth-ethereum-forks/arbitrary",
     "nybbles/arbitrary",

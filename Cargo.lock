@@ -7547,8 +7547,17 @@ dependencies = [
 name = "reth-primitives-traits"
 version = "0.2.0-beta.9"
 dependencies = [
+ "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=cc68b93)",
+ "alloy-genesis 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=cc68b93)",
  "alloy-primitives",
- "revm-primitives",
+ "arbitrary",
+ "bytes",
+ "modular-bitfield",
+ "proptest",
+ "proptest-derive",
+ "reth-codecs",
+ "serde",
+ "test-fuzz",
 ]
 
 [[package]]
