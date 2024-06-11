@@ -33,7 +33,6 @@ revm-primitives.workspace = true
 
 # async
 async-trait.workspace = true
-hyper.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
 tracing.workspace = true
 
