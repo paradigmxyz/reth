@@ -1734,7 +1734,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     }
 
     let rpc_receipt = reth_rpc_types::Receipt {
-        status: receipt.success,
+        status: receipt.success.into(),
         cumulative_gas_used: receipt.cumulative_gas_used as u128,
         logs,
     };

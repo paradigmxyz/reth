@@ -130,17 +130,20 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
                     continue;
                 }
             };
-            reth_rpc_api::EngineApiClient::<T>::fork_choice_updated_v3(
+            let state = reth_rpc_types::engine::ForkchoiceState {
+                head_block_hash: block_hash,
+                safe_block_hash,
+                finalized_block_hash,
+            };
+            let _ = reth_rpc_api::EngineApiClient::<T>::fork_choice_updated_v3(
                 &execution_client,
-                reth_rpc_types::engine::ForkchoiceState {
-                    head_block_hash: block_hash,
-                    safe_block_hash,
-                    finalized_block_hash,
-                },
+                state,
                 None,
             )
             .await
-            .unwrap();
+            .inspect_err(|err|  {
+                warn!(target: "consensus::debug-client", %err, ?state, "failed to submit fork choice update to execution client");
+            });
         }
     }
 }

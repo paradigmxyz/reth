@@ -1385,7 +1385,6 @@ mod tests {
         keccak256,
         proofs::{calculate_transaction_root, state_root_unhashed},
         revm_primitives::AccountInfo,
-        stage::StageCheckpoint,
         Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
         Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
         MAINNET,
@@ -1394,6 +1393,7 @@ mod tests {
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec},
         ProviderFactory,
     };
+    use reth_stages_api::StageCheckpoint;
     use reth_trie::StateRoot;
     use std::collections::HashMap;
 

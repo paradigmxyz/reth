@@ -5,10 +5,11 @@ use reth_db::tables;
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, transaction::DbTx, DatabaseError as DbError,
 };
-use reth_primitives::{stage::StageCheckpoint, BlockNumber};
+use reth_primitives::BlockNumber;
 use reth_stages::{
     stages::{AccountHashingStage, SeedOpts},
     test_utils::TestStageDB,
+    StageCheckpoint,
 };
 use std::{fs, ops::RangeInclusive, path::Path};
 

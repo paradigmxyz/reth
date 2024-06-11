@@ -158,7 +158,12 @@ where
             .drain(page_start..page_end)
             .map(|receipt| {
                 let receipt = receipt.inner.map_inner(|receipt| OtsReceipt {
-                    status: receipt.inner.receipt.status,
+                    status: receipt
+                        .inner
+                        .receipt
+                        .status
+                        .as_eip658()
+                        .expect("ETH API returned pre-EIP-658 status"),
                     cumulative_gas_used: receipt.inner.receipt.cumulative_gas_used as u64,
                     logs: None,
                     logs_bloom: None,

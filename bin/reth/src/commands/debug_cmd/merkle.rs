@@ -18,7 +18,7 @@ use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
-use reth_primitives::{stage::StageCheckpoint, BlockHashOrNumber};
+use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
     BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
@@ -27,7 +27,7 @@ use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
     stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
-    ExecInput, Stage,
+    ExecInput, Stage, StageCheckpoint,
 };
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
