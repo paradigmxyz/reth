@@ -30,6 +30,7 @@ impl StorageLock {
     pub fn try_acquire(path: &Path) -> Result<Self, StorageLockError> {
         let path = path.join(LOCKFILE_NAME);
 
+        #[cfg(not(feature = "disable_lock"))]
         if let Some(process_lock) = ProcessUID::parse(&path)? {
             if process_lock.pid != (process::id() as usize) && process_lock.is_active() {
                 return Err(StorageLockError::Taken(process_lock.pid))

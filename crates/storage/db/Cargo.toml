@@ -78,6 +78,7 @@ mdbx = ["reth-libmdbx"]
 bench = []
 arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
 optimism = []
+disable_lock = []
 
 [[bench]]
 name = "hash_keys"
