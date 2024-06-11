@@ -811,10 +811,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_full_block_with_bad_block() {
-        let client = TestFullBlockClient {
-            bad_block_body: true,
-            ..Default::default()
-        };
+        let client = TestFullBlockClient { bad_block_body: true, ..Default::default() };
 
         let (header, body) = insert_headers_into_client(&client, 0..50);
         let client = FullBlockClient::test_client(client);

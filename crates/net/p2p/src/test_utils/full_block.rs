@@ -238,26 +238,21 @@ impl BodiesClient for TestFullBlockClient {
             .take(self.soft_limit)
             .collect();
 
+        // To avoid halting the client forever, do not create bad block body when
+        // requesting only one block body.
         if self.bad_block_body && hashes.len() > 1 {
-            // Make a bad block body
-            let header = Header {
-                parent_hash: B256::random(),
-                ..Default::default()
-            };
+            let header = Header { parent_hash: B256::random(), ..Default::default() };
+            // Create one bad block body
             block_bodies[0] = BlockBody {
                 transactions: vec![],
                 ommers: vec![header],
                 withdrawals: None,
-                requests: None
+                requests: None,
             }
         }
-        println!("{:?}", hashes);
 
         // Create a future that immediately returns the result of the block body retrieval
         // operation.
-        futures::future::ready(Ok(WithPeerId::new(
-            PeerId::random(),
-            block_bodies
-        )))
+        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), block_bodies)))
     }
 }
