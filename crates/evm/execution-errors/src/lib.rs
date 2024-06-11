@@ -12,10 +12,12 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
+use alloy_eips::BlockNumHash;
+use alloy_primitives::B256;
 use reth_consensus::ConsensusError;
-use reth_primitives::{revm_primitives::EVMError, BlockNumHash, B256};
 use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
+use revm_primitives::EVMError;
 
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::String};
