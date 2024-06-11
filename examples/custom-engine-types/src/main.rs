@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use reth::{
+    api::PayloadTypes,
     builder::{
         components::{ComponentsBuilder, PayloadServiceBuilder},
         node::NodeTypes,
@@ -162,9 +163,12 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
 #[non_exhaustive]
 pub struct CustomEngineTypes;
 
-impl EngineTypes for CustomEngineTypes {
+impl PayloadTypes for CustomEngineTypes {
     type PayloadAttributes = CustomPayloadAttributes;
     type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
+}
+
+impl EngineTypes for CustomEngineTypes {
     type BuiltPayload = EthBuiltPayload;
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
