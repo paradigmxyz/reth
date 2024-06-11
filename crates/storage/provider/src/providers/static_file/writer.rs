@@ -566,7 +566,7 @@ impl StaticFileProviderRW {
 
         // At this point receipts contains at least one receipt, so this would be overwritten.
         let mut tx_number = 0;
-        let mut count = 0;
+        let mut count: u64 = 0;
 
         for receipt_result in receipts_iter {
             let (tx_num, receipt) = receipt_result?;
@@ -575,10 +575,11 @@ impl StaticFileProviderRW {
         }
 
         if let Some(metrics) = &self.metrics {
-            metrics.record_segment_operation(
+            metrics.record_segment_operations(
                 StaticFileSegment::Receipts,
                 StaticFileProviderOperation::AppendAverage,
-                Some(start.elapsed() / count as u32),
+                count,
+                Some(start.elapsed()),
             );
         }
 

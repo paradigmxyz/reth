@@ -80,6 +80,28 @@ impl StaticFileProviderMetrics {
                 .record(duration.as_secs_f64());
         }
     }
+
+    pub(crate) fn record_segment_operations(
+        &self,
+        segment: StaticFileSegment,
+        operation: StaticFileProviderOperation,
+        count: u64,
+        duration: Option<Duration>,
+    ) {
+        self.segment_operations
+            .get(&(segment, operation))
+            .expect("segment operation metrics should exist")
+            .calls_total
+            .increment(count);
+
+        if let Some(duration) = duration {
+            self.segment_operations
+                .get(&(segment, operation))
+                .expect("segment operation metrics should exist")
+                .write_duration_seconds
+                .record(duration.as_secs_f64() / count as f64);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
