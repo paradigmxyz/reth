@@ -158,7 +158,7 @@ impl NetworkArgs {
             )
             .peer_config(peers_config)
             .boot_nodes(chain_bootnodes.clone())
-            .chain_spec(chain_spec.clone())
+            .chain_spec(chain_spec)
             .transactions_manager_config(transactions_manager_config)
             // Configure node identity
             .apply(|builder| {
@@ -172,13 +172,7 @@ impl NetworkArgs {
             // apply discovery settings
             .apply(|builder| {
                 let rlpx_socket = (self.addr, self.port).into();
-                let mut builder = self.discovery.apply_to_builder(builder, rlpx_socket);
-
-                if chain_spec.is_optimism() && !self.discovery.disable_discovery {
-                    builder = builder.discovery_v5(reth_discv5::Config::builder(rlpx_socket));
-                }
-
-                builder
+                self.discovery.apply_to_builder(builder, rlpx_socket)
             })
             // modify discv5 settings if enabled in previous step
             .map_discv5_config_builder(|builder| {
