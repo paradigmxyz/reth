@@ -82,11 +82,16 @@ struct ProcessUID {
 }
 
 impl ProcessUID {
+    /// Creates [`Self`] for the provided PID.
+    fn new(pid: usize) -> Option<Self> {
+        System::new_all()
+            .process(pid.into())
+            .map(|process| Self { pid, start_time: process.start_time() })
+    }
+            
     /// Creates [`Self`] from own process.
     fn own() -> Self {
-        let pid = process::id() as usize;
-        let start_time = System::new_all().process(pid.into()).expect("own process").start_time();
-        Self { pid, start_time }
+        Self::new(process::id() as usize).expect("own process")
     }
 
     /// Parses [`Self`] from a file.
@@ -116,13 +121,6 @@ impl ProcessUID {
     fn write(&self, path: &Path) -> Result<(), StorageLockError> {
         Ok(reth_fs_util::write(path, format!("{}\n{}", self.pid, self.start_time))?)
     }
-
-    #[cfg(test)]
-    fn from_pid(pid: usize) -> Option<Self> {
-        System::new_all()
-            .process(pid.into())
-            .map(|process| Self { pid, start_time: process.start_time() })
-    }
 }
 
 #[cfg(test)]
@@ -148,7 +146,7 @@ mod tests {
         ProcessUID { pid: fake_pid, start_time: u64::MAX }.write(&lock_file).unwrap();
         assert_eq!(Ok(lock.clone()), StorageLock::try_acquire(temp_dir.path()));
 
-        let mut pid_1 = ProcessUID::from_pid(1).unwrap();
+        let mut pid_1 = ProcessUID::new(1).unwrap();
 
         // If a parsed `ProcessUID` exists, the lock can NOT be acquired.
         pid_1.write(&lock_file).unwrap();
