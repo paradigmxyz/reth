@@ -377,18 +377,18 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a BundleStateWithReceipts object with the created bundle, receipts, requests, and
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res = BundleStateWithReceipts {
+        let exec_res = ExecutionOutcome {
             bundle: bundle.clone(),
             receipts: receipts.clone(),
             requests: requests.clone(),
             first_block,
         };
 
-        // Assert that creating a new BundleStateWithReceipts using the constructor matches exec_res
+        // Assert that creating a new ExecutionOutcome using the constructor matches exec_res
         assert_eq!(
-            BundleStateWithReceipts::new(bundle, receipts.clone(), first_block, requests.clone()),
+            ExecutionOutcome::new(bundle, receipts.clone(), first_block, requests.clone()),
             exec_res
         );
 
@@ -405,10 +405,10 @@ mod tests {
         let mut revert_init: RevertsInit = HashMap::new();
         revert_init.insert(123, revert_inner);
 
-        // Assert that creating a new BundleStateWithReceipts using the new_init method matches
+        // Assert that creating a new ExecutionOutcome using the new_init method matches
         // exec_res
         assert_eq!(
-            BundleStateWithReceipts::new_init(
+            ExecutionOutcome::new_init(
                 state_init,
                 revert_init,
                 vec![],
@@ -439,9 +439,9 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a BundleStateWithReceipts object with the created bundle, receipts, requests, and
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res = BundleStateWithReceipts {
+        let exec_res = ExecutionOutcome {
             bundle: Default::default(),
             receipts,
             requests: vec![],
@@ -477,9 +477,9 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a BundleStateWithReceipts object with the created bundle, receipts, requests, and
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res = BundleStateWithReceipts {
+        let exec_res = ExecutionOutcome {
             bundle: Default::default(),
             receipts,
             requests: vec![],
@@ -512,9 +512,9 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a BundleStateWithReceipts object with the created bundle, receipts, requests, and
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res = BundleStateWithReceipts {
+        let exec_res = ExecutionOutcome {
             bundle: Default::default(), // Default value for bundle
             receipts,                   // Include the created receipts
             requests: vec![],           // Empty vector for requests
@@ -562,9 +562,9 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a BundleStateWithReceipts object with the created bundle, receipts, requests, and
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let exec_res = BundleStateWithReceipts {
+        let exec_res = ExecutionOutcome {
             bundle: Default::default(), // Default value for bundle
             receipts,                   // Include the created receipts
             requests: vec![],           // Empty vector for requests
@@ -577,8 +577,8 @@ mod tests {
         // Assert that exec_res is not empty
         assert!(!exec_res.is_empty());
 
-        // Create a BundleStateWithReceipts object with an empty Receipts object
-        let exec_res_empty_receipts = BundleStateWithReceipts {
+        // Create a ExecutionOutcome object with an empty Receipts object
+        let exec_res_empty_receipts = ExecutionOutcome {
             bundle: Default::default(), // Default value for bundle
             receipts: receipts_empty,   // Include the empty receipts
             requests: vec![],           // Empty vector for requests
