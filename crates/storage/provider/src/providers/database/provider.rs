@@ -1317,15 +1317,18 @@ impl<TX: DbTx> BlockNumReader for DatabaseProvider<TX> {
 }
 
 impl<Tx: DbTx> DatabaseProvider<Tx> {
-    fn process_block_range<F, R>(
+    fn process_block_range<F, H, HF, R>(
         &self,
         range: RangeInclusive<BlockNumber>,
+        headers_range: HF,
         mut assemble_block: F,
     ) -> ProviderResult<Vec<R>>
     where
+        H: AsRef<Header>,
+        HF: FnOnce(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
         F: FnMut(
             Range<TxNumber>,
-            Header,
+            H,
             Vec<Header>,
             Option<Withdrawals>,
             Option<Requests>,
@@ -1338,53 +1341,59 @@ impl<Tx: DbTx> DatabaseProvider<Tx> {
         let len = range.end().saturating_sub(*range.start()) as usize;
         let mut blocks = Vec::with_capacity(len);
 
-        let headers = self.headers_range(range)?;
+        let headers = headers_range(range)?;
         let mut ommers_cursor = self.tx.cursor_read::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
         let mut requests_cursor = self.tx.cursor_read::<tables::BlockRequests>()?;
         let mut block_body_cursor = self.tx.cursor_read::<tables::BlockBodyIndices>()?;
 
         for header in headers {
+            let header_ref = header.as_ref();
             // If the body indices are not found, this means that the transactions either do
             // not exist in the database yet, or they do exit but are
             // not indexed. If they exist but are not indexed, we don't
             // have enough information to return the block anyways, so
             // we skip the block.
-            if let Some((_, block_body_indices)) = block_body_cursor.seek_exact(header.number)? {
+            if let Some((_, block_body_indices)) =
+                block_body_cursor.seek_exact(header_ref.number)?
+            {
                 let tx_range = block_body_indices.tx_num_range();
 
                 // If we are past shanghai, then all blocks should have a withdrawal list,
                 // even if empty
                 let withdrawals =
-                    if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) {
+                    if self.chain_spec.is_shanghai_active_at_timestamp(header_ref.timestamp) {
                         Some(
                             withdrawals_cursor
-                                .seek_exact(header.number)?
+                                .seek_exact(header_ref.number)?
                                 .map(|(_, w)| w.withdrawals)
                                 .unwrap_or_default(),
                         )
                     } else {
                         None
                     };
-                let requests = if self.chain_spec.is_prague_active_at_timestamp(header.timestamp) {
-                    Some(requests_cursor.seek_exact(header.number)?.unwrap_or_default().1)
-                } else {
-                    None
-                };
+                let requests =
+                    if self.chain_spec.is_prague_active_at_timestamp(header_ref.timestamp) {
+                        Some(requests_cursor.seek_exact(header_ref.number)?.unwrap_or_default().1)
+                    } else {
+                        None
+                    };
                 let ommers =
-                    if self.chain_spec.final_paris_total_difficulty(header.number).is_some() {
+                    if self.chain_spec.final_paris_total_difficulty(header_ref.number).is_some() {
                         Vec::new()
                     } else {
                         ommers_cursor
-                            .seek_exact(header.number)?
+                            .seek_exact(header_ref.number)?
                             .map(|(_, o)| o.ommers)
                             .unwrap_or_default()
                     };
+
                 if let Ok(b) = assemble_block(tx_range, header, ommers, withdrawals, requests) {
                     blocks.push(b);
                 }
             }
         }
+
         Ok(blocks)
     }
 }
@@ -1515,17 +1524,21 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
-        self.process_block_range(range, |tx_range, header, ommers, withdrawals, requests| {
-            let body = if tx_range.is_empty() {
-                Vec::new()
-            } else {
-                self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
-                    .into_iter()
-                    .map(Into::into)
-                    .collect()
-            };
-            Ok(Block { header, body, ommers, withdrawals, requests })
-        })
+        self.process_block_range(
+            range,
+            |range| self.headers_range(range),
+            |tx_range, header, ommers, withdrawals, requests| {
+                let body = if tx_range.is_empty() {
+                    Vec::new()
+                } else {
+                    self.transactions_by_tx_range_with_cursor(tx_range, &mut tx_cursor)?
+                        .into_iter()
+                        .map(Into::into)
+                        .collect()
+                };
+                Ok(Block { header, body, ommers, withdrawals, requests })
+            },
+        )
     }
 
     fn block_with_senders_range(
@@ -1535,42 +1548,95 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
         let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
 
-        self.process_block_range(range, |tx_range, header, ommers, withdrawals, requests| {
-            let (body, senders) = if tx_range.is_empty() {
-                (Vec::new(), Vec::new())
-            } else {
-                let body = self
-                    .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
-                    .into_iter()
-                    .map(Into::into)
-                    .collect::<Vec<TransactionSigned>>();
-                // fetch senders from the senders table
-                let known_senders =
-                    senders_cursor
+        self.process_block_range(
+            range,
+            |range| self.headers_range(range),
+            |tx_range, header, ommers, withdrawals, requests| {
+                let (body, senders) = if tx_range.is_empty() {
+                    (Vec::new(), Vec::new())
+                } else {
+                    let body = self
+                        .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
+                        .into_iter()
+                        .map(Into::into)
+                        .collect::<Vec<TransactionSigned>>();
+                    // fetch senders from the senders table
+                    let known_senders = senders_cursor
                         .walk_range(tx_range.clone())?
                         .collect::<Result<HashMap<_, _>, _>>()?;
 
-                let mut senders = Vec::with_capacity(body.len());
-                for (tx_num, tx) in tx_range.zip(body.iter()) {
-                    match known_senders.get(&tx_num) {
-                        None => {
-                            // recover the sender from the transaction if not found
-                            let sender = tx
-                                .recover_signer_unchecked()
-                                .ok_or_else(|| ProviderError::SenderRecoveryError)?;
-                            senders.push(sender);
+                    let mut senders = Vec::with_capacity(body.len());
+                    for (tx_num, tx) in tx_range.zip(body.iter()) {
+                        match known_senders.get(&tx_num) {
+                            None => {
+                                // recover the sender from the transaction if not found
+                                let sender = tx
+                                    .recover_signer_unchecked()
+                                    .ok_or_else(|| ProviderError::SenderRecoveryError)?;
+                                senders.push(sender);
+                            }
+                            Some(sender) => senders.push(*sender),
                         }
-                        Some(sender) => senders.push(*sender),
                     }
-                }
 
-                (body, senders)
-            };
+                    (body, senders)
+                };
 
-            Block { header, body, ommers, withdrawals, requests }
-                .try_with_senders_unchecked(senders)
-                .map_err(|_| ProviderError::SenderRecoveryError)
-        })
+                Block { header, body, ommers, withdrawals, requests }
+                    .try_with_senders_unchecked(senders)
+                    .map_err(|_| ProviderError::SenderRecoveryError)
+            },
+        )
+    }
+
+    fn sealed_block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+        let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
+
+        self.process_block_range(
+            range,
+            |range| self.sealed_headers_range(range),
+            |tx_range, header, ommers, withdrawals, requests| {
+                let (body, senders) = if tx_range.is_empty() {
+                    (Vec::new(), Vec::new())
+                } else {
+                    let body = self
+                        .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
+                        .into_iter()
+                        .map(Into::into)
+                        .collect::<Vec<TransactionSigned>>();
+                    // fetch senders from the senders table
+                    let known_senders = senders_cursor
+                        .walk_range(tx_range.clone())?
+                        .collect::<Result<HashMap<_, _>, _>>()?;
+
+                    let mut senders = Vec::with_capacity(body.len());
+                    for (tx_num, tx) in tx_range.zip(body.iter()) {
+                        match known_senders.get(&tx_num) {
+                            None => {
+                                // recover the sender from the transaction if not found
+                                let sender = tx
+                                    .recover_signer_unchecked()
+                                    .ok_or_else(|| ProviderError::SenderRecoveryError)?;
+                                senders.push(sender);
+                            }
+                            Some(sender) => senders.push(*sender),
+                        }
+                    }
+
+                    (body, senders)
+                };
+
+                SealedBlockWithSenders::new(
+                    SealedBlock { header, body, ommers, withdrawals, requests },
+                    senders,
+                )
+                .ok_or(ProviderError::SenderRecoveryError)
+            },
+        )
     }
 }
 
