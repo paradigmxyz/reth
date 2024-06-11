@@ -14,7 +14,7 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
 use crate::{
     eth::{
-        api::{pending_block::PendingBlockEnv, LoadPendingBlock, LoadStateExt, SpawnBlocking},
+        api::{pending_block::PendingBlockEnv, LoadPendingBlock, SpawnBlocking},
         cache::EthStateCache,
         error::{EthApiError, EthResult, RpcInvalidTransactionError},
     },
@@ -119,6 +119,8 @@ pub trait EthState: LoadState + SpawnBlocking {
 }
 
 /// Loads state from database.
+///
+/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` state RPC methods.
 pub trait LoadState {
     /// Returns a handle for reading state from database.
     ///
@@ -204,7 +206,7 @@ pub trait LoadState {
         header: &Header,
     ) -> impl Future<Output = EthResult<(CfgEnvWithHandlerCfg, BlockEnv)>> + Send
     where
-        Self: LoadStateExt,
+        Self: LoadPendingBlock + SpawnBlocking,
     {
         async move {
             // get the parent config first

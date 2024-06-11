@@ -29,11 +29,16 @@ pub struct OptimismApi<Provider, Pool, Network, EvmConfig> {
     inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
 }
 
-unsafe impl<Provider, Pool, Network, EvmConfig> Send
+impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
     for OptimismApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: Clone + Send + Sync + 'static,
 {
-}
-unsafe impl<Provider, Pool, Network, EvmConfig> Sync
-    for OptimismApi<Provider, Pool, Network, EvmConfig>
-{
+    fn io_task_spawner(&self) -> impl TaskSpawner {
+        self.inner.task_spawner()
+    }
+
+    fn tracing_task_pool(&self) -> &BlockingTaskPool {
+        self.inner.blocking_task_pool()
+    }
 }

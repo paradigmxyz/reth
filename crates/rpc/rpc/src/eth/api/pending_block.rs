@@ -32,7 +32,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     eth::{
-        api::LoadPendingBlock,
+        api::{LoadPendingBlock, SpawnBlocking},
         error::{EthApiError, EthResult},
     },
     EthApi,
@@ -41,6 +41,7 @@ use crate::{
 impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
+    Self: SpawnBlocking,
     Provider: BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory,
     Pool: TransactionPool,
     EvmConfig: ConfigureEvm,

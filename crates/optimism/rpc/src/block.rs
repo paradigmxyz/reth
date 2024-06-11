@@ -6,7 +6,10 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory,
 };
 use reth_rpc::eth::{
-    api::{BuildReceipt, EthBlocks, LoadBlock, ReceiptBuilder},
+    api::{
+        EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, PendingBlock, ReceiptBuilder,
+        SpawnBlocking,
+    },
     cache::EthStateCache,
     error::EthResult,
 };
@@ -24,6 +27,10 @@ where
     Self: LoadBlock,
     Provider: BlockReaderIdExt + ChainSpecProvider + HeaderProvider,
 {
+    fn provider(&self) -> impl HeaderProvider {
+        self.inner.provider()
+    }
+
     async fn block_receipts(
         &self,
         block_id: BlockId,
@@ -75,6 +82,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> LoadBlock
     for OptimismApi<Provider, Pool, Network, EvmConfig>
 where
+    Self: LoadPendingBlock + SpawnBlocking,
     Provider: BlockReaderIdExt,
 {
     #[inline]
@@ -85,5 +93,35 @@ where
     #[inline]
     fn cache(&self) -> &EthStateCache {
         self.inner.cache()
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
+    for OptimismApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory,
+    Pool: TransactionPool,
+    EvmConfig: ConfigureEvm,
+{
+    #[inline]
+    fn provider(
+        &self,
+    ) -> impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory {
+        self.inner.provider()
+    }
+
+    #[inline]
+    fn pool(&self) -> impl TransactionPool {
+        self.inner.pool()
+    }
+
+    #[inline]
+    fn pending_block(&self) -> &Mutex<Option<PendingBlock>> {
+        self.inner.pending_block()
+    }
+
+    #[inline]
+    fn evm_config(&self) -> &impl ConfigureEvm {
+        self.inner.evm_config()
     }
 }

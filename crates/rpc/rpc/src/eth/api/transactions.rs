@@ -2,55 +2,26 @@
 
 use std::sync::Arc;
 
-use reth_evm::ConfigureEvm;
-use reth_network_api::NetworkInfo;
-use reth_primitives::{BlockId, Bytes, TransactionSignedEcRecovered, B256};
-use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory, TransactionsProvider,
-};
-use reth_rpc_types::{Index, Transaction, TransactionInfo};
+use reth_primitives::{TransactionSignedEcRecovered, B256};
+use reth_provider::{BlockReaderIdExt, TransactionsProvider};
+use reth_rpc_types::{Transaction, TransactionInfo};
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::TransactionPool;
 
 use crate::{
     eth::{
-        api::{BuildReceipt, EthTransactions, LoadBlock, LoadTransaction, RawTransactionForwarder},
+        api::{EthTransactions, LoadTransaction, RawTransactionForwarder, SpawnBlocking},
         cache::EthStateCache,
-        error::EthResult,
         revm_utils::FillableTransaction,
         signer::EthSigner,
     },
     EthApi,
 };
 
-impl<Provider, Pool, Network, EvmConfig> LoadTransaction
-    for EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Provider: TransactionsProvider,
-    Pool: TransactionPool,
-{
-    type Pool = Pool;
-
-    #[inline]
-    fn provider(&self) -> impl TransactionsProvider {
-        self.inner.provider()
-    }
-
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
-
-    #[inline]
-    fn pool(&self) -> &Self::Pool {
-        self.inner.pool()
-    }
-}
-
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadTransaction + Send + Sync,
+    Self: LoadTransaction,
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt,
 {
@@ -70,64 +41,28 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> BuildReceipt
+impl<Provider, Pool, Network, EvmConfig> LoadTransaction
     for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: SpawnBlocking,
+    Provider: TransactionsProvider,
+    Pool: TransactionPool,
 {
+    type Pool = Pool;
+
+    #[inline]
+    fn provider(&self) -> impl TransactionsProvider {
+        self.inner.provider()
+    }
+
     #[inline]
     fn cache(&self) -> &EthStateCache {
-        &self.inner.eth_cache
-    }
-}
-
-// === impl EthApi ===
-
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Self: LoadBlock,
-    Provider:
-        BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
-    Pool: TransactionPool + 'static,
-    Network: NetworkInfo + 'static,
-    EvmConfig: ConfigureEvm,
-{
-    /// Get Transaction by [`BlockId`] and the index of the transaction within that Block.
-    ///
-    /// Returns `Ok(None)` if the block does not exist, or the block as fewer transactions
-    pub(crate) async fn transaction_by_block_and_tx_index(
-        &self,
-        block_id: impl Into<BlockId>,
-        index: Index,
-    ) -> EthResult<Option<Transaction>> {
-        if let Some(block) = self.block_with_senders(block_id.into()).await? {
-            let block_hash = block.hash();
-            let block_number = block.number;
-            let base_fee_per_gas = block.base_fee_per_gas;
-            if let Some(tx) = block.into_transactions_ecrecovered().nth(index.into()) {
-                return Ok(Some(from_recovered_with_block_context(
-                    tx,
-                    block_hash,
-                    block_number,
-                    base_fee_per_gas,
-                    index.into(),
-                )))
-            }
-        }
-
-        Ok(None)
+        self.inner.cache()
     }
 
-    pub(crate) async fn raw_transaction_by_block_and_tx_index(
-        &self,
-        block_id: impl Into<BlockId>,
-        index: Index,
-    ) -> EthResult<Option<Bytes>> {
-        if let Some(block) = self.block_with_senders(block_id.into()).await? {
-            if let Some(tx) = block.transactions().nth(index.into()) {
-                return Ok(Some(tx.envelope_encoded()))
-            }
-        }
-
-        Ok(None)
+    #[inline]
+    fn pool(&self) -> &Self::Pool {
+        self.inner.pool()
     }
 }
 
