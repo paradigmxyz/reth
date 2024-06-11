@@ -1,7 +1,8 @@
 #![allow(missing_docs, unreachable_pub)]
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
-use reth_primitives::{proofs::triehash::KeccakHasher, ReceiptWithBloom, B256};
+use reth_primitives::{ReceiptWithBloom, B256};
+use reth_trie::triehash::KeccakHasher;
 
 /// Benchmarks different implementations of the root calculation.
 pub fn trie_root_benchmark(c: &mut Criterion) {

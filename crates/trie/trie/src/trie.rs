@@ -556,10 +556,9 @@ mod tests {
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         transaction::DbTxMut,
     };
-    use reth_primitives::{
-        hex_literal::hex, proofs::triehash::KeccakHasher, Account, StorageEntry, U256,
-    };
+    use reth_primitives::{hex_literal::hex, Account, StorageEntry, U256};
     use reth_provider::{test_utils::create_test_provider_factory, DatabaseProviderRW};
+    use reth_trie_common::triehash::KeccakHasher;
     use std::{
         collections::{BTreeMap, HashMap},
         ops::Mul,

@@ -129,32 +129,6 @@ pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
     keccak256(ommers_rlp)
 }
 
-/// Implementation of hasher using our keccak256 hashing function
-/// for compatibility with `triehash` crate.
-#[cfg(any(test, feature = "test-utils"))]
-pub mod triehash {
-    use crate::{keccak256, B256};
-    use hash_db::Hasher;
-    use plain_hasher::PlainHasher;
-
-    /// A [Hasher] that calculates a keccak256 hash of the given data.
-    #[derive(Default, Debug, Clone, PartialEq, Eq)]
-    #[non_exhaustive]
-    pub struct KeccakHasher;
-
-    #[cfg(any(test, feature = "test-utils"))]
-    impl Hasher for KeccakHasher {
-        type Out = B256;
-        type StdHasher = PlainHasher;
-
-        const LENGTH: usize = 32;
-
-        fn hash(x: &[u8]) -> Self::Out {
-            keccak256(x)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
