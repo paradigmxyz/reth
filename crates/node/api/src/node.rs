@@ -19,7 +19,7 @@ use std::marker::PhantomData;
 /// consensus layer.
 ///
 /// This trait is intended to be stateless and only define the types of the node.
-pub trait NodeTypes: Send + Sync + 'static {
+pub trait NodeTypes: Send + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives: NodePrimitives;
     /// The node's engine types, defining the interaction with the consensus engine.
@@ -61,11 +61,17 @@ impl<Types, DB, Provider> Default for FullNodeTypesAdapter<Types, DB, Provider> 
     }
 }
 
+impl<Types, DB, Provider> Clone for FullNodeTypesAdapter<Types, DB, Provider> {
+    fn clone(&self) -> Self {
+        Self { types: self.types, db: self.db, provider: self.provider }
+    }
+}
+
 impl<Types, DB, Provider> NodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
     Types: NodeTypes,
-    DB: Send + Sync + 'static,
-    Provider: Send + Sync + 'static,
+    DB: Send + Sync + Unpin + 'static,
+    Provider: Send + Sync + Unpin + 'static,
 {
     type Primitives = Types::Primitives;
     type Engine = Types::Engine;

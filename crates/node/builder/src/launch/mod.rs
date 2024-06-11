@@ -4,11 +4,10 @@ use crate::{
     builder::{NodeAdapter, NodeAddOns, NodeTypesAdapter},
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
-    launch::common::WithConfigs,
     node::FullNode,
     BuilderContext, NodeBuilderWithComponents, NodeHandle,
 };
-use futures::{future, future::Either, stream, stream_select, StreamExt};
+use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
@@ -19,7 +18,8 @@ use reth_blockchain_tree::{
     TreeExternals,
 };
 use reth_consensus::Consensus;
-use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
+use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
+use reth_exex::ExExManagerHandle;
 use reth_network::NetworkEvents;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_node_core::{
@@ -30,7 +30,7 @@ use reth_node_core::{
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
-use reth_provider::{providers::BlockchainProvider, CanonStateSubscriptions};
+use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::EngineApi;
 use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
@@ -42,6 +42,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 pub mod common;
 pub use common::LaunchContext;
+mod exex;
+pub use exex::ExExLauncher;
 
 /// A general purpose trait that launches a new node of any kind.
 ///
@@ -56,6 +58,18 @@ pub trait LaunchNode<Target> {
 
     /// Create and return a new node asynchronously.
     fn launch_node(self, target: Target) -> impl Future<Output = eyre::Result<Self::Node>> + Send;
+}
+
+impl<F, Target, Fut, Node> LaunchNode<Target> for F
+where
+    F: FnOnce(Target) -> Fut + Send,
+    Fut: Future<Output = eyre::Result<Node>> + Send,
+{
+    type Node = Node;
+
+    fn launch_node(self, target: Target) -> impl Future<Output = eyre::Result<Self::Node>> + Send {
+        self(target)
+    }
 }
 
 /// The default launcher for a node.
@@ -145,15 +159,11 @@ where
             )),
         )?;
 
-        let config_container = WithConfigs {
-            config: ctx.node_config().clone(),
-            toml_config: ctx.toml_config().clone(),
-        };
         let builder_ctx = BuilderContext::new(
             head,
             blockchain_db.clone(),
             ctx.task_executor().clone(),
-            config_container,
+            ctx.configs().clone(),
         );
 
         debug!(target: "reth::cli", "creating components");
@@ -190,75 +200,10 @@ where
         on_component_initialized.on_event(node_adapter.clone())?;
 
         // spawn exexs
-        let mut exex_handles = Vec::with_capacity(installed_exex.len());
-        let mut exexs = Vec::with_capacity(installed_exex.len());
-        for (id, exex) in installed_exex {
-            // create a new exex handle
-            let (handle, events, notifications) = ExExHandle::new(id.clone());
-            exex_handles.push(handle);
-
-            // create the launch context for the exex
-            let context = ExExContext {
-                head,
-                config: ctx.node_config().clone(),
-                reth_config: ctx.toml_config().clone(),
-                components: node_adapter.clone(),
-                events,
-                notifications,
-            };
-
-            let executor = ctx.task_executor().clone();
-            exexs.push(async move {
-                debug!(target: "reth::cli", id, "spawning exex");
-                let span = reth_tracing::tracing::info_span!("exex", id);
-                let _enter = span.enter();
-
-                // init the exex
-                let exex = exex.launch(context).await.unwrap();
-
-                // spawn it as a crit task
-                executor.spawn_critical("exex", async move {
-                    info!(target: "reth::cli", "ExEx started");
-                    match exex.await {
-                        Ok(_) => panic!("ExEx {id} finished. ExEx's should run indefinitely"),
-                        Err(err) => panic!("ExEx {id} crashed: {err}"),
-                    }
-                });
-            });
-        }
-
-        future::join_all(exexs).await;
-
-        // spawn exex manager
-        let exex_manager_handle = if !exex_handles.is_empty() {
-            debug!(target: "reth::cli", "spawning exex manager");
-            // todo(onbjerg): rm magic number
-            let exex_manager = ExExManager::new(exex_handles, 1024);
-            let exex_manager_handle = exex_manager.handle();
-            ctx.task_executor().spawn_critical("exex manager", async move {
-                exex_manager.await.expect("exex manager crashed");
-            });
-
-            // send notifications from the blockchain tree to exex manager
-            let mut canon_state_notifications = blockchain_db.subscribe_to_canonical_state();
-            let mut handle = exex_manager_handle.clone();
-            ctx.task_executor().spawn_critical(
-                "exex manager blockchain tree notifications",
-                async move {
-                    while let Ok(notification) = canon_state_notifications.recv().await {
-                        handle.send_async(notification.into()).await.expect(
-                            "blockchain tree notification could not be sent to exex manager",
-                        );
-                    }
-                },
-            );
-
-            info!(target: "reth::cli", "ExEx Manager started");
-
-            Some(exex_manager_handle)
-        } else {
-            None
-        };
+        let exex_manager_handle =
+            ExExLauncher::new(head, node_adapter.clone(), installed_exex, ctx.configs().clone())
+                .launch()
+                .await;
 
         // create pipeline
         let network_client = node_adapter.network().fetch_client().await?;
@@ -452,6 +397,48 @@ where
             let res = beacon_consensus_engine.await;
             let _ = tx.send(res);
         });
+
+        if let Some(maybe_custom_etherscan_url) = ctx.node_config().debug.etherscan.clone() {
+            info!(target: "reth::cli", "Using etherscan as consensus client");
+
+            let chain = ctx.node_config().chain.chain;
+            let etherscan_url = maybe_custom_etherscan_url.map(Ok).unwrap_or_else(|| {
+                // If URL isn't provided, use default Etherscan URL for the chain if it is known
+                chain
+                    .etherscan_urls()
+                    .map(|urls| urls.0.to_string())
+                    .ok_or_else(|| eyre::eyre!("failed to get etherscan url for chain: {chain}"))
+            })?;
+
+            let block_provider = EtherscanBlockProvider::new(
+                etherscan_url,
+                chain.etherscan_api_key().ok_or_else(|| {
+                    eyre::eyre!(
+                        "etherscan api key not found for rpc consensus client for chain: {chain}"
+                    )
+                })?,
+            );
+            let rpc_consensus_client = DebugConsensusClient::new(
+                rpc_server_handles.auth.clone(),
+                Arc::new(block_provider),
+            );
+            ctx.task_executor().spawn_critical("etherscan consensus client", async move {
+                rpc_consensus_client.run::<T::Engine>().await
+            });
+        }
+
+        if let Some(rpc_ws_url) = ctx.node_config().debug.rpc_consensus_ws.clone() {
+            info!(target: "reth::cli", "Using rpc provider as consensus client");
+
+            let block_provider = RpcBlockProvider::new(rpc_ws_url);
+            let rpc_consensus_client = DebugConsensusClient::new(
+                rpc_server_handles.auth.clone(),
+                Arc::new(block_provider),
+            );
+            ctx.task_executor().spawn_critical("rpc consensus client", async move {
+                rpc_consensus_client.run::<T::Engine>().await
+            });
+        }
 
         let full_node = FullNode {
             evm_config: node_adapter.components.evm_config().clone(),

@@ -3,15 +3,14 @@
 use crate::eth::error::{EthApiError, EthResult};
 use reth_errors::ProviderError;
 use reth_primitives::{
-    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
+    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
     proofs,
     revm::env::tx_env_with_recovered,
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
-    trie::EMPTY_ROOT_HASH,
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Receipts, Requests, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Requests, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -223,8 +222,9 @@ impl PendingBlockEnv {
 
         let bundle = BundleStateWithReceipts::new(
             db.take_bundle(),
-            Receipts::from_vec(vec![receipts]),
+            vec![receipts].into(),
             block_number,
+            Vec::new(),
         );
 
         #[cfg(feature = "optimism")]

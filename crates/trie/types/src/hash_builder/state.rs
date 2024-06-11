@@ -1,5 +1,5 @@
 use super::StoredHashBuilderValue;
-use crate::trie::{StoredTrieMask, TrieMask};
+use crate::{StoredTrieMask, TrieMask};
 use alloy_trie::{hash_builder::HashBuilderValue, HashBuilder};
 use bytes::Buf;
 use nybbles::Nibbles;

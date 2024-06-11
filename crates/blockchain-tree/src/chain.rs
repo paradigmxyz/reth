@@ -14,8 +14,7 @@ use reth_db_api::database::Database;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{
-    BlockHash, BlockNumber, ForkBlock, GotExpected, Receipts, SealedBlockWithSenders, SealedHeader,
-    U256,
+    BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView},
@@ -217,8 +216,9 @@ impl AppendableChain {
 
         let bundle_state = BundleStateWithReceipts::new(
             state,
-            Receipts::from_block_receipt(receipts),
+            receipts.into(),
             block.number,
+            vec![requests.into()],
         );
 
         // check state root if the block extends the canonical chain __and__ if state root

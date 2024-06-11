@@ -2,7 +2,7 @@ use crate::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::{PrefixSetMut, TriePrefixSets},
     updates::TrieUpdates,
-    StateRoot,
+    Nibbles, StateRoot,
 };
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_db::{tables, DatabaseError};
@@ -13,8 +13,7 @@ use reth_db_api::{
 };
 use reth_execution_errors::StateRootError;
 use reth_primitives::{
-    keccak256, revm::compat::into_reth_acc, trie::Nibbles, Account, Address, BlockNumber, B256,
-    U256,
+    keccak256, revm::compat::into_reth_acc, Account, Address, BlockNumber, B256, U256,
 };
 use revm::db::BundleAccount;
 use std::{
