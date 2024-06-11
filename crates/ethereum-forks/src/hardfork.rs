@@ -15,6 +15,13 @@ pub enum ConsensusType {
     ProofOfStake,
 }
 
+/// Represents the non-common hardfork
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
+pub struct NamedHardfork {
+    pub name: &'static str,
+}
+
 /// The name of an Ethereum hardfork.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
@@ -76,6 +83,13 @@ pub enum Hardfork {
     /// Fjord: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#fjord>
     #[cfg(feature = "optimism")]
     Fjord,
+
+    /// Dynamic Hardfork variant.
+    ///
+    /// The `serde(skip)` attribute is added to the `Other` variant because deserializing the JSON
+    /// to `Hardfork` enum is not directly used.
+    #[serde(skip)]
+    Other(NamedHardfork),
 }
 
 impl Hardfork {
