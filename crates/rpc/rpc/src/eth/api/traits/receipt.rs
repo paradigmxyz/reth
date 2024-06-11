@@ -12,8 +12,10 @@ use crate::eth::{
 };
 
 /// Assembles transaction receipt data w.r.t to network.
+///
+/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` receipts RPC methods.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait BuildReceipt {
+pub trait LoadReceipt: Send + Sync {
     /// Returns a handle for reading data from memory.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -25,10 +27,7 @@ pub trait BuildReceipt {
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> impl Future<Output = EthResult<AnyTransactionReceipt>> + Send
-    where
-        Self: Send + Sync,
-    {
+    ) -> impl Future<Output = EthResult<AnyTransactionReceipt>> + Send {
         async move {
             // get all receipts for the block
             let all_receipts = match self.cache().get_receipts(meta.block_hash).await? {

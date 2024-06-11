@@ -4,15 +4,16 @@ use crate::{transaction::OptimismTxMeta, OptimismApi};
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use reth_provider::{BlockIdReader, ChainSpecProvider};
 use reth_rpc::eth::{
-    api::{BuildReceipt, ReceiptBuilder},
+    api::{LoadReceipt, ReceiptBuilder},
     cache::EthStateCache,
     error::{EthApiError, EthResult},
 };
 use reth_rpc_types::{AnyTransactionReceipt, OptimismTransactionReceiptFields};
 
-impl<Provider, Pool, Network, EvmConfig> BuildReceipt
+impl<Provider, Pool, Network, EvmConfig> LoadReceipt
     for OptimismApi<Provider, Pool, Network, EvmConfig>
 where
+    Self: Send + Sync,
     Provider: BlockIdReader + ChainSpecProvider,
 {
     #[inline]
@@ -25,10 +26,7 @@ where
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> EthResult<AnyTransactionReceipt>
-    where
-        Self: Send + Sync,
-    {
+    ) -> EthResult<AnyTransactionReceipt> {
         let (block, receipts) = self
             .cache()
             .get_block_and_receipts(meta.block_hash)

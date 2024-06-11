@@ -20,9 +20,7 @@ use tracing::trace;
 
 use crate::{
     eth::{
-        api::{
-            BuildReceipt, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, Trace,
-        },
+        api::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions},
         error::EthApiError,
         revm_utils::EvmOverrides,
         EthApi,
@@ -33,14 +31,7 @@ use crate::{
 #[async_trait::async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthApiServer for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: EthApiSpec
-        + EthTransactions
-        + EthBlocks
-        + EthState
-        + EthCall
-        + EthFees
-        + Trace
-        + BuildReceipt,
+    Self: EthApiSpec + EthTransactions + EthBlocks + EthState + EthCall + EthFees,
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt
         + ChainSpecProvider
@@ -91,7 +82,7 @@ where
     /// Handler for: `eth_getBlockByHash`
     async fn block_by_hash(&self, hash: B256, full: bool) -> Result<Option<RichBlock>> {
         trace!(target: "rpc::eth", ?hash, ?full, "Serving eth_getBlockByHash");
-        Ok(Self::rpc_block(self, hash, full).await?)
+        Ok(EthBlocks::rpc_block(self, hash, full).await?)
     }
 
     /// Handler for: `eth_getBlockByNumber`
@@ -101,13 +92,13 @@ where
         full: bool,
     ) -> Result<Option<RichBlock>> {
         trace!(target: "rpc::eth", ?number, ?full, "Serving eth_getBlockByNumber");
-        Ok(Self::rpc_block(self, number, full).await?)
+        Ok(EthBlocks::rpc_block(self, number, full).await?)
     }
 
     /// Handler for: `eth_getBlockTransactionCountByHash`
     async fn block_transaction_count_by_hash(&self, hash: B256) -> Result<Option<U256>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getBlockTransactionCountByHash");
-        Ok(Self::block_transaction_count(self, hash).await?.map(U256::from))
+        Ok(EthBlocks::block_transaction_count(self, hash).await?.map(U256::from))
     }
 
     /// Handler for: `eth_getBlockTransactionCountByNumber`
@@ -116,19 +107,19 @@ where
         number: BlockNumberOrTag,
     ) -> Result<Option<U256>> {
         trace!(target: "rpc::eth", ?number, "Serving eth_getBlockTransactionCountByNumber");
-        Ok(Self::block_transaction_count(self, number).await?.map(U256::from))
+        Ok(EthBlocks::block_transaction_count(self, number).await?.map(U256::from))
     }
 
     /// Handler for: `eth_getUncleCountByBlockHash`
     async fn block_uncles_count_by_hash(&self, hash: B256) -> Result<Option<U256>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getUncleCountByBlockHash");
-        Ok(Self::ommers(self, hash)?.map(|ommers| U256::from(ommers.len())))
+        Ok(EthBlocks::ommers(self, hash)?.map(|ommers| U256::from(ommers.len())))
     }
 
     /// Handler for: `eth_getUncleCountByBlockNumber`
     async fn block_uncles_count_by_number(&self, number: BlockNumberOrTag) -> Result<Option<U256>> {
         trace!(target: "rpc::eth", ?number, "Serving eth_getUncleCountByBlockNumber");
-        Ok(Self::ommers(self, number)?.map(|ommers| U256::from(ommers.len())))
+        Ok(EthBlocks::ommers(self, number)?.map(|ommers| U256::from(ommers.len())))
     }
 
     /// Handler for: `eth_getBlockReceipts`
@@ -147,7 +138,7 @@ where
         index: Index,
     ) -> Result<Option<RichBlock>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getUncleByBlockHashAndIndex");
-        Ok(Self::ommer_by_block_and_index(self, hash, index).await?)
+        Ok(EthBlocks::ommer_by_block_and_index(self, hash, index).await?)
     }
 
     /// Handler for: `eth_getUncleByBlockNumberAndIndex`
@@ -157,7 +148,7 @@ where
         index: Index,
     ) -> Result<Option<RichBlock>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getUncleByBlockNumberAndIndex");
-        Ok(Self::ommer_by_block_and_index(self, number, index).await?)
+        Ok(EthBlocks::ommer_by_block_and_index(self, number, index).await?)
     }
 
     /// Handler for: `eth_getRawTransactionByHash`
@@ -179,7 +170,7 @@ where
         index: Index,
     ) -> Result<Option<Bytes>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getRawTransactionByBlockHashAndIndex");
-        Ok(Self::raw_transaction_by_block_and_tx_index(self, hash, index).await?)
+        Ok(EthTransactions::raw_transaction_by_block_and_tx_index(self, hash, index).await?)
     }
 
     /// Handler for: `eth_getTransactionByBlockHashAndIndex`
@@ -189,7 +180,7 @@ where
         index: Index,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getTransactionByBlockHashAndIndex");
-        Ok(Self::transaction_by_block_and_tx_index(self, hash, index).await?)
+        Ok(EthTransactions::transaction_by_block_and_tx_index(self, hash, index).await?)
     }
 
     /// Handler for: `eth_getRawTransactionByBlockNumberAndIndex`
@@ -199,7 +190,7 @@ where
         index: Index,
     ) -> Result<Option<Bytes>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getRawTransactionByBlockNumberAndIndex");
-        Ok(Self::raw_transaction_by_block_and_tx_index(self, number, index).await?)
+        Ok(EthTransactions::raw_transaction_by_block_and_tx_index(self, number, index).await?)
     }
 
     /// Handler for: `eth_getTransactionByBlockNumberAndIndex`
@@ -209,7 +200,7 @@ where
         index: Index,
     ) -> Result<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getTransactionByBlockNumberAndIndex");
-        Ok(Self::transaction_by_block_and_tx_index(self, number, index).await?)
+        Ok(EthTransactions::transaction_by_block_and_tx_index(self, number, index).await?)
     }
 
     /// Handler for: `eth_getTransactionReceipt`
@@ -255,13 +246,13 @@ where
     /// Handler for: `eth_getHeaderByNumber`
     async fn header_by_number(&self, block_number: BlockNumberOrTag) -> Result<Option<Header>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_getHeaderByNumber");
-        Ok(Self::rpc_block_header(self, block_number).await?)
+        Ok(EthBlocks::rpc_block_header(self, block_number).await?)
     }
 
     /// Handler for: `eth_getHeaderByHash`
     async fn header_by_hash(&self, hash: B256) -> Result<Option<Header>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
-        Ok(Self::rpc_block_header(self, hash).await?)
+        Ok(EthBlocks::rpc_block_header(self, hash).await?)
     }
 
     /// Handler for: `eth_call`

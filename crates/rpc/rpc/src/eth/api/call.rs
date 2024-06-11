@@ -3,12 +3,18 @@
 use reth_evm::ConfigureEvm;
 
 use crate::eth::{
-    api::{Call, EthCall},
+    api::{Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
     EthApi,
 };
 
+impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig> where
+    Self: Call + LoadPendingBlock
+{
+}
+
 impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
 where
+    Self: LoadState + SpawnBlocking,
     EvmConfig: ConfigureEvm,
 {
     #[inline]
@@ -20,9 +26,4 @@ where
     fn evm_config(&self) -> &impl ConfigureEvm {
         self.inner.evm_config()
     }
-}
-
-impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig> where
-    Self: Call
-{
 }
