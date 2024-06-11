@@ -2,13 +2,16 @@
 
 use crate::{
     chain::DepositContract,
-    revm_primitives::{Address, address, b256},
+    revm_primitives::{address, b256},
     B256, U256,
 };
 use std::time::Duration;
 
 #[cfg(feature = "optimism")]
-use crate::chain::BaseFeeParams;
+use crate::{
+    chain::BaseFeeParams,
+    revm_primitives::Address
+};
 
 /// [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#parameters) constants.
 pub mod eip4844;
