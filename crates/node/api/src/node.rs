@@ -8,11 +8,11 @@ use reth_db_api::{
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_primitives::PayloadTypes;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
 use std::marker::PhantomData;
-use reth_payload_primitives::PayloadTypes;
 
 /// The type that configures the essential types of an ethereum like node.
 ///

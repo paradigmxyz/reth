@@ -12,7 +12,8 @@ use core::fmt;
 use reth_primitives::ChainSpec;
 
 use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes, PayloadTypes,
+    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes,
+    PayloadTypes,
 };
 
 use serde::{de::DeserializeOwned, ser::Serialize};

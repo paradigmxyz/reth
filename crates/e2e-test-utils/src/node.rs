@@ -8,8 +8,8 @@ use eyre::Ok;
 use futures_util::Future;
 use reth::{
     api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
-    payload::PayloadTypes,
     builder::FullNode,
+    payload::PayloadTypes,
     providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
     rpc::types::engine::PayloadStatusEnum,
 };
