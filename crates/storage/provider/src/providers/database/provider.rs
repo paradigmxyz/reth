@@ -358,10 +358,21 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         )
     }
 
-    fn block_with_senders_range<H: AsRef<Header>, B>(
+    /// Returns a range of blocks from the database, along with the senders of each
+    /// transaction in the blocks.
+    ///
+    /// Uses the provided `headers_range` to get the headers for the range, and `assemble_block` to
+    /// construct a block for the provided inputs
+    fn block_with_senders_range<H, HF, B, BF>(
         &self,
-        headers_range: impl FnOnce(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
-        mut assemble_block: impl FnMut(
+        headers_range: HF,
+        mut assemble_block: BF,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<B>>
+    where
+        H: AsRef<Header>,
+        HF: FnOnce(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
+        BF: FnMut(
             H,
             Vec<TransactionSigned>,
             Vec<Header>,
@@ -369,8 +380,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             Option<Requests>,
             Vec<Address>,
         ) -> ProviderResult<B>,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<B>> {
+    {
         let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
         let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
 
