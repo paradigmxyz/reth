@@ -1,14 +1,13 @@
 mod ctrl;
 mod event;
 pub use crate::pipeline::ctrl::ControlFlow;
+use crate::{PipelineTarget, StageCheckpoint, StageId};
 pub use event::*;
 use futures_util::Future;
 use reth_db_api::database::Database;
 use reth_primitives::{
-    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH,
-    stage::{PipelineTarget, StageCheckpoint, StageId},
-    static_file::HighestStaticFiles,
-    BlockNumber, B256,
+    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, static_file::HighestStaticFiles, BlockNumber,
+    B256,
 };
 use reth_provider::{
     providers::StaticFileWriter, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,

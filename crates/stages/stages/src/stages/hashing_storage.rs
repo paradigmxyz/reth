@@ -9,13 +9,12 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_primitives::{
-    keccak256,
-    stage::{EntitiesCheckpoint, StageCheckpoint, StageId, StorageHashingCheckpoint},
-    BufMut, StorageEntry, B256,
-};
+use reth_primitives::{keccak256, BufMut, StorageEntry, B256};
 use reth_provider::{DatabaseProviderRW, HashingWriter, StatsReader, StorageReader};
-use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_stages_api::{
+    EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
+    StorageHashingCheckpoint, UnwindInput, UnwindOutput,
+};
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     fmt::Debug,

@@ -6,7 +6,6 @@ use reth_db::tables;
 use reth_db_api::{database::Database, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
     Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts, StaticFileSegment,
     StorageEntry, B256, U256,
 };
@@ -18,6 +17,7 @@ use reth_provider::{
     DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
     ProviderFactory, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
 };
+use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use serde::{Deserialize, Serialize};
 use std::{

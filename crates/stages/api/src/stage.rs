@@ -1,9 +1,6 @@
-use crate::error::StageError;
+use crate::{error::StageError, StageCheckpoint, StageId};
 use reth_db_api::database::Database;
-use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
-    BlockNumber, TxNumber,
-};
+use reth_primitives::{BlockNumber, TxNumber};
 use reth_provider::{BlockReader, DatabaseProviderRW, ProviderError, TransactionsProvider};
 use std::{
     cmp::{max, min},

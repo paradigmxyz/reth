@@ -5,12 +5,7 @@ use reth_db::{static_file::HeaderMask, tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_exex::{ExExManagerHandle, ExExNotification};
-use reth_primitives::{
-    stage::{
-        CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
-    },
-    BlockNumber, Header, StaticFileSegment,
-};
+use reth_primitives::{BlockNumber, Header, StaticFileSegment};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     BlockReader, BundleStateWithReceipts, Chain, DatabaseProviderRW, HeaderProvider,
@@ -20,8 +15,9 @@ use reth_provider::{
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
-    BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
-    UnwindInput, UnwindOutput,
+    BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
+    ExecutionCheckpoint, MetricEvent, MetricEventsSender, Stage, StageCheckpoint, StageError,
+    StageId, UnwindInput, UnwindOutput,
 };
 use std::{
     cmp::Ordering,
@@ -713,14 +709,15 @@ mod tests {
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_execution_errors::BlockValidationError;
     use reth_primitives::{
-        address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
-        Bytecode, ChainSpecBuilder, SealedBlock, StorageEntry, B256, U256,
+        address, hex_literal::hex, keccak256, Account, Address, Bytecode, ChainSpecBuilder,
+        SealedBlock, StorageEntry, B256, U256,
     };
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, ReceiptProvider,
         StaticFileProviderFactory,
     };
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
+    use reth_stages_api::StageUnitCheckpoint;
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthExecutorProvider> {
