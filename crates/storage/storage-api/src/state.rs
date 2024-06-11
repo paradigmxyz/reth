@@ -1,6 +1,6 @@
 use super::{AccountReader, BlockHashReader, BlockIdReader, StateRootProvider};
 use auto_impl::auto_impl;
-use reth_execution_types::BlockExecutionOutcome;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     proofs::AccountProof, Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
     Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
@@ -178,7 +178,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Used to inspect or execute transaction on the pending state.
     fn pending_with_provider(
         &self,
-        bundle_state_data: Box<dyn FullBlockExecutionDataProvider>,
+        bundle_state_data: Box<dyn FullExecutionDataProvider>,
     ) -> ProviderResult<StateProviderBox>;
 }
 
@@ -192,7 +192,7 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
     fn pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> ProviderResult<Box<dyn FullBlockExecutionDataProvider>> {
+    ) -> ProviderResult<Box<dyn FullExecutionDataProvider>> {
         self.find_pending_state_provider(block_hash)
             .ok_or(ProviderError::StateForHashNotFound(block_hash))
     }
@@ -201,7 +201,7 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn FullBlockExecutionDataProvider>>;
+    ) -> Option<Box<dyn FullExecutionDataProvider>>;
 }
 
 /// Provides data required for post-block execution.
@@ -210,19 +210,19 @@ pub trait BlockchainTreePendingStateProvider: Send + Sync {
 /// in accounts and storage, as well as block hashes for both the pending and canonical chains.
 ///
 /// The trait includes:
-/// * [`BlockExecutionOutcome`] - Captures all account and storage changes in the pending chain.
+/// * [`ExecutionOutcome`] - Captures all account and storage changes in the pending chain.
 /// * Block hashes - Provides access to the block hashes of both the pending chain and canonical
 ///   blocks.
 #[auto_impl(&, Box)]
-pub trait BlockExecutionDataProvider: Send + Sync {
-    /// Return the block execution outcome.
-    fn block_execution_outcome(&self) -> &BlockExecutionOutcome;
+pub trait ExecutionDataProvider: Send + Sync {
+    /// Return the execution outcome.
+    fn execution_outcome(&self) -> &ExecutionOutcome;
     /// Return block hash by block number of pending or canonical chain.
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash>;
 }
 
-impl BlockExecutionDataProvider for BlockExecutionOutcome {
-    fn block_execution_outcome(&self) -> &BlockExecutionOutcome {
+impl ExecutionDataProvider for ExecutionOutcome {
+    fn execution_outcome(&self) -> &ExecutionOutcome {
         self
     }
 
@@ -246,19 +246,18 @@ pub trait BlockExecutionForkProvider {
 /// Provides comprehensive post-execution state data required for further execution.
 ///
 /// This trait is used to create a state provider over the pending state and is a combination of
-/// [`BlockExecutionDataProvider`] and [`BlockExecutionForkProvider`].
+/// [`ExecutionDataProvider`] and [`BlockExecutionForkProvider`].
 ///
 /// The pending state includes:
-/// * `BlockExecutionOutcome`: Contains all changes to accounts and storage within the pending
-///   chain.
+/// * `ExecutionOutcome`: Contains all changes to accounts and storage within the pending chain.
 /// * Block hashes: Represents hashes of both the pending chain and canonical blocks.
 /// * Canonical fork: Denotes the block from which the pending chain forked.
-pub trait FullBlockExecutionDataProvider:
-    BlockExecutionDataProvider + BlockExecutionForkProvider
+pub trait FullExecutionDataProvider:
+    ExecutionDataProvider + BlockExecutionForkProvider
 {
 }
 
-impl<T> FullBlockExecutionDataProvider for T where
-    T: BlockExecutionDataProvider + BlockExecutionForkProvider
+impl<T> FullExecutionDataProvider for T where
+    T: ExecutionDataProvider + BlockExecutionForkProvider
 {
 }

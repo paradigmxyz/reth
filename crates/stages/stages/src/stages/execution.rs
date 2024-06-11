@@ -13,7 +13,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockExecutionOutcome, BlockReader, Chain, DatabaseProviderRW, HeaderProvider,
+    ExecutionOutcome, BlockReader, Chain, DatabaseProviderRW, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter, StatsReader,
     TransactionVariant,
 };
@@ -289,8 +289,8 @@ where
             }
         }
         let time = Instant::now();
-        let BlockExecutionOutcome { bundle, receipts, requests, first_block } = executor.finalize();
-        let state = BlockExecutionOutcome::new(bundle, receipts, first_block, requests);
+        let ExecutionOutcome { bundle, receipts, requests, first_block } = executor.finalize();
+        let state = ExecutionOutcome::new(bundle, receipts, first_block, requests);
         let write_preparation_duration = time.elapsed();
 
         // Check if we should send a [`ExExNotification`] to execution extensions.

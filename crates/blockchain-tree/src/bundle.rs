@@ -1,16 +1,14 @@
-//! [`BlockExecutionDataProvider`] implementations used by the tree.
+//! [`ExecutionDataProvider`] implementations used by the tree.
 
 use reth_primitives::{BlockHash, BlockNumber, ForkBlock};
-use reth_provider::{
-    BlockExecutionDataProvider, BlockExecutionForkProvider, BlockExecutionOutcome,
-};
+use reth_provider::{BlockExecutionForkProvider, ExecutionDataProvider, ExecutionOutcome};
 use std::collections::BTreeMap;
 
-/// Structure that combines references of required data to be a [`BlockExecutionDataProvider`].
+/// Structure that combines references of required data to be a [`ExecutionDataProvider`].
 #[derive(Clone, Debug)]
 pub struct BundleStateDataRef<'a> {
-    /// The block execution outcome after execution of one or more transactions and/or blocks.
-    pub block_execution_outcome: &'a BlockExecutionOutcome,
+    /// The execution outcome after execution of one or more transactions and/or blocks.
+    pub execution_outcome: &'a ExecutionOutcome,
     /// The blocks in the sidechain.
     pub sidechain_block_hashes: &'a BTreeMap<BlockNumber, BlockHash>,
     /// The blocks in the canonical chain.
@@ -19,9 +17,9 @@ pub struct BundleStateDataRef<'a> {
     pub canonical_fork: ForkBlock,
 }
 
-impl<'a> BlockExecutionDataProvider for BundleStateDataRef<'a> {
-    fn block_execution_outcome(&self) -> &BlockExecutionOutcome {
-        self.block_execution_outcome
+impl<'a> ExecutionDataProvider for BundleStateDataRef<'a> {
+    fn execution_outcome(&self) -> &ExecutionOutcome {
+        self.execution_outcome
     }
 
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash> {
@@ -40,11 +38,11 @@ impl<'a> BlockExecutionForkProvider for BundleStateDataRef<'a> {
     }
 }
 
-/// Structure that owns the relevant data needs to be a [`BlockExecutionDataProvider`]
+/// Structure that owns the relevant data needs to be a [`ExecutionDataProvider`]
 #[derive(Clone, Debug)]
-pub struct BlockExecutionData {
-    /// Block execution outcome.
-    pub block_execution_outcome: BlockExecutionOutcome,
+pub struct ExecutionData {
+    /// Execution outcome.
+    pub execution_outcome: ExecutionOutcome,
     /// Parent block hashes needs for evm BLOCKHASH opcode.
     /// NOTE: it does not mean that all hashes are there but all until finalized are there.
     /// Other hashes can be obtained from provider
@@ -53,9 +51,9 @@ pub struct BlockExecutionData {
     pub canonical_fork: ForkBlock,
 }
 
-impl BlockExecutionDataProvider for BlockExecutionData {
-    fn block_execution_outcome(&self) -> &BlockExecutionOutcome {
-        &self.block_execution_outcome
+impl ExecutionDataProvider for ExecutionData {
+    fn execution_outcome(&self) -> &ExecutionOutcome {
+        &self.execution_outcome
     }
 
     fn block_hash(&self, block_number: BlockNumber) -> Option<BlockHash> {
@@ -63,7 +61,7 @@ impl BlockExecutionDataProvider for BlockExecutionData {
     }
 }
 
-impl BlockExecutionForkProvider for BlockExecutionData {
+impl BlockExecutionForkProvider for ExecutionData {
     fn canonical_fork(&self) -> ForkBlock {
         self.canonical_fork
     }

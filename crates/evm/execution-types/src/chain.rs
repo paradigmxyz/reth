@@ -1,6 +1,6 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
-use crate::BlockExecutionOutcome;
+use crate::ExecutionOutcome;
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{
     Address, BlockHash, BlockNumHash, BlockNumber, ForkBlock, Receipt, SealedBlock,
@@ -30,7 +30,7 @@ pub struct Chain {
     /// chain, ranging from the [`Chain::first`] block to the [`Chain::tip`] block, inclusive.
     ///
     /// Additionally, it includes the individual state changes that led to the current state.
-    block_execution_outcome: BlockExecutionOutcome,
+    execution_outcome: ExecutionOutcome,
     /// State trie updates after block is added to the chain.
     /// NOTE: Currently, trie updates are present only for
     /// single-block chains that extend the canonical chain.
@@ -45,22 +45,22 @@ impl Chain {
     /// A chain of blocks should not be empty.
     pub fn new(
         blocks: impl IntoIterator<Item = SealedBlockWithSenders>,
-        block_execution_outcome: BlockExecutionOutcome,
+        execution_outcome: ExecutionOutcome,
         trie_updates: Option<TrieUpdates>,
     ) -> Self {
         let blocks = BTreeMap::from_iter(blocks.into_iter().map(|b| (b.number, b)));
         debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
 
-        Self { blocks, block_execution_outcome, trie_updates }
+        Self { blocks, execution_outcome, trie_updates }
     }
 
     /// Create new Chain from a single block and its state.
     pub fn from_block(
         block: SealedBlockWithSenders,
-        block_execution_outcome: BlockExecutionOutcome,
+        execution_outcome: ExecutionOutcome,
         trie_updates: Option<TrieUpdates>,
     ) -> Self {
-        Self::new([block], block_execution_outcome, trie_updates)
+        Self::new([block], execution_outcome, trie_updates)
     }
 
     /// Get the blocks in this chain.
@@ -88,14 +88,14 @@ impl Chain {
         self.trie_updates.take();
     }
 
-    /// Get block execution outcome of this chain
-    pub const fn block_execution_outcome(&self) -> &BlockExecutionOutcome {
-        &self.block_execution_outcome
+    /// Get execution outcome of this chain
+    pub const fn execution_outcome(&self) -> &ExecutionOutcome {
+        &self.execution_outcome
     }
 
     /// Prepends the given state to the current state.
     pub fn prepend_state(&mut self, state: BundleState) {
-        self.block_execution_outcome.prepend_state(state);
+        self.execution_outcome.prepend_state(state);
         self.trie_updates.take(); // invalidate cached trie updates
     }
 
@@ -119,19 +119,19 @@ impl Chain {
         self.blocks.iter().find_map(|(_num, block)| (block.hash() == block_hash).then_some(block))
     }
 
-    /// Return block execution outcome at the `block_number` or None if block is not known
-    pub fn block_execution_outcome_at_block(
+    /// Return execution outcome at the `block_number` or None if block is not known
+    pub fn execution_outcome_at_block(
         &self,
         block_number: BlockNumber,
-    ) -> Option<BlockExecutionOutcome> {
+    ) -> Option<ExecutionOutcome> {
         if self.tip().number == block_number {
-            return Some(self.block_execution_outcome.clone())
+            return Some(self.execution_outcome.clone())
         }
 
         if self.blocks.contains_key(&block_number) {
-            let mut block_execution_outcome = self.block_execution_outcome.clone();
-            block_execution_outcome.revert_to(block_number);
-            return Some(block_execution_outcome)
+            let mut execution_outcome = self.execution_outcome.clone();
+            execution_outcome.revert_to(block_number);
+            return Some(execution_outcome)
         }
         None
     }
@@ -140,24 +140,20 @@ impl Chain {
     /// 1. The blocks contained in the chain.
     /// 2. The execution outcome representing the final state.
     /// 3. The optional trie updates.
-    pub fn into_inner(self) -> (ChainBlocks<'static>, BlockExecutionOutcome, Option<TrieUpdates>) {
-        (
-            ChainBlocks { blocks: Cow::Owned(self.blocks) },
-            self.block_execution_outcome,
-            self.trie_updates,
-        )
+    pub fn into_inner(self) -> (ChainBlocks<'static>, ExecutionOutcome, Option<TrieUpdates>) {
+        (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.execution_outcome, self.trie_updates)
     }
 
     /// Destructure the chain into its inner components:
     /// 1. A reference to the blocks contained in the chain.
     /// 2. A reference to the execution outcome representing the final state.
-    pub const fn inner(&self) -> (ChainBlocks<'_>, &BlockExecutionOutcome) {
-        (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.block_execution_outcome)
+    pub const fn inner(&self) -> (ChainBlocks<'_>, &ExecutionOutcome) {
+        (ChainBlocks { blocks: Cow::Borrowed(&self.blocks) }, &self.execution_outcome)
     }
 
     /// Returns an iterator over all the receipts of the blocks in the chain.
     pub fn block_receipts_iter(&self) -> impl Iterator<Item = &Vec<Option<Receipt>>> + '_ {
-        self.block_execution_outcome.receipts().iter()
+        self.execution_outcome.receipts().iter()
     }
 
     /// Returns an iterator over all blocks in the chain with increasing block number.
@@ -216,7 +212,7 @@ impl Chain {
     /// Get all receipts for the given block.
     pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<&Receipt>> {
         let num = self.block_number(block_hash)?;
-        self.block_execution_outcome.receipts_by_block(num).iter().map(Option::as_ref).collect()
+        self.execution_outcome.receipts_by_block(num).iter().map(Option::as_ref).collect()
     }
 
     /// Get all receipts with attachment.
@@ -225,7 +221,7 @@ impl Chain {
     pub fn receipts_with_attachment(&self) -> Vec<BlockReceipts> {
         let mut receipt_attach = Vec::new();
         for ((block_num, block), receipts) in
-            self.blocks().iter().zip(self.block_execution_outcome.receipts().iter())
+            self.blocks().iter().zip(self.execution_outcome.receipts().iter())
         {
             let mut tx_receipts = Vec::new();
             for (tx, receipt) in block.body.iter().zip(receipts.iter()) {
@@ -245,10 +241,10 @@ impl Chain {
     pub fn append_block(
         &mut self,
         block: SealedBlockWithSenders,
-        block_execution_outcome: BlockExecutionOutcome,
+        execution_outcome: ExecutionOutcome,
     ) {
         self.blocks.insert(block.number, block);
-        self.block_execution_outcome.extend(block_execution_outcome);
+        self.execution_outcome.extend(execution_outcome);
         self.trie_updates.take(); // reset
     }
 
@@ -267,7 +263,7 @@ impl Chain {
 
         // Insert blocks from other chain
         self.blocks.extend(other.blocks);
-        self.block_execution_outcome.extend(other.block_execution_outcome);
+        self.execution_outcome.extend(other.execution_outcome);
         self.trie_updates.take(); // reset
 
         Ok(())
@@ -324,20 +320,20 @@ impl Chain {
         let split_at = block_number + 1;
         let higher_number_blocks = self.blocks.split_off(&split_at);
 
-        let block_execution_outcome = std::mem::take(&mut self.block_execution_outcome);
+        let execution_outcome = std::mem::take(&mut self.execution_outcome);
         let (canonical_block_exec_outcome, pending_block_exec_outcome) =
-            block_execution_outcome.split_at(split_at);
+            execution_outcome.split_at(split_at);
 
         // TODO: Currently, trie updates are reset on chain split.
         // Add tests ensuring that it is valid to leave updates in the pending chain.
         ChainSplit::Split {
             canonical: Self {
-                block_execution_outcome: canonical_block_exec_outcome.expect("split in range"),
+                execution_outcome: canonical_block_exec_outcome.expect("split in range"),
                 blocks: self.blocks,
                 trie_updates: None,
             },
             pending: Self {
-                block_execution_outcome: pending_block_exec_outcome,
+                execution_outcome: pending_block_exec_outcome,
                 blocks: higher_number_blocks,
                 trie_updates: None,
             },
@@ -529,7 +525,7 @@ mod tests {
 
     #[test]
     fn test_number_split() {
-        let block_execution_outcome1 = BlockExecutionOutcome::new(
+        let execution_outcome1 = ExecutionOutcome::new(
             BundleState::new(
                 vec![(
                     Address::new([2; 20]),
@@ -545,7 +541,7 @@ mod tests {
             vec![],
         );
 
-        let block_execution_outcome2 = BlockExecutionOutcome::new(
+        let execution_outcome2 = ExecutionOutcome::new(
             BundleState::new(
                 vec![(
                     Address::new([3; 20]),
@@ -573,37 +569,37 @@ mod tests {
         block2.set_hash(block2_hash);
         block2.senders.push(Address::new([4; 20]));
 
-        let mut block_state_extended = block_execution_outcome1;
-        block_state_extended.extend(block_execution_outcome2);
+        let mut block_state_extended = execution_outcome1;
+        block_state_extended.extend(execution_outcome2);
 
         let chain = Chain::new(vec![block1.clone(), block2.clone()], block_state_extended, None);
 
-        let (split1_block_execution_outcome, split2_block_execution_outcome) =
-            chain.block_execution_outcome.clone().split_at(2);
+        let (split1_execution_outcome, split2_execution_outcome) =
+            chain.execution_outcome.clone().split_at(2);
 
         let chain_split1 = Chain {
-            block_execution_outcome: split1_block_execution_outcome.unwrap(),
+            execution_outcome: split1_execution_outcome.unwrap(),
             blocks: BTreeMap::from([(1, block1.clone())]),
             trie_updates: None,
         };
 
         let chain_split2 = Chain {
-            block_execution_outcome: split2_block_execution_outcome,
+            execution_outcome: split2_execution_outcome,
             blocks: BTreeMap::from([(2, block2.clone())]),
             trie_updates: None,
         };
 
         // return tip state
         assert_eq!(
-            chain.block_execution_outcome_at_block(block2.number),
-            Some(chain.block_execution_outcome.clone())
+            chain.execution_outcome_at_block(block2.number),
+            Some(chain.execution_outcome.clone())
         );
         assert_eq!(
-            chain.block_execution_outcome_at_block(block1.number),
-            Some(chain_split1.block_execution_outcome.clone())
+            chain.execution_outcome_at_block(block1.number),
+            Some(chain_split1.execution_outcome.clone())
         );
         // state at unknown block
-        assert_eq!(chain.block_execution_outcome_at_block(100), None);
+        assert_eq!(chain.execution_outcome_at_block(100), None);
 
         // split in two
         assert_eq!(

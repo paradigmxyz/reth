@@ -18,7 +18,7 @@ use reth_primitives::{
     TryFromRecoveredTransaction,
 };
 use reth_provider::{
-    BlockExecutionOutcome, BlockReaderIdExt, CanonStateNotification, ChainSpecProvider,
+    ExecutionOutcome, BlockReaderIdExt, CanonStateNotification, ChainSpecProvider,
     ProviderError, StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
@@ -556,9 +556,9 @@ where
 
 /// Extracts all changed accounts from the `BundleState`
 fn changed_accounts_iter(
-    block_execution_outcome: &BlockExecutionOutcome,
+    execution_outcome: &ExecutionOutcome,
 ) -> impl Iterator<Item = ChangedAccount> + '_ {
-    block_execution_outcome
+    execution_outcome
         .accounts_iter()
         .filter_map(|(addr, acc)| acc.map(|acc| (addr, acc)))
         .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })

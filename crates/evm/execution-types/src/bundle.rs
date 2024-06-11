@@ -13,10 +13,10 @@ use std::collections::HashMap;
 
 /// Represents the outcome of block execution, including post-execution changes and reverts.
 ///
-/// The `BlockExecutionOutcome` structure aggregates the state changes over an arbitrary number of
+/// The `ExecutionOutcome` structure aggregates the state changes over an arbitrary number of
 /// blocks, capturing the resulting state, receipts, and requests following the execution.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
-pub struct BlockExecutionOutcome {
+pub struct ExecutionOutcome {
     /// Bundle state with reverts.
     pub bundle: BundleState,
     /// The collection of receipts.
@@ -46,10 +46,10 @@ pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 /// Type used to initialize revms reverts.
 pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
 
-impl BlockExecutionOutcome {
-    /// Creates a new `BlockExecutionOutcome`.
+impl ExecutionOutcome {
+    /// Creates a new `ExecutionOutcome`.
     ///
-    /// This constructor initializes a new `BlockExecutionOutcome` instance with the provided
+    /// This constructor initializes a new `ExecutionOutcome` instance with the provided
     /// bundle state, receipts, first block number, and EIP-7685 requests.
     pub const fn new(
         bundle: BundleState,
@@ -60,9 +60,9 @@ impl BlockExecutionOutcome {
         Self { bundle, receipts, first_block, requests }
     }
 
-    /// Creates a new `BlockExecutionOutcome` from initialization parameters.
+    /// Creates a new `ExecutionOutcome` from initialization parameters.
     ///
-    /// This constructor initializes a new `BlockExecutionOutcome` instance using detailed
+    /// This constructor initializes a new `ExecutionOutcome` instance using detailed
     /// initialization parameters.
     pub fn new_init(
         state_init: BundleStateInit,
@@ -144,7 +144,7 @@ impl BlockExecutionOutcome {
         self.bundle.bytecode(code_hash).map(Bytecode)
     }
 
-    /// Returns [`HashedPostState`] for this block execution outcome.
+    /// Returns [`HashedPostState`] for this execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
     pub fn hash_state_slow(&self) -> HashedPostState {
         HashedPostState::from_bundle_state(&self.bundle.state)

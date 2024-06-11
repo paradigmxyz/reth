@@ -1,7 +1,7 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, FullBlockExecutionDataProvider,
+    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, FullExecutionDataProvider,
     HeaderProvider, ReceiptProviderIdExt, RequestsProvider, StateProvider, StateProviderBox,
     StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
     WithdrawalsProvider,
@@ -661,7 +661,7 @@ impl StateProviderFactory for MockEthProvider {
 
     fn pending_with_provider<'a>(
         &'a self,
-        _bundle_state_data: Box<dyn FullBlockExecutionDataProvider + 'a>,
+        _bundle_state_data: Box<dyn FullExecutionDataProvider + 'a>,
     ) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }

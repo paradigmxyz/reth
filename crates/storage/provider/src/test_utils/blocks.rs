@@ -1,5 +1,5 @@
 //! Dummy blocks and data for tests
-use crate::{BlockExecutionOutcome, DatabaseProviderRW};
+use crate::{DatabaseProviderRW, ExecutionOutcome};
 use alloy_primitives::Log;
 use alloy_rlp::Decodable;
 use reth_db::tables;
@@ -68,7 +68,7 @@ pub struct BlockchainTestData {
     /// Genesis
     pub genesis: SealedBlock,
     /// Blocks with its execution result
-    pub blocks: Vec<(SealedBlockWithSenders, BlockExecutionOutcome)>,
+    pub blocks: Vec<(SealedBlockWithSenders, ExecutionOutcome)>,
 }
 
 impl BlockchainTestData {
@@ -114,8 +114,8 @@ pub fn genesis() -> SealedBlock {
     }
 }
 
-fn bundle_state_root(block_execution_outcome: &BlockExecutionOutcome) -> B256 {
-    state_root_unhashed(block_execution_outcome.bundle_accounts_iter().filter_map(
+fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
+    state_root_unhashed(execution_outcome.bundle_accounts_iter().filter_map(
         |(address, account)| {
             account.info.as_ref().map(|info| {
                 (
@@ -137,14 +137,14 @@ fn bundle_state_root(block_execution_outcome: &BlockExecutionOutcome) -> B256 {
 }
 
 /// Block one that points to genesis
-fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BlockExecutionOutcome) {
+fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
     // block changes
     let account1: Address = [0x60; 20].into();
     let account2: Address = [0x61; 20].into();
     let slot = U256::from(5);
     let info = AccountInfo { nonce: 1, balance: U256::from(10), ..Default::default() };
 
-    let block_execution_outcome = BlockExecutionOutcome::new(
+    let execution_outcome = ExecutionOutcome::new(
         BundleState::builder(number..=number)
             .state_present_account_info(account1, info.clone())
             .revert_account_info(number, account1, Some(None))
@@ -171,7 +171,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BlockExecutionOutcome
         Vec::new(),
     );
 
-    let state_root = bundle_state_root(&block_execution_outcome);
+    let state_root = bundle_state_root(&execution_outcome);
     assert_eq!(
         state_root,
         b256!("5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd")
@@ -185,23 +185,20 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BlockExecutionOutcome
     header.parent_hash = B256::ZERO;
     block.header = header.seal_slow();
 
-    (
-        SealedBlockWithSenders { block, senders: vec![Address::new([0x30; 20])] },
-        block_execution_outcome,
-    )
+    (SealedBlockWithSenders { block, senders: vec![Address::new([0x30; 20])] }, execution_outcome)
 }
 
 /// Block two that points to block 1
 fn block2(
     number: BlockNumber,
     parent_hash: B256,
-    prev_block_execution_outcome: &BlockExecutionOutcome,
-) -> (SealedBlockWithSenders, BlockExecutionOutcome) {
+    prev_execution_outcome: &ExecutionOutcome,
+) -> (SealedBlockWithSenders, ExecutionOutcome) {
     // block changes
     let account: Address = [0x60; 20].into();
     let slot = U256::from(5);
 
-    let block_execution_outcome = BlockExecutionOutcome::new(
+    let execution_outcome = ExecutionOutcome::new(
         BundleState::builder(number..=number)
             .state_present_account_info(
                 account,
@@ -234,8 +231,8 @@ fn block2(
         Vec::new(),
     );
 
-    let mut extended = prev_block_execution_outcome.clone();
-    extended.extend(block_execution_outcome.clone());
+    let mut extended = prev_execution_outcome.clone();
+    extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
     assert_eq!(
         state_root,
@@ -252,18 +249,15 @@ fn block2(
     header.parent_hash = parent_hash;
     block.header = header.seal_slow();
 
-    (
-        SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] },
-        block_execution_outcome,
-    )
+    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
 }
 
 /// Block three that points to block 2
 fn block3(
     number: BlockNumber,
     parent_hash: B256,
-    prev_block_execution_outcome: &BlockExecutionOutcome,
-) -> (SealedBlockWithSenders, BlockExecutionOutcome) {
+    prev_execution_outcome: &ExecutionOutcome,
+) -> (SealedBlockWithSenders, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -286,7 +280,7 @@ fn block3(
             .revert_account_info(number, address, Some(None))
             .revert_storage(number, address, Vec::new());
     }
-    let block_execution_outcome = BlockExecutionOutcome::new(
+    let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
         vec![vec![Some(Receipt {
             tx_type: TxType::Eip1559,
@@ -307,8 +301,8 @@ fn block3(
         Vec::new(),
     );
 
-    let mut extended = prev_block_execution_outcome.clone();
-    extended.extend(block_execution_outcome.clone());
+    let mut extended = prev_execution_outcome.clone();
+    extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
     let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
@@ -320,18 +314,15 @@ fn block3(
     header.parent_hash = parent_hash;
     block.header = header.seal_slow();
 
-    (
-        SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] },
-        block_execution_outcome,
-    )
+    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
 }
 
 /// Block four that points to block 3
 fn block4(
     number: BlockNumber,
     parent_hash: B256,
-    prev_block_execution_outcome: &BlockExecutionOutcome,
-) -> (SealedBlockWithSenders, BlockExecutionOutcome) {
+    prev_execution_outcome: &ExecutionOutcome,
+) -> (SealedBlockWithSenders, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -380,7 +371,7 @@ fn block4(
                 Vec::from_iter(slot_range.clone().map(|slot| (U256::from(slot), U256::from(slot)))),
             );
     }
-    let block_execution_outcome = BlockExecutionOutcome::new(
+    let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
         vec![vec![Some(Receipt {
             tx_type: TxType::Eip1559,
@@ -401,8 +392,8 @@ fn block4(
         Vec::new(),
     );
 
-    let mut extended = prev_block_execution_outcome.clone();
-    extended.extend(block_execution_outcome.clone());
+    let mut extended = prev_execution_outcome.clone();
+    extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
     let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
@@ -414,18 +405,15 @@ fn block4(
     header.parent_hash = parent_hash;
     block.header = header.seal_slow();
 
-    (
-        SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] },
-        block_execution_outcome,
-    )
+    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
 }
 
 /// Block five that points to block 4
 fn block5(
     number: BlockNumber,
     parent_hash: B256,
-    prev_block_execution_outcome: &BlockExecutionOutcome,
-) -> (SealedBlockWithSenders, BlockExecutionOutcome) {
+    prev_execution_outcome: &ExecutionOutcome,
+) -> (SealedBlockWithSenders, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -469,7 +457,7 @@ fn block5(
             bundle_state_builder.revert_address(number, address)
         };
     }
-    let block_execution_outcome = BlockExecutionOutcome::new(
+    let execution_outcome = ExecutionOutcome::new(
         bundle_state_builder.build(),
         vec![vec![Some(Receipt {
             tx_type: TxType::Eip1559,
@@ -490,8 +478,8 @@ fn block5(
         Vec::new(),
     );
 
-    let mut extended = prev_block_execution_outcome.clone();
-    extended.extend(block_execution_outcome.clone());
+    let mut extended = prev_execution_outcome.clone();
+    extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
     let mut block = SealedBlock::decode(&mut BLOCK_RLP.as_slice()).unwrap();
@@ -503,8 +491,5 @@ fn block5(
     header.parent_hash = parent_hash;
     block.header = header.seal_slow();
 
-    (
-        SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] },
-        block_execution_outcome,
-    )
+    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
 }
