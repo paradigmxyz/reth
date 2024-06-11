@@ -6978,6 +6978,8 @@ dependencies = [
 name = "reth-execution-types"
 version = "0.2.0-beta.9"
 dependencies = [
+ "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=cc68b93)",
+ "alloy-primitives",
  "reth-execution-errors",
  "reth-primitives",
  "reth-trie",
