@@ -8,10 +8,12 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use alloy_eips::BlockNumHash;
+use alloy_primitives::B256;
 use reth_consensus::ConsensusError;
-use reth_primitives::{revm_primitives::EVMError, BlockNumHash, B256};
 use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
+use revm_primitives::EVMError;
 use std::fmt::Display;
 use thiserror::Error;
 
