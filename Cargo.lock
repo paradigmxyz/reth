@@ -6543,6 +6543,7 @@ dependencies = [
  "reth-nippy-jar",
  "reth-primitives",
  "reth-prune-types",
+ "reth-stages-types",
  "reth-storage-errors",
  "reth-tracing",
  "reth-trie-types",
@@ -6577,6 +6578,7 @@ dependencies = [
  "reth-codecs",
  "reth-primitives",
  "reth-prune-types",
+ "reth-stages-types",
  "reth-storage-errors",
  "reth-trie-types",
  "serde",
@@ -6596,6 +6598,7 @@ dependencies = [
  "reth-etl",
  "reth-primitives",
  "reth-provider",
+ "reth-stages-types",
  "reth-trie",
  "serde",
  "serde_json",
@@ -6730,6 +6733,7 @@ dependencies = [
  "reth-provider",
  "reth-rpc",
  "reth-rpc-layer",
+ "reth-stages-types",
  "reth-tokio-util",
  "reth-tracing",
  "serde_json",
@@ -7383,6 +7387,7 @@ dependencies = [
  "reth-rpc-server-types",
  "reth-rpc-types",
  "reth-rpc-types-compat",
+ "reth-stages-types",
  "reth-storage-errors",
  "reth-tasks",
  "reth-tracing",
@@ -7648,6 +7653,7 @@ dependencies = [
  "reth-nippy-jar",
  "reth-primitives",
  "reth-prune-types",
+ "reth-stages-types",
  "reth-storage-api",
  "reth-storage-errors",
  "reth-testing-utils",
@@ -7999,6 +8005,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-prune",
+ "reth-stages-types",
  "reth-static-file",
  "reth-testing-utils",
  "reth-tokio-util",
@@ -8006,6 +8013,23 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "reth-stages-types"
+version = "0.2.0-beta.9"
+dependencies = [
+ "alloy-primitives",
+ "arbitrary",
+ "bytes",
+ "modular-bitfield",
+ "proptest",
+ "proptest-derive",
+ "rand 0.8.5",
+ "reth-codecs",
+ "reth-trie-types",
+ "serde",
+ "test-fuzz",
 ]
 
 [[package]]
@@ -8049,6 +8073,7 @@ dependencies = [
  "reth-execution-types",
  "reth-primitives",
  "reth-prune-types",
+ "reth-stages-types",
  "reth-storage-errors",
  "reth-trie",
  "revm",
@@ -8167,6 +8192,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
+ "reth-stages-types",
  "reth-storage-errors",
  "reth-trie-types",
  "revm",

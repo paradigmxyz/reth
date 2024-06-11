@@ -36,7 +36,7 @@ macro_rules! stage_test_suite {
                 let mut runner = $runner::default();
                 let input = reth_stages_api::ExecInput {
                     target: Some(target),
-                    checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(current_checkpoint)),
+                    checkpoint: Some(crate::StageCheckpoint::new(current_checkpoint)),
                 };
                 let seed = runner.seed_execution(input).expect("failed to seed");
                 let rx = runner.execute(input);
@@ -100,7 +100,7 @@ macro_rules! stage_test_suite {
                 let mut runner = $runner::default();
                 let execute_input = reth_stages_api::ExecInput {
                     target: Some(target),
-                    checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(current_checkpoint)),
+                    checkpoint: Some(crate::StageCheckpoint::new(current_checkpoint)),
                 };
                 let seed = runner.seed_execution(execute_input).expect("failed to seed");
 
@@ -127,7 +127,7 @@ macro_rules! stage_test_suite {
                 // Run stage unwind
                 let unwind_input = reth_stages_api::UnwindInput {
                     unwind_to: current_checkpoint,
-                    checkpoint: reth_primitives::stage::StageCheckpoint::new(target),
+                    checkpoint: crate::StageCheckpoint::new(target),
                     bad_block: None,
                 };
 
@@ -167,7 +167,7 @@ macro_rules! stage_test_suite_ext {
                 let mut runner = $runner::default();
                 let input = reth_stages_api::ExecInput {
                     target: Some(current_checkpoint),
-                    checkpoint: Some(reth_primitives::stage::StageCheckpoint::new(current_checkpoint)),
+                    checkpoint: Some(crate::StageCheckpoint::new(current_checkpoint)),
                 };
                 let seed = runner.seed_execution(input).expect("failed to seed");
 

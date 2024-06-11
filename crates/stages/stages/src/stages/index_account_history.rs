@@ -2,15 +2,14 @@ use super::{collect_history_indices, load_history_indices};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db::tables;
 use reth_db_api::{database::Database, models::ShardedKey, table::Decode, transaction::DbTxMut};
-use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
-    Address,
-};
+use reth_primitives::Address;
 use reth_provider::{
     DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
-use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_stages_api::{
+    ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
+};
 use std::fmt::Debug;
 use tracing::info;
 
