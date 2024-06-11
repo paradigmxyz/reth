@@ -1,4 +1,4 @@
-use crate::trie::StoredTrieMask;
+use crate::StoredTrieMask;
 use alloy_primitives::B256;
 use alloy_trie::BranchNodeCompact;
 use bytes::Buf;

@@ -34,7 +34,7 @@ impl FromReader for ReceiptFileClient {
     where
         B: AsyncReadExt + Unpin,
     {
-        let mut receipts = Receipts::new();
+        let mut receipts = Receipts::default();
 
         // use with_capacity to make sure the internal buffer contains the entire chunk
         let mut stream =

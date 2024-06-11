@@ -1,0 +1,33 @@
+[package]
+name = "reth-trie-types"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Commonly used types for trie usage in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-codecs.workspace = true
+
+alloy-primitives.workspace = true
+alloy-rlp = { workspace = true, features = ["arrayvec"] }
+alloy-trie = { workspace = true, features = ["serde"] }
+bytes.workspace = true
+derive_more.workspace = true
+serde.workspace = true
+
+nybbles = { workspace = true, features = ["serde", "rlp"] }
+
+[dev-dependencies]
+arbitrary = { workspace = true, features = ["derive"] }
+assert_matches.workspace = true
+proptest.workspace = true
+proptest-derive.workspace = true
+serde_json.workspace = true
+test-fuzz.workspace = true
+toml.workspace = true

@@ -72,21 +72,6 @@ pub struct Receipts {
 }
 
 impl Receipts {
-    /// Create a new `Receipts` instance with an empty vector.
-    pub const fn new() -> Self {
-        Self { receipt_vec: vec![] }
-    }
-
-    /// Create a new `Receipts` instance from an existing vector.
-    pub fn from_vec(vec: Vec<Vec<Option<Receipt>>>) -> Self {
-        Self { receipt_vec: vec }
-    }
-
-    /// Create a new `Receipts` instance from a single block receipt.
-    pub fn from_block_receipt(block_receipts: Vec<Receipt>) -> Self {
-        Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
-    }
-
     /// Returns the length of the `Receipts` vector.
     pub fn len(&self) -> usize {
         self.receipt_vec.len()
@@ -125,6 +110,18 @@ impl Receipts {
     }
 }
 
+impl From<Vec<Vec<Option<Receipt>>>> for Receipts {
+    fn from(receipt_vec: Vec<Vec<Option<Receipt>>>) -> Self {
+        Self { receipt_vec }
+    }
+}
+
+impl From<Vec<Receipt>> for Receipts {
+    fn from(block_receipts: Vec<Receipt>) -> Self {
+        Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
+    }
+}
+
 impl Deref for Receipts {
     type Target = Vec<Vec<Option<Receipt>>>;
 
@@ -150,7 +147,7 @@ impl IntoIterator for Receipts {
 
 impl FromIterator<Vec<Option<Receipt>>> for Receipts {
     fn from_iter<I: IntoIterator<Item = Vec<Option<Receipt>>>>(iter: I) -> Self {
-        Self::from_vec(iter.into_iter().collect())
+        iter.into_iter().collect::<Vec<_>>().into()
     }
 }
 

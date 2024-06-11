@@ -1,9 +1,7 @@
-use crate::{
-    trie::{hash_builder::HashBuilderState, StoredSubNode},
-    Address, BlockNumber, B256,
-};
+use crate::{Address, BlockNumber, B256};
 use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
+use reth_trie_types::{hash_builder::HashBuilderState, StoredSubNode};
 use std::ops::RangeInclusive;
 
 use super::StageId;

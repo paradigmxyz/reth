@@ -29,7 +29,6 @@ mod compression;
 pub mod constants;
 pub mod eip4844;
 mod error;
-mod exex;
 pub mod genesis;
 mod header;
 mod integer_list;
@@ -44,7 +43,6 @@ pub mod stage;
 pub use reth_static_file_types as static_file;
 mod storage;
 pub mod transaction;
-pub mod trie;
 mod withdrawal;
 pub use account::{Account, Bytecode};
 #[cfg(any(test, feature = "arbitrary"))]
@@ -65,7 +63,6 @@ pub use constants::{
     KECCAK_EMPTY, MAINNET_DEPOSIT_CONTRACT, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use error::{GotExpected, GotExpectedBoxed};
-pub use exex::FinishedExExHeight;
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeaderValidationError, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;

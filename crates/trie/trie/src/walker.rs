@@ -2,12 +2,10 @@ use crate::{
     prefix_set::PrefixSet,
     trie_cursor::{CursorSubNode, TrieCursor},
     updates::TrieUpdates,
+    BranchNodeCompact, Nibbles,
 };
 use reth_db::DatabaseError;
-use reth_primitives::{
-    trie::{BranchNodeCompact, Nibbles},
-    B256,
-};
+use reth_primitives::B256;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
 /// It allows moving through the trie in a depth-first manner, skipping certain branches
@@ -249,10 +247,10 @@ mod tests {
     use crate::{
         prefix_set::PrefixSetMut,
         trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
+        StorageTrieEntry, StoredBranchNode,
     };
     use reth_db::tables;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
-    use reth_primitives::trie::{StorageTrieEntry, StoredBranchNode};
     use reth_provider::test_utils::create_test_provider_factory;
 
     #[test]

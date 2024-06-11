@@ -4,14 +4,13 @@ use alloy_primitives::Log;
 use alloy_rlp::Decodable;
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
-
 use reth_primitives::{
     alloy_primitives, b256,
     hex_literal::hex,
     proofs::{state_root_unhashed, storage_root_unhashed},
     revm::compat::into_reth_acc,
-    Address, BlockNumber, Bytes, Header, Receipt, Receipts, Requests, SealedBlock,
-    SealedBlockWithSenders, TxType, Withdrawal, Withdrawals, B256, U256,
+    Address, BlockNumber, Bytes, Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders,
+    TxType, Withdrawal, Withdrawals, B256, U256,
 };
 use revm::{
     db::BundleState,
@@ -151,7 +150,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
             .revert_account_info(number, account2, Some(None))
             .state_storage(account1, HashMap::from([(slot, (U256::ZERO, U256::from(10)))]))
             .build(),
-        Receipts::from_vec(vec![vec![Some(Receipt {
+        vec![vec![Some(Receipt {
             tx_type: TxType::Eip2930,
             success: true,
             cumulative_gas_used: 300,
@@ -164,8 +163,10 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, BundleStateWithReceip
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
             deposit_receipt_version: None,
-        })]]),
+        })]]
+        .into(),
         number,
+        Vec::new(),
     );
 
     let state_root = bundle_state_root(&bundle);
@@ -209,7 +210,7 @@ fn block2(
             )
             .revert_storage(number, account, Vec::from([(slot, U256::from(10))]))
             .build(),
-        Receipts::from_vec(vec![vec![Some(Receipt {
+        vec![vec![Some(Receipt {
             tx_type: TxType::Eip1559,
             success: false,
             cumulative_gas_used: 400,
@@ -222,8 +223,10 @@ fn block2(
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
             deposit_receipt_version: None,
-        })]]),
+        })]]
+        .into(),
         number,
+        Vec::new(),
     );
 
     let mut extended = prev_state.clone();
@@ -277,7 +280,7 @@ fn block3(
     }
     let bundle = BundleStateWithReceipts::new(
         bundle_state_builder.build(),
-        Receipts::from_vec(vec![vec![Some(Receipt {
+        vec![vec![Some(Receipt {
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
@@ -290,8 +293,10 @@ fn block3(
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
             deposit_receipt_version: None,
-        })]]),
+        })]]
+        .into(),
         number,
+        Vec::new(),
     );
 
     let mut extended = prev_state.clone();
@@ -366,7 +371,7 @@ fn block4(
     }
     let bundle = BundleStateWithReceipts::new(
         bundle_state_builder.build(),
-        Receipts::from_vec(vec![vec![Some(Receipt {
+        vec![vec![Some(Receipt {
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
@@ -379,8 +384,10 @@ fn block4(
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
             deposit_receipt_version: None,
-        })]]),
+        })]]
+        .into(),
         number,
+        Vec::new(),
     );
 
     let mut extended = prev_state.clone();
@@ -450,7 +457,7 @@ fn block5(
     }
     let bundle = BundleStateWithReceipts::new(
         bundle_state_builder.build(),
-        Receipts::from_vec(vec![vec![Some(Receipt {
+        vec![vec![Some(Receipt {
             tx_type: TxType::Eip1559,
             success: true,
             cumulative_gas_used: 400,
@@ -463,8 +470,10 @@ fn block5(
             deposit_nonce: None,
             #[cfg(feature = "optimism")]
             deposit_receipt_version: None,
-        })]]),
+        })]]
+        .into(),
         number,
+        Vec::new(),
     );
 
     let mut extended = prev_state.clone();

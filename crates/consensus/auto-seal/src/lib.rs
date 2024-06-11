@@ -23,8 +23,8 @@ use reth_primitives::{
     constants::{EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
     proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainSpec, Header, Receipts, Requests, SealedBlock, SealedHeader, TransactionSigned,
-    Withdrawals, B256, U256,
+    ChainSpec, Header, Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256,
+    U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BundleStateWithReceipts, StateProviderFactory, StateRootProvider,
@@ -389,12 +389,13 @@ impl StorageInner {
         );
 
         // execute the block
-        let BlockExecutionOutput { state, receipts, .. } =
+        let BlockExecutionOutput { state, receipts, requests: block_execution_requests, .. } =
             executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
         let bundle_state = BundleStateWithReceipts::new(
             state,
-            Receipts::from_block_receipt(receipts),
+            receipts.into(),
             block.number,
+            vec![block_execution_requests.into()],
         );
 
         // todo(onbjerg): we should not pass requests around as this is building a block, which

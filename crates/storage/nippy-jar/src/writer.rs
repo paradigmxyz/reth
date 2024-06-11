@@ -39,6 +39,8 @@ pub struct NippyJarWriter<H: NippyJarHeader = ()> {
     offsets: Vec<u64>,
     /// Column where writer is going to write next.
     column: usize,
+    /// Whether the writer has changed data that needs to be committed.
+    dirty: bool,
 }
 
 impl<H: NippyJarHeader> NippyJarWriter<H> {
@@ -64,6 +66,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
             uncompressed_row_size: 0,
             offsets: Vec::with_capacity(1_000_000),
             column: 0,
+            dirty: false,
         };
 
         // If we are opening a previously created jar, we need to check its consistency, and make
@@ -83,9 +86,18 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         &self.jar.user_header
     }
 
-    /// Returns a mutable reference to `H` of [`NippyJar`]
+    /// Returns a mutable reference to `H` of [`NippyJar`].
+    ///
+    /// Since there's no way of knowing if `H` has been actually changed, this sets `self.dirty` to
+    /// true.
     pub fn user_header_mut(&mut self) -> &mut H {
+        self.dirty = true;
         &mut self.jar.user_header
+    }
+
+    /// Returns whether there are changes that need to be committed.
+    pub const fn is_dirty(&self) -> bool {
+        self.dirty
     }
 
     /// Gets total writer rows in jar.
@@ -264,6 +276,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         &mut self,
         column: Option<ColumnResult<impl AsRef<[u8]>>>,
     ) -> Result<(), NippyJarError> {
+        self.dirty = true;
+
         match column {
             Some(Ok(value)) => {
                 if self.offsets.is_empty() {
@@ -313,6 +327,8 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
     /// Prunes rows from data and offsets file and updates its configuration on disk
     pub fn prune_rows(&mut self, num_rows: usize) -> Result<(), NippyJarError> {
+        self.dirty = true;
+
         self.offsets_file.flush()?;
         self.data_file.flush()?;
 
@@ -412,6 +428,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         // Flushes `max_row_size` and total `rows` to disk.
         self.jar.freeze_config()?;
+        self.dirty = false;
 
         Ok(())
     }
@@ -424,6 +441,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
         // Flushes `max_row_size` and total `rows` to disk.
         self.jar.freeze_config()?;
+        self.dirty = false;
 
         Ok(())
     }

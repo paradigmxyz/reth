@@ -5,8 +5,9 @@ use crate::utils::{
 };
 use reth_rpc_builder::{
     error::{RpcError, ServerKind, WsHttpSamePortError},
-    RethRpcModule, RpcServerConfig, TransportRpcModuleConfig,
+    RpcServerConfig, TransportRpcModuleConfig,
 };
+use reth_rpc_server_types::RethRpcModule;
 use std::io;
 
 fn is_addr_in_use_kind(err: &RpcError, kind: ServerKind) -> bool {
