@@ -12,9 +12,6 @@ use std::sync::{atomic::AtomicUsize, Arc};
 /// Error type when interacting with the Sequencer
 #[derive(Debug, thiserror::Error)]
 pub enum SequencerRpcError {
-    /// Wrapper around a [`hyper::Error`].
-    #[error(transparent)]
-    HyperError(#[from] hyper::Error),
     /// Wrapper around an [`reqwest::Error`].
     #[error(transparent)]
     HttpError(#[from] reqwest::Error),
