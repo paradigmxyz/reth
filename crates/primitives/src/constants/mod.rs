@@ -2,7 +2,7 @@
 
 use crate::{
     chain::DepositContract,
-    revm_primitives::{address, b256},
+    revm_primitives::{Address, address, b256},
     B256, U256,
 };
 use std::time::Duration;

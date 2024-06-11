@@ -236,7 +236,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             Some(TxType::Deposit) => {
                 Ok(Self::Deposit(TxDeposit {
                     source_hash: match tx.other["sourceHash"] {
-                        String(source_hash) => source_hash.parse().ok_or(ConversionError::MissingSourceHash),
+                        serde_json::Value::String(source_hash) => source_hash.parse().ok_or(ConversionError::MissingSourceHash),
                         _ => Err(ConversionError::MissingSourceHash),
                     },
                     from: tx.from,
@@ -245,7 +245,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                         None => TxKind::Create,
                     },
                     mint: match tx.other["mint"] {
-                        String(mint) => mint.parse::<u128>().ok().and_then(|num| if num == 0 { None } else { Some(num) }),
+                        serde_json::Value::String(mint) => mint.parse::<u128>().ok().and_then(|num| if num == 0 { None } else { Some(num) }),
                         _ => Err(ConversionError::MissingSourceHash),
                     },
                     value: tx.value,
