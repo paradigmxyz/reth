@@ -298,11 +298,22 @@ where
                 break
             }
         }
+
+        // prepare execution output for writing
         let time = Instant::now();
         let BundleStateWithReceipts { bundle, receipts, requests, first_block } =
             executor.finalize();
         let state = BundleStateWithReceipts::new(bundle, receipts, first_block, requests);
         let write_preparation_duration = time.elapsed();
+
+        // log the gas per second for the range we just executed
+        debug!(
+            target: "sync::stages::execution",
+            start = start_block,
+            end = stage_progress,
+            throughput = format_gas_throughput(cumulative_gas, execution_duration),
+            "Finished executing block range"
+        );
 
         // Prepare the input for post execute commit hook, where an `ExExNotification` will be sent.
         //
@@ -597,6 +608,23 @@ impl From<ExecutionConfig> for ExecutionStageThresholds {
     }
 }
 
+/// Returns a formatted gas throughput log, showing either:
+///  * "Kgas/s", or 1,000 gas per second
+///  * "Mgas/s", or 1,000,000 gas per second
+///  * "Ggas/s", or 1,000,000,000 gas per second
+///
+/// Depending on the magnitude of the gas throughput.
+pub fn format_gas_throughput(gas: u64, execution_duration: Duration) -> String {
+    let gas_per_second = gas as f64 / execution_duration.as_secs_f64();
+    if gas_per_second < 1_000_000.0 {
+        format!("{:.} Kgas/second", gas_per_second / 1_000.0)
+    } else if gas_per_second < 1_000_000_000.0 {
+        format!("{:.} Mgas/second", gas_per_second / 1_000_000.0)
+    } else {
+        format!("{:.} Ggas/second", gas_per_second / 1_000_000_000.0)
+    }
+}
+
 /// Returns a `StaticFileProviderRWRefMut` static file producer after performing a consistency
 /// check.
 ///
@@ -711,6 +739,22 @@ mod tests {
             PruneModes::none(),
             ExExManagerHandle::empty(),
         )
+    }
+
+    #[test]
+    fn test_gas_throughput_fmt() {
+        let duration = Duration::from_secs(1);
+        let gas = 100_000;
+        let throughput = format_gas_throughput(gas, duration);
+        assert_eq!(throughput, "100 Kgas/second");
+
+        let gas = 100_000_000;
+        let throughput = format_gas_throughput(gas, duration);
+        assert_eq!(throughput, "100 Mgas/second");
+
+        let gas = 100_000_000_000;
+        let throughput = format_gas_throughput(gas, duration);
+        assert_eq!(throughput, "100 Ggas/second");
     }
 
     #[test]
