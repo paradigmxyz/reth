@@ -5,7 +5,7 @@ use crate::{
     Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844,
     TxLegacy, TxType,
 };
-use alloy_primitives::TxKind;
+use alloy_primitives::{TxKind, B256};
 use alloy_rlp::Error as RlpError;
 
 #[cfg(feature = "optimism")]
