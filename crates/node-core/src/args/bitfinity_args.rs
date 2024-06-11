@@ -70,4 +70,8 @@ pub struct BitfinityResetEvmStateArgs {
     /// This is usually the URL of the Bitfinity EVM block extractor.
     #[arg(long)]
     pub evm_datasource_url: String,
+
+    /// Number of parallel requests to send data to the IC.
+    #[arg(long, default_value = "4")]
+    pub parallel_requests: usize,
 }
