@@ -102,7 +102,7 @@ impl<SP: StateProvider, BSDP: BundleStateDataProvider> StateProvider
         self.state_provider.bytecode_by_hash(code_hash)
     }
 
-    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof<Account>> {
+    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
     }
 }

@@ -89,7 +89,7 @@ impl StateProvider for StateProviderTest {
         Ok(self.contracts.get(&code_hash).cloned())
     }
 
-    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof<Account>> {
+    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
         unimplemented!("proof generation is not supported")
     }
 }

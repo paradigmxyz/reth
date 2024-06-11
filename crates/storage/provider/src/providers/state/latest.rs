@@ -111,7 +111,7 @@ impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
         self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 
-    fn proof(&self, address: Address, slots: &[B256]) -> ProviderResult<AccountProof<Account>> {
+    fn proof(&self, address: Address, slots: &[B256]) -> ProviderResult<AccountProof> {
         Ok(Proof::new(self.tx)
             .account_proof(address, slots)
             .map_err(Into::<reth_db::DatabaseError>::into)?)

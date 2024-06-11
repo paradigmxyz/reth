@@ -561,7 +561,7 @@ impl StateProvider for MockEthProvider {
         }))
     }
 
-    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof<Account>> {
+    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
         Ok(AccountProof::new(address))
     }
 }

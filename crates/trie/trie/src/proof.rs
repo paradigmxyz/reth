@@ -10,7 +10,7 @@ use alloy_rlp::{BufMut, Encodable};
 use reth_db::tables;
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{StateRootError, StorageRootError};
-use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Account, Address, B256};
+use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, B256};
 use reth_trie_common::{proof::ProofRetainer, AccountProof, StorageProof, TrieAccount};
 /// A struct for generating merkle proofs.
 ///
@@ -42,7 +42,7 @@ where
         &self,
         address: Address,
         slots: &[B256],
-    ) -> Result<AccountProof<Account>, StateRootError> {
+    ) -> Result<AccountProof, StateRootError> {
         let target_hashed_address = keccak256(address);
         let target_nibbles = Nibbles::unpack(target_hashed_address);
         let mut account_proof = AccountProof::new(address);

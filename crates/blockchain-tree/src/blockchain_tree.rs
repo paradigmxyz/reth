@@ -1393,8 +1393,8 @@ mod tests {
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec},
         ProviderFactory,
     };
-    use reth_trie::{root::state_root_unhashed, StateRoot};
     use reth_stages_api::StageCheckpoint;
+    use reth_trie::{root::state_root_unhashed, StateRoot};
     use std::collections::HashMap;
 
     fn setup_externals(

@@ -8045,7 +8045,7 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
- "reth-trie-types",
+ "reth-trie-common",
  "serde",
  "test-fuzz",
 ]
@@ -8226,8 +8226,8 @@ dependencies = [
 name = "reth-trie-common"
 version = "0.2.0-beta.9"
 dependencies = [
- "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=cc68b93)",
- "alloy-genesis 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=cc68b93)",
+ "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=14ed25d)",
+ "alloy-genesis 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=14ed25d)",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
@@ -8241,6 +8241,7 @@ dependencies = [
  "proptest-derive",
  "reth-codecs",
  "reth-primitives-traits",
+ "revm-primitives",
  "serde",
  "serde_json",
  "test-fuzz",

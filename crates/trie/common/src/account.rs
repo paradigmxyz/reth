@@ -5,6 +5,7 @@ use alloy_primitives::{keccak256, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_primitives_traits::Account;
+use revm_primitives::AccountInfo;
 
 /// An Ethereum account as represented in the trie.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
@@ -49,13 +50,24 @@ impl From<GenesisAccount> for TrieAccount {
     }
 }
 
-impl<A: Account> From<(A, B256)> for TrieAccount {
-    fn from((account, storage_root): (A, B256)) -> Self {
+impl From<(Account, B256)> for TrieAccount {
+    fn from((account, storage_root): (Account, B256)) -> Self {
         Self {
-            nonce: account.nonce(),
-            balance: account.balance(),
+            nonce: account.nonce,
+            balance: account.balance,
             storage_root,
-            code_hash: account.bytecode_hash().unwrap_or(KECCAK_EMPTY),
+            code_hash: account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+        }
+    }
+}
+
+impl From<(AccountInfo, B256)> for TrieAccount {
+    fn from((account, storage_root): (AccountInfo, B256)) -> Self {
+        Self {
+            nonce: account.nonce,
+            balance: account.balance,
+            storage_root,
+            code_hash: account.code_hash,
         }
     }
 }
