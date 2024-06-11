@@ -160,8 +160,7 @@ use crate::{
     metrics::RpcRequestMetrics,
 };
 use error::{ConflictingModules, RpcError, ServerKind};
-use hyper::{header::AUTHORIZATION, HeaderMap};
-pub use jsonrpsee::server::ServerBuilder;
+use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
     server::{AlreadyStoppedError, IdProvider, RpcServiceBuilder, Server, ServerHandle},
@@ -170,9 +169,6 @@ use jsonrpsee::{
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
 use reth_ipc::server::IpcServer;
-pub use reth_ipc::server::{
-    Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
-};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
@@ -204,14 +200,16 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-pub use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
 
-pub use crate::eth::{EthConfig, EthHandlers};
-
 // re-export for convenience
+pub use jsonrpsee::server::ServerBuilder;
+pub use reth_ipc::server::{
+    Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
+};
 pub use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
+pub use tower::layer::util::{Identity, Stack};
 
 /// Auth server utilities.
 pub mod auth;
@@ -227,6 +225,7 @@ pub mod error;
 
 /// Eth utils
 mod eth;
+pub use eth::{EthConfig, EthHandlers};
 
 // Rpc server metrics
 mod metrics;
@@ -1959,6 +1958,7 @@ impl RpcServerHandle {
 
         client.expect("failed to create http client").into()
     }
+
     /// Returns a ws client connected to the server.
     pub async fn ws_client(&self) -> Option<jsonrpsee::ws_client::WsClient> {
         let url = self.ws_url()?;

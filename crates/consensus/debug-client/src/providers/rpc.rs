@@ -3,6 +3,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_provider::{Provider, ProviderBuilder};
 use futures::StreamExt;
 use reth_node_core::rpc::types::RichBlock;
+use reth_rpc_types::BlockTransactionsKind;
 use tokio::sync::mpsc::Sender;
 
 /// Block provider that fetches new blocks from an RPC endpoint using a websocket connection.
@@ -32,7 +33,7 @@ impl BlockProvider for RpcBlockProvider {
 
         while let Some(block) = stream.next().await {
             let full_block = ws_provider
-                .get_block_by_hash(block.header.hash.unwrap(), true)
+                .get_block_by_hash(block.header.hash.unwrap(), BlockTransactionsKind::Full)
                 .await
                 .expect("failed to get block")
                 .expect("block not found");
