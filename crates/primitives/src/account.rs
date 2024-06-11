@@ -1,6 +1,4 @@
-use crate::{
-    revm_primitives::{Bytecode as RevmBytecode, Bytes},
-};
+use crate::revm_primitives::{Bytecode as RevmBytecode, Bytes};
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use reth_codecs::Compact;
@@ -92,8 +90,8 @@ impl Compact for Bytecode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{hex_literal::hex, KECCAK_EMPTY, U256, B256};
-    use revm_primitives::{LegacyAnalyzedBytecode};
+    use crate::{hex_literal::hex, B256, KECCAK_EMPTY, U256};
+    use revm_primitives::LegacyAnalyzedBytecode;
 
     #[test]
     fn test_account() {
