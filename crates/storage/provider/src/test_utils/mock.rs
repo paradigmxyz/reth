@@ -490,6 +490,13 @@ impl BlockReader for MockEthProvider {
     ) -> ProviderResult<Vec<BlockWithSenders>> {
         Ok(vec![])
     }
+
+    fn sealed_block_with_senders_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+        Ok(vec![])
+    }
 }
 
 impl BlockReaderIdExt for MockEthProvider {
