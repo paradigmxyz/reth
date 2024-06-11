@@ -17,7 +17,7 @@ pub struct BenchmarkArgs {
 
     /// Path to a JWT secret to use for the authenticated engine-API RPC server.
     ///
-    /// This will perform JWT authentication for all requests to the other EL.
+    /// This will perform JWT authentication for all requests to the given engine RPC url.
     ///
     /// If no path is provided, a secret will be generated and stored in the datadir under
     /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
