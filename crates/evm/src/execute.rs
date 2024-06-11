@@ -3,8 +3,8 @@
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Request, U256};
 use reth_prune_types::PruneModes;
-use revm::db::BundleState;
-use revm_primitives::db::Database;
+use revm::{db::BundleState, Context, DatabaseCommit, Evm};
+use revm_primitives::{db::Database, EVMError, ResultAndState};
 
 pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_storage_errors::provider::ProviderError;
@@ -14,27 +14,53 @@ pub use reth_storage_errors::provider::ProviderError;
 ///
 /// The executor can also commit the state changes to the database.
 pub trait EvmExecutor<DB> {
-    /// The input type for the executor.
-    type Input;
-    /// The configuration for the evm executor.
-    type Config;
+    /// The environment for the executor.
+    type Env;
     /// The output produced by the executor.
     type Output;
+    /// The error produced by the executor.
+    type Error;
 
-    /// Executes the input and returns the output without committing the state.
-    fn execute(&mut self, input: Self::Input) -> Self::Output;
+    /// Runs the executor with the current env.
+    fn execute(&mut self) -> Result<Self::Output, Self::Error>;
 
     /// Commit the state changes to the database.
     fn commit(&mut self, output: Self::Output);
 
-    /// Execute the input and commit the state changes to the database.
-    fn execute_and_commit(&mut self, input: Self::Input) {
-        let output = self.execute(input);
-        self.commit(output);
+    /// Run the executor and commit the state changes to the database.
+    fn execute_and_commit(&mut self) -> Result<Self::Output, Self::Error>;
+
+    /// Returns the current env of the executor.
+    fn env(&self) -> &Self::Env;
+}
+
+/// An EVM executor that uses the [`Evm`] struct to execute the current Env.
+impl<'a, DB, I> EvmExecutor<DB> for Evm<'a, I, DB>
+where
+    DB: Database + DatabaseCommit,
+{
+    type Env = Context<I, DB>;
+
+    type Error = EVMError<DB::Error>;
+    type Output = ResultAndState;
+
+    fn execute(&mut self) -> Result<Self::Output, Self::Error> {
+        self.transact()
     }
 
-    /// Returns the current config of the executor.
-    fn config(&self) -> Self::Config;
+    fn commit(&mut self, output: Self::Output) {
+        self.context.evm.db.commit(output.state);
+    }
+
+    fn execute_and_commit(&mut self) -> Result<Self::Output, Self::Error> {
+        let output = self.execute()?;
+        self.commit(output.clone());
+        Ok(output)
+    }
+
+    fn env(&self) -> &Self::Env {
+        &self.context
+    }
 }
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output

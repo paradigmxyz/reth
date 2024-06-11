@@ -12,7 +12,7 @@ use execute::EvmExecutor;
 use reth_primitives::{
     revm::env::fill_block_env, Address, ChainSpec, Header, TransactionSigned, U256,
 };
-use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
+use revm::{inspector_handle_register, Database, DatabaseCommit, Evm, EvmBuilder, GetInspector};
 use revm_primitives::{
     BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv,
 };
@@ -126,7 +126,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 }
 
 /// Trait for managing the EVM context.
-pub trait EvmContext<DB: Database> {
+pub trait EvmContext<EXT, DB: Database> {
     /// The executor produced with the context set.
     type Executor: EvmExecutor<DB>;
 
@@ -156,10 +156,51 @@ pub trait EvmContext<DB: Database> {
 
     /// Sets the inspector for the EVM instance.
     #[must_use]
-    fn with_inspector<I>(self, inspector: I) -> Self
-    where
-        I: GetInspector<DB>;
+    fn with_inspector(self, inspector: EXT) -> Self;
 
     /// Returns the EVM executor.
     fn executor(self) -> Self::Executor;
+}
+
+/// A context for configuring a Revm EVM instance.
+#[allow(missing_debug_implementations)]
+pub struct RevmContext<'a, Stage, EXT, DB: Database>(EvmBuilder<'a, Stage, EXT, DB>);
+
+impl<'a, Stage, EXT, DB> EvmContext<EXT, DB> for RevmContext<'a, Stage, EXT, DB>
+where
+    DB: Database + DatabaseCommit + 'a,
+{
+    type Executor = Evm<'a, EXT, DB>;
+
+    fn with_db(self, db: DB) -> Self {
+        Self(self.0.modify_db(|old| *old = db))
+    }
+
+    fn with_env(self, env: Env) -> Self {
+        Self(self.0.modify_env(|old| *old = env.into()))
+    }
+
+    fn with_cfg_env(self, cfg: CfgEnv) -> Self {
+        Self(self.0.modify_cfg_env(|old| *old = cfg))
+    }
+
+    fn with_block_env(self, block: BlockEnv) -> Self {
+        Self(self.0.modify_block_env(|old| *old = block))
+    }
+
+    fn with_tx_env(self, tx: TxEnv) -> Self {
+        Self(self.0.modify_tx_env(|old| *old = tx))
+    }
+
+    fn with_spec_id(self, spec_id: SpecId) -> Self {
+        Self(self.0.with_spec_id(spec_id))
+    }
+
+    fn with_inspector(self, inspector: EXT) -> Self {
+        Self(self.0.modify_external_context(|old| *old = inspector))
+    }
+
+    fn executor(self) -> Self::Executor {
+        self.0.build()
+    }
 }
