@@ -12,6 +12,7 @@ use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
 use std::marker::PhantomData;
+use reth_payload_primitives::PayloadTypes;
 
 /// The type that configures the essential types of an ethereum like node.
 ///
@@ -23,7 +24,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives: NodePrimitives;
     /// The node's engine types, defining the interaction with the consensus engine.
-    type Engine: EngineTypes;
+    type Engine: EngineTypes + PayloadTypes;
 }
 
 /// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful components to the
