@@ -16,19 +16,15 @@ use reth_consensus::ConsensusError;
 use reth_primitives::{revm_primitives::EVMError, BlockNumHash, B256};
 use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
-use thiserror_no_std::Error;
 
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::String};
-
-#[cfg(feature = "std")]
-use std::boxed::Box;
 
 pub mod trie;
 pub use trie::{StateRootError, StorageRootError};
 
 /// Transaction validation errors
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror_no_std::Error, Debug, Clone, PartialEq, Eq)]
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
     #[error("EVM reported invalid transaction ({hash}): {error}")]
@@ -108,7 +104,7 @@ pub enum BlockValidationError {
 }
 
 /// `BlockExecutor` Errors
-#[derive(Error, Debug)]
+#[derive(thiserror_no_std::Error, Debug)]
 pub enum BlockExecutionError {
     /// Validation error, transparently wrapping `BlockValidationError`
     #[error(transparent)]
@@ -160,8 +156,8 @@ impl BlockExecutionError {
         Self::Other(Box::new(error))
     }
 
-    #[cfg(feature = "std")]
     /// Create a new [`BlockExecutionError::Other`] from a given message.
+    #[cfg(feature = "std")]
     pub fn msg(msg: impl std::fmt::Display) -> Self {
         Self::Other(msg.to_string().into())
     }
