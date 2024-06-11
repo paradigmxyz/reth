@@ -31,7 +31,7 @@ async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Res
                     chain.first().number.checked_sub(1).ok_or_eyre("block number underflow")?,
                     database_provider.static_file_provider().clone(),
                 ),
-                chain.state(),
+                chain.execution_outcome(),
             );
             let db = StateProviderDatabase::new(&provider);
 
@@ -53,9 +53,17 @@ async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Res
                     acc
                 });
 
+            // Construct transactions to check the decimals of ERC20 contracts and balances of
+            //addresses that had balance changes
             let txs = erc20_contracts_and_addresses.into_iter().map(|(contract, addresses)| {
                 (
                     contract,
+                    Transaction::Legacy(TxLegacy {
+                        gas_limit: 50_000_000,
+                        to: TxKind::Call(contract),
+                        input: ERC20Calls::decimals(ERC20::decimalsCall {}).abi_encode().into(),
+                        ..Default::default()
+                    }),
                     addresses.into_iter().map(move |address| {
                         (
                             address,
@@ -74,12 +82,22 @@ async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Res
                 )
             });
 
-            for (contract, balance_txs) in txs {
+            for (contract, decimals_tx, balance_txs) in txs {
+                fill_tx_env(evm.tx_mut(), &decimals_tx, Address::ZERO);
+                let result = evm.transact()?.result;
+                let output = result.output().ok_or_eyre("no output for decimals tx")?;
+                let decimals = U256::try_from_be_slice(output);
+
                 for (address, balance_tx) in balance_txs {
                     fill_tx_env(evm.tx_mut(), &balance_tx, Address::ZERO);
                     let result = evm.transact()?.result;
                     let output = result.output().ok_or_eyre("no output for balance tx")?;
-                    if let Some(balance) = U256::try_from_be_slice(output) {
+                    let balance = U256::try_from_be_slice(output);
+
+                    if let Some((balance, decimals)) = balance.zip(decimals) {
+                        let divisor = U256::from(10).pow(decimals);
+                        let (balance, rem) = balance.div_rem(divisor);
+                        let balance = f64::from(balance) + f64::from(rem) / f64::from(divisor);
                         info!(?contract, ?address, %balance, "Balance updated");
                     } else {
                         info!(
