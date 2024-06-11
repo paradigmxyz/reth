@@ -49,6 +49,7 @@ plain_hasher = "0.2"
 [features]
 test-utils = ["dep:plain_hasher", "dep:hash-db", "arbitrary"]
 arbitrary = [
+    "alloy-trie/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",
