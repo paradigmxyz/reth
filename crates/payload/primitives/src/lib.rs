@@ -22,6 +22,17 @@ pub use payload::PayloadOrAttributes;
 use reth_primitives::ChainSpec;
 use std::fmt::Debug;
 
+/// The types that are used by the engine API.
+pub trait PayloadTypes: Send + Sync + Unpin {
+    /// The RPC payload attributes type the CL node emits via the engine API.
+    type PayloadAttributes: PayloadAttributes + Unpin;
+
+    /// The payload attributes type that contains information about a running payload job.
+    type PayloadBuilderAttributes: PayloadBuilderAttributes<RpcPayloadAttributes = Self::PayloadAttributes>
+        + Clone
+        + Unpin;
+}
+
 /// Validates the timestamp depending on the version called:
 ///
 /// * If V2, this ensures that the payload timestamp is pre-Cancun.
