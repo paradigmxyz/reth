@@ -8,7 +8,6 @@ use reth_db_api::{
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::PayloadTypes;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
@@ -24,7 +23,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives: NodePrimitives;
     /// The node's engine types, defining the interaction with the consensus engine.
-    type Engine: EngineTypes + PayloadTypes;
+    type Engine: EngineTypes;
 }
 
 /// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful components to the
