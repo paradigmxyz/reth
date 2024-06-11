@@ -16,7 +16,7 @@ reth-consensus.workspace = true
 reth-primitives.workspace = true
 reth-storage-errors.workspace = true
 reth-prune-types.workspace = true
-thiserror-no-std = { workspace = true, default-features = false }
+thiserror-no-std.workspace = true
 
 [features]
 default = ["std"]
