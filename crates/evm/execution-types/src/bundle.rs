@@ -324,6 +324,10 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: Some(18),
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: Some(34),
             })]],
         };
 
@@ -360,7 +364,7 @@ mod tests {
             bundle: bundle.clone(),
             receipts: receipts.clone(),
             requests: requests.clone(),
-            first_block: first_block.clone(),
+            first_block,
         };
 
         // Assert that creating a new BundleStateWithReceipts using the constructor matches exec_res
@@ -406,6 +410,10 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: Some(18),
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: Some(34),
             })]],
         };
 
@@ -440,6 +448,10 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: Some(18),
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: Some(34),
             })]],
         };
 
@@ -471,6 +483,10 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: Some(18),
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: Some(34),
             })]],
         };
 
@@ -487,7 +503,7 @@ mod tests {
         };
 
         // Get receipts for block number 123 and convert the result into a vector
-        let receipts_by_block: Vec<_> = exec_res.receipts_by_block(123).into_iter().collect();
+        let receipts_by_block: Vec<_> = exec_res.receipts_by_block(123).iter().collect();
 
         // Assert that the receipts for block number 123 match the expected receipts
         assert_eq!(
@@ -497,6 +513,10 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: Some(18),
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: Some(34),
             })]
         );
     }
@@ -510,6 +530,10 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: Some(18),
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: Some(34),
             })]],
         };
 
