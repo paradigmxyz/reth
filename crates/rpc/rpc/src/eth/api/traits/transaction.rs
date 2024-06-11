@@ -20,10 +20,7 @@ use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 
 use crate::eth::{
-    api::{
-        EthApiSpec, EthCall, EthState, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt,
-        SpawnBlocking,
-    },
+    api::{EthApiSpec, LoadBlock, LoadBlockExt, LoadFee, LoadReceipt, LoadStateExt, SpawnBlocking},
     cache::EthStateCache,
     error::{EthApiError, EthResult, SignError},
     signer::EthSigner,
@@ -31,7 +28,9 @@ use crate::eth::{
     TransactionSource,
 };
 
-/// Transaction related functions for the [`EthApiServer`](crate::EthApi) trait in
+use super::Call;
+
+/// Transaction related functions for the [`EthApiServer`](reth_rpc_api::EthApiServer) trait in
 /// the `eth_` namespace.
 ///
 /// This includes utilities for transaction tracing, transacting and inspection.
@@ -199,7 +198,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
         index: Index,
     ) -> impl Future<Output = EthResult<Option<Transaction>>> + Send
     where
-        Self: LoadBlock + LoadPendingBlock + SpawnBlocking,
+        Self: LoadBlockExt,
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id.into()).await? {
@@ -230,7 +229,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
         index: Index,
     ) -> impl Future<Output = EthResult<Option<Bytes>>> + Send
     where
-        Self: LoadBlock + LoadPendingBlock + SpawnBlocking,
+        Self: LoadBlockExt,
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id.into()).await? {
@@ -276,7 +275,7 @@ pub trait EthTransactions: LoadTransaction + Send + Sync {
         mut request: TransactionRequest,
     ) -> impl Future<Output = EthResult<B256>> + Send
     where
-        Self: EthCall + EthState + EthApiSpec + LoadPendingBlock + LoadBlock + LoadFee,
+        Self: EthApiSpec + LoadStateExt + LoadBlock + LoadFee + Call,
     {
         async move {
             let from = match request.from {
@@ -507,7 +506,7 @@ pub trait LoadTransaction {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> &impl TransactionsProvider;
+    fn provider(&self) -> impl TransactionsProvider;
 
     /// Returns a handle for reading data from memory.
     ///

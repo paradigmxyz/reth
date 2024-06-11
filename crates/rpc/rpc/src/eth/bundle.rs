@@ -20,7 +20,7 @@ use revm::{
 use revm_primitives::{EnvWithHandlerCfg, MAX_BLOB_GAS_PER_BLOCK};
 
 use crate::eth::{
-    api::{Call, EthTransactions, LoadPendingBlock, LoadState, SpawnBlocking},
+    api::{Call, EthTransactions, LoadStateExt},
     error::{EthApiError, EthResult, RpcInvalidTransactionError},
     revm_utils::FillableTransaction,
     utils::recover_raw_transaction,
@@ -41,7 +41,7 @@ impl<Eth> EthBundle<Eth> {
 
 impl<Eth> EthBundle<Eth>
 where
-    Eth: EthTransactions + LoadState + LoadPendingBlock + SpawnBlocking + Call + 'static,
+    Eth: EthTransactions + LoadStateExt + Call + 'static,
 {
     /// Simulates a bundle of transactions at the top of a given block number with the state of
     /// another (or the same) block. This can be used to simulate future blocks with the current

@@ -1,4 +1,18 @@
-//! Database access.
+//! Behaviour needed to serve `eth_` RPC requests, divided into general database reads and
+//! specific database access.
+//!
+//! Traits with `Load` prefix, read atomic data from database, e.g. a block or transaction. Any
+//! database read done in more than one default `Eth` trait implementation, is defined in a `Load`
+//! trait.
+//!
+//! Traits with `Eth` prefix, compose specific data needed to serve RPC requests in the `eth`
+//! namespace. They use `Load` traits as building blocks. [`EthTransactions`] also writes data
+//! (submits transactions). Based on the `eth_` request method semantics, request methods are  
+//! divided into: [`EthTransactions`], [`EthBlocks`], [`EthFees`], [`EthState`] and [`EthCall`].
+//! Default implementation of the `Eth` traits, is done w.r.t. L1.
+//!
+//! [`EthApiServer`](reth_rpc_api::EthApiServer), is implemented for any type that implements all
+//! the `Eth` traits, e.g. [`EthApi`](crate::EthApi).
 
 pub mod block;
 pub mod blocking_task;
@@ -17,5 +31,20 @@ pub use fee::{EthFees, LoadFee};
 pub use pending_block::LoadPendingBlock;
 pub use receipt::LoadReceipt;
 pub use state::{EthState, LoadState};
-pub use trace::{EthTrace, Trace};
+pub use trace::Trace;
 pub use transaction::{EthTransactions, LoadTransaction, RawTransactionForwarder};
+
+/// Extension trait that bundles traits needed for loading execution environment.
+pub trait LoadStateExt: LoadState + LoadPendingBlock + SpawnBlocking {}
+
+impl<T> LoadStateExt for T where T: LoadState + LoadPendingBlock + SpawnBlocking {}
+
+/// Extension trait that bundles traits needed for loading a block at any point in finalization.
+pub trait LoadBlockExt: LoadBlock + LoadPendingBlock + SpawnBlocking {}
+
+impl<T> LoadBlockExt for T where T: LoadBlock + LoadPendingBlock + SpawnBlocking {}
+
+/// Extension trait that bundles traits needed for tracing transactions.
+pub trait TraceExt: LoadStateExt + Trace + Call {}
+
+impl<T> TraceExt for T where T: LoadStateExt + Trace + Call {}

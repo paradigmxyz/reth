@@ -2,13 +2,8 @@
 
 use std::sync::Arc;
 
-use reth_evm::ConfigureEvm;
-use reth_network_api::NetworkInfo;
 use reth_primitives::{TransactionSignedEcRecovered, B256};
-use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ReceiptProvider, StateProviderFactory,
-    TransactionsProvider,
-};
+use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_types::{Transaction, TransactionInfo};
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::TransactionPool;
@@ -32,7 +27,7 @@ where
     type Pool = Pool;
 
     #[inline]
-    fn provider(&self) -> &impl TransactionsProvider {
+    fn provider(&self) -> impl TransactionsProvider {
         self.inner.provider()
     }
 
@@ -50,16 +45,9 @@ where
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
+    Self: LoadTransaction + Send + Sync,
     Pool: TransactionPool + 'static,
-    Provider: BlockReaderIdExt
-        + TransactionsProvider
-        + ReceiptProvider
-        + ChainSpecProvider
-        + StateProviderFactory
-        + EvmEnvProvider
-        + 'static,
-    Network: NetworkInfo + 'static,
-    EvmConfig: ConfigureEvm,
+    Provider: BlockReaderIdExt,
 {
     #[inline]
     fn provider(&self) -> impl BlockReaderIdExt {

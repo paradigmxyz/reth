@@ -9,7 +9,7 @@ use tracing::debug;
 use crate::eth::{
     api::{
         fee_history::{calculate_reward_percentiles_for_block, FeeHistoryEntry},
-        LoadBlock, LoadPendingBlock, SpawnBlocking,
+        LoadBlockExt,
     },
     cache::EthStateCache,
     error::{EthApiError, EthResult, RpcInvalidTransactionError},
@@ -17,7 +17,7 @@ use crate::eth::{
     FeeHistoryCache,
 };
 
-/// Fee related functions for the [`EthApiServer`](crate::EthApi) trait in the
+/// Fee related functions for the [`EthApiServer`](reth_rpc_api::EthApiServer) trait in the
 /// `eth_` namespace.
 pub trait EthFees: LoadFee {
     /// Returns a suggestion for a gas price for legacy transactions.
@@ -25,7 +25,7 @@ pub trait EthFees: LoadFee {
     /// See also: <https://github.com/ethereum/pm/issues/328#issuecomment-853234014>
     fn gas_price(&self) -> impl Future<Output = EthResult<U256>> + Send
     where
-        Self: LoadBlock + LoadPendingBlock + SpawnBlocking,
+        Self: LoadBlockExt,
     {
         LoadFee::gas_price(self)
     }
@@ -33,7 +33,7 @@ pub trait EthFees: LoadFee {
     /// Returns a suggestion for a base fee for blob transactions.
     fn blob_base_fee(&self) -> impl Future<Output = EthResult<U256>> + Send
     where
-        Self: LoadBlock + LoadPendingBlock + SpawnBlocking,
+        Self: LoadBlockExt,
     {
         LoadFee::blob_base_fee(self)
     }
@@ -55,7 +55,7 @@ pub trait EthFees: LoadFee {
         mut block_count: u64,
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
-    ) -> impl Future<Output = EthResult<FeeHistory>> + Send where {
+    ) -> impl Future<Output = EthResult<FeeHistory>> + Send {
         async move {
             if block_count == 0 {
                 return Ok(FeeHistory::default())
@@ -256,7 +256,7 @@ pub trait LoadFee: Send + Sync + Clone {
         gas_price: Option<U256>,
     ) -> impl Future<Output = EthResult<U256>> + Send
     where
-        Self: LoadBlock + LoadPendingBlock + SpawnBlocking,
+        Self: LoadBlockExt,
     {
         async move {
             match gas_price {
@@ -279,7 +279,7 @@ pub trait LoadFee: Send + Sync + Clone {
         max_priority_fee_per_gas: Option<U256>,
     ) -> impl Future<Output = EthResult<(U256, U256)>> + Send
     where
-        Self: LoadBlock + LoadPendingBlock + SpawnBlocking,
+        Self: LoadBlockExt,
     {
         async move {
             let max_fee_per_gas = match max_fee_per_gas {
@@ -314,7 +314,7 @@ pub trait LoadFee: Send + Sync + Clone {
         blob_fee: Option<U256>,
     ) -> impl Future<Output = EthResult<U256>> + Send
     where
-        Self: LoadBlock + LoadPendingBlock + SpawnBlocking,
+        Self: LoadBlockExt,
     {
         async move {
             match blob_fee {
@@ -329,7 +329,7 @@ pub trait LoadFee: Send + Sync + Clone {
     /// See also: <https://github.com/ethereum/pm/issues/328#issuecomment-853234014>
     fn gas_price(&self) -> impl Future<Output = EthResult<U256>> + Send
     where
-        Self: LoadBlock + LoadPendingBlock + SpawnBlocking,
+        Self: LoadBlockExt,
     {
         let header = self.block(BlockNumberOrTag::Latest);
         let suggested_tip = self.suggested_priority_fee();
@@ -343,7 +343,7 @@ pub trait LoadFee: Send + Sync + Clone {
     /// Returns a suggestion for a base fee for blob transactions.
     fn blob_base_fee(&self) -> impl Future<Output = EthResult<U256>> + Send
     where
-        Self: LoadBlock + LoadPendingBlock + SpawnBlocking,
+        Self: LoadBlockExt,
     {
         async move {
             self.block(BlockNumberOrTag::Latest)

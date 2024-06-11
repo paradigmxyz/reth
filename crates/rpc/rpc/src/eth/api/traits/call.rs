@@ -19,7 +19,7 @@ use revm_primitives::{
 use tracing::trace;
 
 use crate::eth::{
-    api::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace},
+    api::{LoadBlock, LoadState, LoadStateExt, LoadTransaction, SpawnBlocking, Trace},
     error::{ensure_success, EthApiError, EthResult, RevertError, RpcInvalidTransactionError},
     revm_utils::{
         apply_state_overrides, build_call_evm_env, caller_gas_allowance,
@@ -38,7 +38,7 @@ pub const ESTIMATE_GAS_ERROR_RATIO: f64 = 0.015;
 /// Helper alias type for the state's [`CacheDB`]
 pub type StateCacheDB<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'a>>>;
 
-/// Execution related functions for the [`EthApiServer`](crate::EthApi) trait in the
+/// Execution related functions for the [`EthApiServer`](reth_rpc_api::EthApiServer) trait in the
 /// `eth_` namespace.
 pub trait EthCall: Call {
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].
@@ -49,17 +49,9 @@ pub trait EthCall: Call {
         state_override: Option<StateOverride>,
     ) -> impl Future<Output = EthResult<U256>> + Send
     where
-        Self: LoadState + LoadPendingBlock + SpawnBlocking,
+        Self: LoadStateExt,
     {
-        async move {
-            let (cfg, block_env, at) = self.evm_env_at(at).await?;
-
-            self.spawn_blocking_io(move |this| {
-                let state = this.state_at_block_id(at)?;
-                this.estimate_gas_with(cfg, block_env, request, state, state_override)
-            })
-            .await
-        }
+        Call::estimate_gas_at(self, request, at, state_override)
     }
 
     /// Executes the call request (`eth_call`) and returns the output
@@ -70,7 +62,7 @@ pub trait EthCall: Call {
         overrides: EvmOverrides,
     ) -> impl Future<Output = EthResult<Bytes>> + Send
     where
-        Self: LoadState + LoadPendingBlock + SpawnBlocking,
+        Self: LoadStateExt,
     {
         async move {
             let (res, _env) =
@@ -89,7 +81,7 @@ pub trait EthCall: Call {
         mut state_override: Option<StateOverride>,
     ) -> impl Future<Output = EthResult<Vec<EthCallResponse>>> + Send
     where
-        Self: LoadState + LoadPendingBlock + LoadBlock + SpawnBlocking,
+        Self: LoadStateExt + LoadBlock,
     {
         async move {
             let Bundle { transactions, block_override } = bundle;
@@ -183,6 +175,330 @@ pub trait EthCall: Call {
                 }
 
                 Ok(results)
+            })
+            .await
+        }
+    }
+
+    /// Creates [`AccessListWithGasUsed`] for the [`TransactionRequest`] at the given
+    /// [`BlockId`], or latest block.
+    fn create_access_list_at(
+        &self,
+        request: TransactionRequest,
+        block_number: Option<BlockId>,
+    ) -> impl Future<Output = EthResult<AccessListWithGasUsed>> + Send
+    where
+        Self: LoadStateExt + Trace,
+    {
+        async move {
+            let block_id = block_number.unwrap_or_default();
+            let (cfg, block, at) = self.evm_env_at(block_id).await?;
+
+            self.spawn_blocking_io(move |this| {
+                this.create_access_list_with(cfg, block, at, request)
+            })
+            .await
+        }
+    }
+
+    /// Creates [`AccessListWithGasUsed`] for the [`TransactionRequest`] at the given
+    /// [`BlockId`].
+    fn create_access_list_with(
+        &self,
+        cfg: CfgEnvWithHandlerCfg,
+        block: BlockEnv,
+        at: BlockId,
+        mut request: TransactionRequest,
+    ) -> EthResult<AccessListWithGasUsed>
+    where
+        Self: LoadState + Trace,
+    {
+        let state = self.state_at_block_id(at)?;
+
+        let mut env = build_call_evm_env(cfg, block, request.clone())?;
+
+        // we want to disable this in eth_createAccessList, since this is common practice used by
+        // other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
+        env.cfg.disable_block_gas_limit = true;
+
+        // The basefee should be ignored for eth_createAccessList
+        // See:
+        // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
+        env.cfg.disable_base_fee = true;
+
+        let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+        if request.gas.is_none() && env.tx.gas_price > U256::ZERO {
+            // no gas limit was provided in the request, so we need to cap the request's gas limit
+            cap_tx_gas_limit_with_caller_allowance(&mut db, &mut env.tx)?;
+        }
+
+        let from = request.from.unwrap_or_default();
+        let to = if let Some(TxKind::Call(to)) = request.to {
+            to
+        } else {
+            let nonce = db.basic_ref(from)?.unwrap_or_default().nonce;
+            from.create(nonce)
+        };
+
+        // can consume the list since we're not using the request anymore
+        let initial = request.access_list.take().unwrap_or_default();
+
+        let precompiles = get_precompiles(env.handler_cfg.spec_id);
+        let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
+        let (result, env) = self.inspect(&mut db, env, &mut inspector)?;
+
+        match result.result {
+            ExecutionResult::Halt { reason, .. } => Err(match reason {
+                HaltReason::NonceOverflow => RpcInvalidTransactionError::NonceMaxValue,
+                halt => RpcInvalidTransactionError::EvmHalt(halt),
+            }),
+            ExecutionResult::Revert { output, .. } => {
+                Err(RpcInvalidTransactionError::Revert(RevertError::new(output)))
+            }
+            ExecutionResult::Success { .. } => Ok(()),
+        }?;
+
+        let access_list = inspector.into_access_list();
+
+        let cfg_with_spec_id =
+            CfgEnvWithHandlerCfg { cfg_env: env.cfg.clone(), handler_cfg: env.handler_cfg };
+
+        // calculate the gas used using the access list
+        request.access_list = Some(access_list.clone());
+        let gas_used =
+            self.estimate_gas_with(cfg_with_spec_id, env.block.clone(), request, &*db.db, None)?;
+
+        Ok(AccessListWithGasUsed { access_list, gas_used })
+    }
+}
+
+/// Executes code on state.
+pub trait Call {
+    /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
+    ///
+    /// Data access in default trait method implementations.
+    fn call_gas_limit(&self) -> u64;
+
+    /// Executes the closure with the state that corresponds to the given [`BlockId`].
+    fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
+    where
+        Self: LoadState,
+        F: FnOnce(StateProviderTraitObjWrapper<'_>) -> EthResult<T>,
+    {
+        let state = self.state_at_block_id(at)?;
+        f(StateProviderTraitObjWrapper(&state))
+    }
+
+    /// Returns a handle for reading evm config.
+    ///
+    /// Data access in default (L1) trait method implementations.
+    fn evm_config(&self) -> &impl ConfigureEvm;
+
+    /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
+    /// changes.
+    fn transact<DB>(
+        &self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
+    where
+        DB: Database,
+        <DB as Database>::Error: Into<EthApiError>,
+    {
+        let mut evm = self.evm_config().evm_with_env(db, env);
+        let res = evm.transact()?;
+        let (_, env) = evm.into_db_and_env_with_handler_cfg();
+        Ok((res, env))
+    }
+
+    /// Executes the call request at the given [`BlockId`].
+    fn transact_call_at(
+        &self,
+        request: TransactionRequest,
+        at: BlockId,
+        overrides: EvmOverrides,
+    ) -> impl Future<Output = EthResult<(ResultAndState, EnvWithHandlerCfg)>> + Send
+    where
+        Self: LoadStateExt,
+    {
+        let this = self.clone();
+        self.spawn_with_call_at(request, at, overrides, move |db, env| this.transact(db, env))
+    }
+
+    /// Executes the closure with the state that corresponds to the given [`BlockId`] on a new task
+    fn spawn_with_state_at_block<F, T>(
+        &self,
+        at: BlockId,
+        f: F,
+    ) -> impl Future<Output = EthResult<T>> + Send
+    where
+        Self: LoadState + SpawnBlocking,
+        F: FnOnce(StateProviderTraitObjWrapper<'_>) -> EthResult<T> + Send + 'static,
+        T: Send + 'static,
+    {
+        self.spawn_tracing(move |this| {
+            let state = this.state_at_block_id(at)?;
+            f(StateProviderTraitObjWrapper(&state))
+        })
+    }
+
+    /// Prepares the state and env for the given [`TransactionRequest`] at the given [`BlockId`] and
+    /// executes the closure on a new task returning the result of the closure.
+    ///
+    /// This returns the configured [`EnvWithHandlerCfg`] for the given [`TransactionRequest`] at
+    /// the given [`BlockId`] and with configured call settings: `prepare_call_env`.
+    fn spawn_with_call_at<F, R>(
+        &self,
+        request: TransactionRequest,
+        at: BlockId,
+        overrides: EvmOverrides,
+        f: F,
+    ) -> impl Future<Output = EthResult<R>> + Send
+    where
+        Self: LoadStateExt,
+        F: FnOnce(StateCacheDBRefMutWrapper<'_, '_>, EnvWithHandlerCfg) -> EthResult<R>
+            + Send
+            + 'static,
+        R: Send + 'static,
+    {
+        async move {
+            let (cfg, block_env, at) = self.evm_env_at(at).await?;
+            let this = self.clone();
+            self.spawn_tracing(move |_| {
+                let state = this.state_at_block_id(at)?;
+                let mut db =
+                    CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
+
+                let env = prepare_call_env(
+                    cfg,
+                    block_env,
+                    request,
+                    this.call_gas_limit(),
+                    &mut db,
+                    overrides,
+                )?;
+
+                f(StateCacheDBRefMutWrapper(&mut db), env)
+            })
+            .await
+            .map_err(|_| EthApiError::InternalBlockingTaskError)
+        }
+    }
+
+    /// Retrieves the transaction if it exists and executes it.
+    ///
+    /// Before the transaction is executed, all previous transaction in the block are applied to the
+    /// state by executing them first.
+    /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
+    /// and the database that points to the beginning of the transaction.
+    ///
+    /// Note: Implementers should use a threadpool where blocking is allowed, such as
+    /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
+    fn spawn_replay_transaction<F, R>(
+        &self,
+        hash: B256,
+        f: F,
+    ) -> impl Future<Output = EthResult<Option<R>>> + Send
+    where
+        Self: LoadStateExt + LoadTransaction + LoadBlock,
+        F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB<'_>) -> EthResult<R>
+            + Send
+            + 'static,
+        R: Send + 'static,
+    {
+        async move {
+            let (transaction, block) = match self.transaction_and_block(hash).await? {
+                None => return Ok(None),
+                Some(res) => res,
+            };
+            let (tx, tx_info) = transaction.split();
+
+            let (cfg, block_env, _) = self.evm_env_at(block.hash().into()).await?;
+
+            // we need to get the state of the parent block because we're essentially replaying the
+            // block the transaction is included in
+            let parent_block = block.parent_hash;
+            let block_txs = block.into_transactions_ecrecovered();
+
+            let this = self.clone();
+            self.spawn_with_state_at_block(parent_block.into(), move |state| {
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+                // replay all transactions prior to the targeted transaction
+                this.replay_transactions_until(
+                    &mut db,
+                    cfg.clone(),
+                    block_env.clone(),
+                    block_txs,
+                    tx.hash,
+                )?;
+
+                let env =
+                    EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
+
+                let (res, _) = this.transact(&mut db, env)?;
+                f(tx_info, res, db)
+            })
+            .await
+            .map(Some)
+        }
+    }
+
+    /// Replays all the transactions until the target transaction is found.
+    ///
+    /// All transactions before the target transaction are executed and their changes are written to
+    /// the _runtime_ db ([`CacheDB`]).
+    ///
+    /// Note: This assumes the target transaction is in the given iterator.
+    /// Returns the index of the target transaction in the given iterator.
+    fn replay_transactions_until<DB, I, Tx>(
+        &self,
+        db: &mut CacheDB<DB>,
+        cfg: CfgEnvWithHandlerCfg,
+        block_env: BlockEnv,
+        transactions: I,
+        target_tx_hash: B256,
+    ) -> Result<usize, EthApiError>
+    where
+        DB: DatabaseRef,
+        EthApiError: From<<DB as DatabaseRef>::Error>,
+        I: IntoIterator<Item = Tx>,
+        Tx: FillableTransaction,
+    {
+        let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
+
+        let mut evm = self.evm_config().evm_with_env(db, env);
+        let mut index = 0;
+        for tx in transactions {
+            if tx.hash() == target_tx_hash {
+                // reached the target transaction
+                break
+            }
+
+            tx.try_fill_tx_env(evm.tx_mut())?;
+            evm.transact_commit()?;
+            index += 1;
+        }
+        Ok(index)
+    }
+
+    /// Estimate gas needed for execution of the `request` at the [`BlockId`].
+    fn estimate_gas_at(
+        &self,
+        request: TransactionRequest,
+        at: BlockId,
+        state_override: Option<StateOverride>,
+    ) -> impl Future<Output = EthResult<U256>> + Send
+    where
+        Self: LoadStateExt,
+    {
+        async move {
+            let (cfg, block_env, at) = self.evm_env_at(at).await?;
+
+            self.spawn_blocking_io(move |this| {
+                let state = this.state_at_block_id(at)?;
+                this.estimate_gas_with(cfg, block_env, request, state, state_override)
             })
             .await
         }
@@ -387,132 +703,6 @@ pub trait EthCall: Call {
         Ok(U256::from(highest_gas_limit))
     }
 
-    /// Creates [`AccessListWithGasUsed`] for the [`TransactionRequest`] at the given
-    /// [`BlockId`], or latest block.
-    fn create_access_list_at(
-        &self,
-        request: TransactionRequest,
-        block_number: Option<BlockId>,
-    ) -> impl Future<Output = EthResult<AccessListWithGasUsed>> + Send
-    where
-        Self: LoadState + LoadPendingBlock + Trace + SpawnBlocking,
-    {
-        async move {
-            let block_id = block_number.unwrap_or_default();
-            let (cfg, block, at) = self.evm_env_at(block_id).await?;
-
-            self.spawn_blocking_io(move |this| {
-                this.create_access_list_with(cfg, block, at, request)
-            })
-            .await
-        }
-    }
-
-    /// Creates [`AccessListWithGasUsed`] for the [`TransactionRequest`] at the given
-    /// [`BlockId`].
-    fn create_access_list_with(
-        &self,
-        cfg: CfgEnvWithHandlerCfg,
-        block: BlockEnv,
-        at: BlockId,
-        mut request: TransactionRequest,
-    ) -> EthResult<AccessListWithGasUsed>
-    where
-        Self: LoadState + Trace,
-    {
-        let state = self.state_at_block_id(at)?;
-
-        let mut env = build_call_evm_env(cfg, block, request.clone())?;
-
-        // we want to disable this in eth_createAccessList, since this is common practice used by
-        // other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
-        env.cfg.disable_block_gas_limit = true;
-
-        // The basefee should be ignored for eth_createAccessList
-        // See:
-        // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
-        env.cfg.disable_base_fee = true;
-
-        let mut db = CacheDB::new(StateProviderDatabase::new(state));
-
-        if request.gas.is_none() && env.tx.gas_price > U256::ZERO {
-            // no gas limit was provided in the request, so we need to cap the request's gas limit
-            cap_tx_gas_limit_with_caller_allowance(&mut db, &mut env.tx)?;
-        }
-
-        let from = request.from.unwrap_or_default();
-        let to = if let Some(TxKind::Call(to)) = request.to {
-            to
-        } else {
-            let nonce = db.basic_ref(from)?.unwrap_or_default().nonce;
-            from.create(nonce)
-        };
-
-        // can consume the list since we're not using the request anymore
-        let initial = request.access_list.take().unwrap_or_default();
-
-        let precompiles = get_precompiles(env.handler_cfg.spec_id);
-        let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
-        let (result, env) = self.inspect(&mut db, env, &mut inspector)?;
-
-        match result.result {
-            ExecutionResult::Halt { reason, .. } => Err(match reason {
-                HaltReason::NonceOverflow => RpcInvalidTransactionError::NonceMaxValue,
-                halt => RpcInvalidTransactionError::EvmHalt(halt),
-            }),
-            ExecutionResult::Revert { output, .. } => {
-                Err(RpcInvalidTransactionError::Revert(RevertError::new(output)))
-            }
-            ExecutionResult::Success { .. } => Ok(()),
-        }?;
-
-        let access_list = inspector.into_access_list();
-
-        let cfg_with_spec_id =
-            CfgEnvWithHandlerCfg { cfg_env: env.cfg.clone(), handler_cfg: env.handler_cfg };
-
-        // calculate the gas used using the access list
-        request.access_list = Some(access_list.clone());
-        let gas_used =
-            self.estimate_gas_with(cfg_with_spec_id, env.block.clone(), request, &*db.db, None)?;
-
-        Ok(AccessListWithGasUsed { access_list, gas_used })
-    }
-
-    /// Executes the requests again after an out of gas error to check if the error is gas related
-    /// or not
-    #[inline]
-    fn map_out_of_gas_err<S>(
-        &self,
-        env_gas_limit: U256,
-        mut env: EnvWithHandlerCfg,
-        db: &mut CacheDB<StateProviderDatabase<S>>,
-    ) -> EthApiError
-    where
-        S: StateProvider,
-    {
-        let req_gas_limit = env.tx.gas_limit;
-        env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
-        let (res, _) = match self.transact(db, env) {
-            Ok(res) => res,
-            Err(err) => return err,
-        };
-        match res.result {
-            ExecutionResult::Success { .. } => {
-                // transaction succeeded by manually increasing the gas limit to
-                // highest, which means the caller lacks funds to pay for the tx
-                RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit).into()
-            }
-            ExecutionResult::Revert { output, .. } => {
-                // reverted again after bumping the limit
-                RpcInvalidTransactionError::Revert(RevertError::new(output)).into()
-            }
-            ExecutionResult::Halt { reason, .. } => {
-                RpcInvalidTransactionError::EvmHalt(reason).into()
-            }
-        }
-    }
-
     /// Updates the highest and lowest gas limits for binary search based on the execution result.
     ///
     /// This function refines the gas limit estimates used in a binary search to find the optimal
@@ -561,218 +751,39 @@ pub trait EthCall: Call {
 
         Ok(())
     }
-}
 
-/// Executes code on state.
-///
-/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` call RPC methods.
-pub trait Call {
-    /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
-    ///
-    /// Data access in default trait method implementations.
-    fn call_gas_limit(&self) -> u64;
-
-    /// Executes the closure with the state that corresponds to the given [`BlockId`].
-    fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
-    where
-        Self: LoadState,
-        F: FnOnce(StateProviderTraitObjWrapper<'_>) -> EthResult<T>,
-    {
-        let state = self.state_at_block_id(at)?;
-        f(StateProviderTraitObjWrapper(&state))
-    }
-
-    /// Returns a handle for reading evm config.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn evm_config(&self) -> &impl ConfigureEvm;
-
-    /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
-    /// changes.
-    fn transact<DB>(
+    /// Executes the requests again after an out of gas error to check if the error is gas related
+    /// or not
+    #[inline]
+    fn map_out_of_gas_err<S>(
         &self,
-        db: DB,
-        env: EnvWithHandlerCfg,
-    ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
+        env_gas_limit: U256,
+        mut env: EnvWithHandlerCfg,
+        db: &mut CacheDB<StateProviderDatabase<S>>,
+    ) -> EthApiError
     where
-        DB: Database,
-        <DB as Database>::Error: Into<EthApiError>,
+        S: StateProvider,
     {
-        let mut evm = self.evm_config().evm_with_env(db, env);
-        let res = evm.transact()?;
-        let (_, env) = evm.into_db_and_env_with_handler_cfg();
-        Ok((res, env))
-    }
-
-    /// Executes the call request at the given [`BlockId`].
-    fn transact_call_at(
-        &self,
-        request: TransactionRequest,
-        at: BlockId,
-        overrides: EvmOverrides,
-    ) -> impl Future<Output = EthResult<(ResultAndState, EnvWithHandlerCfg)>> + Send
-    where
-        Self: LoadState + LoadPendingBlock + SpawnBlocking,
-    {
-        let this = self.clone();
-        self.spawn_with_call_at(request, at, overrides, move |db, env| this.transact(db, env))
-    }
-
-    /// Executes the closure with the state that corresponds to the given [`BlockId`] on a new task
-    fn spawn_with_state_at_block<F, T>(
-        &self,
-        at: BlockId,
-        f: F,
-    ) -> impl Future<Output = EthResult<T>> + Send
-    where
-        Self: LoadState + SpawnBlocking,
-        F: FnOnce(StateProviderTraitObjWrapper<'_>) -> EthResult<T> + Send + 'static,
-        T: Send + 'static,
-    {
-        self.spawn_tracing(move |this| {
-            let state = this.state_at_block_id(at)?;
-            f(StateProviderTraitObjWrapper(&state))
-        })
-    }
-
-    /// Prepares the state and env for the given [`TransactionRequest`] at the given [`BlockId`] and
-    /// executes the closure on a new task returning the result of the closure.
-    ///
-    /// This returns the configured [`EnvWithHandlerCfg`] for the given [`TransactionRequest`] at
-    /// the given [`BlockId`] and with configured call settings: `prepare_call_env`.
-    fn spawn_with_call_at<F, R>(
-        &self,
-        request: TransactionRequest,
-        at: BlockId,
-        overrides: EvmOverrides,
-        f: F,
-    ) -> impl Future<Output = EthResult<R>> + Send
-    where
-        Self: LoadState + SpawnBlocking + LoadPendingBlock,
-        F: FnOnce(StateCacheDBRefMutWrapper<'_, '_>, EnvWithHandlerCfg) -> EthResult<R>
-            + Send
-            + 'static,
-        R: Send + 'static,
-    {
-        async move {
-            let (cfg, block_env, at) = self.evm_env_at(at).await?;
-            let this = self.clone();
-            self.spawn_tracing(move |_| {
-                let state = this.state_at_block_id(at)?;
-                let mut db =
-                    CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
-
-                let env = prepare_call_env(
-                    cfg,
-                    block_env,
-                    request,
-                    this.call_gas_limit(),
-                    &mut db,
-                    overrides,
-                )?;
-
-                f(StateCacheDBRefMutWrapper(&mut db), env)
-            })
-            .await
-            .map_err(|_| EthApiError::InternalBlockingTaskError)
-        }
-    }
-
-    /// Retrieves the transaction if it exists and executes it.
-    ///
-    /// Before the transaction is executed, all previous transaction in the block are applied to the
-    /// state by executing them first.
-    /// The callback `f` is invoked with the [`ResultAndState`] after the transaction was executed
-    /// and the database that points to the beginning of the transaction.
-    ///
-    /// Note: Implementers should use a threadpool where blocking is allowed, such as
-    /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
-    fn spawn_replay_transaction<F, R>(
-        &self,
-        hash: B256,
-        f: F,
-    ) -> impl Future<Output = EthResult<Option<R>>> + Send
-    where
-        Self: LoadState + LoadTransaction + LoadBlock + LoadPendingBlock + SpawnBlocking,
-        F: FnOnce(TransactionInfo, ResultAndState, StateCacheDB<'_>) -> EthResult<R>
-            + Send
-            + 'static,
-        R: Send + 'static,
-    {
-        async move {
-            let (transaction, block) = match self.transaction_and_block(hash).await? {
-                None => return Ok(None),
-                Some(res) => res,
-            };
-            let (tx, tx_info) = transaction.split();
-
-            let (cfg, block_env, _) = self.evm_env_at(block.hash().into()).await?;
-
-            // we need to get the state of the parent block because we're essentially replaying the
-            // block the transaction is included in
-            let parent_block = block.parent_hash;
-            let block_txs = block.into_transactions_ecrecovered();
-
-            let this = self.clone();
-            self.spawn_with_state_at_block(parent_block.into(), move |state| {
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
-
-                // replay all transactions prior to the targeted transaction
-                this.replay_transactions_until(
-                    &mut db,
-                    cfg.clone(),
-                    block_env.clone(),
-                    block_txs,
-                    tx.hash,
-                )?;
-
-                let env =
-                    EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
-
-                let (res, _) = this.transact(&mut db, env)?;
-                f(tx_info, res, db)
-            })
-            .await
-            .map(Some)
-        }
-    }
-
-    /// Replays all the transactions until the target transaction is found.
-    ///
-    /// All transactions before the target transaction are executed and their changes are written to
-    /// the _runtime_ db ([`CacheDB`]).
-    ///
-    /// Note: This assumes the target transaction is in the given iterator.
-    /// Returns the index of the target transaction in the given iterator.
-    fn replay_transactions_until<DB, I, Tx>(
-        &self,
-        db: &mut CacheDB<DB>,
-        cfg: CfgEnvWithHandlerCfg,
-        block_env: BlockEnv,
-        transactions: I,
-        target_tx_hash: B256,
-    ) -> Result<usize, EthApiError>
-    where
-        DB: DatabaseRef,
-        EthApiError: From<<DB as DatabaseRef>::Error>,
-        I: IntoIterator<Item = Tx>,
-        Tx: FillableTransaction,
-    {
-        let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
-
-        let mut evm = self.evm_config().evm_with_env(db, env);
-        let mut index = 0;
-        for tx in transactions {
-            if tx.hash() == target_tx_hash {
-                // reached the target transaction
-                break
+        let req_gas_limit = env.tx.gas_limit;
+        env.tx.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
+        let (res, _) = match self.transact(db, env) {
+            Ok(res) => res,
+            Err(err) => return err,
+        };
+        match res.result {
+            ExecutionResult::Success { .. } => {
+                // transaction succeeded by manually increasing the gas limit to
+                // highest, which means the caller lacks funds to pay for the tx
+                RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit).into()
             }
-
-            tx.try_fill_tx_env(evm.tx_mut())?;
-            evm.transact_commit()?;
-            index += 1;
+            ExecutionResult::Revert { output, .. } => {
+                // reverted again after bumping the limit
+                RpcInvalidTransactionError::Revert(RevertError::new(output)).into()
+            }
+            ExecutionResult::Halt { reason, .. } => {
+                RpcInvalidTransactionError::EvmHalt(reason).into()
+            }
         }
-        Ok(index)
     }
 }
 
