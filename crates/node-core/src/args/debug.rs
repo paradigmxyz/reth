@@ -28,6 +28,26 @@ pub struct DebugArgs {
     #[arg(long = "debug.max-block", help_heading = "Debug")]
     pub max_block: Option<u64>,
 
+    /// Runs a fake consensus client that advances the chain using recent block hashes
+    /// on Etherscan. If specified, requires an `ETHERSCAN_API_KEY` environment variable.
+    #[arg(
+        long = "debug.etherscan",
+        help_heading = "Debug",
+        conflicts_with = "tip",
+        conflicts_with = "rpc_consensus_ws",
+        value_name = "ETHERSCAN_API_URL"
+    )]
+    pub etherscan: Option<Option<String>>,
+
+    /// Runs a fake consensus client using blocks fetched from an RPC `WebSocket` endpoint.
+    #[arg(
+        long = "debug.rpc-consensus-ws",
+        help_heading = "Debug",
+        conflicts_with = "tip",
+        conflicts_with = "etherscan"
+    )]
+    pub rpc_consensus_ws: Option<String>,
+
     /// If provided, the engine will skip `n` consecutive FCUs.
     #[arg(long = "debug.skip-fcu", help_heading = "Debug")]
     pub skip_fcu: Option<usize>,

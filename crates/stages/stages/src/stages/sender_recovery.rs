@@ -6,17 +6,15 @@ use reth_db_api::{
     database::Database,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{
-    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    Address, StaticFileSegment, TransactionSignedNoHash, TxNumber,
-};
+use reth_primitives::{Address, StaticFileSegment, TransactionSignedNoHash, TxNumber};
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
     StatsReader,
 };
 use reth_prune_types::PruneSegment;
 use reth_stages_api::{
-    BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
+    BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError,
+    StageId, UnwindInput, UnwindOutput,
 };
 use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;
@@ -282,14 +280,13 @@ struct FailedSenderRecoveryError {
 mod tests {
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
-    use reth_primitives::{
-        stage::StageUnitCheckpoint, BlockNumber, SealedBlock, TransactionSigned, B256,
-    };
+    use reth_primitives::{BlockNumber, SealedBlock, TransactionSigned, B256};
     use reth_provider::{
         providers::StaticFileWriter, PruneCheckpointWriter, StaticFileProviderFactory,
         TransactionsProvider,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
+    use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::{
         generators,
         generators::{random_block, random_block_range},

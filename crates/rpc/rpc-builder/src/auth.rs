@@ -1,6 +1,5 @@
 use crate::error::{RpcError, ServerKind};
-use hyper::header::AUTHORIZATION;
-pub use jsonrpsee::server::ServerBuilder;
+use http::header::AUTHORIZATION;
 use jsonrpsee::{
     core::RegisterMethodError,
     http_client::{transport::HttpBackend, HeaderMap},
@@ -8,7 +7,6 @@ use jsonrpsee::{
     Methods,
 };
 use reth_engine_primitives::EngineTypes;
-pub use reth_ipc::server::Builder as IpcServerBuilder;
 use reth_rpc::EthSubscriptionIdProvider;
 use reth_rpc_api::servers::*;
 use reth_rpc_layer::{
@@ -18,6 +16,9 @@ use reth_rpc_layer::{
 use reth_rpc_server_types::constants;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tower::layer::util::Identity;
+
+pub use jsonrpsee::server::ServerBuilder;
+pub use reth_ipc::server::Builder as IpcServerBuilder;
 
 /// Server configuration for the auth server.
 #[derive(Debug)]

@@ -269,7 +269,26 @@ where
         pool: Pool,
     ) -> eyre::Result<NetworkHandle> {
         let Self { disable_txpool_gossip } = self;
-        let mut network_config = ctx.network_config()?;
+
+        let args = &ctx.config().network;
+
+        let network_builder = ctx
+            .network_config_builder()?
+            // purposefully disable discv4
+            .disable_discv4_discovery()
+            // apply discovery settings
+            .apply(|builder| {
+                let rlpx_socket = (args.addr, args.port).into();
+                let mut builder = args.discovery.apply_to_builder(builder, rlpx_socket);
+
+                if !args.discovery.disable_discovery {
+                    builder = builder.discovery_v5(reth_discv5::Config::builder(rlpx_socket));
+                }
+
+                builder
+            });
+
+        let mut network_config = ctx.build_network_config(network_builder);
 
         // When `sequencer_endpoint` is configured, the node will forward all transactions to a
         // Sequencer node for execution and inclusion on L1, and disable its own txpool

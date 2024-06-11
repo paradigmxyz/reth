@@ -1,14 +1,14 @@
 //! A no operation block executor implementation.
 
 use reth_execution_errors::BlockExecutionError;
+use reth_execution_types::BundleStateWithReceipts;
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm_primitives::db::Database;
 
 use crate::execute::{
-    BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
-    BlockExecutorProvider, Executor,
+    BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
 
 const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
@@ -50,7 +50,7 @@ impl<DB> Executor<DB> for NoopBlockExecutorProvider {
 
 impl<DB> BatchExecutor<DB> for NoopBlockExecutorProvider {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BatchBlockExecutionOutput;
+    type Output = BundleStateWithReceipts;
     type Error = BlockExecutionError;
 
     fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {

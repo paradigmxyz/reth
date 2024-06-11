@@ -14,12 +14,13 @@ workspace = true
 reth-primitives.workspace = true
 reth-execution-errors.workspace = true
 reth-trie.workspace = true
-reth-evm.workspace = true
 
 revm.workspace = true
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["test-utils"] }
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
 
 [features]
 optimism = []
