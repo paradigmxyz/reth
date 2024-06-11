@@ -12,7 +12,6 @@ use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHe
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_core::{
-    cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
 };
@@ -21,6 +20,7 @@ use reth_provider::{
     providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
+use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{sets::DefaultStages, Pipeline};
 use reth_static_file::StaticFileProducer;

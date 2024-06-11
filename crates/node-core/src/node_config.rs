@@ -42,7 +42,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
 /// # };
-/// # use reth_rpc_builder::RpcModuleSelection;
+/// # use reth_rpc_server_types::RpcModuleSelection;
 /// # use tokio::runtime::Handle;
 ///
 /// async fn t() {
@@ -70,7 +70,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
 /// # };
-/// # use reth_rpc_builder::RpcModuleSelection;
+/// # use reth_rpc_server_types::RpcModuleSelection;
 /// # use tokio::runtime::Handle;
 ///
 /// async fn t() {

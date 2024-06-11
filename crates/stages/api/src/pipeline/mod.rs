@@ -369,6 +369,8 @@ where
                         provider_rw.commit()?;
                         self.provider_factory.static_file_provider().commit()?;
 
+                        stage.post_unwind_commit()?;
+
                         provider_rw = self.provider_factory.provider_rw()?;
                     }
                     Err(err) => {
@@ -478,6 +480,8 @@ where
                     // start-up.
                     self.provider_factory.static_file_provider().commit()?;
                     provider_rw.commit()?;
+
+                    stage.post_execute_commit()?;
 
                     if done {
                         let block_number = checkpoint.block_number;
