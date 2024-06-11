@@ -663,18 +663,14 @@ mod tests {
         });
 
         // Create a vector of Requests containing the request.
-        let requests = vec![Requests(vec![request.clone()])];
+        let requests = vec![Requests(vec![request])];
 
         // Define the initial block number.
         let first_block = 123;
 
         // Create an ExecutionOutcome object.
-        let mut exec_res = ExecutionOutcome {
-            bundle: Default::default(),
-            receipts: receipts.clone(),
-            requests,
-            first_block,
-        };
+        let mut exec_res =
+            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
 
         // Extend the ExecutionOutcome object by itself.
         exec_res.extend(exec_res.clone());
@@ -687,7 +683,7 @@ mod tests {
                 receipts: Receipts {
                     receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]]
                 },
-                requests: vec![Requests(vec![request.clone()]), Requests(vec![request])],
+                requests: vec![Requests(vec![request]), Requests(vec![request])],
                 first_block: 123,
             }
         );
