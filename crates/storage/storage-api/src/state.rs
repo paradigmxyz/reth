@@ -252,12 +252,6 @@ pub trait BlockExecutionForkProvider {
 /// * `ExecutionOutcome`: Contains all changes to accounts and storage within the pending chain.
 /// * Block hashes: Represents hashes of both the pending chain and canonical blocks.
 /// * Canonical fork: Denotes the block from which the pending chain forked.
-pub trait FullExecutionDataProvider:
-    ExecutionDataProvider + BlockExecutionForkProvider
-{
-}
+pub trait FullExecutionDataProvider: ExecutionDataProvider + BlockExecutionForkProvider {}
 
-impl<T> FullExecutionDataProvider for T where
-    T: ExecutionDataProvider + BlockExecutionForkProvider
-{
-}
+impl<T> FullExecutionDataProvider for T where T: ExecutionDataProvider + BlockExecutionForkProvider {}

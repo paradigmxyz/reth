@@ -506,12 +506,8 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let execution_outcome = ExecutionOutcome::new(
-        db.take_bundle(),
-        vec![receipts].into(),
-        block_number,
-        Vec::new(),
-    );
+    let execution_outcome =
+        ExecutionOutcome::new(db.take_bundle(), vec![receipts].into(), block_number, Vec::new());
     let receipts_root = execution_outcome
         .optimism_receipts_root_slow(
             block_number,
@@ -519,8 +515,7 @@ where
             attributes.payload_attributes.timestamp,
         )
         .expect("Number is in range");
-    let logs_bloom =
-        execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
+    let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
     let state_root = {

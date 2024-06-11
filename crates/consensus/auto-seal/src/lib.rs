@@ -26,9 +26,7 @@ use reth_primitives::{
     ChainSpec, Header, Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256,
     U256,
 };
-use reth_provider::{
-    ExecutionOutcome, BlockReaderIdExt, StateProviderFactory, StateRootProvider,
-};
+use reth_provider::{BlockReaderIdExt, ExecutionOutcome, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::TransactionPool;
 use std::{

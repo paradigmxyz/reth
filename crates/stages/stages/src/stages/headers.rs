@@ -378,7 +378,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders, B256};
     use reth_provider::{
-        ExecutionOutcome, BlockWriter, ProviderFactory, StaticFileProviderFactory,
+        BlockWriter, ExecutionOutcome, ProviderFactory, StaticFileProviderFactory,
     };
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};

@@ -18,8 +18,8 @@ use reth_primitives::{
     TryFromRecoveredTransaction,
 };
 use reth_provider::{
-    ExecutionOutcome, BlockReaderIdExt, CanonStateNotification, ChainSpecProvider,
-    ProviderError, StateProviderFactory,
+    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, ExecutionOutcome, ProviderError,
+    StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
 use std::{

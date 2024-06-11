@@ -8,7 +8,7 @@ use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_primitives::{BlockNumber, Header, StaticFileSegment};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    ExecutionOutcome, BlockReader, Chain, DatabaseProviderRW, HeaderProvider,
+    BlockReader, Chain, DatabaseProviderRW, ExecutionOutcome, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter, StatsReader,
     TransactionVariant,
 };
