@@ -1,5 +1,7 @@
 //! Storage lock utils.
 
+#![cfg_attr(feature = "disable_lock", allow(dead_code))]
+
 use reth_storage_errors::lockfile::StorageLockError;
 use reth_tracing::tracing::error;
 use std::{
@@ -28,21 +30,24 @@ impl StorageLock {
     /// Note: In-process exclusivity is not on scope. If called from the same process (or another
     /// with the same PID), it will succeed.
     pub fn try_acquire(path: &Path) -> Result<Self, StorageLockError> {
+        let file_path = path.join(LOCKFILE_NAME);
+
         #[cfg(feature = "disable_lock")]
         {
-            // Too expensive for ef-tests
-            return Ok(Self(Arc::new(StorageLockInner { file_path: path.to_path_buf() })))
+            // Too expensive for ef-tests to write/read lock to/from disk.
+            Ok(Self(Arc::new(StorageLockInner { file_path })))
         }
 
-        let path = path.join(LOCKFILE_NAME);
-
-        if let Some(process_lock) = ProcessUID::parse(&path)? {
-            if process_lock.pid != (process::id() as usize) && process_lock.is_active() {
-                return Err(StorageLockError::Taken(process_lock.pid))
+        #[cfg(not(feature = "disable_lock"))]
+        {
+            if let Some(process_lock) = ProcessUID::parse(&file_path)? {
+                if process_lock.pid != (process::id() as usize) && process_lock.is_active() {
+                    return Err(StorageLockError::Taken(process_lock.pid))
+                }
             }
-        }
 
-        Ok(Self(Arc::new(StorageLockInner::new(path)?)))
+            Ok(Self(Arc::new(StorageLockInner::new(file_path)?)))
+        }
     }
 }
 
