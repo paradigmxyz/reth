@@ -29,7 +29,7 @@ use crate::eth::{
 
 use super::Call;
 
-/// Transaction related functions for the [`EthApiServer`](crate::EthApi) trait in
+/// Transaction related functions for the [`EthApiServer`](reth_rpc_api::EthApiServer) trait in
 /// the `eth_` namespace.
 ///
 /// This includes utilities for transaction tracing, transacting and inspection.

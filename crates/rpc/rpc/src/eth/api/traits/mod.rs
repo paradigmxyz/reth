@@ -1,4 +1,18 @@
-//! Database access.
+//! Behaviour needed to serve `eth_` RPC requests, divided into general database reads and
+//! specific database access.
+//!
+//! Traits with `Load` prefix, read atomic data from database, e.g. a block or transaction. Any
+//! database read done in more than one default `Eth` trait implementation, is defined in a `Load`
+//! trait.
+//!
+//! Traits with `Eth` prefix, compose specific data needed to serve RPC requests in the `eth`
+//! namespace. They use `Load` traits as building blocks. [`EthTransactions`] also writes data
+//! (submits transactions). Based on the `eth_` request method semantics, request methods are  
+//! divided into: [`EthTransactions`], [`EthBlocks`], [`EthFees`], [`EthState`] and [`EthCall`].
+//! Default implementation of the `Eth` traits, is done w.r.t. L1.
+//!
+//! [`EthApiServer`](reth_rpc_api::EthApiServer), is implemented for any type that implements all
+//! the `Eth` traits, e.g. [`EthApi`](crate::EthApi).
 
 pub mod block;
 pub mod blocking_task;

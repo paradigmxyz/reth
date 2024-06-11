@@ -13,7 +13,7 @@ use crate::eth::{
     error::EthResult,
 };
 
-/// Block related functions for the [`EthApiServer`](crate::EthApi) trait in the
+/// Block related functions for the [`EthApiServer`](reth_rpc_api::EthApiServer) trait in the
 /// `eth_` namespace.
 pub trait EthBlocks: LoadBlock {
     /// Helper function for `eth_getBlockReceipts`.

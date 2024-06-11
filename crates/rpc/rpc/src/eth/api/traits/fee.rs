@@ -17,7 +17,7 @@ use crate::eth::{
     FeeHistoryCache,
 };
 
-/// Fee related functions for the [`EthApiServer`](crate::EthApi) trait in the
+/// Fee related functions for the [`EthApiServer`](reth_rpc_api::EthApiServer) trait in the
 /// `eth_` namespace.
 pub trait EthFees: LoadFee {
     /// Returns a suggestion for a gas price for legacy transactions.
