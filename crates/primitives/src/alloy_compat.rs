@@ -235,9 +235,8 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             #[cfg(feature = "optimism")]
             Some(TxType::Deposit) => {
                 Ok(Self::Deposit(TxDeposit {
-                    source_hash: match tx.other["sourceHash"] {
-                        serde_json::Value::String(source_hash) => source_hash.parse().unwrap(),
-                        _ => Err(ConversionError::MissingSourceHash),
+                    source_hash: if let serde_json::Value::String(source_hash) = tx.other["sourceHash"] {
+                        source_hash.parse().unwrap()
                     },
                     from: tx.from,
                     to: match tx.to {
