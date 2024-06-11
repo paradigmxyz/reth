@@ -5,7 +5,7 @@ use crate::execute::{
 };
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::BundleStateWithReceipts;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
@@ -15,12 +15,12 @@ use std::sync::Arc;
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
 pub struct MockExecutorProvider {
-    exec_results: Arc<Mutex<Vec<BundleStateWithReceipts>>>,
+    exec_results: Arc<Mutex<Vec<ExecutionOutcome>>>,
 }
 
 impl MockExecutorProvider {
     /// Extend the mocked execution results
-    pub fn extend(&self, results: impl IntoIterator<Item = impl Into<BundleStateWithReceipts>>) {
+    pub fn extend(&self, results: impl IntoIterator<Item = impl Into<ExecutionOutcome>>) {
         self.exec_results.lock().extend(results.into_iter().map(Into::into));
     }
 }
@@ -51,7 +51,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
     type Error = BlockExecutionError;
 
     fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        let BundleStateWithReceipts { bundle, receipts, requests, first_block: _ } =
+        let ExecutionOutcome { bundle, receipts, requests, first_block: _ } =
             self.exec_results.lock().pop().unwrap();
         Ok(BlockExecutionOutput {
             state: bundle,
@@ -64,7 +64,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
 
 impl<DB> BatchExecutor<DB> for MockExecutorProvider {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BundleStateWithReceipts;
+    type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 
     fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {

@@ -419,7 +419,7 @@ impl StateProviderFactory for NoopProvider {
 
     fn pending_with_provider<'a>(
         &'a self,
-        _bundle_state_data: Box<dyn crate::FullBundleStateDataProvider + 'a>,
+        _bundle_state_data: Box<dyn crate::FullExecutionDataProvider + 'a>,
     ) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(*self))
     }

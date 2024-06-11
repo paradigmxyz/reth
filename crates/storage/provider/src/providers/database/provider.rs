@@ -1,5 +1,5 @@
 use crate::{
-    bundle_state::{BundleStateInit, BundleStateWithReceipts, HashedStateChanges, RevertsInit},
+    bundle_state::{BundleStateInit, ExecutionOutcome, HashedStateChanges, RevertsInit},
     providers::{database::metrics, static_file::StaticFileWriter, StaticFileProvider},
     to_range,
     traits::{
@@ -366,7 +366,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     }
 
     // TODO(joshie) TEMPORARY should be moved to trait providers
-    /// Unwind or peek at last N blocks of state recreating the [`BundleStateWithReceipts`].
+    /// Unwind or peek at last N blocks of state recreating the [`ExecutionOutcome`].
     ///
     /// If UNWIND it set to true tip and latest state will be unwind
     /// and returned back with all the blocks
@@ -393,9 +393,9 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     pub fn unwind_or_peek_state<const TAKE: bool>(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<BundleStateWithReceipts> {
+    ) -> ProviderResult<ExecutionOutcome> {
         if range.is_empty() {
-            return Ok(BundleStateWithReceipts::default())
+            return Ok(ExecutionOutcome::default())
         }
         let start_block_number = *range.start();
 
@@ -533,7 +533,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             receipts.push(block_receipts);
         }
 
-        Ok(BundleStateWithReceipts::new_init(
+        Ok(ExecutionOutcome::new_init(
             state,
             reverts,
             Vec::new(),
@@ -2673,7 +2673,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
     fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
-        state: BundleStateWithReceipts,
+        execution_outcome: ExecutionOutcome,
         hashed_state: HashedPostState,
         trie_updates: TrieUpdates,
         prune_modes: Option<&PruneModes>,
@@ -2698,7 +2698,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        state.write_to_storage(self.tx_ref(), None, OriginalValuesKnown::No)?;
+        execution_outcome.write_to_storage(self.tx_ref(), None, OriginalValuesKnown::No)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
         // insert hashes and intermediate merkle nodes

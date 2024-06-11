@@ -13,7 +13,7 @@ use reth_primitives::{
     BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, Receipt, Receipts, TxType,
     Withdrawals, U256,
 };
-use reth_provider::BundleStateWithReceipts;
+use reth_provider::ExecutionOutcome;
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
@@ -397,7 +397,7 @@ where
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BundleStateWithReceipts;
+    type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
@@ -424,7 +424,7 @@ where
     fn finalize(mut self) -> Self::Output {
         self.stats.log_debug();
 
-        BundleStateWithReceipts::new(
+        ExecutionOutcome::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
             self.batch_record.first_block().unwrap_or_default(),

@@ -2,7 +2,7 @@ use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    EvmEnvProvider, FullBundleStateDataProvider, HeaderProvider, ProviderError,
+    EvmEnvProvider, FullExecutionDataProvider, HeaderProvider, ProviderError,
     PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
@@ -657,7 +657,7 @@ where
 
     fn pending_with_provider(
         &self,
-        bundle_state_data: Box<dyn FullBundleStateDataProvider>,
+        bundle_state_data: Box<dyn FullExecutionDataProvider>,
     ) -> ProviderResult<StateProviderBox> {
         let canonical_fork = bundle_state_data.canonical_fork();
         trace!(target: "providers::blockchain", ?canonical_fork, "Returning post state provider");
@@ -876,7 +876,7 @@ where
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn FullBundleStateDataProvider>> {
+    ) -> Option<Box<dyn FullExecutionDataProvider>> {
         self.tree.find_pending_state_provider(block_hash)
     }
 }

@@ -12,7 +12,7 @@ use reth_evm::{
     },
     ConfigureEvm,
 };
-use reth_execution_types::BundleStateWithReceipts;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, Receipt, Request, Withdrawals,
     MAINNET, U256,
@@ -406,7 +406,7 @@ where
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BundleStateWithReceipts;
+    type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
@@ -436,7 +436,7 @@ where
     fn finalize(mut self) -> Self::Output {
         self.stats.log_debug();
 
-        BundleStateWithReceipts::new(
+        ExecutionOutcome::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
             self.batch_record.first_block().unwrap_or_default(),
