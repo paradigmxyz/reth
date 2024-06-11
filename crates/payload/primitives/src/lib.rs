@@ -23,7 +23,7 @@ use reth_primitives::ChainSpec;
 use std::fmt::Debug;
 
 /// The types that are used by the engine API.
-pub trait PayloadTypes {
+pub trait PayloadTypes: Send + Sync + Unpin {
     /// The RPC payload attributes type the CL node emits via the engine API.
     type PayloadAttributes: PayloadAttributes + Unpin;
 
