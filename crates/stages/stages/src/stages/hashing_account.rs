@@ -7,13 +7,12 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_primitives::{
-    keccak256,
-    stage::{AccountHashingCheckpoint, EntitiesCheckpoint, StageCheckpoint, StageId},
-    Account, B256,
-};
+use reth_primitives::{keccak256, Account, B256};
 use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
-use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_stages_api::{
+    AccountHashingCheckpoint, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint,
+    StageError, StageId, UnwindInput, UnwindOutput,
+};
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     fmt::Debug,
@@ -296,8 +295,9 @@ mod tests {
         UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_primitives::{stage::StageUnitCheckpoint, Account, U256};
+    use reth_primitives::{Account, U256};
     use reth_provider::providers::StaticFileWriter;
+    use reth_stages_api::StageUnitCheckpoint;
     use test_utils::*;
 
     stage_test_suite_ext!(AccountHashingTestRunner, account_hashing);

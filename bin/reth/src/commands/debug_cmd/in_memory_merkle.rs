@@ -15,13 +15,14 @@ use reth_errors::BlockValidationError;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{stage::StageId, BlockHashOrNumber};
+use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
     AccountExtReader, BundleStateWithReceipts, ChainSpecProvider, HashingWriter, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
     StateWriter, StaticFileProviderFactory, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
+use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
 use reth_trie::{updates::TrieKey, StateRoot};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
@@ -135,7 +136,7 @@ impl Command {
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
-        let BlockExecutionOutput { state, receipts, .. } = executor.execute(
+        let BlockExecutionOutput { state, receipts, requests, .. } = executor.execute(
             (
                 &block
                     .clone()
@@ -146,7 +147,12 @@ impl Command {
             )
                 .into(),
         )?;
-        let block_state = BundleStateWithReceipts::new(state, receipts.into(), block.number);
+        let block_state = BundleStateWithReceipts::new(
+            state,
+            receipts.into(),
+            block.number,
+            vec![requests.into()],
+        );
 
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates) =

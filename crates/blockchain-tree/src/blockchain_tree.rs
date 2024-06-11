@@ -1385,7 +1385,6 @@ mod tests {
         keccak256,
         proofs::calculate_transaction_root,
         revm_primitives::AccountInfo,
-        stage::StageCheckpoint,
         Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
         Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
         MAINNET,
@@ -1395,6 +1394,7 @@ mod tests {
         ProviderFactory,
     };
     use reth_trie::{root::state_root_unhashed, StateRoot};
+    use reth_stages_api::StageCheckpoint;
     use std::collections::HashMap;
 
     fn setup_externals(

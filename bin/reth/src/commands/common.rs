@@ -14,11 +14,11 @@ use reth_node_core::{
     },
     dirs::{ChainPath, DataDirPath},
 };
-use reth_primitives::{stage::PipelineTarget, ChainSpec};
+use reth_primitives::ChainSpec;
 use reth_provider::{
     providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
 };
-use reth_stages::{sets::DefaultStages, Pipeline};
+use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tracing::{debug, info, warn};

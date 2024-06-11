@@ -288,7 +288,7 @@ mod tests {
 
         state.merge_transitions(BundleRetention::Reverts);
 
-        BundleStateWithReceipts::new(state.take_bundle(), Receipts::default(), 1)
+        BundleStateWithReceipts::new(state.take_bundle(), Receipts::default(), 1, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -386,7 +386,7 @@ mod tests {
         )]));
 
         state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(state.take_bundle(), Receipts::default(), 2)
+        BundleStateWithReceipts::new(state.take_bundle(), Receipts::default(), 2, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -450,7 +450,7 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::default(), 0)
+        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
@@ -592,7 +592,7 @@ mod tests {
 
         let bundle = state.take_bundle();
 
-        BundleStateWithReceipts::new(bundle, Receipts::default(), 1)
+        BundleStateWithReceipts::new(bundle, Receipts::default(), 1, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -755,7 +755,7 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::default(), 0)
+        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
@@ -800,7 +800,7 @@ mod tests {
 
         // Commit block #1 changes to the database.
         state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(state.take_bundle(), Receipts::default(), 1)
+        BundleStateWithReceipts::new(state.take_bundle(), Receipts::default(), 1, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -834,6 +834,7 @@ mod tests {
             bundle: BundleState::default(),
             receipts: vec![vec![Some(Receipt::default()); 2]; 7].into(),
             first_block: 10,
+            requests: Vec::new(),
         };
 
         let mut this = base.clone();
@@ -895,10 +896,15 @@ mod tests {
 
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
             assert_eq!(
-                BundleStateWithReceipts::new(state.bundle_state.clone(), Receipts::default(), 0)
-                    .hash_state_slow()
-                    .state_root(&tx)
-                    .unwrap(),
+                BundleStateWithReceipts::new(
+                    state.bundle_state.clone(),
+                    Receipts::default(),
+                    0,
+                    Vec::new()
+                )
+                .hash_state_slow()
+                .state_root(&tx)
+                .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
                     address,
                     (account, storage.into_iter())
@@ -1045,6 +1051,7 @@ mod tests {
             bundle: present_state,
             receipts: vec![vec![Some(Receipt::default()); 2]; 1].into(),
             first_block: 2,
+            requests: Vec::new(),
         };
 
         test.prepend_state(previous_state);

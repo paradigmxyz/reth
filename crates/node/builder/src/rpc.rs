@@ -3,18 +3,13 @@
 use futures::TryFutureExt;
 use reth_network::NetworkHandle;
 use reth_node_api::FullNodeComponents;
-use reth_node_core::{
-    cli::config::RethRpcConfig,
-    node_config::NodeConfig,
-    rpc::{
-        api::EngineApiServer,
-        builder::{
-            auth::{AuthRpcModule, AuthServerHandle},
-            RethModuleRegistry, RpcModuleBuilder, RpcServerHandle, TransportRpcModules,
-        },
-    },
-};
+use reth_node_core::{node_config::NodeConfig, rpc::api::EngineApiServer};
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_rpc_builder::{
+    auth::{AuthRpcModule, AuthServerHandle},
+    config::RethRpcServerConfig,
+    RethModuleRegistry, RpcModuleBuilder, RpcServerHandle, TransportRpcModules,
+};
 use reth_rpc_layer::JwtSecret;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
