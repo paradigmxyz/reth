@@ -127,13 +127,13 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 
 /// Trait for managing the EVM context.
 /// Allows to build an EVM Executor with the given context.
-pub trait EvmContext<EXT, DB: Database> {
+pub trait EvmContext<'a, EXT, DB: Database> {
     /// The executor produced with the context set.
     type Executor: EvmExecutor<DB>;
 
     /// Sets the EVM database.
     #[must_use]
-    fn with_db<DBN: Database>(self, db: DBN) -> impl EvmContext<EXT, DBN>;
+    fn with_db<DBN: Database + 'a>(self, db: DBN) -> impl EvmContext<'a, EXT, DBN>;
 
     /// Sets the EVM environment.
     #[must_use]
@@ -157,7 +157,7 @@ pub trait EvmContext<EXT, DB: Database> {
 
     /// Sets the inspector for the EVM instance.
     #[must_use]
-    fn with_inspector<EXTN>(self, inspector: EXTN) -> impl EvmContext<EXTN, DB>;
+    fn with_inspector<EXTN: 'a>(self, inspector: EXTN) -> impl EvmContext<'a, EXTN, DB>;
 
     /// Returns the EVM executor.
     fn executor(self) -> Self::Executor;
@@ -174,19 +174,19 @@ impl<'a, EXT, DB: Database> RevmContext<'a, EXT, DB> {
     /// Create a new [`RevmContext`].
     pub const fn new(
         context: revm::Context<EXT, DB>,
-        handler: revm::Handler<'a, revm::Context<EXT, EVB>, EXT, DB>,
+        handler: revm::Handler<'a, revm::Context<EXT, DB>, EXT, DB>,
     ) -> Self {
         Self { context, handler }
     }
 }
 
-impl<'a, EXT, DB> EvmContext<EXT, DB> for RevmContext<'a, EXT, DB>
+impl<'a, EXT, DB> EvmContext<'a, EXT, DB> for RevmContext<'a, EXT, DB>
 where
     DB: Database + 'a,
 {
     type Executor = Evm<'a, EXT, DB>;
 
-    fn with_db<DBN: Database + 'a>(self, db: DBN) -> RevmContext<'a, EXT, DBN> {
+    fn with_db<DBN: Database + 'a>(self, db: DBN) -> impl EvmContext<'a, EXT, DBN> {
         let context = revm::Context::new(self.context.evm.with_db(db), self.context.external);
         let handler = revm::Handler::new(self.handler.cfg());
         RevmContext { context, handler }
@@ -198,17 +198,17 @@ where
     }
 
     fn with_cfg_env(mut self, cfg: CfgEnv) -> Self {
-        (*self.context.evm.env()).cfg = cfg;
+        self.context.evm.env().cfg = cfg;
         Self { context: self.context, handler: self.handler }
     }
 
     fn with_block_env(mut self, block: BlockEnv) -> Self {
-        (*self.context.evm.env()).block = block;
+        self.context.evm.env().block = block;
         Self { context: self.context, handler: self.handler }
     }
 
     fn with_tx_env(mut self, tx: TxEnv) -> Self {
-        (*self.context.evm.env()).tx = tx;
+        self.context.evm.env().tx = tx;
         Self { context: self.context, handler: self.handler }
     }
 
@@ -217,7 +217,7 @@ where
         Self { context: self.context, handler: self.handler }
     }
 
-    fn with_inspector<EXTN: 'a>(self, inspector: EXTN) -> RevmContext<'a, EXTN, DB> {
+    fn with_inspector<EXTN: 'a>(self, inspector: EXTN) -> impl EvmContext<'a, EXTN, DB> {
         let context = revm::Context::new(self.context.evm, inspector);
         let handler = revm::Handler::new(self.handler.cfg());
         RevmContext { context, handler }
@@ -228,19 +228,19 @@ where
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use revm::{db::WrapDatabaseRef, inspectors::NoOpInspector, Inspector};
+#[cfg(test)]
+mod tests {
+    use revm::inspectors::NoOpInspector;
+    use revm_primitives::HandlerCfg;
 
-//     use super::*;
+    use super::*;
 
-//     #[test]
-//     fn test_builder() {
-//         // Given
-//         let builder = EvmBuilder::default();
-//         let context = RevmContext::new(builder);
+    #[test]
+    fn test_builder() {
+        let context = revm::Context::new_empty();
+        let handler = revm::Handler::new(HandlerCfg::default());
+        let revm_context = RevmContext::new(context, handler);
 
-//         // When
-//         let context = context.with_inspector(NoOpInspector::default());
-//     }
-// }
+        let _ = revm_context.with_inspector(NoOpInspector).with_block_env(BlockEnv::default());
+    }
+}
