@@ -13,7 +13,7 @@ use reth_primitives::{revm_primitives::EVMError, BlockNumHash, B256};
 use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
 use std::fmt::Display;
-use thiserror::Error;
+use thiserror_no_std::Error;
 
 pub mod trie;
 pub use trie::{StateRootError, StorageRootError};
