@@ -1,4 +1,4 @@
-use crate::{BundleStateWithReceipts, Chain};
+use crate::{Chain, ExecutionOutcome};
 use reth_db_api::models::StoredBlockBodyIndices;
 use reth_primitives::{BlockNumber, SealedBlockWithSenders};
 use reth_prune_types::PruneModes;
@@ -65,7 +65,7 @@ pub trait BlockWriter: Send + Sync {
     fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders>,
-        state: BundleStateWithReceipts,
+        execution_outcome: ExecutionOutcome,
         hashed_state: HashedPostState,
         trie_updates: TrieUpdates,
         prune_modes: Option<&PruneModes>,

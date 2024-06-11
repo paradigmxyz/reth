@@ -1,7 +1,7 @@
 //! A no operation block executor implementation.
 
 use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::BundleStateWithReceipts;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
@@ -50,7 +50,7 @@ impl<DB> Executor<DB> for NoopBlockExecutorProvider {
 
 impl<DB> BatchExecutor<DB> for NoopBlockExecutorProvider {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BundleStateWithReceipts;
+    type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 
     fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
