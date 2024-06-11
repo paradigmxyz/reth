@@ -43,7 +43,7 @@ impl<DB: Database> Segment<DB> for Receipts {
             let receipts_walker = receipts_cursor.walk_range(block_body_indices.tx_num_range())?;
 
             let receipts = receipts_walker.collect::<Result<Vec<_>, _>>()?;
-            static_file_writer.append_receipts(receipts)?;
+            static_file_writer.append_receipts(receipts.into_iter().map(Ok))?;
         }
 
         Ok(())

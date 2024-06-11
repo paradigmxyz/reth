@@ -49,7 +49,7 @@ impl StateWriter for BundleStateWithReceipts {
                             .expect("receipt should not be filtered when saving to static files."),
                     )
                 });
-                static_file_producer.append_receipts(receipts)?;
+                static_file_producer.append_receipts(receipts.into_iter().map(Ok))?;
             } else if !receipts.is_empty() {
                 for (tx_idx, receipt) in receipts.into_iter().enumerate() {
                     if let Some(receipt) = receipt {

@@ -552,32 +552,37 @@ impl StaticFileProviderRW {
     /// Returns the current [`TxNumber`] as seen in the static file.
     pub fn append_receipts<I>(&mut self, receipts: I) -> ProviderResult<TxNumber>
     where
-        I: IntoIterator<Item = (TxNumber, Receipt)>,
+        I: IntoIterator<Item = Result<(TxNumber, Receipt), ProviderError>>,
     {
         let mut receipts_iter = receipts.into_iter().peekable();
+        // If receipts are empty, we can simply return the current TxNumber as seen in the static
+        // file.
         if receipts_iter.peek().is_none() {
-            return Err(ProviderError::EmptyReceipts());
+            return Ok(self.writer.user_header().tx_end().expect("qed"));
         }
 
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
-        // receipts contains at least one receipt so this would be overwritten
-        let mut last_tx_number = TxNumber::default();
 
-        for (tx_num, receipt) in receipts_iter {
-            self.append_with_tx_number(StaticFileSegment::Receipts, tx_num, receipt)?;
-            last_tx_number = tx_num;
+        // At this point receipts contains at least one receipt, so this would be overwritten.
+        let mut tx_number = 0;
+        let mut count = 0;
+
+        for receipt_result in receipts_iter {
+            let (tx_num, receipt) = receipt_result?;
+            tx_number = self.append_with_tx_number(StaticFileSegment::Receipts, tx_num, receipt)?;
+            count += 1;
         }
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 StaticFileSegment::Receipts,
-                StaticFileProviderOperation::Append,
-                Some(start.elapsed()),
+                StaticFileProviderOperation::AppendAverage,
+                Some(start.elapsed() / count as u32),
             );
         }
 
-        Ok(last_tx_number)
+        Ok(tx_number)
     }
 
     /// Adds an instruction to prune `to_delete`transactions during commit.
