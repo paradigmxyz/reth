@@ -74,13 +74,3 @@ backon.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-
-[features]
-optimism = [
-    "reth-primitives/optimism",
-    "reth-rpc/optimism",
-    "reth-provider/optimism",
-    "reth-beacon-consensus/optimism",
-    "reth-blockchain-tree/optimism",
-    "reth-node-core/optimism",
-]
