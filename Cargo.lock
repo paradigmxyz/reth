@@ -8016,7 +8016,6 @@ version = "0.2.0-beta.9"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
- "assert_matches",
  "bytes",
  "modular-bitfield",
  "proptest",
@@ -8025,9 +8024,7 @@ dependencies = [
  "reth-codecs",
  "reth-trie-types",
  "serde",
- "serde_json",
  "test-fuzz",
- "toml",
 ]
 
 [[package]]
