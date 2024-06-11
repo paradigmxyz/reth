@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-primitives-traits.workspace = true
 reth-codecs.workspace = true
 reth-ethereum-forks.workspace = true
 reth-network-peers.workspace = true
@@ -98,6 +99,7 @@ secp256k1.workspace = true
 default = ["c-kzg", "zstd-codec", "alloy-compat"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
+    "reth-primitives-traits/arbitrary",
     "revm-primitives/arbitrary",
     "reth-ethereum-forks/arbitrary",
     "nybbles/arbitrary",
