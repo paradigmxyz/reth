@@ -314,6 +314,11 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         &self.tx
     }
 
+    /// Returns a reference to the [`ChainSpec`].
+    pub fn chain_spec(&self) -> &ChainSpec {
+        &self.chain_spec
+    }
+
     /// Return full table as Vec
     pub fn table<T: Table>(&self) -> Result<Vec<KeyValue<T>>, DatabaseError>
     where
@@ -353,9 +358,59 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         )
     }
 
-    /// Returns a reference to the [`ChainSpec`].
-    pub fn chain_spec(&self) -> &ChainSpec {
-        &self.chain_spec
+    fn block_with_senders_range<H: AsRef<Header>, B>(
+        &self,
+        headers_range: impl FnOnce(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
+        mut assemble_block: impl FnMut(
+            H,
+            Vec<TransactionSigned>,
+            Vec<Header>,
+            Option<Withdrawals>,
+            Option<Requests>,
+            Vec<Address>,
+        ) -> ProviderResult<B>,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<B>> {
+        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
+        let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
+
+        self.process_block_range(
+            range,
+            headers_range,
+            |tx_range, header, ommers, withdrawals, requests| {
+                let (body, senders) = if tx_range.is_empty() {
+                    (Vec::new(), Vec::new())
+                } else {
+                    let body = self
+                        .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
+                        .into_iter()
+                        .map(Into::into)
+                        .collect::<Vec<TransactionSigned>>();
+                    // fetch senders from the senders table
+                    let known_senders = senders_cursor
+                        .walk_range(tx_range.clone())?
+                        .collect::<Result<HashMap<_, _>, _>>()?;
+
+                    let mut senders = Vec::with_capacity(body.len());
+                    for (tx_num, tx) in tx_range.zip(body.iter()) {
+                        match known_senders.get(&tx_num) {
+                            None => {
+                                // recover the sender from the transaction if not found
+                                let sender = tx
+                                    .recover_signer_unchecked()
+                                    .ok_or_else(|| ProviderError::SenderRecoveryError)?;
+                                senders.push(sender);
+                            }
+                            Some(sender) => senders.push(*sender),
+                        }
+                    }
+
+                    (body, senders)
+                };
+
+                assemble_block(header, body, ommers, withdrawals, requests, senders)
+            },
+        )
     }
 }
 
@@ -1545,47 +1600,14 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
-        let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
-
-        self.process_block_range(
-            range,
+        self.block_with_senders_range(
             |range| self.headers_range(range),
-            |tx_range, header, ommers, withdrawals, requests| {
-                let (body, senders) = if tx_range.is_empty() {
-                    (Vec::new(), Vec::new())
-                } else {
-                    let body = self
-                        .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
-                        .into_iter()
-                        .map(Into::into)
-                        .collect::<Vec<TransactionSigned>>();
-                    // fetch senders from the senders table
-                    let known_senders = senders_cursor
-                        .walk_range(tx_range.clone())?
-                        .collect::<Result<HashMap<_, _>, _>>()?;
-
-                    let mut senders = Vec::with_capacity(body.len());
-                    for (tx_num, tx) in tx_range.zip(body.iter()) {
-                        match known_senders.get(&tx_num) {
-                            None => {
-                                // recover the sender from the transaction if not found
-                                let sender = tx
-                                    .recover_signer_unchecked()
-                                    .ok_or_else(|| ProviderError::SenderRecoveryError)?;
-                                senders.push(sender);
-                            }
-                            Some(sender) => senders.push(*sender),
-                        }
-                    }
-
-                    (body, senders)
-                };
-
+            |header, body, ommers, withdrawals, requests, senders| {
                 Block { header, body, ommers, withdrawals, requests }
                     .try_with_senders_unchecked(senders)
                     .map_err(|_| ProviderError::SenderRecoveryError)
             },
+            range,
         )
     }
 
@@ -1593,49 +1615,16 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
-        let mut tx_cursor = self.tx.cursor_read::<tables::Transactions>()?;
-        let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
-
-        self.process_block_range(
-            range,
+        self.block_with_senders_range(
             |range| self.sealed_headers_range(range),
-            |tx_range, header, ommers, withdrawals, requests| {
-                let (body, senders) = if tx_range.is_empty() {
-                    (Vec::new(), Vec::new())
-                } else {
-                    let body = self
-                        .transactions_by_tx_range_with_cursor(tx_range.clone(), &mut tx_cursor)?
-                        .into_iter()
-                        .map(Into::into)
-                        .collect::<Vec<TransactionSigned>>();
-                    // fetch senders from the senders table
-                    let known_senders = senders_cursor
-                        .walk_range(tx_range.clone())?
-                        .collect::<Result<HashMap<_, _>, _>>()?;
-
-                    let mut senders = Vec::with_capacity(body.len());
-                    for (tx_num, tx) in tx_range.zip(body.iter()) {
-                        match known_senders.get(&tx_num) {
-                            None => {
-                                // recover the sender from the transaction if not found
-                                let sender = tx
-                                    .recover_signer_unchecked()
-                                    .ok_or_else(|| ProviderError::SenderRecoveryError)?;
-                                senders.push(sender);
-                            }
-                            Some(sender) => senders.push(*sender),
-                        }
-                    }
-
-                    (body, senders)
-                };
-
+            |header, body, ommers, withdrawals, requests, senders| {
                 SealedBlockWithSenders::new(
                     SealedBlock { header, body, ommers, withdrawals, requests },
                     senders,
                 )
                 .ok_or(ProviderError::SenderRecoveryError)
             },
+            range,
         )
     }
 }
