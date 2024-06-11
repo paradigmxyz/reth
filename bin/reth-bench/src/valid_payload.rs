@@ -90,7 +90,6 @@ where
         &self,
         payload: ExecutionPayloadInputV2,
     ) -> TransportResult<PayloadStatus> {
-        // TODO: remove clones somehow?
         let mut status = self.new_payload_v2(payload.clone()).await?;
         while status.status != PayloadStatusEnum::Valid {
             if status.status.is_invalid() {
@@ -108,7 +107,6 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> TransportResult<PayloadStatus> {
-        // TODO: remove clones somehow?
         let mut status = self
             .new_payload_v3(payload.clone(), versioned_hashes.clone(), parent_beacon_block_root)
             .await?;
