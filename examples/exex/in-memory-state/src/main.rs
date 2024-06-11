@@ -76,7 +76,6 @@ mod tests {
     use std::pin::pin;
 
     use reth::{
-        primitives::Receipts,
         providers::{BundleStateWithReceipts, Chain},
         revm::db::BundleState,
     };
@@ -99,8 +98,9 @@ mod tests {
         let block_number_1 = block_1.number;
         let state_1 = BundleStateWithReceipts::new(
             BundleState::default(),
-            Receipts::from_block_receipt(vec![random_receipt(&mut rng, &block_1.body[0], None)]),
+            vec![random_receipt(&mut rng, &block_1.body[0], None)].into(),
             block_1.number,
+            vec![],
         );
         // Extend the expected state with the first block
         expected_state.extend(state_1.clone());
@@ -119,8 +119,9 @@ mod tests {
             .ok_or(eyre::eyre!("failed to recover senders"))?;
         let state_2 = BundleStateWithReceipts::new(
             BundleState::default(),
-            Receipts::from_block_receipt(vec![random_receipt(&mut rng, &block_2.body[0], None)]),
+            vec![random_receipt(&mut rng, &block_2.body[0], None)].into(),
             block_2.number,
+            vec![],
         );
         // Extend the expected state with the second block
         expected_state.extend(state_2.clone());
