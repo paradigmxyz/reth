@@ -31,7 +31,7 @@ sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin 
 ## 4. Install Rust
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-apt-get install libclang-dev pkg-config build-essential
+sudo apt-get install libclang-dev pkg-config build-essential
 ```
 
 ## 5. Get Sources
@@ -79,7 +79,7 @@ CGO_CFLAGS="-O2 -D__BLST_PORTABLE__" go build -o=../prysmctl ./cmd/prysmctl
 
 ### Generate Genesis
 ```bash
-./prysmctl testnet generate-genesis --fork capella     --num-validators 1     --genesis-time-delay 600     --chain-config-file /home/reth-node/testnet/config.yml     --geth-genesis-json-in /home/reth-node/testnet/genesis.json     --geth-genesis-json-out /home/reth-node/testnet/genesis.json     --output-ssz /home/reth-node/testnet/genesis.ssz
+./prysmctl testnet generate-genesis --fork capella  --num-validators 1     --genesis-time-delay 600     --chain-config-file /home/reth-node/testnet/config.yml     --geth-genesis-json-in /home/reth-node/testnet/genesis.json     --geth-genesis-json-out /home/reth-node/testnet/genesis.json     --output-ssz /home/reth-node/testnet/genesis.ssz
 ```
 
 ### Move Generated Files to Docker Volumes

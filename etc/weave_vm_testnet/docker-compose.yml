@@ -138,6 +138,19 @@ services:
       beacon-chain:
         condition: service_started
 
+  metrics-exporter:
+    restart: unless-stopped
+    image: ethpandaops/ethereum-metrics-exporter:debian-latest
+    depends_on:
+      - reth
+    ports:
+      - "9091:9091" # metrics
+    volumes:
+      - ./../ethereum-metrics-exporter/config.yaml:/root/config.yaml
+    command:
+      - --config=/root/config.yaml
+      - --metrics-port=9091
+
 volumes:
   reth_data:
   reth_jwt:

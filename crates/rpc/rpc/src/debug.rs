@@ -497,7 +497,8 @@ where
                     }
                     // Increment block_env number and timestamp for the next bundle
                     block_env.number += U256::from(1);
-                    block_env.timestamp += U256::from(12);
+                    // WVM: blocktime 2s
+                    block_env.timestamp += U256::from(2);
 
                     all_bundles.push(results);
                 }
