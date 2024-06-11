@@ -77,7 +77,7 @@ async fn start_reth_testing_node(bitfinity_evm_url: Option<String>) -> (SocketAd
     // create node config
     let node_config = NodeConfig::test()
         .dev()
-        .with_rpc(RpcServerArgs::default().with_http());
+        .with_rpc(RpcServerArgs::default().with_http().with_http_unused_port());
 
     let mut chain = node_config.chain.as_ref().clone();
     chain.bitfinity_evm_url = bitfinity_evm_url;
