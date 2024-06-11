@@ -98,18 +98,6 @@ pub enum BlockValidationError {
     DepositRequestDecode(String),
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for BlockValidationError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::EVM { error, .. } => Some(&**error),
-            Self::StateRoot(err) => Some(err),
-            Self::BlockHashAccountLoadingFailed(err) => Some(err),
-            _ => None,
-        }
-    }
-}
-
 /// `BlockExecutor` Errors
 #[derive(Error, Debug)]
 pub enum BlockExecutionError {
@@ -150,20 +138,6 @@ pub enum BlockExecutionError {
     /// Arbitrary Block Executor Errors
     #[error(transparent)]
     Other(Box<dyn std::error::Error + Send + Sync>),
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for BlockExecutionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Validation(err) => Some(err),
-            Self::Pruning(err) => Some(err),
-            Self::Consensus(err) => Some(err),
-            Self::LatestBlock(err) => Some(err),
-            Self::Other(err) => Some(&**err),
-            _ => None,
-        }
-    }
 }
 
 impl BlockExecutionError {

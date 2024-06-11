@@ -23,29 +23,10 @@ impl From<StateRootError> for DatabaseError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for StateRootError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::DB(err) => Some(err),
-            Self::StorageRootError(err) => Some(err),
-        }
-    }
-}
-
 /// Storage root error.
 #[derive(Error, PartialEq, Eq, Clone, Debug)]
 pub enum StorageRootError {
     /// Internal database error.
     #[error(transparent)]
     DB(#[from] DatabaseError),
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for StorageRootError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::DB(err) => Some(err),
-        }
-    }
 }
