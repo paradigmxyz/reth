@@ -577,7 +577,7 @@ impl StaticFileProviderRW {
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operations(
                 StaticFileSegment::Receipts,
-                StaticFileProviderOperation::AppendAverage,
+                StaticFileProviderOperation::Append,
                 count,
                 Some(start.elapsed()),
             );
