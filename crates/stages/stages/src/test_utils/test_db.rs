@@ -351,7 +351,7 @@ impl TestStageDB {
                     writer.increment_block(StaticFileSegment::Receipts, block_num)?;
                     writer.append_receipts(receipts.into_iter().map(Ok))?;
                     Ok(())
-                }); 
+                });
                 writer.commit_without_sync_all()?;
                 res
             }
