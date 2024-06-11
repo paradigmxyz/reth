@@ -28,9 +28,14 @@ impl StorageLock {
     /// Note: In-process exclusivity is not on scope. If called from the same process (or another
     /// with the same PID), it will succeed.
     pub fn try_acquire(path: &Path) -> Result<Self, StorageLockError> {
+        #[cfg(feature = "disable_lock")]
+        {
+            // Too expensive for ef-tests
+            return Ok(Self(Arc::new(StorageLockInner { file_path: path.to_path_buf() })))
+        }
+
         let path = path.join(LOCKFILE_NAME);
 
-        #[cfg(not(feature = "disable_lock"))]
         if let Some(process_lock) = ProcessUID::parse(&path)? {
             if process_lock.pid != (process::id() as usize) && process_lock.is_active() {
                 return Err(StorageLockError::Taken(process_lock.pid))
