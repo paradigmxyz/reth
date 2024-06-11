@@ -77,7 +77,7 @@ where
 /// Builds the [Pipeline] with the given [`ProviderFactory`] and downloaders.
 #[allow(clippy::too_many_arguments)]
 pub async fn build_pipeline<DB, H, B, Executor>(
-    node_config: &NodeConfig,
+    _node_config: &NodeConfig,
     provider_factory: ProviderFactory<DB>,
     stage_config: &StageConfig,
     header_downloader: H,
@@ -107,14 +107,13 @@ where
 
     let prune_modes = prune_config.map(|prune| prune.segments).unwrap_or_default();
 
-    let tip = tip_rx;
     let pipeline = builder
         .with_tip_sender(tip_tx)
         .with_metrics_tx(metrics_tx.clone())
         .add_stages(
             DefaultStages::new(
                 provider_factory.clone(),
-                tip,
+                tip_rx,
                 Arc::clone(&consensus),
                 header_downloader,
                 body_downloader,

@@ -194,7 +194,7 @@ impl<DB: Database> HeaderProvider for ProviderFactory<DB> {
         if let Some(td) = self.chain_spec.final_paris_total_difficulty(number) {
             // if this block is higher than the final paris(merge) block, return the final paris
             // difficulty
-            return Ok(Some(td));
+            return Ok(Some(td))
         }
 
         self.static_file_provider.get_with_static_file_or_database(
@@ -740,7 +740,6 @@ mod tests {
         let mut rng = generators::rng();
         let consensus_tip = rng.gen();
         let (_tip_tx, tip_rx) = watch::channel(consensus_tip);
-        let tip = tip_rx;
 
         // Genesis
         let checkpoint = 0;
@@ -748,7 +747,7 @@ mod tests {
 
         // Empty database
         assert_matches!(
-            provider.sync_gap(tip.clone(), checkpoint),
+            provider.sync_gap(tip_rx.clone(), checkpoint),
             Err(ProviderError::HeaderNotFound(block_number))
                 if block_number.as_number().unwrap() == checkpoint
         );
@@ -760,7 +759,7 @@ mod tests {
         static_file_writer.commit().unwrap();
         drop(static_file_writer);
 
-        let gap = provider.sync_gap(tip, checkpoint).unwrap();
+        let gap = provider.sync_gap(tip_rx, checkpoint).unwrap();
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), consensus_tip.into());
     }

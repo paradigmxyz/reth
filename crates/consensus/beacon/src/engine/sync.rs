@@ -264,7 +264,7 @@ where
             PipelineState::Idle(pipeline) => {
                 let target = self.pending_pipeline_target.take();
 
-                if target.is_none(){
+                if target.is_none() {
                     // nothing to sync
                     return None
                 }

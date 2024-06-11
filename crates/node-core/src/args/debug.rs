@@ -8,7 +8,6 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
 #[command(next_help_heading = "Debug")]
 pub struct DebugArgs {
-    /// Prompt the downloader to download blocks one at a time.
     /// Flag indicating whether the node should be terminated after the pipeline sync.
     #[arg(long = "debug.terminate", help_heading = "Debug")]
     pub terminate: bool,

@@ -17,9 +17,7 @@ use reth_node_core::{
     node_config::NodeConfig,
 };
 use reth_primitives::{stage::PipelineTarget, BlockNumber, Chain, ChainSpec, Head, B256};
-use reth_provider::{
-    providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory,
-};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{sets::DefaultStages, Pipeline};
@@ -311,15 +309,6 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
             .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
     }
 
-    /// Returns the initial pipeline target, based on whether or not the node is running in
-    /// `debug.tip` mode or neither.
-    ///
-    /// If running in `debug.tip` mode, the configured tip is returned.
-    /// Otherwise, `None` is returned. This is what the node will do by default.
-    pub fn initial_pipeline_target(&self) -> Option<B256> {
-        self.node_config().initial_pipeline_target()
-    }
-
     /// Loads the JWT secret for the engine API
     pub fn auth_jwt_secret(&self) -> eyre::Result<JwtSecret> {
         let default_jwt_path = self.data_dir().jwt();
@@ -370,7 +359,7 @@ where
             assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
-            
+
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
             // Builds an unwind-only pipeline

@@ -18,16 +18,17 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider};
+    BlockHashReader, DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+};
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderError;
-use tokio::sync::watch;
 use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
+use tokio::sync::watch;
 use tracing::*;
 
 /// The headers stage.

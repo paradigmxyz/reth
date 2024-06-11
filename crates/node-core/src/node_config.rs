@@ -238,21 +238,6 @@ impl NodeConfig {
         self
     }
 
-    /// Returns the initial pipeline target, based on whether or not the node is running in
-    /// `debug.tip` mode or neither.
-    ///
-    /// If running in `debug.tip` mode, the configured tip is returned.
-    /// Otherwise, `None` is returned. This is what the node will do by default.
-    pub fn initial_pipeline_target(&self) -> Option<B256> {
-        if let Some(tip) = self.debug.tip {
-            // Set the provided tip as the initial pipeline target.
-            debug!(target: "reth::cli", %tip, "Tip manually set");
-            Some(tip)
-        } else {
-            None
-        }
-    }
-
     /// Returns pruning configuration.
     pub fn prune_config(&self) -> Option<PruneConfig> {
         self.pruning.prune_config(&self.chain)

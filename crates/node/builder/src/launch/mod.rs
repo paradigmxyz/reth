@@ -353,7 +353,7 @@ where
 
         let pipeline_events = pipeline.events();
 
-        let initial_target = ctx.initial_pipeline_target();
+        let initial_target = ctx.node_config().debug.tip;
 
         let mut pruner_builder =
             ctx.pruner_builder().max_reorg_depth(tree_config.max_reorg_depth() as usize);

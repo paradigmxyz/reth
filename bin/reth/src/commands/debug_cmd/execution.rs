@@ -86,13 +86,12 @@ impl Command {
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let executor = block_executor!(provider_factory.chain_spec());
 
-        let tip = tip_rx;
         let pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
                     provider_factory.clone(),
-                    tip,
+                    tip_rx,
                     Arc::clone(&consensus),
                     header_downloader,
                     body_downloader,
