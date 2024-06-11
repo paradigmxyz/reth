@@ -160,7 +160,7 @@ use crate::{
     metrics::RpcRequestMetrics,
 };
 use error::{ConflictingModules, RpcError, ServerKind};
-use hyper::{header::AUTHORIZATION, HeaderMap};
+use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
     server::{AlreadyStoppedError, IdProvider, RpcServiceBuilder, Server, ServerHandle},
@@ -205,6 +205,9 @@ use tracing::{instrument, trace};
 
 // re-export for convenience
 pub use jsonrpsee::server::ServerBuilder;
+pub use reth_ipc::server::{
+    Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
+};
 pub use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
 pub use tower::layer::util::{Identity, Stack};
 

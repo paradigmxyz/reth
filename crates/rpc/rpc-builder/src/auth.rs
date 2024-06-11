@@ -1,5 +1,5 @@
 use crate::error::{RpcError, ServerKind};
-use hyper::header::AUTHORIZATION;
+use http::header::AUTHORIZATION;
 use jsonrpsee::{
     core::RegisterMethodError,
     http_client::{transport::HttpBackend, HeaderMap},

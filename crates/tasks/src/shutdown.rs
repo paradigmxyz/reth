@@ -13,8 +13,6 @@ use std::{
 use tokio::sync::oneshot;
 
 /// A Future that resolves when the shutdown event has been fired.
-///
-/// The [`TaskManager`](crate)
 #[derive(Debug)]
 pub struct GracefulShutdown {
     shutdown: Shutdown,
@@ -24,6 +22,13 @@ pub struct GracefulShutdown {
 impl GracefulShutdown {
     pub(crate) fn new(shutdown: Shutdown, guard: GracefulShutdownGuard) -> Self {
         Self { shutdown, guard: Some(guard) }
+    }
+
+    /// Returns a new shutdown future that is ignores the returned [`GracefulShutdownGuard`].
+    ///
+    /// This just maps the return value of the future to `()`, it does not drop the guard.
+    pub fn ignore_guard(self) -> impl Future<Output = ()> + Send + Sync + Unpin + 'static {
+        self.map(drop)
     }
 }
 
