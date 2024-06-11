@@ -28,14 +28,16 @@ pub mod receipt;
 mod server;
 mod sign;
 mod state;
+pub mod trace;
 pub mod traits;
 pub mod transactions;
 
 pub use pending_block::PendingBlock;
 pub use receipt::ReceiptBuilder;
 pub use traits::{
-    BuildReceipt, EthBlocks, EthState, EthTransactions, LoadPendingBlock, LoadState,
-    RawTransactionForwarder, SpawnBlocking, StateCacheDB,
+    BuildReceipt, Call, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadBlock,
+    LoadBlockExt, LoadFee, LoadPendingBlock, LoadState, LoadStateExt, LoadTransaction,
+    RawTransactionForwarder, SpawnBlocking, StateCacheDB, Trace, TraceExt,
 };
 pub use transactions::TransactionSource;
 
@@ -168,7 +170,7 @@ where
     }
 
     /// Returns the gas oracle frontend
-    pub(crate) fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
+    pub fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
         &self.inner.gas_oracle
     }
 
@@ -215,7 +217,7 @@ impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Networ
 #[async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthApiSpec for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Pool: TransactionPool + Clone + 'static,
+    Pool: TransactionPool + 'static,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
@@ -390,5 +392,29 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     #[inline]
     pub fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
         self.raw_transaction_forwarder.read().clone()
+    }
+
+    /// Returns the gas cap.
+    #[inline]
+    pub const fn gas_cap(&self) -> u64 {
+        self.gas_cap
+    }
+
+    /// Returns a handle to the gas oracle.
+    #[inline]
+    pub const fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
+        &self.gas_oracle
+    }
+
+    /// Returns a handle to the fee history cache.
+    #[inline]
+    pub const fn fee_history_cache(&self) -> &FeeHistoryCache {
+        &self.fee_history_cache
+    }
+
+    /// Returns a handle to the signers.
+    #[inline]
+    pub const fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
+        &self.signers
     }
 }

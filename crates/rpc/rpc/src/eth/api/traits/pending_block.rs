@@ -1,4 +1,5 @@
-//! Loads a pending block from database. Helper trait for `eth_` block and transaction RPC methods.
+//! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
+//! RPC methods.
 
 use std::time::{Duration, Instant};
 
@@ -22,18 +23,19 @@ use crate::eth::{
 };
 
 /// Loads a pending block from database.
-pub trait LoadPendingBlock: SpawnBlocking {
+#[auto_impl::auto_impl(&, Arc)]
+pub trait LoadPendingBlock {
     /// Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
     fn provider(
         &self,
-    ) -> &(impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory);
+    ) -> impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory;
 
     /// Returns a handle for reading data from transaction pool.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn pool(&self) -> &impl TransactionPool;
+    fn pool(&self) -> impl TransactionPool;
 
     /// Returns a handle to the pending block.
     ///
@@ -98,7 +100,10 @@ pub trait LoadPendingBlock: SpawnBlocking {
     /// Returns the locally built pending block
     fn local_pending_block(
         &self,
-    ) -> impl Future<Output = EthResult<Option<SealedBlockWithSenders>>> {
+    ) -> impl Future<Output = EthResult<Option<SealedBlockWithSenders>>> + Send
+    where
+        Self: SpawnBlocking,
+    {
         async move {
             let pending = self.pending_block_env_and_cfg()?;
             if pending.origin.is_actual_pending() {
@@ -124,7 +129,7 @@ pub trait LoadPendingBlock: SpawnBlocking {
             let pending_block = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
-                    pending.build_block(this.provider(), this.pool())
+                    pending.build_block(&this.provider(), &this.pool())
                 })
                 .await
             {

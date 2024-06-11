@@ -1,9 +1,5 @@
-use crate::eth::{
-    api::{EthTransactions, LoadPendingBlock, LoadState, SpawnBlocking},
-    error::{EthApiError, EthResult},
-    revm_utils::{prepare_call_env, EvmOverrides},
-    utils::recover_raw_transaction,
-};
+use std::{collections::HashSet, sync::Arc};
+
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{base_block_reward, block_reward};
@@ -30,8 +26,14 @@ use revm_inspectors::{
     opcode::OpcodeGasInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
-use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+
+use crate::eth::{
+    api::{LoadBlock, LoadTransaction, TraceExt},
+    error::{EthApiError, EthResult},
+    revm_utils::{prepare_call_env, EvmOverrides},
+    utils::recover_raw_transaction,
+};
 
 /// `trace` API implementation.
 ///
@@ -72,7 +74,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: EthTransactions + LoadState + SpawnBlocking + LoadPendingBlock + 'static,
+    Eth: LoadTransaction + LoadBlock + TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(&self, trace_request: TraceCallRequest) -> EthResult<TraceResults> {
@@ -84,6 +86,10 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, env| {
+                // wrapper is hack to get around 'higher-ranked lifetime error', see
+                // <https://github.com/rust-lang/rust/issues/100013>
+                let db = db.0;
+
                 let (res, _) = this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     &res,
@@ -349,7 +355,7 @@ where
             },
         );
 
-        let block = self.inner.eth_api.block_by_id(block_id);
+        let block = self.inner.eth_api.block(block_id);
         let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
 
         let mut maybe_traces =
@@ -456,7 +462,7 @@ where
         let res = self
             .inner
             .eth_api
-            .trace_block_with_inspector(
+            .trace_block_inspector(
                 block_id,
                 OpcodeGasInspector::default,
                 move |tx_info, inspector, _res, _, _| {
@@ -471,7 +477,7 @@ where
 
         let Some(transactions) = res else { return Ok(None) };
 
-        let Some(block) = self.inner.eth_api.block_by_id(block_id).await? else { return Ok(None) };
+        let Some(block) = self.inner.eth_api.block(block_id).await? else { return Ok(None) };
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),
@@ -485,7 +491,7 @@ where
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: EthTransactions + LoadState + SpawnBlocking + LoadPendingBlock + 'static,
+    Eth: LoadBlock + LoadTransaction + TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     ///

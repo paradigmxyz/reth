@@ -26,3 +26,12 @@ pub struct OptimismApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
 }
+
+unsafe impl<Provider, Pool, Network, EvmConfig> Send
+    for OptimismApi<Provider, Pool, Network, EvmConfig>
+{
+}
+unsafe impl<Provider, Pool, Network, EvmConfig> Sync
+    for OptimismApi<Provider, Pool, Network, EvmConfig>
+{
+}

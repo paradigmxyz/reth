@@ -1,9 +1,12 @@
 //! Contains common `reth` arguments
 
 use clap::Parser;
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
+use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
+use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_node_core::{
     args::{
         utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
@@ -11,10 +14,14 @@ use reth_node_core::{
     },
     dirs::{ChainPath, DataDirPath},
 };
-use reth_primitives::ChainSpec;
-use reth_provider::{providers::StaticFileProvider, ProviderFactory};
+use reth_primitives::{stage::PipelineTarget, ChainSpec};
+use reth_provider::{
+    providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
+};
+use reth_stages::{sets::DefaultStages, Pipeline};
+use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Struct to hold config and datadir paths
 #[derive(Debug, Parser)]
@@ -77,13 +84,69 @@ impl EnvironmentArgs {
             ),
         };
 
-        let provider_factory = ProviderFactory::new(db, self.chain.clone(), sfp);
+        let provider_factory = self.create_provider_factory(&config, db, sfp)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain, genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis(provider_factory.clone())?;
         }
 
         Ok(Environment { config, provider_factory, data_dir })
+    }
+
+    /// Returns a [`ProviderFactory`] after executing consistency checks.
+    ///
+    /// If it's a read-write environment and an issue is found, it will attempt to heal (including a
+    /// pipeline unwind). Otherwise, it will print out an warning, advising the user to restart the
+    /// node to heal.
+    fn create_provider_factory(
+        &self,
+        config: &Config,
+        db: Arc<DatabaseEnv>,
+        static_file_provider: StaticFileProvider,
+    ) -> eyre::Result<ProviderFactory<Arc<DatabaseEnv>>> {
+        let has_receipt_pruning = config.prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
+        let factory = ProviderFactory::new(db, self.chain.clone(), static_file_provider);
+
+        info!(target: "reth::cli", "Verifying storage consistency.");
+
+        // Check for consistency between database and static files.
+        if let Some(unwind_target) = factory
+            .static_file_provider()
+            .check_consistency(&factory.provider()?, has_receipt_pruning)?
+        {
+            if factory.db_ref().is_read_only() {
+                warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
+                return Ok(factory)
+            }
+
+            let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
+
+            // Highly unlikely to happen, and given its destructive nature, it's better to panic
+            // instead.
+            assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
+
+            info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
+
+            // Builds and executes an unwind-only pipeline
+            let mut pipeline = Pipeline::builder()
+                .add_stages(DefaultStages::new(
+                    factory.clone(),
+                    HeaderSyncMode::Continuous,
+                    Arc::new(EthBeaconConsensus::new(self.chain.clone())),
+                    NoopHeaderDownloader::default(),
+                    NoopBodiesDownloader::default(),
+                    NoopBlockExecutorProvider::default(),
+                    config.stages.clone(),
+                    prune_modes.clone(),
+                ))
+                .build(factory.clone(), StaticFileProducer::new(factory.clone(), prune_modes));
+
+            // Move all applicable data from database to static files.
+            pipeline.move_to_static_files()?;
+            pipeline.unwind(unwind_target.unwind_target().expect("should exist"), None)?;
+        }
+
+        Ok(factory)
     }
 }
 

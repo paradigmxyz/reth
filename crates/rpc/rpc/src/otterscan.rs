@@ -1,9 +1,6 @@
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use revm_inspectors::transfer::{TransferInspector, TransferKind};
-use revm_primitives::ExecutionResult;
-
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_types::{
@@ -13,9 +10,11 @@ use reth_rpc_types::{
     },
     BlockTransactions, Transaction,
 };
+use revm_inspectors::transfer::{TransferInspector, TransferKind};
+use revm_primitives::ExecutionResult;
 
 use crate::{
-    eth::api::{EthTransactions, LoadPendingBlock, LoadState},
+    eth::api::{LoadBlock, LoadTransaction, TraceExt},
     result::internal_rpc_err,
 };
 
@@ -37,7 +36,7 @@ impl<Eth> OtterscanApi<Eth> {
 #[async_trait]
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
-    Eth: EthApiServer + EthTransactions + LoadState + LoadPendingBlock,
+    Eth: EthApiServer + LoadBlock + LoadTransaction + TraceExt + 'static,
 {
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool> {

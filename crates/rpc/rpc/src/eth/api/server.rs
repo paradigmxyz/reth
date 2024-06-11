@@ -20,7 +20,9 @@ use tracing::trace;
 
 use crate::{
     eth::{
-        api::{BuildReceipt, EthApiSpec, EthBlocks, EthState, EthTransactions},
+        api::{
+            BuildReceipt, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, Trace,
+        },
         error::EthApiError,
         revm_utils::EvmOverrides,
         EthApi,
@@ -31,7 +33,14 @@ use crate::{
 #[async_trait::async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthApiServer for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: EthApiSpec + EthTransactions + BuildReceipt + EthState,
+    Self: EthApiSpec
+        + EthTransactions
+        + EthBlocks
+        + EthState
+        + EthCall
+        + EthFees
+        + Trace
+        + BuildReceipt,
     Pool: TransactionPool + 'static,
     Provider: BlockReaderIdExt
         + ChainSpecProvider
@@ -264,9 +273,13 @@ where
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, ?block_overrides, "Serving eth_call");
-        Ok(self
-            .call(request, block_number, EvmOverrides::new(state_overrides, block_overrides))
-            .await?)
+        Ok(EthCall::call(
+            self,
+            request,
+            block_number,
+            EvmOverrides::new(state_overrides, block_overrides),
+        )
+        .await?)
     }
 
     /// Handler for: `eth_callMany`
@@ -277,7 +290,7 @@ where
         state_override: Option<StateOverride>,
     ) -> Result<Vec<EthCallResponse>> {
         trace!(target: "rpc::eth", ?bundle, ?state_context, ?state_override, "Serving eth_callMany");
-        Ok(Self::call_many(self, bundle, state_context, state_override).await?)
+        Ok(EthCall::call_many(self, bundle, state_context, state_override).await?)
     }
 
     /// Handler for: `eth_createAccessList`
@@ -287,7 +300,8 @@ where
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
-        let access_list_with_gas_used = self.create_access_list_at(request, block_number).await?;
+        let access_list_with_gas_used =
+            EthCall::create_access_list_at(self, request, block_number).await?;
 
         Ok(access_list_with_gas_used)
     }
@@ -300,25 +314,31 @@ where
         state_override: Option<StateOverride>,
     ) -> Result<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
-        Ok(self.estimate_gas_at(request, block_number.unwrap_or_default(), state_override).await?)
+        Ok(EthCall::estimate_gas_at(
+            self,
+            request,
+            block_number.unwrap_or_default(),
+            state_override,
+        )
+        .await?)
     }
 
     /// Handler for: `eth_gasPrice`
     async fn gas_price(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
-        return Ok(Self::gas_price(self).await?)
+        return Ok(EthFees::gas_price(self).await?)
     }
 
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
-        return Ok(Self::suggested_priority_fee(self).await?)
+        return Ok(EthFees::suggested_priority_fee(self).await?)
     }
 
     /// Handler for: `eth_blobBaseFee`
     async fn blob_base_fee(&self) -> Result<U256> {
         trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
-        return Ok(Self::blob_base_fee(self).await?)
+        return Ok(EthFees::blob_base_fee(self).await?)
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
@@ -337,7 +357,9 @@ where
         reward_percentiles: Option<Vec<f64>>,
     ) -> Result<FeeHistory> {
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
-        return Ok(Self::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?)
+        return Ok(
+            EthFees::fee_history(self, block_count.to(), newest_block, reward_percentiles).await?
+        )
     }
 
     /// Handler for: `eth_mining`
@@ -650,7 +672,8 @@ mod tests {
         let (eth_api, base_fees_per_gas, gas_used_ratios) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let fee_history = eth_api.fee_history(1, newest_block.into(), None).await.unwrap();
+        let fee_history =
+            eth_api.fee_history(U64::from(1), newest_block.into(), None).await.unwrap();
         assert_eq!(
             fee_history.base_fee_per_gas,
             &base_fees_per_gas[base_fees_per_gas.len() - 2..],
@@ -684,7 +707,7 @@ mod tests {
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
         let fee_history =
-            eth_api.fee_history(block_count, newest_block.into(), None).await.unwrap();
+            eth_api.fee_history(U64::from(block_count), newest_block.into(), None).await.unwrap();
 
         assert_eq!(
             &fee_history.base_fee_per_gas, &base_fees_per_gas,

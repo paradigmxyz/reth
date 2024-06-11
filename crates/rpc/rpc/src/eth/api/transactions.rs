@@ -2,70 +2,37 @@
 
 use std::sync::Arc;
 
-use alloy_primitives::TxKind as RpcTransactionKind;
-use async_trait::async_trait;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{
-    revm::env::tx_env_with_recovered, Address, BlockId, BlockNumberOrTag, Bytes,
-    FromRecoveredPooledTransaction, SealedBlock, SealedBlockWithSenders, TransactionSigned,
-    TransactionSignedEcRecovered, B256, U256,
-};
+use reth_primitives::{BlockId, Bytes, TransactionSignedEcRecovered, B256};
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ReceiptProvider,
-    StateProviderFactory, TransactionsProvider,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory, TransactionsProvider,
 };
-use reth_revm::database::StateProviderDatabase;
-use reth_rpc_types::{
-    transaction::{
-        EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
-        LegacyTransactionRequest,
-    },
-    Index, Transaction, TransactionInfo, TransactionRequest, TypedTransactionRequest,
-};
+use reth_rpc_types::{Index, Transaction, TransactionInfo};
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
-use reth_transaction_pool::{TransactionOrigin, TransactionPool};
-use revm::{
-    db::CacheDB,
-    primitives::{
-        db::DatabaseCommit, EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState,
-    },
-    Inspector,
-};
+use reth_transaction_pool::TransactionPool;
 
 use crate::{
     eth::{
-        api::{
-            BuildReceipt, EthState, EthTransactions, LoadState, RawTransactionForwarder,
-            SpawnBlocking, StateCacheDB,
-        },
+        api::{BuildReceipt, EthTransactions, LoadBlock, LoadTransaction, RawTransactionForwarder},
         cache::EthStateCache,
-        error::{EthApiError, EthResult, RpcInvalidTransactionError, SignError},
+        error::EthResult,
         revm_utils::FillableTransaction,
+        signer::EthSigner,
     },
-    EthApi, EthApiSpec,
+    EthApi,
 };
 
-#[async_trait]
-impl<Provider, Pool, Network, EvmConfig> EthTransactions
+impl<Provider, Pool, Network, EvmConfig> LoadTransaction
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Pool: TransactionPool + 'static,
-    Provider: BlockReaderIdExt
-        + BlockReader
-        + TransactionsProvider
-        + ReceiptProvider
-        + ChainSpecProvider
-        + StateProviderFactory
-        + EvmEnvProvider
-        + 'static,
-    Network: NetworkInfo + 'static,
-    EvmConfig: ConfigureEvm,
+    Provider: TransactionsProvider,
+    Pool: TransactionPool,
 {
     type Pool = Pool;
 
     #[inline]
-    fn provider(&self) -> impl BlockReaderIdExt {
+    fn provider(&self) -> impl TransactionsProvider {
         self.inner.provider()
     }
 
@@ -75,13 +42,21 @@ where
     }
 
     #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm {
-        self.inner.evm_config()
-    }
-
-    #[inline]
     fn pool(&self) -> &Self::Pool {
         self.inner.pool()
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> EthTransactions
+    for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: LoadTransaction + Send + Sync,
+    Pool: TransactionPool + 'static,
+    Provider: BlockReaderIdExt,
+{
+    #[inline]
+    fn provider(&self) -> impl BlockReaderIdExt {
+        self.inner.provider()
     }
 
     #[inline]
@@ -90,316 +65,8 @@ where
     }
 
     #[inline]
-    fn call_gas_limit(&self) -> u64 {
-        self.inner.gas_cap
-    }
-
-    async fn block_by_id(&self, id: BlockId) -> EthResult<Option<SealedBlock>> {
-        self.block(id).await
-    }
-
-    async fn block_by_id_with_senders(
-        &self,
-        id: BlockId,
-    ) -> EthResult<Option<SealedBlockWithSenders>> {
-        self.block_with_senders(id).await
-    }
-
-    async fn transactions_by_block_id(
-        &self,
-        block: BlockId,
-    ) -> EthResult<Option<Vec<TransactionSigned>>> {
-        self.block_by_id(block).await.map(|block| block.map(|block| block.body))
-    }
-
-    async fn send_transaction(&self, mut request: TransactionRequest) -> EthResult<B256>
-    where
-        Self: EthState,
-    {
-        let from = match request.from {
-            Some(from) => from,
-            None => return Err(SignError::NoAccount.into()),
-        };
-
-        // set nonce if not already set before
-        if request.nonce.is_none() {
-            let nonce = self.transaction_count(from, Some(BlockId::pending())).await?;
-            // note: `.to()` can't panic because the nonce is constructed from a `u64`
-            request.nonce = Some(nonce.to::<u64>());
-        }
-
-        let chain_id = self.chain_id();
-
-        let estimated_gas = self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
-        let gas_limit = estimated_gas;
-
-        let TransactionRequest {
-            to,
-            gas_price,
-            max_fee_per_gas,
-            max_priority_fee_per_gas,
-            gas,
-            value,
-            input: data,
-            nonce,
-            mut access_list,
-            max_fee_per_blob_gas,
-            blob_versioned_hashes,
-            sidecar,
-            ..
-        } = request;
-
-        // todo: remove this inlining after https://github.com/alloy-rs/alloy/pull/183#issuecomment-1928161285
-        let transaction = match (
-            gas_price,
-            max_fee_per_gas,
-            access_list.take(),
-            max_fee_per_blob_gas,
-            blob_versioned_hashes,
-            sidecar,
-        ) {
-            // legacy transaction
-            // gas price required
-            (Some(_), None, None, None, None, None) => {
-                Some(TypedTransactionRequest::Legacy(LegacyTransactionRequest {
-                    nonce: nonce.unwrap_or_default(),
-                    gas_price: U256::from(gas_price.unwrap_or_default()),
-                    gas_limit: U256::from(gas.unwrap_or_default()),
-                    value: value.unwrap_or_default(),
-                    input: data.into_input().unwrap_or_default(),
-                    kind: to.unwrap_or(RpcTransactionKind::Create),
-                    chain_id: None,
-                }))
-            }
-            // EIP2930
-            // if only accesslist is set, and no eip1599 fees
-            (_, None, Some(access_list), None, None, None) => {
-                Some(TypedTransactionRequest::EIP2930(EIP2930TransactionRequest {
-                    nonce: nonce.unwrap_or_default(),
-                    gas_price: U256::from(gas_price.unwrap_or_default()),
-                    gas_limit: U256::from(gas.unwrap_or_default()),
-                    value: value.unwrap_or_default(),
-                    input: data.into_input().unwrap_or_default(),
-                    kind: to.unwrap_or(RpcTransactionKind::Create),
-                    chain_id: 0,
-                    access_list,
-                }))
-            }
-            // EIP1559
-            // if 4844 fields missing
-            // gas_price, max_fee_per_gas, access_list, max_fee_per_blob_gas, blob_versioned_hashes,
-            // sidecar,
-            (None, _, _, None, None, None) => {
-                // Empty fields fall back to the canonical transaction schema.
-                Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
-                    nonce: nonce.unwrap_or_default(),
-                    max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
-                    max_priority_fee_per_gas: U256::from(
-                        max_priority_fee_per_gas.unwrap_or_default(),
-                    ),
-                    gas_limit: U256::from(gas.unwrap_or_default()),
-                    value: value.unwrap_or_default(),
-                    input: data.into_input().unwrap_or_default(),
-                    kind: to.unwrap_or(RpcTransactionKind::Create),
-                    chain_id: 0,
-                    access_list: access_list.unwrap_or_default(),
-                }))
-            }
-            // EIP4884
-            // all blob fields required
-            (
-                None,
-                _,
-                _,
-                Some(max_fee_per_blob_gas),
-                Some(blob_versioned_hashes),
-                Some(sidecar),
-            ) => {
-                // As per the EIP, we follow the same semantics as EIP-1559.
-                Some(TypedTransactionRequest::EIP4844(EIP4844TransactionRequest {
-                    chain_id: 0,
-                    nonce: nonce.unwrap_or_default(),
-                    max_priority_fee_per_gas: U256::from(
-                        max_priority_fee_per_gas.unwrap_or_default(),
-                    ),
-                    max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
-                    gas_limit: U256::from(gas.unwrap_or_default()),
-                    value: value.unwrap_or_default(),
-                    input: data.into_input().unwrap_or_default(),
-                    #[allow(clippy::manual_unwrap_or_default)] // clippy is suggesting here unwrap_or_default
-                    to: match to {
-                        Some(RpcTransactionKind::Call(to)) => to,
-                        _ => Address::default(),
-                    },
-                    access_list: access_list.unwrap_or_default(),
-
-                    // eip-4844 specific.
-                    max_fee_per_blob_gas: U256::from(max_fee_per_blob_gas),
-                    blob_versioned_hashes,
-                    sidecar,
-                }))
-            }
-
-            _ => None,
-        };
-
-        let transaction = match transaction {
-            Some(TypedTransactionRequest::Legacy(mut req)) => {
-                req.chain_id = Some(chain_id.to());
-                req.gas_limit = gas_limit.saturating_to();
-                req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
-
-                TypedTransactionRequest::Legacy(req)
-            }
-            Some(TypedTransactionRequest::EIP2930(mut req)) => {
-                req.chain_id = chain_id.to();
-                req.gas_limit = gas_limit.saturating_to();
-                req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
-
-                TypedTransactionRequest::EIP2930(req)
-            }
-            Some(TypedTransactionRequest::EIP1559(mut req)) => {
-                let (max_fee_per_gas, max_priority_fee_per_gas) = self
-                    .eip1559_fees(
-                        max_fee_per_gas.map(U256::from),
-                        max_priority_fee_per_gas.map(U256::from),
-                    )
-                    .await?;
-
-                req.chain_id = chain_id.to();
-                req.gas_limit = gas_limit.saturating_to();
-                req.max_fee_per_gas = max_fee_per_gas.saturating_to();
-                req.max_priority_fee_per_gas = max_priority_fee_per_gas.saturating_to();
-
-                TypedTransactionRequest::EIP1559(req)
-            }
-            Some(TypedTransactionRequest::EIP4844(mut req)) => {
-                let (max_fee_per_gas, max_priority_fee_per_gas) = self
-                    .eip1559_fees(
-                        max_fee_per_gas.map(U256::from),
-                        max_priority_fee_per_gas.map(U256::from),
-                    )
-                    .await?;
-
-                req.max_fee_per_gas = max_fee_per_gas;
-                req.max_priority_fee_per_gas = max_priority_fee_per_gas;
-                req.max_fee_per_blob_gas =
-                    self.eip4844_blob_fee(max_fee_per_blob_gas.map(U256::from)).await?;
-
-                req.chain_id = chain_id.to();
-                req.gas_limit = gas_limit;
-
-                TypedTransactionRequest::EIP4844(req)
-            }
-            None => return Err(EthApiError::ConflictingFeeFieldsInRequest),
-        };
-
-        let signed_tx = self.sign_request(&from, transaction)?;
-
-        let recovered =
-            signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
-
-        let pool_transaction = match recovered.try_into() {
-            Ok(converted) => <Pool::Transaction>::from_recovered_pooled_transaction(converted),
-            Err(_) => return Err(EthApiError::TransactionConversionError),
-        };
-
-        // submit the transaction to the pool with a `Local` origin
-        let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
-
-        Ok(hash)
-    }
-
-    async fn trace_block_until_with_inspector<Setup, Insp, F, R>(
-        &self,
-        block_id: BlockId,
-        highest_index: Option<u64>,
-        mut inspector_setup: Setup,
-        f: F,
-    ) -> EthResult<Option<Vec<R>>>
-    where
-        Self: LoadState,
-        F: for<'a> Fn(
-                TransactionInfo,
-                Insp,
-                ExecutionResult,
-                &'a EvmState,
-                &'a StateCacheDB,
-            ) -> EthResult<R>
-            + Send
-            + 'static,
-        Setup: FnMut() -> Insp + Send + 'static,
-        Insp: for<'a> Inspector<&'a mut StateCacheDB> + Send + 'static,
-        R: Send + 'static,
-    {
-        let ((cfg, block_env, _), block) =
-            futures::try_join!(self.evm_env_at(block_id), self.block_with_senders(block_id))?;
-
-        let Some(block) = block else { return Ok(None) };
-
-        if block.body.is_empty() {
-            // nothing to trace
-            return Ok(Some(Vec::new()))
-        }
-
-        // replay all transactions of the block
-        self.spawn_tracing(move |this| {
-            // we need to get the state of the parent block because we're replaying this block on
-            // top of its parent block's state
-            let state_at = block.parent_hash;
-            let block_hash = block.hash();
-
-            let block_number = block_env.number.saturating_to::<u64>();
-            let base_fee = block_env.basefee.saturating_to::<u128>();
-
-            // prepare transactions, we do everything upfront to reduce time spent with open state
-            let max_transactions = highest_index.map_or(block.body.len(), |highest| {
-                // we need + 1 because the index is 0-based
-                highest as usize + 1
-            });
-            let mut results = Vec::with_capacity(max_transactions);
-
-            let mut transactions = block
-                .into_transactions_ecrecovered()
-                .take(max_transactions)
-                .enumerate()
-                .map(|(idx, tx)| {
-                    let tx_info = TransactionInfo {
-                        hash: Some(tx.hash()),
-                        index: Some(idx as u64),
-                        block_hash: Some(block_hash),
-                        block_number: Some(block_number),
-                        base_fee: Some(base_fee),
-                    };
-                    let tx_env = tx_env_with_recovered(&tx);
-                    (tx_info, tx_env)
-                })
-                .peekable();
-
-            // now get the state
-            let state = this.state_at_block_id(state_at.into())?;
-            let mut db = CacheDB::new(StateProviderDatabase::new(state));
-
-            while let Some((tx_info, tx)) = transactions.next() {
-                let env = EnvWithHandlerCfg::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
-
-                let mut inspector = inspector_setup();
-                let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
-                let ResultAndState { result, state } = res;
-                results.push(f(tx_info, inspector, result, &state, &db)?);
-
-                // need to apply the state changes of this transaction before executing the
-                // next transaction, but only if there's a next transaction
-                if transactions.peek().is_some() {
-                    // commit the state changes to the DB
-                    db.commit(state)
-                }
-            }
-
-            Ok(results)
-        })
-        .await
-        .map(Some)
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
+        self.inner.signers()
     }
 }
 
@@ -416,82 +83,13 @@ impl<Provider, Pool, Network, EvmConfig> BuildReceipt
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
+    Self: LoadBlock,
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + 'static,
     EvmConfig: ConfigureEvm,
 {
-    /// Returns the gas price if it is set, otherwise fetches a suggested gas price for legacy
-    /// transactions.
-    pub(crate) async fn legacy_gas_price(&self, gas_price: Option<U256>) -> EthResult<U256> {
-        match gas_price {
-            Some(gas_price) => Ok(gas_price),
-            None => {
-                // fetch a suggested gas price
-                self.gas_price().await
-            }
-        }
-    }
-
-    /// Returns the EIP-1559 fees if they are set, otherwise fetches a suggested gas price for
-    /// EIP-1559 transactions.
-    ///
-    /// Returns (`max_fee`, `priority_fee`)
-    pub(crate) async fn eip1559_fees(
-        &self,
-        max_fee_per_gas: Option<U256>,
-        max_priority_fee_per_gas: Option<U256>,
-    ) -> EthResult<(U256, U256)> {
-        let max_fee_per_gas = match max_fee_per_gas {
-            Some(max_fee_per_gas) => max_fee_per_gas,
-            None => {
-                // fetch pending base fee
-                let base_fee = self
-                    .block(BlockNumberOrTag::Pending)
-                    .await?
-                    .ok_or(EthApiError::UnknownBlockNumber)?
-                    .base_fee_per_gas
-                    .ok_or_else(|| {
-                        EthApiError::InvalidTransaction(
-                            RpcInvalidTransactionError::TxTypeNotSupported,
-                        )
-                    })?;
-                U256::from(base_fee)
-            }
-        };
-
-        let max_priority_fee_per_gas = match max_priority_fee_per_gas {
-            Some(max_priority_fee_per_gas) => max_priority_fee_per_gas,
-            None => self.suggested_priority_fee().await?,
-        };
-        Ok((max_fee_per_gas, max_priority_fee_per_gas))
-    }
-
-    /// Returns the EIP-4844 blob fee if it is set, otherwise fetches a blob fee.
-    pub(crate) async fn eip4844_blob_fee(&self, blob_fee: Option<U256>) -> EthResult<U256> {
-        match blob_fee {
-            Some(blob_fee) => Ok(blob_fee),
-            None => self.blob_base_fee().await,
-        }
-    }
-
-    pub(crate) fn sign_request(
-        &self,
-        from: &Address,
-        request: TypedTransactionRequest,
-    ) -> EthResult<TransactionSigned> {
-        for signer in self.inner.signers.read().iter() {
-            if signer.is_signer_for(from) {
-                return match signer.sign_transaction(request, from) {
-                    Ok(tx) => Ok(tx),
-                    Err(e) => Err(e.into()),
-                }
-            }
-        }
-        Err(EthApiError::InvalidTransactionSignature)
-    }
-
     /// Get Transaction by [`BlockId`] and the index of the transaction within that Block.
     ///
     /// Returns `Ok(None)` if the block does not exist, or the block as fewer transactions

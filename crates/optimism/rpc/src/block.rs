@@ -3,7 +3,8 @@
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider};
 use reth_rpc::eth::{
-    api::{BuildReceipt, EthBlocks, ReceiptBuilder},
+    api::{BuildReceipt, EthBlocks, LoadBlock, ReceiptBuilder},
+    cache::EthStateCache,
     error::EthResult,
 };
 use reth_rpc_types::{AnyTransactionReceipt, BlockId};
@@ -17,11 +18,6 @@ impl<Provider, Pool, Network, EvmConfig> EthBlocks
 where
     Provider: BlockReaderIdExt + ChainSpecProvider,
 {
-    #[inline]
-    fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
-    }
-
     async fn block_receipts(
         &self,
         block_id: BlockId,
@@ -67,5 +63,21 @@ where
         }
 
         Ok(None)
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> LoadBlock
+    for OptimismApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReaderIdExt,
+{
+    #[inline]
+    fn provider(&self) -> impl BlockReaderIdExt {
+        self.inner.provider()
+    }
+
+    #[inline]
+    fn cache(&self) -> &EthStateCache {
+        self.inner.cache()
     }
 }

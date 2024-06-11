@@ -220,6 +220,14 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
         launcher.launch_node(self).await
     }
 
+    /// Launches the node with the given closure.
+    pub fn launch_with_fn<L, R>(self, launcher: L) -> R
+    where
+        L: FnOnce(Self) -> R,
+    {
+        launcher(self)
+    }
+
     /// Check that the builder can be launched
     ///
     /// This is useful when writing tests to ensure that the builder is configured correctly.
