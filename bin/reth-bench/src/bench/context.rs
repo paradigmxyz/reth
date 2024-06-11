@@ -33,7 +33,7 @@ pub(crate) struct BenchContext {
 }
 
 impl BenchContext {
-    /// This is the intialization code for most benchmarks, taking in a [`BenchmarkArgs`] and
+    /// This is the initialization code for most benchmarks, taking in a [`BenchmarkArgs`] and
     /// returning the providers needed to run a benchmark.
     pub(crate) async fn new(bench_args: &BenchmarkArgs, rpc_url: String) -> eyre::Result<Self> {
         info!("Running benchmark using data from RPC URL: {}", rpc_url);
