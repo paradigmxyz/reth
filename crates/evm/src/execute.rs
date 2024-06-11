@@ -24,23 +24,24 @@ pub trait EvmExecutor<DB> {
     /// Runs the executor with the current env.
     fn execute(&mut self) -> Result<Self::Output, Self::Error>;
 
+    /// Returns the current env of the executor.
+    fn env(&self) -> &Self::Env;
+}
+
+pub trait EvmCommitter<DB>: EvmExecutor<DB> {
     /// Commit the state changes to the database.
     fn commit(&mut self, output: Self::Output);
 
     /// Run the executor and commit the state changes to the database.
     fn execute_and_commit(&mut self) -> Result<Self::Output, Self::Error>;
-
-    /// Returns the current env of the executor.
-    fn env(&self) -> &Self::Env;
 }
 
 /// An EVM executor that uses the [`Evm`] struct to execute the current Env.
 impl<'a, DB, I> EvmExecutor<DB> for Evm<'a, I, DB>
 where
-    DB: Database + DatabaseCommit,
+    DB: Database,
 {
     type Env = Context<I, DB>;
-
     type Error = EVMError<DB::Error>;
     type Output = ResultAndState;
 
@@ -48,6 +49,15 @@ where
         self.transact()
     }
 
+    fn env(&self) -> &Self::Env {
+        &self.context
+    }
+}
+
+impl<'a, DB, I> EvmCommitter<DB> for Evm<'a, I, DB>
+where
+    DB: Database + DatabaseCommit,
+{
     fn commit(&mut self, output: Self::Output) {
         self.context.evm.db.commit(output.state);
     }
@@ -56,10 +66,6 @@ where
         let output = self.execute()?;
         self.commit(output.clone());
         Ok(output)
-    }
-
-    fn env(&self) -> &Self::Env {
-        &self.context
     }
 }
 
