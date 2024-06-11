@@ -321,12 +321,12 @@ impl DatabaseEnv {
                 };
                 reth_tracing::tracing::warn!(
                     target: "storage::db::mdbx",
-                    process_id,
-                    thread_id,
-                    read_txn_id,
-                    gap,
-                    space,
-                    retry,
+                    ?process_id,
+                    ?thread_id,
+                    ?read_txn_id,
+                    ?gap,
+                    ?space,
+                    ?retry,
                     "{message}"
                 )
             }
