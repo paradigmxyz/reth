@@ -35,7 +35,7 @@ impl InvalidHeaderCache {
     ///
     /// If this is called, the hit count for the entry is incremented.
     /// If the hit count exceeds the threshold, the entry is evicted and `None` is returned.
-    pub(crate) fn get(&mut self, hash: &B256) -> Option<Arc<Header>> {
+    pub fn get(&mut self, hash: &B256) -> Option<Arc<Header>> {
         {
             let entry = self.headers.get(hash)?;
             entry.hit_count += 1;
