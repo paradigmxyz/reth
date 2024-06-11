@@ -5,8 +5,9 @@ use crate::{
     DatabaseError,
 };
 use reth_codecs::{main_codec, Compact};
-use reth_primitives::{stage::StageCheckpoint, Address, B256, *};
+use reth_primitives::{Address, B256, *};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
+use reth_stages_types::StageCheckpoint;
 use reth_trie_types::{StoredNibbles, StoredNibblesSubKey, *};
 
 pub mod accounts;
@@ -298,15 +299,15 @@ add_wrapper_struct!((ClientVersion, CompactClientVersion));
 mod tests {
     use super::*;
     use reth_primitives::{
-        stage::{
-            AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint,
-            ExecutionCheckpoint, HeadersCheckpoint, IndexHistoryCheckpoint, StageCheckpoint,
-            StageUnitCheckpoint, StorageHashingCheckpoint,
-        },
         Account, Header, Receipt, ReceiptWithBloom, SealedHeader, TxEip1559, TxEip2930, TxEip4844,
         TxLegacy, Withdrawals,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
+    use reth_stages_types::{
+        AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
+        HeadersCheckpoint, IndexHistoryCheckpoint, StageCheckpoint, StageUnitCheckpoint,
+        StorageHashingCheckpoint,
+    };
 
     // each value in the database has an extra field named flags that encodes metadata about other
     // fields in the value, e.g. offset and length.

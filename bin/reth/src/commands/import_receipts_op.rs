@@ -11,11 +11,12 @@ use reth_downloaders::{
 };
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
-use reth_primitives::{stage::StageId, Receipts, StaticFileSegment};
+use reth_primitives::{Receipts, StaticFileSegment};
 use reth_provider::{
-    BundleStateWithReceipts, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StateWriter, StaticFileProviderFactory, StaticFileWriter, StatsReader,
+    ExecutionOutcome, OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateWriter,
+    StaticFileProviderFactory, StaticFileWriter, StatsReader,
 };
+use reth_stages::StageId;
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info, trace};
 
@@ -130,20 +131,16 @@ where
         );
 
         // We're reusing receipt writing code internal to
-        // `BundleStateWithReceipts::write_to_storage`, so we just use a default empty
+        // `ExecutionOutcome::write_to_storage`, so we just use a default empty
         // `BundleState`.
-        let bundled_state = BundleStateWithReceipts::new(
-            Default::default(),
-            receipts,
-            first_block,
-            Default::default(),
-        );
+        let execution_outcome =
+            ExecutionOutcome::new(Default::default(), receipts, first_block, Default::default());
 
         let static_file_producer =
             static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
 
         // finally, write the receipts
-        bundled_state.write_to_storage::<DB::TXMut>(
+        execution_outcome.write_to_storage::<DB::TXMut>(
             &tx,
             Some(static_file_producer),
             OriginalValuesKnown::Yes,

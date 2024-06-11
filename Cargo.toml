@@ -65,6 +65,7 @@ members = [
     "crates/payload/primitives/",
     "crates/payload/validator/",
     "crates/primitives/",
+    "crates/primitives-traits/",
     "crates/prune/prune",
     "crates/prune/types",
     "crates/revm/",
@@ -79,6 +80,7 @@ members = [
     "crates/rpc/rpc/",
     "crates/stages/api/",
     "crates/stages/stages/",
+    "crates/stages/types/",
     "crates/static-file/types/",
     "crates/static-file/static-file",
     "crates/storage/codecs/",
@@ -301,6 +303,7 @@ reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-primitives = { path = "crates/primitives" }
+reth-primitives-traits = { path = "crates/primitives-traits" }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types" }
@@ -316,6 +319,7 @@ reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
+reth-stages-types = { path = "crates/stages/types" }
 reth-static-file = { path = "crates/static-file/static-file" }
 reth-static-file-types = { path = "crates/static-file/types" }
 reth-storage-api = { path = "crates/storage/storage-api" }

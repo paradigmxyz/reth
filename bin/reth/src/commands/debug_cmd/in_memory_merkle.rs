@@ -15,13 +15,14 @@ use reth_errors::BlockValidationError;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{stage::StageId, BlockHashOrNumber};
+use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    AccountExtReader, BundleStateWithReceipts, ChainSpecProvider, HashingWriter, HeaderProvider,
+    AccountExtReader, ChainSpecProvider, ExecutionOutcome, HashingWriter, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
     StateWriter, StaticFileProviderFactory, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
+use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
 use reth_trie::{updates::TrieKey, StateRoot};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
@@ -146,16 +147,12 @@ impl Command {
             )
                 .into(),
         )?;
-        let block_state = BundleStateWithReceipts::new(
-            state,
-            receipts.into(),
-            block.number,
-            vec![requests.into()],
-        );
+        let execution_outcome =
+            ExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
 
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates) =
-            block_state.hash_state_slow().state_root_with_updates(provider.tx_ref())?;
+            execution_outcome.hash_state_slow().state_root_with_updates(provider.tx_ref())?;
 
         if in_memory_state_root == block.state_root {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
@@ -172,7 +169,7 @@ impl Command {
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
             None,
         )?;
-        block_state.write_to_storage(provider_rw.tx_ref(), None, OriginalValuesKnown::No)?;
+        execution_outcome.write_to_storage(provider_rw.tx_ref(), None, OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;

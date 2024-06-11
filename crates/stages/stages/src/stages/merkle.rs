@@ -5,16 +5,14 @@ use reth_db_api::{
     database::Database,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{
-    stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
-    BlockNumber, GotExpected, SealedHeader, B256,
-};
+use reth_primitives::{BlockNumber, GotExpected, SealedHeader, B256};
 use reth_provider::{
     DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader,
     StageCheckpointWriter, StatsReader,
 };
 use reth_stages_api::{
-    BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
+    BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
+    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
 use std::fmt::Debug;
@@ -367,10 +365,9 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
-    use reth_primitives::{
-        keccak256, stage::StageUnitCheckpoint, SealedBlock, StaticFileSegment, StorageEntry, U256,
-    };
+    use reth_primitives::{keccak256, SealedBlock, StaticFileSegment, StorageEntry, U256};
     use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+    use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::{
         generators,
         generators::{

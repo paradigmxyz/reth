@@ -19,6 +19,7 @@ reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-provider.workspace = true
 reth-node-builder.workspace = true
 reth-tokio-util.workspace = true
+reth-stages-types.workspace = true
 
 jsonrpsee.workspace = true
 
