@@ -25,10 +25,7 @@ thiserror.workspace = true
 dashmap = { workspace = true, features = ["inline"], optional = true }
 tracing.workspace = true
 
-ffi = { package = "reth-mdbx-sys", path = "./mdbx-sys" }
-
-[target.'cfg(not(windows))'.dependencies]
-libffi = "3.2.0"
+reth-mdbx-sys.workspace = true
 
 [features]
 default = []
@@ -36,7 +33,11 @@ return-borrowed = []
 read-tx-timeouts = ["dashmap", "dashmap/inline"]
 
 [dev-dependencies]
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
+pprof = { workspace = true, features = [
+    "flamegraph",
+    "frame-pointer",
+    "criterion",
+] }
 criterion.workspace = true
 rand.workspace = true
 rand_xorshift = "0.3"
