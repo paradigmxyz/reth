@@ -29,7 +29,7 @@ to make a PR!
 | [OP Bridge ExEx](./exex/op-bridge)        | Illustrates an ExEx that decodes Optimism deposit and withdrawal receipts from L1 |
 | [Rollup](./exex/rollup)                   | Illustrates a rollup ExEx that derives the state from L1                          |
 | [In Memory State](./exex/in-memory-state) | Illustrates an ExEx that tracks the plain state in memory                         |
-| [EVM](./exex/evm)                         | Illustrates an ExEx that re-executes every block with a custom tracing inspector  |
+| [EVM](./exex/evm)                         | Illustrates an ExEx that checks ERC20 balances                                    |
 
 ## RPC
 
@@ -58,11 +58,11 @@ to make a PR!
 
 ## P2P
 
-| Example                     | Description                                                       |
-| --------------------------- | ----------------------------------------------------------------- |
-| [Manual P2P](./manual-p2p)  | Illustrates how to connect and communicate with a peer            |
-| [Polygon P2P](./polygon-p2p) | Illustrates how to connect and communicate with a peer on Polygon |
-| [BSC P2P](./bsc-p2p) | Illustrates how to connect and communicate with a peer on Binance Smart Chain |
+| Example                      | Description                                                                   |
+| ---------------------------- | ----------------------------------------------------------------------------- |
+| [Manual P2P](./manual-p2p)   | Illustrates how to connect and communicate with a peer                        |
+| [Polygon P2P](./polygon-p2p) | Illustrates how to connect and communicate with a peer on Polygon             |
+| [BSC P2P](./bsc-p2p)         | Illustrates how to connect and communicate with a peer on Binance Smart Chain |
 
 ## Misc
 
