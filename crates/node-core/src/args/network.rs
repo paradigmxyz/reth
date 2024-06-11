@@ -169,6 +169,11 @@ impl NetworkArgs {
                         .build(),
                 )
             })
+            // apply discovery settings
+            .apply(|builder| {
+                let rlpx_socket = (self.addr, self.port).into();
+                self.discovery.apply_to_builder(builder, rlpx_socket)
+            })
             // modify discv5 settings if enabled in previous step
             .map_discv5_config_builder(|builder| {
                 let DiscoveryArgs {
