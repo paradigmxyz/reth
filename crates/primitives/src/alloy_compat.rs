@@ -236,7 +236,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             Some(TxType::Deposit) => {
                 Ok(Self::Deposit(TxDeposit {
                     source_hash: match &tx.other["sourceHash"] {
-                        serde_json::Value::String(source_hash) => source_hash.parse().map_err(|_| ConversionError::InvalidSourceHash)?,
+                        serde_json::Value::String(source_hash) => source_hash.parse().map_err(|_| ConversionError::MissingSourceHash)?,
                         _ => return Err(ConversionError::MissingSourceHash),
                     },
                     from: tx.from,
