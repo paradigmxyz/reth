@@ -337,6 +337,13 @@ where
     ) -> ProviderResult<Vec<BlockWithSenders>> {
         self.database.block_with_senders_range(range)
     }
+
+    fn sealed_block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+        self.database.sealed_block_with_senders_range(range)
+    }
 }
 
 impl<DB> TransactionsProvider for BlockchainProvider<DB>

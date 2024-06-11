@@ -109,6 +109,12 @@ pub struct Header {
     pub extra_data: Bytes,
 }
 
+impl AsRef<Self> for Header {
+    fn as_ref(&self) -> &Self {
+        self
+    }
+}
+
 impl Default for Header {
     fn default() -> Self {
         Self {
