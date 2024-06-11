@@ -88,7 +88,7 @@ impl ProcessUID {
             .process(pid.into())
             .map(|process| Self { pid, start_time: process.start_time() })
     }
-            
+
     /// Creates [`Self`] from own process.
     fn own() -> Self {
         Self::new(process::id() as usize).expect("own process")
