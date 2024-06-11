@@ -15,13 +15,14 @@ use reth_config::config::PruneConfig;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives::{
-    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,
-    BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, B256, MAINNET,
+    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, BlockHashOrNumber,
+    BlockNumber, ChainSpec, Head, SealedHeader, B256, MAINNET,
 };
 use reth_provider::{
     providers::StaticFileProvider, BlockHashReader, HeaderProvider, ProviderFactory,
     StageCheckpointReader,
 };
+use reth_stages_types::StageId;
 use reth_storage_errors::provider::ProviderResult;
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};

@@ -36,6 +36,7 @@ reth-tasks.workspace = true
 reth-consensus-common.workspace = true
 reth-beacon-consensus.workspace = true
 reth-prune-types.workspace = true
+reth-stages-types.workspace = true
 
 # ethereum
 alloy-rpc-types-engine.workspace = true

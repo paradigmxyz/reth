@@ -10,8 +10,9 @@ use itertools::Itertools;
 use reth_db::{static_file::iter_static_files, tables, DatabaseEnv};
 use reth_db_api::transaction::DbTxMut;
 use reth_db_common::init::{insert_genesis_header, insert_genesis_history, insert_genesis_state};
-use reth_primitives::{stage::StageId, static_file::find_fixed_range, StaticFileSegment};
+use reth_primitives::{static_file::find_fixed_range, StaticFileSegment};
 use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+use reth_stages::StageId;
 
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]

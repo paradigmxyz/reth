@@ -13,7 +13,8 @@ use reth::{
     rpc::types::engine::PayloadStatusEnum,
 };
 use reth_node_builder::NodeTypes;
-use reth_primitives::{stage::StageId, BlockHash, BlockNumber, Bytes, B256};
+use reth_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use reth_stages_types::StageId;
 use std::{marker::PhantomData, pin::Pin};
 use tokio_stream::StreamExt;
 

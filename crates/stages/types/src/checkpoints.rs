@@ -1,4 +1,4 @@
-use crate::{Address, BlockNumber, B256};
+use alloy_primitives::{Address, BlockNumber, B256};
 use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
 use reth_trie_types::{hash_builder::HashBuilderState, StoredSubNode};
