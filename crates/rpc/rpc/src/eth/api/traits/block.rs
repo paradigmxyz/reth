@@ -4,86 +4,18 @@ use std::sync::Arc;
 
 use futures::Future;
 use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta};
-use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
-use reth_rpc_types::{AnyTransactionReceipt, Header, Index, RichBlock};
-use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
+use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt};
+use reth_rpc_types::AnyTransactionReceipt;
 
 use crate::eth::{
-    api::{LoadPendingBlock, LoadReceipt, ReceiptBuilder, SpawnBlocking},
+    api::{BuildReceipt, LoadPendingBlock, ReceiptBuilder, SpawnBlocking},
     cache::EthStateCache,
-    error::{EthApiError, EthResult},
+    error::EthResult,
 };
 
 /// Block related functions for the [`EthApiServer`](reth_rpc_api::EthApiServer) trait in the
 /// `eth_` namespace.
 pub trait EthBlocks: LoadBlock {
-    /// Returns a handle for reading data from disk.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> impl HeaderProvider;
-
-    /// Returns the block header for the given block id.
-    fn rpc_block_header(
-        &self,
-        block_id: impl Into<BlockId> + Send,
-    ) -> impl Future<Output = EthResult<Option<Header>>> + Send
-    where
-        Self: LoadPendingBlock + SpawnBlocking,
-    {
-        async move { Ok(self.rpc_block(block_id, false).await?.map(|block| block.inner.header)) }
-    }
-
-    /// Returns the populated rpc block object for the given block id.
-    ///
-    /// If `full` is true, the block object will contain all transaction objects, otherwise it will
-    /// only contain the transaction hashes.
-    fn rpc_block(
-        &self,
-        block_id: impl Into<BlockId> + Send,
-        full: bool,
-    ) -> impl Future<Output = EthResult<Option<RichBlock>>> + Send
-    where
-        Self: LoadPendingBlock + SpawnBlocking,
-    {
-        async move {
-            let block = match self.block_with_senders(block_id).await? {
-                Some(block) => block,
-                None => return Ok(None),
-            };
-            let block_hash = block.hash();
-            let total_difficulty = EthBlocks::provider(self)
-                .header_td_by_number(block.number)?
-                .ok_or(EthApiError::UnknownBlockNumber)?;
-            let block =
-                from_block(block.unseal(), total_difficulty, full.into(), Some(block_hash))?;
-            Ok(Some(block.into()))
-        }
-    }
-
-    /// Returns the number transactions in the given block.
-    ///
-    /// Returns `None` if the block does not exist
-    fn block_transaction_count(
-        &self,
-        block_id: impl Into<BlockId>,
-    ) -> impl Future<Output = EthResult<Option<usize>>> + Send {
-        let block_id = block_id.into();
-
-        async move {
-            if block_id.is_pending() {
-                // Pending block can be fetched directly without need for caching
-                return Ok(LoadBlock::provider(self).pending_block()?.map(|block| block.body.len()))
-            }
-
-            let block_hash = match LoadBlock::provider(self).block_hash_for_id(block_id)? {
-                Some(block_hash) => block_hash,
-                None => return Ok(None),
-            };
-
-            Ok(self.cache().get_block_transactions(block_hash).await?.map(|txs| txs.len()))
-        }
-    }
-
     /// Helper function for `eth_getBlockReceipts`.
     ///
     /// Returns all transaction receipts in block, or `None` if block wasn't found.
@@ -129,6 +61,65 @@ pub trait EthBlocks: LoadBlock {
             Ok(None)
         }
     }
+}
+
+/// Loads a block from database.
+pub trait LoadBlock: Send + Sync {
+    // Returns a handle for reading data from disk.
+    ///
+    /// Data access in default (L1) trait method implementations.
+    fn provider(&self) -> impl BlockReaderIdExt;
+
+    /// Returns a handle for reading data from memory.
+    ///
+    /// Data access in default (L1) trait method implementations.
+    fn cache(&self) -> &EthStateCache;
+
+    /// Returns the block object for the given block id.
+    fn block(
+        &self,
+        block_id: impl Into<BlockId> + Send,
+    ) -> impl Future<Output = EthResult<Option<SealedBlock>>> + Send
+    where
+        Self: LoadPendingBlock + SpawnBlocking,
+    {
+        async move {
+            self.block_with_senders(block_id)
+                .await
+                .map(|maybe_block| maybe_block.map(|block| block.block))
+        }
+    }
+
+    /// Returns the block object for the given block id.
+    fn block_with_senders(
+        &self,
+        block_id: impl Into<BlockId> + Send,
+    ) -> impl Future<Output = EthResult<Option<SealedBlockWithSenders>>> + Send
+    where
+        Self: LoadPendingBlock + SpawnBlocking,
+    {
+        async move {
+            let block_id = block_id.into();
+
+            if block_id.is_pending() {
+                // Pending block can be fetched directly without need for caching
+                let maybe_pending =
+                    LoadPendingBlock::provider(self).pending_block_with_senders()?;
+                return if maybe_pending.is_some() {
+                    Ok(maybe_pending)
+                } else {
+                    self.local_pending_block().await
+                }
+            }
+
+            let block_hash = match LoadPendingBlock::provider(self).block_hash_for_id(block_id)? {
+                Some(block_hash) => block_hash,
+                None => return Ok(None),
+            };
+
+            Ok(self.cache().get_sealed_block_with_senders(block_hash).await?)
+        }
+    }
 
     /// Helper method that loads a bock and all its receipts.
     fn load_block_and_receipts(
@@ -145,8 +136,8 @@ pub trait EthBlocks: LoadBlock {
                     .map(|(sb, receipts)| (sb, Arc::new(receipts))))
             }
 
-            if let Some(block_hash) = LoadBlock::provider(self).block_hash_for_id(block_id)? {
-                return Ok(LoadReceipt::cache(self).get_block_and_receipts(block_hash).await?)
+            if let Some(block_hash) = self.provider().block_hash_for_id(block_id)? {
+                return Ok(BuildReceipt::cache(self).get_block_and_receipts(block_hash).await?)
             }
 
             Ok(None)

@@ -94,7 +94,7 @@ impl ReceiptBuilder {
         }
 
         let rpc_receipt = reth_rpc_types::Receipt {
-            status: receipt.success,
+            status: receipt.success.into(),
             cumulative_gas_used: receipt.cumulative_gas_used as u128,
             logs,
         };

@@ -33,7 +33,7 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 use crate::{
     eth::{
-        api::{EthTransactions, LoadBlock, LoadTransaction, StateCacheDB, TraceExt},
+        api::{LoadBlock, LoadTransaction, StateCacheDB, TraceExt},
         error::{EthApiError, EthResult},
         revm_utils::{prepare_call_env, EvmOverrides},
     },
@@ -639,7 +639,7 @@ where
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,
-    Eth: EthApiSpec + EthTransactions + LoadBlock + TraceExt + 'static,
+    Eth: EthApiSpec + LoadBlock + TraceExt + 'static,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {

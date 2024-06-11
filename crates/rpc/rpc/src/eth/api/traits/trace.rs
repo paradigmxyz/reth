@@ -10,15 +10,14 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState};
 
 use crate::eth::{
-    api::{
-        traits::call::{StateCacheDBRefMutWrapper, StateProviderTraitObjWrapper},
-        Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, StateCacheDB,
-    },
+    api::{Call, LoadBlock, LoadState, LoadStateExt, LoadTransaction, StateCacheDB},
     error::{EthApiError, EthResult},
 };
 
+use super::call::{StateCacheDBRefMutWrapper, StateProviderTraitObjWrapper};
+
 /// Executes CPU heavy tasks.
-pub trait Trace: LoadState {
+pub trait Trace {
     /// Returns a handle for reading evm config.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -77,7 +76,7 @@ pub trait Trace: LoadState {
         f: F,
     ) -> EthResult<R>
     where
-        Self: Call,
+        Self: LoadState + Call,
         F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
     {
         self.with_state_at_block(at, |state| {
@@ -103,7 +102,7 @@ pub trait Trace: LoadState {
         f: F,
     ) -> impl Future<Output = EthResult<R>> + Send
     where
-        Self: LoadPendingBlock + Call,
+        Self: LoadStateExt + Call,
         F: FnOnce(TracingInspector, ResultAndState, StateCacheDB<'_>) -> EthResult<R>
             + Send
             + 'static,
@@ -134,7 +133,7 @@ pub trait Trace: LoadState {
         f: F,
     ) -> impl Future<Output = EthResult<Option<R>>> + Send
     where
-        Self: LoadPendingBlock + LoadTransaction + Call,
+        Self: LoadStateExt + LoadTransaction + Call,
         F: FnOnce(
                 TransactionInfo,
                 TracingInspector,
@@ -164,7 +163,7 @@ pub trait Trace: LoadState {
         f: F,
     ) -> impl Future<Output = EthResult<Option<R>>> + Send
     where
-        Self: LoadPendingBlock + LoadTransaction + Call,
+        Self: LoadStateExt + LoadTransaction + Call,
         F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDB<'_>) -> EthResult<R>
             + Send
             + 'static,
@@ -223,7 +222,7 @@ pub trait Trace: LoadState {
         f: F,
     ) -> impl Future<Output = EthResult<Option<Vec<R>>>> + Send
     where
-        Self: LoadBlock,
+        Self: LoadStateExt + LoadBlock,
         F: Fn(
                 TransactionInfo,
                 TracingInspector,
@@ -261,7 +260,7 @@ pub trait Trace: LoadState {
         f: F,
     ) -> impl Future<Output = EthResult<Option<Vec<R>>>> + Send
     where
-        Self: LoadBlock,
+        Self: LoadStateExt + LoadBlock,
         F: Fn(TransactionInfo, Insp, ExecutionResult, &EvmState, &StateCacheDB<'_>) -> EthResult<R>
             + Send
             + 'static,
@@ -361,7 +360,7 @@ pub trait Trace: LoadState {
         f: F,
     ) -> impl Future<Output = EthResult<Option<Vec<R>>>> + Send
     where
-        Self: LoadBlock,
+        Self: LoadStateExt + LoadBlock,
         // This is the callback that's invoked for each transaction with the inspector, the result,
         // state and db
         F: Fn(
@@ -399,7 +398,7 @@ pub trait Trace: LoadState {
         f: F,
     ) -> impl Future<Output = EthResult<Option<Vec<R>>>> + Send
     where
-        Self: LoadBlock,
+        Self: LoadStateExt + LoadBlock,
         // This is the callback that's invoked for each transaction with the inspector, the result,
         // state and db
         F: Fn(TransactionInfo, Insp, ExecutionResult, &EvmState, &StateCacheDB<'_>) -> EthResult<R>

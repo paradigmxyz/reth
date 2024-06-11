@@ -1,7 +1,5 @@
-use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
-    BlockNumber,
-};
+use reth_primitives::BlockNumber;
+use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::ProviderResult;
 
 /// The trait for fetching stage checkpoint related data.

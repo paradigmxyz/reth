@@ -1,4 +1,5 @@
 use super::{collect_history_indices, load_history_indices};
+use crate::{StageCheckpoint, StageId};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db::tables;
 use reth_db_api::{
@@ -7,7 +8,6 @@ use reth_db_api::{
     table::Decode,
     transaction::DbTxMut,
 };
-use reth_primitives::stage::{StageCheckpoint, StageId};
 use reth_provider::{
     DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
 };

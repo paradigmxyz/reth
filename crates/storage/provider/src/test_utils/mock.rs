@@ -1,17 +1,16 @@
 use crate::{
     traits::{BlockSource, ReceiptProvider},
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, FullBundleStateDataProvider,
-    HeaderProvider, ReceiptProviderIdExt, RequestsProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
-    WithdrawalsProvider,
+    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider,
+    ReceiptProviderIdExt, RequestsProvider, StateProvider, StateProviderBox, StateProviderFactory,
+    StateRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use parking_lot::Mutex;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    keccak256, trie::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId,
-    BlockNumber, BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt,
+    keccak256, proofs::AccountProof, Account, Address, Block, BlockHash, BlockHashOrNumber,
+    BlockId, BlockNumber, BlockWithSenders, Bytecode, Bytes, ChainInfo, ChainSpec, Header, Receipt,
     SealedBlock, SealedBlockWithSenders, SealedHeader, StorageKey, StorageValue, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
@@ -661,7 +660,7 @@ impl StateProviderFactory for MockEthProvider {
 
     fn pending_with_provider<'a>(
         &'a self,
-        _bundle_state_data: Box<dyn FullBundleStateDataProvider + 'a>,
+        _bundle_state_data: Box<dyn FullExecutionDataProvider + 'a>,
     ) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(self.clone()))
     }

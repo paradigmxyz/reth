@@ -23,8 +23,6 @@ use crate::eth::{
 };
 
 /// Loads a pending block from database.
-///
-/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait LoadPendingBlock {
     /// Returns a handle for reading data from disk.

@@ -35,9 +35,9 @@ pub mod transactions;
 pub use pending_block::PendingBlock;
 pub use receipt::ReceiptBuilder;
 pub use traits::{
-    Call, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadBlock, LoadFee,
-    LoadPendingBlock, LoadReceipt, LoadState, LoadTransaction, RawTransactionForwarder,
-    SpawnBlocking, StateCacheDB, Trace, TraceExt,
+    BuildReceipt, Call, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadBlock,
+    LoadBlockExt, LoadFee, LoadPendingBlock, LoadState, LoadStateExt, LoadTransaction,
+    RawTransactionForwarder, SpawnBlocking, StateCacheDB, Trace, TraceExt,
 };
 pub use transactions::TransactionSource;
 

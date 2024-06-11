@@ -20,7 +20,7 @@ use reth_rpc_api::{
     DebugApiClient, EthFilterApiClient, NetApiClient, OtterscanClient, TraceApiClient,
     Web3ApiClient,
 };
-use reth_rpc_builder::RethRpcModule;
+use reth_rpc_server_types::RethRpcModule;
 use reth_rpc_types::{
     trace::filter::TraceFilter, FeeHistory, Filter, Index, Log, PendingTransactionFilterKind,
     RichBlock, SyncStatus, Transaction, TransactionReceipt, TransactionRequest,
