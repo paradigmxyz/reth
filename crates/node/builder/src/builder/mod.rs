@@ -458,6 +458,11 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.provider().chain_spec()
     }
 
+    /// Returns true if the node is configured as --dev
+    pub const fn is_dev(&self) -> bool {
+        self.config().dev.dev
+    }
+
     /// Returns the transaction pool config of the node.
     pub fn pool_config(&self) -> PoolConfig {
         self.config().txpool.pool_config()
