@@ -7204,6 +7204,7 @@ dependencies = [
  "aquamarine",
  "assert_matches",
  "async-channel 2.3.1",
+ "async-trait",
  "backon",
  "boyer-moore-magiclen",
  "candid",

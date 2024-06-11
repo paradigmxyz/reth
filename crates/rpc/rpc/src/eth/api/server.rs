@@ -327,7 +327,7 @@ where
         );
 
         let gas_price = client.gas_price().await.map_err(|e| {
-            internal_rpc_err(format!("failed to send raw transaction to {}: {}", rpc_url, e))
+            internal_rpc_err(format!("failed to forward gas_price request to {}: {}", rpc_url, e))
         })?;
 
         Ok(U256::from(gas_price.as_u128()))
@@ -346,7 +346,7 @@ where
         );
 
         let priority_fee = client.max_priority_fee_per_gas().await.map_err(|e| {
-            internal_rpc_err(format!("failed to send raw transaction to {}: {}", rpc_url, e))
+            internal_rpc_err(format!("failed to forward max_priority_fee_per_gas request to {}: {}", rpc_url, e))
         })?;
 
         Ok(U256::from(priority_fee.as_u128()))
@@ -419,7 +419,7 @@ where
         );
 
         let tx_hash = client.send_raw_transaction_bytes(&tx).await.map_err(|e| {
-            internal_rpc_err(format!("failed to send raw transaction to {}: {}", rpc_url, e))
+            internal_rpc_err(format!("failed to forward send_raw_transaction request to {}: {}", rpc_url, e))
         })?;
 
         Ok(tx_hash.0.into())
