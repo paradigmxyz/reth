@@ -235,7 +235,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             #[cfg(feature = "optimism")]
             Some(TxType::Deposit) => {
                 Ok(Self::Deposit(TxDeposit {
-                    source_hash: match tx.other["sourceHash"] {
+                    source_hash: match &tx.other["sourceHash"] {
                         serde_json::Value::String(source_hash) => source_hash.parse().unwrap(),
                         _ => B256::default() // TODO: don't assume this, handle the error
                     },
@@ -244,7 +244,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                         Some(to) => TxKind::Call(to),
                         None => TxKind::Create,
                     },
-                    mint: match tx.other["mint"] {
+                    mint: match &tx.other["mint"] {
                         serde_json::Value::String(mint) => mint.parse::<u128>().ok().and_then(|num| if num == 0 { None } else { Some(num) }),
                         _ => None,
                     },
