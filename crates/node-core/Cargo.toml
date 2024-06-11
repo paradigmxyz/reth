@@ -69,7 +69,9 @@ serde.workspace = true
 serde_json.workspace = true
 
 # http/rpc
-hyper.workspace = true
+http.workspace = true
+jsonrpsee.workspace = true
+tower.workspace = true
 
 # tracing
 tracing.workspace = true

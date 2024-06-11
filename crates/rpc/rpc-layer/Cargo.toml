@@ -14,15 +14,14 @@ workspace = true
 alloy-rpc-types-engine.workspace = true
 
 http.workspace = true
-hyper.workspace = true
-tower.workspace = true
-http-body.workspace = true
+jsonrpsee-http-client.workspace = true
 pin-project.workspace = true
+tower.workspace = true
 
 tracing.workspace = true
 
 [dev-dependencies]
-hyper = { workspace = true, features = ["client", "tcp"] }
+reqwest.workspace = true
 assert_matches.workspace = true
 tokio = { workspace = true, features = ["macros"] }
 tempfile.workspace = true
