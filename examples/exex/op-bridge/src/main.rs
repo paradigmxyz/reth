@@ -261,10 +261,10 @@ mod tests {
     use reth::revm::db::BundleState;
     use reth_exex_test_utils::{test_exex_context, PollOnce};
     use reth_primitives::{
-        Address, Block, Header, Log, Receipt, Receipts, Transaction, TransactionSigned, TxKind,
-        TxLegacy, TxType, U256,
+        Address, Block, Header, Log, Receipt, Transaction, TransactionSigned, TxKind, TxLegacy,
+        TxType, U256,
     };
-    use reth_provider::{BundleStateWithReceipts, Chain};
+    use reth_provider::{Chain, ExecutionOutcome};
     use reth_testing_utils::generators::sign_tx_with_random_key_pair;
     use rusqlite::Connection;
 
@@ -341,10 +341,11 @@ mod tests {
         // Construct a chain
         let chain = Chain::new(
             vec![block.clone()],
-            BundleStateWithReceipts::new(
+            ExecutionOutcome::new(
                 BundleState::default(),
-                Receipts::from_block_receipt(vec![deposit_tx_receipt, withdrawal_tx_receipt]),
+                vec![deposit_tx_receipt, withdrawal_tx_receipt].into(),
                 block.number,
+                vec![block.requests.clone().unwrap_or_default()],
             ),
             None,
         );

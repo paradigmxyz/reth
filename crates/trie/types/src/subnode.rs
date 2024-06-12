@@ -3,7 +3,6 @@ use bytes::Buf;
 use reth_codecs::Compact;
 
 /// Walker sub node for storing intermediate state root calculation state in the database.
-/// See [`crate::stage::MerkleCheckpoint`].
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StoredSubNode {
     /// The key of the current node.
@@ -70,7 +69,8 @@ impl Compact for StoredSubNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{trie::TrieMask, B256};
+    use crate::TrieMask;
+    use alloy_primitives::B256;
 
     #[test]
     fn subnode_roundtrip() {

@@ -39,11 +39,9 @@ mod receipt;
 mod request;
 /// Helpers for working with revm
 pub mod revm;
-pub mod stage;
 pub use reth_static_file_types as static_file;
 mod storage;
 pub mod transaction;
-pub mod trie;
 mod withdrawal;
 pub use account::{Account, Bytecode};
 #[cfg(any(test, feature = "arbitrary"))]

@@ -10,8 +10,7 @@ use byteorder::{ByteOrder, NativeEndian};
 use mem::size_of;
 use std::{
     ffi::CString,
-    fmt,
-    fmt::Debug,
+    fmt::{self, Debug},
     mem,
     ops::{Bound, RangeBounds},
     path::Path,
@@ -51,7 +50,6 @@ impl Environment {
             geometry: None,
             log_level: None,
             kind: Default::default(),
-            #[cfg(not(windows))]
             handle_slow_readers: None,
             #[cfg(feature = "read-tx-timeouts")]
             max_read_transaction_duration: None,
@@ -514,6 +512,7 @@ impl<R> Default for Geometry<R> {
 ///   implement timeout reset logic while waiting for a readers.
 ///
 /// # Returns
+///
 /// A return code that determines the further actions for MDBX and must match the action which
 /// was executed by the callback:
 /// * `-2` or less – An error condition and the reader was not killed.
@@ -528,46 +527,37 @@ impl<R> Default for Geometry<R> {
 ///   called later.
 /// * `2` or greater – The reader process was terminated or killed, and MDBX should entirely reset
 ///   reader registration.
-pub type HandleSlowReadersCallback = fn(
-    process_id: u32,
-    thread_id: u32,
-    read_txn_id: u64,
-    gap: usize,
+pub type HandleSlowReadersCallback = extern "C" fn(
+    env: *const ffi::MDBX_env,
+    txn: *const ffi::MDBX_txn,
+    pid: ffi::mdbx_pid_t,
+    tid: ffi::mdbx_tid_t,
+    laggard: u64,
+    gap: std::ffi::c_uint,
     space: usize,
-    retry: isize,
+    retry: std::ffi::c_int,
 ) -> HandleSlowReadersReturnCode;
 
 #[derive(Debug)]
+#[repr(i32)]
 pub enum HandleSlowReadersReturnCode {
     /// An error condition and the reader was not killed.
-    Error,
+    Error = -2,
     /// The callback was unable to solve the problem and agreed on `MDBX_MAP_FULL` error;
     /// MDBX should increase the database size or return `MDBX_MAP_FULL` error.
-    ProceedWithoutKillingReader,
+    ProceedWithoutKillingReader = -1,
     /// The callback solved the problem or just waited for a while, libmdbx should rescan the
     /// reader lock table and retry. This also includes a situation when corresponding transaction
     /// terminated in normal way by `mdbx_txn_abort()` or `mdbx_txn_reset()`, and may be restarted.
     /// I.e. reader slot isn't needed to be cleaned from transaction.
-    Success,
+    Success = 0,
     /// Transaction aborted asynchronous and reader slot should be cleared immediately, i.e. read
     /// transaction will not continue but `mdbx_txn_abort()` nor `mdbx_txn_reset()` will be called
     /// later.
-    ClearReaderSlot,
+    ClearReaderSlot = 1,
     /// The reader process was terminated or killed, and MDBX should entirely reset reader
     /// registration.
-    ReaderProcessTerminated,
-}
-
-impl From<HandleSlowReadersReturnCode> for i32 {
-    fn from(value: HandleSlowReadersReturnCode) -> Self {
-        match value {
-            HandleSlowReadersReturnCode::Error => -2,
-            HandleSlowReadersReturnCode::ProceedWithoutKillingReader => -1,
-            HandleSlowReadersReturnCode::Success => 0,
-            HandleSlowReadersReturnCode::ClearReaderSlot => 1,
-            HandleSlowReadersReturnCode::ReaderProcessTerminated => 2,
-        }
-    }
+    ReaderProcessTerminated = 2,
 }
 
 /// Options for opening or creating an environment.
@@ -585,7 +575,6 @@ pub struct EnvironmentBuilder {
     geometry: Option<Geometry<(Option<usize>, Option<usize>)>>,
     log_level: Option<ffi::MDBX_log_level_t>,
     kind: EnvironmentKind,
-    #[cfg(not(windows))]
     handle_slow_readers: Option<HandleSlowReadersCallback>,
     #[cfg(feature = "read-tx-timeouts")]
     /// The maximum duration of a read transaction. If [None], but the `read-tx-timeout` feature is
@@ -671,11 +660,10 @@ impl EnvironmentBuilder {
                     ))?;
                 }
 
-                #[cfg(not(windows))]
                 if let Some(handle_slow_readers) = self.handle_slow_readers {
                     mdbx_result(ffi::mdbx_env_set_hsr(
                         env,
-                        handle_slow_readers_callback(handle_slow_readers),
+                        convert_hsr_fn(Some(handle_slow_readers)),
                     ))?;
                 }
 
@@ -834,7 +822,6 @@ impl EnvironmentBuilder {
 
     /// Set the Handle-Slow-Readers callback. See [`HandleSlowReadersCallback`] for more
     /// information.
-    #[cfg(not(windows))]
     pub fn set_handle_slow_readers(&mut self, hsr: HandleSlowReadersCallback) -> &mut Self {
         self.handle_slow_readers = Some(hsr);
         self
@@ -878,42 +865,10 @@ pub(crate) mod read_transactions {
     }
 }
 
-/// Creates an instance of `MDBX_hsr_func`.
-///
-/// Caution: this leaks the memory for callbacks, so they're alive throughout the program. It's
-/// fine, because we also expect the database environment to be alive during this whole time.
-#[cfg(not(windows))]
-unsafe fn handle_slow_readers_callback(callback: HandleSlowReadersCallback) -> ffi::MDBX_hsr_func {
-    // Move the callback function to heap and intentionally leak it, so it's not dropped and the
-    // MDBX env can use it throughout the whole program.
-    let callback = Box::leak(Box::new(callback));
-
-    // Wrap the callback into an ffi binding. The callback is needed for a nicer UX with Rust types,
-    // and without `env` and `txn` arguments that we don't want to expose to the user. Again,
-    // move the closure to heap and leak.
-    let hsr = Box::leak(Box::new(
-        |_env: *const ffi::MDBX_env,
-         _txn: *const ffi::MDBX_txn,
-         pid: ffi::mdbx_pid_t,
-         tid: ffi::mdbx_tid_t,
-         laggard: u64,
-         gap: ::libc::c_uint,
-         space: usize,
-         retry: ::libc::c_int|
-         -> i32 {
-            callback(pid as u32, tid as u32, laggard, gap as usize, space, retry as isize).into()
-        },
-    ));
-
-    // Create a pointer to the C function from the Rust closure, and forcefully forget the original
-    // closure.
-    let closure = libffi::high::Closure8::new(hsr);
-    let closure_ptr = *closure.code_ptr();
-    std::mem::forget(closure);
-
-    // Cast the closure to FFI `extern fn` type.
-    #[allow(clippy::missing_transmute_annotations)]
-    Some(std::mem::transmute(closure_ptr))
+/// Converts a [`HandleSlowReadersCallback`] to the actual FFI function pointer.
+#[allow(clippy::missing_transmute_annotations)]
+fn convert_hsr_fn(callback: Option<HandleSlowReadersCallback>) -> ffi::MDBX_hsr_func {
+    unsafe { std::mem::transmute(callback) }
 }
 
 #[cfg(test)]
@@ -924,10 +879,23 @@ mod tests {
         sync::atomic::{AtomicBool, Ordering},
     };
 
-    #[cfg(not(windows))]
     #[test]
     fn test_handle_slow_readers_callback() {
         static CALLED: AtomicBool = AtomicBool::new(false);
+
+        extern "C" fn handle_slow_readers(
+            _env: *const ffi::MDBX_env,
+            _txn: *const ffi::MDBX_txn,
+            _pid: ffi::mdbx_pid_t,
+            _tid: ffi::mdbx_tid_t,
+            _laggard: u64,
+            _gap: std::ffi::c_uint,
+            _space: usize,
+            _retry: std::ffi::c_int,
+        ) -> HandleSlowReadersReturnCode {
+            CALLED.store(true, Ordering::Relaxed);
+            HandleSlowReadersReturnCode::ProceedWithoutKillingReader
+        }
 
         let tempdir = tempfile::tempdir().unwrap();
         let env = Environment::builder()
@@ -936,18 +904,7 @@ mod tests {
                 page_size: Some(PageSize::MinimalAcceptable), // To create as many pages as possible
                 ..Default::default()
             })
-            .set_handle_slow_readers(
-                |_process_id: u32,
-                 _thread_id: u32,
-                 _read_txn_id: u64,
-                 _gap: usize,
-                 _space: usize,
-                 _retry: isize| {
-                    CALLED.store(true, Ordering::Relaxed);
-
-                    HandleSlowReadersReturnCode::ProceedWithoutKillingReader
-                },
-            )
+            .set_handle_slow_readers(handle_slow_readers)
             .open(tempdir.path())
             .unwrap();
 

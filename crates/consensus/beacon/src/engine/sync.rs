@@ -11,8 +11,8 @@ use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
 };
-use reth_primitives::{stage::PipelineTarget, BlockNumber, ChainSpec, SealedBlock, B256};
-use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
+use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, B256};
+use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventSender;
 use std::{
@@ -422,14 +422,15 @@ mod tests {
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,
-        Header, SealedHeader, MAINNET,
+        constants::ETHEREUM_BLOCK_GAS_LIMIT, BlockBody, ChainSpecBuilder, Header, SealedHeader,
+        MAINNET,
     };
     use reth_provider::{
-        test_utils::create_test_provider_factory_with_chain_spec, BundleStateWithReceipts,
+        test_utils::create_test_provider_factory_with_chain_spec, ExecutionOutcome,
     };
     use reth_prune_types::PruneModes;
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
+    use reth_stages_api::StageCheckpoint;
     use reth_static_file::StaticFileProducer;
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, future::poll_fn, ops::Range};
@@ -437,7 +438,7 @@ mod tests {
 
     struct TestPipelineBuilder {
         pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-        executor_results: Vec<BundleStateWithReceipts>,
+        executor_results: Vec<ExecutionOutcome>,
         max_block: Option<BlockNumber>,
     }
 
@@ -462,7 +463,7 @@ mod tests {
 
         /// Set the executor results to use for the test consensus engine.
         #[allow(dead_code)]
-        fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
+        fn with_executor_results(mut self, executor_results: Vec<ExecutionOutcome>) -> Self {
             self.executor_results = executor_results;
             self
         }

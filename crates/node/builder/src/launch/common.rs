@@ -12,15 +12,15 @@ use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHe
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_core::{
-    cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
 };
-use reth_primitives::{stage::PipelineTarget, BlockNumber, Chain, ChainSpec, Head, B256};
+use reth_primitives::{BlockNumber, Chain, ChainSpec, Head, B256};
 use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
 use reth_prune::{PruneModes, PrunerBuilder};
+use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
-use reth_stages::{sets::DefaultStages, Pipeline};
+use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
@@ -250,6 +250,11 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     pub fn with_adjusted_rpc_instance_ports(mut self) -> Self {
         self.node_config_mut().adjust_instance_ports();
         self
+    }
+
+    /// Returns the container for all config types
+    pub const fn configs(&self) -> &WithConfigs {
+        self.attachment.left()
     }
 
     /// Returns the attached [`NodeConfig`].
