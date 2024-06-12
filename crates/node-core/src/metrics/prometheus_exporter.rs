@@ -11,6 +11,8 @@ use reth_metrics::metrics::Unit;
 use reth_provider::providers::StaticFileProvider;
 use reth_tasks::TaskExecutor;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
+use futures::future::FusedFuture;
+use futures::FutureExt;
 
 pub(crate) trait Hook: Fn() + Send + Sync {}
 impl<T: Fn() + Send + Sync> Hook for T {}
@@ -65,17 +67,14 @@ async fn start_endpoint<F: Hook + 'static>(
         tokio::net::TcpListener::bind(listen_addr).await.wrap_err("Could not bind to address")?;
 
     task_executor.spawn_with_graceful_shutdown_signal(|signal| async move {
-        let mut shutdown = signal.ignore_guard();
+        let mut shutdown = signal.ignore_guard().fuse();
         loop {
-            let io = tokio::select! {
-                res = listener.accept() => match res {
-                    Ok((stream, _remote_addr)) => stream,
-                    Err(err) => {
-                        tracing::error!(%err, "failed to accept connection");
-                        continue;
-                    }
-                },
-                _ = &mut shutdown => break,
+            let io = match listener.accept().await {
+                Ok((stream, _remote_addr)) => stream,
+                Err(err) => {
+                    tracing::error!(%err, "failed to accept connection");
+                    continue;
+                }
             };
 
             let handle = handle.clone();
@@ -89,7 +88,11 @@ async fn start_endpoint<F: Hook + 'static>(
             if let Err(error) =
                 jsonrpsee::server::serve_with_graceful_shutdown(io, service, &mut shutdown).await
             {
-                tracing::error!(%error, "metrics endpoint crashed")
+                tracing::debug!(%error, "failed to serve request")
+            }
+
+            if shutdown.is_terminated() {
+                break;
             }
         }
     });
