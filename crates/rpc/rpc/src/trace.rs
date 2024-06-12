@@ -249,8 +249,7 @@ where
 
         if start > end {
             return Err(EthApiError::InvalidParams(
-                "invalid parameters: fromBlock cannot be greater than toBlock"
-                    .to_string(),
+                "invalid parameters: fromBlock cannot be greater than toBlock".to_string(),
             ))
         }
 
