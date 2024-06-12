@@ -238,11 +238,8 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                         .map_err(|_| ConversionError::MissingAccessList)?,
                     from: tx.from,
                     to: TxKind::from(tx.to),
-                    mint: tx.other.get_deserialized::<String>("mint")
-                        .ok_or(ConversionError::MissingBlobVersionedHashes)?
+                    mint: Option::transpose(tx.other.get_deserialized::<u128>("mint"))
                         .map_err(|_| ConversionError::MissingMaxFeePerBlobGas)?
-                        .parse::<u128>()
-                        .ok() // TODO: This converts failure to None. Better to error instead?
                         .and_then(|num| if num == 0 { None } else { Some(num) }),
                     value: tx.value,
                     gas_limit: tx
@@ -329,7 +326,26 @@ mod tests {
 
     #[test]
     fn optimism_deposit_tx_conversion_no_mint() {
-        let tx_file = File::open("res/txs/opt_deposit_tx_no_mint.json").expect("failed to open file");
+        let input = r#"{
+            "blockHash": "0xef664d656f841b5ad6a2b527b963f1eb48b97d7889d742f6cbff6950388e24cd",
+            "blockNumber": "0x73a78fd",
+            "depositReceiptVersion": "0x1",
+            "from": "0x36bde71c97b33cc4729cf772ae268934f7ab70b2",
+            "gas": "0xc27a8",
+            "gasPrice": "0x0",
+            "hash": "0x0bf1845c5d7a82ec92365d5027f7310793d53004f3c86aa80965c67bf7e7dc80",
+            "input": "0xd764ad0b000100000000000000000000000000000000000000000000000000000001cf5400000000000000000000000099c9fc46f92e8a1c0dec1b1747d010903e884be100000000000000000000000042000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007a12000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000e40166a07a0000000000000000000000000994206dfe8de6ec6920ff4d779b0d950605fb53000000000000000000000000d533a949740bb3306d119cc777fa900ba034cd52000000000000000000000000ca74f404e0c7bfa35b13b511097df966d5a65597000000000000000000000000ca74f404e0c7bfa35b13b511097df966d5a65597000000000000000000000000000000000000000000000216614199391dbba2ba00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "mint": "0x0",
+            "nonce": "0x74060",
+            "r": "0x0",
+            "s": "0x0",
+            "sourceHash": "0x074adb22f2e6ed9bdd31c52eefc1f050e5db56eb85056450bccd79a6649520b3",
+            "to": "0x4200000000000000000000000000000000000007",
+            "transactionIndex": "0x1",
+            "type": "0x7e",
+            "v": "0x0",
+            "value": "0x0"
+        }"#;
         let alloy_tx: AlloyTransaction = serde_json::from_reader(tx_file).expect("failed to deserialize");
 
         let reth_tx: Transaction = alloy_tx.try_into().expect("failed to convert");
@@ -348,8 +364,27 @@ mod tests {
 
     #[test]
     fn optimism_deposit_tx_conversion_mint() {
-        let tx_file = File::open("res/txs/opt_deposit_tx_mint.json").expect("failed to open file");
-        let alloy_tx: AlloyTransaction = serde_json::from_reader(tx_file).expect("failed to deserialize");
+        let input = r#"{
+            "blockHash": "0x7194f63b105e93fb1a27c50d23d62e422d4185a68536c55c96284911415699b2",
+            "blockNumber": "0x73a82cc",
+            "depositReceiptVersion": "0x1",
+            "from": "0x36bde71c97b33cc4729cf772ae268934f7ab70b2",
+            "gas": "0x7812e",
+            "gasPrice": "0x0",
+            "hash": "0xf7e83886d3c6864f78e01c453ebcd57020c5795d96089e8f0e0b90a467246ddb",
+            "input": "0xd764ad0b000100000000000000000000000000000000000000000000000000000001cf5f00000000000000000000000099c9fc46f92e8a1c0dec1b1747d010903e884be100000000000000000000000042000000000000000000000000000000000000100000000000000000000000000000000000000000000000239c2e16a5ca5900000000000000000000000000000000000000000000000000000000000000030d4000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000e41635f5fd0000000000000000000000002ce910fbba65b454bbaf6a18c952a70f3bcd82990000000000000000000000002ce910fbba65b454bbaf6a18c952a70f3bcd82990000000000000000000000000000000000000000000000239c2e16a5ca590000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+            "mint": "0x239c2e16a5ca590000",
+            "nonce": "0x7406b",
+            "r": "0x0",
+            "s": "0x0",
+            "sourceHash": "0xe0358cd2b2686d297c5c859646a613124a874fb9d9c4a2c88636a46a65c06e48",
+            "to": "0x4200000000000000000000000000000000000007",
+            "transactionIndex": "0x1",
+            "type": "0x7e",
+            "v": "0x0",
+            "value": "0x239c2e16a5ca590000"
+        }"#;
+        let alloy_tx: AlloyTransaction = serde_json::from_reader(input).expect("failed to deserialize");
 
         let reth_tx: Transaction = alloy_tx.try_into().expect("failed to convert");
 
