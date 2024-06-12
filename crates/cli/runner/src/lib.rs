@@ -11,7 +11,7 @@
 //! Entrypoint for running commands.
 
 use reth_tasks::{TaskExecutor, TaskManager};
-use std::{future::Future, pin::pin};
+use std::{future::Future, pin::pin, sync::mpsc, time::Duration};
 use tracing::{debug, error, trace};
 
 /// Executes CLI commands.
@@ -55,13 +55,22 @@ impl CliRunner {
             task_manager.graceful_shutdown_with_timeout(std::time::Duration::from_secs(10));
         }
 
-        // drop the tokio runtime on a separate thread because drop blocks until its pools
-        // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
-        // the current thread but we want to exit right away.
+        // `drop(tokio_runtime)` would block the current thread until its pools
+        // (including blocking pool) are shutdown. Since we want to exit as soon as possible, drop
+        // it on a separate thread and wait for up to 5 seconds for this operation to
+        // complete.
+        let (tx, rx) = mpsc::channel();
         std::thread::Builder::new()
             .name("tokio-runtime-shutdown".to_string())
-            .spawn(move || drop(tokio_runtime))
+            .spawn(move || {
+                drop(tokio_runtime);
+                let _ = tx.send(());
+            })
             .unwrap();
+
+        if rx.recv_timeout(Duration::from_secs(5)).is_err() {
+            error!(target: "reth::cli", "could not shutdown runtime gracefully");
+        }
 
         command_res
     }
