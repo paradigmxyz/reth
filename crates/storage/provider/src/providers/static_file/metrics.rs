@@ -45,150 +45,159 @@ impl StaticFileProviderMetrics {
         operation: StaticFileProviderOperation,
         duration: Option<Duration>,
     ) {
+        macro_rules! record_operation {
+            ($self:ident, $counter:ident, $histogram:ident, $duration:expr) => {
+                $self.segment_operations.$counter.increment(1);
+                if let Some(duration) = $duration {
+                    $self.segment_operations.$histogram.record(duration.as_secs_f64());
+                }
+            };
+        }
+
         match (segment, operation) {
             (StaticFileSegment::Headers, StaticFileProviderOperation::InitCursor) => {
-                self.segment_operations.headers_init_cursor_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .headers_init_cursor_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    headers_init_cursor_calls_total,
+                    headers_init_cursor_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Headers, StaticFileProviderOperation::OpenWriter) => {
-                self.segment_operations.headers_open_writer_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .headers_open_writer_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    headers_open_writer_calls_total,
+                    headers_open_writer_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Headers, StaticFileProviderOperation::Append) => {
-                self.segment_operations.headers_append_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .headers_append_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    headers_append_calls_total,
+                    headers_append_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Headers, StaticFileProviderOperation::Prune) => {
-                self.segment_operations.headers_prune_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .headers_prune_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    headers_prune_calls_total,
+                    headers_prune_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Headers, StaticFileProviderOperation::IncrementBlock) => {
-                self.segment_operations.headers_increment_block_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .headers_increment_block_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    headers_increment_block_calls_total,
+                    headers_increment_block_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Headers, StaticFileProviderOperation::CommitWriter) => {
-                self.segment_operations.headers_commit_writer_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .headers_commit_writer_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    headers_commit_writer_calls_total,
+                    headers_commit_writer_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Transactions, StaticFileProviderOperation::InitCursor) => {
-                self.segment_operations.transactions_init_cursor_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .transactions_init_cursor_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    transactions_init_cursor_calls_total,
+                    transactions_init_cursor_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Transactions, StaticFileProviderOperation::OpenWriter) => {
-                self.segment_operations.transactions_open_writer_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .transactions_open_writer_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    transactions_open_writer_calls_total,
+                    transactions_open_writer_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Transactions, StaticFileProviderOperation::Append) => {
-                self.segment_operations.transactions_append_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .transactions_append_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    transactions_append_calls_total,
+                    transactions_append_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Transactions, StaticFileProviderOperation::Prune) => {
-                self.segment_operations.transactions_prune_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .transactions_prune_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    transactions_prune_calls_total,
+                    transactions_prune_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Transactions, StaticFileProviderOperation::IncrementBlock) => {
-                self.segment_operations.transactions_increment_block_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .transactions_increment_block_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    transactions_increment_block_calls_total,
+                    transactions_increment_block_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Transactions, StaticFileProviderOperation::CommitWriter) => {
-                self.segment_operations.transactions_commit_writer_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .transactions_commit_writer_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    transactions_commit_writer_calls_total,
+                    transactions_commit_writer_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Receipts, StaticFileProviderOperation::InitCursor) => {
-                self.segment_operations.receipts_init_cursor_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .receipts_init_cursor_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    receipts_init_cursor_calls_total,
+                    receipts_init_cursor_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Receipts, StaticFileProviderOperation::OpenWriter) => {
-                self.segment_operations.receipts_open_writer_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .receipts_open_writer_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    receipts_open_writer_calls_total,
+                    receipts_open_writer_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Receipts, StaticFileProviderOperation::Append) => {
-                self.segment_operations.receipts_append_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .receipts_append_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    receipts_append_calls_total,
+                    receipts_append_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Receipts, StaticFileProviderOperation::Prune) => {
-                self.segment_operations.receipts_prune_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .receipts_prune_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    receipts_prune_calls_total,
+                    receipts_prune_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Receipts, StaticFileProviderOperation::IncrementBlock) => {
-                self.segment_operations.receipts_increment_block_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .receipts_increment_block_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    receipts_increment_block_calls_total,
+                    receipts_increment_block_duration_seconds,
+                    duration
+                );
             }
             (StaticFileSegment::Receipts, StaticFileProviderOperation::CommitWriter) => {
-                self.segment_operations.receipts_commit_writer_calls_total.increment(1);
-                if let Some(duration) = duration {
-                    self.segment_operations
-                        .receipts_commit_writer_write_duration_seconds
-                        .record(duration.as_secs_f64());
-                }
+                record_operation!(
+                    self,
+                    receipts_commit_writer_calls_total,
+                    receipts_commit_writer_duration_seconds,
+                    duration
+                );
             }
         }
     }
@@ -269,56 +278,56 @@ pub(crate) struct StaticFileProviderOperationMetrics {
     receipts_commit_writer_calls_total: Counter,
     /// The time it took to execute the headers static file jar provider operation that initializes
     /// a cursor.
-    headers_init_cursor_write_duration_seconds: Histogram,
+    headers_init_cursor_duration_seconds: Histogram,
     /// The time it took to execute the headers static file jar provider operation that opens a
     /// writer.
-    headers_open_writer_write_duration_seconds: Histogram,
+    headers_open_writer_duration_seconds: Histogram,
     /// The time it took to execute the headers static file jar provider operation that appends
     /// data.
-    headers_append_write_duration_seconds: Histogram,
+    headers_append_duration_seconds: Histogram,
     /// The time it took to execute the headers static file jar provider operation that prunes
     /// data.
-    headers_prune_write_duration_seconds: Histogram,
+    headers_prune_duration_seconds: Histogram,
     /// The time it took to execute the headers static file jar provider operation that increments
     /// the block.
-    headers_increment_block_write_duration_seconds: Histogram,
+    headers_increment_block_duration_seconds: Histogram,
     /// The time it took to execute the headers static file jar provider operation that commits
     /// the writer.
-    headers_commit_writer_write_duration_seconds: Histogram,
+    headers_commit_writer_duration_seconds: Histogram,
     /// The time it took to execute the transactions static file jar provider operation that
     /// initializes a cursor.
-    transactions_init_cursor_write_duration_seconds: Histogram,
+    transactions_init_cursor_duration_seconds: Histogram,
     /// The time it took to execute the transactions static file jar provider operation that opens
     /// a writer.
-    transactions_open_writer_write_duration_seconds: Histogram,
+    transactions_open_writer_duration_seconds: Histogram,
     /// The time it took to execute the transactions static file jar provider operation that
     /// appends data.
-    transactions_append_write_duration_seconds: Histogram,
+    transactions_append_duration_seconds: Histogram,
     /// The time it took to execute the transactions static file jar provider operation that prunes
     /// data.
-    transactions_prune_write_duration_seconds: Histogram,
+    transactions_prune_duration_seconds: Histogram,
     /// The time it took to execute the transactions static file jar provider operation that
     /// increments the block.
-    transactions_increment_block_write_duration_seconds: Histogram,
+    transactions_increment_block_duration_seconds: Histogram,
     /// The time it took to execute the transactions static file jar provider operation that
     /// commits the writer.
-    transactions_commit_writer_write_duration_seconds: Histogram,
+    transactions_commit_writer_duration_seconds: Histogram,
     /// The time it took to execute the receipts static file jar provider operation that
     /// initializes a cursor.
-    receipts_init_cursor_write_duration_seconds: Histogram,
+    receipts_init_cursor_duration_seconds: Histogram,
     /// The time it took to execute the receipts static file jar provider operation that opens a
     /// writer.
-    receipts_open_writer_write_duration_seconds: Histogram,
+    receipts_open_writer_duration_seconds: Histogram,
     /// The time it took to execute the receipts static file jar provider operation that appends
     /// data.
-    receipts_append_write_duration_seconds: Histogram,
+    receipts_append_duration_seconds: Histogram,
     /// The time it took to execute the receipts static file jar provider operation that prunes
     /// data.
-    receipts_prune_write_duration_seconds: Histogram,
+    receipts_prune_duration_seconds: Histogram,
     /// The time it took to execute the receipts static file jar provider operation that increments
     /// the block.
-    receipts_increment_block_write_duration_seconds: Histogram,
+    receipts_increment_block_duration_seconds: Histogram,
     /// The time it took to execute the receipts static file jar provider operation that commits
     /// the writer.
-    receipts_commit_writer_write_duration_seconds: Histogram,
+    receipts_commit_writer_duration_seconds: Histogram,
 }
