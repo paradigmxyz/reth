@@ -113,6 +113,7 @@ tikv-jemallocator = { version = "0.5.0", optional = true }
 libc = "0.2"
 
 # bitfinity dependencies
+async-trait = { workspace = true }
 async-channel.workspace = true
 candid.workspace = true
 did.workspace = true
