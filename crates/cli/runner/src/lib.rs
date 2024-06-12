@@ -68,9 +68,7 @@ impl CliRunner {
             })
             .unwrap();
 
-        if rx.recv_timeout(Duration::from_secs(5)).is_err() {
-            error!(target: "reth::cli", "could not shutdown runtime gracefully");
-        }
+        let _ = rx.recv_timeout(Duration::from_secs(5));
 
         command_res
     }
