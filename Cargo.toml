@@ -351,21 +351,23 @@ alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.4"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
-alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d", default-features = false, features = [
+    "eth",
+]}
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d", default-features = false }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" , default-features = false}
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" , default-features = false}
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" , default-features = false}
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" , default-features = false}
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" , default-features = false }
 alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d", default-features = false, features = [
     "reqwest",
 ] }
 alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "14ed25d" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" , default-features = false}
+alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" , default-features = false}
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d", default-features = false }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" , default-features = false}
 
 # misc
 auto_impl = "1"
