@@ -9,6 +9,7 @@ exclude = [".github/"]
 
 [workspace]
 members = [
+    "bin/reth-bench/",
     "bin/reth/",
     "crates/blockchain-tree/",
     "crates/blockchain-tree-api/",
@@ -239,6 +240,7 @@ incremental = false
 [workspace.dependencies]
 # reth
 reth = { path = "bin/reth" }
+reth-bench = { path = "bin/reth-bench" }
 reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }
@@ -366,6 +368,13 @@ alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
 alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
 alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
 alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
+alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d", features = ["reqwest-rustls-tls"], default-features = false }
+alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
+alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
+alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
+alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
+alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", rev = "14ed25d" }
 
 # misc
 auto_impl = "1"

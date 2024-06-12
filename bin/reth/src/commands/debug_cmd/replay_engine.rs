@@ -155,7 +155,6 @@ impl Command {
             Box::new(ctx.task_executor.clone()),
             Box::new(network),
             None,
-            false,
             payload_builder,
             None,
             u64::MAX,
