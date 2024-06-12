@@ -1,7 +1,9 @@
 use reth_fs_util::FsPathError;
-use thiserror::Error;
 
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, string::String};
+
+#[derive(thiserror_no_std::Error, Debug, Clone, PartialEq, Eq)]
 /// Storage lock error.
 pub enum StorageLockError {
     /// Write lock taken

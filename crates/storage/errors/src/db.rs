@@ -1,8 +1,17 @@
+#[cfg(feature = "std")]
 use std::{fmt::Display, str::FromStr};
-use thiserror::Error;
+
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, format, string::String, vec::Vec};
+
+#[cfg(not(feature = "std"))]
+use core::{
+    fmt::{Display, Formatter, Result},
+    str::FromStr,
+};
 
 /// Database error type.
-#[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror_no_std::Error)]
 pub enum DatabaseError {
     /// Failed to open the database.
     #[error("failed to open the database: {0}")]
@@ -43,7 +52,7 @@ pub enum DatabaseError {
 }
 
 /// Common error struct to propagate implementation-specific error information.
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[derive(Debug, thiserror_no_std::Error, Clone, PartialEq, Eq)]
 #[error("{message} ({code})")]
 pub struct DatabaseErrorInfo {
     /// Human-readable error message.
@@ -70,7 +79,7 @@ impl From<DatabaseWriteError> for DatabaseError {
 }
 
 /// Database write error.
-#[derive(Clone, Debug, PartialEq, Eq, Error)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror_no_std::Error)]
 #[error(
     "write operation {operation:?} failed for key \"{key}\" in table {table_name:?}: {info}",
     key = reth_primitives::hex::encode(key),
