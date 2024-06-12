@@ -9,7 +9,9 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "optimism")]
-    use crate::chain::{OP_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, BASE_SEPOLIA_BASE_FEE_PARAMS};
+    use crate::chain::{
+        BASE_SEPOLIA_BASE_FEE_PARAMS, OP_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
+    };
 
     #[test]
     fn calculate_base_fee_success() {

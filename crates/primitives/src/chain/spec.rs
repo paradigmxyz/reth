@@ -24,9 +24,8 @@ pub use alloy_eips::eip1559::BaseFeeParams;
 #[cfg(feature = "optimism")]
 pub(crate) use crate::{
     constants::{
-        OP_BASE_FEE_PARAMS, OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
-        OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
-        BASE_SEPOLIA_BASE_FEE_PARAMS, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS,
+        BASE_SEPOLIA_BASE_FEE_PARAMS, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS, OP_BASE_FEE_PARAMS,
+        OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
     },
     net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes},
 };
