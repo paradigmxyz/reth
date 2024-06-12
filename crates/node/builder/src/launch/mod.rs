@@ -310,7 +310,6 @@ where
             .build();
 
             let pipeline = crate::setup::build_networked_pipeline(
-                ctx.node_config(),
                 &ctx.toml_config().stages,
                 client.clone(),
                 Arc::clone(&consensus),
@@ -333,7 +332,6 @@ where
             (pipeline, Either::Left(client))
         } else {
             let pipeline = crate::setup::build_networked_pipeline(
-                ctx.node_config(),
                 &ctx.toml_config().stages,
                 network_client.clone(),
                 Arc::clone(&consensus),
