@@ -14,7 +14,7 @@ Reth manages the lifecycle of all ExExes, including:
 - Pruning (in case of a full or pruned node) only the data that have been processed by all ExExes
 - Shutting ExExes down when the node is shut down
 
-# Pruning
+## Pruning
 
 Pruning deserves a special mention here.
 
