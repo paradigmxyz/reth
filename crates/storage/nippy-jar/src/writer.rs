@@ -130,10 +130,19 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         }
 
         let mut offsets_file = OpenOptions::new().read(true).write(true).open(offsets)?;
+        if is_created {
+            let mut buf = Vec::with_capacity(1 + OFFSET_SIZE_BYTES as usize);
 
-        // First byte of the offset file is the size of one offset in bytes
-        offsets_file.write_all(&[OFFSET_SIZE_BYTES])?;
-        offsets_file.seek(SeekFrom::End(0))?;
+            // First byte of the offset file is the size of one offset in bytes
+            buf.write_all(&[OFFSET_SIZE_BYTES])?;
+
+            // The last offset should always represent the data file len, which is 0 on
+            // creation.
+            buf.write_all(&[0; OFFSET_SIZE_BYTES as usize])?;
+
+            offsets_file.write_all(&buf)?;
+            offsets_file.seek(SeekFrom::End(0))?;
+        }
 
         Ok((data_file, offsets_file, is_created))
     }
