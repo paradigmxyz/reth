@@ -119,7 +119,7 @@ pub trait Consensus: Debug + Send + Sync {
 }
 
 /// Consensus Errors
-#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
+#[derive(thiserror_no_std::Error, Debug, PartialEq, Eq, Clone)]
 pub enum ConsensusError {
     /// Error when the gas used in the header exceeds the gas limit.
     #[error("block used gas ({gas_used}) is greater than gas limit ({gas_limit})")]
@@ -333,6 +333,6 @@ impl ConsensusError {
 }
 
 /// `HeaderConsensusError` combines a `ConsensusError` with the `SealedHeader` it relates to.
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror_no_std::Error, Debug)]
 #[error("Consensus error: {0}, Invalid header: {1:?}")]
 pub struct HeaderConsensusError(ConsensusError, SealedHeader);
