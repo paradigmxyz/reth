@@ -247,7 +247,7 @@ where
             self.provider().best_block_number()?
         };
 
-        if end > start {
+        if start > end {
             return Err(EthApiError::InvalidParams(
                 "Invalid block range; `from_block` must be less than or equal to `to_block`"
                     .to_string(),
