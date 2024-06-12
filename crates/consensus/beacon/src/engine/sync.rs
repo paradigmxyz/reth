@@ -262,20 +262,14 @@ where
     fn try_spawn_pipeline(&mut self) -> Option<EngineSyncEvent> {
         match &mut self.pipeline_state {
             PipelineState::Idle(pipeline) => {
-                let target = self.pending_pipeline_target.take();
-
-                if target.is_none() {
-                    // nothing to sync
-                    return None
-                }
-
+                let target = self.pending_pipeline_target.take()?;
                 let (tx, rx) = oneshot::channel();
 
                 let pipeline = pipeline.take().expect("exists");
                 self.pipeline_task_spawner.spawn_critical_blocking(
                     "pipeline task",
                     Box::pin(async move {
-                        let result = pipeline.run_as_fut(target).await;
+                        let result = pipeline.run_as_fut(Some(target)).await;
                         let _ = tx.send(result);
                     }),
                 );
@@ -285,7 +279,7 @@ where
                 // outdated (included in the range the pipeline is syncing anyway)
                 self.clear_block_download_requests();
 
-                Some(EngineSyncEvent::PipelineStarted(target))
+                Some(EngineSyncEvent::PipelineStarted(Some(target)))
             }
             PipelineState::Running(_) => None,
         }
