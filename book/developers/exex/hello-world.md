@@ -31,7 +31,7 @@ eyre = "0.6" # Easy error handling
 
 Now, let's jump to our `main.rs` and start by initializing and launching a default Reth node
 
-```rust,norun,noplayground
+```rust,norun,noplayground,ignore
 use reth_node_ethereum::EthereumNode;
 
 fn main() -> eyre::Result<()> {
@@ -60,7 +60,7 @@ $ cargo run -- init --chain holesky --datadir data
 
 The simplest ExEx is just an async function that never returns. We need to install it into our node
 
-```rust,norun,noplayground
+```rust,norun,noplayground,ignore
 use reth::api::FullNodeComponents;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_ethereum::EthereumNode;
@@ -105,7 +105,7 @@ If you try running a node with an ExEx that exits, the node will exit as well.
 
 Now, let's extend our simplest ExEx and start to actually listen to new notifications, log them, and send events back to the main node
 
-```rust,norun,noplayground
+```rust,norun,noplayground,ignore
 use reth::api::FullNodeComponents;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_ethereum::EthereumNode;
