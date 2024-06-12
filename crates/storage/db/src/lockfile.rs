@@ -1,6 +1,6 @@
 //! Storage lock utils.
 
-#![cfg_attr(feature = "disable_lock", allow(dead_code))]
+#![cfg_attr(feature = "disable-lock", allow(dead_code))]
 
 use reth_storage_errors::lockfile::StorageLockError;
 use reth_tracing::tracing::error;
@@ -32,13 +32,13 @@ impl StorageLock {
     pub fn try_acquire(path: &Path) -> Result<Self, StorageLockError> {
         let file_path = path.join(LOCKFILE_NAME);
 
-        #[cfg(feature = "disable_lock")]
+        #[cfg(feature = "disable-lock")]
         {
             // Too expensive for ef-tests to write/read lock to/from disk.
             Ok(Self(Arc::new(StorageLockInner { file_path })))
         }
 
-        #[cfg(not(feature = "disable_lock"))]
+        #[cfg(not(feature = "disable-lock"))]
         {
             if let Some(process_lock) = ProcessUID::parse(&file_path)? {
                 if process_lock.pid != (process::id() as usize) && process_lock.is_active() {
