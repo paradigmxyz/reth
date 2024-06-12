@@ -42,6 +42,13 @@ impl StorageLock {
         {
             if let Some(process_lock) = ProcessUID::parse(&file_path)? {
                 if process_lock.pid != (process::id() as usize) && process_lock.is_active() {
+                    error!(
+                        target: "reth::db::lockfile",
+                        path = ?file_path,
+                        pid = process_lock.pid,
+                        start_time = process_lock.start_time,
+                        "Storage lock already taken."
+                    );
                     return Err(StorageLockError::Taken(process_lock.pid))
                 }
             }
