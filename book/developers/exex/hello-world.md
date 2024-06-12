@@ -173,4 +173,4 @@ What we've arrived at is the [minimal ExEx example](https://github.com/paradigmx
 
 ## What's next?
 
-Let's do something a bit more interesting, and see how you can track some state inside your ExEx.
+Let's do something a bit more interesting, and see how you can keep track of some state inside your ExEx.
