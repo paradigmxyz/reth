@@ -55,6 +55,10 @@ pub use pruning::PruningArgs;
 mod datadir_args;
 pub use datadir_args::DatadirArgs;
 
+/// BenchmarkArgs struct for configuring the benchmark to run
+mod benchmark_args;
+pub use benchmark_args::BenchmarkArgs;
+
 pub mod utils;
 
 pub mod types;
