@@ -238,12 +238,12 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                         .map_err(|_| ConversionError::MissingAccessList)?,
                     from: tx.from,
                     to: TxKind::from(tx.to),
-                    // TODO: Need to get U128 to u128 conversions working here.
-                    mint: None, // match Option::transpose(tx.other.get_deserialized::<U128>("mint"))
-                    // .map_err(|_| ConversionError::MissingBlockNumber)? {
-                    //     Some(mint) => if mint == 0 { None } else { Some(mint) },
-                    //     None => None,
-                    // },
+                    mint: tx.other.get_deserialized::<String>("mint")
+                        .ok_or(ConversionError::MissingBlobVersionedHashes)?
+                        .map_err(|_| ConversionError::MissingMaxFeePerBlobGas)?
+                        .parse::<u128>()
+                        .ok() // TODO: This converts failure to None. Better to error instead?
+                        .and_then(|num| if num == 0 { None } else { Some(num) }),
                     value: tx.value,
                     gas_limit: tx
                         .gas
@@ -357,7 +357,7 @@ mod tests {
             assert_eq!(deposit_tx.source_hash, "0xe0358cd2b2686d297c5c859646a613124a874fb9d9c4a2c88636a46a65c06e48".parse::<B256>().unwrap());
             assert_eq!(deposit_tx.from, "0x36bde71c97b33cc4729cf772ae268934f7ab70b2".parse::<Address>().unwrap());
             assert_eq!(deposit_tx.to, TxKind::from(address!("4200000000000000000000000000000000000007")));
-            // assert_eq!(deposit_tx.mint, Some(656890000000000000000));
+            assert_eq!(deposit_tx.mint, Some(656890000000000000000));
             assert_eq!(deposit_tx.value, U256::from(0x239c2e16a5ca590000 as u128));
             assert_eq!(deposit_tx.gas_limit, 491822);
             assert_eq!(deposit_tx.is_system_transaction, false);
