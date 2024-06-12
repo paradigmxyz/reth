@@ -373,7 +373,7 @@ where
                         },
                     ));
 
-                    for uncle in &block.ommers.iter() {
+                    for uncle in &block.ommers {
                         let uncle_reward =
                             ommer_reward(base_block_reward, block.header.number, uncle.number);
                         traces.push(reward_trace(
