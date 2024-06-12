@@ -68,8 +68,8 @@ impl CliRunner {
             })
             .unwrap();
 
-        let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|| {
-            debug!(target: "reth::cli", "tokio runtime shutdown timed out");
+        let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
+            debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
         });
 
         command_res
