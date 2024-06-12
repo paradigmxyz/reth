@@ -229,9 +229,11 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             #[cfg(feature = "optimism")]
             Some(TxType::Deposit) => {
                 Ok(Self::Deposit(crate::transaction::TxDeposit {
-                    // TODO: Uses the wrong errors, need alloy ConversionError enum updated with new errors for this.
-                    // https://github.com/alloy-rs/alloy/pull/875/
-                    source_hash: tx.other.get_deserialized::<String>("sourceHash")
+                    // TODO: Uses the wrong errors, need alloy ConversionError enum updated with new
+                    // errors for this. https://github.com/alloy-rs/alloy/pull/875/
+                    source_hash: tx
+                        .other
+                        .get_deserialized::<String>("sourceHash")
                         .ok_or(ConversionError::MissingBlobVersionedHashes)?
                         .map_err(|_| ConversionError::MissingAccessList)?
                         .parse()
@@ -240,7 +242,13 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                     to: TxKind::from(tx.to),
                     mint: Option::transpose(tx.other.get_deserialized::<U128>("mint"))
                         .map_err(|_| ConversionError::MissingMaxFeePerBlobGas)?
-                        .and_then(|num| if num.to::<u128>() == 0 { None } else { Some(num.to::<u128>()) }),
+                        .and_then(|num| {
+                            if num.to::<u128>() == 0 {
+                                None
+                            } else {
+                                Some(num.to::<u128>())
+                            }
+                        }),
                     value: tx.value,
                     gas_limit: tx
                         .gas
@@ -318,12 +326,13 @@ impl TryFrom<alloy_rpc_types::Signature> for Signature {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{B256, U256};
+    use alloy_rpc_types::Transaction as AlloyTransaction;
+    use revm_primitives::{address, Address};
     use serde_json;
-    use alloy_rpc_types::{Transaction as AlloyTransaction};
-    use alloy_primitives::{U256, B256};
-    use revm_primitives::{Address, address};
 
     #[test]
+    #[cfg(feature = "optimism")]
     fn optimism_deposit_tx_conversion_no_mint() {
         let input = r#"{
             "blockHash": "0xef664d656f841b5ad6a2b527b963f1eb48b97d7889d742f6cbff6950388e24cd",
@@ -345,13 +354,25 @@ mod tests {
             "v": "0x0",
             "value": "0x0"
         }"#;
-        let alloy_tx: AlloyTransaction = serde_json::from_str(input).expect("failed to deserialize");
+        let alloy_tx: AlloyTransaction =
+            serde_json::from_str(input).expect("failed to deserialize");
 
         let reth_tx: Transaction = alloy_tx.try_into().expect("failed to convert");
         if let Transaction::Deposit(deposit_tx) = reth_tx {
-            assert_eq!(deposit_tx.source_hash, "0x074adb22f2e6ed9bdd31c52eefc1f050e5db56eb85056450bccd79a6649520b3".parse::<B256>().unwrap());
-            assert_eq!(deposit_tx.from, "0x36bde71c97b33cc4729cf772ae268934f7ab70b2".parse::<Address>().unwrap());
-            assert_eq!(deposit_tx.to, TxKind::from(address!("4200000000000000000000000000000000000007")));
+            assert_eq!(
+                deposit_tx.source_hash,
+                "0x074adb22f2e6ed9bdd31c52eefc1f050e5db56eb85056450bccd79a6649520b3"
+                    .parse::<B256>()
+                    .unwrap()
+            );
+            assert_eq!(
+                deposit_tx.from,
+                "0x36bde71c97b33cc4729cf772ae268934f7ab70b2".parse::<Address>().unwrap()
+            );
+            assert_eq!(
+                deposit_tx.to,
+                TxKind::from(address!("4200000000000000000000000000000000000007"))
+            );
             assert_eq!(deposit_tx.mint, None);
             assert_eq!(deposit_tx.value, U256::ZERO);
             assert_eq!(deposit_tx.gas_limit, 796584);
@@ -362,6 +383,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "optimism")]
     fn optimism_deposit_tx_conversion_mint() {
         let input = r#"{
             "blockHash": "0x7194f63b105e93fb1a27c50d23d62e422d4185a68536c55c96284911415699b2",
@@ -383,14 +405,26 @@ mod tests {
             "v": "0x0",
             "value": "0x239c2e16a5ca590000"
         }"#;
-        let alloy_tx: AlloyTransaction = serde_json::from_str(input).expect("failed to deserialize");
+        let alloy_tx: AlloyTransaction =
+            serde_json::from_str(input).expect("failed to deserialize");
 
         let reth_tx: Transaction = alloy_tx.try_into().expect("failed to convert");
 
         if let Transaction::Deposit(deposit_tx) = reth_tx {
-            assert_eq!(deposit_tx.source_hash, "0xe0358cd2b2686d297c5c859646a613124a874fb9d9c4a2c88636a46a65c06e48".parse::<B256>().unwrap());
-            assert_eq!(deposit_tx.from, "0x36bde71c97b33cc4729cf772ae268934f7ab70b2".parse::<Address>().unwrap());
-            assert_eq!(deposit_tx.to, TxKind::from(address!("4200000000000000000000000000000000000007")));
+            assert_eq!(
+                deposit_tx.source_hash,
+                "0xe0358cd2b2686d297c5c859646a613124a874fb9d9c4a2c88636a46a65c06e48"
+                    .parse::<B256>()
+                    .unwrap()
+            );
+            assert_eq!(
+                deposit_tx.from,
+                "0x36bde71c97b33cc4729cf772ae268934f7ab70b2".parse::<Address>().unwrap()
+            );
+            assert_eq!(
+                deposit_tx.to,
+                TxKind::from(address!("4200000000000000000000000000000000000007"))
+            );
             assert_eq!(deposit_tx.mint, Some(656890000000000000000));
             assert_eq!(deposit_tx.value, U256::from(0x239c2e16a5ca590000 as u128));
             assert_eq!(deposit_tx.gas_limit, 491822);

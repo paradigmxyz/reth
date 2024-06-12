@@ -7,12 +7,6 @@ use crate::{
 };
 use std::time::Duration;
 
-#[cfg(feature = "optimism")]
-use crate::{
-    chain::BaseFeeParams,
-    revm_primitives::Address
-};
-
 /// [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#parameters) constants.
 pub mod eip4844;
 
@@ -79,8 +73,8 @@ pub const MAINNET_DEPOSIT_CONTRACT: DepositContract = DepositContract::new(
 );
 
 /// From address from Optimism system txs.
-#[cfg(feature = "optimism")]
-pub const OP_SYSTEM_TX_FROM_ADDR: Address = address!("deaddeaddeaddeaddeaddeaddeaddeaddead0001");
+pub const OP_SYSTEM_TX_FROM_ADDR: crate::Address =
+    address!("deaddeaddeaddeaddeaddeaddeaddeaddead0001");
 
 /// Base fee max change denominator for Optimism Mainnet as defined in the Optimism
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
@@ -114,28 +108,28 @@ pub const OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 10;
 
 /// Get the base fee parameters for Optimism Sepolia.
 #[cfg(feature = "optimism")]
-pub const OP_SEPOLIA_BASE_FEE_PARAMS: BaseFeeParams = BaseFeeParams {
+pub const OP_SEPOLIA_BASE_FEE_PARAMS: crate::BaseFeeParams = crate::BaseFeeParams {
     max_change_denominator: OP_SEPOLIA_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
     elasticity_multiplier: OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
 };
 
 /// Get the base fee parameters for Optimism Sepolia (post Canyon).
 #[cfg(feature = "optimism")]
-pub const OP_SEPOLIA_CANYON_BASE_FEE_PARAMS: BaseFeeParams = BaseFeeParams {
+pub const OP_SEPOLIA_CANYON_BASE_FEE_PARAMS: crate::BaseFeeParams = crate::BaseFeeParams {
     max_change_denominator: OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
     elasticity_multiplier: OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
 };
 
 /// Get the base fee parameters for Optimism Mainnet.
 #[cfg(feature = "optimism")]
-pub const OP_BASE_FEE_PARAMS: BaseFeeParams = BaseFeeParams {
+pub const OP_BASE_FEE_PARAMS: crate::BaseFeeParams = crate::BaseFeeParams {
     max_change_denominator: OP_MAINNET_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
     elasticity_multiplier: OP_MAINNET_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
 };
 
 /// Get the base fee parameters for Optimism Mainnet (post Canyon).
 #[cfg(feature = "optimism")]
-pub const OP_CANYON_BASE_FEE_PARAMS: BaseFeeParams = BaseFeeParams {
+pub const OP_CANYON_BASE_FEE_PARAMS: crate::BaseFeeParams = crate::BaseFeeParams {
     max_change_denominator: OP_MAINNET_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
     elasticity_multiplier: OP_MAINNET_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
 };
