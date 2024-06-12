@@ -43,7 +43,7 @@ derive_more.workspace = true
 eyre.workspace = true
 paste.workspace = true
 rustc-hash.workspace = true
-sysinfo = "0.30"
+sysinfo = { version = "0.30", default-features = false }
 
 # arbitrary utils
 strum = { workspace = true, features = ["derive"] }
