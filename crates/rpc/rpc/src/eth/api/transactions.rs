@@ -1,70 +1,75 @@
 //! Contains RPC handler implementations specific to transactions
 
-use std::sync::Arc;
-
 use reth_primitives::{TransactionSignedEcRecovered, B256};
-use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_types::{Transaction, TransactionInfo};
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
-use reth_transaction_pool::TransactionPool;
 
-use crate::{
-    eth::{
-        api::{EthTransactions, LoadTransaction, RawTransactionForwarder, SpawnBlocking},
-        cache::EthStateCache,
-        revm_utils::FillableTransaction,
-        signer::EthSigner,
-    },
-    EthApi,
-};
+use crate::{eth::revm_utils::FillableTransaction, EthApi};
 
-impl<Provider, Pool, Network, EvmConfig> EthTransactions
-    for EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Self: LoadTransaction,
-    Pool: TransactionPool + 'static,
-    Provider: BlockReaderIdExt,
-{
-    #[inline]
-    fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
-    }
+/// Implements [`EthTransactions`](crate::eth::api::EthTransactions) for a type, that has similar
+/// data layout to [`EthApi`].
+#[macro_export]
+macro_rules! eth_transactions_impl {
+    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
+        impl$(<$($generic,)+>)* $crate::eth::api::EthTransactions
+            for $network_api
+        where
+            Self: $crate::eth::api::LoadTransaction,
+            Pool: reth_transaction_pool::TransactionPool + 'static,
+            Provider: reth_provider::BlockReaderIdExt,
+        {
+            #[inline]
+            fn provider(&self) -> impl reth_provider::BlockReaderIdExt {
+                self.inner.provider()
+            }
 
-    #[inline]
-    fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
-        self.inner.raw_tx_forwarder()
-    }
+            #[inline]
+            fn raw_tx_forwarder(&self) -> Option<std::sync::Arc<dyn $crate::eth::api::RawTransactionForwarder>> {
+                self.inner.raw_tx_forwarder()
+            }
 
-    #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
-        self.inner.signers()
-    }
+            #[inline]
+            fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn $crate::eth::EthSigner>>> {
+                self.inner.signers()
+            }
+        }
+    };
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadTransaction
-    for EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Self: SpawnBlocking,
-    Provider: TransactionsProvider,
-    Pool: TransactionPool,
-{
-    type Pool = Pool;
+/// Implements [`LoadTransaction`](crate::eth::api::LoadTransaction) for a type, that has similar
+/// data layout to [`EthApi`].
+#[macro_export]
+macro_rules! load_transaction_impl {
+    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
+        impl$(<$($generic,)+>)* $crate::eth::api::LoadTransaction
+            for $network_api
+        where
+            Self: $crate::eth::api::SpawnBlocking,
+            Provider: reth_provider::TransactionsProvider,
+            Pool: reth_transaction_pool::TransactionPool,
+        {
+            type Pool = Pool;
 
-    #[inline]
-    fn provider(&self) -> impl TransactionsProvider {
-        self.inner.provider()
-    }
+            #[inline]
+            fn provider(&self) -> impl reth_provider::TransactionsProvider {
+                self.inner.provider()
+            }
 
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
+            #[inline]
+            fn cache(&self) -> &$crate::eth::cache::EthStateCache {
+                self.inner.cache()
+            }
 
-    #[inline]
-    fn pool(&self) -> &Self::Pool {
-        self.inner.pool()
-    }
+            #[inline]
+            fn pool(&self) -> &Self::Pool {
+                self.inner.pool()
+            }
+        }
+    };
 }
+
+eth_transactions_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
+load_transaction_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
 
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -159,14 +164,15 @@ impl From<TransactionSource> for Transaction {
 mod tests {
     use super::*;
     use crate::eth::{
-        cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache, FeeHistoryCacheConfig,
+        api::EthTransactions, cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
+        FeeHistoryCacheConfig,
     };
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_tasks::pool::BlockingTaskPool;
-    use reth_transaction_pool::test_utils::testing_pool;
+    use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
 
     #[tokio::test]
     async fn send_raw_transaction() {

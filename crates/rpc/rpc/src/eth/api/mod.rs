@@ -269,19 +269,29 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
-    for EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Self: Clone + Send + Sync + 'static,
-{
-    fn io_task_spawner(&self) -> impl TaskSpawner {
-        self.inner.task_spawner()
-    }
+/// Implements [`SpawnBlocking`] for a type, that has similar data layout to [`EthApi`].
+#[macro_export]
+macro_rules! spawn_blocking_impl {
+    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
+        impl$(<$($generic,)+>)* $crate::eth::api::SpawnBlocking
+            for $network_api
+        where
+            Self: Clone + Send + Sync + 'static,
+        {
+            #[inline]
+            fn io_task_spawner(&self) -> impl reth_tasks::TaskSpawner {
+                self.inner.task_spawner()
+            }
 
-    fn tracing_task_pool(&self) -> &BlockingTaskPool {
-        self.inner.blocking_task_pool()
-    }
+            #[inline]
+            fn tracing_task_pool(&self) -> &reth_tasks::pool::BlockingTaskPool {
+                self.inner.blocking_task_pool()
+            }
+        }
+    };
 }
+
+spawn_blocking_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
 
 /// The default gas limit for `eth_call` and adjacent calls.
 ///

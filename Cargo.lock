@@ -7536,6 +7536,7 @@ version = "0.2.0-beta.9"
 dependencies = [
  "futures",
  "jsonrpsee",
+ "parking_lot 0.12.3",
  "reth-evm",
  "reth-evm-optimism",
  "reth-network-api",

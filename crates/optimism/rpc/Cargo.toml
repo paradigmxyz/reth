@@ -28,6 +28,7 @@ reth-tasks.workspace = true
 # async
 futures.workspace = true
 tokio = { workspace = true, features = ["sync"] }
+parking_lot.workspace = true
 
 # rpc
 jsonrpsee.workspace = true

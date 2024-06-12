@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use derive_more::Constructor;
 use reth_errors::ProviderError;
-use reth_evm::ConfigureEvm;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
     proofs,
@@ -15,9 +14,7 @@ use reth_primitives::{
     Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
     Requests, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
-use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome, StateProviderFactory,
-};
+use reth_provider::{ChainSpecProvider, ExecutionOutcome, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     state_change::{
@@ -28,46 +25,51 @@ use reth_revm::{
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
 use revm_primitives::EnvWithHandlerCfg;
-use tokio::sync::Mutex;
 
 use crate::{
-    eth::{
-        api::{LoadPendingBlock, SpawnBlocking},
-        error::{EthApiError, EthResult},
-    },
+    eth::error::{EthApiError, EthResult},
     EthApi,
 };
 
-impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
-    for EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Self: SpawnBlocking,
-    Provider: BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory,
-    Pool: TransactionPool,
-    EvmConfig: ConfigureEvm,
-{
-    #[inline]
-    fn provider(
-        &self,
-    ) -> impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory {
-        self.inner.provider()
-    }
+/// Implements [`LoadPendingBlock`](crate::eth::api::LoadPendingBlock) for a type, that has similar
+/// data layout to [`EthApi`].
+#[macro_export]
+macro_rules! load_pending_block_impl {
+    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
+        impl$(<$($generic,)+>)* $crate::eth::api::LoadPendingBlock
+            for $network_api
+        where
+            Self: $crate::eth::api::SpawnBlocking,
+            Provider: reth_provider::BlockReaderIdExt + reth_provider::EvmEnvProvider + reth_provider::ChainSpecProvider + reth_provider::StateProviderFactory,
+            Pool: reth_transaction_pool::TransactionPool,
+            EvmConfig: reth_evm::ConfigureEvm,
+        {
+            #[inline]
+            fn provider(
+                &self,
+            ) -> impl reth_provider::BlockReaderIdExt + reth_provider::EvmEnvProvider + reth_provider::ChainSpecProvider + reth_provider::StateProviderFactory {
+                self.inner.provider()
+            }
 
-    #[inline]
-    fn pool(&self) -> impl TransactionPool {
-        self.inner.pool()
-    }
+            #[inline]
+            fn pool(&self) -> impl reth_transaction_pool::TransactionPool {
+                self.inner.pool()
+            }
 
-    #[inline]
-    fn pending_block(&self) -> &Mutex<Option<PendingBlock>> {
-        self.inner.pending_block()
-    }
+            #[inline]
+            fn pending_block(&self) -> &tokio::sync::Mutex<Option<$crate::eth::PendingBlock>> {
+                self.inner.pending_block()
+            }
 
-    #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm {
-        self.inner.evm_config()
-    }
+            #[inline]
+            fn evm_config(&self) -> &impl reth_evm::ConfigureEvm {
+                self.inner.evm_config()
+            }
+        }
+    };
 }
+
+load_pending_block_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
 
 /// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block
 #[derive(Debug, Clone, Constructor)]
