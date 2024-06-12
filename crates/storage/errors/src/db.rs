@@ -54,7 +54,7 @@ pub enum DatabaseError {
 }
 
 /// Common error struct to propagate implementation-specific error information.
-#[derive(Debug, thiserror_no_std::Error, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror_no_std::Error)]
 #[error("{message} ({code})")]
 pub struct DatabaseErrorInfo {
     /// Human-readable error message.
@@ -180,7 +180,7 @@ impl LogLevel {
 impl FromStr for LogLevel {
     type Err = String;
 
-    fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "fatal" => Ok(Self::Fatal),
             "error" => Ok(Self::Error),
@@ -190,7 +190,7 @@ impl FromStr for LogLevel {
             "debug" => Ok(Self::Debug),
             "trace" => Ok(Self::Trace),
             "extra" => Ok(Self::Extra),
-            _ => Err(format!("Invalid log level: {}", s)),
+            _ => Err(format!("Invalid log level: {s}")),
         }
     }
 }

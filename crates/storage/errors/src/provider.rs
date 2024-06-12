@@ -151,7 +151,7 @@ impl From<reth_fs_util::FsPathError> for ProviderError {
 }
 
 /// A root mismatch error at a given block height.
-#[derive(Clone, Debug, thiserror_no_std::Error, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror_no_std::Error)]
 #[error("root mismatch at #{block_number} ({block_hash}): {root}")]
 pub struct RootMismatch {
     /// The target block root diff.
@@ -163,7 +163,7 @@ pub struct RootMismatch {
 }
 
 /// Consistent database view error.
-#[derive(Clone, Debug, thiserror_no_std::Error, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror_no_std::Error)]
 pub enum ConsistentViewError {
     /// Error thrown on attempt to initialize provider while node is still syncing.
     #[error("node is syncing. best block: {best_block:?}")]
