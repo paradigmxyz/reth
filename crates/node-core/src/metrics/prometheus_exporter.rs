@@ -2,6 +2,7 @@
 
 use crate::metrics::version_metrics::register_version_metrics;
 use eyre::WrapErr;
+use futures::{future::FusedFuture, FutureExt};
 use http::Response;
 use metrics::describe_gauge;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
@@ -11,8 +12,6 @@ use reth_metrics::metrics::Unit;
 use reth_provider::providers::StaticFileProvider;
 use reth_tasks::TaskExecutor;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
-use futures::future::FusedFuture;
-use futures::FutureExt;
 
 pub(crate) trait Hook: Fn() + Send + Sync {}
 impl<T: Fn() + Send + Sync> Hook for T {}
