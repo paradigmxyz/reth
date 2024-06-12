@@ -164,7 +164,8 @@ Woah, there's a lot of new stuff here! Let's go through it step by step.
 
 Sending an `ExExEvent::FinishedHeight` event is a very important part of every ExEx.
 
-It's the only way to communicate the main node that the ExEx has finished processing the specified height.
+It's the only way to communicate to the main node that the ExEx has finished processing the specified height
+and it's safe to prune the associated data.
 
 </div>
 
