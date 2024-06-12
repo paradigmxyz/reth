@@ -5,7 +5,7 @@ use crate::{
     Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844,
     TxLegacy, TxType,
 };
-use alloy_primitives::TxKind;
+use alloy_primitives::{TxKind, U128};
 use alloy_rlp::Error as RlpError;
 
 impl TryFrom<alloy_rpc_types::Block> for Block {
@@ -233,14 +233,14 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                     // https://github.com/alloy-rs/alloy/pull/875/
                     source_hash: tx.other.get_deserialized::<String>("sourceHash")
                         .ok_or(ConversionError::MissingBlobVersionedHashes)?
-                        .map_err(|_| ConversionError::MissingMaxFeePerBlobGas)?
+                        .map_err(|_| ConversionError::MissingAccessList)?
                         .parse()
                         .map_err(|_| ConversionError::MissingAccessList)?,
                     from: tx.from,
                     to: TxKind::from(tx.to),
-                    mint: Option::transpose(tx.other.get_deserialized::<u128>("mint"))
+                    mint: Option::transpose(tx.other.get_deserialized::<U128>("mint"))
                         .map_err(|_| ConversionError::MissingMaxFeePerBlobGas)?
-                        .and_then(|num| if num == 0 { None } else { Some(num) }),
+                        .and_then(|num| if num.to::<u128>() == 0 { None } else { Some(num.to::<u128>()) }),
                     value: tx.value,
                     gas_limit: tx
                         .gas
@@ -318,7 +318,6 @@ impl TryFrom<alloy_rpc_types::Signature> for Signature {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
     use serde_json;
     use alloy_rpc_types::{Transaction as AlloyTransaction};
     use alloy_primitives::{U256, B256};
@@ -346,7 +345,7 @@ mod tests {
             "v": "0x0",
             "value": "0x0"
         }"#;
-        let alloy_tx: AlloyTransaction = serde_json::from_reader(tx_file).expect("failed to deserialize");
+        let alloy_tx: AlloyTransaction = serde_json::from_str(input).expect("failed to deserialize");
 
         let reth_tx: Transaction = alloy_tx.try_into().expect("failed to convert");
         if let Transaction::Deposit(deposit_tx) = reth_tx {
@@ -384,7 +383,7 @@ mod tests {
             "v": "0x0",
             "value": "0x239c2e16a5ca590000"
         }"#;
-        let alloy_tx: AlloyTransaction = serde_json::from_reader(input).expect("failed to deserialize");
+        let alloy_tx: AlloyTransaction = serde_json::from_str(input).expect("failed to deserialize");
 
         let reth_tx: Transaction = alloy_tx.try_into().expect("failed to convert");
 
