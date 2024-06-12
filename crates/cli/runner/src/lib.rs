@@ -52,7 +52,7 @@ impl CliRunner {
             // after the command has finished or exit signal was received we shutdown the task
             // manager which fires the shutdown signal to all tasks spawned via the task
             // executor and awaiting on tasks spawned with graceful shutdown
-            task_manager.graceful_shutdown_with_timeout(std::time::Duration::from_secs(10));
+            task_manager.graceful_shutdown_with_timeout(Duration::from_secs(5));
         }
 
         // `drop(tokio_runtime)` would block the current thread until its pools
