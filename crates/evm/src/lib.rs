@@ -129,7 +129,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 /// Allows to build an EVM Executor with the given context.
 pub trait EvmContext<'a, EXT, DB: Database> {
     /// The executor produced with the context set.
-    type Executor: EvmExecutor<DB>;
+    type Executor: EvmExecutor;
 
     /// Sets the EVM database.
     #[must_use]

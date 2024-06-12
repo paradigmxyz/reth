@@ -12,8 +12,8 @@ pub use reth_storage_errors::provider::ProviderError;
 /// An EVM executor trait that executes an input (e.g. transaction and height) and produces an output
 /// (e.g. state changes).
 ///
-/// The executor can also commit the state changes to the database.
-pub trait EvmExecutor<DB> {
+/// The executor cannot commit the state changes to the database directly, see [`EvmCommitter`].
+pub trait EvmExecutor {
     /// The environment for the executor.
     type Env;
     /// The output produced by the executor.
@@ -28,7 +28,8 @@ pub trait EvmExecutor<DB> {
     fn env(&self) -> &Self::Env;
 }
 
-pub trait EvmCommitter<DB>: EvmExecutor<DB> {
+/// An EVM executor trait that can commit the state changes to the database.
+pub trait EvmCommitter: EvmExecutor {
     /// Commit the state changes to the database.
     fn commit(&mut self, output: Self::Output);
 
@@ -37,7 +38,7 @@ pub trait EvmCommitter<DB>: EvmExecutor<DB> {
 }
 
 /// An EVM executor that uses the [`Evm`] struct to execute the current Env.
-impl<'a, DB, I> EvmExecutor<DB> for Evm<'a, I, DB>
+impl<'a, DB, I> EvmExecutor for Evm<'a, I, DB>
 where
     DB: Database,
 {
@@ -54,7 +55,7 @@ where
     }
 }
 
-impl<'a, DB, I> EvmCommitter<DB> for Evm<'a, I, DB>
+impl<'a, DB, I> EvmCommitter for Evm<'a, I, DB>
 where
     DB: Database + DatabaseCommit,
 {
