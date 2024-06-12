@@ -22,3 +22,5 @@ pub mod engine;
 pub mod pipeline;
 /// Support for interacting with the blockchain tree.
 pub mod tree;
+/// The background writer task for batch db writes.
+pub mod background_writer;
