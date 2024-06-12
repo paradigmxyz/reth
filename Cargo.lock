@@ -8241,7 +8241,7 @@ version = "1.0.0-rc.1"
 dependencies = [
  "reth-fs-util",
  "reth-primitives",
- "thiserror",
+ "thiserror-no-std",
 ]
 
 [[package]]
