@@ -5,25 +5,11 @@ use std::time::Instant;
 use derive_more::Constructor;
 use reth_errors::ProviderError;
 use reth_primitives::{
-    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
-    proofs,
-    revm::env::tx_env_with_recovered,
-    revm_primitives::{
-        BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
-    },
-    Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Requests, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+    BlockId, BlockNumberOrTag, ChainSpec, SealedBlockWithSenders, SealedHeader, B256,
 };
-use reth_provider::{ChainSpecProvider, ExecutionOutcome, StateProviderFactory};
-use reth_revm::{
-    database::StateProviderDatabase,
-    state_change::{
-        apply_beacon_root_contract_call, apply_blockhashes_update,
-        post_block_withdrawals_balance_increments,
-    },
-};
-use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
-use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
+use reth_revm::state_change::{apply_beacon_root_contract_call, apply_blockhashes_update};
+use revm::{Database, DatabaseCommit};
 use revm_primitives::EnvWithHandlerCfg;
 
 use crate::{
@@ -82,263 +68,6 @@ pub struct PendingBlockEnv {
     pub origin: PendingBlockEnvOrigin,
 }
 
-impl PendingBlockEnv {
-    /// Builds a pending block using the given client and pool.
-    ///
-    /// If the origin is the actual pending block, the block is built with withdrawals.
-    ///
-    /// After Cancun, if the origin is the actual pending block, the block includes the EIP-4788 pre
-    /// block contract call using the parent beacon block root received from the CL.
-    pub fn build_block<Client, Pool>(
-        self,
-        client: &Client,
-        pool: &Pool,
-    ) -> EthResult<SealedBlockWithSenders>
-    where
-        Client: StateProviderFactory + ChainSpecProvider,
-        Pool: TransactionPool,
-    {
-        let Self { cfg, block_env, origin } = self;
-
-        let parent_hash = origin.build_target_hash();
-        let state_provider = client.history_by_block_hash(parent_hash)?;
-        let state = StateProviderDatabase::new(state_provider);
-        let mut db = State::builder().with_database(state).with_bundle_update().build();
-
-        let mut cumulative_gas_used = 0;
-        let mut sum_blob_gas_used = 0;
-        let block_gas_limit: u64 = block_env.gas_limit.to::<u64>();
-        let base_fee = block_env.basefee.to::<u64>();
-        let block_number = block_env.number.to::<u64>();
-
-        let mut executed_txs = Vec::new();
-        let mut senders = Vec::new();
-        let mut best_txs = pool.best_transactions_with_attributes(BestTransactionsAttributes::new(
-            base_fee,
-            block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
-        ));
-
-        let (withdrawals, withdrawals_root) = match origin {
-            PendingBlockEnvOrigin::ActualPending(ref block) => {
-                (block.withdrawals.clone(), block.withdrawals_root)
-            }
-            PendingBlockEnvOrigin::DerivedFromLatest(_) => (None, None),
-        };
-
-        let chain_spec = client.chain_spec();
-
-        let parent_beacon_block_root = if origin.is_actual_pending() {
-            // apply eip-4788 pre block contract call if we got the block from the CL with the real
-            // parent beacon block root
-            pre_block_beacon_root_contract_call(
-                &mut db,
-                chain_spec.as_ref(),
-                block_number,
-                &cfg,
-                &block_env,
-                origin.header().parent_beacon_block_root,
-            )?;
-            origin.header().parent_beacon_block_root
-        } else {
-            None
-        };
-        pre_block_blockhashes_update(
-            &mut db,
-            chain_spec.as_ref(),
-            &block_env,
-            block_number,
-            parent_hash,
-        )?;
-
-        let mut receipts = Vec::new();
-
-        while let Some(pool_tx) = best_txs.next() {
-            // ensure we still have capacity for this transaction
-            if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
-                // we can't fit this transaction into the block, so we need to mark it as invalid
-                // which also removes all dependent transaction from the iterator before we can
-                // continue
-                best_txs.mark_invalid(&pool_tx);
-                continue
-            }
-
-            if pool_tx.origin.is_private() {
-                // we don't want to leak any state changes made by private transactions, so we mark
-                // them as invalid here which removes all dependent transactions from the iterator
-                // before we can continue
-                best_txs.mark_invalid(&pool_tx);
-                continue
-            }
-
-            // convert tx to a signed transaction
-            let tx = pool_tx.to_recovered_transaction();
-
-            // There's only limited amount of blob space available per block, so we need to check if
-            // the EIP-4844 can still fit in the block
-            if let Some(blob_tx) = tx.transaction.as_eip4844() {
-                let tx_blob_gas = blob_tx.blob_gas();
-                if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
-                    // we can't fit this _blob_ transaction into the block, so we mark it as
-                    // invalid, which removes its dependent transactions from
-                    // the iterator. This is similar to the gas limit condition
-                    // for regular transactions above.
-                    best_txs.mark_invalid(&pool_tx);
-                    continue
-                }
-            }
-
-            // Configure the environment for the block.
-            let env =
-                Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx_env_with_recovered(&tx));
-
-            let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
-
-            let ResultAndState { result, state } = match evm.transact() {
-                Ok(res) => res,
-                Err(err) => {
-                    match err {
-                        EVMError::Transaction(err) => {
-                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                                // if the nonce is too low, we can skip this transaction
-                            } else {
-                                // if the transaction is invalid, we can skip it and all of its
-                                // descendants
-                                best_txs.mark_invalid(&pool_tx);
-                            }
-                            continue
-                        }
-                        err => {
-                            // this is an error that we should treat as fatal for this attempt
-                            return Err(err.into())
-                        }
-                    }
-                }
-            };
-            // drop evm to release db reference.
-            drop(evm);
-            // commit changes
-            db.commit(state);
-
-            // add to the total blob gas used if the transaction successfully executed
-            if let Some(blob_tx) = tx.transaction.as_eip4844() {
-                let tx_blob_gas = blob_tx.blob_gas();
-                sum_blob_gas_used += tx_blob_gas;
-
-                // if we've reached the max data gas per block, we can skip blob txs entirely
-                if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
-                    best_txs.skip_blobs();
-                }
-            }
-
-            let gas_used = result.gas_used();
-
-            // add gas used by the transaction to cumulative gas used, before creating the receipt
-            cumulative_gas_used += gas_used;
-
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            receipts.push(Some(Receipt {
-                tx_type: tx.tx_type(),
-                success: result.is_success(),
-                cumulative_gas_used,
-                logs: result.into_logs().into_iter().map(Into::into).collect(),
-                #[cfg(feature = "optimism")]
-                deposit_nonce: None,
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: None,
-            }));
-
-            // append transaction to the list of executed transactions
-            let (tx, sender) = tx.to_components();
-            executed_txs.push(tx);
-            senders.push(sender);
-        }
-
-        // executes the withdrawals and commits them to the Database and BundleState.
-        let balance_increments = post_block_withdrawals_balance_increments(
-            &chain_spec,
-            block_env.timestamp.try_into().unwrap_or(u64::MAX),
-            &withdrawals.clone().unwrap_or_default(),
-        );
-
-        // increment account balances for withdrawals
-        db.increment_balances(balance_increments)?;
-
-        // merge all transitions into bundle state.
-        db.merge_transitions(BundleRetention::PlainState);
-
-        let execution_outcome = ExecutionOutcome::new(
-            db.take_bundle(),
-            vec![receipts].into(),
-            block_number,
-            Vec::new(),
-        );
-
-        #[cfg(feature = "optimism")]
-        let receipts_root = execution_outcome
-            .optimism_receipts_root_slow(
-                block_number,
-                chain_spec.as_ref(),
-                block_env.timestamp.to::<u64>(),
-            )
-            .expect("Block is present");
-
-        #[cfg(not(feature = "optimism"))]
-        let receipts_root =
-            execution_outcome.receipts_root_slow(block_number).expect("Block is present");
-
-        let logs_bloom =
-            execution_outcome.block_logs_bloom(block_number).expect("Block is present");
-
-        // calculate the state root
-        let state_provider = &db.database;
-        let state_root = state_provider.state_root(execution_outcome.state())?;
-
-        // create the block header
-        let transactions_root = proofs::calculate_transaction_root(&executed_txs);
-
-        // check if cancun is activated to set eip4844 header fields correctly
-        let blob_gas_used =
-            if cfg.handler_cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
-
-        // note(onbjerg): the rpc spec has not been changed to include requests, so for now we just
-        // set these to empty
-        let (requests, requests_root) =
-            if chain_spec.is_prague_active_at_timestamp(block_env.timestamp.to::<u64>()) {
-                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
-            } else {
-                (None, None)
-            };
-
-        let header = Header {
-            parent_hash,
-            ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: block_env.coinbase,
-            state_root,
-            transactions_root,
-            receipts_root,
-            withdrawals_root,
-            logs_bloom,
-            timestamp: block_env.timestamp.to::<u64>(),
-            mix_hash: block_env.prevrandao.unwrap_or_default(),
-            nonce: BEACON_NONCE,
-            base_fee_per_gas: Some(base_fee),
-            number: block_number,
-            gas_limit: block_gas_limit,
-            difficulty: U256::ZERO,
-            gas_used: cumulative_gas_used,
-            blob_gas_used,
-            excess_blob_gas: block_env.get_blob_excess_gas(),
-            extra_data: Default::default(),
-            parent_beacon_block_root,
-            requests_root,
-        };
-
-        // seal the block
-        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests };
-        Ok(SealedBlockWithSenders { block: block.seal_slow(), senders })
-    }
-}
-
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
 /// This constructs a new [Evm](revm::Evm) with the given DB, and environment
@@ -346,7 +75,7 @@ impl PendingBlockEnv {
 ///
 /// This uses [`apply_beacon_root_contract_call`] to ultimately apply the beacon root contract state
 /// change.
-fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
+pub fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_number: u64,
@@ -384,7 +113,7 @@ where
 /// [`CfgEnvWithHandlerCfg`] and [`BlockEnv`].
 ///
 /// This uses [`apply_blockhashes_update`].
-fn pre_block_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCommit>(
+pub fn pre_block_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     initialized_block_env: &BlockEnv,
@@ -448,7 +177,7 @@ impl PendingBlockEnvOrigin {
     /// For the [`PendingBlockEnvOrigin::ActualPending`] this is the parent hash of the block.
     /// For the [`PendingBlockEnvOrigin::DerivedFromLatest`] this is the hash of the _latest_
     /// header.
-    fn build_target_hash(&self) -> B256 {
+    pub fn build_target_hash(&self) -> B256 {
         match self {
             Self::ActualPending(block) => block.parent_hash,
             Self::DerivedFromLatest(header) => header.hash(),

@@ -11,12 +11,13 @@ use std::sync::Arc;
 
 use reth_rpc::{
     call_impl, eth::api::EthApiInner, eth_call_impl, eth_fees_impl, eth_state_impl,
-    eth_transactions_impl, load_block_impl, load_fee_impl, load_pending_block_impl,
-    load_state_impl, load_transaction_impl, spawn_blocking_impl, trace_impl,
+    eth_transactions_impl, load_block_impl, load_fee_impl, load_state_impl, load_transaction_impl,
+    spawn_blocking_impl, trace_impl,
 };
 
 pub mod block;
 pub mod error;
+pub mod pending_block;
 pub mod receipt;
 pub mod transaction;
 
@@ -39,7 +40,6 @@ eth_transactions_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provide
 
 load_block_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
 load_fee_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-load_pending_block_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
 load_state_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
 load_transaction_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
 
