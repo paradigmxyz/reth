@@ -3,15 +3,13 @@
 //!
 
 use super::utils::*;
-use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
-use jsonrpsee::{core::RpcResult, proc_macros::rpc, server::{Server, ServerHandle}, Methods, RpcModule};
+use eth_server::{EthImpl, EthServer};
+use jsonrpsee::{server::{Server, ServerHandle}, Methods, RpcModule};
 use reth::args::RpcServerArgs;
 use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_ethereum::EthereumNode;
-use reth_provider::{BlockNumReader, BlockReader};
 use reth_tasks::TaskManager;
-use revm_primitives::U256;
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
 
 #[tokio::test]
 async fn bitfinity_test_should_start_local_reth_node() {
@@ -32,28 +30,9 @@ async fn bitfinity_test_node_forward_get_gas_price_requests() {
     // Arrange
     let _log = init_logs();
 
-    #[rpc(server, namespace = "eth")]
-    pub trait Eth {
-        #[method(name = "gasPrice")]
-        async fn gas_price(&self) -> RpcResult<U256>;
-    }
-
-    let gas_price: u128 = rand::random();
-
-    struct EthImpl{
-        gas_price: u128
-    }
-
-    #[async_trait::async_trait]
-    impl EthServer for EthImpl {
-        async fn gas_price(&self) -> RpcResult<U256> {
-            Ok(U256::from(self.gas_price))
-        }
-    }
-
-    let (server, eth_server_address) = mock_eth_server_start(EthServer::into_rpc(EthImpl {gas_price})).await;
-    println!("Mock Eth server started at: {}", eth_server_address);
-
+    let eth_server = EthImpl::new();
+    let gas_price = eth_server.gas_price;
+    let (_server, eth_server_address) = mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
     let (reth_address, _reth_node) = start_reth_testing_node(Some(format!("http://{}", eth_server_address))).await;
     
     let client = ethereum_json_rpc_client::EthJsonRpcClient::new(
@@ -68,11 +47,31 @@ async fn bitfinity_test_node_forward_get_gas_price_requests() {
 
 }
 
+#[tokio::test]
+async fn bitfinity_test_node_forward_max_priority_fee_per_gas_requests() {
+    // Arrange
+    let _log = init_logs();
+
+    let eth_server = EthImpl::new();
+    let max_priority_fee_per_gas = eth_server.max_priority_fee_per_gas;
+    let (_server, eth_server_address) = mock_eth_server_start(EthServer::into_rpc(eth_server)).await;
+    let (reth_address, _reth_node) = start_reth_testing_node(Some(format!("http://{}", eth_server_address))).await;
+    
+    let client = ethereum_json_rpc_client::EthJsonRpcClient::new(
+        ethereum_json_rpc_client::reqwest::ReqwestClient::new(format!("http://{}", reth_address)),
+    );
+
+    // Act
+    let result = client.max_priority_fee_per_gas().await;
+
+    // Assert
+    assert_eq!(result.unwrap().as_u128(), max_priority_fee_per_gas);
+
+}
+
 /// Start a local reth node
 async fn start_reth_testing_node(bitfinity_evm_url: Option<String>) -> (SocketAddr, NodeHandle<reth_node_builder::NodeAdapter<reth_node_api::FullNodeTypesAdapter<EthereumNode, std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, reth_provider::providers::BlockchainProvider<std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>>, reth_node_builder::components::Components<reth_node_api::FullNodeTypesAdapter<EthereumNode, std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, reth_provider::providers::BlockchainProvider<std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>>, reth_transaction_pool::Pool<reth_transaction_pool::TransactionValidationTaskExecutor<reth_transaction_pool::EthTransactionValidator<reth_provider::providers::BlockchainProvider<std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>, reth_transaction_pool::EthPooledTransaction>>, reth_transaction_pool::CoinbaseTipOrdering<reth_transaction_pool::EthPooledTransaction>, reth_transaction_pool::blobstore::DiskFileBlobStore>, reth_node_ethereum::EthEvmConfig, reth_node_ethereum::EthExecutorProvider>>>) {
     let tasks = TaskManager::current();
-
-
 
     // create node config
     let node_config = NodeConfig::test()
@@ -115,4 +114,46 @@ async fn mock_eth_server_start(
 async fn mock_eth_server_stop(server: ServerHandle) {
     server.stop().unwrap();
     server.stopped().await;
+}
+
+pub mod eth_server {
+
+    use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+    use revm_primitives::U256;
+
+    #[rpc(server, namespace = "eth")]
+    pub trait Eth {
+        #[method(name = "gasPrice")]
+        async fn gas_price(&self) -> RpcResult<U256>;
+
+        #[method(name = "maxPriorityFeePerGas")]
+        async fn max_priority_fee_per_gas(&self) -> RpcResult<U256>;
+    }
+
+    #[derive(Debug)]
+    pub struct EthImpl{
+        pub gas_price: u128,
+        pub max_priority_fee_per_gas: u128,
+    }
+
+    impl EthImpl{
+        pub fn new() -> Self {
+            Self {
+                gas_price: rand::random(),
+                max_priority_fee_per_gas: rand::random(),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl EthServer for EthImpl {
+        async fn gas_price(&self) -> RpcResult<U256> {
+            Ok(U256::from(self.gas_price))
+        }
+
+        async fn max_priority_fee_per_gas(&self) -> RpcResult<U256> {
+            Ok(U256::from(self.max_priority_fee_per_gas))
+        }
+    }
+
 }
