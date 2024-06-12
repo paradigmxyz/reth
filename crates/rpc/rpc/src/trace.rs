@@ -239,13 +239,19 @@ where
         filter: TraceFilter,
     ) -> EthResult<Vec<LocalizedTransactionTrace>> {
         let matcher = filter.matcher();
-        let TraceFilter { from_block, to_block, after: _after, count: _count, .. } = filter;
+        let TraceFilter { from_block, to_block, .. } = filter;
         let start = from_block.unwrap_or(0);
         let end = if let Some(to_block) = to_block {
             to_block
         } else {
             self.provider().best_block_number()?
         };
+
+        if start > end {
+            return Err(EthApiError::InvalidParams(
+                "invalid parameters: fromBlock cannot be greater than toBlock".to_string(),
+            ))
+        }
 
         // ensure that the range is not too large, since we need to fetch all blocks in the range
         let distance = end.saturating_sub(start);
