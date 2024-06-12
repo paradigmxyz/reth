@@ -14,13 +14,12 @@ use reth_node_core::{
     },
     dirs::{ChainPath, DataDirPath},
 };
-use reth_primitives::ChainSpec;
-use reth_provider::{
-    providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
-};
+use reth_primitives::{ChainSpec, B256};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
+use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
 /// Struct to hold config and datadir paths
@@ -127,11 +126,13 @@ impl EnvironmentArgs {
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
+            let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
+
             // Builds and executes an unwind-only pipeline
             let mut pipeline = Pipeline::builder()
                 .add_stages(DefaultStages::new(
                     factory.clone(),
-                    HeaderSyncMode::Continuous,
+                    tip_rx,
                     Arc::new(EthBeaconConsensus::new(self.chain.clone())),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),

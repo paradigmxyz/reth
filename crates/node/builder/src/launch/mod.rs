@@ -250,7 +250,6 @@ where
             .build();
 
             let pipeline = crate::setup::build_networked_pipeline(
-                ctx.node_config(),
                 &ctx.toml_config().stages,
                 client.clone(),
                 consensus.clone(),
@@ -273,7 +272,6 @@ where
             (pipeline, Either::Left(client))
         } else {
             let pipeline = crate::setup::build_networked_pipeline(
-                ctx.node_config(),
                 &ctx.toml_config().stages,
                 network_client.clone(),
                 consensus.clone(),
@@ -293,7 +291,7 @@ where
 
         let pipeline_events = pipeline.events();
 
-        let initial_target = ctx.initial_pipeline_target();
+        let initial_target = ctx.node_config().debug.tip;
 
         let mut pruner_builder =
             ctx.pruner_builder().max_reorg_depth(tree_config.max_reorg_depth() as usize);
@@ -316,7 +314,6 @@ where
             Box::new(ctx.task_executor().clone()),
             Box::new(node_adapter.components.network().clone()),
             max_block,
-            ctx.node_config().debug.continuous,
             node_adapter.components.payload_builder().clone(),
             initial_target,
             reth_beacon_consensus::MIN_BLOCKS_FOR_PIPELINE_RUN,
