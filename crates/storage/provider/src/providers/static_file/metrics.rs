@@ -1,10 +1,9 @@
 use std::time::Duration;
 
-use itertools::Itertools;
 use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
 use reth_primitives::StaticFileSegment;
-use strum::{EnumIter, IntoEnumIterator};
+use strum::EnumIter;
 
 /// Metrics for the static file provider.
 #[derive(Debug, Default)]
@@ -12,33 +11,6 @@ pub struct StaticFileProviderMetrics {
     segments: StaticFileSegmentMetrics,
     segment_operations: StaticFileProviderOperationMetrics,
 }
-
-// impl Default for StaticFileProviderMetrics {
-//     fn default() -> Self {
-//         Self {
-//             segments: StaticFileSegment::iter()
-//                 .map(|segment| {
-//                     (
-//                         segment,
-//                         StaticFileSegmentMetrics::new_with_labels(&[("segment",
-// segment.as_str())]),                     )
-//                 })
-//                 .collect(),
-//             segment_operations: StaticFileSegment::iter()
-//                 .cartesian_product(StaticFileProviderOperation::iter())
-//                 .map(|(segment, operation)| {
-//                     (
-//                         (segment, operation),
-//                         StaticFileProviderOperationMetrics::new_with_labels(&[
-//                             ("segment", segment.as_str()),
-//                             ("operation", operation.as_str()),
-//                         ]),
-//                     )
-//                 })
-//                 .collect(),
-//         }
-//     }
-// }
 
 impl StaticFileProviderMetrics {
     pub(crate) fn record_segment(
@@ -230,19 +202,6 @@ pub(crate) enum StaticFileProviderOperation {
     Prune,
     IncrementBlock,
     CommitWriter,
-}
-
-impl StaticFileProviderOperation {
-    const fn as_str(&self) -> &'static str {
-        match self {
-            Self::InitCursor => "init-cursor",
-            Self::OpenWriter => "open-writer",
-            Self::Append => "append",
-            Self::Prune => "prune",
-            Self::IncrementBlock => "increment-block",
-            Self::CommitWriter => "commit-writer",
-        }
-    }
 }
 
 /// Metrics for a specific static file segment.
