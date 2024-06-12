@@ -240,7 +240,6 @@ where
         task_spawner: Box<dyn TaskSpawner>,
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
-        run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle<EngineT>,
         target: Option<B256>,
         pipeline_run_threshold: u64,
@@ -254,7 +253,6 @@ where
             task_spawner,
             sync_state_updater,
             max_block,
-            run_pipeline_continuously,
             payload_builder,
             target,
             pipeline_run_threshold,
@@ -285,7 +283,6 @@ where
         task_spawner: Box<dyn TaskSpawner>,
         sync_state_updater: Box<dyn NetworkSyncUpdater>,
         max_block: Option<BlockNumber>,
-        run_pipeline_continuously: bool,
         payload_builder: PayloadBuilderHandle<EngineT>,
         target: Option<B256>,
         pipeline_run_threshold: u64,
@@ -299,7 +296,6 @@ where
             pipeline,
             client,
             task_spawner.clone(),
-            run_pipeline_continuously,
             max_block,
             blockchain.chain_spec(),
             event_sender.clone(),
@@ -1446,11 +1442,6 @@ where
             // update the `invalid_headers` cache with the new invalid header
             self.invalid_headers.insert(*bad_block);
             return Ok(())
-        }
-
-        // update the canon chain if continuous is enabled
-        if self.sync.run_pipeline_continuously() {
-            self.set_canonical_head(ctrl.block_number().unwrap_or_default())?;
         }
 
         let sync_target_state = match self.forkchoice_state_tracker.sync_target_state() {
