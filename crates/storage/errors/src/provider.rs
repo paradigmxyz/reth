@@ -2,11 +2,15 @@ use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, StaticFileSegment,
     TxHashOrNumber, TxNumber, B256, U256,
 };
+
 #[cfg(feature = "std")]
 use std::path::PathBuf;
 
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::String};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+};
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
@@ -111,6 +115,7 @@ pub enum ProviderError {
     #[error("this provider does not support this request")]
     UnsupportedProvider,
     /// Static File is not found at specified path.
+    #[cfg(feature = "std")]
     #[error("not able to find {0} static file at {1}")]
     MissingStaticFilePath(StaticFileSegment, PathBuf),
     /// Static File is not found for requested block.

@@ -1,7 +1,7 @@
 use reth_fs_util::FsPathError;
 
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::String};
+use alloc::string::{String, ToString};
 
 #[derive(thiserror_no_std::Error, Debug, Clone, PartialEq, Eq)]
 /// Storage lock error.

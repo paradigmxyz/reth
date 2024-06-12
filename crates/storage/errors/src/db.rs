@@ -1,14 +1,16 @@
 #[cfg(feature = "std")]
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display, str::FromStr, string::String};
 
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, format, string::String, vec::Vec};
-
-#[cfg(not(feature = "std"))]
-use core::{
-    fmt::{Display, Formatter, Result},
-    str::FromStr,
+use alloc::{
+    boxed::Box,
+    format,
+    string::{String, ToString},
+    vec::Vec,
 };
+
+#[cfg(not(feature = "std"))]
+use core::{fmt::Display, str::FromStr};
 
 /// Database error type.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror_no_std::Error)]
@@ -178,7 +180,7 @@ impl LogLevel {
 impl FromStr for LogLevel {
     type Err = String;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "fatal" => Ok(Self::Fatal),
             "error" => Ok(Self::Error),
