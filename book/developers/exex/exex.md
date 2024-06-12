@@ -3,7 +3,7 @@
 ## What are Execution Extensions?
 
 Execution Extensions allow developers to build their own infrastructure that relies on Reth
-as a base for driving the chain (be it [Ethereum](../run/mainnet.md) or [OP Stack](../run/optimism.md)) forward.
+as a base for driving the chain (be it [Ethereum](../../run/mainnet.md) or [OP Stack](../../run/optimism.md)) forward.
 
 Execution Extension is a task that derives its state from Reth's state.
 Some examples of such state derives are rollups, bridges, and indexers.
@@ -17,6 +17,3 @@ and run on Holesky testnet.
 
 1. [How do ExExes work?](./how-it-works.md)
 1. [Hello World](./hello-world.md)
-1. [Tracking State](./tracking-state.md)
-1. [Testing](./testing.md)
-1. [Running](./running.md)
