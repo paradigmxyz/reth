@@ -9,56 +9,27 @@ use reth_primitives::{
     ChainSpec, GotExpected, Hardfork, Header, SealedBlock, SealedHeader,
 };
 
-/// Validate header standalone
-pub fn validate_header_standalone(
-    header: &SealedHeader,
-    chain_spec: &ChainSpec,
-) -> Result<(), ConsensusError> {
-    // Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
+/// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
+pub fn validate_header_gas(header: &SealedHeader) -> Result<(), ConsensusError> {
     if header.gas_used > header.gas_limit {
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
             gas_used: header.gas_used,
             gas_limit: header.gas_limit,
         })
     }
+    Ok(())
+}
 
-    // Check if base fee is set.
+/// Check if base fee is set.
+pub fn validate_header_base_fee(
+    header: &SealedHeader,
+    chain_spec: &ChainSpec,
+) -> Result<(), ConsensusError> {
     if chain_spec.fork(Hardfork::London).active_at_block(header.number) &&
         header.base_fee_per_gas.is_none()
     {
         return Err(ConsensusError::BaseFeeMissing)
     }
-
-    let wd_root_missing = header.withdrawals_root.is_none() && !chain_spec.is_optimism();
-
-    // EIP-4895: Beacon chain push withdrawals as operations
-    if chain_spec.is_shanghai_active_at_timestamp(header.timestamp) && wd_root_missing {
-        return Err(ConsensusError::WithdrawalsRootMissing)
-    } else if !chain_spec.is_shanghai_active_at_timestamp(header.timestamp) &&
-        header.withdrawals_root.is_some()
-    {
-        return Err(ConsensusError::WithdrawalsRootUnexpected)
-    }
-
-    // Ensures that EIP-4844 fields are valid once cancun is active.
-    if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-        validate_4844_header_standalone(header)?;
-    } else if header.blob_gas_used.is_some() {
-        return Err(ConsensusError::BlobGasUsedUnexpected)
-    } else if header.excess_blob_gas.is_some() {
-        return Err(ConsensusError::ExcessBlobGasUnexpected)
-    } else if header.parent_beacon_block_root.is_some() {
-        return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
-    }
-
-    if chain_spec.is_prague_active_at_timestamp(header.timestamp) {
-        if header.requests_root.is_none() {
-            return Err(ConsensusError::RequestsRootMissing)
-        }
-    } else if header.requests_root.is_some() {
-        return Err(ConsensusError::RequestsRootUnexpected)
-    }
-
     Ok(())
 }
 
