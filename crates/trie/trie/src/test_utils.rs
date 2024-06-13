@@ -1,8 +1,6 @@
 use alloy_rlp::encode_fixed_size;
-use reth_primitives::{
-    proofs::{triehash::KeccakHasher, IntoTrieAccount},
-    Account, Address, B256, U256,
-};
+use reth_primitives::{Account, Address, B256, U256};
+use reth_trie_common::{triehash::KeccakHasher, TrieAccount};
 
 /// Re-export of [triehash].
 pub use triehash;
@@ -15,7 +13,7 @@ where
 {
     let encoded_accounts = accounts.into_iter().map(|(address, (account, storage))| {
         let storage_root = storage_root(storage);
-        let account = IntoTrieAccount::to_trie_account((account, storage_root));
+        let account = TrieAccount::from((account, storage_root));
         (address, alloy_rlp::encode(account))
     });
     triehash::sec_trie_root::<KeccakHasher, _, _, _>(encoded_accounts)
@@ -36,7 +34,7 @@ where
 {
     let encoded_accounts = accounts.into_iter().map(|(address, (account, storage))| {
         let storage_root = storage_root_prehashed(storage);
-        let account = IntoTrieAccount::to_trie_account((account, storage_root));
+        let account = TrieAccount::from((account, storage_root));
         (address, alloy_rlp::encode(account))
     });
 
