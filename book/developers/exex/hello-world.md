@@ -103,7 +103,7 @@ If you try running a node with an ExEx that exits, the node will exit as well.
 
 ### Hello World ExEx
 
-Now, let's extend our simplest ExEx and start to actually listen to new notifications, log them, and send events back to the main node
+Now, let's extend our simplest ExEx and start actually listening to new notifications, log them, and send events back to the main node
 
 ```rust,norun,noplayground,ignore
 use reth::api::FullNodeComponents;
