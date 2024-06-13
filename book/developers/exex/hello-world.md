@@ -144,11 +144,11 @@ fn main() -> eyre::Result<()> {
 
 Woah, there's a lot of new stuff here! Let's go through it step by step:
 
--   First, we've added a `while let Some(notification) = ctx.notifications.recv().await` loop that waits for new notifications to come in.
-    -   The main node is responsible for sending notifications to the ExEx, so we're waiting for them to come in.
--   Next, we've added a `match &notification { ... }` block that matches on the type of the notification.
-    -   In each case, we're logging the notification and the corresponding block range, be it a chain commit, revert, or reorg.
--   Finally, we're checking if the notification contains a committed chain, and if it does, we're sending a `ExExEvent::FinishedHeight` event back to the main node using the `ctx.events.send` method.
+- First, we've added a `while let Some(notification) = ctx.notifications.recv().await` loop that waits for new notifications to come in.
+   - The main node is responsible for sending notifications to the ExEx, so we're waiting for them to come in.
+- Next, we've added a `match &notification { ... }` block that matches on the type of the notification.
+   - In each case, we're logging the notification and the corresponding block range, be it a chain commit, revert, or reorg.
+- Finally, we're checking if the notification contains a committed chain, and if it does, we're sending a `ExExEvent::FinishedHeight` event back to the main node using the `ctx.events.send` method.
 
 <div class="warning">
 
