@@ -1,14 +1,7 @@
 //! utilities for working with revm
 
 use crate::eth::error::{EthApiError, EthResult, RpcInvalidTransactionError};
-#[cfg(feature = "optimism")]
-use reth_primitives::revm::env::fill_op_tx_env;
-#[cfg(not(feature = "optimism"))]
-use reth_primitives::revm::env::fill_tx_env;
-use reth_primitives::{
-    revm::env::fill_tx_env_with_recovered, Address, TransactionSigned,
-    TransactionSignedEcRecovered, TxHash, TxKind, B256, U256,
-};
+use reth_primitives::{Address, TxKind, B256, U256};
 use reth_rpc_types::{
     state::{AccountOverride, StateOverride},
     BlockOverrides, TransactionRequest,
@@ -60,56 +53,6 @@ impl EvmOverrides {
 impl From<Option<StateOverride>> for EvmOverrides {
     fn from(state: Option<StateOverride>) -> Self {
         Self::state(state)
-    }
-}
-
-/// Helper type to work with different transaction types when configuring the EVM env.
-///
-/// This makes it easier to handle errors.
-pub trait FillableTransaction {
-    /// Returns the hash of the transaction.
-    fn hash(&self) -> TxHash;
-
-    /// Fill the transaction environment with the given transaction.
-    fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()>;
-}
-
-impl FillableTransaction for TransactionSignedEcRecovered {
-    fn hash(&self) -> TxHash {
-        self.hash
-    }
-
-    fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()> {
-        #[cfg(not(feature = "optimism"))]
-        fill_tx_env_with_recovered(tx_env, self);
-
-        #[cfg(feature = "optimism")]
-        {
-            let mut envelope_buf = Vec::with_capacity(self.length_without_header());
-            self.encode_enveloped(&mut envelope_buf);
-            fill_tx_env_with_recovered(tx_env, self, envelope_buf.into());
-        }
-        Ok(())
-    }
-}
-impl FillableTransaction for TransactionSigned {
-    fn hash(&self) -> TxHash {
-        self.hash
-    }
-
-    fn try_fill_tx_env(&self, tx_env: &mut TxEnv) -> EthResult<()> {
-        let signer =
-            self.recover_signer().ok_or_else(|| EthApiError::InvalidTransactionSignature)?;
-        #[cfg(not(feature = "optimism"))]
-        fill_tx_env(tx_env, self, signer);
-
-        #[cfg(feature = "optimism")]
-        {
-            let mut envelope_buf = Vec::with_capacity(self.length_without_header());
-            self.encode_enveloped(&mut envelope_buf);
-            fill_op_tx_env(tx_env, self, signer, envelope_buf.into());
-        }
-        Ok(())
     }
 }
 

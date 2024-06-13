@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use jsonrpsee::core::RpcResult;
+use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
     constants::eip4844::MAINNET_KZG_TRUSTED_SETUP,
     keccak256,
@@ -22,7 +23,6 @@ use revm_primitives::{EnvWithHandlerCfg, MAX_BLOB_GAS_PER_BLOCK};
 use crate::eth::{
     api::{Call, EthTransactions, LoadPendingBlock},
     error::{EthApiError, EthResult, RpcInvalidTransactionError},
-    revm_utils::FillableTransaction,
     utils::recover_raw_transaction,
 };
 
@@ -101,6 +101,8 @@ where
         // use the block number of the request
         block_env.number = U256::from(block_number);
 
+        let eth_api = self.inner.eth_api.clone();
+
         self.inner
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
@@ -132,13 +134,13 @@ where
                             .map_err(|e| EthApiError::InvalidParams(e.to_string()))?;
                     }
 
-                    let tx = tx.into_ecrecovered_transaction(signer);
+                    let tx = tx.into_transaction();
 
                     hash_bytes.extend_from_slice(tx.hash().as_slice());
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)?;
-                    tx.try_fill_tx_env(evm.tx_mut())?;
+                    Call::evm_config(&eth_api).fill_tx_env(evm.tx_mut(), &tx.clone(), signer);
                     let ResultAndState { result, state } = evm.transact()?;
 
                     let gas_used = result.gas_used();
@@ -169,7 +171,7 @@ where
                     let tx_res = EthCallBundleTransactionResult {
                         coinbase_diff,
                         eth_sent_to_coinbase,
-                        from_address: tx.signer(),
+                        from_address: signer,
                         gas_fees,
                         gas_price: U256::from(gas_price),
                         gas_used,
@@ -215,7 +217,7 @@ where
 #[async_trait::async_trait]
 impl<Eth> EthCallBundleApiServer for EthBundle<Eth>
 where
-    Eth: EthTransactions + 'static,
+    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
         Ok(Self::call_bundle(self, request).await?)

@@ -6,8 +6,8 @@ use reth::{
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     primitives::{
         address,
-        revm_primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
-        Address, Bytes, U256,
+        revm_primitives::{Env, PrecompileResult},
+        Bytes,
     },
     revm::{
         handler::register::EvmHandler,
@@ -19,8 +19,8 @@ use reth::{
 };
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
-use reth_primitives::{Chain, ChainSpec, Genesis, Header, TransactionSigned};
+use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
+use reth_primitives::{Chain, ChainSpec, Genesis};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
 
@@ -60,20 +60,7 @@ impl MyEvmConfig {
     }
 }
 
-impl ConfigureEvmEnv for MyEvmConfig {
-    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        EthEvmConfig::fill_tx_env(tx_env, transaction, sender)
-    }
-
-    fn fill_cfg_env(
-        cfg_env: &mut CfgEnvWithHandlerCfg,
-        chain_spec: &ChainSpec,
-        header: &Header,
-        total_difficulty: U256,
-    ) {
-        EthEvmConfig::fill_cfg_env(cfg_env, chain_spec, header, total_difficulty)
-    }
-}
+impl ConfigureEvmEnv for MyEvmConfig {}
 
 impl ConfigureEvm for MyEvmConfig {
     type DefaultExternalContext<'a> = ();

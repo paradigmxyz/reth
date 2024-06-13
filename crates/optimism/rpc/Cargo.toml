@@ -35,3 +35,6 @@ jsonrpsee.workspace = true
 
 # misc
 thiserror.workspace = true
+
+[features]
+optimism = []

@@ -2,8 +2,15 @@
 //! methods.
 
 use futures::Future;
-use reth_evm::ConfigureEvm;
-use reth_primitives::{revm::env::tx_env_with_recovered, Bytes, TxKind, B256, U256};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_primitives::{
+    revm::env::tx_env_with_recovered,
+    revm_primitives::{
+        BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
+        ResultAndState, TransactTo,
+    },
+    Bytes, TransactionSignedEcRecovered, TxKind, B256, U256,
+};
 use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
 use reth_rpc_types::{
@@ -12,10 +19,6 @@ use reth_rpc_types::{
 };
 use revm::{Database, DatabaseCommit};
 use revm_inspectors::access_list::AccessListInspector;
-use revm_primitives::{
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason, ResultAndState,
-    TransactTo,
-};
 use tracing::trace;
 
 use crate::eth::{
@@ -24,7 +27,6 @@ use crate::eth::{
     revm_utils::{
         apply_state_overrides, build_call_evm_env, caller_gas_allowance,
         cap_tx_gas_limit_with_caller_allowance, get_precompiles, prepare_call_env, EvmOverrides,
-        FillableTransaction,
     },
 };
 
@@ -444,19 +446,17 @@ pub trait Call: LoadState + SpawnBlocking {
     ///
     /// Note: This assumes the target transaction is in the given iterator.
     /// Returns the index of the target transaction in the given iterator.
-    fn replay_transactions_until<DB, I, Tx>(
+    fn replay_transactions_until<DB>(
         &self,
         db: &mut CacheDB<DB>,
         cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
-        transactions: I,
+        transactions: impl IntoIterator<Item = TransactionSignedEcRecovered>,
         target_tx_hash: B256,
     ) -> Result<usize, EthApiError>
     where
         DB: DatabaseRef,
         EthApiError: From<<DB as DatabaseRef>::Error>,
-        I: IntoIterator<Item = Tx>,
-        Tx: FillableTransaction,
     {
         let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
 
@@ -468,7 +468,8 @@ pub trait Call: LoadState + SpawnBlocking {
                 break
             }
 
-            tx.try_fill_tx_env(evm.tx_mut())?;
+            let sender = tx.signer();
+            self.evm_config().fill_tx_env(evm.tx_mut(), &tx.into_signed(), sender);
             evm.transact_commit()?;
             index += 1;
         }
