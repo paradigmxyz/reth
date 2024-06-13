@@ -21,6 +21,6 @@ Pruning deserves a special mention here.
 ExExes **SHOULD** emit an [`ExExEvent::FinishedHeight`](https://reth.rs/docs/reth_exex/enum.ExExEvent.html#variant.FinishedHeight)
 event to signify what blocks have been processed. This event is used by Reth to determine what state can be pruned.
 
-An ExEx will only receive notifications for blocks greater than the block emitted in the event.
+An ExEx will only receive notifications for block numbers greater than the block in the most recently emitted `FinishedHeight` event.
 
 To clarify: if an ExEx emits `ExExEvent::FinishedHeight(0)` it will receive notifications for any `block_number > 0`.
