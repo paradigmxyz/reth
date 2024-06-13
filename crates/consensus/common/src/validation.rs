@@ -208,13 +208,12 @@ pub fn validate_parent_hash_number(
     Ok(())
 }
 
-/// EIP-1559 check base fee
+/// Validates the base fee according to the parent and EIP-1559 rules.
 pub fn validate_parent_eip1559_base_fee(
     header: &SealedHeader,
     parent: &SealedHeader,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
-    // EIP-1559 check base fee
     if chain_spec.fork(Hardfork::London).active_at_block(header.number) {
         let base_fee = header.base_fee_per_gas.ok_or(ConsensusError::BaseFeeMissing)?;
 
