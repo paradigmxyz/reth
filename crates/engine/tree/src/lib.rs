@@ -16,5 +16,7 @@ pub use reth_blockchain_tree_api::*;
 pub mod chain;
 /// Engine Api chain handler support.
 pub mod engine;
+/// Support for managing the pipeline.
+pub mod pipeline;
 /// Support for interacting with the blockchain tree.
 pub mod tree;

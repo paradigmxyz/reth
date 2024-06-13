@@ -53,7 +53,7 @@ where
         todo!()
     }
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<HandlerEvent> {
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<HandlerEvent> {
         todo!()
     }
 }
