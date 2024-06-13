@@ -33,7 +33,7 @@ jobs:
 
         cat etc/assertoor/assertoor-template.yaml | envsubst > etc/assertoor/assertoor.yaml
 
-        kurtosis run github.com/kurtosis-tech/ethereum-package --enclave assertoor-${{ github.run_id }} --args-file etc/assertoor/assertoor.yaml
+        kurtosis run github.com/ethpandaops/ethereum-package --enclave assertoor-${{ github.run_id }} --args-file etc/assertoor/assertoor.yaml
 
         enclave_dump=$(kurtosis enclave inspect assertoor-${{ github.run_id }})
 
