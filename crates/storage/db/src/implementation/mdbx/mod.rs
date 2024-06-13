@@ -290,50 +290,53 @@ impl DatabaseEnv {
             page_size: Some(PageSize::Set(default_page_size())),
         });
 
-        fn is_current_process(id: u32) -> bool {
-            #[cfg(unix)]
-            {
-                id == std::os::unix::process::parent_id() || id == std::process::id()
+        #[cfg(not(windows))]
+        {
+            fn is_current_process(id: u32) -> bool {
+                #[cfg(unix)]
+                {
+                    id == std::os::unix::process::parent_id() || id == std::process::id()
+                }
+
+                #[cfg(not(unix))]
+                {
+                    id == std::process::id()
+                }
             }
 
-            #[cfg(not(unix))]
-            {
-                id == std::process::id()
-            }
-        }
-
-        extern "C" fn handle_slow_readers(
-            _env: *const ffi::MDBX_env,
-            _txn: *const ffi::MDBX_txn,
-            process_id: ffi::mdbx_pid_t,
-            thread_id: ffi::mdbx_tid_t,
-            read_txn_id: u64,
-            gap: std::ffi::c_uint,
-            space: usize,
-            retry: std::ffi::c_int,
-        ) -> HandleSlowReadersReturnCode {
-            if space > MAX_SAFE_READER_SPACE {
-                let message = if is_current_process(process_id as u32) {
-                    "Current process has a long-lived database transaction that grows the database file."
-                } else {
-                    "External process has a long-lived database transaction that grows the database file. \
+            extern "C" fn handle_slow_readers(
+                _env: *const ffi::MDBX_env,
+                _txn: *const ffi::MDBX_txn,
+                process_id: ffi::mdbx_pid_t,
+                thread_id: ffi::mdbx_tid_t,
+                read_txn_id: u64,
+                gap: std::ffi::c_uint,
+                space: usize,
+                retry: std::ffi::c_int,
+            ) -> HandleSlowReadersReturnCode {
+                if space > MAX_SAFE_READER_SPACE {
+                    let message = if is_current_process(process_id as u32) {
+                        "Current process has a long-lived database transaction that grows the database file."
+                    } else {
+                        "External process has a long-lived database transaction that grows the database file. \
                      Use shorter-lived read transactions or shut down the node."
-                };
-                reth_tracing::tracing::warn!(
-                    target: "storage::db::mdbx",
-                    ?process_id,
-                    ?thread_id,
-                    ?read_txn_id,
-                    ?gap,
-                    ?space,
-                    ?retry,
-                    "{message}"
-                )
-            }
+                    };
+                    reth_tracing::tracing::warn!(
+                        target: "storage::db::mdbx",
+                        ?process_id,
+                        ?thread_id,
+                        ?read_txn_id,
+                        ?gap,
+                        ?space,
+                        ?retry,
+                        "{message}"
+                    )
+                }
 
-            reth_libmdbx::HandleSlowReadersReturnCode::ProceedWithoutKillingReader
+                reth_libmdbx::HandleSlowReadersReturnCode::ProceedWithoutKillingReader
+            }
+            inner_env.set_handle_slow_readers(handle_slow_readers);
         }
-        inner_env.set_handle_slow_readers(handle_slow_readers);
 
         inner_env.set_flags(EnvironmentFlags {
             mode,
