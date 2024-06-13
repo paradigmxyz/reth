@@ -3,12 +3,12 @@
 use crate::{
     codec::ECIESCodec, error::ECIESErrorImpl, ECIESError, EgressECIESValue, IngressECIESValue,
 };
-use futures::{ready, Sink, SinkExt};
-use reth_net_common::stream::HasRemoteAddr;
-use reth_primitives::{
+use alloy_primitives::{
     bytes::{Bytes, BytesMut},
     B512 as PeerId,
 };
+use futures::{ready, Sink, SinkExt};
+use reth_net_common::stream::HasRemoteAddr;
 use secp256k1::SecretKey;
 use std::{
     fmt::Debug,

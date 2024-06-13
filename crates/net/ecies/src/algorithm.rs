@@ -7,6 +7,10 @@ use crate::{
     ECIESError,
 };
 use aes::{cipher::StreamCipher, Aes128, Aes256};
+use alloy_primitives::{
+    bytes::{BufMut, Bytes, BytesMut},
+    B128, B256, B512 as PeerId,
+};
 use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
@@ -14,10 +18,6 @@ use digest::{crypto_common::KeyIvInit, Digest};
 use educe::Educe;
 use rand::{thread_rng, Rng};
 use reth_network_peers::{id2pk, pk2id};
-use reth_primitives::{
-    bytes::{BufMut, Bytes, BytesMut},
-    B128, B256, B512 as PeerId,
-};
 use secp256k1::{
     ecdsa::{RecoverableSignature, RecoveryId},
     PublicKey, SecretKey, SECP256K1,
@@ -721,7 +721,7 @@ impl ECIES {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{b256, hex};
+    use alloy_primitives::{b256, hex};
 
     #[test]
     fn ecdh() {

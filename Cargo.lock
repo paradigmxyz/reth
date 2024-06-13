@@ -6857,6 +6857,7 @@ name = "reth-ecies"
 version = "1.0.0-rc.1"
 dependencies = [
  "aes 0.8.4",
+ "alloy-primitives",
  "alloy-rlp",
  "block-padding",
  "byteorder",
@@ -6872,7 +6873,6 @@ dependencies = [
  "rand 0.8.5",
  "reth-net-common",
  "reth-network-peers",
- "reth-primitives",
  "secp256k1 0.28.2",
  "sha2 0.10.8",
  "sha3",
