@@ -7,13 +7,22 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 use reth_primitives::{
     BlockHash, BlockNumber, BlockWithSenders, Bloom, GotExpected, GotExpectedBoxed, Header,
     HeaderValidationError, InvalidTransactionError, Receipt, Request, SealedBlock, SealedHeader,
     B256, U256,
 };
+
+#[cfg(feature = "std")]
 use std::fmt::Debug;
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
+#[cfg(not(feature = "std"))]
+use alloc::{fmt::Debug, vec::Vec};
 
 /// A consensus implementation that does nothing.
 pub mod noop;
@@ -119,7 +128,7 @@ pub trait Consensus: Debug + Send + Sync {
 }
 
 /// Consensus Errors
-#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
+#[derive(thiserror_no_std::Error, Debug, PartialEq, Eq, Clone)]
 pub enum ConsensusError {
     /// Error when the gas used in the header exceeds the gas limit.
     #[error("block used gas ({gas_used}) is greater than gas limit ({gas_limit})")]
@@ -333,6 +342,6 @@ impl ConsensusError {
 }
 
 /// `HeaderConsensusError` combines a `ConsensusError` with the `SealedHeader` it relates to.
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror_no_std::Error, Debug)]
 #[error("Consensus error: {0}, Invalid header: {1:?}")]
 pub struct HeaderConsensusError(ConsensusError, SealedHeader);
