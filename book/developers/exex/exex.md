@@ -5,7 +5,7 @@
 Execution Extensions allow developers to build their own infrastructure that relies on Reth
 as a base for driving the chain (be it [Ethereum](../../run/mainnet.md) or [OP Stack](../../run/optimism.md)) forward.
 
-Execution Extension is a task that derives its state from Reth's state.
+An Execution Extension is a task that derives its state from changes in Reth's state.
 Some examples of such state derivations are rollups, bridges, and indexers.
 
 Read more about things you can build with Execution Extensions in the [Paradigm blog](https://www.paradigm.xyz/2024/05/reth-exex).

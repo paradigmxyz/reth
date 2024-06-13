@@ -7,15 +7,15 @@ Let's write a simple "Hello World" ExEx that emits a log every time a new chain 
 First, let's create a new project for our ExEx
 
 ```console
-cargo new --bin hello-world-exex
-cd hello-world-exex
+cargo new --bin my-exex
+cd my-exex
 ```
 
 And add Reth as a dependency in `Cargo.toml`
 
 ```toml
 [package]
-name = "hello-world-exex"
+name = "my-exex"
 version = "0.1.0"
 edition = "2021"
 
@@ -66,9 +66,7 @@ use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
 
-async fn hello_world_exex<Node: FullNodeComponents>(
-    mut ctx: ExExContext<Node>,
-) -> eyre::Result<()> {
+async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Result<()> {
     loop {}
 }
 
@@ -76,10 +74,7 @@ fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex(
-                "Hello World",
-                |ctx| async move { Ok(hello_world_exex(ctx)) },
-            )
+            .install_exex("my-exex", |ctx| async move { Ok(my_exex(ctx)) })
             .launch()
             .await?;
 
@@ -95,7 +90,7 @@ Currently, our ExEx does absolutely nothing by running an infinite loop in an as
 
 <div class="warning">
 
-It's important that the future returned by the ExEx (`hello_world_exex`) never resolves.
+It's important that the future returned by the ExEx (`my_exex`) never resolves.
 
 If you try running a node with an ExEx that exits, the node will exit as well.
 
@@ -111,9 +106,7 @@ use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
 
-async fn hello_world_exex<Node: FullNodeComponents>(
-    mut ctx: ExExContext<Node>,
-) -> eyre::Result<()> {
+async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.recv().await {
         match &notification {
             ExExNotification::ChainCommitted { new } => {
@@ -140,10 +133,7 @@ fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _| async move {
         let handle = builder
             .node(EthereumNode::default())
-            .install_exex(
-                "Hello World",
-                |ctx| async move { Ok(hello_world_exex(ctx)) },
-            )
+            .install_exex("my-exex", |ctx| async move { Ok(my_exex(ctx)) })
             .launch()
             .await?;
 
@@ -152,7 +142,7 @@ fn main() -> eyre::Result<()> {
 }
 ```
 
-Woah, there's a lot of new stuff here! Let's go through it step by step.
+Woah, there's a lot of new stuff here! Let's go through it step by step:
 
 - First, we've added a `while let Some(notification) = ctx.notifications.recv().await` loop that waits for new notifications to come in.
    - The main node is responsible for sending notifications to the ExEx, so we're waiting for them to come in.
@@ -170,7 +160,3 @@ and it's safe to prune the associated data.
 </div>
 
 What we've arrived at is the [minimal ExEx example](https://github.com/paradigmxyz/reth/blob/b8cd7be6c92a71aea5341cdeba685f124c6de540/examples/exex/minimal/src/main.rs) that we provide in the Reth repository.
-
-## What's next?
-
-Let's do something a bit more interesting, and see how you can keep track of some state inside your ExEx.
