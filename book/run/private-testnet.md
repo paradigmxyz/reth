@@ -2,15 +2,15 @@
 For those who need a private testnet to validate functionality or scale with Reth.
 
 ## Using Docker locally
-This guide uses [Kurtosis' ethereum-package](https://github.com/kurtosis-tech/ethereum-package) and assumes you have Kurtosis and Docker installed and have Docker already running on your machine. 
+This guide uses [Kurtosis' ethereum-package](https://github.com/ethpandaops/ethereum-package) and assumes you have Kurtosis and Docker installed and have Docker already running on your machine.
 * Go [here](https://docs.kurtosis.com/install/) to install Kurtosis
 * Go [here](https://docs.docker.com/get-docker/) to install Docker
 
-The [`ethereum-package`](https://github.com/kurtosis-tech/ethereum-package) is a [package](https://docs.kurtosis.com/advanced-concepts/packages) for a general purpose Ethereum testnet definition used for instantiating private testnets at any scale over Docker or Kubernetes, locally or in the cloud. This guide will go through how to spin up a local private testnet with Reth various CL clients locally. Specifically, you will instantiate a 2-node network over Docker with Reth/Lighthouse and Reth/Teku client combinations.
+The [`ethereum-package`](https://github.com/ethpandaops/ethereum-package) is a [package](https://docs.kurtosis.com/advanced-concepts/packages) for a general purpose Ethereum testnet definition used for instantiating private testnets at any scale over Docker or Kubernetes, locally or in the cloud. This guide will go through how to spin up a local private testnet with Reth various CL clients locally. Specifically, you will instantiate a 2-node network over Docker with Reth/Lighthouse and Reth/Teku client combinations.
 
-To see all possible configurations and flags you can use, including metrics and observability tools (e.g. Grafana, Prometheus, etc), go [here](https://github.com/kurtosis-tech/ethereum-package#configuration).
+To see all possible configurations and flags you can use, including metrics and observability tools (e.g. Grafana, Prometheus, etc), go [here](https://github.com/ethpandaops/ethereum-package#configuration).
 
-Genesis data will be generated using this [genesis-generator](https://github.com/ethpandaops/ethereum-genesis-generator) to be used to bootstrap the EL and CL clients for each node. The end result will be a private testnet with nodes deployed as Docker containers in an ephemeral, isolated environment on your machine called an [enclave](https://docs.kurtosis.com/advanced-concepts/enclaves/). Read more about how the `ethereum-package` works by going [here](https://github.com/kurtosis-tech/ethereum-package/).
+Genesis data will be generated using this [genesis-generator](https://github.com/ethpandaops/ethereum-genesis-generator) to be used to bootstrap the EL and CL clients for each node. The end result will be a private testnet with nodes deployed as Docker containers in an ephemeral, isolated environment on your machine called an [enclave](https://docs.kurtosis.com/advanced-concepts/enclaves/). Read more about how the `ethereum-package` works by going [here](https://github.com/ethpandaops/ethereum-package/).
 
 ### Step 1: Define the parameters and shape of your private network
 First, in your home directory, create a file with the name `network_params.json` with the following contents:
@@ -43,7 +43,7 @@ First, in your home directory, create a file with the name `network_params.json`
 
 Next, run the following command from your command line:
 ```bash
-kurtosis run github.com/kurtosis-tech/ethereum-package --args-file ~/network_params.json
+kurtosis run github.com/ethpandaops/ethereum-package --args-file ~/network_params.json
 ```
 Kurtosis will spin up an [enclave](https://docs.kurtosis.com/advanced-concepts/enclaves/) (i.e an ephemeral, isolated environment) and begin to configure and instantiate the nodes in your network. In the end, Kurtosis will print the services running in your enclave that form your private testnet alongside all the container ports and files that were generated & used to start up the private testnet. Here is a sample output:
 ```console
@@ -94,13 +94,13 @@ b454497fbec8   el-1-reth-lighthouse                       engine-rpc: 8551/tcp -
 46829c4bd8b0   prelaunch-data-generator-el-genesis-data   <none>                                        RUNNING
 ```
 
-Great! You now have a private network with 2 full Ethereum nodes on your local machine over Docker - one that is a Reth/Lighthouse pair and another that is Reth/Teku. Check out the [Kurtosis docs](https://docs.kurtosis.com/cli) to learn about the various ways you can interact with and inspect your network. 
+Great! You now have a private network with 2 full Ethereum nodes on your local machine over Docker - one that is a Reth/Lighthouse pair and another that is Reth/Teku. Check out the [Kurtosis docs](https://docs.kurtosis.com/cli) to learn about the various ways you can interact with and inspect your network.
 
 ## Using Kurtosis on Kubernetes
 Kurtosis packages are portable and reproducible, meaning they will work the same way over Docker or Kubernetes, locally or on remote infrastructure. For use cases that require a larger scale, Kurtosis can be deployed on Kubernetes by following these docs [here](https://docs.kurtosis.com/k8s/).
 
 ## Running the network with additional services
-The [`ethereum-package`](https://github.com/kurtosis-tech/ethereum-package) comes with many optional flags and arguments you can enable for your private network. Some include:
+The [`ethereum-package`](https://github.com/ethpandaops/ethereum-package) comes with many optional flags and arguments you can enable for your private network. Some include:
 - A Grafana + Prometheus instance
 - A transaction spammer called [`tx-fuzz`](https://github.com/MariusVanDerWijden/tx-fuzz)
 - [A network metrics collector](https://github.com/dapplion/beacon-metrics-gazer)
