@@ -8,12 +8,6 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
 #[command(next_help_heading = "Debug")]
 pub struct DebugArgs {
-    /// Prompt the downloader to download blocks one at a time.
-    ///
-    /// NOTE: This is for testing purposes only.
-    #[arg(long = "debug.continuous", help_heading = "Debug", conflicts_with = "tip")]
-    pub continuous: bool,
-
     /// Flag indicating whether the node should be terminated after the pipeline sync.
     #[arg(long = "debug.terminate", help_heading = "Debug")]
     pub terminate: bool,
@@ -21,7 +15,7 @@ pub struct DebugArgs {
     /// Set the chain tip manually for testing purposes.
     ///
     /// NOTE: This is a temporary flag
-    #[arg(long = "debug.tip", help_heading = "Debug", conflicts_with = "continuous")]
+    #[arg(long = "debug.tip", help_heading = "Debug")]
     pub tip: Option<B256>,
 
     /// Runs the sync only up to the specified block.

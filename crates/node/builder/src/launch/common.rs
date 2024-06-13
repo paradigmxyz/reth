@@ -16,9 +16,7 @@ use reth_node_core::{
     node_config::NodeConfig,
 };
 use reth_primitives::{BlockNumber, Chain, ChainSpec, Head, B256};
-use reth_provider::{
-    providers::StaticFileProvider, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
-};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
@@ -27,7 +25,7 @@ use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
 use std::{sync::Arc, thread::available_parallelism};
-use tokio::sync::{mpsc::Receiver, oneshot};
+use tokio::sync::{mpsc::Receiver, oneshot, watch};
 
 /// Reusable setup for launching a node.
 ///
@@ -316,16 +314,6 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
             .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
     }
 
-    /// Returns the initial pipeline target, based on whether or not the node is running in
-    /// `debug.tip` mode, `debug.continuous` mode, or neither.
-    ///
-    /// If running in `debug.tip` mode, the configured tip is returned.
-    /// Otherwise, if running in `debug.continuous` mode, the genesis hash is returned.
-    /// Otherwise, `None` is returned. This is what the node will do by default.
-    pub fn initial_pipeline_target(&self) -> Option<B256> {
-        self.node_config().initial_pipeline_target(self.genesis_hash())
-    }
-
     /// Loads the JWT secret for the engine API
     pub fn auth_jwt_secret(&self) -> eyre::Result<JwtSecret> {
         let default_jwt_path = self.data_dir().jwt();
@@ -377,11 +365,13 @@ where
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
+            let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
+
             // Builds an unwind-only pipeline
             let pipeline = Pipeline::builder()
                 .add_stages(DefaultStages::new(
                     factory.clone(),
-                    HeaderSyncMode::Continuous,
+                    tip_rx,
                     Arc::new(EthBeaconConsensus::new(self.chain_spec())),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),

@@ -54,8 +54,6 @@ where
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
     range_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock>>,
-    /// If enabled, the pipeline will be triggered continuously, as soon as it becomes idle
-    run_pipeline_continuously: bool,
     /// Max block after which the consensus engine would terminate the sync. Used for debugging
     /// purposes.
     max_block: Option<BlockNumber>,
@@ -73,7 +71,6 @@ where
         pipeline: Pipeline<DB>,
         client: Client,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
-        run_pipeline_continuously: bool,
         max_block: Option<BlockNumber>,
         chain_spec: Arc<ChainSpec>,
         event_sender: EventSender<BeaconConsensusEngineEvent>,
@@ -89,7 +86,6 @@ where
             inflight_full_block_requests: Vec::new(),
             inflight_block_range_requests: Vec::new(),
             range_buffered_blocks: BinaryHeap::new(),
-            run_pipeline_continuously,
             event_sender,
             max_block,
             metrics: EngineSyncMetrics::default(),
@@ -120,11 +116,6 @@ where
     pub(crate) fn cancel_full_block_request(&mut self, hash: B256) {
         self.inflight_full_block_requests.retain(|req| *req.hash() != hash);
         self.update_block_download_metrics();
-    }
-
-    /// Returns whether or not the sync controller is set to run the pipeline continuously.
-    pub(crate) const fn run_pipeline_continuously(&self) -> bool {
-        self.run_pipeline_continuously
     }
 
     /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
@@ -271,20 +262,14 @@ where
     fn try_spawn_pipeline(&mut self) -> Option<EngineSyncEvent> {
         match &mut self.pipeline_state {
             PipelineState::Idle(pipeline) => {
-                let target = self.pending_pipeline_target.take();
-
-                if target.is_none() && !self.run_pipeline_continuously {
-                    // nothing to sync
-                    return None
-                }
-
+                let target = self.pending_pipeline_target.take()?;
                 let (tx, rx) = oneshot::channel();
 
                 let pipeline = pipeline.take().expect("exists");
                 self.pipeline_task_spawner.spawn_critical_blocking(
                     "pipeline task",
                     Box::pin(async move {
-                        let result = pipeline.run_as_fut(target).await;
+                        let result = pipeline.run_as_fut(Some(target)).await;
                         let _ = tx.send(result);
                     }),
                 );
@@ -294,7 +279,7 @@ where
                 // outdated (included in the range the pipeline is syncing anyway)
                 self.clear_block_download_requests();
 
-                Some(EngineSyncEvent::PipelineStarted(target))
+                Some(EngineSyncEvent::PipelineStarted(Some(target)))
             }
             PipelineState::Running(_) => None,
         }
@@ -550,8 +535,6 @@ mod tests {
                 pipeline,
                 client,
                 Box::<TokioTaskExecutor>::default(),
-                // run_pipeline_continuously: false here until we want to test this
-                false,
                 self.max_block,
                 chain_spec,
                 Default::default(),

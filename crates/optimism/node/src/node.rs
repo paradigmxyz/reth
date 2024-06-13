@@ -11,11 +11,13 @@ use reth_evm_optimism::{OpExecutorProvider, OptimismEvmConfig};
 use reth_network::{NetworkHandle, NetworkManager};
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ExecutorBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder,
+        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
+        PayloadServiceBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes},
     BuilderContext, Node, PayloadBuilderConfig,
 };
+use reth_optimism_consensus::OptimismBeaconConsensus;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
@@ -47,6 +49,7 @@ impl OptimismNode {
         OptimismPayloadBuilder,
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
+        OptimismConsensusBuilder,
     >
     where
         Node: FullNodeTypes<Engine = OptimismEngineTypes>,
@@ -61,6 +64,7 @@ impl OptimismNode {
             ))
             .network(OptimismNetworkBuilder { disable_txpool_gossip })
             .executor(OptimismExecutorBuilder::default())
+            .consensus(OptimismConsensusBuilder::default())
     }
 }
 
@@ -74,6 +78,7 @@ where
         OptimismPayloadBuilder,
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
+        OptimismConsensusBuilder,
     >;
 
     fn components_builder(self) -> Self::ComponentsBuilder {
@@ -300,5 +305,21 @@ where
         let handle = ctx.start_network(network, pool);
 
         Ok(handle)
+    }
+}
+
+/// A basic optimism consensus builder.
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct OptimismConsensusBuilder;
+
+impl<Node> ConsensusBuilder<Node> for OptimismConsensusBuilder
+where
+    Node: FullNodeTypes,
+{
+    type Consensus = OptimismBeaconConsensus;
+
+    async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
+        Ok(OptimismBeaconConsensus::new(ctx.chain_spec()))
     }
 }

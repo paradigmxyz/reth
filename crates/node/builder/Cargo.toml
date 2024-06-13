@@ -55,10 +55,10 @@ tokio = { workspace = true, features = [
 ] }
 tokio-stream.workspace = true
 
-# ethereum
+## ethereum
 discv5.workspace = true
 
-# crypto
+## crypto
 secp256k1 = { workspace = true, features = [
     "global-context",
     "rand-std",
