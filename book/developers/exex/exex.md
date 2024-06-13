@@ -10,7 +10,7 @@ Some examples of such state derivations are rollups, bridges, and indexers.
 
 Read more about things you can build with Execution Extensions in the [Paradigm blog](https://www.paradigm.xyz/2024/05/reth-exex).
 
-## How to build an Execution Extension?
+## How do I build an Execution Extension?
 
 Let's dive into how to build our own ExEx (short for Execution Extensions) from scratch, add tests for it,
 and run on Holesky testnet.
