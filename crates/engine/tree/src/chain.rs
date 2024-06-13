@@ -73,7 +73,7 @@ where
                 Poll::Ready(pipeline_event) => match pipeline_event {
                     PipelineEvent::Idle => {}
                     PipelineEvent::Started(_) => {
-                        // notify handler that pipeline finished
+                        // notify handler that pipeline started
                         this.handler.on_event(FromOrchestrator::PipelineStarted);
                         return Poll::Ready(ChainEvent::PipelineStarted);
                     }
