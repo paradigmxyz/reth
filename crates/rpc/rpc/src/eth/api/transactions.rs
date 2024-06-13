@@ -10,9 +10,8 @@ use crate::EthApi;
 /// data layout to [`EthApi`].
 #[macro_export]
 macro_rules! eth_transactions_impl {
-    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
-        impl$(<$($generic,)+>)* $crate::eth::api::EthTransactions
-            for $network_api
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::EthTransactions for $network_api
         where
             Self: $crate::eth::api::LoadTransaction,
             Pool: reth_transaction_pool::TransactionPool + 'static,
@@ -24,7 +23,9 @@ macro_rules! eth_transactions_impl {
             }
 
             #[inline]
-            fn raw_tx_forwarder(&self) -> Option<std::sync::Arc<dyn $crate::eth::api::RawTransactionForwarder>> {
+            fn raw_tx_forwarder(
+                &self,
+            ) -> Option<std::sync::Arc<dyn $crate::eth::api::RawTransactionForwarder>> {
                 self.inner.raw_tx_forwarder()
             }
 
@@ -40,9 +41,8 @@ macro_rules! eth_transactions_impl {
 /// data layout to [`EthApi`].
 #[macro_export]
 macro_rules! load_transaction_impl {
-    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
-        impl$(<$($generic,)+>)* $crate::eth::api::LoadTransaction
-            for $network_api
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::LoadTransaction for $network_api
         where
             Self: $crate::eth::api::SpawnBlocking,
             Provider: reth_provider::TransactionsProvider,
@@ -68,8 +68,8 @@ macro_rules! load_transaction_impl {
     };
 }
 
-eth_transactions_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-load_transaction_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
+eth_transactions_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
+load_transaction_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
 
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]

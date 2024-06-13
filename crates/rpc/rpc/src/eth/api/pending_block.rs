@@ -21,19 +21,24 @@ use crate::{
 /// data layout to [`EthApi`].
 #[macro_export]
 macro_rules! load_pending_block_impl {
-    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
-        impl$(<$($generic,)+>)* $crate::eth::api::LoadPendingBlock
-            for $network_api
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::LoadPendingBlock for $network_api
         where
             Self: $crate::eth::api::SpawnBlocking,
-            Provider: reth_provider::BlockReaderIdExt + reth_provider::EvmEnvProvider + reth_provider::ChainSpecProvider + reth_provider::StateProviderFactory,
+            Provider: reth_provider::BlockReaderIdExt
+                + reth_provider::EvmEnvProvider
+                + reth_provider::ChainSpecProvider
+                + reth_provider::StateProviderFactory,
             Pool: reth_transaction_pool::TransactionPool,
             EvmConfig: reth_evm::ConfigureEvm,
         {
             #[inline]
             fn provider(
                 &self,
-            ) -> impl reth_provider::BlockReaderIdExt + reth_provider::EvmEnvProvider + reth_provider::ChainSpecProvider + reth_provider::StateProviderFactory {
+            ) -> impl reth_provider::BlockReaderIdExt
+                   + reth_provider::EvmEnvProvider
+                   + reth_provider::ChainSpecProvider
+                   + reth_provider::StateProviderFactory {
                 self.inner.provider()
             }
 
@@ -55,7 +60,7 @@ macro_rules! load_pending_block_impl {
     };
 }
 
-load_pending_block_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
+load_pending_block_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
 
 /// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block
 #[derive(Debug, Clone, Constructor)]
