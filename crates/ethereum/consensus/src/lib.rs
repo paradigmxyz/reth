@@ -10,8 +10,9 @@
 
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
-    validate_block_pre_execution, validate_header_extradata, validate_header_standalone,
-    validate_parent_eip1559_base_fee, validate_parent_hash_number, validate_parent_timestamp,
+    validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
+    validate_against_parent_timestamp, validate_block_pre_execution, validate_header_extradata,
+    validate_header_standalone,
 };
 use reth_primitives::{
     constants::MINIMUM_GAS_LIMIT, eip4844::calculate_excess_blob_gas, BlockWithSenders, Chain,
@@ -77,7 +78,7 @@ impl EthBeaconConsensus {
     ///
     /// The maximum allowable difference between self and parent gas limits is determined by the
     /// parent's gas limit divided by the elasticity multiplier (1024).
-    fn validate_parent_gas_limit(
+    fn validate_against_parent_gas_limit(
         &self,
         header: &SealedHeader,
         parent: &SealedHeader,
@@ -129,15 +130,15 @@ impl Consensus for EthBeaconConsensus {
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        validate_parent_hash_number(header, parent)?;
+        validate_against_parent_hash_number(header, parent)?;
 
-        validate_parent_timestamp(header, parent)?;
+        validate_against_parent_timestamp(header, parent)?;
 
         // TODO Check difficulty increment between parent and self
         // Ace age did increment it by some formula that we need to follow.
-        self.validate_parent_gas_limit(header, parent)?;
+        self.validate_against_parent_gas_limit(header, parent)?;
 
-        validate_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
+        validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
@@ -241,7 +242,7 @@ mod tests {
 
         assert_eq!(
             EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
-                .validate_parent_gas_limit(&child, &parent),
+                .validate_against_parent_gas_limit(&child, &parent),
             Ok(())
         );
     }
@@ -253,7 +254,7 @@ mod tests {
 
         assert_eq!(
             EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
-                .validate_parent_gas_limit(&child, &parent),
+                .validate_against_parent_gas_limit(&child, &parent),
             Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit })
         );
     }
@@ -265,7 +266,7 @@ mod tests {
 
         assert_eq!(
             EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
-                .validate_parent_gas_limit(&child, &parent),
+                .validate_against_parent_gas_limit(&child, &parent),
             Err(ConsensusError::GasLimitInvalidIncrease {
                 parent_gas_limit: parent.gas_limit,
                 child_gas_limit: child.gas_limit,
@@ -280,7 +281,7 @@ mod tests {
 
         assert_eq!(
             EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
-                .validate_parent_gas_limit(&child, &parent),
+                .validate_against_parent_gas_limit(&child, &parent),
             Ok(())
         );
     }
@@ -292,7 +293,7 @@ mod tests {
 
         assert_eq!(
             EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
-                .validate_parent_gas_limit(&child, &parent),
+                .validate_against_parent_gas_limit(&child, &parent),
             Err(ConsensusError::GasLimitInvalidDecrease {
                 parent_gas_limit: parent.gas_limit,
                 child_gas_limit: child.gas_limit,

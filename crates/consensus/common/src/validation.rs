@@ -187,7 +187,7 @@ pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> 
 ///
 /// This function ensures that the header block number is sequential and that the hash of the parent
 /// header matches the parent hash in the header.
-pub fn validate_parent_hash_number(
+pub fn validate_against_parent_hash_number(
     header: &SealedHeader,
     parent: &SealedHeader,
 ) -> Result<(), ConsensusError> {
@@ -209,7 +209,7 @@ pub fn validate_parent_hash_number(
 }
 
 /// Validates the base fee against the parent and EIP-1559 rules.
-pub fn validate_parent_eip1559_base_fee(
+pub fn validate_against_parent_eip1559_base_fee(
     header: &SealedHeader,
     parent: &SealedHeader,
     chain_spec: &ChainSpec,
@@ -239,7 +239,7 @@ pub fn validate_parent_eip1559_base_fee(
 }
 
 /// Validates the timestamp against the parent to make sure it is in the past.
-pub fn validate_parent_timestamp(
+pub fn validate_against_parent_timestamp(
     header: &SealedHeader,
     parent: &SealedHeader,
 ) -> Result<(), ConsensusError> {
