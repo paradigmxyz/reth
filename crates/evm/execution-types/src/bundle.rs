@@ -288,6 +288,7 @@ impl ExecutionOutcome {
     pub fn extend(&mut self, other: Self) {
         self.bundle.extend(other.bundle);
         self.receipts.extend(other.receipts.receipt_vec);
+        self.requests.extend(other.requests);
     }
 
     /// Prepends present the state with the given `BundleState`.
@@ -590,5 +591,101 @@ mod tests {
 
         // Assert that exec_res_empty_receipts is empty
         assert!(exec_res_empty_receipts.is_empty());
+    }
+
+    #[test]
+    fn test_revert_to() {
+        // Create a Receipts object with a vector of receipt vectors
+        let receipts = Receipts {
+            receipt_vec: vec![vec![Some(Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 46913,
+                logs: vec![],
+                success: true,
+                #[cfg(feature = "optimism")]
+                deposit_nonce: Some(18),
+                #[cfg(feature = "optimism")]
+                deposit_receipt_version: Some(34),
+            })]],
+        };
+
+        // Define the first block number
+        let first_block = 123;
+
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let mut exec_res = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: receipts.clone(),
+            requests: vec![],
+            first_block,
+        };
+
+        // Assert that the revert_to method returns true when reverting to the initial block number.
+        assert!(exec_res.revert_to(123));
+
+        // Assert that the receipts remain unchanged after reverting to the initial block number.
+        assert_eq!(exec_res.receipts, receipts);
+
+        // Assert that the revert_to method returns false when attempting to revert to a block
+        // number greater than the initial block number.
+        assert!(!exec_res.revert_to(133));
+
+        // Assert that the revert_to method returns false when attempting to revert to a block
+        // number less than the initial block number.
+        assert!(!exec_res.revert_to(10));
+    }
+
+    #[test]
+    fn test_extend_execution_outcome() {
+        // Create a Receipt object with specific attributes.
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            success: true,
+            #[cfg(feature = "optimism")]
+            deposit_nonce: Some(18),
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: Some(34),
+        };
+
+        // Create a Receipts object containing the receipt.
+        let receipts = Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] };
+
+        // Create a DepositRequest object with specific attributes.
+        let request = Request::DepositRequest(DepositRequest {
+            pubkey: FixedBytes::<48>::from([1; 48]),
+            withdrawal_credentials: B256::from([0; 32]),
+            amount: 1111,
+            signature: FixedBytes::<96>::from([2; 96]),
+            index: 222,
+        });
+
+        // Create a vector of Requests containing the request.
+        let requests = vec![Requests(vec![request])];
+
+        // Define the initial block number.
+        let first_block = 123;
+
+        // Create an ExecutionOutcome object.
+        let mut exec_res =
+            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+
+        // Extend the ExecutionOutcome object by itself.
+        exec_res.extend(exec_res.clone());
+
+        // Assert the extended ExecutionOutcome matches the expected outcome.
+        assert_eq!(
+            exec_res,
+            ExecutionOutcome {
+                bundle: Default::default(),
+                receipts: Receipts {
+                    receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]]
+                },
+                requests: vec![Requests(vec![request]), Requests(vec![request])],
+                first_block: 123,
+            }
+        );
     }
 }

@@ -13,11 +13,8 @@ use reth_network_p2p::{
     bodies::{client::BodiesClient, downloader::BodyDownloader},
     headers::{client::HeadersClient, downloader::HeaderDownloader},
 };
-use reth_node_core::{
-    node_config::NodeConfig,
-    primitives::{BlockNumber, B256},
-};
-use reth_provider::{HeaderSyncMode, ProviderFactory};
+use reth_node_core::primitives::{BlockNumber, B256};
+use reth_provider::ProviderFactory;
 use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
@@ -28,7 +25,6 @@ use tokio::sync::watch;
 /// Constructs a [Pipeline] that's wired to the network
 #[allow(clippy::too_many_arguments)]
 pub async fn build_networked_pipeline<DB, Client, Executor>(
-    node_config: &NodeConfig,
     config: &StageConfig,
     client: Client,
     consensus: Arc<dyn Consensus>,
@@ -56,7 +52,6 @@ where
         .into_task_with(task_executor);
 
     let pipeline = build_pipeline(
-        node_config,
         provider_factory,
         config,
         header_downloader,
@@ -77,7 +72,6 @@ where
 /// Builds the [Pipeline] with the given [`ProviderFactory`] and downloaders.
 #[allow(clippy::too_many_arguments)]
 pub async fn build_pipeline<DB, H, B, Executor>(
-    node_config: &NodeConfig,
     provider_factory: ProviderFactory<DB>,
     stage_config: &StageConfig,
     header_downloader: H,
@@ -107,18 +101,13 @@ where
 
     let prune_modes = prune_config.map(|prune| prune.segments).unwrap_or_default();
 
-    let header_mode = if node_config.debug.continuous {
-        HeaderSyncMode::Continuous
-    } else {
-        HeaderSyncMode::Tip(tip_rx)
-    };
     let pipeline = builder
         .with_tip_sender(tip_tx)
         .with_metrics_tx(metrics_tx.clone())
         .add_stages(
             DefaultStages::new(
                 provider_factory.clone(),
-                header_mode,
+                tip_rx,
                 Arc::clone(&consensus),
                 header_downloader,
                 body_downloader,

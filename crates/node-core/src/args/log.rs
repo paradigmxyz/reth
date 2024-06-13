@@ -92,6 +92,8 @@ impl LogArgs {
     }
 
     /// Initializes tracing with the configured options from cli args.
+    ///
+    /// Returns the file worker guard, and the file name, if a file worker was configured.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
         let mut tracer = RethTracer::new();
 

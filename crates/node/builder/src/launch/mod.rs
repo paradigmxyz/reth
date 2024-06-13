@@ -8,10 +8,9 @@ use crate::{
     BuilderContext, NodeBuilderWithComponents, NodeHandle,
 };
 use futures::{future::Either, stream, stream_select, StreamExt};
-use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
-    BeaconConsensusEngine, EthBeaconConsensus,
+    BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{
     noop::NoopBlockchainTree, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
@@ -29,6 +28,7 @@ use reth_node_core::{
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
+
 use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::EngineApi;
@@ -130,13 +130,6 @@ where
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
             });
 
-        // setup the consensus instance
-        let consensus: Arc<dyn Consensus> = if ctx.is_dev() {
-            Arc::new(AutoSealConsensus::new(ctx.chain_spec()))
-        } else {
-            Arc::new(EthBeaconConsensus::new(ctx.chain_spec()))
-        };
-
         debug!(target: "reth::cli", "Spawning stages metrics listener task");
         let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
         let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
@@ -168,6 +161,8 @@ where
 
         debug!(target: "reth::cli", "creating components");
         let components = components_builder.build_components(&builder_ctx).await?;
+
+        let consensus: Arc<dyn Consensus> = Arc::new(components.consensus().clone());
 
         let tree_externals = TreeExternals::new(
             ctx.provider_factory().clone(),
@@ -255,10 +250,9 @@ where
             .build();
 
             let pipeline = crate::setup::build_networked_pipeline(
-                ctx.node_config(),
                 &ctx.toml_config().stages,
                 client.clone(),
-                Arc::clone(&consensus),
+                consensus.clone(),
                 ctx.provider_factory().clone(),
                 ctx.task_executor(),
                 sync_metrics_tx,
@@ -278,10 +272,9 @@ where
             (pipeline, Either::Left(client))
         } else {
             let pipeline = crate::setup::build_networked_pipeline(
-                ctx.node_config(),
                 &ctx.toml_config().stages,
                 network_client.clone(),
-                Arc::clone(&consensus),
+                consensus.clone(),
                 ctx.provider_factory().clone(),
                 ctx.task_executor(),
                 sync_metrics_tx,
@@ -298,7 +291,7 @@ where
 
         let pipeline_events = pipeline.events();
 
-        let initial_target = ctx.initial_pipeline_target();
+        let initial_target = ctx.node_config().debug.tip;
 
         let mut pruner_builder =
             ctx.pruner_builder().max_reorg_depth(tree_config.max_reorg_depth() as usize);
@@ -321,7 +314,6 @@ where
             Box::new(ctx.task_executor().clone()),
             Box::new(node_adapter.components.network().clone()),
             max_block,
-            ctx.node_config().debug.continuous,
             node_adapter.components.payload_builder().clone(),
             initial_target,
             reth_beacon_consensus::MIN_BLOCKS_FOR_PIPELINE_RUN,

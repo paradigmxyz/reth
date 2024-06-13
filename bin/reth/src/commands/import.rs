@@ -24,8 +24,8 @@ use reth_network_p2p::{
 use reth_node_events::node::NodeEvent;
 use reth_primitives::B256;
 use reth_provider::{
-    BlockNumReader, ChainSpecProvider, HeaderProvider, HeaderSyncMode, ProviderError,
-    ProviderFactory, StageCheckpointReader,
+    BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderError, ProviderFactory,
+    StageCheckpointReader,
 };
 use reth_prune_types::PruneModes;
 use reth_stages::{prelude::*, Pipeline, StageId, StageSet};
@@ -208,7 +208,7 @@ where
         .add_stages(
             DefaultStages::new(
                 provider_factory.clone(),
-                HeaderSyncMode::Tip(tip_rx),
+                tip_rx,
                 consensus.clone(),
                 header_downloader,
                 body_downloader,
