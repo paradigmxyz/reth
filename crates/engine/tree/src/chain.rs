@@ -80,7 +80,7 @@ where
                     PipelineEvent::Finished(res) => {
                         return match res {
                             Ok(event) => {
-                                tracing::error!(?event, "pipeline finished");
+                                tracing::debug!(?event, "pipeline finished");
                                 // notify handler that pipeline finished
                                 this.handler.on_event(FromOrchestrator::PipelineFinished);
                                 Poll::Ready(ChainEvent::PipelineFinished)
