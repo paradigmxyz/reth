@@ -4,6 +4,11 @@ use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "std")]
+use std::mem;
+
+#[cfg(not(feature = "std"))]
+use core::mem;
 
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
 /// to EIP-2 should have an S value less than or equal to this.
@@ -193,7 +198,7 @@ impl Signature {
     /// Calculates a heuristic for the in-memory size of the [Signature].
     #[inline]
     pub const fn size(&self) -> usize {
-        std::mem::size_of::<Self>()
+        mem::size_of::<Self>()
     }
 }
 

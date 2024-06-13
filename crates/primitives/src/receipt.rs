@@ -9,7 +9,19 @@ use proptest::strategy::Strategy;
 #[cfg(feature = "zstd-codec")]
 use reth_codecs::CompactZstd;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
+
+#[cfg(feature = "std")]
 use std::{
+    cmp::Ordering,
+    ops::{Deref, DerefMut},
+    vec,
+};
+
+#[cfg(not(feature = "std"))]
+use alloc::{vec, vec::Vec};
+
+#[cfg(not(feature = "std"))]
+use core::{
     cmp::Ordering,
     ops::{Deref, DerefMut},
 };
@@ -138,7 +150,7 @@ impl DerefMut for Receipts {
 
 impl IntoIterator for Receipts {
     type Item = Vec<Option<Receipt>>;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
+    type IntoIter = vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.receipt_vec.into_iter()

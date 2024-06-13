@@ -13,7 +13,11 @@ use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "std")]
 use std::mem;
+
+#[cfg(not(feature = "std"))]
+use core::mem;
 
 pub use access_list::{AccessList, AccessListItem};
 pub use eip1559::TxEip1559;
@@ -59,6 +63,9 @@ mod optimism;
 pub use optimism::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Either a transaction hash or number.
 pub type TxHashOrNumber = BlockHashOrNumber;

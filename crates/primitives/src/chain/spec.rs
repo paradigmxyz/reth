@@ -13,13 +13,31 @@ use crate::{
 use once_cell::sync::Lazy;
 use reth_trie_common::root::state_root_ref_unhashed;
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "std")]
 use std::{
     collections::BTreeMap,
+    fmt,
     fmt::{Display, Formatter},
     sync::Arc,
 };
 
 pub use alloy_eips::eip1559::BaseFeeParams;
+
+#[cfg(not(feature = "std"))]
+use core::{
+    fmt,
+    fmt::{Display, Formatter},
+};
+
+#[cfg(not(feature = "std"))]
+use alloc::{
+    collections::BTreeMap,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 
 #[cfg(feature = "optimism")]
 pub(crate) use crate::{
@@ -1476,7 +1494,7 @@ struct DisplayFork {
 }
 
 impl Display for DisplayFork {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let name_with_eip = if let Some(eip) = &self.eip {
             format!("{} ({})", self.name, eip)
         } else {
@@ -1550,13 +1568,13 @@ pub struct DisplayHardforks {
 }
 
 impl Display for DisplayHardforks {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         fn format(
             header: &str,
             forks: &[DisplayFork],
             next_is_empty: bool,
             f: &mut Formatter<'_>,
-        ) -> std::fmt::Result {
+        ) -> fmt::Result {
             writeln!(f, "{header}:")?;
             let mut iter = forks.iter().peekable();
             while let Some(fork) = iter.next() {

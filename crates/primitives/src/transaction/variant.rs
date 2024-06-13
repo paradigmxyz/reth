@@ -5,7 +5,12 @@ use crate::{
     Address, Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
     B256,
 };
+
+#[cfg(feature = "std")]
 use std::ops::Deref;
+
+#[cfg(not(feature = "std"))]
+use core::ops::Deref;
 
 /// Represents various different transaction formats used in reth.
 ///

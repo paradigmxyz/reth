@@ -5,7 +5,12 @@ use crate::{
     revm_primitives::{address, b256},
     B256, U256,
 };
+
+#[cfg(feature = "std")]
 use std::time::Duration;
+
+#[cfg(not(feature = "std"))]
+use core::time::Duration;
 
 #[cfg(feature = "optimism")]
 use crate::chain::BaseFeeParams;

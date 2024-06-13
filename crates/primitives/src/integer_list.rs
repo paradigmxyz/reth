@@ -5,7 +5,14 @@ use serde::{
     ser::SerializeSeq,
     Deserialize, Deserializer, Serialize, Serializer,
 };
+#[cfg(feature = "std")]
 use std::{fmt, ops::Deref};
+
+#[cfg(not(feature = "std"))]
+use core::{fmt, ops::Deref};
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Uses Roaring Bitmaps to hold a list of integers. It provides really good compression with the
 /// capability to access its elements without decoding it.
@@ -105,7 +112,7 @@ struct IntegerListVisitor;
 impl<'de> Visitor<'de> for IntegerListVisitor {
     type Value = IntegerList;
 
-    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("a usize array")
     }
 
@@ -144,7 +151,7 @@ impl<'a> Arbitrary<'a> for IntegerList {
 }
 
 /// Primitives error type.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror_no_std::Error)]
 pub enum RoaringBitmapError {
     /// The provided input is invalid.
     #[error("the provided input is invalid")]

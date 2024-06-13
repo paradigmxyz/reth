@@ -5,10 +5,17 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use reth_codecs::{main_codec, Compact, CompactPlaceholder};
+#[cfg(feature = "std")]
 use std::mem;
 
 #[cfg(feature = "c-kzg")]
 use crate::kzg::KzgSettings;
+
+#[cfg(not(feature = "std"))]
+use core::mem;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
 ///

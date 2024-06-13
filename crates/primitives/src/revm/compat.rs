@@ -1,6 +1,9 @@
 use crate::{revm_primitives::AccountInfo, Account, Address, TxKind, KECCAK_EMPTY, U256};
 use revm::{interpreter::gas::validate_initial_tx_gas, primitives::SpecId};
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// Converts a Revm [`AccountInfo`] into a Reth [`Account`].
 ///
 /// Sets `bytecode_hash` to `None` if `code_hash` is [`KECCAK_EMPTY`].

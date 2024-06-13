@@ -2,7 +2,11 @@ use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
 use alloy_rlp::{length_of_length, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
+#[cfg(feature = "std")]
 use std::mem;
+
+#[cfg(not(feature = "std"))]
+use core::mem;
 
 /// Legacy transaction.
 #[main_codec]

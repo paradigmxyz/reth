@@ -5,7 +5,11 @@ use alloy_eips::eip7685::{Decodable7685, Encodable7685};
 use alloy_rlp::{Decodable, Encodable};
 use reth_codecs::{main_codec, Compact};
 use revm_primitives::Bytes;
-use std::ops::{Deref, DerefMut};
+#[cfg(feature = "std")]
+use std::vec;
+
+#[cfg(not(feature = "std"))]
+use alloc::{vec, vec::Vec};
 
 /// A list of EIP-7685 requests.
 #[main_codec]
@@ -20,7 +24,7 @@ impl From<Vec<Request>> for Requests {
 
 impl IntoIterator for Requests {
     type Item = Request;
-    type IntoIter = std::vec::IntoIter<Request>;
+    type IntoIter = vec::IntoIter<Request>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
