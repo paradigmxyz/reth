@@ -221,7 +221,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    EvmConfig: ConfigureEvm,
 {
     /// Returns the current ethereum protocol version.
     ///

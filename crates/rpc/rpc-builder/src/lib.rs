@@ -47,7 +47,7 @@
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
-//!     EvmConfig: ConfigureEvm + 'static,
+//!     EvmConfig: ConfigureEvm,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -115,7 +115,7 @@
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
 //!     EngineT: EngineTypes + 'static,
-//!     EvmConfig: ConfigureEvm + 'static,
+//!     EvmConfig: ConfigureEvm,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -256,7 +256,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    EvmConfig: ConfigureEvm,
 {
     let module_config = module_config.into();
     let server_config = server_config.into();
@@ -447,7 +447,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    EvmConfig: ConfigureEvm,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
     /// be used to start the transport server(s).
@@ -772,7 +772,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    EvmConfig: ConfigureEvm,
 {
     /// Register Eth Namespace
     ///

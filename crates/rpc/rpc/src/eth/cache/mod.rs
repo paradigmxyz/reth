@@ -107,7 +107,7 @@ impl EthStateCache {
     ) -> Self
     where
         Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
-        EvmConfig: ConfigureEvm + 'static,
+        EvmConfig: ConfigureEvm,
     {
         Self::spawn_with(provider, config, TokioTaskExecutor::default(), evm_config)
     }
@@ -125,7 +125,7 @@ impl EthStateCache {
     where
         Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
         Tasks: TaskSpawner + Clone + 'static,
-        EvmConfig: ConfigureEvm + 'static,
+        EvmConfig: ConfigureEvm,
     {
         let EthStateCacheConfig { max_blocks, max_receipts, max_envs, max_concurrent_db_requests } =
             config;
@@ -316,7 +316,7 @@ impl<Provider, Tasks, EvmConfig> EthStateCacheService<Provider, Tasks, EvmConfig
 where
     Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    EvmConfig: ConfigureEvm,
 {
     fn on_new_block(&mut self, block_hash: B256, res: ProviderResult<Option<BlockWithSenders>>) {
         if let Some(queued) = self.full_block_cache.remove(&block_hash) {
@@ -403,7 +403,7 @@ impl<Provider, Tasks, EvmConfig> Future for EthStateCacheService<Provider, Tasks
 where
     Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    EvmConfig: ConfigureEvm,
 {
     type Output = ();
 
