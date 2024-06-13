@@ -95,7 +95,7 @@ Currently, our ExEx does absolutely nothing by running an infinite loop in an as
 
 <div class="warning">
 
-It's important that our ExEx never returns, and the future that `hello_world_exex` function creates never resolves.
+It's important that the future returned by the ExEx (`hello_world_exex`) never resolves.
 
 If you try running a node with an ExEx that exits, the node will exit as well.
 
