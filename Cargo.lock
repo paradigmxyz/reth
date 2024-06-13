@@ -6844,7 +6844,6 @@ dependencies = [
  "hmac 0.12.1",
  "pin-project",
  "rand 0.8.5",
- "reth-net-common",
  "reth-network-peers",
  "reth-primitives",
  "secp256k1 0.28.2",
