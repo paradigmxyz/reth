@@ -241,8 +241,6 @@ impl ExecutionOutcome {
     pub fn revert_to(&mut self, block_number: BlockNumber) -> bool {
         let Some(index) = self.block_number_to_index(block_number) else { return false };
 
-        println!("Reverting to block number: {}", index);
-
         // +1 is for number of blocks that we have as index is included.
         let new_len = index + 1;
         let rm_trx: usize = self.len() - new_len;
