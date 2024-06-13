@@ -12,6 +12,7 @@
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_block_pre_execution, validate_header_extradata, validate_header_standalone,
+    validate_parent_eip1559_base_fee, validate_parent_hash_number,
 };
 use reth_primitives::{
     BlockWithSenders, ChainSpec, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
@@ -53,7 +54,21 @@ impl Consensus for OptimismBeaconConsensus {
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        header.validate_against_parent(parent, &self.chain_spec).map_err(ConsensusError::from)?;
+        validate_parent_hash_number(header, parent)?;
+
+        // timestamp in past check
+        if self.chain_spec.is_bedrock_active_at_block(header.number) &&
+            header.is_timestamp_in_past(parent.timestamp)
+        {
+            return Err(ConsensusError::TimestampIsInPast {
+                parent_timestamp: parent.timestamp,
+                timestamp: header.timestamp,
+            }
+            .into())
+        }
+
+        validate_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
+
         Ok(())
     }
 

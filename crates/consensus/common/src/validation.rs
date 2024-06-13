@@ -183,6 +183,61 @@ pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> 
     }
 }
 
+/// Validates the parent hash and number.
+///
+/// This function ensures that the header block number is sequential and that the hash of the parent
+/// header matches the parent hash in the header.
+pub fn validate_parent_hash_number(
+    header: &SealedHeader,
+    parent: &SealedHeader,
+) -> Result<(), ConsensusError> {
+    // Parent number is consistent.
+    if parent.number + 1 != header.number {
+        return Err(ConsensusError::ParentBlockNumberMismatch {
+            parent_block_number: parent.number,
+            block_number: header.number,
+        })
+    }
+
+    if parent.hash() != header.parent_hash {
+        return Err(ConsensusError::ParentHashMismatch(
+            GotExpected { got: header.parent_hash, expected: parent.hash() }.into(),
+        ))
+    }
+
+    Ok(())
+}
+
+/// EIP-1559 check base fee
+pub fn validate_parent_eip1559_base_fee(
+    header: &SealedHeader,
+    parent: &SealedHeader,
+    chain_spec: &ChainSpec,
+) -> Result<(), ConsensusError> {
+    // EIP-1559 check base fee
+    if chain_spec.fork(Hardfork::London).active_at_block(header.number) {
+        let base_fee = header.base_fee_per_gas.ok_or(ConsensusError::BaseFeeMissing)?;
+
+        let expected_base_fee =
+            if chain_spec.fork(Hardfork::London).transitions_at_block(header.number) {
+                reth_primitives::constants::EIP1559_INITIAL_BASE_FEE
+            } else {
+                // This BaseFeeMissing will not happen as previous blocks are checked to have
+                // them.
+                parent
+                    .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(header.timestamp))
+                    .ok_or(ConsensusError::BaseFeeMissing)?
+            };
+        if expected_base_fee != base_fee {
+            return Err(ConsensusError::BaseFeeDiff(GotExpected {
+                expected: expected_base_fee,
+                got: base_fee,
+            }))
+        }
+    }
+
+    Ok(())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
