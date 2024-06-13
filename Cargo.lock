@@ -6695,6 +6695,7 @@ dependencies = [
 name = "reth-discv4"
 version = "1.0.0-rc.1"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "assert_matches",
  "discv5",
@@ -6702,6 +6703,7 @@ dependencies = [
  "generic-array",
  "parking_lot 0.12.3",
  "rand 0.8.5",
+ "reth-ethereum-forks",
  "reth-net-common",
  "reth-net-nat",
  "reth-network-peers",
