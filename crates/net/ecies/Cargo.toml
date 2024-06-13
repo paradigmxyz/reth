@@ -23,7 +23,6 @@ tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
 pin-project.workspace = true
 
-educe = "0.4.19"
 tracing.workspace = true
 
 # HeaderBytes
