@@ -1,6 +1,6 @@
 # Hello World
 
-Let's write a simple "Hello World" ExEx that emits a log every time new chain of blocks is committed, reverted, or reorged.
+Let's write a simple "Hello World" ExEx that emits a log every time a new chain of blocks is committed, reverted, or reorged.
 
 ### Create a project
 
