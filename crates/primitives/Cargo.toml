@@ -118,7 +118,7 @@ optimism = [
     "revm/optimism",
 ]
 alloy-compat = ["alloy-rpc-types"]
-test-utils = []
+test-utils = ["reth-primitives-traits/test-utils"]
 
 [[bench]]
 name = "recover_ecdsa_crit"

@@ -7723,14 +7723,19 @@ name = "reth-primitives-traits"
 version = "1.0.0-rc.1"
 dependencies = [
  "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=00d81d7)",
+ "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=00d81d7)",
  "alloy-genesis 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=00d81d7)",
  "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=00d81d7)",
  "arbitrary",
  "bytes",
  "modular-bitfield",
  "proptest",
  "proptest-derive",
+ "rand 0.8.5",
  "reth-codecs",
+ "revm-primitives",
  "serde",
  "test-fuzz",
 ]
