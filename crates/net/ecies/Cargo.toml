@@ -11,13 +11,14 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-primitives.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
 
-alloy-rlp = { workspace = true, features = ["derive"] }
+alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
+alloy-rlp = { workspace = true, features = ["derive", "arrayvec"] }
+
 futures.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["time"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
 pin-project.workspace = true
