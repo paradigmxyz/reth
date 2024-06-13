@@ -1,29 +1,41 @@
 //! Contains RPC handler implementations specific to endpoints that call/execute within evm.
 
-use reth_evm::ConfigureEvm;
+use crate::EthApi;
 
-use crate::eth::{
-    api::{Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
-    EthApi,
-};
-
-impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig> where
-    Self: Call + LoadPendingBlock
-{
+/// Implements [`EthCall`](crate::eth::api::EthCall) for a type, that has similar
+/// data layout to [`EthApi`].
+#[macro_export]
+macro_rules! eth_call_impl {
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::EthCall for $network_api where
+            Self: $crate::eth::api::Call + $crate::eth::api::LoadPendingBlock
+        {
+        }
+    };
 }
 
-impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Self: LoadState + SpawnBlocking,
-    EvmConfig: ConfigureEvm,
-{
-    #[inline]
-    fn call_gas_limit(&self) -> u64 {
-        self.inner.gas_cap()
-    }
+/// Implements [`Call`](crate::eth::api::Call) for a type, that has similar
+/// data layout to [`EthApi`].
+#[macro_export]
+macro_rules! call_impl {
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::Call for $network_api
+        where
+            Self: $crate::eth::api::LoadState + $crate::eth::api::SpawnBlocking,
+            EvmConfig: reth_evm::ConfigureEvm,
+        {
+            #[inline]
+            fn call_gas_limit(&self) -> u64 {
+                self.inner.gas_cap()
+            }
 
-    #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm {
-        self.inner.evm_config()
-    }
+            #[inline]
+            fn evm_config(&self) -> &impl reth_evm::ConfigureEvm {
+                self.inner.evm_config()
+            }
+        }
+    };
 }
+
+eth_call_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
+call_impl!(EthApi<Provider, Pool, Network, EvmConfig>);

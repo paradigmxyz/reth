@@ -1,40 +1,47 @@
 //! Contains RPC handler implementations specific to blocks.
 
-use reth_provider::{BlockReaderIdExt, HeaderProvider};
+use crate::EthApi;
 
-use crate::{
-    eth::{
-        api::{EthBlocks, LoadBlock},
-        cache::EthStateCache,
-    },
-    EthApi,
-};
-
-use super::{LoadPendingBlock, SpawnBlocking};
-
-impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Self: LoadBlock,
-    Provider: HeaderProvider,
-{
-    #[inline]
-    fn provider(&self) -> impl HeaderProvider {
-        self.inner.provider()
-    }
+/// Implements [`EthBlocks`](crate::eth::api::EthBlocks) for a type, that has similar
+/// data layout to [`EthApi`].
+#[macro_export]
+macro_rules! eth_blocks_impl {
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::EthBlocks for $network_api
+        where
+            Self: $crate::eth::api::LoadBlock,
+            Provider: reth_provider::HeaderProvider,
+        {
+            #[inline]
+            fn provider(&self) -> impl reth_provider::HeaderProvider {
+                self.inner.provider()
+            }
+        }
+    };
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadBlock for EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Self: LoadPendingBlock + SpawnBlocking,
-    Provider: BlockReaderIdExt,
-{
-    #[inline]
-    fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
-    }
+/// Implements [`LoadBlock`](crate::eth::api::LoadBlock) for a type, that has similar
+/// data layout to [`EthApi`].
+#[macro_export]
+macro_rules! load_block_impl {
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::LoadBlock for $network_api
+        where
+            Self: $crate::eth::api::LoadPendingBlock + $crate::eth::api::SpawnBlocking,
+            Provider: reth_provider::BlockReaderIdExt,
+        {
+            #[inline]
+            fn provider(&self) -> impl reth_provider::BlockReaderIdExt {
+                self.inner.provider()
+            }
 
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
+            #[inline]
+            fn cache(&self) -> &$crate::eth::cache::EthStateCache {
+                self.inner.cache()
+            }
+        }
+    };
 }
+
+eth_blocks_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
+load_block_impl!(EthApi<Provider, Pool, Network, EvmConfig>);

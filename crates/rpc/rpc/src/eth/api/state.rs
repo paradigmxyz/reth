@@ -1,46 +1,56 @@
 //! Contains RPC handler implementations specific to state.
 
-use crate::{
-    eth::{
-        api::{EthState, LoadState, SpawnBlocking},
-        cache::EthStateCache,
-    },
-    EthApi,
-};
-use reth_provider::StateProviderFactory;
-use reth_transaction_pool::TransactionPool;
+use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig> where
-    Self: LoadState + SpawnBlocking
-{
+/// Implements [`EthState`](crate::eth::api::EthState) for a type, that has similar
+/// data layout to [`EthApi`].
+#[macro_export]
+macro_rules! eth_state_impl {
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::EthState for $network_api where
+            Self: $crate::eth::api::LoadState + $crate::eth::api::SpawnBlocking
+        {
+        }
+    };
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
-where
-    Provider: StateProviderFactory,
-    Pool: TransactionPool,
-{
-    #[inline]
-    fn provider(&self) -> impl StateProviderFactory {
-        &self.inner.provider
-    }
+/// Implements [`LoadState`](crate::eth::api::LoadState) for a type, that has similar
+/// data layout to [`EthApi`].
+#[macro_export]
+macro_rules! load_state_impl {
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::LoadState for $network_api
+        where
+            Provider: reth_provider::StateProviderFactory,
+            Pool: reth_transaction_pool::TransactionPool,
+        {
+            #[inline]
+            fn provider(&self) -> impl reth_provider::StateProviderFactory {
+                self.inner.provider()
+            }
 
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
+            #[inline]
+            fn cache(&self) -> &$crate::eth::cache::EthStateCache {
+                self.inner.cache()
+            }
 
-    #[inline]
-    fn pool(&self) -> impl TransactionPool {
-        self.inner.pool()
-    }
+            #[inline]
+            fn pool(&self) -> impl reth_transaction_pool::TransactionPool {
+                self.inner.pool()
+            }
+        }
+    };
 }
+
+eth_state_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
+load_state_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::eth::{
-        cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache, FeeHistoryCacheConfig,
+        api::EthState, cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
+        FeeHistoryCacheConfig,
     };
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives::{
