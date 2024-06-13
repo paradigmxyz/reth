@@ -5,6 +5,7 @@ use alloy_eips::eip7685::{Decodable7685, Encodable7685};
 use alloy_rlp::{Decodable, Encodable};
 use reth_codecs::{main_codec, Compact};
 use revm_primitives::Bytes;
+use std::ops::{Deref, DerefMut};
 
 /// A list of EIP-7685 requests.
 #[main_codec]
@@ -51,5 +52,19 @@ impl Decodable for Requests {
             .map(|bytes| Request::decode_7685(&mut bytes.as_ref()))
             .collect::<Result<Vec<_>, alloy_eips::eip7685::Eip7685Error>>()
             .map(Self)?)
+    }
+}
+
+impl Deref for Requests {
+    type Target = Vec<Request>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Requests {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
