@@ -1875,7 +1875,7 @@ where
         info!(target: "consensus::cl","===================================try_publish============================================");
         info!(target: "consensus::cl","{}: Try publish proposal", state);
 
-        match self.service.summarize_block() {
+        match self.service.summarize_block(state.seq_num, state.validators.accounts()) {
             Ok(_) => {}
             Err(err) => {
                 info!("Couldn't summarize, so not finalizing: {}", err);

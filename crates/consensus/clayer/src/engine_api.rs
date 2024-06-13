@@ -185,6 +185,8 @@ pub fn forkchoice_updated(
 pub fn forkchoice_updated_with_attributes(
     api: &Arc<HttpJsonRpcSync>,
     last_block: B256,
+    index: u64,
+    accounts: Vec<alloy_primitives::Address>,
 ) -> Result<ForkchoiceUpdated, ClRpcError> {
     let forkchoice_state = ForkchoiceState {
         head_block_hash: last_block,
@@ -192,24 +194,45 @@ pub fn forkchoice_updated_with_attributes(
         safe_block_hash: last_block,
     };
 
-    let data = r#"
-        {
-            "timestamp": "0x658967b8",
-            "prevRandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
-            "suggestedFeeRecipient": "0x0000000000000000000000000000000000000000",
-            "withdrawals": [
-                {
-                    "index": "0x00",
-                    "validatorIndex": "0x00",
-                    "address": "0x00000000000000000000000000000000000010f0",
-                    "amount": "0x1"
-                }
-            ]
-        }"#;
-    let mut p: PayloadAttributes = serde_json::from_str(data).unwrap();
+    // let data = r#"
+    //     {
+    //         "timestamp": "0x658967b8",
+    //         "prevRandao": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    //         "suggestedFeeRecipient": "0x0000000000000000000000000000000000000000",
+    //         "withdrawals": [
+    //             {
+    //                 "index": "0x00",
+    //                 "validatorIndex": "0x00",
+    //                 "address": "0x00000000000000000000000000000000000010f0",
+    //                 "amount": "0x1"
+    //             }
+    //         ]
+    //     }"#;
+    // let mut p: PayloadAttributes = serde_json::from_str(data).unwrap();
+    // let dt = chrono::prelude::Local::now();
+    // p.timestamp = dt.timestamp() as u64;
+
+    let mut withdrawals = Vec::new();
+    for (i, a) in accounts.iter().enumerate() {
+        withdrawals.push(reth_rpc_types::Withdrawal {
+            index,
+            validator_index: i as u64,
+            address: *a,
+            amount: 1,
+        });
+    }
     let dt = chrono::prelude::Local::now();
-    p.timestamp = dt.timestamp() as u64;
-    api.forkchoice_updated_v2(forkchoice_state, Some(p))
+    let payload_attributes = PayloadAttributes {
+        timestamp: dt.timestamp() as u64,
+        prev_randao: alloy_primitives::B256::ZERO,
+        suggested_fee_recipient: alloy_primitives::address!(
+            "0000000000000000000000000000000000000000"
+        ),
+        withdrawals: Some(withdrawals),
+        parent_beacon_block_root: None,
+    };
+
+    api.forkchoice_updated_v2(forkchoice_state, Some(payload_attributes))
 }
 
 pub fn new_payload(
@@ -237,12 +260,6 @@ impl std::fmt::Display for ApiServiceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
     }
-}
-
-#[derive(Clone)]
-pub struct PayloadPair {
-    pub payload_id: PayloadId,
-    pub execution_payload: Option<ExecutionPayloadWrapperV2>,
 }
 
 pub struct ApiService {
@@ -314,7 +331,11 @@ impl ApiService {
 
     /// Stop adding batches to the current block and return a summary of its
     /// contents.
-    pub fn summarize_block(&mut self) -> Result<(), ApiServiceError> {
+    pub fn summarize_block(
+        &mut self,
+        index: u64,
+        accounts: Vec<alloy_primitives::Address>,
+    ) -> Result<(), ApiServiceError> {
         tracing::info!(target:"consensus::cl","ApiService::summarize_block");
         let previous_id = match self.latest_committed_id {
             Some(id) => id,
@@ -324,7 +345,12 @@ impl ApiService {
             }
         };
 
-        let forkchoice_updated = match forkchoice_updated_with_attributes(&self.api, previous_id) {
+        let forkchoice_updated = match forkchoice_updated_with_attributes(
+            &self.api,
+            previous_id,
+            index,
+            accounts,
+        ) {
             Ok(x) => x,
             Err(e) => {
                 tracing::error!(target:"consensus::cl","ApiService::summarize_block::forkchoice_updated_with_attributes return(error: {:?})", e);
@@ -377,6 +403,8 @@ impl ApiService {
                 return Err(ApiServiceError::ApiError(format!("get_payload_v2: {:?}", e)));
             }
         };
+
+        tracing::info!(target:"consensus::cl","ApiService::finalize_block payload withdrawals: {:?}", playload.execution_payload.withdrawals);
 
         let block_id = playload.execution_payload.payload_inner.block_hash;
         let last_block_id = playload.execution_payload.payload_inner.parent_hash;

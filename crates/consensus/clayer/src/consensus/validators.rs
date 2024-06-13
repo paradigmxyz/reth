@@ -54,6 +54,13 @@ impl Validators {
         &self.validators
     }
 
+    pub fn accounts(&self) -> Vec<alloy_primitives::Address> {
+        self.validators
+            .iter()
+            .map(|x| alloy_primitives::Address::from_raw_public_key(x.as_slice()))
+            .collect()
+    }
+
     pub fn compare(&self, new_members: &Vec<PeerId>) -> (i8, PeerId) {
         if self.validators.len() > new_members.len() {
             for p in self.validators.iter() {
@@ -85,6 +92,10 @@ impl fmt::Display for Validators {
 #[cfg(test)]
 mod tests {
 
+    use reth_ecies::util::id2pk;
+    use reth_rpc_types::PeerId;
+    use std::str::FromStr;
+
     #[test]
     fn validators_is_defferent_test() {
         let a = "Hello";
@@ -98,5 +109,17 @@ mod tests {
 
         let matching = a.iter().zip(&b).filter(|&(a, b)| a == b).count();
         println!("{}", matching);
+    }
+
+    #[test]
+    fn convert() {
+        let pid = PeerId::from_str("0x23fc99dc5a9411b1f74425cf82d38393f9f0dfa63360848886514eb64f8d61c99a47b52df97afbad20bdbd781086a9e9e228a4d61177d85e28f8cdf5c6ae7738").expect("try into PeerId error");
+        println!("pid : {}", pid);
+
+        let pk = id2pk(pid).unwrap();
+        println!("pk : {}", pk);
+
+        let addr = alloy_primitives::Address::from_raw_public_key(pid.as_slice());
+        println!("addr : {}", addr);
     }
 }
