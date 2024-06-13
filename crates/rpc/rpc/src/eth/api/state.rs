@@ -6,10 +6,8 @@ use crate::EthApi;
 /// data layout to [`EthApi`].
 #[macro_export]
 macro_rules! eth_state_impl {
-    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
-        impl$(<$($generic,)+>)* $crate::eth::api::EthState
-            for $network_api
-        where
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::EthState for $network_api where
             Self: $crate::eth::api::LoadState + $crate::eth::api::SpawnBlocking
         {
         }
@@ -20,9 +18,8 @@ macro_rules! eth_state_impl {
 /// data layout to [`EthApi`].
 #[macro_export]
 macro_rules! load_state_impl {
-    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
-        impl$(<$($generic,)+>)* $crate::eth::api::LoadState
-            for $network_api
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::LoadState for $network_api
         where
             Provider: reth_provider::StateProviderFactory,
             Pool: reth_transaction_pool::TransactionPool,
@@ -45,8 +42,8 @@ macro_rules! load_state_impl {
     };
 }
 
-eth_state_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-load_state_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
+eth_state_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
+load_state_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
 
 #[cfg(test)]
 mod tests {

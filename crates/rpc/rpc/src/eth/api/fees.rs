@@ -6,11 +6,9 @@ use crate::EthApi;
 /// data layout to [`EthApi`].
 #[macro_export]
 macro_rules! eth_fees_impl {
-    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
-        impl$(<$($generic,)+>)* $crate::eth::api::EthFees
-            for $network_api
-        where
-            Self: $crate::eth::api::LoadFee,
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::EthFees for $network_api where
+            Self: $crate::eth::api::LoadFee
         {
         }
     };
@@ -20,15 +18,20 @@ macro_rules! eth_fees_impl {
 /// data layout to [`EthApi`].
 #[macro_export]
 macro_rules! load_fee_impl {
-    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
-        impl$(<$($generic,)+>)* $crate::eth::api::LoadFee
-            for $network_api
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::LoadFee for $network_api
         where
             Self: $crate::eth::api::LoadBlock,
-            Provider: reth_provider::BlockReaderIdExt + reth_provider::HeaderProvider + reth_provider::ChainSpecProvider,
+            Provider: reth_provider::BlockReaderIdExt
+                + reth_provider::HeaderProvider
+                + reth_provider::ChainSpecProvider,
         {
             #[inline]
-            fn provider(&self) -> impl reth_provider::BlockIdReader + reth_provider::HeaderProvider + reth_provider::ChainSpecProvider {
+            fn provider(
+                &self,
+            ) -> impl reth_provider::BlockIdReader
+                   + reth_provider::HeaderProvider
+                   + reth_provider::ChainSpecProvider {
                 self.inner.provider()
             }
 
@@ -38,7 +41,10 @@ macro_rules! load_fee_impl {
             }
 
             #[inline]
-            fn gas_oracle(&self) -> &$crate::eth::gas_oracle::GasPriceOracle<impl reth_provider::BlockReaderIdExt> {
+            fn gas_oracle(
+                &self,
+            ) -> &$crate::eth::gas_oracle::GasPriceOracle<impl reth_provider::BlockReaderIdExt>
+            {
                 self.inner.gas_oracle()
             }
 
@@ -50,5 +56,5 @@ macro_rules! load_fee_impl {
     };
 }
 
-eth_fees_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-load_fee_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
+eth_fees_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
+load_fee_impl!(EthApi<Provider, Pool, Network, EvmConfig>);

@@ -6,9 +6,8 @@ use crate::EthApi;
 /// data layout to [`EthApi`].
 #[macro_export]
 macro_rules! trace_impl {
-    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
-        impl$(<$($generic,)+>)* $crate::eth::api::Trace
-            for $network_api
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::Trace for $network_api
         where
             Self: $crate::eth::api::LoadState,
             EvmConfig: reth_evm::ConfigureEvm,
@@ -21,4 +20,4 @@ macro_rules! trace_impl {
     };
 }
 
-trace_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
+trace_impl!(EthApi<Provider, Pool, Network, EvmConfig>);

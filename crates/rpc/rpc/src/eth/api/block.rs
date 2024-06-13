@@ -6,9 +6,8 @@ use crate::EthApi;
 /// data layout to [`EthApi`].
 #[macro_export]
 macro_rules! eth_blocks_impl {
-    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
-        impl$(<$($generic,)+>)* $crate::eth::api::EthBlocks
-            for $network_api
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::EthBlocks for $network_api
         where
             Self: $crate::eth::api::LoadBlock,
             Provider: reth_provider::HeaderProvider,
@@ -25,12 +24,11 @@ macro_rules! eth_blocks_impl {
 /// data layout to [`EthApi`].
 #[macro_export]
 macro_rules! load_block_impl {
-    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
-        impl$(<$($generic,)+>)* $crate::eth::api::LoadBlock
-            for $network_api
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::LoadBlock for $network_api
         where
             Self: $crate::eth::api::LoadPendingBlock + $crate::eth::api::SpawnBlocking,
-            Provider:reth_provider::BlockReaderIdExt,
+            Provider: reth_provider::BlockReaderIdExt,
         {
             #[inline]
             fn provider(&self) -> impl reth_provider::BlockReaderIdExt {
@@ -45,5 +43,5 @@ macro_rules! load_block_impl {
     };
 }
 
-eth_blocks_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-load_block_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
+eth_blocks_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
+load_block_impl!(EthApi<Provider, Pool, Network, EvmConfig>);

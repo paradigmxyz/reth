@@ -35,16 +35,16 @@ pub struct OptimismApi<Provider, Pool, Network, EvmConfig> {
     inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
 }
 
-eth_call_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-eth_fees_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-eth_state_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-eth_transactions_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
+eth_call_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>);
+eth_fees_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>);
+eth_state_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>);
+eth_transactions_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>);
 
-load_block_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-load_fee_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-load_state_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-load_transaction_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
+load_block_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>);
+load_fee_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>);
+load_state_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>);
+load_transaction_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>);
 
-call_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-spawn_blocking_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-trace_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
+call_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>);
+spawn_blocking_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>);
+trace_impl!(OptimismApi<Provider, Pool, Network, EvmConfig>);

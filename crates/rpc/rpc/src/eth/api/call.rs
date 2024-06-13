@@ -6,10 +6,8 @@ use crate::EthApi;
 /// data layout to [`EthApi`].
 #[macro_export]
 macro_rules! eth_call_impl {
-    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
-        impl$(<$($generic,)+>)* $crate::eth::api::EthCall
-            for $network_api
-        where
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::EthCall for $network_api where
             Self: $crate::eth::api::Call + $crate::eth::api::LoadPendingBlock
         {
         }
@@ -20,9 +18,8 @@ macro_rules! eth_call_impl {
 /// data layout to [`EthApi`].
 #[macro_export]
 macro_rules! call_impl {
-    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
-        impl$(<$($generic,)+>)* $crate::eth::api::Call
-            for $network_api
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::Call for $network_api
         where
             Self: $crate::eth::api::LoadState + $crate::eth::api::SpawnBlocking,
             EvmConfig: reth_evm::ConfigureEvm,
@@ -40,5 +37,5 @@ macro_rules! call_impl {
     };
 }
 
-eth_call_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
-call_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
+eth_call_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
+call_impl!(EthApi<Provider, Pool, Network, EvmConfig>);

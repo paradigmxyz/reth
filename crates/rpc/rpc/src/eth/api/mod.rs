@@ -272,9 +272,8 @@ where
 /// Implements [`SpawnBlocking`] for a type, that has similar data layout to [`EthApi`].
 #[macro_export]
 macro_rules! spawn_blocking_impl {
-    ($network_api:ty, $(<$($generic:ident,)+>)*) => {
-        impl$(<$($generic,)+>)* $crate::eth::api::SpawnBlocking
-            for $network_api
+    ($network_api:ty) => {
+        impl<Provider, Pool, Network, EvmConfig> $crate::eth::api::SpawnBlocking for $network_api
         where
             Self: Clone + Send + Sync + 'static,
         {
@@ -291,7 +290,7 @@ macro_rules! spawn_blocking_impl {
     };
 }
 
-spawn_blocking_impl!(EthApi<Provider, Pool, Network, EvmConfig>, <Provider, Pool, Network, EvmConfig,>);
+spawn_blocking_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
 
 /// The default gas limit for `eth_call` and adjacent calls.
 ///
