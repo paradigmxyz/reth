@@ -1,14 +1,18 @@
 use crate::{engine::DownloadRequest, pipeline::PipelineAction};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard, RwLock};
 use reth_beacon_consensus::{ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated};
+use reth_blockchain_tree::BlockBuffer;
 use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::ProviderResult;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Block, BlockNumber, SealedBlock, SealedBlockWithSenders, B256};
+use reth_primitives::{Address, Block, BlockNumber, SealedBlock, SealedBlockWithSenders, B256};
 use reth_provider::BlockReader;
 use reth_rpc_types::{
-    engine::{CancunPayloadFields, ForkchoiceState, PayloadStatus, PayloadStatusEnum},
+    engine::{
+        CancunPayloadFields, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
+        PayloadValidationError,
+    },
     ExecutionPayload,
 };
 use std::{
@@ -21,13 +25,14 @@ use tracing::*;
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug)]
 struct ExecutedBlock {
-    block: Arc<SealedBlockWithSenders>,
+    block: Arc<SealedBlock>,
+    senders: Arc<Vec<Address>>,
     state: Arc<()>,
     trie: Arc<()>,
 }
 
 /// Keeps track of the state of the tree.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct TreeState {
     /// All executed blocks by hash.
     blocks_by_hash: HashMap<B256, ExecutedBlock>,
@@ -36,11 +41,9 @@ pub struct TreeState {
 }
 
 impl TreeState {
-    fn block_by_hash(&self, _hash: B256) -> Option<SealedBlock> {
-        todo!()
+    fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlock>> {
+        self.blocks_by_hash.get(&hash).map(|b| b.block.clone())
     }
-
-    fn buffer(&mut self) {}
 
     /// Insert executed block into the state.
     fn insert_executed(&mut self, executed: ExecutedBlock) {
@@ -76,9 +79,11 @@ impl TreeState {
 #[derive(Clone, Debug)]
 pub struct EngineApiTreeState {
     /// Tracks the state of the blockchain tree.
-    tree_state: TreeState,
+    tree_state: Arc<RwLock<TreeState>>,
     /// Tracks the received forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
+    /// Buffer of detached blocks.
+    buffer: Arc<RwLock<BlockBuffer>>,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
     invalid_headers: Arc<Mutex<InvalidHeaderCache>>,
@@ -179,9 +184,28 @@ where
         if block.is_none() {
             // Note: it's fine to return the unsealed block because the caller already has
             // the hash
-            block = self.state.tree_state.block_by_hash(hash).map(|block| block.unseal());
+            let tree_state = self.state.tree_state.read();
+            block = tree_state
+                .block_by_hash(hash)
+                // TODO: clone for compatibility. should we return an Arc here?
+                .map(|block| block.as_ref().clone().unseal());
         }
         Ok(block)
+    }
+
+    /// Return the parent hash of the lowest buffered ancestor for the requested block, if there
+    /// are any buffered ancestors. If there are no buffered ancestors, and the block itself does
+    /// not exist in the buffer, this returns the hash that is passed in.
+    ///
+    /// Returns the parent hash of the block itself if the block is buffered and has no other
+    /// buffered ancestors.
+    fn lowest_buffered_ancestor_or(&self, hash: B256) -> B256 {
+        self.state
+            .buffer
+            .read()
+            .lowest_ancestor(&hash)
+            .map(|block| block.parent_hash)
+            .unwrap_or_else(|| hash)
     }
 
     /// If validation fails, the response MUST contain the latest valid hash:
@@ -196,6 +220,7 @@ where
     ///     the above conditions.
     fn latest_valid_hash_for_invalid_payload(
         &self,
+        invalid_headers: &mut MutexGuard<'_, InvalidHeaderCache>,
         parent_hash: B256,
     ) -> ProviderResult<Option<B256>> {
         // Check if parent exists in side chain or in canonical chain.
@@ -206,7 +231,6 @@ where
         // iterate over ancestors in the invalid cache
         // until we encounter the first valid ancestor
         let mut current_hash = parent_hash;
-        let mut invalid_headers = self.state.invalid_headers.lock();
         let mut current_header = invalid_headers.get(&current_hash);
         while let Some(header) = current_header {
             current_hash = header.parent_hash;
@@ -219,6 +243,54 @@ where
             }
         }
         Ok(None)
+    }
+
+    /// Prepares the invalid payload response for the given hash, checking the
+    /// database for the parent hash and populating the payload status with the latest valid hash
+    /// according to the engine api spec.
+    fn prepare_invalid_response(
+        &self,
+        invalid_headers: &mut MutexGuard<'_, InvalidHeaderCache>,
+        mut parent_hash: B256,
+    ) -> ProviderResult<PayloadStatus> {
+        // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
+        // PoW block, which we need to identify by looking at the parent's block difficulty
+        if let Some(parent) = self.block_by_hash(parent_hash)? {
+            if !parent.is_zero_difficulty() {
+                parent_hash = B256::ZERO;
+            }
+        }
+
+        let valid_parent_hash =
+            self.latest_valid_hash_for_invalid_payload(invalid_headers, parent_hash)?;
+        Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
+            validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
+        })
+        .with_latest_valid_hash(valid_parent_hash.unwrap_or_default()))
+    }
+
+    /// Checks if the given `check` hash points to an invalid header, inserting the given `head`
+    /// block into the invalid header cache if the `check` hash has a known invalid ancestor.
+    ///
+    /// Returns a payload status response according to the engine API spec if the block is known to
+    /// be invalid.
+    fn check_invalid_ancestor_with_head(
+        &self,
+        check: B256,
+        head: B256,
+    ) -> ProviderResult<Option<PayloadStatus>> {
+        let mut invalid_headers = self.state.invalid_headers.lock();
+
+        // check if the check hash was previously marked as invalid
+        let Some(header) = invalid_headers.get(&check) else { return Ok(None) };
+
+        // populate the latest valid hash field
+        let status = self.prepare_invalid_response(&mut invalid_headers, header.parent_hash)?;
+
+        // insert the head block into the invalid header cache
+        invalid_headers.insert_with_invalid_ancestor(head, header);
+
+        Ok(Some(status))
     }
 
     fn insert_block_without_senders(
@@ -297,13 +369,29 @@ where
                         // > `latestValidHash: null` if the expected and the actual arrays don't match (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md?plain=1#L103>)
                         None
                     } else {
-                        self.latest_valid_hash_for_invalid_payload(parent_hash)?
+                        self.latest_valid_hash_for_invalid_payload(
+                            &mut self.state.invalid_headers.lock(),
+                            parent_hash,
+                        )?
                     };
 
                 let status = PayloadStatusEnum::from(error);
                 return Ok(TreeOutcome::new(PayloadStatus::new(status, latest_valid_hash)))
             }
         };
+
+        let block_hash = block.hash();
+        let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
+        if lowest_buffered_ancestor == block_hash {
+            lowest_buffered_ancestor = block.parent_hash;
+        }
+
+        // now check the block itself
+        if let Some(status) =
+            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_hash)?
+        {
+            return Ok(TreeOutcome::new(status))
+        }
 
         // TODO:
         let _ = self.insert_block_without_senders(block);
