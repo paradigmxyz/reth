@@ -15,7 +15,6 @@ use alloy_rlp::{Encodable, Rlp, RlpEncodable, RlpMaxEncodedLen};
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use ctr::Ctr64BE;
 use digest::{crypto_common::KeyIvInit, Digest};
-use educe::Educe;
 use rand::{thread_rng, Rng};
 use reth_network_peers::{id2pk, pk2id};
 use secp256k1::{
@@ -51,17 +50,13 @@ fn kdf(secret: B256, s1: &[u8], dest: &mut [u8]) {
     concat_kdf::derive_key_into::<Sha256>(secret.as_slice(), s1, dest).unwrap();
 }
 
-#[derive(Educe)]
-#[educe(Debug)]
 pub struct ECIES {
-    #[educe(Debug(ignore))]
     secret_key: SecretKey,
     public_key: PublicKey,
     remote_public_key: Option<PublicKey>,
 
     pub(crate) remote_id: Option<PeerId>,
 
-    #[educe(Debug(ignore))]
     ephemeral_secret_key: SecretKey,
     ephemeral_public_key: PublicKey,
     ephemeral_shared_secret: Option<B256>,
@@ -70,9 +65,7 @@ pub struct ECIES {
     nonce: B256,
     remote_nonce: Option<B256>,
 
-    #[educe(Debug(ignore))]
     ingress_aes: Option<Ctr64BE<Aes256>>,
-    #[educe(Debug(ignore))]
     egress_aes: Option<Ctr64BE<Aes256>>,
     ingress_mac: Option<MAC>,
     egress_mac: Option<MAC>,
@@ -81,6 +74,27 @@ pub struct ECIES {
     remote_init_msg: Option<Bytes>,
 
     body_size: Option<usize>,
+}
+
+impl core::fmt::Debug for ECIES {
+    #[inline]
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ECIES")
+            .field("public_key", &self.public_key)
+            .field("remote_public_key", &self.remote_public_key)
+            .field("remote_id", &self.remote_id)
+            .field("ephemeral_public_key", &self.ephemeral_public_key)
+            .field("ephemeral_shared_secret", &self.ephemeral_shared_secret)
+            .field("remote_ephemeral_public_key", &self.remote_ephemeral_public_key)
+            .field("nonce", &self.nonce)
+            .field("remote_nonce", &self.remote_nonce)
+            .field("ingress_mac", &self.ingress_mac)
+            .field("egress_mac", &self.egress_mac)
+            .field("init_msg", &self.init_msg)
+            .field("remote_init_msg", &self.remote_init_msg)
+            .field("body_size", &self.body_size)
+            .finish()
+    }
 }
 
 fn split_at_mut<T>(arr: &mut [T], idx: usize) -> Result<(&mut [T], &mut [T]), ECIESError> {
