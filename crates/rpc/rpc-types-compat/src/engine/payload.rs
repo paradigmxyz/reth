@@ -18,7 +18,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         return Err(PayloadError::ExtraData(payload.extra_data))
     }
 
-    if payload.base_fee_per_gas == U256::ZERO {
+    if payload.base_fee_per_gas.is_zero() {
         return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
     }
 
