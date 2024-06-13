@@ -3,11 +3,11 @@
 use crate::{
     codec::ECIESCodec, error::ECIESErrorImpl, ECIESError, EgressECIESValue, IngressECIESValue,
 };
-use futures::{ready, Sink, SinkExt};
-use reth_primitives::{
+use alloy_primitives::{
     bytes::{Bytes, BytesMut},
     B512 as PeerId,
 };
+use futures::{ready, Sink, SinkExt};
 use secp256k1::SecretKey;
 use std::{
     fmt::Debug,
