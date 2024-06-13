@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use reth::{
+    api::PayloadTypes,
     builder::{
         components::{ComponentsBuilder, PayloadServiceBuilder},
         node::NodeTypes,
@@ -43,7 +44,7 @@ use reth_node_api::{
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::node::{
-    EthereumExecutorBuilder, EthereumNetworkBuilder, EthereumPoolBuilder,
+    EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder, EthereumPoolBuilder,
 };
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
@@ -162,9 +163,12 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
 #[non_exhaustive]
 pub struct CustomEngineTypes;
 
-impl EngineTypes for CustomEngineTypes {
+impl PayloadTypes for CustomEngineTypes {
     type PayloadAttributes = CustomPayloadAttributes;
     type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
+}
+
+impl EngineTypes for CustomEngineTypes {
     type BuiltPayload = EthBuiltPayload;
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
@@ -204,6 +208,7 @@ where
         CustomPayloadServiceBuilder,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
+        EthereumConsensusBuilder,
     >;
 
     fn components_builder(self) -> Self::ComponentsBuilder {
@@ -213,6 +218,7 @@ where
             .payload(CustomPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
+            .consensus(EthereumConsensusBuilder::default())
     }
 }
 

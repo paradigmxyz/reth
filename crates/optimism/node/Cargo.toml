@@ -29,6 +29,7 @@ reth-evm.workspace = true
 reth-revm.workspace = true
 reth-evm-optimism.workspace = true
 reth-beacon-consensus.workspace = true
+reth-optimism-consensus.workspace = true
 revm-primitives.workspace = true
 reth-discv5.workspace = true
 

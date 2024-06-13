@@ -2,14 +2,21 @@ use reth_primitives::{
     Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, StaticFileSegment,
     TxHashOrNumber, TxNumber, B256, U256,
 };
+
+#[cfg(feature = "std")]
 use std::path::PathBuf;
-use thiserror::Error;
+
+#[cfg(not(feature = "std"))]
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+};
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
 
 /// Bundled errors variants thrown by various providers.
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, thiserror_no_std::Error, PartialEq, Eq)]
 pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
@@ -108,6 +115,7 @@ pub enum ProviderError {
     #[error("this provider does not support this request")]
     UnsupportedProvider,
     /// Static File is not found at specified path.
+    #[cfg(feature = "std")]
     #[error("not able to find {0} static file at {1}")]
     MissingStaticFilePath(StaticFileSegment, PathBuf),
     /// Static File is not found for requested block.
@@ -143,7 +151,7 @@ impl From<reth_fs_util::FsPathError> for ProviderError {
 }
 
 /// A root mismatch error at a given block height.
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror_no_std::Error)]
 #[error("root mismatch at #{block_number} ({block_hash}): {root}")]
 pub struct RootMismatch {
     /// The target block root diff.
@@ -155,7 +163,7 @@ pub struct RootMismatch {
 }
 
 /// Consistent database view error.
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror_no_std::Error)]
 pub enum ConsistentViewError {
     /// Error thrown on attempt to initialize provider while node is still syncing.
     #[error("node is syncing. best block: {best_block:?}")]
