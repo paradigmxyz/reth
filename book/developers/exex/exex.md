@@ -12,7 +12,7 @@ Read more about things you can build with Execution Extensions in the [Paradigm 
 
 ## How do I build an Execution Extension?
 
-Let's dive into how to build our own ExEx (short for Execution Extensions) from scratch, add tests for it,
+Let's dive into how to build our own ExEx (short for Execution Extension) from scratch, add tests for it,
 and run it on the Holesky testnet.
 
 1. [How do ExExes work?](./how-it-works.md)
