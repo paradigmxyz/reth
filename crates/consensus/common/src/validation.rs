@@ -451,22 +451,6 @@ mod tests {
     }
 
     #[test]
-    fn shanghai_block_zero_withdrawals() {
-        // ensures that if shanghai is activated, and we include a block with a withdrawals root,
-        // that the header is valid
-        let chain_spec = ChainSpecBuilder::mainnet().shanghai_activated().build();
-
-        let header = Header {
-            base_fee_per_gas: Some(1337u64),
-            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
-            ..Default::default()
-        }
-        .seal_slow();
-
-        assert_eq!(validate_header_standalone(&header, &chain_spec), Ok(()));
-    }
-
-    #[test]
     fn cancun_block_incorrect_blob_gas_used() {
         let chain_spec = ChainSpecBuilder::mainnet().cancun_activated().build();
 

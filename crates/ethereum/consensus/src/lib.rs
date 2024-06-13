@@ -13,7 +13,7 @@ use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_eip1559_base_fee,
     validate_against_parent_hash_number, validate_against_parent_timestamp,
     validate_block_pre_execution, validate_header_base_fee, validate_header_extradata,
-    validate_header_gas, validate_header_standalone,
+    validate_header_gas,
 };
 use reth_primitives::{
     constants::MINIMUM_GAS_LIMIT, eip4844::calculate_excess_blob_gas, BlockWithSenders, Chain,
@@ -259,7 +259,7 @@ impl Consensus for EthBeaconConsensus {
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::B256;
+    use reth_primitives::{proofs, ChainSpecBuilder, B256};
 
     use super::*;
 
@@ -332,5 +332,21 @@ mod tests {
                 child_gas_limit: child.gas_limit,
             })
         );
+    }
+
+    #[test]
+    fn shanghai_block_zero_withdrawals() {
+        // ensures that if shanghai is activated, and we include a block with a withdrawals root,
+        // that the header is valid
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
+
+        let header = Header {
+            base_fee_per_gas: Some(1337u64),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            ..Default::default()
+        }
+        .seal_slow();
+
+        assert_eq!(EthBeaconConsensus::new(chain_spec).validate_header(&header), Ok(()));
     }
 }
