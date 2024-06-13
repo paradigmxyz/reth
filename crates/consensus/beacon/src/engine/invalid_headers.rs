@@ -50,7 +50,7 @@ impl InvalidHeaderCache {
     }
 
     /// Inserts an invalid block into the cache, with a given invalid ancestor.
-    pub(crate) fn insert_with_invalid_ancestor(
+    pub fn insert_with_invalid_ancestor(
         &mut self,
         header_hash: B256,
         invalid_ancestor: Arc<Header>,
