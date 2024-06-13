@@ -1383,7 +1383,7 @@ mod tests {
     use reth_primitives::{
         constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH, ETHEREUM_BLOCK_GAS_LIMIT},
         keccak256,
-        proofs::{calculate_transaction_root, state_root_unhashed},
+        proofs::calculate_transaction_root,
         revm_primitives::AccountInfo,
         Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
         Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
@@ -1394,7 +1394,7 @@ mod tests {
         ProviderFactory,
     };
     use reth_stages_api::StageCheckpoint;
-    use reth_trie::StateRoot;
+    use reth_trie::{root::state_root_unhashed, StateRoot};
     use std::collections::HashMap;
 
     fn setup_externals(
