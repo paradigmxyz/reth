@@ -633,18 +633,14 @@ mod tests {
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let mut exec_res = ExecutionOutcome {
-            bundle: Default::default(),
-            receipts: receipts.clone(),
-            requests: requests.clone(),
-            first_block,
-        };
+        let mut exec_res =
+            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
 
         // Assert that the revert_to method returns true when reverting to the initial block number.
         assert!(exec_res.revert_to(123));
 
         // Assert that the receipts are properly cut after reverting to the initial block number.
-        assert_eq!(exec_res.receipts, Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] });
+        assert_eq!(exec_res.receipts, Receipts { receipt_vec: vec![vec![Some(receipt)]] });
 
         // Assert that the requests are properly cut after reverting to the initial block number.
         assert_eq!(exec_res.requests, vec![Requests(vec![request])]);
