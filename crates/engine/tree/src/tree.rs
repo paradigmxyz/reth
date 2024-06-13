@@ -1,4 +1,4 @@
-use crate::{chain::PipelineAction, engine::DownloadRequest};
+use crate::{engine::DownloadRequest, pipeline::PipelineAction};
 use parking_lot::Mutex;
 use reth_beacon_consensus::{ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated};
 use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
