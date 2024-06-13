@@ -43,7 +43,7 @@ impl EthBeaconConsensus {
     /// ensures that the `blob_gas_used` and `excess_blob_gas` fields exist in the child header, and
     /// that the `excess_blob_gas` field matches the expected `excess_blob_gas` calculated from the
     /// parent header fields.
-    pub fn validate_4844_header_against_parent(
+    pub fn validate_against_parent_4844(
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
@@ -142,7 +142,7 @@ impl Consensus for EthBeaconConsensus {
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            Self::validate_4844_header_against_parent(header, parent)?;
+            Self::validate_against_parent_4844(header, parent)?;
         }
 
         Ok(())
