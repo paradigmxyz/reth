@@ -6,16 +6,15 @@ use reth_db_api::{
     database::Database,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{
-    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    Address, PruneSegment, StaticFileSegment, TransactionSignedNoHash, TxNumber,
-};
+use reth_primitives::{Address, StaticFileSegment, TransactionSignedNoHash, TxNumber};
 use reth_provider::{
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, PruneCheckpointReader,
     StatsReader,
 };
+use reth_prune_types::PruneSegment;
 use reth_stages_api::{
-    BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
+    BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError,
+    StageId, UnwindInput, UnwindOutput,
 };
 use std::{fmt::Debug, ops::Range, sync::mpsc};
 use thiserror::Error;
@@ -90,9 +89,9 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
         // Acquire the cursor for inserting elements
         let mut senders_cursor = tx.cursor_write::<tables::TransactionSenders>()?;
 
-        // Iterate over transactions in chunks
         info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
 
+        // Iterate over transactions in batches, recover the senders and append them
         let batch = (tx_range.start..tx_range.end)
             .step_by(BATCH_SIZE)
             .map(|start| start..std::cmp::min(start + BATCH_SIZE as u64, tx_range.end))
@@ -155,8 +154,6 @@ fn recover_range<DB: Database>(
     let static_file_provider = provider.static_file_provider().clone();
     tokio::task::spawn_blocking(move || {
         for (chunk_range, recovered_senders_tx) in chunks {
-            let static_file_provider = static_file_provider.clone();
-
             // Read the raw value, and let the rayon worker to decompress & decode.
             let chunk = static_file_provider
                 .fetch_range_with_predicate(
@@ -229,11 +226,11 @@ fn recover_sender(
     (tx_id, tx): (TxNumber, TransactionSignedNoHash),
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(u64, Address), Box<SenderRecoveryStageError>> {
-    // We call [Signature::recover_signer_unchecked] because transactions run in the pipeline are
-    // known to be valid - this means that we do not need to check whether or not the `s` value is
-    // greater than `secp256k1n / 2` if past EIP-2. There are transactions pre-homestead which have
-    // large `s` values, so using [Signature::recover_signer] here would not be
-    // backwards-compatible.
+    // We call [Signature::encode_and_recover_unchecked] because transactions run in the pipeline
+    // are known to be valid - this means that we do not need to check whether or not the `s`
+    // value is greater than `secp256k1n / 2` if past EIP-2. There are transactions
+    // pre-homestead which have large `s` values, so using [Signature::recover_signer] here
+    // would not be backwards-compatible.
     let sender = tx
         .encode_and_recover_unchecked(rlp_buf)
         .ok_or(SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError { tx: tx_id }))?;
@@ -283,14 +280,13 @@ struct FailedSenderRecoveryError {
 mod tests {
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
-    use reth_primitives::{
-        stage::StageUnitCheckpoint, BlockNumber, PruneCheckpoint, PruneMode, SealedBlock,
-        TransactionSigned, B256,
-    };
+    use reth_primitives::{BlockNumber, SealedBlock, TransactionSigned, B256};
     use reth_provider::{
         providers::StaticFileWriter, PruneCheckpointWriter, StaticFileProviderFactory,
         TransactionsProvider,
     };
+    use reth_prune_types::{PruneCheckpoint, PruneMode};
+    use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::{
         generators,
         generators::{random_block, random_block_range},

@@ -13,10 +13,12 @@ workspace = true
 
 [dependencies]
 # reth
+reth-primitives-traits.workspace = true
 reth-codecs.workspace = true
 reth-ethereum-forks.workspace = true
-reth-network-types.workspace = true
+reth-network-peers.workspace = true
 reth-static-file-types.workspace = true
+reth-trie-types.workspace = true
 revm.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
@@ -29,7 +31,6 @@ alloy-trie = { workspace = true, features = ["serde"] }
 alloy-rpc-types = { workspace = true, optional = true }
 alloy-genesis.workspace = true
 alloy-eips = { workspace = true, features = ["serde"] }
-nybbles = { workspace = true, features = ["serde", "rlp"] }
 
 # crypto
 secp256k1 = { workspace = true, features = [
@@ -98,6 +99,7 @@ secp256k1.workspace = true
 default = ["c-kzg", "zstd-codec", "alloy-compat"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
+    "reth-primitives-traits/arbitrary",
     "revm-primitives/arbitrary",
     "reth-ethereum-forks/arbitrary",
     "nybbles/arbitrary",

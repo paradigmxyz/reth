@@ -22,7 +22,7 @@ use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{bytes::Bytes, EnrForkIdEntry, ForkId, NodeRecord};
 use secp256k1::SecretKey;
 use tokio::{sync::mpsc, task};

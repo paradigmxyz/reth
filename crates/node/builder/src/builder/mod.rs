@@ -20,7 +20,9 @@ use reth_db_api::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_exex::ExExContext;
-use reth_network::{NetworkBuilder, NetworkConfig, NetworkHandle, NetworkManager};
+use reth_network::{
+    NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
+};
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::{
     args::{get_secret_key, DatadirArgs},
@@ -38,7 +40,6 @@ use secp256k1::SecretKey;
 pub use states::*;
 use std::{
     net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6},
-    path::PathBuf,
     sync::Arc,
 };
 
@@ -457,6 +458,11 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.provider().chain_spec()
     }
 
+    /// Returns true if the node is configured as --dev
+    pub const fn is_dev(&self) -> bool {
+        self.config().dev.dev
+    }
+
     /// Returns the transaction pool config of the node.
     pub fn pool_config(&self) -> PoolConfig {
         self.config().txpool.pool_config()
@@ -515,9 +521,20 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
 
     /// Returns the default network config for the node.
     pub fn network_config(&self) -> eyre::Result<NetworkConfig<Node::Provider>> {
+        let network_builder = self.network_config_builder();
+        Ok(self.build_network_config(network_builder?))
+    }
+
+    /// Get the [`NetworkConfigBuilder`].
+    pub fn network_config_builder(&self) -> eyre::Result<NetworkConfigBuilder> {
         let secret_key = self.network_secret(&self.config().datadir())?;
         let default_peers_path = self.config().datadir().known_peers();
-        Ok(self.build_network_config(secret_key, default_peers_path))
+        Ok(self.config().network.network_config(
+            self.reth_config(),
+            self.config().chain.clone(),
+            secret_key,
+            default_peers_path,
+        ))
     }
 
     /// Get the network secret from the given data dir
@@ -529,19 +546,11 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Builds the [`NetworkConfig`].
-    fn build_network_config(
+    pub fn build_network_config(
         &self,
-        secret_key: SecretKey,
-        default_peers_path: PathBuf,
+        network_builder: NetworkConfigBuilder,
     ) -> NetworkConfig<Node::Provider> {
-        self.config()
-            .network
-            .network_config(
-                self.reth_config(),
-                self.config().chain.clone(),
-                secret_key,
-                default_peers_path,
-            )
+        network_builder
             .with_task_executor(Box::new(self.executor.clone()))
             .set_head(self.head)
             .listener_addr(SocketAddr::new(
@@ -549,7 +558,6 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 // set discovery port based on instance number
                 self.config().network.port + self.config().instance - 1,
             ))
-            .disable_discv4_discovery_if(self.config().chain.chain.is_optimism())
             .discovery_addr(SocketAddr::new(
                 self.config().network.discovery.addr,
                 // set discovery port based on instance number

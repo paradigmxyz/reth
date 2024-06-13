@@ -602,6 +602,8 @@ where
         Ok(res?)
     }
 
+    /// Handler for `engine_newPayloadV4`
+    /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/prague.md#engine_newpayloadv4>
     async fn new_payload_v4(
         &self,
         payload: ExecutionPayloadV4,
@@ -802,6 +804,7 @@ where
         self.inner.metrics.latency.exchange_transition_configuration.record(start.elapsed());
         Ok(res?)
     }
+
     /// Handler for `engine_getClientVersionV1`
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md>

@@ -15,7 +15,9 @@ workspace = true
 reth-execution-errors.workspace = true
 reth-primitives.workspace = true
 revm-primitives.workspace = true
+reth-prune-types.workspace = true
 reth-storage-errors.workspace = true
+reth-execution-types.workspace = true
 
 revm.workspace = true
 

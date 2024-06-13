@@ -14,17 +14,15 @@ use reth_db_api::{
     transaction::DbTxMut,
 };
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
-use reth_primitives::{
-    stage::{EntitiesCheckpoint, StageCheckpoint, StageId},
-    StaticFileSegment, TxNumber,
-};
+use reth_primitives::{StaticFileSegment, TxNumber};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, StatsReader,
 };
-use reth_stages_api::{ExecInput, ExecOutput, StageError, UnwindInput, UnwindOutput};
-
-use reth_stages_api::Stage;
+use reth_stages_api::{
+    EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
+    UnwindInput, UnwindOutput,
+};
 use reth_storage_errors::provider::ProviderResult;
 
 // TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
@@ -397,8 +395,8 @@ fn stage_checkpoint<DB: Database>(
 mod tests {
     use assert_matches::assert_matches;
 
-    use reth_primitives::stage::StageUnitCheckpoint;
     use reth_provider::StaticFileProviderFactory;
+    use reth_stages_api::StageUnitCheckpoint;
     use test_utils::*;
 
     use crate::test_utils::{

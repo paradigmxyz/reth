@@ -6,7 +6,7 @@ use crate::eth::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_consensus_common::calc::{base_block_reward, block_reward};
+use reth_consensus_common::calc::{base_block_reward, block_reward, ommer_reward};
 use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, SealedHeader, B256, U256};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
@@ -239,13 +239,19 @@ where
         filter: TraceFilter,
     ) -> EthResult<Vec<LocalizedTransactionTrace>> {
         let matcher = filter.matcher();
-        let TraceFilter { from_block, to_block, after: _after, count: _count, .. } = filter;
+        let TraceFilter { from_block, to_block, .. } = filter;
         let start = from_block.unwrap_or(0);
         let end = if let Some(to_block) = to_block {
             to_block
         } else {
             self.provider().best_block_number()?
         };
+
+        if start > end {
+            return Err(EthApiError::InvalidParams(
+                "invalid parameters: fromBlock cannot be greater than toBlock".to_string(),
+            ))
+        }
 
         // ensure that the range is not too large, since we need to fetch all blocks in the range
         let distance = end.saturating_sub(start);
@@ -363,25 +369,25 @@ where
                     block.header.difficulty,
                     header_td,
                 ) {
+                    let block_reward = block_reward(base_block_reward, block.ommers.len());
                     traces.push(reward_trace(
                         &block.header,
                         RewardAction {
                             author: block.header.beneficiary,
                             reward_type: RewardType::Block,
-                            value: U256::from(base_block_reward),
+                            value: U256::from(block_reward),
                         },
                     ));
 
-                    if !block.ommers.is_empty() {
+                    for uncle in &block.ommers {
+                        let uncle_reward =
+                            ommer_reward(base_block_reward, block.header.number, uncle.number);
                         traces.push(reward_trace(
                             &block.header,
                             RewardAction {
-                                author: block.header.beneficiary,
+                                author: uncle.beneficiary,
                                 reward_type: RewardType::Uncle,
-                                value: U256::from(
-                                    block_reward(base_block_reward, block.ommers.len()) -
-                                        base_block_reward,
-                                ),
+                                value: U256::from(uncle_reward),
                             },
                         ));
                     }

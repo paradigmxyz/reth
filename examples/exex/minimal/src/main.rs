@@ -54,13 +54,12 @@ fn main() -> eyre::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use reth::providers::{Chain, ExecutionOutcome};
+    use reth_exex_test_utils::{test_exex_context, PollOnce};
     use std::pin::pin;
 
-    use reth::providers::{BundleStateWithReceipts, Chain};
-    use reth_exex_test_utils::{test_exex_context, PollOnce};
-
     #[tokio::test]
-    async fn exex() -> eyre::Result<()> {
+    async fn test_exex() -> eyre::Result<()> {
         // Initialize a test Execution Extension context with all dependencies
         let (ctx, mut handle) = test_exex_context().await?;
 
@@ -71,7 +70,7 @@ mod tests {
         handle
             .send_notification_chain_committed(Chain::from_block(
                 handle.genesis.clone(),
-                BundleStateWithReceipts::default(),
+                ExecutionOutcome::default(),
                 None,
             ))
             .await?;
@@ -83,7 +82,7 @@ mod tests {
         handle.assert_events_empty();
 
         // Poll the Execution Extension once to process incoming notifications
-        exex.poll_once().await;
+        exex.poll_once().await?;
 
         // Check that the Execution Extension emitted a `FinishedHeight` event with the correct
         // height

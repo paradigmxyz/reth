@@ -4,14 +4,12 @@ use reth_node_api::FullNodeComponents;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
-    rpc::{
-        api::EngineApiClient,
-        builder::{auth::AuthServerHandle, RpcServerHandle},
-    },
+    rpc::api::EngineApiClient,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::ChainSpec;
 use reth_provider::ChainSpecProvider;
+use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
 use std::sync::Arc;
 

@@ -29,23 +29,19 @@ mod compression;
 pub mod constants;
 pub mod eip4844;
 mod error;
-mod exex;
 pub mod genesis;
 mod header;
 mod integer_list;
 mod log;
 mod net;
 pub mod proofs;
-mod prune;
 mod receipt;
 mod request;
 /// Helpers for working with revm
 pub mod revm;
-pub mod stage;
 pub use reth_static_file_types as static_file;
 mod storage;
 pub mod transaction;
-pub mod trie;
 mod withdrawal;
 pub use account::{Account, Bytecode};
 #[cfg(any(test, feature = "arbitrary"))]
@@ -66,7 +62,6 @@ pub use constants::{
     KECCAK_EMPTY, MAINNET_DEPOSIT_CONTRACT, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use error::{GotExpected, GotExpectedBoxed};
-pub use exex::FinishedExExHeight;
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeaderValidationError, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
@@ -75,11 +70,6 @@ pub use net::{
     goerli_nodes, holesky_nodes, mainnet_nodes, parse_nodes, sepolia_nodes, NodeRecord,
     NodeRecordParseError, TrustedPeer, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
     SEPOLIA_BOOTNODES,
-};
-pub use prune::{
-    PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneModes, PruneProgress,
-    PrunePurpose, PruneSegment, PruneSegmentError, ReceiptsLogPruneConfig,
-    MINIMUM_PRUNING_DISTANCE,
 };
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,

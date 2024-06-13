@@ -7,15 +7,17 @@ use crate::{
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{
-        BatchBlockExecutionOutput, BatchExecutor, BlockExecutionError, BlockExecutionInput,
-        BlockExecutionOutput, BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
+        BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
+        BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     ConfigureEvm,
 };
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, PruneModes, Receipt, Request,
-    Withdrawals, MAINNET, U256,
+    BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, Receipt, Request, Withdrawals,
+    MAINNET, U256,
 };
+use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
@@ -404,7 +406,7 @@ where
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BatchBlockExecutionOutput;
+    type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
@@ -434,11 +436,11 @@ where
     fn finalize(mut self) -> Self::Output {
         self.stats.log_debug();
 
-        BatchBlockExecutionOutput::new(
+        ExecutionOutcome::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
-            self.batch_record.take_requests(),
             self.batch_record.first_block().unwrap_or_default(),
+            self.batch_record.take_requests(),
         )
     }
 
@@ -1312,5 +1314,95 @@ mod tests {
         assert_eq!(withdrawal_request.source_address, sender_address);
         assert_eq!(withdrawal_request.validator_public_key, validator_public_key);
         assert_eq!(withdrawal_request.amount, u64::from_be_bytes(withdrawal_amount.into()));
+    }
+
+    #[test]
+    fn block_gas_limit_error() {
+        // Create a chain specification with fork conditions set for Prague
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(0))
+                .build(),
+        );
+
+        // Create a state provider with the withdrawal requests contract pre-deployed
+        let mut db = create_state_provider_with_withdrawal_requests_contract();
+
+        // Initialize Secp256k1 for key pair generation
+        let secp = Secp256k1::new();
+        // Generate a new key pair for the sender
+        let sender_key_pair = Keypair::new(&secp, &mut generators::rng());
+        // Get the sender's address from the public key
+        let sender_address = public_key_to_address(sender_key_pair.public_key());
+
+        // Insert the sender account into the state with a nonce of 1 and a balance of 1 ETH in Wei
+        db.insert_account(
+            sender_address,
+            Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
+            None,
+            HashMap::new(),
+        );
+
+        // Define the validator public key and withdrawal amount as fixed bytes
+        let validator_public_key = fixed_bytes!("111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
+        let withdrawal_amount = fixed_bytes!("2222222222222222");
+        // Concatenate the validator public key and withdrawal amount into a single byte array
+        let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
+        // Ensure the input length is 56 bytes
+        assert_eq!(input.len(), 56);
+
+        // Create a genesis block header with a specified gas limit and gas used
+        let mut header = chain_spec.genesis_header();
+        header.gas_limit = 1_500_000;
+        header.gas_used = 134_807;
+        header.receipts_root =
+            b256!("b31a3e47b902e9211c4d349af4e4c5604ce388471e79ca008907ae4616bb0ed3");
+
+        // Create a transaction with a gas limit higher than the block gas limit
+        let tx = sign_tx_with_key_pair(
+            sender_key_pair,
+            Transaction::Legacy(TxLegacy {
+                chain_id: Some(chain_spec.chain.id()),
+                nonce: 1,
+                gas_price: header.base_fee_per_gas.unwrap().into(),
+                gas_limit: 2_500_000, // higher than block gas limit
+                to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
+                value: U256::from(1),
+                input,
+            }),
+        );
+
+        // Create an executor from the state provider
+        let executor = executor_provider(chain_spec).executor(StateProviderDatabase::new(&db));
+
+        // Execute the block and capture the result
+        let exec_result = executor.execute(
+            (
+                &Block {
+                    header,
+                    body: vec![tx],
+                    ommers: vec![],
+                    withdrawals: None,
+                    requests: None,
+                }
+                .with_recovered_senders()
+                .unwrap(),
+                U256::ZERO,
+            )
+                .into(),
+        );
+
+        // Check if the execution result is an error and assert the specific error type
+        match exec_result {
+            Ok(_) => panic!("Expected block gas limit error"),
+            Err(err) => assert_eq!(
+                *err.as_validation().unwrap(),
+                BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit: 2_500_000,
+                    block_available_gas: 1_500_000,
+                }
+            ),
+        }
     }
 }

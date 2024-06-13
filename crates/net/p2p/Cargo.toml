@@ -16,7 +16,7 @@ reth-primitives.workspace = true
 reth-network-api.workspace = true
 reth-eth-wire-types.workspace = true
 reth-consensus.workspace = true
-reth-network-types.workspace = true
+reth-network-peers.workspace = true
 reth-storage-errors.workspace = true
 
 # async

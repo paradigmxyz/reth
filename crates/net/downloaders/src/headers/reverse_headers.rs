@@ -16,7 +16,7 @@ use reth_network_p2p::{
     },
     priority::Priority,
 };
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{
     BlockHashOrNumber, BlockNumber, GotExpected, Header, HeadersDirection, SealedHeader, B256,
 };

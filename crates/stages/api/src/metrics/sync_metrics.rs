@@ -1,8 +1,8 @@
+use crate::StageId;
 use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives::stage::StageId;
 use std::collections::HashMap;
 
 #[derive(Debug, Default)]

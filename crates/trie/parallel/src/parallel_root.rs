@@ -3,10 +3,7 @@ use alloy_rlp::{BufMut, Encodable};
 use rayon::prelude::*;
 use reth_db_api::database::Database;
 use reth_execution_errors::StorageRootError;
-use reth_primitives::{
-    trie::{HashBuilder, Nibbles, TrieAccount},
-    B256,
-};
+use reth_primitives::{proofs::IntoTrieAccount, B256};
 use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, ProviderError};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -14,7 +11,7 @@ use reth_trie::{
     trie_cursor::TrieCursorFactory,
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashedPostState, StorageRoot,
+    HashBuilder, HashedPostState, Nibbles, StorageRoot,
 };
 use std::collections::HashMap;
 use thiserror::Error;
@@ -155,7 +152,7 @@ where
                     }
 
                     account_rlp.clear();
-                    let account = TrieAccount::from((account, storage_root));
+                    let account = IntoTrieAccount::to_trie_account((account, storage_root));
                     account.encode(&mut account_rlp as &mut dyn BufMut);
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
                 }
