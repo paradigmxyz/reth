@@ -11,7 +11,7 @@
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_block_pre_execution, validate_header_extradata, validate_header_standalone,
-    validate_parent_eip1559_base_fee, validate_parent_hash_number,
+    validate_parent_eip1559_base_fee, validate_parent_hash_number, validate_parent_timestamp,
 };
 use reth_primitives::{
     constants::MINIMUM_GAS_LIMIT, eip4844::calculate_excess_blob_gas, BlockWithSenders, Chain,
@@ -131,12 +131,7 @@ impl Consensus for EthBeaconConsensus {
     ) -> Result<(), ConsensusError> {
         validate_parent_hash_number(header, parent)?;
 
-        if header.is_timestamp_in_past(parent.timestamp) {
-            return Err(ConsensusError::TimestampIsInPast {
-                parent_timestamp: parent.timestamp,
-                timestamp: header.timestamp,
-            })
-        }
+        validate_parent_timestamp(header, parent)?;
 
         // TODO Check difficulty increment between parent and self
         // Ace age did increment it by some formula that we need to follow.

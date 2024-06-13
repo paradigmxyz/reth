@@ -183,7 +183,7 @@ pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> 
     }
 }
 
-/// Validates the parent hash and number.
+/// Validates against the parent hash and number.
 ///
 /// This function ensures that the header block number is sequential and that the hash of the parent
 /// header matches the parent hash in the header.
@@ -208,7 +208,7 @@ pub fn validate_parent_hash_number(
     Ok(())
 }
 
-/// Validates the base fee according to the parent and EIP-1559 rules.
+/// Validates the base fee against the parent and EIP-1559 rules.
 pub fn validate_parent_eip1559_base_fee(
     header: &SealedHeader,
     parent: &SealedHeader,
@@ -237,6 +237,21 @@ pub fn validate_parent_eip1559_base_fee(
 
     Ok(())
 }
+
+/// Validates the timestamp against the parent to make sure it is in the past.
+pub fn validate_parent_timestamp(
+    header: &SealedHeader,
+    parent: &SealedHeader,
+) -> Result<(), ConsensusError> {
+    if header.is_timestamp_in_past(parent.timestamp) {
+        return Err(ConsensusError::TimestampIsInPast {
+            parent_timestamp: parent.timestamp,
+            timestamp: header.timestamp,
+        })
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
