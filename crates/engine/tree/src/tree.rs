@@ -5,19 +5,34 @@ use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::ProviderResult;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Block, SealedBlock, SealedBlockWithSenders, B256};
+use reth_primitives::{Block, BlockNumber, SealedBlock, SealedBlockWithSenders, B256};
 use reth_provider::BlockReader;
 use reth_rpc_types::{
     engine::{CancunPayloadFields, ForkchoiceState, PayloadStatus, PayloadStatusEnum},
     ExecutionPayload,
 };
-use std::{marker::PhantomData, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    marker::PhantomData,
+    sync::Arc,
+};
 use tracing::*;
+
+/// Represents an executed block stored in-memory.
+#[derive(Clone, Debug)]
+struct ExecutedBlock {
+    block: Arc<SealedBlockWithSenders>,
+    state: Arc<()>,
+    trie: Arc<()>,
+}
 
 /// Keeps track of the state of the tree.
 #[derive(Clone, Debug)]
 pub struct TreeState {
-    // TODO: this is shared state for the blocks etc.
+    /// All executed blocks by hash.
+    blocks_by_hash: HashMap<B256, ExecutedBlock>,
+    /// Executed blocks grouped by their respective block number.
+    blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock>>,
 }
 
 impl TreeState {
@@ -27,7 +42,32 @@ impl TreeState {
 
     fn buffer(&mut self) {}
 
-    fn insert_validated(&mut self) {}
+    /// Insert executed block into the state.
+    fn insert_executed(&mut self, executed: ExecutedBlock) {
+        self.blocks_by_number.entry(executed.block.number).or_default().push(executed.clone());
+        let existing = self.blocks_by_hash.insert(executed.block.hash(), executed);
+        debug_assert!(existing.is_none(), "inserted duplicate block");
+    }
+
+    /// Remove blocks before specified block number.
+    fn remove_before(&mut self, block_number: BlockNumber) {
+        while self
+            .blocks_by_number
+            .first_key_value()
+            .map(|entry| entry.0 < &block_number)
+            .unwrap_or_default()
+        {
+            let (_, to_remove) = self.blocks_by_number.pop_first().unwrap();
+            for block in to_remove {
+                let block_hash = block.block.hash();
+                let removed = self.blocks_by_hash.remove(&block_hash);
+                debug_assert!(
+                    removed.is_some(),
+                    "attempted to remove non-existing block {block_hash}"
+                );
+            }
+        }
+    }
 }
 
 /// Tracks the state of the engine api internals.
