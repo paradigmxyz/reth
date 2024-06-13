@@ -206,6 +206,10 @@ pub enum ConsensusError {
         block_number: BlockNumber,
     },
 
+    /// Error when the parent hash does not match the expected parent hash.
+    #[error("mismatched parent hash: {0}")]
+    ParentHashMismatch(GotExpectedBoxed<B256>),
+
     /// Error when the block timestamp is in the future compared to our clock time.
     #[error("block timestamp {timestamp} is in the future compared to our clock time {present_timestamp}")]
     TimestampIsInFuture {
@@ -328,10 +332,6 @@ pub enum ConsensusError {
     /// Error for a transaction that violates consensus.
     #[error(transparent)]
     InvalidTransaction(#[from] InvalidTransactionError),
-
-    /// Error when the parent hash does not match the expected parent hash.
-    #[error("mismatched parent hash: {0}")]
-    ParentHashMismatch(GotExpectedBoxed<B256>),
 
     /// Error when the block's base fee is different from the expected base fee.
     #[error("block base fee mismatch: {0}")]
