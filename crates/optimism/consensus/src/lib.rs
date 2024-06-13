@@ -56,15 +56,13 @@ impl Consensus for OptimismBeaconConsensus {
     ) -> Result<(), ConsensusError> {
         validate_parent_hash_number(header, parent)?;
 
-        // timestamp in past check
         if self.chain_spec.is_bedrock_active_at_block(header.number) &&
             header.is_timestamp_in_past(parent.timestamp)
         {
             return Err(ConsensusError::TimestampIsInPast {
                 parent_timestamp: parent.timestamp,
                 timestamp: header.timestamp,
-            }
-            .into())
+            })
         }
 
         validate_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
