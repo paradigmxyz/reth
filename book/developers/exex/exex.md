@@ -16,7 +16,7 @@ Read more about things you can build with Execution Extensions in the [Paradigm 
 ## What Execution Extensions are not?
 
 Execution Extensions are not separate processes that connect to the main Reth node process.
-Instead, ExExes are compiled into the same binary as Reth, and run alongside it, sharing the memory.
+Instead, ExExes are compiled into the same binary as Reth, and run alongside it, sharing memory.
 
 If you want to build an Execution Extension that sends data into a separate process, check out the [Sink](./sink.md) chapter.
 
