@@ -60,6 +60,7 @@ optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
+    "reth-rpc/optimism",
     "reth-evm-optimism/optimism",
     "reth-optimism-payload-builder/optimism",
     "reth-beacon-consensus/optimism",
