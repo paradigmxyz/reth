@@ -1,4 +1,6 @@
-use reth_primitives::{BlockNumHash, BlockNumber, B256};
+use alloy_eips::BlockNumHash;
+use alloy_primitives::{BlockNumber, B256};
+
 /// Current status of the blockchain's head.
 #[derive(Default, Copy, Clone, Debug, Eq, PartialEq)]
 pub struct ChainInfo {
@@ -10,6 +12,6 @@ pub struct ChainInfo {
 
 impl From<ChainInfo> for BlockNumHash {
     fn from(value: ChainInfo) -> Self {
-        BlockNumHash { number: value.best_number, hash: value.best_hash }
+        Self { number: value.best_number, hash: value.best_hash }
     }
 }

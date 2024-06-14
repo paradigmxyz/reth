@@ -12,19 +12,25 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
-reth-network-types.workspace = true
 reth-ethereum-forks.workspace = true
+reth-network-peers.workspace = true
+reth-trie-common.workspace = true
+reth-primitives-traits.workspace = true
+reth-primitives.workspace = true
 
 # ethereum
 alloy-chains = { workspace = true, features = ["serde", "rlp"] }
 alloy-eips.workspace = true
-alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-genesis.workspace = true
+alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
+alloy-trie.workspace = true
+
 # misc
 once_cell.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+derive_more.workspace = true
+
 [dev-dependencies]
 # eth
 nybbles = { workspace = true, features = ["arbitrary"] }
@@ -36,7 +42,10 @@ reth-rpc-types.workspace = true
 rand.workspace = true
 
 [features]
-optimism = []
+optimism = [
+    "reth-primitives/optimism",
+    "reth-ethereum-forks/optimism"
+]
 
 
 
