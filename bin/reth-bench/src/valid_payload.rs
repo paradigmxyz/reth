@@ -5,7 +5,6 @@
 use alloy_provider::{ext::EngineApi, Network};
 use alloy_rpc_types_engine::{
     ExecutionPayloadInputV2, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
-    PayloadStatusEnum,
 };
 use alloy_transport::{Transport, TransportResult};
 use reth_node_api::EngineApiMessageVersion;
@@ -76,8 +75,8 @@ where
         payload: ExecutionPayloadV1,
     ) -> TransportResult<PayloadStatus> {
         let mut status = self.new_payload_v1(payload.clone()).await?;
-        while status.status != PayloadStatusEnum::Valid {
-            if status.status.is_invalid() {
+        while !status.is_valid() {
+            if status.is_invalid() {
                 error!(?status, ?payload, "Invalid newPayloadV1",);
                 panic!("Invalid newPayloadV1: {status:?}");
             }
@@ -91,8 +90,8 @@ where
         payload: ExecutionPayloadInputV2,
     ) -> TransportResult<PayloadStatus> {
         let mut status = self.new_payload_v2(payload.clone()).await?;
-        while status.status != PayloadStatusEnum::Valid {
-            if status.status.is_invalid() {
+        while !status.is_valid() {
+            if status.is_invalid() {
                 error!(?status, ?payload, "Invalid newPayloadV2",);
                 panic!("Invalid newPayloadV2: {status:?}");
             }
@@ -110,8 +109,8 @@ where
         let mut status = self
             .new_payload_v3(payload.clone(), versioned_hashes.clone(), parent_beacon_block_root)
             .await?;
-        while status.status != PayloadStatusEnum::Valid {
-            if status.status.is_invalid() {
+        while !status.is_valid() {
+            if status.is_invalid() {
                 error!(
                     ?status,
                     ?payload,
@@ -136,8 +135,8 @@ where
         let mut status =
             self.fork_choice_updated_v1(fork_choice_state, payload_attributes.clone()).await?;
 
-        while status.payload_status.status != PayloadStatusEnum::Valid {
-            if status.payload_status.status.is_invalid() {
+        while !status.is_valid() {
+            if status.is_invalid() {
                 error!(
                     ?status,
                     ?fork_choice_state,
@@ -161,8 +160,8 @@ where
         let mut status =
             self.fork_choice_updated_v2(fork_choice_state, payload_attributes.clone()).await?;
 
-        while status.payload_status.status != PayloadStatusEnum::Valid {
-            if status.payload_status.status.is_invalid() {
+        while !status.is_valid() {
+            if status.is_invalid() {
                 error!(
                     ?status,
                     ?fork_choice_state,
@@ -186,8 +185,8 @@ where
         let mut status =
             self.fork_choice_updated_v3(fork_choice_state, payload_attributes.clone()).await?;
 
-        while status.payload_status.status != PayloadStatusEnum::Valid {
-            if status.payload_status.status.is_invalid() {
+        while !status.is_valid() {
+            if status.is_invalid() {
                 error!(
                     ?status,
                     ?fork_choice_state,
