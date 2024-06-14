@@ -10,7 +10,4 @@ repository.workspace = true
 
 [build-dependencies]
 cc = "1.0"
-bindgen = { version = "0.69", optional = true }
-
-[features]
-generate-bindings = ["dep:bindgen"]
+bindgen = { version = "0.69", default-features = false, features = ["runtime"] }

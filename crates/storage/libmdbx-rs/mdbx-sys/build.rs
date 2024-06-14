@@ -1,4 +1,7 @@
-use std::{env, path::PathBuf};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -6,8 +9,8 @@ fn main() {
 
     println!("cargo:rerun-if-changed={}", mdbx.display());
 
-    #[cfg(feature = "generate-bindings")]
-    generate_bindings(&manifest_dir, &mdbx);
+    let bindings = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("bindings.rs");
+    generate_bindings(&mdbx, &bindings);
 
     let mut cc = cc::Build::new();
     cc.flag_if_supported("-Wno-unused-parameter").flag_if_supported("-Wuninitialized");
@@ -38,8 +41,7 @@ fn main() {
     cc.file(mdbx.join("mdbx.c")).compile("libmdbx.a");
 }
 
-#[cfg(feature = "generate-bindings")]
-fn generate_bindings(manifest_dir: &std::path::Path, mdbx: &std::path::Path) {
+fn generate_bindings(mdbx: &Path, out_file: &Path) {
     use bindgen::{
         callbacks::{IntKind, ParseCallbacks},
         Formatter,
@@ -106,5 +108,5 @@ fn generate_bindings(manifest_dir: &std::path::Path, mdbx: &std::path::Path) {
         .formatter(Formatter::Rustfmt)
         .generate()
         .expect("Unable to generate bindings");
-    bindings.write_to_file(manifest_dir.join("src/bindings.rs")).expect("Couldn't write bindings!");
+    bindings.write_to_file(out_file).expect("Couldn't write bindings!");
 }
