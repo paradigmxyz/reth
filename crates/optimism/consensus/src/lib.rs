@@ -11,7 +11,9 @@
 
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
-    validate_block_pre_execution, validate_header_extradata, validate_header_standalone,
+    validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
+    validate_against_parent_timestamp, validate_block_pre_execution, validate_header_base_fee,
+    validate_header_extradata, validate_header_gas,
 };
 use reth_primitives::{
     BlockWithSenders, ChainSpec, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
@@ -44,8 +46,8 @@ impl OptimismBeaconConsensus {
 
 impl Consensus for OptimismBeaconConsensus {
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
-        validate_header_standalone(header, &self.chain_spec)?;
-        Ok(())
+        validate_header_gas(header)?;
+        validate_header_base_fee(header, &self.chain_spec)
     }
 
     fn validate_header_against_parent(
@@ -53,7 +55,14 @@ impl Consensus for OptimismBeaconConsensus {
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        header.validate_against_parent(parent, &self.chain_spec).map_err(ConsensusError::from)?;
+        validate_against_parent_hash_number(header, parent)?;
+
+        if self.chain_spec.is_bedrock_active_at_block(header.number) {
+            validate_against_parent_timestamp(header, parent)?;
+        }
+
+        validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
+
         Ok(())
     }
 

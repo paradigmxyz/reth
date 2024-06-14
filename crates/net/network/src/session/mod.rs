@@ -15,7 +15,6 @@ use reth_eth_wire::{
     UnauthedP2PStream,
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
-use reth_net_common::stream::HasRemoteAddr;
 use reth_network_peers::PeerId;
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_tasks::TaskSpawner;
@@ -927,7 +926,7 @@ async fn authenticate(
 
 /// Returns an [`ECIESStream`] if it can be built. If not, send a
 /// [`PendingSessionEvent::EciesAuthError`] and returns `None`
-async fn get_eciess_stream<Io: AsyncRead + AsyncWrite + Unpin + HasRemoteAddr>(
+async fn get_eciess_stream<Io: AsyncRead + AsyncWrite + Unpin>(
     stream: Io,
     secret_key: SecretKey,
     direction: Direction,

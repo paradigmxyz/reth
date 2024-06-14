@@ -1,7 +1,7 @@
 [workspace.package]
 version = "1.0.0-rc.1"
 edition = "2021"
-rust-version = "1.76"
+rust-version = "1.79"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -99,9 +99,9 @@ members = [
     "crates/tokio-util/",
     "crates/tracing/",
     "crates/transaction-pool/",
+    "crates/trie/common",
     "crates/trie/parallel/",
     "crates/trie/trie",
-    "crates/trie/types",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
@@ -332,8 +332,8 @@ reth-tokio-util = { path = "crates/tokio-util" }
 reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie/trie" }
+reth-trie-common = { path = "crates/trie/common" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
-reth-trie-types = { path = "crates/trie/types" }
 
 # revm
 revm = { version = "9.0.0", features = [
@@ -357,9 +357,10 @@ alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", 
     "eth",
 ] }
 alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
 alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
+alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
 alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
 alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
 alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false, features = [
@@ -391,6 +392,7 @@ derive_more = "0.99.17"
 fdlimit = "0.3.0"
 eyre = "0.6"
 generic-array = "0.14"
+linked_hash_set = "0.1"
 tracing = "0.1.0"
 tracing-appender = "0.2"
 thiserror = "1.0"
@@ -458,6 +460,7 @@ jsonrpsee-http-client = "0.23"
 # http
 http = "1.0"
 http-body = "1.0"
+jsonwebtoken = "9"
 
 # crypto
 secp256k1 = { version = "0.28", default-features = false, features = [

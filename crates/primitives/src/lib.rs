@@ -30,7 +30,7 @@ pub mod constants;
 pub mod eip4844;
 mod error;
 pub mod genesis;
-mod header;
+pub mod header;
 mod integer_list;
 mod log;
 mod net;
@@ -63,7 +63,7 @@ pub use constants::{
 };
 pub use error::{GotExpected, GotExpectedBoxed};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
-pub use header::{Header, HeaderValidationError, HeadersDirection, SealedHeader};
+pub use header::{Header, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
 pub use net::{

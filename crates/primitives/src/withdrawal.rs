@@ -1,8 +1,8 @@
 //! [EIP-4895](https://eips.ethereum.org/EIPS/eip-4895) Withdrawal types.
 
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use derive_more::{AsRef, Deref, DerefMut, From, IntoIterator};
 use reth_codecs::{main_codec, Compact};
-use std::ops::{Deref, DerefMut};
 
 /// Re-export from `alloy_eips`.
 #[doc(inline)]
@@ -10,12 +10,27 @@ pub use alloy_eips::eip4895::Withdrawal;
 
 /// Represents a collection of Withdrawals.
 #[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodableWrapper, RlpDecodableWrapper)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Default,
+    Hash,
+    From,
+    AsRef,
+    Deref,
+    DerefMut,
+    IntoIterator,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+)]
+#[as_ref(forward)]
 pub struct Withdrawals(Vec<Withdrawal>);
 
 impl Withdrawals {
     /// Create a new Withdrawals instance.
-    pub fn new(withdrawals: Vec<Withdrawal>) -> Self {
+    pub const fn new(withdrawals: Vec<Withdrawal>) -> Self {
         Self(withdrawals)
     }
 
@@ -44,41 +59,6 @@ impl Withdrawals {
     /// Convert [Self] into raw vec of withdrawals.
     pub fn into_inner(self) -> Vec<Withdrawal> {
         self.0
-    }
-}
-
-impl IntoIterator for Withdrawals {
-    type Item = Withdrawal;
-    type IntoIter = std::vec::IntoIter<Withdrawal>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-impl AsRef<[Withdrawal]> for Withdrawals {
-    fn as_ref(&self) -> &[Withdrawal] {
-        &self.0
-    }
-}
-
-impl Deref for Withdrawals {
-    type Target = Vec<Withdrawal>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Withdrawals {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl From<Vec<Withdrawal>> for Withdrawals {
-    fn from(withdrawals: Vec<Withdrawal>) -> Self {
-        Self(withdrawals)
     }
 }
 

@@ -2,10 +2,11 @@ use super::{AccountReader, BlockHashReader, BlockIdReader, StateRootProvider};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    proofs::AccountProof, Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag,
-    Bytecode, StorageKey, StorageValue, B256, KECCAK_EMPTY, U256,
+    Address, BlockHash, BlockId, BlockNumHash, BlockNumber, BlockNumberOrTag, Bytecode, StorageKey,
+    StorageValue, B256, KECCAK_EMPTY, U256,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_trie::AccountProof;
 
 /// Type alias of boxed [`StateProvider`].
 pub type StateProviderBox = Box<dyn StateProvider>;

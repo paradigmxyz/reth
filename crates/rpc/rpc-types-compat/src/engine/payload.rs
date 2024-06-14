@@ -2,7 +2,7 @@
 //! Ethereum's Engine
 
 use reth_primitives::{
-    constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
+    constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE},
     proofs::{self},
     Block, Header, Request, SealedBlock, TransactionSigned, UintTryTo, Withdrawals, B256, U256,
 };
@@ -18,7 +18,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         return Err(PayloadError::ExtraData(payload.extra_data))
     }
 
-    if payload.base_fee_per_gas < MIN_PROTOCOL_BASE_FEE_U256 {
+    if payload.base_fee_per_gas.is_zero() {
         return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
     }
 

@@ -39,7 +39,7 @@ pub struct EthBuiltPayload {
 
 impl EthBuiltPayload {
     /// Initializes the payload with the given initial block.
-    pub fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
+    pub const fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
         Self { id, block, fees, sidecars: Vec::new() }
     }
 

@@ -115,7 +115,7 @@ impl<TX> DatabaseProvider<TX> {
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-write transaction.
-    pub fn new_rw(
+    pub const fn new_rw(
         tx: TX,
         chain_spec: Arc<ChainSpec>,
         static_file_provider: StaticFileProvider,
@@ -252,7 +252,7 @@ where
 
 impl<TX: DbTx> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-only transaction.
-    pub fn new(
+    pub const fn new(
         tx: TX,
         chain_spec: Arc<ChainSpec>,
         static_file_provider: StaticFileProvider,
