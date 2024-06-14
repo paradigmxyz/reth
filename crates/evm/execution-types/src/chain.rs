@@ -637,7 +637,7 @@ mod tests {
 
         // Clone the default block into block1 and block2
         let mut block1 = block.clone();
-        let mut block2 = block.clone();
+        let mut block2 = block;
 
         // Set the hashes of block1 and block2
         block1.block.header.set_hash(block1_hash);
@@ -668,9 +668,8 @@ mod tests {
         };
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(receipt1.clone())], vec![Some(receipt2.clone())]],
-        };
+        let receipts =
+            Receipts { receipt_vec: vec![vec![Some(receipt1.clone())], vec![Some(receipt2)]] };
 
         // Create an ExecutionOutcome object with the created bundle, receipts, an empty requests
         // vector, and first_block set to 10
@@ -690,12 +689,12 @@ mod tests {
         };
 
         // Assert that the proper receipt vector is returned for block1_hash
-        assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1.clone()]));
+        assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));
 
         // Create an ExecutionOutcome object with a single receipt vector containing receipt1
         let execution_outcome1 = ExecutionOutcome {
             bundle: Default::default(),
-            receipts: Receipts { receipt_vec: vec![vec![Some(receipt1.clone())]] },
+            receipts: Receipts { receipt_vec: vec![vec![Some(receipt1)]] },
             requests: vec![],
             first_block: 10,
         };
