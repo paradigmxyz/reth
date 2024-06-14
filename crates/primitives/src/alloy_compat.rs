@@ -232,21 +232,16 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                     source_hash: tx
                         .other
                         .get_deserialized::<String>("sourceHash")
-                        .ok_or(ConversionError::Custom(String::from("MissingSourceHash")))?
-                        .map_err(|_| ConversionError::Custom(String::from("MissingSourceHash")))?
+                        .ok_or_else(|| ConversionError::Custom("MissingSourceHash".to_string()))?
+                        .map_err(|_| ConversionError::Custom("MissingSourceHash".to_string()))?
                         .parse()
-                        .map_err(|_| ConversionError::Custom(String::from("InvalidSourceHash")))?,
+                        .map_err(|_| ConversionError::Custom("InvalidSourceHash".to_string()))?,
                     from: tx.from,
                     to: TxKind::from(tx.to),
                     mint: Option::transpose(tx.other.get_deserialized::<alloy_primitives::U128>("mint"))
-                        .map_err(|_| ConversionError::Custom(String::from("MissingMintValue")))?
-                        .and_then(|num| {
-                            if num.to::<u128>() == 0 {
-                                None
-                            } else {
-                                Some(num.to::<u128>())
-                            }
-                        }),
+                        .map_err(|_| ConversionError::Custom("MissingMintValue".to_string()))?
+                        .map(|num| num.to::<u128>())
+                        .filter(|num| *num > 0),
                     value: tx.value,
                     gas_limit: tx
                         .gas
