@@ -7,8 +7,7 @@
 //!
 //! These modes are mutually exclusive and the node can only be in one mode at a time.
 
-use reth_primitives::stage::PipelineTarget;
-use reth_stages_api::{ControlFlow, PipelineError};
+use reth_stages_api::{ControlFlow, PipelineError, PipelineTarget};
 use std::task::{Context, Poll};
 
 /// A handler for the pipeline.

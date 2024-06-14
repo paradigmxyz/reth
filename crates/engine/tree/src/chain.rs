@@ -1,6 +1,6 @@
 use crate::pipeline::{PipelineAction, PipelineEvent, PipelineHandler};
 use futures::Stream;
-use reth_primitives::stage::PipelineTarget;
+use reth_stages_api::PipelineTarget;
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -60,7 +60,7 @@ where
     ///
     /// Polls the `ChainOrchestrator` for the next event.
     #[tracing::instrument(level = "debug", name = "ChainOrchestrator::poll", skip(self, cx))]
-    fn poll_next_event(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<ChainEvent> {
+    fn poll_next_event(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<ChainEvent> {
         let this = self.get_mut();
 
         // This loop polls the components

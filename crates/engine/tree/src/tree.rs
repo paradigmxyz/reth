@@ -5,6 +5,7 @@ use reth_blockchain_tree::BlockBuffer;
 use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::ProviderResult;
+use reth_payload_primitives::PayloadTypes;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Address, Block, BlockNumber, SealedBlock, SealedBlockWithSenders, B256};
 use reth_provider::BlockReader;
@@ -129,7 +130,7 @@ pub trait EngineApiTreeHandler: Send + Sync + Clone {
     fn on_forkchoice_updated(
         &self,
         state: ForkchoiceState,
-        attrs: Option<<Self::Engine as EngineTypes>::PayloadAttributes>,
+        attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> TreeOutcome<Result<OnForkChoiceUpdated, String>>;
 }
 
@@ -155,7 +156,7 @@ impl<T> TreeOutcome<T> {
     }
 }
 
-/// Events that can be emitted by the [EngineApiTreeHandler].
+/// Events that can be emitted by the [`EngineApiTreeHandler`].
 #[derive(Debug)]
 pub enum TreeEvent {
     /// Pipeline action is needed.
@@ -402,7 +403,7 @@ where
     fn on_forkchoice_updated(
         &self,
         state: ForkchoiceState,
-        attrs: Option<<Self::Engine as EngineTypes>::PayloadAttributes>,
+        attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> TreeOutcome<Result<OnForkChoiceUpdated, String>> {
         todo!()
     }

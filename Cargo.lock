@@ -6889,6 +6889,7 @@ dependencies = [
  "reth-metrics",
  "reth-network-p2p",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
