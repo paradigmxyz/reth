@@ -12,19 +12,28 @@ use serde_json::Value;
 use tracing::trace;
 
 use crate::{
-    EthApiServer,
     eth::{
-        api::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, Trace, LoadReceipt},
+        api::{
+            EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadReceipt, Trace,
+        },
         error::EthApiError,
         revm_utils::EvmOverrides,
     },
     result::{internal_rpc_err, ToRpcResult},
+    EthApiServer,
 };
 
 #[async_trait::async_trait]
 impl<T> EthApiServer for T
 where
-    Self: EthApiSpec + EthTransactions + EthBlocks + EthState + EthCall + EthFees + Trace + LoadReceipt,
+    Self: EthApiSpec
+        + EthTransactions
+        + EthBlocks
+        + EthState
+        + EthCall
+        + EthFees
+        + Trace
+        + LoadReceipt,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> Result<U64> {
@@ -414,8 +423,7 @@ where
 mod tests {
     use crate::{
         eth::{
-            EthApi,
-            cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
+            cache::EthStateCache, gas_oracle::GasPriceOracle, EthApi, FeeHistoryCache,
             FeeHistoryCacheConfig,
         },
         EthApiServer,

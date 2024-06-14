@@ -11,8 +11,8 @@
 //! divided into: [`EthTransactions`], [`EthBlocks`], [`EthFees`], [`EthState`] and [`EthCall`].
 //! Default implementation of the `Eth` traits, is done w.r.t. L1.
 //!
-//! [`EthApiServer`](reth_rpc_eth_api::EthApiServer), is implemented for any type that implements all
-//! the `Eth` traits, e.g. [`EthApi`](crate::EthApi).
+//! [`EthApiServer`](reth_rpc_eth_api::EthApiServer), is implemented for any type that implements
+//! all the `Eth` traits, e.g. [`EthApi`](crate::EthApi).
 
 pub mod block;
 pub mod blocking_task;

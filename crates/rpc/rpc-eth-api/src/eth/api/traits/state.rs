@@ -12,13 +12,11 @@ use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
-use crate::{
-    eth::{
-        api::{pending_block::PendingBlockEnv, LoadPendingBlock, SpawnBlocking},
-        cache::EthStateCache,
-        error::{EthApiError, EthResult, RpcInvalidTransactionError},
-        EthApiSpec,
-    },
+use crate::eth::{
+    api::{pending_block::PendingBlockEnv, LoadPendingBlock, SpawnBlocking},
+    cache::EthStateCache,
+    error::{EthApiError, EthResult, RpcInvalidTransactionError},
+    EthApiSpec,
 };
 
 /// Helper methods for `eth_` methods relating to state (accounts).

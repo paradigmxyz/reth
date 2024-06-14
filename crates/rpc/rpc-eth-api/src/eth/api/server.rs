@@ -24,6 +24,6 @@ use crate::{
         revm_utils::EvmOverrides,
         EthApi,
     },
-    EthApiServer,
     result::{internal_rpc_err, ToRpcResult},
+    EthApiServer,
 };

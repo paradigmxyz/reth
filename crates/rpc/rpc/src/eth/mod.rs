@@ -9,5 +9,4 @@ pub use filter::{EthFilter, EthFilterConfig};
 pub use id_provider::EthSubscriptionIdProvider;
 pub use pubsub::EthPubSub;
 
-
 pub use reth_rpc_eth_api::eth::*;

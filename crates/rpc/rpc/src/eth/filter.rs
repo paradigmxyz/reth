@@ -13,10 +13,7 @@ use reth_primitives::{ChainInfo, IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_eth_api::{
-    eth::{
-        cache::EthStateCache,
-        error::EthApiError,
-    },
+    eth::{cache::EthStateCache, error::EthApiError},
     result::{rpc_error_with_code, ToRpcResult},
 };
 use reth_rpc_types::{
@@ -32,7 +29,10 @@ use tokio::{
 };
 use tracing::trace;
 
-use crate::{EthSubscriptionIdProvider, eth::logs_utils::{self, append_matching_block_logs}};
+use crate::{
+    eth::logs_utils::{self, append_matching_block_logs},
+    EthSubscriptionIdProvider,
+};
 
 /// The maximum number of headers we read at once when handling a range filter.
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb

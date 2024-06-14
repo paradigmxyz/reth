@@ -10,13 +10,11 @@ use reth_rpc_types::{
     TransactionReceipt, WithOtherFields,
 };
 
-use crate::{
-    eth::{
-        EthApi,
-        api::LoadReceipt,
-        cache::EthStateCache,
-        error::{EthApiError, EthResult},
-    },
+use crate::eth::{
+    api::LoadReceipt,
+    cache::EthStateCache,
+    error::{EthApiError, EthResult},
+    EthApi,
 };
 
 impl<Provider, Pool, Network, EvmConfig> LoadReceipt for EthApi<Provider, Pool, Network, EvmConfig>

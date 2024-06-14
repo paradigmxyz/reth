@@ -12,8 +12,9 @@ use reth_revm::state_change::{apply_beacon_root_contract_call, apply_blockhashes
 use revm::{Database, DatabaseCommit};
 use revm_primitives::EnvWithHandlerCfg;
 
-use crate::{
-    eth::{EthApi, error::{EthApiError, EthResult}},
+use crate::eth::{
+    error::{EthApiError, EthResult},
+    EthApi,
 };
 
 /// Implements [`LoadPendingBlock`](crate::eth::api::LoadPendingBlock) for a type, that has similar

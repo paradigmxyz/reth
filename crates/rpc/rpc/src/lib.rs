@@ -55,5 +55,4 @@ pub use trace::TraceApi;
 pub use txpool::TxPoolApi;
 pub use web3::Web3Api;
 
-
-pub use reth_rpc_eth_api::{result, eth::EthApi};
+pub use reth_rpc_eth_api::{eth::EthApi, result};
