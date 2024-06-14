@@ -16,9 +16,8 @@ use reth_consensus_common::validation::{
     validate_header_extradata, validate_header_gas,
 };
 use reth_primitives::{
-    constants::MINIMUM_GAS_LIMIT, eip4844::calculate_excess_blob_gas, BlockWithSenders, Chain,
-    ChainSpec, GotExpected, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH,
-    U256,
+    constants::MINIMUM_GAS_LIMIT, BlockWithSenders, Chain, ChainSpec, Hardfork, Header,
+    SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
 
