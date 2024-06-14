@@ -10,6 +10,7 @@ use crate::{
     Hardfork, Head, Header, NamedChain, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH,
     MAINNET_DEPOSIT_CONTRACT, U256,
 };
+use derive_more::From;
 use once_cell::sync::Lazy;
 use reth_trie_common::root::state_root_ref_unhashed;
 use serde::{Deserialize, Serialize};
@@ -484,14 +485,8 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 
 /// A type alias to a vector of tuples of [Hardfork] and [`BaseFeeParams`], sorted by [Hardfork]
 /// activation order. This is used to specify dynamic EIP-1559 parameters for chains like Optimism.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
-
-impl From<Vec<(Hardfork, BaseFeeParams)>> for ForkBaseFeeParams {
-    fn from(params: Vec<(Hardfork, BaseFeeParams)>) -> Self {
-        Self(params)
-    }
-}
 
 /// An Ethereum chain specification.
 ///

@@ -3,11 +3,11 @@ use crate::{
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
+use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::{any, prop_compose};
 use reth_codecs::derive_arbitrary;
 use serde::{Deserialize, Serialize};
-use std::ops::Deref;
 
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
@@ -28,12 +28,13 @@ prop_compose! {
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[derive_arbitrary(rlp, 25)]
 #[derive(
-    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
+    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, RlpEncodable, RlpDecodable,
 )]
 #[rlp(trailing)]
 pub struct Block {
     /// Block header.
     #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "valid_header_strategy()"))]
+    #[deref]
     pub header: Header,
     /// Transactions in this block.
     #[cfg_attr(
@@ -181,17 +182,12 @@ impl Block {
     }
 }
 
-impl Deref for Block {
-    type Target = Header;
-    fn deref(&self) -> &Self::Target {
-        &self.header
-    }
-}
-
 /// Sealed block with senders recovered from transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut)]
 pub struct BlockWithSenders {
     /// Block
+    #[deref]
+    #[deref_mut]
     pub block: Block,
     /// List of senders that match the transactions in the block
     pub senders: Vec<Address>,
@@ -253,30 +249,28 @@ impl BlockWithSenders {
     }
 }
 
-impl Deref for BlockWithSenders {
-    type Target = Block;
-    fn deref(&self) -> &Self::Target {
-        &self.block
-    }
-}
-
-#[cfg(any(test, feature = "test-utils"))]
-impl std::ops::DerefMut for BlockWithSenders {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.block
-    }
-}
-
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[derive_arbitrary(rlp)]
 #[derive(
-    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    Deref,
+    DerefMut,
+    RlpEncodable,
+    RlpDecodable,
 )]
 #[rlp(trailing)]
 pub struct SealedBlock {
     /// Locked block header.
+    #[deref]
+    #[deref_mut]
     pub header: SealedHeader,
     /// Transactions with signatures.
     #[cfg_attr(
@@ -450,24 +444,12 @@ impl From<SealedBlock> for Block {
     }
 }
 
-impl Deref for SealedBlock {
-    type Target = SealedHeader;
-    fn deref(&self) -> &Self::Target {
-        &self.header
-    }
-}
-
-#[cfg(any(test, feature = "test-utils"))]
-impl std::ops::DerefMut for SealedBlock {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.header
-    }
-}
-
 /// Sealed block with senders recovered from transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SealedBlockWithSenders {
     /// Sealed block
+    #[deref]
+    #[deref_mut]
     pub block: SealedBlock,
     /// List of senders that match transactions from block.
     pub senders: Vec<Address>,
@@ -518,20 +500,6 @@ impl SealedBlockWithSenders {
         self,
     ) -> impl Iterator<Item = TransactionSignedEcRecovered> {
         self.block.body.into_iter().zip(self.senders).map(|(tx, sender)| tx.with_signer(sender))
-    }
-}
-
-impl Deref for SealedBlockWithSenders {
-    type Target = SealedBlock;
-    fn deref(&self) -> &Self::Target {
-        &self.block
-    }
-}
-
-#[cfg(any(test, feature = "test-utils"))]
-impl std::ops::DerefMut for SealedBlockWithSenders {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.block
     }
 }
 
