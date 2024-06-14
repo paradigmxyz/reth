@@ -1,6 +1,6 @@
 //! Ethereum protocol-related constants
 
-use alloy_primitives::{address, b256, B256, U256};
+use alloy_primitives::{b256, B256, U256};
 use std::time::Duration;
 
 /// The client version: `reth/v{major}.{minor}.{patch}`
