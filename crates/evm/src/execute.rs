@@ -12,7 +12,7 @@ pub use reth_storage_errors::provider::ProviderError;
 /// Trait that transacts an input (e.g. transaction and height) and produces an output
 /// (e.g. state changes).
 ///
-/// The trait cannot commit the state changes to the database directly, see [`EvmCommitter`].
+/// The trait cannot commit the state changes to the database directly, see [`EvmCommit`].
 pub trait EvmTransact {
     /// The environment for the evm.
     type Env;
