@@ -8,7 +8,7 @@ as a base for driving the chain (be it [Ethereum](../../run/mainnet.md) or [OP S
 An Execution Extension is a task that derives its state from changes in Reth's state.
 Some examples of such state derivations are rollups, bridges, and indexers.
 
-They are called Execution Extensions because the main trigger for them is the execution of new blocks (or reorgs of old)
+They are called Execution Extensions because the main trigger for them is the execution of new blocks (or reorgs of old blocks)
 initiated by Reth.
 
 Read more about things you can build with Execution Extensions in the [Paradigm blog](https://www.paradigm.xyz/2024/05/reth-exex).
