@@ -63,7 +63,7 @@ impl TreeState {
     }
 
     /// Remove blocks before specified block number.
-    fn remove_before(&mut self, block_number: BlockNumber) {
+    pub(crate) fn remove_before(&mut self, block_number: BlockNumber) {
         while self
             .blocks_by_number
             .first_key_value()
