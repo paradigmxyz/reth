@@ -56,19 +56,19 @@ impl TxState {
     ///   - enough blob fee cap
     #[inline]
     pub(crate) const fn is_pending(&self) -> bool {
-        self.bits() >= TxState::PENDING_POOL_BITS.bits()
+        self.bits() >= Self::PENDING_POOL_BITS.bits()
     }
 
     /// Whether this transaction is a blob transaction.
     #[inline]
     pub(crate) const fn is_blob(&self) -> bool {
-        self.contains(TxState::BLOB_TRANSACTION)
+        self.contains(Self::BLOB_TRANSACTION)
     }
 
     /// Returns `true` if the transaction has a nonce gap.
     #[inline]
     pub(crate) const fn has_nonce_gap(&self) -> bool {
-        !self.intersects(TxState::NO_NONCE_GAPS)
+        !self.intersects(Self::NO_NONCE_GAPS)
     }
 }
 
@@ -95,30 +95,30 @@ impl SubPool {
     /// Whether this transaction is to be moved to the pending sub-pool.
     #[inline]
     pub const fn is_pending(&self) -> bool {
-        matches!(self, SubPool::Pending)
+        matches!(self, Self::Pending)
     }
 
     /// Whether this transaction is in the queued pool.
     #[inline]
     pub const fn is_queued(&self) -> bool {
-        matches!(self, SubPool::Queued)
+        matches!(self, Self::Queued)
     }
 
     /// Whether this transaction is in the base fee pool.
     #[inline]
     pub const fn is_base_fee(&self) -> bool {
-        matches!(self, SubPool::BaseFee)
+        matches!(self, Self::BaseFee)
     }
 
     /// Whether this transaction is in the blob pool.
     #[inline]
     pub const fn is_blob(&self) -> bool {
-        matches!(self, SubPool::Blob)
+        matches!(self, Self::Blob)
     }
 
     /// Returns whether this is a promotion depending on the current sub-pool location.
     #[inline]
-    pub fn is_promoted(&self, other: SubPool) -> bool {
+    pub fn is_promoted(&self, other: Self) -> bool {
         self > &other
     }
 }
@@ -126,16 +126,16 @@ impl SubPool {
 impl From<TxState> for SubPool {
     fn from(value: TxState) -> Self {
         if value.is_pending() {
-            return SubPool::Pending
+            return Self::Pending
         }
         if value.is_blob() {
             // all _non-pending_ blob transactions are in the blob sub-pool
-            return SubPool::Blob
+            return Self::Blob
         }
         if value.bits() < TxState::BASE_FEE_POOL_BITS.bits() {
-            return SubPool::Queued
+            return Self::Queued
         }
-        SubPool::BaseFee
+        Self::BaseFee
     }
 }
 

@@ -21,7 +21,7 @@ impl Compact for AccessListItem {
         buf = new_buf;
         let (storage_keys, new_buf) = Vec::specialized_from_compact(buf, buf.len());
         buf = new_buf;
-        let access_list_item = AccessListItem { address, storage_keys };
+        let access_list_item = Self { address, storage_keys };
         (access_list_item, buf)
     }
 }
@@ -41,7 +41,7 @@ impl Compact for AccessList {
     fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
         let (access_list_items, new_buf) = Vec::from_compact(buf, buf.len());
         buf = new_buf;
-        let access_list = AccessList(access_list_items);
+        let access_list = Self(access_list_items);
         (access_list, buf)
     }
 }

@@ -6,4 +6,4 @@ mod session;
 mod startup;
 mod txgossip;
 
-fn main() {}
+const fn main() {}

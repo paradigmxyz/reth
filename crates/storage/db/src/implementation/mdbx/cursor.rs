@@ -1,15 +1,17 @@
 //! Cursor wrapper for libmdbx-sys.
 
 use crate::{
+    metrics::{DatabaseEnvMetrics, Operation},
+    tables::utils::*,
+    DatabaseError,
+};
+use reth_db_api::{
     common::{PairResult, ValueOnlyResult},
     cursor::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
     },
-    metrics::{DatabaseEnvMetrics, Operation},
     table::{Compress, Decode, Decompress, DupSort, Encode, Table},
-    tables::utils::*,
-    DatabaseError,
 };
 use reth_libmdbx::{Error as MDBXError, TransactionKind, WriteFlags, RO, RW};
 use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
@@ -34,7 +36,7 @@ pub struct Cursor<K: TransactionKind, T: Table> {
 }
 
 impl<K: TransactionKind, T: Table> Cursor<K, T> {
-    pub(crate) fn new_with_metrics(
+    pub(crate) const fn new_with_metrics(
         inner: reth_libmdbx::Cursor<K>,
         metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> Self {
@@ -52,7 +54,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
         if let Some(metrics) = self.metrics.as_ref().cloned() {
-            metrics.record_operation(T::TABLE, operation, value_size, || f(self))
+            metrics.record_operation(T::NAME, operation, value_size, || f(self))
         } else {
             f(self)
         }

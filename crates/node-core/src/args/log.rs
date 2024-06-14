@@ -72,7 +72,7 @@ pub struct LogArgs {
 }
 
 impl LogArgs {
-    /// Creates a [LayerInfo] instance.
+    /// Creates a [`LayerInfo`] instance.
     fn layer(&self, format: LogFormat, filter: String, use_color: bool) -> LayerInfo {
         LayerInfo::new(
             format,
@@ -92,6 +92,8 @@ impl LogArgs {
     }
 
     /// Initializes tracing with the configured options from cli args.
+    ///
+    /// Returns the file worker guard, and the file name, if a file worker was configured.
     pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
         let mut tracer = RethTracer::new();
 
@@ -127,9 +129,9 @@ pub enum ColorMode {
 impl Display for ColorMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ColorMode::Always => write!(f, "always"),
-            ColorMode::Auto => write!(f, "auto"),
-            ColorMode::Never => write!(f, "never"),
+            Self::Always => write!(f, "always"),
+            Self::Auto => write!(f, "auto"),
+            Self::Never => write!(f, "never"),
         }
     }
 }

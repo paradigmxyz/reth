@@ -4,15 +4,13 @@ use crate::{logs_bloom, Bloom, Bytes, TxType, B256};
 use alloy_primitives::Log;
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
+use derive_more::{Deref, DerefMut, From, IntoIterator};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::strategy::Strategy;
 #[cfg(feature = "zstd-codec")]
 use reth_codecs::CompactZstd;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
-use std::{
-    cmp::Ordering,
-    ops::{Deref, DerefMut},
-};
+use std::{cmp::Ordering, ops::Deref};
 
 /// Receipt containing result of transaction execution.
 #[cfg_attr(feature = "zstd-codec", main_codec(no_arbitrary, zstd))]
@@ -45,48 +43,33 @@ pub struct Receipt {
 }
 
 impl Receipt {
-    /// Calculates [`Log`]'s bloom filter. this is slow operation and [ReceiptWithBloom] can
+    /// Calculates [`Log`]'s bloom filter. this is slow operation and [`ReceiptWithBloom`] can
     /// be used to cache this value.
     pub fn bloom_slow(&self) -> Bloom {
         logs_bloom(self.logs.iter())
     }
 
-    /// Calculates the bloom filter for the receipt and returns the [ReceiptWithBloom] container
+    /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloom`] container
     /// type.
     pub fn with_bloom(self) -> ReceiptWithBloom {
         self.into()
     }
 
-    /// Calculates the bloom filter for the receipt and returns the [ReceiptWithBloomRef] container
-    /// type.
+    /// Calculates the bloom filter for the receipt and returns the [`ReceiptWithBloomRef`]
+    /// container type.
     pub fn with_bloom_ref(&self) -> ReceiptWithBloomRef<'_> {
         self.into()
     }
 }
 
 /// A collection of receipts organized as a two-dimensional vector.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, From, Deref, DerefMut, IntoIterator)]
 pub struct Receipts {
     /// A two-dimensional vector of optional `Receipt` instances.
     pub receipt_vec: Vec<Vec<Option<Receipt>>>,
 }
 
 impl Receipts {
-    /// Create a new `Receipts` instance with an empty vector.
-    pub fn new() -> Self {
-        Self { receipt_vec: vec![] }
-    }
-
-    /// Create a new `Receipts` instance from an existing vector.
-    pub fn from_vec(vec: Vec<Vec<Option<Receipt>>>) -> Self {
-        Self { receipt_vec: vec }
-    }
-
-    /// Create a new `Receipts` instance from a single block receipt.
-    pub fn from_block_receipt(block_receipts: Vec<Receipt>) -> Self {
-        Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
-    }
-
     /// Returns the length of the `Receipts` vector.
     pub fn len(&self) -> usize {
         self.receipt_vec.len()
@@ -125,39 +108,22 @@ impl Receipts {
     }
 }
 
-impl Deref for Receipts {
-    type Target = Vec<Vec<Option<Receipt>>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.receipt_vec
-    }
-}
-
-impl DerefMut for Receipts {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.receipt_vec
-    }
-}
-
-impl IntoIterator for Receipts {
-    type Item = Vec<Option<Receipt>>;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.receipt_vec.into_iter()
+impl From<Vec<Receipt>> for Receipts {
+    fn from(block_receipts: Vec<Receipt>) -> Self {
+        Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
     }
 }
 
 impl FromIterator<Vec<Option<Receipt>>> for Receipts {
     fn from_iter<I: IntoIterator<Item = Vec<Option<Receipt>>>>(iter: I) -> Self {
-        Self::from_vec(iter.into_iter().collect())
+        iter.into_iter().collect::<Vec<_>>().into()
     }
 }
 
 impl From<Receipt> for ReceiptWithBloom {
     fn from(receipt: Receipt) -> Self {
         let bloom = receipt.bloom_slow();
-        ReceiptWithBloom { receipt, bloom }
+        Self { receipt, bloom }
     }
 }
 
@@ -172,8 +138,8 @@ pub struct ReceiptWithBloom {
 }
 
 impl ReceiptWithBloom {
-    /// Create new [ReceiptWithBloom]
-    pub fn new(receipt: Receipt, bloom: Bloom) -> Self {
+    /// Create new [`ReceiptWithBloom`]
+    pub const fn new(receipt: Receipt, bloom: Bloom) -> Self {
         Self { receipt, bloom }
     }
 
@@ -188,7 +154,7 @@ impl ReceiptWithBloom {
     }
 
     #[inline]
-    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
+    const fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: &self.receipt, bloom: &self.bloom }
     }
 }
@@ -245,7 +211,7 @@ impl proptest::arbitrary::Arbitrary for Receipt {
         arbitrary_receipt().boxed()
     }
 
-    type Strategy = proptest::strategy::BoxedStrategy<Receipt>;
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -283,7 +249,7 @@ impl<'a> arbitrary::Arbitrary<'a> for Receipt {
 impl ReceiptWithBloom {
     /// Returns the enveloped encoded receipt.
     ///
-    /// See also [ReceiptWithBloom::encode_enveloped]
+    /// See also [`ReceiptWithBloom::encode_enveloped`]
     pub fn envelope_encoded(&self) -> Bytes {
         let mut buf = Vec::new();
         self.encode_enveloped(&mut buf);
@@ -429,8 +395,8 @@ pub struct ReceiptWithBloomRef<'a> {
 }
 
 impl<'a> ReceiptWithBloomRef<'a> {
-    /// Create new [ReceiptWithBloomRef]
-    pub fn new(receipt: &'a Receipt, bloom: Bloom) -> Self {
+    /// Create new [`ReceiptWithBloomRef`]
+    pub const fn new(receipt: &'a Receipt, bloom: Bloom) -> Self {
         Self { receipt, bloom }
     }
 
@@ -440,7 +406,7 @@ impl<'a> ReceiptWithBloomRef<'a> {
     }
 
     #[inline]
-    fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
+    const fn as_encoder(&self) -> ReceiptWithBloomEncoder<'_> {
         ReceiptWithBloomEncoder { receipt: self.receipt, bloom: &self.bloom }
     }
 }

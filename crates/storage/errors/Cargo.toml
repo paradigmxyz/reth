@@ -14,8 +14,8 @@ workspace = true
 reth-primitives.workspace = true
 reth-fs-util.workspace = true
 
-thiserror.workspace = true
-clap = { workspace = true, features = ["derive"], optional = true }
+thiserror-no-std = { workspace = true, default-features = false }
 
 [features]
-clap = ["dep:clap"]
+default = ["std"]
+std = ["thiserror-no-std/std"]

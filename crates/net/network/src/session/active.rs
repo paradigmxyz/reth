@@ -18,9 +18,9 @@ use reth_eth_wire::{
     message::{EthBroadcastMessage, RequestPair},
     DisconnectP2P, DisconnectReason, EthMessage,
 };
-use reth_interfaces::p2p::error::RequestError;
 use reth_metrics::common::mpsc::MeteredPollSender;
-use reth_network_types::PeerId;
+use reth_network_p2p::error::RequestError;
+use reth_network_peers::PeerId;
 use std::{
     collections::VecDeque,
     future::Future,
@@ -90,7 +90,7 @@ pub(crate) struct ActiveSession {
     pub(crate) internal_request_timeout: Arc<AtomicU64>,
     /// Interval when to check for timed out requests.
     pub(crate) internal_request_timeout_interval: Interval,
-    /// If an [ActiveSession] does not receive a response at all within this duration then it is
+    /// If an [`ActiveSession`] does not receive a response at all within this duration then it is
     /// considered a protocol violation and the session will initiate a drop.
     pub(crate) protocol_breach_request_timeout: Duration,
     /// Used to reserve a slot to guarantee that the termination message is delivered
@@ -423,7 +423,7 @@ impl ActiveSession {
     /// session should be terminated.
     #[must_use]
     fn check_timed_out_requests(&mut self, now: Instant) -> bool {
-        for (id, req) in self.inflight_requests.iter_mut() {
+        for (id, req) in &mut self.inflight_requests {
             if req.is_timed_out(now) {
                 if req.is_waiting() {
                     debug!(target: "net::session", ?id, remote_peer_id=?self.remote_peer_id, "timed out outgoing request");
@@ -685,7 +685,7 @@ impl InflightRequest {
 
     /// Returns true if we're still waiting for a response
     #[inline]
-    fn is_waiting(&self) -> bool {
+    const fn is_waiting(&self) -> bool {
         matches!(self.request, RequestState::Waiting(_))
     }
 
@@ -713,8 +713,8 @@ enum OnIncomingMessageOutcome {
 impl From<Result<(), ActiveSessionMessage>> for OnIncomingMessageOutcome {
     fn from(res: Result<(), ActiveSessionMessage>) -> Self {
         match res {
-            Ok(_) => OnIncomingMessageOutcome::Ok,
-            Err(msg) => OnIncomingMessageOutcome::NoCapacity(msg),
+            Ok(_) => Self::Ok,
+            Err(msg) => Self::NoCapacity(msg),
         }
     }
 }
@@ -736,13 +736,13 @@ pub(crate) enum OutgoingMessage {
 
 impl From<EthMessage> for OutgoingMessage {
     fn from(value: EthMessage) -> Self {
-        OutgoingMessage::Eth(value)
+        Self::Eth(value)
     }
 }
 
 impl From<EthBroadcastMessage> for OutgoingMessage {
     fn from(value: EthBroadcastMessage) -> Self {
-        OutgoingMessage::Broadcast(value)
+        Self::Broadcast(value)
     }
 }
 
@@ -768,8 +768,7 @@ mod tests {
         EthStream, GetBlockBodies, HelloMessageWithProtocols, P2PStream, Status, StatusBuilder,
         UnauthedEthStream, UnauthedP2PStream,
     };
-    use reth_net_common::bandwidth_meter::{BandwidthMeter, MeteredStream};
-    use reth_network_types::pk2id;
+    use reth_network_peers::pk2id;
     use reth_primitives::{ForkFilter, Hardfork, MAINNET};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::{
@@ -793,7 +792,6 @@ mod tests {
         status: Status,
         fork_filter: ForkFilter,
         next_id: usize,
-        bandwidth_meter: BandwidthMeter,
     }
 
     impl SessionBuilder {
@@ -838,13 +836,11 @@ mod tests {
             let session_id = self.next_id();
             let (_disconnect_tx, disconnect_rx) = oneshot::channel();
             let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(1);
-            let metered_stream =
-                MeteredStream::new_with_meter(stream, self.bandwidth_meter.clone());
 
             tokio::task::spawn(start_pending_incoming_session(
                 disconnect_rx,
                 session_id,
-                metered_stream,
+                stream,
                 pending_sessions_tx,
                 remote_addr,
                 self.secret_key,
@@ -925,7 +921,6 @@ mod tests {
                 fork_filter: MAINNET
                     .hardfork_fork_filter(Hardfork::Frontier)
                     .expect("The Frontier fork filter should exist on mainnet"),
-                bandwidth_meter: BandwidthMeter::default(),
             }
         }
     }

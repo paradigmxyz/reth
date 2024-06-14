@@ -8,7 +8,7 @@ pub use network::{DiscoveryArgs, NetworkArgs};
 mod rpc_server;
 pub use rpc_server::RpcServerArgs;
 
-/// RpcStateCacheArgs struct for configuring RPC state cache
+/// `RpcStateCacheArgs` struct for configuring RPC state cache
 mod rpc_state_cache;
 pub use rpc_state_cache::RpcStateCacheArgs;
 
@@ -27,7 +27,7 @@ pub use log::{ColorMode, LogArgs};
 mod secret_key;
 pub use secret_key::{get_secret_key, SecretKeyError};
 
-/// PayloadBuilderArgs struct for configuring the payload builder
+/// `PayloadBuilderArgs` struct for configuring the payload builder
 mod payload_builder;
 pub use payload_builder::PayloadBuilderArgs;
 
@@ -50,6 +50,14 @@ pub use dev::DevArgs;
 /// PruneArgs for configuring the pruning and full node
 mod pruning;
 pub use pruning::PruningArgs;
+
+/// DatadirArgs for configuring data storage paths
+mod datadir_args;
+pub use datadir_args::DatadirArgs;
+
+/// BenchmarkArgs struct for configuring the benchmark to run
+mod benchmark_args;
+pub use benchmark_args::BenchmarkArgs;
 
 pub mod utils;
 

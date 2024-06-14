@@ -82,7 +82,7 @@ pub struct TxEip4844 {
 
 impl TxEip4844 {
     /// Returns the effective gas price for the given `base_fee`.
-    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+    pub const fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         match base_fee {
             None => self.max_fee_per_gas,
             Some(base_fee) => {
@@ -102,7 +102,7 @@ impl TxEip4844 {
     /// Verifies that the given blob data, commitments, and proofs are all valid for this
     /// transaction.
     ///
-    /// Takes as input the [KzgSettings], which should contain the parameters derived from the
+    /// Takes as input the [`KzgSettings`], which should contain the parameters derived from the
     /// KZG trusted setup.
     ///
     /// This ensures that the blob transaction payload has the same number of blob data elements,
@@ -128,7 +128,7 @@ impl TxEip4844 {
         self.blob_versioned_hashes.len() as u64 * DATA_GAS_PER_BLOB
     }
 
-    /// Decodes the inner [TxEip4844] fields from RLP bytes.
+    /// Decodes the inner [`TxEip4844`] fields from RLP bytes.
     ///
     /// NOTE: This assumes a RLP header has already been decoded, and _just_ decodes the following
     /// RLP fields in the following order:
@@ -191,7 +191,7 @@ impl TxEip4844 {
         self.blob_versioned_hashes.encode(out);
     }
 
-    /// Calculates a heuristic for the in-memory size of the [TxEip4844] transaction.
+    /// Calculates a heuristic for the in-memory size of the [`TxEip4844`] transaction.
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<ChainId>() + // chain_id
@@ -244,7 +244,7 @@ impl TxEip4844 {
     }
 
     /// Get transaction type
-    pub(crate) fn tx_type(&self) -> TxType {
+    pub(crate) const fn tx_type(&self) -> TxType {
         TxType::Eip4844
     }
 

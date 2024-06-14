@@ -5,7 +5,7 @@
 //!
 //! ## Capabilities
 //!
-//! The network manages peers depending on their announced capabilities via their RLPx sessions. Most importantly the [Ethereum Wire Protocol](https://github.com/ethereum/devp2p/blob/master/caps/eth.md)(`eth`).
+//! The network manages peers depending on their announced capabilities via their `RLPx` sessions. Most importantly the [Ethereum Wire Protocol](https://github.com/ethereum/devp2p/blob/master/caps/eth.md)(`eth`).
 //!
 //! ## Overview
 //!
@@ -13,7 +13,7 @@
 //! made up of peer-to-peer connections between nodes that are available on the same network.
 //! Responsible for peer discovery is ethereum's discovery protocol (discv4, discv5). If the address
 //! (IP+port) of our node is published via discovery, remote peers can initiate inbound connections
-//! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the RLPx session.
+//! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the `RLPx` session.
 
 use crate::{
     budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
@@ -42,9 +42,8 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
-use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::ReputationChangeKind;
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{ForkId, NodeRecord};
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
@@ -53,7 +52,7 @@ use reth_tokio_util::EventSender;
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
-    pin::{pin, Pin},
+    pin::Pin,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -129,7 +128,7 @@ impl<C> NetworkManager<C> {
         self.to_eth_request_handler = Some(tx);
     }
 
-    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
     pub fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.swarm.add_rlpx_sub_protocol(protocol)
     }
@@ -137,18 +136,12 @@ impl<C> NetworkManager<C> {
     /// Returns the [`NetworkHandle`] that can be cloned and shared.
     ///
     /// The [`NetworkHandle`] can be used to interact with this [`NetworkManager`]
-    pub fn handle(&self) -> &NetworkHandle {
+    pub const fn handle(&self) -> &NetworkHandle {
         &self.handle
     }
 
-    /// Returns a shareable reference to the [`BandwidthMeter`] stored
-    /// inside of the [`NetworkHandle`]
-    pub fn bandwidth_meter(&self) -> &BandwidthMeter {
-        self.handle.bandwidth_meter()
-    }
-
     /// Returns the secret key used for authenticating sessions.
-    pub fn secret_key(&self) -> SecretKey {
+    pub const fn secret_key(&self) -> SecretKey {
         self.swarm.sessions().secret_key()
     }
 
@@ -161,8 +154,8 @@ impl<C> NetworkManager<C> {
         // update metrics for whole poll function
         metrics.duration_poll_network_manager.set(start.elapsed().as_secs_f64());
         // update poll metrics for nested items
-        metrics.duration_poll_network_handle.set(acc_network_handle.as_secs_f64());
-        metrics.duration_poll_swarm.set(acc_swarm.as_secs_f64());
+        metrics.acc_duration_poll_network_handle.set(acc_network_handle.as_secs_f64());
+        metrics.acc_duration_poll_swarm.set(acc_swarm.as_secs_f64());
     }
 }
 
@@ -206,9 +199,16 @@ where
         })?;
         let listener_address = Arc::new(Mutex::new(incoming.local_address()));
 
+        // resolve boot nodes
+        let mut resolved_boot_nodes = vec![];
+        for record in &boot_nodes {
+            let resolved = record.resolve().await?;
+            resolved_boot_nodes.push(resolved);
+        }
+
         discovery_v4_config = discovery_v4_config.map(|mut disc_config| {
             // merge configured boot nodes
-            disc_config.bootstrap_nodes.extend(boot_nodes.clone());
+            disc_config.bootstrap_nodes.extend(resolved_boot_nodes.clone());
             disc_config.add_eip868_pair("eth", status.forkid);
             disc_config
         });
@@ -226,7 +226,6 @@ where
         let discv4 = discovery.discv4();
 
         let num_active_peers = Arc::new(AtomicUsize::new(0));
-        let bandwidth_meter: BandwidthMeter = BandwidthMeter::default();
 
         let sessions = SessionManager::new(
             secret_key,
@@ -236,7 +235,6 @@ where
             hello_message,
             fork_filter,
             extra_protocols,
-            bandwidth_meter.clone(),
         );
 
         let state =
@@ -256,7 +254,6 @@ where
             local_peer_id,
             peers_handle,
             network_mode,
-            bandwidth_meter,
             Arc::new(AtomicU64::new(chain_spec.chain.id())),
             tx_gossip_disabled,
             discv4,
@@ -313,12 +310,12 @@ where
     }
 
     /// Create a [`NetworkBuilder`] to configure all components of the network
-    pub fn into_builder(self) -> NetworkBuilder<C, (), ()> {
+    pub const fn into_builder(self) -> NetworkBuilder<C, (), ()> {
         NetworkBuilder { network: self, transactions: (), request_handler: () }
     }
 
     /// Returns the [`SocketAddr`] that listens for incoming connections.
-    pub fn local_addr(&self) -> SocketAddr {
+    pub const fn local_addr(&self) -> SocketAddr {
         self.swarm.listener().local_address()
     }
 
@@ -893,27 +890,28 @@ impl<C> NetworkManager<C>
 where
     C: BlockReader + Unpin,
 {
-    /// Drives the [NetworkManager] future until a [GracefulShutdown] signal is received.
+    /// Drives the [`NetworkManager`] future until a [`GracefulShutdown`] signal is received.
     ///
-    /// This also run the given function `shutdown_hook` afterwards.
-    pub async fn run_until_graceful_shutdown(
-        self,
+    /// This invokes the given function `shutdown_hook` while holding the graceful shutdown guard.
+    pub async fn run_until_graceful_shutdown<F, R>(
+        mut self,
         shutdown: GracefulShutdown,
-        shutdown_hook: impl FnOnce(&mut Self),
-    ) {
-        let network = self;
-        let mut network = pin!(network);
-
+        shutdown_hook: F,
+    ) -> R
+    where
+        F: FnOnce(Self) -> R,
+    {
         let mut graceful_guard = None;
         tokio::select! {
-            _ = &mut network => {},
+            _ = &mut self => {},
             guard = shutdown => {
                 graceful_guard = Some(guard);
             },
         }
 
-        shutdown_hook(&mut network);
+        let res = shutdown_hook(self);
         drop(graceful_guard);
+        res
     }
 }
 

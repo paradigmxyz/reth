@@ -1,62 +1,17 @@
-use crate::{
-    keccak256,
-    revm_primitives::{Bytecode as RevmBytecode, Bytes},
-    GenesisAccount, B256, KECCAK_EMPTY, U256,
-};
+use crate::revm_primitives::{Bytecode as RevmBytecode, Bytes};
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
-use reth_codecs::{main_codec, Compact};
+use derive_more::Deref;
+use reth_codecs::Compact;
 use revm_primitives::JumpTable;
 use serde::{Deserialize, Serialize};
-use std::ops::Deref;
 
-/// An Ethereum account.
-#[main_codec]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct Account {
-    /// Account nonce.
-    pub nonce: u64,
-    /// Account balance.
-    pub balance: U256,
-    /// Hash of the account's bytecode.
-    pub bytecode_hash: Option<B256>,
-}
-
-impl Account {
-    /// Whether the account has bytecode.
-    pub fn has_bytecode(&self) -> bool {
-        self.bytecode_hash.is_some()
-    }
-
-    /// After SpuriousDragon empty account is defined as account with nonce == 0 && balance == 0 &&
-    /// bytecode = None (or hash is [`KECCAK_EMPTY`]).
-    pub fn is_empty(&self) -> bool {
-        self.nonce == 0 &&
-            self.balance.is_zero() &&
-            self.bytecode_hash.map_or(true, |hash| hash == KECCAK_EMPTY)
-    }
-
-    /// Makes an [Account] from [GenesisAccount] type
-    pub fn from_genesis_account(value: &GenesisAccount) -> Self {
-        Account {
-            // nonce must exist, so we default to zero when converting a genesis account
-            nonce: value.nonce.unwrap_or_default(),
-            balance: value.balance,
-            bytecode_hash: value.code.as_ref().map(keccak256),
-        }
-    }
-
-    /// Returns an account bytecode's hash.
-    /// In case of no bytecode, returns [`KECCAK_EMPTY`].
-    pub fn get_bytecode_hash(&self) -> B256 {
-        self.bytecode_hash.unwrap_or(KECCAK_EMPTY)
-    }
-}
+pub use reth_primitives_traits::Account;
 
 /// Bytecode for an account.
 ///
 /// A wrapper around [`revm::primitives::Bytecode`][RevmBytecode] with encoding/decoding support.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Deref)]
 pub struct Bytecode(pub RevmBytecode);
 
 impl Bytecode {
@@ -65,14 +20,6 @@ impl Bytecode {
     /// No analysis will be performed.
     pub fn new_raw(bytes: Bytes) -> Self {
         Self(RevmBytecode::new_raw(bytes))
-    }
-}
-
-impl Deref for Bytecode {
-    type Target = RevmBytecode;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 
@@ -115,9 +62,9 @@ impl Compact for Bytecode {
         let bytes = Bytes::from(buf.copy_to_bytes(len as usize));
         let variant = buf.read_u8().expect("could not read bytecode variant");
         let decoded = match variant {
-            0 => Bytecode(RevmBytecode::new_raw(bytes)),
+            0 => Self(RevmBytecode::new_raw(bytes)),
             1 => unreachable!("Junk data in database: checked Bytecode variant was removed"),
-            2 => Bytecode(unsafe {
+            2 => Self(unsafe {
                 RevmBytecode::new_analyzed(
                     bytes,
                     buf.read_u64::<BigEndian>().unwrap() as usize,
@@ -135,7 +82,7 @@ impl Compact for Bytecode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hex_literal::hex;
+    use crate::{hex_literal::hex, B256, KECCAK_EMPTY, U256};
     use revm_primitives::LegacyAnalyzedBytecode;
 
     #[test]

@@ -6,7 +6,7 @@ use crate::{
 };
 use futures::Stream;
 use reth_consensus::{Consensus, ConsensusError};
-use reth_network_types::WithPeerId;
+use reth_network_peers::WithPeerId;
 use reth_primitives::{
     BlockBody, GotExpected, Header, HeadersDirection, SealedBlock, SealedHeader, B256,
 };
@@ -45,12 +45,12 @@ impl<Client> FullBlockClient<Client>
 where
     Client: BodiesClient + HeadersClient + Clone,
 {
-    /// Returns a future that fetches the [SealedBlock] for the given hash.
+    /// Returns a future that fetches the [`SealedBlock`] for the given hash.
     ///
     /// Note: this future is cancel safe
     ///
     /// Caution: This does no validation of body (transactions) response but guarantees that the
-    /// [SealedHeader] matches the requested hash.
+    /// [`SealedHeader`] matches the requested hash.
     pub fn get_full_block(&self, hash: B256) -> FetchFullBlockFuture<Client> {
         let client = self.client.clone();
         FetchFullBlockFuture {
@@ -65,12 +65,12 @@ where
         }
     }
 
-    /// Returns a future that fetches [SealedBlock]s for the given hash and count.
+    /// Returns a future that fetches [`SealedBlock`]s for the given hash and count.
     ///
     /// Note: this future is cancel safe
     ///
     /// Caution: This does no validation of body (transactions) responses but guarantees that
-    /// the starting [SealedHeader] matches the requested hash, and that the number of headers and
+    /// the starting [`SealedHeader`] matches the requested hash, and that the number of headers and
     /// bodies received matches the requested limit.
     ///
     /// The returned future yields bodies in falling order, i.e. with descending block numbers.
@@ -121,7 +121,7 @@ where
     Client: BodiesClient + HeadersClient,
 {
     /// Returns the hash of the block being requested.
-    pub fn hash(&self) -> &B256 {
+    pub const fn hash(&self) -> &B256 {
         &self.hash
     }
 
@@ -130,7 +130,7 @@ where
         self.header.as_ref().map(|h| h.number)
     }
 
-    /// Returns the [SealedBlock] if the request is complete and valid.
+    /// Returns the [`SealedBlock`] if the request is complete and valid.
     fn take_block(&mut self) -> Option<SealedBlock> {
         if self.header.is_none() || self.body.is_none() {
             return None
@@ -313,22 +313,36 @@ fn ensure_valid_body_response(
         ))
     }
 
-    let withdrawals = match &block.withdrawals {
-        Some(withdrawals) => withdrawals.as_slice(),
-        None => &[][..],
-    };
-    if let Some(header_withdrawals_root) = header.withdrawals_root {
-        let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
-        if withdrawals_root != header_withdrawals_root {
-            return Err(ConsensusError::BodyWithdrawalsRootDiff(
-                GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
-            ))
+    match (header.withdrawals_root, &block.withdrawals) {
+        (Some(header_withdrawals_root), Some(withdrawals)) => {
+            let withdrawals = withdrawals.as_slice();
+            let withdrawals_root = reth_primitives::proofs::calculate_withdrawals_root(withdrawals);
+            if withdrawals_root != header_withdrawals_root {
+                return Err(ConsensusError::BodyWithdrawalsRootDiff(
+                    GotExpected { got: withdrawals_root, expected: header_withdrawals_root }.into(),
+                ))
+            }
         }
-        return Ok(())
+        (None, None) => {
+            // this is ok because we assume the fork is not active in this case
+        }
+        _ => return Err(ConsensusError::WithdrawalsRootUnexpected),
     }
 
-    if !withdrawals.is_empty() {
-        return Err(ConsensusError::WithdrawalsRootUnexpected)
+    match (header.requests_root, &block.requests) {
+        (Some(header_requests_root), Some(requests)) => {
+            let requests = requests.0.as_slice();
+            let requests_root = reth_primitives::proofs::calculate_requests_root(requests);
+            if requests_root != header_requests_root {
+                return Err(ConsensusError::BodyRequestsRootDiff(
+                    GotExpected { got: requests_root, expected: header_requests_root }.into(),
+                ))
+            }
+        }
+        (None, None) => {
+            // this is ok because we assume the fork is not active in this case
+        }
+        _ => return Err(ConsensusError::RequestsRootUnexpected),
     }
 
     Ok(())
@@ -339,7 +353,7 @@ fn ensure_valid_body_response(
 /// This first fetches the headers for the given range using the inner `Client`. Once the request
 /// is complete, it will fetch the bodies for the headers it received.
 ///
-/// Once the bodies request completes, the [SealedBlock]s will be assembled and the future will
+/// Once the bodies request completes, the [`SealedBlock`]s will be assembled and the future will
 /// yield the full block range.
 ///
 /// The full block range will be returned with falling block numbers, i.e. in descending order.
@@ -395,7 +409,7 @@ where
 
     /// Inserts multiple block bodies.
     fn insert_bodies(&mut self, bodies: impl IntoIterator<Item = BodyResponse>) {
-        for body in bodies.into_iter() {
+        for body in bodies {
             self.insert_body(body);
         }
     }
@@ -406,7 +420,7 @@ where
         self.pending_headers.iter().map(|h| h.hash()).collect()
     }
 
-    /// Returns the [SealedBlock]s if the request is complete and valid.
+    /// Returns the [`SealedBlock`]s if the request is complete and valid.
     ///
     /// The request is complete if the number of blocks requested is equal to the number of blocks
     /// received. The request is valid if the returned bodies match the roots in the headers.
@@ -510,17 +524,17 @@ where
 
     /// Returns whether or not a bodies request has been started, returning false if there is no
     /// pending request.
-    fn has_bodies_request_started(&self) -> bool {
+    const fn has_bodies_request_started(&self) -> bool {
         self.request.bodies.is_some()
     }
 
     /// Returns the start hash for the request
-    pub fn start_hash(&self) -> B256 {
+    pub const fn start_hash(&self) -> B256 {
         self.start_hash
     }
 
     /// Returns the block count for the request
-    pub fn count(&self) -> u64 {
+    pub const fn count(&self) -> u64 {
         self.count
     }
 }
@@ -626,7 +640,7 @@ struct FullBlockRangeStream<Client>
 where
     Client: BodiesClient + HeadersClient,
 {
-    /// The inner [FetchFullBlockRangeFuture] that is polled.
+    /// The inner [`FetchFullBlockRangeFuture`] that is polled.
     inner: FetchFullBlockRangeFuture<Client>,
     /// The blocks that have been received so far.
     ///

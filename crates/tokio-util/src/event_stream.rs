@@ -7,7 +7,7 @@ use std::{
 use tokio_stream::Stream;
 use tracing::warn;
 
-/// Thin wrapper around tokio's BroadcastStream to allow skipping broadcast errors.
+/// Thin wrapper around tokio's `BroadcastStream` to allow skipping broadcast errors.
 #[derive(Debug)]
 pub struct EventStream<T> {
     inner: tokio_stream::wrappers::BroadcastStream<T>,
@@ -20,7 +20,7 @@ where
     /// Creates a new `EventStream`.
     pub fn new(receiver: tokio::sync::broadcast::Receiver<T>) -> Self {
         let inner = tokio_stream::wrappers::BroadcastStream::new(receiver);
-        EventStream { inner }
+        Self { inner }
     }
 }
 

@@ -21,8 +21,8 @@ pub struct TxPoolApi<Pool> {
 
 impl<Pool> TxPoolApi<Pool> {
     /// Creates a new instance of `TxpoolApi`.
-    pub fn new(pool: Pool) -> Self {
-        TxPoolApi { pool }
+    pub const fn new(pool: Pool) -> Self {
+        Self { pool }
     }
 }
 

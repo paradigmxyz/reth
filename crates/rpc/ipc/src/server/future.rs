@@ -33,7 +33,7 @@ use tokio::sync::watch;
 pub(crate) struct StopHandle(watch::Receiver<()>);
 
 impl StopHandle {
-    pub(crate) fn new(rx: watch::Receiver<()>) -> Self {
+    pub(crate) const fn new(rx: watch::Receiver<()>) -> Self {
         Self(rx)
     }
 

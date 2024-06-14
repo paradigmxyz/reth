@@ -18,8 +18,8 @@ use reth_primitives::{
     TryFromRecoveredTransaction,
 };
 use reth_provider::{
-    BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
-    ProviderError, StateProviderFactory,
+    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, ExecutionOutcome, ProviderError,
+    StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
 use std::{
@@ -485,11 +485,11 @@ impl MaintainedPoolState {
     /// Returns `true` if the pool is assumed to be out of sync with the current state.
     #[inline]
     const fn is_drifted(&self) -> bool {
-        matches!(self, MaintainedPoolState::Drifted)
+        matches!(self, Self::Drifted)
     }
 }
 
-/// A unique ChangedAccount identified by its address that can be used for deduplication
+/// A unique `ChangedAccount` identified by its address that can be used for deduplication
 #[derive(Eq)]
 struct ChangedAccountEntry(ChangedAccount);
 
@@ -554,11 +554,11 @@ where
     Ok(res)
 }
 
-/// Extracts all changed accounts from the BundleState
+/// Extracts all changed accounts from the `BundleState`
 fn changed_accounts_iter(
-    state: &BundleStateWithReceipts,
+    execution_outcome: &ExecutionOutcome,
 ) -> impl Iterator<Item = ChangedAccount> + '_ {
-    state
+    execution_outcome
         .accounts_iter()
         .filter_map(|(addr, acc)| acc.map(|acc| (addr, acc)))
         .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })

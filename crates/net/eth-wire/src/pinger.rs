@@ -58,7 +58,7 @@ impl Pinger {
     }
 
     /// Returns the current state of the pinger.
-    pub(crate) fn state(&self) -> PingState {
+    pub(crate) const fn state(&self) -> PingState {
         self.state
     }
 

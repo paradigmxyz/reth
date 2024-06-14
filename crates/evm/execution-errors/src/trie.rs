@@ -1,7 +1,7 @@
 //! Errors when computing the state root.
 
 use reth_storage_errors::db::DatabaseError;
-use thiserror::Error;
+use thiserror_no_std::Error;
 
 /// State root errors.
 #[derive(Error, Debug, PartialEq, Eq, Clone)]
@@ -17,7 +17,7 @@ pub enum StateRootError {
 impl From<StateRootError> for DatabaseError {
     fn from(err: StateRootError) -> Self {
         match err {
-            StateRootError::DB(err) => err,
+            StateRootError::DB(err) |
             StateRootError::StorageRootError(StorageRootError::DB(err)) => err,
         }
     }

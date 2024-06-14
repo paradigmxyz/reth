@@ -6,52 +6,32 @@ use reth_primitives::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
         MAXIMUM_EXTRA_DATA_SIZE,
     },
-    op_mainnet::is_dup_tx,
     ChainSpec, GotExpected, Hardfork, Header, SealedBlock, SealedHeader,
 };
 
-/// Validate header standalone
-pub fn validate_header_standalone(
-    header: &SealedHeader,
-    chain_spec: &ChainSpec,
-) -> Result<(), ConsensusError> {
-    // Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
+/// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
+#[inline]
+pub fn validate_header_gas(header: &SealedHeader) -> Result<(), ConsensusError> {
     if header.gas_used > header.gas_limit {
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
             gas_used: header.gas_used,
             gas_limit: header.gas_limit,
         })
     }
+    Ok(())
+}
 
-    // Check if base fee is set.
+/// Ensure the EIP-1559 base fee is set if the London hardfork is active.
+#[inline]
+pub fn validate_header_base_fee(
+    header: &SealedHeader,
+    chain_spec: &ChainSpec,
+) -> Result<(), ConsensusError> {
     if chain_spec.fork(Hardfork::London).active_at_block(header.number) &&
         header.base_fee_per_gas.is_none()
     {
         return Err(ConsensusError::BaseFeeMissing)
     }
-
-    let wd_root_missing = header.withdrawals_root.is_none() && !chain_spec.is_optimism();
-
-    // EIP-4895: Beacon chain push withdrawals as operations
-    if chain_spec.is_shanghai_active_at_timestamp(header.timestamp) && wd_root_missing {
-        return Err(ConsensusError::WithdrawalsRootMissing)
-    } else if !chain_spec.is_shanghai_active_at_timestamp(header.timestamp) &&
-        header.withdrawals_root.is_some()
-    {
-        return Err(ConsensusError::WithdrawalsRootUnexpected)
-    }
-
-    // Ensures that EIP-4844 fields are valid once cancun is active.
-    if chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-        validate_4844_header_standalone(header)?;
-    } else if header.blob_gas_used.is_some() {
-        return Err(ConsensusError::BlobGasUsedUnexpected)
-    } else if header.excess_blob_gas.is_some() {
-        return Err(ConsensusError::ExcessBlobGasUnexpected)
-    } else if header.parent_beacon_block_root.is_some() {
-        return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
-    }
-
     Ok(())
 }
 
@@ -74,10 +54,8 @@ pub fn validate_block_pre_execution(
     }
 
     // Check transaction root
-    if !chain_spec.is_optimism_mainnet() || !is_dup_tx(block.number) {
-        if let Err(error) = block.ensure_transaction_root_valid() {
-            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
-        }
+    if let Err(error) = block.ensure_transaction_root_valid() {
+        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
@@ -105,6 +83,19 @@ pub fn validate_block_pre_execution(
                 got: header_blob_gas_used,
                 expected: total_blob_gas,
             }))
+        }
+    }
+
+    // EIP-7685: General purpose execution layer requests
+    if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+        let requests = block.requests.as_ref().ok_or(ConsensusError::BodyRequestsMissing)?;
+        let requests_root = reth_primitives::proofs::calculate_requests_root(&requests.0);
+        let header_requests_root =
+            block.requests_root.as_ref().ok_or(ConsensusError::RequestsRootMissing)?;
+        if requests_root != *header_requests_root {
+            return Err(ConsensusError::BodyRequestsRootDiff(
+                GotExpected { got: requests_root, expected: *header_requests_root }.into(),
+            ))
         }
     }
 
@@ -157,6 +148,7 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
 ///
 /// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
 /// This must be 32 bytes or fewer; formally Hx.
+#[inline]
 pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> {
     if header.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
         Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
@@ -165,20 +157,91 @@ pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> 
     }
 }
 
+/// Validates against the parent hash and number.
+///
+/// This function ensures that the header block number is sequential and that the hash of the parent
+/// header matches the parent hash in the header.
+#[inline]
+pub fn validate_against_parent_hash_number(
+    header: &SealedHeader,
+    parent: &SealedHeader,
+) -> Result<(), ConsensusError> {
+    // Parent number is consistent.
+    if parent.number + 1 != header.number {
+        return Err(ConsensusError::ParentBlockNumberMismatch {
+            parent_block_number: parent.number,
+            block_number: header.number,
+        })
+    }
+
+    if parent.hash() != header.parent_hash {
+        return Err(ConsensusError::ParentHashMismatch(
+            GotExpected { got: header.parent_hash, expected: parent.hash() }.into(),
+        ))
+    }
+
+    Ok(())
+}
+
+/// Validates the base fee against the parent and EIP-1559 rules.
+#[inline]
+pub fn validate_against_parent_eip1559_base_fee(
+    header: &SealedHeader,
+    parent: &SealedHeader,
+    chain_spec: &ChainSpec,
+) -> Result<(), ConsensusError> {
+    if chain_spec.fork(Hardfork::London).active_at_block(header.number) {
+        let base_fee = header.base_fee_per_gas.ok_or(ConsensusError::BaseFeeMissing)?;
+
+        let expected_base_fee =
+            if chain_spec.fork(Hardfork::London).transitions_at_block(header.number) {
+                reth_primitives::constants::EIP1559_INITIAL_BASE_FEE
+            } else {
+                // This BaseFeeMissing will not happen as previous blocks are checked to have
+                // them.
+                parent
+                    .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(header.timestamp))
+                    .ok_or(ConsensusError::BaseFeeMissing)?
+            };
+        if expected_base_fee != base_fee {
+            return Err(ConsensusError::BaseFeeDiff(GotExpected {
+                expected: expected_base_fee,
+                got: base_fee,
+            }))
+        }
+    }
+
+    Ok(())
+}
+
+/// Validates the timestamp against the parent to make sure it is in the past.
+#[inline]
+pub fn validate_against_parent_timestamp(
+    header: &SealedHeader,
+    parent: &SealedHeader,
+) -> Result<(), ConsensusError> {
+    if header.is_timestamp_in_past(parent.timestamp) {
+        return Err(ConsensusError::TimestampIsInPast {
+            parent_timestamp: parent.timestamp,
+            timestamp: header.timestamp,
+        })
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use mockall::mock;
-    use reth_interfaces::{
-        provider::ProviderResult,
-        test_utils::generators::{self, Rng},
-    };
+    use rand::Rng;
     use reth_primitives::{
         hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber,
         BlockNumber, Bytes, ChainSpecBuilder, Signature, Transaction, TransactionSigned, TxEip4844,
         Withdrawal, Withdrawals, U256,
     };
-    use reth_provider::{AccountReader, HeaderProvider, WithdrawalsProvider};
+    use reth_storage_api::{
+        errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,
+    };
     use std::ops::RangeBounds;
 
     mock! {
@@ -279,7 +342,7 @@ mod tests {
     }
 
     fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
-        let mut rng = generators::rng();
+        let mut rng = rand::thread_rng();
         let request = Transaction::Eip4844(TxEip4844 {
             chain_id: 1u64,
             nonce,
@@ -326,6 +389,7 @@ mod tests {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
+            requests_root: None
         };
         // size: 0x9b5
 
@@ -339,7 +403,16 @@ mod tests {
         let ommers = Vec::new();
         let body = Vec::new();
 
-        (SealedBlock { header: header.seal_slow(), body, ommers, withdrawals: None }, parent)
+        (
+            SealedBlock {
+                header: header.seal_slow(),
+                body,
+                ommers,
+                withdrawals: None,
+                requests: None,
+            },
+            parent,
+        )
     }
 
     #[test]
@@ -384,22 +457,6 @@ mod tests {
     }
 
     #[test]
-    fn shanghai_block_zero_withdrawals() {
-        // ensures that if shanghai is activated, and we include a block with a withdrawals root,
-        // that the header is valid
-        let chain_spec = ChainSpecBuilder::mainnet().shanghai_activated().build();
-
-        let header = Header {
-            base_fee_per_gas: Some(1337u64),
-            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
-            ..Default::default()
-        }
-        .seal_slow();
-
-        assert_eq!(validate_header_standalone(&header, &chain_spec), Ok(()));
-    }
-
-    #[test]
     fn cancun_block_incorrect_blob_gas_used() {
         let chain_spec = ChainSpecBuilder::mainnet().cancun_activated().build();
 
@@ -419,6 +476,7 @@ mod tests {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
+            requests: None,
         };
 
         let block = SealedBlock::new(header, body);

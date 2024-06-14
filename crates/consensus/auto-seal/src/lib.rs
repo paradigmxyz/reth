@@ -1,7 +1,7 @@
 //! A [Consensus] implementation for local testing purposes
 //! that automatically seals blocks.
 //!
-//! The Mining task polls a [MiningMode], and will return a list of transactions that are ready to
+//! The Mining task polls a [`MiningMode`], and will return a list of transactions that are ready to
 //! be mined.
 //!
 //! These downloaders poll the miner, assemble the block, and return transactions that are ready to
@@ -16,20 +16,17 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
-use reth_interfaces::executor::{BlockExecutionError, BlockValidationError};
+use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     constants::{EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
     proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainSpec, Header, Receipt, Receipts, SealedBlock, SealedHeader, TransactionSigned,
-    Withdrawals, B256, U256,
+    ChainSpec, Header, Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256,
+    U256,
 };
-use reth_provider::{
-    BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotificationSender, StateProviderFactory,
-    StateRootProvider,
-};
+use reth_provider::{BlockReaderIdExt, ExecutionOutcome, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -58,8 +55,8 @@ pub struct AutoSealConsensus {
 }
 
 impl AutoSealConsensus {
-    /// Create a new instance of [AutoSealConsensus]
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+    /// Create a new instance of [`AutoSealConsensus`]
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
@@ -92,7 +89,7 @@ impl Consensus for AutoSealConsensus {
     fn validate_block_post_execution(
         &self,
         _block: &BlockWithSenders,
-        _receipts: &[Receipt],
+        _input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError> {
         Ok(())
     }
@@ -107,7 +104,6 @@ pub struct AutoSealBuilder<Client, Pool, Engine: EngineTypes, EvmConfig> {
     mode: MiningMode,
     storage: Storage,
     to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
-    canon_state_notification: CanonStateNotificationSender,
     evm_config: EvmConfig,
 }
 
@@ -125,7 +121,6 @@ where
         client: Client,
         pool: Pool,
         to_engine: UnboundedSender<BeaconEngineMessage<Engine>>,
-        canon_state_notification: CanonStateNotificationSender,
         mode: MiningMode,
         evm_config: EvmConfig,
     ) -> Self {
@@ -142,12 +137,11 @@ where
             pool,
             mode,
             to_engine,
-            canon_state_notification,
             evm_config,
         }
     }
 
-    /// Sets the [MiningMode] it operates in, default is [MiningMode::Auto]
+    /// Sets the [`MiningMode`] it operates in, default is [`MiningMode::Auto`]
     pub fn mode(mut self, mode: MiningMode) -> Self {
         self.mode = mode;
         self
@@ -158,22 +152,12 @@ where
     pub fn build(
         self,
     ) -> (AutoSealConsensus, AutoSealClient, MiningTask<Client, Pool, EvmConfig, Engine>) {
-        let Self {
-            client,
-            consensus,
-            pool,
-            mode,
-            storage,
-            to_engine,
-            canon_state_notification,
-            evm_config,
-        } = self;
+        let Self { client, consensus, pool, mode, storage, to_engine, evm_config } = self;
         let auto_client = AutoSealClient::new(storage.clone());
         let task = MiningTask::new(
             Arc::clone(&consensus.chain_spec),
             mode,
             to_engine,
-            canon_state_notification,
             storage,
             client,
             pool,
@@ -274,13 +258,13 @@ impl StorageInner {
     /// transactions.
     pub(crate) fn build_header_template(
         &self,
+        timestamp: u64,
         transactions: &[TransactionSigned],
         ommers: &[Header],
         withdrawals: Option<&Withdrawals>,
+        requests: Option<&Requests>,
         chain_spec: Arc<ChainSpec>,
     ) -> Header {
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-
         // check previous block for base fee
         let base_fee_per_gas = self.headers.get(&self.best_block).and_then(|parent| {
             parent.next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
@@ -319,6 +303,7 @@ impl StorageInner {
             excess_blob_gas: None,
             extra_data: Default::default(),
             parent_beacon_block_root: None,
+            requests_root: requests.map(|r| proofs::calculate_requests_root(&r.0)),
         };
 
         if chain_spec.is_cancun_active_at_timestamp(timestamp) {
@@ -354,27 +339,43 @@ impl StorageInner {
     /// Builds and executes a new block with the given transactions, on the provided executor.
     ///
     /// This returns the header of the executed block, as well as the poststate from execution.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn build_and_execute<Provider, Executor>(
         &mut self,
         transactions: Vec<TransactionSigned>,
         ommers: Vec<Header>,
-        withdrawals: Option<Withdrawals>,
         provider: &Provider,
         chain_spec: Arc<ChainSpec>,
         executor: &Executor,
-    ) -> Result<(SealedHeader, BundleStateWithReceipts), BlockExecutionError>
+    ) -> Result<(SealedHeader, ExecutionOutcome), BlockExecutionError>
     where
         Executor: BlockExecutorProvider,
         Provider: StateProviderFactory,
     {
-        let header =
-            self.build_header_template(&transactions, &ommers, withdrawals.as_ref(), chain_spec);
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+
+        // if shanghai is active, include empty withdrawals
+        let withdrawals =
+            chain_spec.is_shanghai_active_at_timestamp(timestamp).then_some(Withdrawals::default());
+        // if prague is active, include empty requests
+        let requests =
+            chain_spec.is_prague_active_at_timestamp(timestamp).then_some(Requests::default());
+
+        let header = self.build_header_template(
+            timestamp,
+            &transactions,
+            &ommers,
+            withdrawals.as_ref(),
+            requests.as_ref(),
+            chain_spec,
+        );
 
         let block = Block {
             header,
             body: transactions,
             ommers: ommers.clone(),
             withdrawals: withdrawals.clone(),
+            requests: requests.clone(),
         }
         .with_recovered_senders()
         .ok_or(BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError))?;
@@ -386,21 +387,26 @@ impl StorageInner {
         );
 
         // execute the block
-        let BlockExecutionOutput { state, receipts, .. } =
+        let BlockExecutionOutput { state, receipts, requests: block_execution_requests, .. } =
             executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
-        let bundle_state = BundleStateWithReceipts::new(
+        let execution_outcome = ExecutionOutcome::new(
             state,
-            Receipts::from_block_receipt(receipts),
+            receipts.into(),
             block.number,
+            vec![block_execution_requests.into()],
         );
 
-        let Block { mut header, body, .. } = block.block;
-        let body = BlockBody { transactions: body, ommers, withdrawals };
+        // todo(onbjerg): we should not pass requests around as this is building a block, which
+        // means we need to extract the requests from the execution output and compute the requests
+        // root here
 
-        trace!(target: "consensus::auto", ?bundle_state, ?header, ?body, "executed block, calculating state root and completing header");
+        let Block { mut header, body, .. } = block.block;
+        let body = BlockBody { transactions: body, ommers, withdrawals, requests };
+
+        trace!(target: "consensus::auto", ?execution_outcome, ?header, ?body, "executed block, calculating state root and completing header");
 
         // calculate the state root
-        header.state_root = db.state_root(bundle_state.state())?;
+        header.state_root = db.state_root(execution_outcome.state())?;
         trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 
         // finally insert into storage
@@ -409,6 +415,6 @@ impl StorageInner {
         // set new header with hash that should have been updated by insert_new_block
         let new_header = header.seal(self.best_hash);
 
-        Ok((new_header, bundle_state))
+        Ok((new_header, execution_outcome))
     }
 }

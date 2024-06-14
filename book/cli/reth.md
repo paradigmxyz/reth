@@ -7,20 +7,19 @@ $ reth --help
 Usage: reth [OPTIONS] <COMMAND>
 
 Commands:
-  node             Start the node
-  init             Initialize the database from a genesis file
-  init-state       Initialize the database from a state dump file
-  import           This syncs RLP encoded blocks from a file
-  import-receipts  This imports RLP encoded receipts from a file
-  dump-genesis     Dumps genesis block JSON configuration to stdout
-  db               Database debugging utilities
-  stage            Manipulate individual stages
-  p2p              P2P Debugging utilities
-  test-vectors     Generate Test Vectors
-  config           Write config to stdout
-  debug            Various debug routines
-  recover          Scripts for node recovery
-  help             Print this message or the help of the given subcommand(s)
+  node          Start the node
+  init          Initialize the database from a genesis file
+  init-state    Initialize the database from a state dump file
+  import        This syncs RLP encoded blocks from a file
+  dump-genesis  Dumps genesis block JSON configuration to stdout
+  db            Database debugging utilities
+  stage         Manipulate individual stages
+  p2p           P2P Debugging utilities
+  test-vectors  Generate Test Vectors
+  config        Write config to stdout
+  debug         Various debug routines
+  recover       Scripts for node recovery
+  help          Print this message or the help of the given subcommand(s)
 
 Options:
       --chain <CHAIN_OR_PATH>
@@ -39,7 +38,7 @@ Options:
 
           Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
 
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
 
           [default: 1]
 

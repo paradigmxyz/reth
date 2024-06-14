@@ -2,14 +2,12 @@
 
 use crate::metrics::version_metrics::register_version_metrics;
 use eyre::WrapErr;
-use hyper::{
-    service::{make_service_fn, service_fn},
-    Body, Request, Response, Server,
-};
+use futures::{future::FusedFuture, FutureExt};
+use http::Response;
 use metrics::describe_gauge;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
-use reth_db::database_metrics::DatabaseMetrics;
+use reth_db_api::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
 use reth_provider::providers::StaticFileProvider;
 use reth_tasks::TaskExecutor;
@@ -64,29 +62,37 @@ async fn start_endpoint<F: Hook + 'static>(
     hook: Arc<F>,
     task_executor: TaskExecutor,
 ) -> eyre::Result<()> {
-    let make_svc = make_service_fn(move |_| {
-        let handle = handle.clone();
-        let hook = Arc::clone(&hook);
-        async move {
-            Ok::<_, Infallible>(service_fn(move |_: Request<Body>| {
+    let listener =
+        tokio::net::TcpListener::bind(listen_addr).await.wrap_err("Could not bind to address")?;
+
+    task_executor.spawn_with_graceful_shutdown_signal(|signal| async move {
+        let mut shutdown = signal.ignore_guard().fuse();
+        loop {
+            let io = match listener.accept().await {
+                Ok((stream, _remote_addr)) => stream,
+                Err(err) => {
+                    tracing::error!(%err, "failed to accept connection");
+                    continue;
+                }
+            };
+
+            let handle = handle.clone();
+            let hook = hook.clone();
+            let service = tower::service_fn(move |_| {
                 (hook)();
                 let metrics = handle.render();
-                async move { Ok::<_, Infallible>(Response::new(Body::from(metrics))) }
-            }))
-        }
-    });
+                async move { Ok::<_, Infallible>(Response::new(metrics)) }
+            });
 
-    let server =
-        Server::try_bind(&listen_addr).wrap_err("Could not bind to address")?.serve(make_svc);
+            if let Err(error) =
+                jsonrpsee::server::serve_with_graceful_shutdown(io, service, &mut shutdown).await
+            {
+                tracing::debug!(%error, "failed to serve request")
+            }
 
-    task_executor.spawn_with_graceful_shutdown_signal(move |signal| async move {
-        if let Err(error) = server
-            .with_graceful_shutdown(async move {
-                let _ = signal.await;
-            })
-            .await
-        {
-            tracing::error!(%error, "metrics endpoint crashed")
+            if shutdown.is_terminated() {
+                break;
+            }
         }
     });
 
@@ -164,37 +170,37 @@ fn collect_memory_stats() {
     if let Ok(value) = stats::active::read()
         .map_err(|error| error!(%error, "Failed to read jemalloc.stats.active"))
     {
-        gauge!("jemalloc.active", value as f64);
+        gauge!("jemalloc.active").set(value as f64);
     }
 
     if let Ok(value) = stats::allocated::read()
         .map_err(|error| error!(%error, "Failed to read jemalloc.stats.allocated"))
     {
-        gauge!("jemalloc.allocated", value as f64);
+        gauge!("jemalloc.allocated").set(value as f64);
     }
 
     if let Ok(value) = stats::mapped::read()
         .map_err(|error| error!(%error, "Failed to read jemalloc.stats.mapped"))
     {
-        gauge!("jemalloc.mapped", value as f64);
+        gauge!("jemalloc.mapped").set(value as f64);
     }
 
     if let Ok(value) = stats::metadata::read()
         .map_err(|error| error!(%error, "Failed to read jemalloc.stats.metadata"))
     {
-        gauge!("jemalloc.metadata", value as f64);
+        gauge!("jemalloc.metadata").set(value as f64);
     }
 
     if let Ok(value) = stats::resident::read()
         .map_err(|error| error!(%error, "Failed to read jemalloc.stats.resident"))
     {
-        gauge!("jemalloc.resident", value as f64);
+        gauge!("jemalloc.resident").set(value as f64);
     }
 
     if let Ok(value) = stats::retained::read()
         .map_err(|error| error!(%error, "Failed to read jemalloc.stats.retained"))
     {
-        gauge!("jemalloc.retained", value as f64);
+        gauge!("jemalloc.retained").set(value as f64);
     }
 }
 
@@ -241,7 +247,7 @@ fn describe_memory_stats() {}
 
 #[cfg(target_os = "linux")]
 fn collect_io_stats() {
-    use metrics::absolute_counter;
+    use metrics::counter;
     use tracing::error;
 
     let Ok(process) = procfs::process::Process::myself()
@@ -256,13 +262,13 @@ fn collect_io_stats() {
         return
     };
 
-    absolute_counter!("io.rchar", io.rchar);
-    absolute_counter!("io.wchar", io.wchar);
-    absolute_counter!("io.syscr", io.syscr);
-    absolute_counter!("io.syscw", io.syscw);
-    absolute_counter!("io.read_bytes", io.read_bytes);
-    absolute_counter!("io.write_bytes", io.write_bytes);
-    absolute_counter!("io.cancelled_write_bytes", io.cancelled_write_bytes);
+    counter!("io.rchar").absolute(io.rchar);
+    counter!("io.wchar").absolute(io.wchar);
+    counter!("io.syscr").absolute(io.syscr);
+    counter!("io.syscw").absolute(io.syscw);
+    counter!("io.read_bytes").absolute(io.read_bytes);
+    counter!("io.write_bytes").absolute(io.write_bytes);
+    counter!("io.cancelled_write_bytes").absolute(io.cancelled_write_bytes);
 }
 
 #[cfg(target_os = "linux")]
@@ -279,15 +285,14 @@ fn describe_io_stats() {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn collect_io_stats() {}
+const fn collect_io_stats() {}
 
 #[cfg(not(target_os = "linux"))]
-fn describe_io_stats() {}
+const fn describe_io_stats() {}
 
 #[cfg(test)]
 mod tests {
     use crate::node_config::PROMETHEUS_RECORDER_HANDLE;
-    use std::ops::Deref;
 
     // Dependencies using different version of the `metrics` crate (to be exact, 0.21 vs 0.22)
     // may not be able to communicate with each other through the global recorder.
@@ -297,13 +302,13 @@ mod tests {
     #[test]
     fn process_metrics() {
         // initialize the lazy handle
-        let _ = PROMETHEUS_RECORDER_HANDLE.deref();
+        let _ = &*PROMETHEUS_RECORDER_HANDLE;
 
         let process = metrics_process::Collector::default();
         process.describe();
         process.collect();
 
         let metrics = PROMETHEUS_RECORDER_HANDLE.render();
-        assert!(metrics.contains("process_cpu_seconds_total"));
+        assert!(metrics.contains("process_cpu_seconds_total"), "{metrics:?}");
     }
 }

@@ -3,10 +3,11 @@
 //! This basis of this file has been taken from the discv5 codebase:
 //! <https://github.com/sigp/discv5>
 
+use alloy_primitives::bytes::Bytes;
 use alloy_rlp::Encodable;
 use reth_net_common::ban_list::BanList;
 use reth_net_nat::{NatResolver, ResolveNatInterval};
-use reth_primitives::{bytes::Bytes, NodeRecord};
+use reth_network_peers::NodeRecord;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -33,7 +34,7 @@ pub struct Discv4Config {
     pub ping_expiration: Duration,
     /// The rate at which new random lookups should be triggered.
     pub lookup_interval: Duration,
-    /// The duration of we consider a FindNode request timed out.
+    /// The duration of we consider a `FindNode` request timed out.
     pub request_timeout: Duration,
     /// The duration after which we consider an enr request timed out.
     pub enr_expiration: Duration,
@@ -91,13 +92,13 @@ impl Discv4Config {
         &mut self,
         pairs: impl IntoIterator<Item = (impl Into<Vec<u8>>, Bytes)>,
     ) -> &mut Self {
-        for (k, v) in pairs.into_iter() {
+        for (k, v) in pairs {
             self.add_eip868_rlp_pair(k, v);
         }
         self
     }
 
-    /// Returns the corresponding [`ResolveNatInterval`], if a [NatResolver] and an interval was
+    /// Returns the corresponding [`ResolveNatInterval`], if a [`NatResolver`] and an interval was
     /// configured
     pub fn resolve_external_ip_interval(&self) -> Option<ResolveNatInterval> {
         let resolver = self.external_ip_resolver?;
@@ -252,13 +253,13 @@ impl Discv4ConfigBuilder {
         &mut self,
         pairs: impl IntoIterator<Item = (impl Into<Vec<u8>>, Bytes)>,
     ) -> &mut Self {
-        for (k, v) in pairs.into_iter() {
+        for (k, v) in pairs {
             self.add_eip868_rlp_pair(k, v);
         }
         self
     }
 
-    /// A set of lists that can ban IP's or PeerIds from the server. See
+    /// A set of lists that can ban IP's or `PeerIds` from the server. See
     /// [`BanList`].
     pub fn ban_list(&mut self, ban_list: BanList) -> &mut Self {
         self.config.ban_list = ban_list;

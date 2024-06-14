@@ -2,55 +2,36 @@
 //! file.
 
 use crate::{
-    args::{
-        utils::{genesis_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs,
+    commands::{
+        common::{AccessRights, Environment, EnvironmentArgs},
+        import::build_import_pipeline,
     },
-    commands::import::{build_import_pipeline, load_config},
-    dirs::{DataDirPath, MaybePlatformPath},
     version::SHORT_VERSION,
 };
 use clap::Parser;
-use reth_beacon_consensus::EthBeaconConsensus;
-use reth_config::{config::EtlConfig, Config};
-
-use reth_db::{init_db, tables, transaction::DbTx};
+use reth_consensus::noop::NoopConsensus;
+use reth_db::tables;
+use reth_db_api::transaction::DbTx;
 use reth_downloaders::file_client::{
     ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
 };
-
-use reth_node_core::init::init_genesis;
-
-use reth_primitives::{op_mainnet::is_dup_tx, stage::StageId, PruneModes};
-use reth_provider::{ProviderFactory, StageCheckpointReader, StaticFileProviderFactory};
+use reth_optimism_primitives::bedrock_import::is_dup_tx;
+use reth_provider::StageCheckpointReader;
+use reth_prune_types::PruneModes;
+use reth_stages::StageId;
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
-
 use tracing::{debug, error, info};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]
 pub struct ImportOpCommand {
-    /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
-    config: Option<PathBuf>,
+    #[command(flatten)]
+    env: EnvironmentArgs,
 
-    /// The path to the data dir for all reth files and subdirectories.
-    ///
-    /// Defaults to the OS-specific data directory:
-    ///
-    /// - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-    /// - Windows: `{FOLDERID_RoamingAppData}/reth/`
-    /// - macOS: `$HOME/Library/Application Support/reth/`
-    #[arg(long, value_name = "DATA_DIR", verbatim_doc_comment, default_value_t)]
-    datadir: MaybePlatformPath<DataDirPath>,
-
-    /// Chunk byte length.
+    /// Chunk byte length to read from file.
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
-
-    #[command(flatten)]
-    db: DatabaseArgs,
 
     /// The path to a block file for import.
     ///
@@ -74,35 +55,10 @@ impl ImportOpCommand {
             "Chunking chain import"
         );
 
-        let chain_spec = genesis_value_parser(SUPPORTED_CHAINS[0])?;
+        let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
 
-        // add network name to data dir
-        let data_dir = self.datadir.unwrap_or_chain_default(chain_spec.chain);
-        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
-
-        let mut config: Config = load_config(config_path.clone())?;
-        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
-
-        // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
-        if config.stages.etl.dir.is_none() {
-            config.stages.etl.dir = Some(EtlConfig::from_datadir(data_dir.data_dir()));
-        }
-
-        let db_path = data_dir.db();
-
-        info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let db = Arc::new(init_db(db_path, self.db.database_args())?);
-
-        info!(target: "reth::cli", "Database opened");
-        let provider_factory =
-            ProviderFactory::new(db.clone(), chain_spec.clone(), data_dir.static_files())?;
-
-        debug!(target: "reth::cli", chain=%chain_spec.chain, genesis=?chain_spec.genesis_hash(), "Initializing genesis");
-
-        init_genesis(provider_factory.clone())?;
-
-        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
-        info!(target: "reth::cli", "Consensus engine initialized");
+        // we use noop here because we expect the inputs to be valid
+        let consensus = Arc::new(NoopConsensus::default());
 
         // open file
         let mut reader = ChunkedFileReader::new(&self.path, self.chunk_len).await?;
@@ -138,11 +94,7 @@ impl ImportOpCommand {
                 provider_factory.clone(),
                 &consensus,
                 Arc::new(file_client),
-                StaticFileProducer::new(
-                    provider_factory.clone(),
-                    provider_factory.static_file_provider(),
-                    PruneModes::default(),
-                ),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
                 true,
             )
             .await?;
@@ -159,7 +111,7 @@ impl ImportOpCommand {
                 None,
                 latest_block_number,
                 events,
-                db.clone(),
+                provider_factory.db_ref().clone(),
             ));
 
             // Run pipeline
@@ -191,6 +143,9 @@ impl ImportOpCommand {
         info!(target: "reth::cli",
             total_imported_blocks,
             total_imported_txns,
+            total_decoded_blocks,
+            total_decoded_txns,
+            total_filtered_out_dup_txns,
             "Chain file imported"
         );
 

@@ -1,6 +1,6 @@
 //! reth data directories.
 
-use crate::utils::parse_path;
+use crate::{args::DatadirArgs, utils::parse_path};
 use reth_primitives::Chain;
 use std::{
     env::VarError,
@@ -16,35 +16,35 @@ pub fn config_path_prefix(chain: Chain) -> String {
 
 /// Returns the path to the reth data directory.
 ///
-/// Refer to [dirs_next::data_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::data_dir`] for cross-platform behavior.
 pub fn data_dir() -> Option<PathBuf> {
     dirs_next::data_dir().map(|root| root.join("reth"))
 }
 
 /// Returns the path to the reth database.
 ///
-/// Refer to [dirs_next::data_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::data_dir`] for cross-platform behavior.
 pub fn database_path() -> Option<PathBuf> {
     data_dir().map(|root| root.join("db"))
 }
 
 /// Returns the path to the reth configuration directory.
 ///
-/// Refer to [dirs_next::config_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::config_dir`] for cross-platform behavior.
 pub fn config_dir() -> Option<PathBuf> {
     dirs_next::config_dir().map(|root| root.join("reth"))
 }
 
 /// Returns the path to the reth cache directory.
 ///
-/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::cache_dir`] for cross-platform behavior.
 pub fn cache_dir() -> Option<PathBuf> {
     dirs_next::cache_dir().map(|root| root.join("reth"))
 }
 
 /// Returns the path to the reth logs directory.
 ///
-/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
+/// Refer to [`dirs_next::cache_dir`] for cross-platform behavior.
 pub fn logs_dir() -> Option<PathBuf> {
     cache_dir().map(|root| root.join("logs"))
 }
@@ -53,7 +53,7 @@ pub fn logs_dir() -> Option<PathBuf> {
 ///
 /// The data dir should contain a subdirectory for each chain, and those chain directories will
 /// include all information for that chain, such as the p2p secret.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct DataDirPath;
 
@@ -65,8 +65,8 @@ impl XdgPath for DataDirPath {
 
 /// Returns the path to the reth logs directory.
 ///
-/// Refer to [dirs_next::cache_dir] for cross-platform behavior.
-#[derive(Clone, Copy, Debug, Default)]
+/// Refer to [`dirs_next::cache_dir`] for cross-platform behavior.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct LogsDir;
 
@@ -86,7 +86,7 @@ pub trait XdgPath {
 /// A wrapper type that either parses a user-given path or defaults to an
 /// OS-specific path.
 ///
-/// The [FromStr] implementation supports shell expansions and common patterns such as `~` for the
+/// The [`FromStr`] implementation supports shell expansions and common patterns such as `~` for the
 /// home directory.
 ///
 /// # Example
@@ -148,21 +148,24 @@ impl<D> From<PlatformPath<D>> for PathBuf {
 
 impl<D> PlatformPath<D> {
     /// Returns the path joined with another path
-    pub fn join<P: AsRef<Path>>(&self, path: P) -> PlatformPath<D> {
-        PlatformPath::<D>(self.0.join(path), std::marker::PhantomData)
+    pub fn join<P: AsRef<Path>>(&self, path: P) -> Self {
+        Self(self.0.join(path), std::marker::PhantomData)
     }
 }
 
 impl<D> PlatformPath<D> {
     /// Converts the path to a `ChainPath` with the given `Chain`.
-    pub fn with_chain(&self, chain: Chain) -> ChainPath<D> {
+    pub fn with_chain(&self, chain: Chain, datadir_args: DatadirArgs) -> ChainPath<D> {
         // extract chain name
+        let platform_path = self.platform_path_from_chain(chain);
+
+        ChainPath::new(platform_path, chain, datadir_args)
+    }
+
+    fn platform_path_from_chain(&self, chain: Chain) -> Self {
         let chain_name = config_path_prefix(chain);
-
         let path = self.0.join(chain_name);
-
-        let platform_path = PlatformPath::<D>(path, std::marker::PhantomData);
-        ChainPath::new(platform_path, chain)
+        Self(path, std::marker::PhantomData)
     }
 
     /// Map the inner path to a new type `T`.
@@ -171,7 +174,7 @@ impl<D> PlatformPath<D> {
     }
 }
 
-/// An Optional wrapper type around [PlatformPath].
+/// An Optional wrapper type around [`PlatformPath`].
 ///
 /// This is useful for when a path is optional, such as the `--data-dir` flag.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -181,20 +184,23 @@ pub struct MaybePlatformPath<D>(Option<PlatformPath<D>>);
 
 impl<D: XdgPath> MaybePlatformPath<D> {
     /// Returns the path if it is set, otherwise returns the default path for the given chain.
-    pub fn unwrap_or_chain_default(&self, chain: Chain) -> ChainPath<D> {
+    pub fn unwrap_or_chain_default(&self, chain: Chain, datadir_args: DatadirArgs) -> ChainPath<D> {
         ChainPath(
-            self.0.clone().unwrap_or_else(|| PlatformPath::default().with_chain(chain).0),
+            self.0
+                .clone()
+                .unwrap_or_else(|| PlatformPath::default().platform_path_from_chain(chain)),
             chain,
+            datadir_args,
         )
     }
 
     /// Returns the default platform path for the specified [Chain].
     pub fn chain_default(chain: Chain) -> ChainPath<D> {
-        PlatformPath::default().with_chain(chain)
+        PlatformPath::default().with_chain(chain, DatadirArgs::default())
     }
 
     /// Returns true if a custom path is set
-    pub fn is_some(&self) -> bool {
+    pub const fn is_some(&self) -> bool {
         self.0.is_some()
     }
 
@@ -250,7 +256,7 @@ impl<D> From<PathBuf> for MaybePlatformPath<D> {
     }
 }
 
-/// Wrapper type around PlatformPath that includes a `Chain`, used for separating reth data for
+/// Wrapper type around `PlatformPath` that includes a `Chain`, used for separating reth data for
 /// different networks.
 ///
 /// If the chain is either mainnet, goerli, or sepolia, then the path will be:
@@ -261,12 +267,12 @@ impl<D> From<PathBuf> for MaybePlatformPath<D> {
 /// Otherwise, the path will be dependent on the chain ID:
 ///  * `<DIR>/<CHAIN_ID>`
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ChainPath<D>(PlatformPath<D>, Chain);
+pub struct ChainPath<D>(PlatformPath<D>, Chain, DatadirArgs);
 
 impl<D> ChainPath<D> {
     /// Returns a new `ChainPath` given a `PlatformPath` and a `Chain`.
-    pub fn new(path: PlatformPath<D>, chain: Chain) -> Self {
-        Self(path, chain)
+    pub const fn new(path: PlatformPath<D>, chain: Chain, datadir_args: DatadirArgs) -> Self {
+        Self(path, chain, datadir_args)
     }
 
     /// Returns the path to the reth data directory for this chain.
@@ -283,11 +289,16 @@ impl<D> ChainPath<D> {
         self.data_dir().join("db")
     }
 
-    /// Returns the path to the static_files directory for this chain.
+    /// Returns the path to the static files directory for this chain.
     ///
     /// `<DIR>/<CHAIN_ID>/static_files`
     pub fn static_files(&self) -> PathBuf {
-        self.data_dir().join("static_files")
+        let datadir_args = &self.2;
+        if let Some(static_files_path) = &datadir_args.static_files_path {
+            static_files_path.to_path_buf()
+        } else {
+            self.data_dir().join("static_files")
+        }
     }
 
     /// Returns the path to the reth p2p secret key for this chain.
@@ -359,29 +370,29 @@ mod tests {
     #[test]
     fn test_maybe_data_dir_path() {
         let path = MaybePlatformPath::<DataDirPath>::default();
-        let path = path.unwrap_or_chain_default(Chain::mainnet());
+        let path = path.unwrap_or_chain_default(Chain::mainnet(), DatadirArgs::default());
         assert!(path.as_ref().ends_with("reth/mainnet"), "{path:?}");
 
         let db_path = path.db();
         assert!(db_path.ends_with("reth/mainnet/db"), "{db_path:?}");
 
         let path = MaybePlatformPath::<DataDirPath>::from_str("my/path/to/datadir").unwrap();
-        let path = path.unwrap_or_chain_default(Chain::mainnet());
+        let path = path.unwrap_or_chain_default(Chain::mainnet(), DatadirArgs::default());
         assert!(path.as_ref().ends_with("my/path/to/datadir"), "{path:?}");
     }
 
     #[test]
     fn test_maybe_testnet_datadir_path() {
         let path = MaybePlatformPath::<DataDirPath>::default();
-        let path = path.unwrap_or_chain_default(Chain::goerli());
+        let path = path.unwrap_or_chain_default(Chain::goerli(), DatadirArgs::default());
         assert!(path.as_ref().ends_with("reth/goerli"), "{path:?}");
 
         let path = MaybePlatformPath::<DataDirPath>::default();
-        let path = path.unwrap_or_chain_default(Chain::holesky());
+        let path = path.unwrap_or_chain_default(Chain::holesky(), DatadirArgs::default());
         assert!(path.as_ref().ends_with("reth/holesky"), "{path:?}");
 
         let path = MaybePlatformPath::<DataDirPath>::default();
-        let path = path.unwrap_or_chain_default(Chain::sepolia());
+        let path = path.unwrap_or_chain_default(Chain::sepolia(), DatadirArgs::default());
         assert!(path.as_ref().ends_with("reth/sepolia"), "{path:?}");
     }
 }

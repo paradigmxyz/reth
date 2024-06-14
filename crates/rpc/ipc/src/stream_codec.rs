@@ -43,7 +43,7 @@ pub enum Separator {
 
 impl Default for Separator {
     fn default() -> Self {
-        Separator::Byte(b'\n')
+        Self::Byte(b'\n')
     }
 }
 
@@ -57,17 +57,17 @@ pub struct StreamCodec {
 impl StreamCodec {
     /// Default codec with streaming input data. Input can be both enveloped and not.
     pub fn stream_incoming() -> Self {
-        StreamCodec::new(Separator::Empty, Default::default())
+        Self::new(Separator::Empty, Default::default())
     }
 
     /// New custom stream codec
-    pub fn new(incoming_separator: Separator, outgoing_separator: Separator) -> Self {
-        StreamCodec { incoming_separator, outgoing_separator }
+    pub const fn new(incoming_separator: Separator, outgoing_separator: Separator) -> Self {
+        Self { incoming_separator, outgoing_separator }
     }
 }
 
 #[inline]
-fn is_whitespace(byte: u8) -> bool {
+const fn is_whitespace(byte: u8) -> bool {
     matches!(byte, 0x0D | 0x0A | 0x20 | 0x09)
 }
 

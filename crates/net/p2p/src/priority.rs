@@ -1,4 +1,4 @@
-/// BlockHeader and BodyHeader DownloadRequest priority
+/// `BlockHeader` and `BodyHeader` `DownloadRequest` priority
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Priority {
     /// Queued from the back for download requests.
@@ -10,13 +10,13 @@ pub enum Priority {
 }
 
 impl Priority {
-    /// Returns `true` if this is [Priority::High]
-    pub fn is_high(&self) -> bool {
-        matches!(self, Priority::High)
+    /// Returns `true` if this is [`Priority::High`]
+    pub const fn is_high(&self) -> bool {
+        matches!(self, Self::High)
     }
 
-    /// Returns `true` if this is [Priority::Normal]
-    pub fn is_normal(&self) -> bool {
-        matches!(self, Priority::Normal)
+    /// Returns `true` if this is [`Priority::Normal`]
+    pub const fn is_normal(&self) -> bool {
+        matches!(self, Self::Normal)
     }
 }

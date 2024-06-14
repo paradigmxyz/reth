@@ -50,7 +50,7 @@ pub struct TxEip2930 {
 }
 
 impl TxEip2930 {
-    /// Calculates a heuristic for the in-memory size of the [TxEip2930] transaction.
+    /// Calculates a heuristic for the in-memory size of the [`TxEip2930`] transaction.
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<ChainId>() + // chain_id
@@ -63,7 +63,7 @@ impl TxEip2930 {
         self.input.len() // input
     }
 
-    /// Decodes the inner [TxEip2930] fields from RLP bytes.
+    /// Decodes the inner [`TxEip2930`] fields from RLP bytes.
     ///
     /// NOTE: This assumes a RLP header has already been decoded, and _just_ decodes the following
     /// RLP fields in the following order:
@@ -153,7 +153,7 @@ impl TxEip2930 {
     }
 
     /// Get transaction type
-    pub(crate) fn tx_type(&self) -> TxType {
+    pub(crate) const fn tx_type(&self) -> TxType {
         TxType::Eip2930
     }
 

@@ -5,16 +5,16 @@ use alloy_provider::{ext::AdminApi, ProviderBuilder};
 use futures::StreamExt;
 use reth_discv4::Discv4Config;
 use reth_eth_wire::DisconnectReason;
-use reth_interfaces::{
-    p2p::headers::client::{HeadersClient, HeadersRequest},
-    sync::{NetworkSyncUpdater, SyncState},
-};
 use reth_net_common::ban_list::BanList;
 use reth_network::{
     test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
     NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkManager, PeersConfig,
 };
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
+use reth_network_p2p::{
+    headers::client::{HeadersClient, HeadersRequest},
+    sync::{NetworkSyncUpdater, SyncState},
+};
 use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
@@ -54,7 +54,7 @@ async fn test_establish_connections() {
         let mut established = listener0.take(4);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionClosed { .. } => {
+                NetworkEvent::SessionClosed { .. } | NetworkEvent::PeerRemoved(_) => {
                     panic!("unexpected event")
                 }
                 NetworkEvent::SessionEstablished { peer_id, .. } => {
@@ -62,9 +62,6 @@ async fn test_establish_connections() {
                 }
                 NetworkEvent::PeerAdded(peer_id) => {
                     assert!(expected_peers.remove(&peer_id))
-                }
-                NetworkEvent::PeerRemoved(_) => {
-                    panic!("unexpected event")
                 }
             }
         }

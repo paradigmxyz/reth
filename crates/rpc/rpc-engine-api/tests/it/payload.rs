@@ -2,9 +2,6 @@
 
 use alloy_rlp::{Decodable, Error as RlpError};
 use assert_matches::assert_matches;
-use reth_interfaces::test_utils::generators::{
-    self, random_block, random_block_range, random_header, Rng,
-};
 use reth_primitives::{
     bytes::{Bytes, BytesMut},
     proofs, Block, SealedBlock, TransactionSigned, Withdrawals, B256, U256,
@@ -16,6 +13,7 @@ use reth_rpc_types_compat::engine::payload::{
     block_to_payload, block_to_payload_v1, convert_to_payload_body_v1, try_into_sealed_block,
     try_payload_v1_to_block,
 };
+use reth_testing_utils::generators::{self, random_block, random_block_range, random_header, Rng};
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
     let unsealed = src.unseal();
@@ -28,6 +26,7 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
         body: transformed.body,
         ommers: transformed.ommers,
         withdrawals: transformed.withdrawals,
+        requests: transformed.requests,
     })
     .0
 }
