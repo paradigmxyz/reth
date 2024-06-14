@@ -7882,6 +7882,7 @@ dependencies = [
 name = "reth-rpc-api"
 version = "1.0.0-rc.1"
 dependencies = [
+ "alloy-dyn-abi",
  "jsonrpsee",
  "reth-engine-primitives",
  "reth-network-peers",
