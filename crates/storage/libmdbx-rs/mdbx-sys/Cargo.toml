@@ -1,6 +1,6 @@
 [package]
 name = "reth-mdbx-sys"
-description = "Raw bindings for libmdbx, with a good license"
+description = "Raw bindings for libmdbx"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
