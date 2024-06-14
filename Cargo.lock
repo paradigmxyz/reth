@@ -7157,7 +7157,6 @@ dependencies = [
  "dashmap",
  "derive_more",
  "indexmap 2.2.6",
- "libc",
  "parking_lot 0.12.3",
  "pprof",
  "rand 0.8.5",
@@ -7174,7 +7173,6 @@ version = "1.0.0-rc.1"
 dependencies = [
  "bindgen",
  "cc",
- "libc",
 ]
 
 [[package]]
