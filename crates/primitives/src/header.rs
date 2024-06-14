@@ -9,11 +9,12 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::BufMut;
+use derive_more::{AsRef, Deref};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
-use std::{mem, ops::Deref};
+use std::mem;
 
 /// Errors that can occur during header sanity checks.
 #[derive(Debug, PartialEq, Eq)]
@@ -517,11 +518,13 @@ impl Decodable for Header {
 /// to modify header.
 #[main_codec(no_arbitrary)]
 #[add_arbitrary_tests(rlp, compact)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref)]
 pub struct SealedHeader {
     /// Locked Header hash.
     hash: BlockHash,
     /// Locked Header fields.
+    #[as_ref]
+    #[deref]
     header: Header,
 }
 
@@ -655,20 +658,6 @@ impl Decodable for SealedHeader {
         *buf = *b;
 
         Ok(Self { header, hash })
-    }
-}
-
-impl AsRef<Header> for SealedHeader {
-    fn as_ref(&self) -> &Header {
-        &self.header
-    }
-}
-
-impl Deref for SealedHeader {
-    type Target = Header;
-
-    fn deref(&self) -> &Self::Target {
-        &self.header
     }
 }
 
