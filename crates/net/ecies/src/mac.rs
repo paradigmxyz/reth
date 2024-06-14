@@ -10,11 +10,11 @@
 //! For more information, refer to the [Ethereum MAC specification](https://github.com/ethereum/devp2p/blob/master/rlpx.md#mac).
 
 use aes::Aes256Enc;
+use alloy_primitives::{B128, B256};
 use block_padding::NoPadding;
 use cipher::BlockEncrypt;
 use digest::KeyInit;
 use generic_array::GenericArray;
-use reth_primitives::{B128, B256};
 use sha3::{Digest, Keccak256};
 use typenum::U16;
 

@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 reth-codecs.workspace = true
-reth-trie-types.workspace = true
+reth-trie-common.workspace = true
 alloy-primitives.workspace = true
 
 modular-bitfield.workspace = true

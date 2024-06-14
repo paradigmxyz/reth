@@ -1,9 +1,9 @@
 use crate::{
     AccountReader, BlockHashReader, ExecutionDataProvider, StateProvider, StateRootProvider,
 };
-use reth_primitives::{proofs::AccountProof, Account, Address, BlockNumber, Bytecode, B256};
+use reth_primitives::{Account, Address, BlockNumber, Bytecode, B256};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::updates::TrieUpdates;
+use reth_trie::{updates::TrieUpdates, AccountProof};
 use revm::db::BundleState;
 
 /// A state provider that resolves to data from either a wrapped [`crate::ExecutionOutcome`]

@@ -247,6 +247,8 @@ impl ExecutionOutcome {
 
         // remove receipts
         self.receipts.truncate(new_len);
+        // remove requests
+        self.requests.truncate(new_len);
         // Revert last n reverts.
         self.bundle.revert(rm_trx);
 
@@ -595,37 +597,51 @@ mod tests {
 
     #[test]
     fn test_revert_to() {
+        // Create a random receipt object
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            success: true,
+            #[cfg(feature = "optimism")]
+            deposit_nonce: Some(18),
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: Some(34),
+        };
+
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 46913,
-                logs: vec![],
-                success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            })]],
+            receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt.clone())]],
         };
 
         // Define the first block number
         let first_block = 123;
 
+        // Create a DepositRequest object with specific attributes.
+        let request = Request::DepositRequest(DepositRequest {
+            pubkey: FixedBytes::<48>::from([1; 48]),
+            withdrawal_credentials: B256::from([0; 32]),
+            amount: 1111,
+            signature: FixedBytes::<96>::from([2; 96]),
+            index: 222,
+        });
+
+        // Create a vector of Requests containing the request.
+        let requests = vec![Requests(vec![request]), Requests(vec![request])];
+
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let mut exec_res = ExecutionOutcome {
-            bundle: Default::default(),
-            receipts: receipts.clone(),
-            requests: vec![],
-            first_block,
-        };
+        let mut exec_res =
+            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
 
         // Assert that the revert_to method returns true when reverting to the initial block number.
         assert!(exec_res.revert_to(123));
 
-        // Assert that the receipts remain unchanged after reverting to the initial block number.
-        assert_eq!(exec_res.receipts, receipts);
+        // Assert that the receipts are properly cut after reverting to the initial block number.
+        assert_eq!(exec_res.receipts, Receipts { receipt_vec: vec![vec![Some(receipt)]] });
+
+        // Assert that the requests are properly cut after reverting to the initial block number.
+        assert_eq!(exec_res.requests, vec![Requests(vec![request])]);
 
         // Assert that the revert_to method returns false when attempting to revert to a block
         // number greater than the initial block number.

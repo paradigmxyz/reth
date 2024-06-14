@@ -5,13 +5,13 @@ use crate::{
     },
     holesky_nodes,
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
-    proofs::state_root_ref_unhashed,
     revm_primitives::{address, b256},
     Address, BlockNumber, Chain, ChainKind, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis,
     Hardfork, Head, Header, NamedChain, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH,
     MAINNET_DEPOSIT_CONTRACT, U256,
 };
 use once_cell::sync::Lazy;
+use reth_trie_common::root::state_root_ref_unhashed;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -1726,8 +1726,10 @@ impl OptimismGenesisInfo {
 
 #[cfg(test)]
 mod tests {
+    use reth_trie_common::TrieAccount;
+
     use super::*;
-    use crate::{b256, hex, proofs::IntoTrieAccount, ChainConfig, GenesisAccount};
+    use crate::{b256, hex, ChainConfig, GenesisAccount};
     use std::{collections::HashMap, str::FromStr};
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
@@ -2829,10 +2831,7 @@ Post-merge hard forks (timestamp based):
 
         for (key, expected_rlp) in key_rlp {
             let account = chainspec.genesis.alloc.get(&key).expect("account should exist");
-            assert_eq!(
-                &alloy_rlp::encode(IntoTrieAccount::to_trie_account(account.clone())),
-                expected_rlp
-            );
+            assert_eq!(&alloy_rlp::encode(TrieAccount::from(account.clone())), expected_rlp);
         }
 
         assert_eq!(chainspec.genesis_hash, None);
