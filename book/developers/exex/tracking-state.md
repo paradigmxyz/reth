@@ -11,6 +11,13 @@ First, we need to turn our ExEx into a stateful struct.
 Before, we had just an async function, but now we'll need to implement
 the [`Future`](https://doc.rust-lang.org/std/future/trait.Future.html) trait manually.
 
+<div class="warning">
+
+Having a stateful async function is also possible, but it makes testing harder,
+because you can't access variables inside the function to assert the state of your ExEx.
+
+</div>
+
 ```rust,norun,noplayground,ignore
 use std::{
     future::Future,
@@ -101,7 +108,9 @@ use reth_tracing::tracing::info;
 
 struct MyExEx<Node: FullNodeComponents> {
     ctx: ExExContext<Node>,
+    /// First block that was committed since the start of the ExEx.
     first_block: Option<BlockNumber>,
+    /// Total number of transactions committed.
     transactions: u64,
 }
 
@@ -170,7 +179,7 @@ As you can see, we added two fields to our ExEx struct:
 - `first_block` to keep track of the first block that was committed since the start of the ExEx.
 - `transactions` to keep track of the total number of transactions committed, accounting for reorgs and reverts.
 
-We also changed our `match` block to two if clauses:
+We also changed our `match` block to two `if` clauses:
 - First one checks if there's a reverted chain using `notification.reverted_chain()`. If there is:
     - We subtract the number of transactions in the reverted chain from the total number of transactions.
     - It's important to do the `saturating_sub` here, because if we just started our node and
