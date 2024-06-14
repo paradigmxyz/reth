@@ -633,7 +633,7 @@ impl From<Block> for BlockBody {
 /// This __does not, and should not guarantee__ that the header is valid with respect to __anything
 /// else__.
 #[cfg(any(test, feature = "arbitrary"))]
-pub fn generate_valid_header(
+pub const fn generate_valid_header(
     mut header: Header,
     eip_4844_active: bool,
     blob_gas_used: u64,

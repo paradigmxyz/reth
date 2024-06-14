@@ -1152,7 +1152,7 @@ pub struct GetPooledTxRequestFut {
 
 impl GetPooledTxRequestFut {
     #[inline]
-    fn new(
+    const fn new(
         peer_id: PeerId,
         requested_hashes: RequestTxHashes,
         response: oneshot::Receiver<RequestResult<PooledTransactions>>,

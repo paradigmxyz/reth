@@ -225,13 +225,13 @@ impl TransactionBuilder {
     }
 
     /// Increments the nonce value of the transaction builder by 1.
-    pub fn inc_nonce(mut self) -> Self {
+    pub const fn inc_nonce(mut self) -> Self {
         self.nonce += 1;
         self
     }
 
     /// Decrements the nonce value of the transaction builder by 1, avoiding underflow.
-    pub fn decr_nonce(mut self) -> Self {
+    pub const fn decr_nonce(mut self) -> Self {
         self.nonce = self.nonce.saturating_sub(1);
         self
     }

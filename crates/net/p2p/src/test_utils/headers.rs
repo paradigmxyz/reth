@@ -38,7 +38,7 @@ pub struct TestHeaderDownloader {
 
 impl TestHeaderDownloader {
     /// Instantiates the downloader with the mock responses
-    pub fn new(
+    pub const fn new(
         client: TestHeadersClient,
         consensus: Arc<TestConsensus>,
         limit: u64,

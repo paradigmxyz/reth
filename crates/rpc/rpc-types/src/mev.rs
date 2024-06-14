@@ -400,7 +400,7 @@ pub struct SimBundleLogs {
 
 impl SendBundleRequest {
     /// Create a new bundle request.
-    pub fn new(
+    pub const fn new(
         block_num: u64,
         max_block: Option<u64>,
         protocol_version: ProtocolVersion,
