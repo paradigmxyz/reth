@@ -4,16 +4,16 @@ use crate::{logs_bloom, Bloom, Bytes, TxType, B256};
 use alloy_primitives::Log;
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
+use core::{cmp::Ordering, ops::Deref};
 use derive_more::{Deref, DerefMut, From, IntoIterator};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::strategy::Strategy;
 #[cfg(feature = "zstd-codec")]
 use reth_codecs::CompactZstd;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
-use core::{cmp::Ordering, ops::Deref};
 
 #[cfg(not(feature = "std"))]
-use alloc::{vec,vec::Vec};
+use alloc::{vec, vec::Vec};
 
 /// Receipt containing result of transaction execution.
 #[cfg_attr(feature = "zstd-codec", main_codec(no_arbitrary, zstd))]

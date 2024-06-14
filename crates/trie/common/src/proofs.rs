@@ -9,9 +9,6 @@ use alloy_trie::{
 };
 use reth_primitives_traits::Account;
 
-// #[cfg(not(feature = "std"))]
-// use alloc::vec::Vec;
-
 /// The merkle proof with the relevant account info.
 #[derive(PartialEq, Eq, Debug)]
 pub struct AccountProof {

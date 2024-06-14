@@ -7,10 +7,7 @@ use reth_codecs::{main_codec, Compact};
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-use core::{
-    mem,
-    slice,
-};
+use core::{mem, slice};
 
 /// Re-export from `alloy_eips`.
 #[doc(inline)]

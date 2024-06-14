@@ -1,4 +1,5 @@
 use bytes::BufMut;
+use core::fmt;
 use derive_more::Deref;
 use roaring::RoaringTreemap;
 use serde::{
@@ -6,7 +7,6 @@ use serde::{
     ser::SerializeSeq,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use core::fmt;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
