@@ -278,35 +278,32 @@ where
                     highest_matching_index = idx;
                 }
             }
-            target_blocks.push((block.number, transaction_indices, highest_matching_index));
+            if !transaction_indices.is_empty() {
+                target_blocks.push((block.number, transaction_indices, highest_matching_index));
+            }
         }
 
         // trace all relevant blocks
         let mut block_traces = Vec::with_capacity(target_blocks.len());
         for (num, indices, highest_idx) in target_blocks {
-            let mut traces = if !indices.is_empty() {
-                self.inner.eth_api.trace_block_until(
-                    num.into(),
-                    Some(highest_idx),
-                    TracingInspectorConfig::default_parity(),
-                    move |tx_info, inspector, res, _, _| {
-                        if let Some(idx) = tx_info.index {
-                            if !indices.contains(&idx) {
-                                // only record traces for relevant transactions
-                                return Ok(None)
-                            }
+            let traces = self.inner.eth_api.trace_block_until(
+                num.into(),
+                Some(highest_idx),
+                TracingInspectorConfig::default_parity(),
+                move |tx_info, inspector, res, _, _| {
+                    if let Some(idx) = tx_info.index {
+                        if !indices.contains(&idx) {
+                            // only record traces for relevant transactions
+                            return Ok(None)
                         }
-                        let traces = inspector
-                            .with_transaction_gas_used(res.gas_used())
-                            .into_parity_builder()
-                            .into_localized_transaction_traces(tx_info);
-                        Ok(Some(traces))
-                    },
-                )
-            } else {
-                Box::pin(futures::future::ready(Ok(None)))
-            };
-
+                    }
+                    let traces = inspector
+                        .with_transaction_gas_used(res.gas_used())
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info);
+                    Ok(Some(traces))
+                },
+            );
             block_traces.push(traces);
         }
 
