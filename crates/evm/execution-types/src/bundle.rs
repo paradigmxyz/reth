@@ -276,7 +276,7 @@ impl ExecutionOutcome {
         // Truncate higher state to [at..].
         let at_idx = higher_state.block_number_to_index(at).unwrap();
         higher_state.receipts = higher_state.receipts.split_off(at_idx).into();
-        higher_state.requests = higher_state.requests.split_off(at_idx).into();
+        higher_state.requests = higher_state.requests.split_off(at_idx);
         higher_state.bundle.take_n_reverts(at_idx);
         higher_state.first_block = at;
 
@@ -751,7 +751,7 @@ mod tests {
             ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
 
         // Split the ExecutionOutcome at block number 124
-        let result = exec_res.split_at(124);
+        let result = exec_res.clone().split_at(124);
 
         // Define the expected lower ExecutionOutcome after splitting
         let lower_execution_outcome = ExecutionOutcome {
@@ -765,7 +765,7 @@ mod tests {
         let higher_execution_outcome = ExecutionOutcome {
             bundle: Default::default(),
             receipts: Receipts {
-                receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt.clone())]],
+                receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
             },
             requests: vec![Requests(vec![request]), Requests(vec![request])],
             first_block: 124,
@@ -774,5 +774,8 @@ mod tests {
         // Assert that the split result matches the expected lower and higher outcomes
         assert_eq!(result.0, Some(lower_execution_outcome));
         assert_eq!(result.1, higher_execution_outcome);
+
+        // Assert that splitting at the first block number returns None for the lower outcome
+        assert_eq!(exec_res.clone().split_at(123), (None, exec_res));
     }
 }
