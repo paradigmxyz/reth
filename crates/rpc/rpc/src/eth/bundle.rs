@@ -12,6 +12,11 @@ use reth_primitives::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::EthCallBundleApiServer;
+use reth_rpc_eth_api::eth::{
+    api::{Call, EthTransactions, LoadPendingBlock},
+    error::{EthApiError, EthResult, RpcInvalidTransactionError},
+    utils::recover_raw_transaction,
+};
 use reth_rpc_types::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
@@ -19,12 +24,6 @@ use revm::{
     primitives::{ResultAndState, TxEnv},
 };
 use revm_primitives::{EnvWithHandlerCfg, MAX_BLOB_GAS_PER_BLOCK};
-
-use crate::eth::{
-    api::{Call, EthTransactions, LoadPendingBlock},
-    error::{EthApiError, EthResult, RpcInvalidTransactionError},
-    utils::recover_raw_transaction,
-};
 
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {

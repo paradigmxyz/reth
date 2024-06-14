@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-rpc-api.workspace = true
+reth-rpc-eth-api.workspace = true
 reth-rpc-server-types.workspace = true
 reth-rpc-types.workspace = true
 reth-errors.workspace = true
@@ -93,4 +94,6 @@ optimism = [
     "reth-primitives/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-provider/optimism",
+    "reth-rpc-api/optimism",
+    "reth-rpc-eth-api/optimism",
 ]

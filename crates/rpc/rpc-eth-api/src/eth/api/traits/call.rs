@@ -40,7 +40,7 @@ pub const ESTIMATE_GAS_ERROR_RATIO: f64 = 0.015;
 /// Helper alias type for the state's [`CacheDB`]
 pub type StateCacheDB<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'a>>>;
 
-/// Execution related functions for the [`EthApiServer`](reth_rpc_api::EthApiServer) trait in the
+/// Execution related functions for the [`EthApiServer`](reth_rpc_eth_api::EthApiServer) trait in the
 /// `eth_` namespace.
 pub trait EthCall: Call + LoadPendingBlock {
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].

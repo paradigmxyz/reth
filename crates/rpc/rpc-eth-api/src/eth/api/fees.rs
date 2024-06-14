@@ -1,6 +1,6 @@
 //! Contains RPC handler implementations for fee history.
 
-use crate::EthApi;
+use crate::eth::EthApi;
 
 /// Implements [`EthFees`](crate::eth::api::EthFees) for a type, that has similar
 /// data layout to [`EthApi`].

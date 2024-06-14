@@ -1,6 +1,6 @@
 //! Contains RPC handler implementations specific to sign endpoints
 
-use crate::{eth::signer::DevSigner, EthApi};
+use crate::eth::{signer::DevSigner, EthApi};
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
     /// Generates 20 random developer accounts.

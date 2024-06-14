@@ -4,7 +4,7 @@ use reth_primitives::{TransactionSignedEcRecovered, B256};
 use reth_rpc_types::{Transaction, TransactionInfo};
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 
-use crate::EthApi;
+use crate::eth::EthApi;
 
 /// Implements [`EthTransactions`](crate::eth::api::EthTransactions) for a type, that has similar
 /// data layout to [`EthApi`].

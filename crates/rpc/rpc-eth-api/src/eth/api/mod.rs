@@ -70,7 +70,7 @@ pub trait EthApiSpec: Send + Sync {
 ///
 /// This type provides the functionality for handling `eth_` related requests.
 /// These are implemented two-fold: Core functionality is implemented as [`EthApiSpec`]
-/// trait. Additionally, the required server implementations (e.g. [`reth_rpc_api::EthApiServer`])
+/// trait. Additionally, the required server implementations (e.g. [`reth_rpc_eth_api::EthApiServer`])
 /// are implemented separately in submodules. The rpc handler implementation can then delegate to
 /// the main impls. This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone
 /// or in other network handlers (for example ipc).

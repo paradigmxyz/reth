@@ -12,11 +12,11 @@ use reth_rpc_types::{
 
 use crate::{
     eth::{
+        EthApi,
         api::LoadReceipt,
         cache::EthStateCache,
         error::{EthApiError, EthResult},
     },
-    EthApi,
 };
 
 impl<Provider, Pool, Network, EvmConfig> LoadReceipt for EthApi<Provider, Pool, Network, EvmConfig>

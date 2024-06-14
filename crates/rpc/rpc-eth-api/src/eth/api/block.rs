@@ -1,6 +1,6 @@
 //! Contains RPC handler implementations specific to blocks.
 
-use crate::EthApi;
+use crate::eth::EthApi;
 
 /// Implements [`EthBlocks`](crate::eth::api::EthBlocks) for a type, that has similar
 /// data layout to [`EthApi`].

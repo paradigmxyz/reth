@@ -1,8 +1,9 @@
 //! Additional helpers for converting errors.
 
+use std::fmt::Display;
+
 use jsonrpsee::core::RpcResult;
 use reth_rpc_types::engine::PayloadError;
-use std::fmt::Display;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub trait ToRpcResult<Ok, Err>: Sized {
@@ -104,7 +105,7 @@ impl_to_rpc_result!(reth_errors::ProviderError);
 impl_to_rpc_result!(reth_network_api::NetworkError);
 
 /// Constructs an invalid params JSON-RPC error.
-pub(crate) fn invalid_params_rpc_err(
+pub fn invalid_params_rpc_err(
     msg: impl Into<String>,
 ) -> jsonrpsee::types::error::ErrorObject<'static> {
     rpc_err(jsonrpsee::types::error::INVALID_PARAMS_CODE, msg, None)
@@ -116,7 +117,7 @@ pub fn internal_rpc_err(msg: impl Into<String>) -> jsonrpsee::types::error::Erro
 }
 
 /// Constructs an internal JSON-RPC error with data
-pub(crate) fn internal_rpc_err_with_data(
+pub fn internal_rpc_err_with_data(
     msg: impl Into<String>,
     data: &[u8],
 ) -> jsonrpsee::types::error::ErrorObject<'static> {
@@ -124,7 +125,7 @@ pub(crate) fn internal_rpc_err_with_data(
 }
 
 /// Constructs an internal JSON-RPC error with code and message
-pub(crate) fn rpc_error_with_code(
+pub fn rpc_error_with_code(
     code: i32,
     msg: impl Into<String>,
 ) -> jsonrpsee::types::error::ErrorObject<'static> {
@@ -132,7 +133,7 @@ pub(crate) fn rpc_error_with_code(
 }
 
 /// Constructs a JSON-RPC error, consisting of `code`, `message` and optional `data`.
-pub(crate) fn rpc_err(
+pub fn rpc_err(
     code: i32,
     msg: impl Into<String>,
     data: Option<&[u8]>,

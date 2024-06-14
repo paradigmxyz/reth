@@ -17,8 +17,8 @@ use crate::{
         api::{pending_block::PendingBlockEnv, LoadPendingBlock, SpawnBlocking},
         cache::EthStateCache,
         error::{EthApiError, EthResult, RpcInvalidTransactionError},
+        EthApiSpec,
     },
-    EthApiSpec,
 };
 
 /// Helper methods for `eth_` methods relating to state (accounts).

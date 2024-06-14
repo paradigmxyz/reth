@@ -13,8 +13,7 @@ use revm::{Database, DatabaseCommit};
 use revm_primitives::EnvWithHandlerCfg;
 
 use crate::{
-    eth::error::{EthApiError, EthResult},
-    EthApi,
+    eth::{EthApi, error::{EthApiError, EthResult}},
 };
 
 /// Implements [`LoadPendingBlock`](crate::eth::api::LoadPendingBlock) for a type, that has similar

@@ -14,7 +14,7 @@ use crate::eth::{
     error::{EthApiError, EthResult},
 };
 
-/// Block related functions for the [`EthApiServer`](reth_rpc_api::EthApiServer) trait in the
+/// Block related functions for the [`EthApiServer`](reth_rpc_eth_api::EthApiServer) trait in the
 /// `eth_` namespace.
 pub trait EthBlocks: LoadBlock {
     /// Returns a handle for reading data from disk.

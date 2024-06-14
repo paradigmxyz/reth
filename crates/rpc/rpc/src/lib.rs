@@ -46,7 +46,7 @@ mod web3;
 pub use admin::AdminApi;
 pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};
-pub use eth::{EthApi, EthApiSpec, EthFilter, EthPubSub, EthSubscriptionIdProvider};
+pub use eth::{EthFilter, EthPubSub, EthSubscriptionIdProvider};
 pub use net::NetApi;
 pub use otterscan::OtterscanApi;
 pub use reth::RethApi;
@@ -54,4 +54,6 @@ pub use rpc::RPCApi;
 pub use trace::TraceApi;
 pub use txpool::TxPoolApi;
 pub use web3::Web3Api;
-pub mod result;
+
+
+pub use reth_rpc_eth_api::{result, eth::EthApi};

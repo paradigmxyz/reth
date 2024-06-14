@@ -1,6 +1,6 @@
 //! Contains RPC handler implementations specific to tracing.
 
-use crate::EthApi;
+use crate::eth::EthApi;
 
 /// Implements [`Trace`](crate::eth::api::Trace) for a type, that has similar
 /// data layout to [`EthApi`].

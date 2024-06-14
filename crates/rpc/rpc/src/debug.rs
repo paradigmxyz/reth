@@ -13,6 +13,15 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
+use reth_rpc_eth_api::{
+    eth::{
+        api::{EthTransactions, LoadBlock, LoadTransaction, StateCacheDB, TraceExt},
+        error::{EthApiError, EthResult},
+        revm_utils::{prepare_call_env, EvmOverrides},
+    },
+    result::{internal_rpc_err, ToRpcResult},
+    EthApiSpec,
+};
 use reth_rpc_types::{
     trace::geth::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
@@ -30,16 +39,6 @@ use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig,
 };
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
-
-use crate::{
-    eth::{
-        api::{EthTransactions, LoadBlock, LoadTransaction, StateCacheDB, TraceExt},
-        error::{EthApiError, EthResult},
-        revm_utils::{prepare_call_env, EvmOverrides},
-    },
-    result::{internal_rpc_err, ToRpcResult},
-    EthApiSpec,
-};
 
 /// `debug` API implementation.
 ///

@@ -1,6 +1,6 @@
 //! Contains RPC handler implementations specific to endpoints that call/execute within evm.
 
-use crate::EthApi;
+use crate::eth::EthApi;
 
 /// Implements [`EthCall`](crate::eth::api::EthCall) for a type, that has similar
 /// data layout to [`EthApi`].

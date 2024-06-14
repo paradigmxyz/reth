@@ -21,6 +21,12 @@ use reth_rpc_types::{
     TransactionRequest, Work,
 };
 
+pub mod eth;
+pub mod result;
+pub mod server;
+
+pub use eth::EthApiSpec;
+
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]

@@ -2,7 +2,6 @@
 //! Handles RPC requests for the `eth_` namespace.
 
 use jsonrpsee::core::RpcResult as Result;
-use reth_network_api::NetworkInfo;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey, state::StateOverride, AccessListWithGasUsed,
@@ -12,20 +11,20 @@ use reth_rpc_types::{
 use serde_json::Value;
 use tracing::trace;
 
-use reth_rpc::{
+use crate::{
+    EthApiServer,
     eth::{
-        api::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions},
+        api::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, Trace, LoadReceipt},
         error::EthApiError,
         revm_utils::EvmOverrides,
-        EthApi,
     },
     result::{internal_rpc_err, ToRpcResult},
 };
 
 #[async_trait::async_trait]
-impl<T> EthApiServer for EthApi<T>
+impl<T> EthApiServer for T
 where
-    Self: EthApiSpec + EthTransactions + EthBlocks + EthState + EthCall + EthFees,
+    Self: EthApiSpec + EthTransactions + EthBlocks + EthState + EthCall + EthFees + Trace + LoadReceipt,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> Result<U64> {
@@ -415,10 +414,11 @@ where
 mod tests {
     use crate::{
         eth::{
+            EthApi,
             cache::EthStateCache, gas_oracle::GasPriceOracle, FeeHistoryCache,
             FeeHistoryCacheConfig,
         },
-        EthApi,
+        EthApiServer,
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use reth_evm_ethereum::EthEvmConfig;
@@ -431,7 +431,6 @@ mod tests {
         test_utils::{MockEthProvider, NoopProvider},
         BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
     };
-    use reth_rpc_api::EthApiServer;
     use reth_rpc_types::FeeHistory;
     use reth_tasks::pool::BlockingTaskPool;
     use reth_testing_utils::{generators, generators::Rng};

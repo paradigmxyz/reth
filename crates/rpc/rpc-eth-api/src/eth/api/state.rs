@@ -1,6 +1,6 @@
 //! Contains RPC handler implementations specific to state.
 
-use crate::EthApi;
+use crate::eth::EthApi;
 
 /// Implements [`EthState`](crate::eth::api::EthState) for a type, that has similar
 /// data layout to [`EthApi`].

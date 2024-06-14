@@ -72,7 +72,7 @@ pub(crate) fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Addre
 ///  - `disable_eip3607` is set to `true`
 ///  - `disable_base_fee` is set to `true`
 ///  - `nonce` is set to `None`
-pub(crate) fn prepare_call_env<DB>(
+pub fn prepare_call_env<DB>(
     mut cfg: CfgEnvWithHandlerCfg,
     mut block: BlockEnv,
     request: TransactionRequest,

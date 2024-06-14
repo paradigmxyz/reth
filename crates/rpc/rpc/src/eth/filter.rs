@@ -1,19 +1,24 @@
-use super::cache::EthStateCache;
-use crate::{
-    eth::{
-        error::EthApiError,
-        logs_utils::{self, append_matching_block_logs},
-    },
-    result::{rpc_error_with_code, ToRpcResult},
-    EthSubscriptionIdProvider,
+use std::{
+    collections::HashMap,
+    fmt,
+    iter::StepBy,
+    ops::RangeInclusive,
+    sync::Arc,
+    time::{Duration, Instant},
 };
-use core::fmt;
 
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_primitives::{ChainInfo, IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_api::EthFilterApiServer;
+use reth_rpc_eth_api::{
+    eth::{
+        cache::EthStateCache,
+        error::EthApiError,
+    },
+    result::{rpc_error_with_code, ToRpcResult},
+};
 use reth_rpc_types::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,
@@ -21,18 +26,13 @@ use reth_rpc_types::{
 
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
-use std::{
-    collections::HashMap,
-    iter::StepBy,
-    ops::RangeInclusive,
-    sync::Arc,
-    time::{Duration, Instant},
-};
 use tokio::{
     sync::{mpsc::Receiver, Mutex},
     time::MissedTickBehavior,
 };
 use tracing::trace;
+
+use crate::{EthSubscriptionIdProvider, eth::logs_utils::{self, append_matching_block_logs}};
 
 /// The maximum number of headers we read at once when handling a range filter.
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
