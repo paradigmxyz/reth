@@ -4,12 +4,16 @@ use crate::{
     chain::{ChainHandler, FromOrchestrator, HandlerEvent, OrchestratorState},
     tree::EngineApiTreeHandler,
 };
+use futures::{
+    stream::{BoxStream, Fuse},
+    StreamExt,
+};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_primitives::{SealedBlockWithSenders, B256};
 use std::{
     collections::VecDeque,
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 
 /// Advances the chain based on incoming requests.
@@ -37,12 +41,9 @@ where
     /// This type is responsible for processing incoming requests.
     handler: T,
     /// Receiver for incoming requests that need to be processed.
-    // TODO add stream type for T::Request,
-    incoming_requests: (),
+    incoming_requests: Fuse<BoxStream<'static, T::Request>>,
     /// Access to the network sync to download blocks on demand.
     network_sync: (),
-    /// Requests that are buffered and need to be processed.
-    buffered_events: VecDeque<()>,
 }
 
 impl<T> ChainHandler for EngineHandler<T>
@@ -50,11 +51,52 @@ where
     T: EngineRequestHandler,
 {
     fn on_event(&mut self, event: FromOrchestrator) {
-        todo!()
+        // delegate event to the handler
+        self.handler.on_event(event.into());
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<HandlerEvent> {
-        todo!()
+        loop {
+            // drain the handler
+            loop {
+                match self.handler.poll(cx) {
+                    Poll::Ready(ev) => {
+                        match ev {
+                            RequestHandlerEvent::Idle => break,
+                            RequestHandlerEvent::HandlerEvent(ev) => {
+                                match ev {
+                                    HandlerEvent::Pipeline(target) => {
+                                        // bubble up pipeline request
+                                        // TODO: clear downloads in progress
+                                        return Poll::Ready(HandlerEvent::Pipeline(target))
+                                    }
+                                    HandlerEvent::WriteAccessPaused => {}
+                                    HandlerEvent::WriteAccessAcquired => {}
+                                }
+                            }
+                            RequestHandlerEvent::Download(_) => {
+                                // TODO delegate to network sync
+                            }
+                        }
+                    }
+                    Poll::Pending => break,
+                }
+            }
+
+            let mut progress = false;
+
+            if let Poll::Ready(Some(req)) = self.incoming_requests.poll_next_unpin(cx) {
+                // delegate new received request to the handler
+                self.handler.on_event(FromEngine::Request(req));
+                progress = true;
+            }
+
+            // TODO poll network sync
+
+            if !progress {
+                return Poll::Pending;
+            }
+        }
     }
 }
 
@@ -158,6 +200,12 @@ pub enum FromEngine<Req> {
     Event(FromOrchestrator),
     Request(Req),
     DownloadedBlocks(Vec<SealedBlockWithSenders>),
+}
+
+impl<Req> From<FromOrchestrator> for FromEngine<Req> {
+    fn from(event: FromOrchestrator) -> Self {
+        Self::Event(event)
+    }
 }
 
 #[derive(Debug)]

@@ -1,6 +1,7 @@
 use crate::pipeline::{PipelineAction, PipelineEvent, PipelineHandler};
 use futures::Stream;
 use reth_primitives::stage::PipelineTarget;
+use reth_stages_api::PipelineTarget;
 use std::{
     pin::Pin,
     task::{Context, Poll},
