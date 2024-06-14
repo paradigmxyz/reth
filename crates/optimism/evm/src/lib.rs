@@ -31,7 +31,7 @@ pub use error::OptimismBlockExecutionError;
 pub struct OptimismEvmConfig;
 
 impl ConfigureEvmEnv for OptimismEvmConfig {
-    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         let mut buf = Vec::with_capacity(transaction.length_without_header());
         transaction.encode_enveloped(&mut buf);
         fill_op_tx_env(tx_env, transaction, sender, buf.into());

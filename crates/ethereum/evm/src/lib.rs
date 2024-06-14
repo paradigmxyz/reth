@@ -9,11 +9,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{
-    revm::{config::revm_spec, env::fill_tx_env},
-    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Address, ChainSpec, Head, Header, TransactionSigned, U256,
-};
 use reth_revm::{Database, EvmBuilder};
 
 pub mod execute;
@@ -29,34 +24,7 @@ pub mod eip6110;
 #[non_exhaustive]
 pub struct EthEvmConfig;
 
-impl ConfigureEvmEnv for EthEvmConfig {
-    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        fill_tx_env(tx_env, transaction, sender)
-    }
-
-    fn fill_cfg_env(
-        cfg_env: &mut CfgEnvWithHandlerCfg,
-        chain_spec: &ChainSpec,
-        header: &Header,
-        total_difficulty: U256,
-    ) {
-        let spec_id = revm_spec(
-            chain_spec,
-            Head {
-                number: header.number,
-                timestamp: header.timestamp,
-                difficulty: header.difficulty,
-                total_difficulty,
-                hash: Default::default(),
-            },
-        );
-
-        cfg_env.chain_id = chain_spec.chain().id();
-        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
-
-        cfg_env.handler_cfg.spec_id = spec_id;
-    }
-}
+impl ConfigureEvmEnv for EthEvmConfig {}
 
 impl ConfigureEvm for EthEvmConfig {
     type DefaultExternalContext<'a> = ();
@@ -72,7 +40,11 @@ impl ConfigureEvm for EthEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::revm_primitives::{BlockEnv, CfgEnv, SpecId};
+    use reth_primitives::{
+        revm_primitives::{BlockEnv, CfgEnv, SpecId},
+        ChainSpec, Header, U256,
+    };
+    use revm_primitives::CfgEnvWithHandlerCfg;
 
     #[test]
     #[ignore]
