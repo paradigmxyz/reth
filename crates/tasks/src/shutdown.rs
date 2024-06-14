@@ -20,7 +20,7 @@ pub struct GracefulShutdown {
 }
 
 impl GracefulShutdown {
-    pub(crate) fn new(shutdown: Shutdown, guard: GracefulShutdownGuard) -> Self {
+    pub(crate) const fn new(shutdown: Shutdown, guard: GracefulShutdownGuard) -> Self {
         Self { shutdown, guard: Some(guard) }
     }
 
