@@ -13,6 +13,9 @@
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
 
+/// Common constants.
+pub mod constants;
+
 /// Minimal account
 pub mod account;
 pub use account::Account;
