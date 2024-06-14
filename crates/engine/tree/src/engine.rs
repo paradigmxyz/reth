@@ -5,15 +5,15 @@ use crate::{
     tree::EngineApiTreeHandler,
 };
 use futures::{
-    stream::{BoxStream, Fuse},
-    StreamExt,
+    stream::Fuse,
+    Stream, StreamExt,
 };
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_primitives::{SealedBlockWithSenders, B256};
 use std::{
     collections::VecDeque,
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 
 /// Advances the chain based on incoming requests.
@@ -29,9 +29,8 @@ use std::{
 /// It is responsible for handling the following:
 /// - Downloading blocks on demand from the network if requested by the [`EngineApiRequestHandler`].
 ///
-/// The core logic is part of the [EngineRequestHandler], which is responsible for processing the
+/// The core logic is part of the [`EngineRequestHandler`], which is responsible for processing the
 /// incoming requests.
-#[derive(Debug)]
 pub struct EngineHandler<T>
 where
     T: EngineRequestHandler,
@@ -41,7 +40,8 @@ where
     /// This type is responsible for processing incoming requests.
     handler: T,
     /// Receiver for incoming requests that need to be processed.
-    incoming_requests: Fuse<BoxStream<'static, T::Request>>,
+    // TODO maybe use generic?
+    incoming_requests: Fuse<Pin<Box<dyn Stream<Item = T::Request> + Send + Sync + 'static>>>,
     /// Access to the network sync to download blocks on demand.
     network_sync: (),
 }
@@ -109,7 +109,7 @@ pub trait EngineRequestHandler: Send + Sync {
     fn on_event(&mut self, event: FromEngine<Self::Request>);
 
     /// Advances the handler.
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent>;
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent>;
 }
 
 /// An [`EngineRequestHandler`] that processes engine API requests.
@@ -189,7 +189,7 @@ where
         todo!()
     }
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent> {
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent> {
         // advance tree tasks, trigger
         todo!()
     }
