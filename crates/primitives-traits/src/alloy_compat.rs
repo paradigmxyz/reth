@@ -1,5 +1,5 @@
 use super::Header;
-use alloy_rpc_types::{ConversionError, Header as RpcHeader};
+use alloy_rpc_types_eth::{ConversionError, Header as RpcHeader};
 
 impl TryFrom<RpcHeader> for Header {
     type Error = ConversionError;

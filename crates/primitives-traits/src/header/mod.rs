@@ -4,8 +4,6 @@ pub use sealed::SealedHeader;
 mod error;
 pub use error::HeaderError;
 
-mod alloy_compat;
-
 #[cfg(any(test, feature = "test-utils", feature = "arbitrary"))]
 pub mod test_utils;
 

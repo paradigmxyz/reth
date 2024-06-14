@@ -10,6 +10,9 @@
 #![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+#[cfg(feature = "alloy-compat")]
+mod alloy_compat;
+
 /// Minimal account
 pub mod account;
 pub use account::Account;

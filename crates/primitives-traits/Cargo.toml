@@ -19,7 +19,7 @@ alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-alloy-rpc-types.workspace = true
+alloy-rpc-types-eth = { workspace = true, optional = true } 
 
 revm-primitives.workspace = true
 
@@ -47,4 +47,4 @@ arbitrary = [
     "dep:proptest",
     "dep:proptest-derive"
 ]
-
+alloy-compat = ["alloy-rpc-types-eth"]
