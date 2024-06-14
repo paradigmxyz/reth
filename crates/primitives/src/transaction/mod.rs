@@ -479,7 +479,6 @@ impl Transaction {
     }
 
     /// This sets the transaction's gas limit.
-    #[allow(dead_code)]
     pub fn set_gas_limit(&mut self, gas_limit: u64) {
         match self {
             Self::Legacy(tx) => tx.gas_limit = gas_limit,
