@@ -636,7 +636,7 @@ pub struct PendingPayload<P> {
 
 impl<P> PendingPayload<P> {
     /// Constructs a `PendingPayload` future.
-    pub fn new(
+    pub const fn new(
         cancel: Cancelled,
         payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
     ) -> Self {
@@ -773,7 +773,7 @@ pub struct BuildArguments<Pool, Client, Attributes, Payload> {
 
 impl<Pool, Client, Attributes, Payload> BuildArguments<Pool, Client, Attributes, Payload> {
     /// Create new build arguments.
-    pub fn new(
+    pub const fn new(
         client: Client,
         pool: Pool,
         cached_reads: CachedReads,

@@ -15,7 +15,7 @@ pub struct Withdrawals(Vec<Withdrawal>);
 
 impl Withdrawals {
     /// Create a new Withdrawals instance.
-    pub fn new(withdrawals: Vec<Withdrawal>) -> Self {
+    pub const fn new(withdrawals: Vec<Withdrawal>) -> Self {
         Self(withdrawals)
     }
 

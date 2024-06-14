@@ -27,7 +27,7 @@ pub struct AccountProof {
 
 impl AccountProof {
     /// Create new account proof entity.
-    pub fn new(address: Address) -> Self {
+    pub const fn new(address: Address) -> Self {
         Self {
             address,
             info: None,
