@@ -2,7 +2,6 @@
 mod utils;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use libc::size_t;
 use rand::{prelude::SliceRandom, SeedableRng};
 use rand_xorshift::XorShiftRng;
 use reth_libmdbx::{ffi::*, ObjectLength, WriteFlags};
@@ -46,10 +45,10 @@ fn bench_get_rand_raw(c: &mut Criterion) {
     c.bench_function("bench_get_rand_raw", |b| {
         b.iter(|| unsafe {
             txn.txn_execute(|txn| {
-                let mut i: size_t = 0;
+                let mut i = 0;
                 for key in &keys {
-                    key_val.iov_len = key.len() as size_t;
-                    key_val.iov_base = key.as_bytes().as_ptr() as *mut _;
+                    key_val.iov_len = key.len();
+                    key_val.iov_base = key.as_bytes().as_ptr().cast_mut().cast();
 
                     mdbx_get(txn, dbi, &key_val, &mut data_val);
 
@@ -102,12 +101,12 @@ fn bench_put_rand_raw(c: &mut Criterion) {
             env.with_raw_env_ptr(|env| {
                 mdbx_txn_begin_ex(env, ptr::null_mut(), 0, &mut txn, ptr::null_mut());
 
-                let mut i: ::libc::c_int = 0;
+                let mut i = 0;
                 for (key, data) in &items {
-                    key_val.iov_len = key.len() as size_t;
-                    key_val.iov_base = key.as_bytes().as_ptr() as *mut _;
-                    data_val.iov_len = data.len() as size_t;
-                    data_val.iov_base = data.as_bytes().as_ptr() as *mut _;
+                    key_val.iov_len = key.len();
+                    key_val.iov_base = key.as_bytes().as_ptr().cast_mut().cast();
+                    data_val.iov_len = data.len();
+                    data_val.iov_base = data.as_bytes().as_ptr().cast_mut().cast();
 
                     i += mdbx_put(txn, dbi, &key_val, &mut data_val, 0);
                 }

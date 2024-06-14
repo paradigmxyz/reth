@@ -1,19 +1,16 @@
 [package]
 name = "reth-mdbx-sys"
+description = "Raw bindings for libmdbx, with a good license"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license = "Apache-2.0"
-description = "Rust bindings for libmdbx with good licence."
+license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
-[lib]
-name = "reth_mdbx_sys"
-
-[dependencies]
-libc = "0.2"
-
 [build-dependencies]
 cc = "1.0"
-bindgen = { version = "0.69", default-features = false, features = ["runtime"] }
+bindgen = { version = "0.69", default-features = false, optional = true }
+
+[features]
+generate-bindings = ["dep:bindgen"]

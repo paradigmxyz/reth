@@ -8,7 +8,7 @@ use crate::{
 };
 use ffi::{mdbx_txn_renew, MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
 use indexmap::IndexSet;
-use libc::{c_uint, c_void};
+use std::ffi::{c_uint, c_void};
 use parking_lot::{Mutex, MutexGuard};
 use std::{
     fmt::{self, Debug},
