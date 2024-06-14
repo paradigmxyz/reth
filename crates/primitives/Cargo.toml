@@ -111,7 +111,6 @@ c-kzg = [
     "alloy-eips/kzg",
 ]
 zstd-codec = ["dep:zstd"]
-clap = ["reth-static-file-types/clap"]
 optimism = [
     "reth-codecs/optimism",
     "reth-ethereum-forks/optimism",
