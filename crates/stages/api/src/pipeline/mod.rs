@@ -1,18 +1,17 @@
 mod ctrl;
 mod event;
 pub use crate::pipeline::ctrl::ControlFlow;
+use crate::{PipelineTarget, StageCheckpoint, StageId};
 pub use event::*;
 use futures_util::Future;
 use reth_db_api::database::Database;
 use reth_primitives::{
-    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH,
-    stage::{PipelineTarget, StageCheckpoint, StageId},
-    static_file::HighestStaticFiles,
-    BlockNumber, B256,
+    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, static_file::HighestStaticFiles, BlockNumber,
+    B256,
 };
 use reth_provider::{
-    providers::StaticFileWriter, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
-    StaticFileProviderFactory,
+    providers::StaticFileWriter, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
+    StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -353,12 +352,23 @@ where
                         self.event_sender
                             .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
+                        // update finalized block if needed
+                        let last_saved_finalized_block_number =
+                            provider_rw.last_finalized_block_number()?;
+                        if checkpoint.block_number < last_saved_finalized_block_number {
+                            provider_rw.save_finalized_block_number(BlockNumber::from(
+                                checkpoint.block_number,
+                            ))?;
+                        }
+
                         // For unwinding it makes more sense to commit the database first, since if
                         // this function is interrupted before the static files commit, we can just
                         // truncate the static files according to the
                         // checkpoints on the next start-up.
                         provider_rw.commit()?;
                         self.provider_factory.static_file_provider().commit()?;
+
+                        stage.post_unwind_commit()?;
 
                         provider_rw = self.provider_factory.provider_rw()?;
                     }
@@ -469,6 +479,8 @@ where
                     // start-up.
                     self.provider_factory.static_file_provider().commit()?;
                     provider_rw.commit()?;
+
+                    stage.post_execute_commit()?;
 
                     if done {
                         let block_number = checkpoint.block_number;
@@ -598,8 +610,8 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
     use reth_errors::ProviderError;
-    use reth_primitives::PruneModes;
     use reth_provider::test_utils::create_test_provider_factory;
+    use reth_prune::PruneModes;
     use reth_testing_utils::{generators, generators::random_header};
     use tokio_stream::StreamExt;
 

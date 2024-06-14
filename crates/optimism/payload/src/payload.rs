@@ -3,8 +3,8 @@
 //! Optimism builder support
 
 use alloy_rlp::Encodable;
-use reth_engine_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_payload_builder::EthPayloadBuilderAttributes;
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
@@ -179,7 +179,7 @@ pub struct OptimismBuiltPayload {
 
 impl OptimismBuiltPayload {
     /// Initializes the payload with the given initial block.
-    pub fn new(
+    pub const fn new(
         id: PayloadId,
         block: SealedBlock,
         fees: U256,

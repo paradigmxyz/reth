@@ -2,10 +2,8 @@
 
 use crate::metrics::version_metrics::register_version_metrics;
 use eyre::WrapErr;
-use hyper::{
-    service::{make_service_fn, service_fn},
-    Body, Request, Response, Server,
-};
+use futures::{future::FusedFuture, FutureExt};
+use http::Response;
 use metrics::describe_gauge;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
@@ -64,29 +62,37 @@ async fn start_endpoint<F: Hook + 'static>(
     hook: Arc<F>,
     task_executor: TaskExecutor,
 ) -> eyre::Result<()> {
-    let make_svc = make_service_fn(move |_| {
-        let handle = handle.clone();
-        let hook = Arc::clone(&hook);
-        async move {
-            Ok::<_, Infallible>(service_fn(move |_: Request<Body>| {
+    let listener =
+        tokio::net::TcpListener::bind(listen_addr).await.wrap_err("Could not bind to address")?;
+
+    task_executor.spawn_with_graceful_shutdown_signal(|signal| async move {
+        let mut shutdown = signal.ignore_guard().fuse();
+        loop {
+            let io = match listener.accept().await {
+                Ok((stream, _remote_addr)) => stream,
+                Err(err) => {
+                    tracing::error!(%err, "failed to accept connection");
+                    continue;
+                }
+            };
+
+            let handle = handle.clone();
+            let hook = hook.clone();
+            let service = tower::service_fn(move |_| {
                 (hook)();
                 let metrics = handle.render();
-                async move { Ok::<_, Infallible>(Response::new(Body::from(metrics))) }
-            }))
-        }
-    });
+                async move { Ok::<_, Infallible>(Response::new(metrics)) }
+            });
 
-    let server =
-        Server::try_bind(&listen_addr).wrap_err("Could not bind to address")?.serve(make_svc);
+            if let Err(error) =
+                jsonrpsee::server::serve_with_graceful_shutdown(io, service, &mut shutdown).await
+            {
+                tracing::debug!(%error, "failed to serve request")
+            }
 
-    task_executor.spawn_with_graceful_shutdown_signal(move |signal| async move {
-        if let Err(error) = server
-            .with_graceful_shutdown(async move {
-                let _ = signal.await;
-            })
-            .await
-        {
-            tracing::error!(%error, "metrics endpoint crashed")
+            if shutdown.is_terminated() {
+                break;
+            }
         }
     });
 

@@ -1,54 +1,12 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
 use crate::{
-    constants::EMPTY_OMMER_ROOT_HASH,
-    keccak256,
-    trie::{HashBuilder, Nibbles, TrieAccount},
-    Address, Header, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Request, TransactionSigned,
-    Withdrawal, B256, U256,
+    constants::EMPTY_OMMER_ROOT_HASH, keccak256, Header, Receipt, ReceiptWithBloom,
+    ReceiptWithBloomRef, Request, TransactionSigned, Withdrawal, B256,
 };
+use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
+
 use alloy_eips::eip7685::Encodable7685;
-use alloy_rlp::Encodable;
-use itertools::Itertools;
-
-/// Adjust the index of an item for rlp encoding.
-pub const fn adjust_index_for_rlp(i: usize, len: usize) -> usize {
-    if i > 0x7f {
-        i
-    } else if i == 0x7f || i + 1 == len {
-        0
-    } else {
-        i + 1
-    }
-}
-
-/// Compute a trie root of the collection of rlp encodable items.
-pub fn ordered_trie_root<T: Encodable>(items: &[T]) -> B256 {
-    ordered_trie_root_with_encoder(items, |item, buf| item.encode(buf))
-}
-
-/// Compute a trie root of the collection of items with a custom encoder.
-pub fn ordered_trie_root_with_encoder<T, F>(items: &[T], mut encode: F) -> B256
-where
-    F: FnMut(&T, &mut Vec<u8>),
-{
-    let mut value_buffer = Vec::new();
-
-    let mut hb = HashBuilder::default();
-    let items_len = items.len();
-    for i in 0..items_len {
-        let index = adjust_index_for_rlp(i, items_len);
-
-        let index_buffer = alloy_rlp::encode_fixed_size(&index);
-
-        value_buffer.clear();
-        encode(&items[index], &mut value_buffer);
-
-        hb.add_leaf(Nibbles::unpack(&index_buffer), &value_buffer);
-    }
-
-    hb.root()
-}
 
 /// Calculate a transaction root.
 ///
@@ -171,111 +129,16 @@ pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
     keccak256(ommers_rlp)
 }
 
-/// Hashes and sorts account keys, then proceeds to calculating the root hash of the state
-/// represented as MPT.
-/// See [`state_root_unsorted`] for more info.
-pub fn state_root_ref_unhashed<'a, A: Into<TrieAccount> + Clone + 'a>(
-    state: impl IntoIterator<Item = (&'a Address, &'a A)>,
-) -> B256 {
-    state_root_unsorted(
-        state.into_iter().map(|(address, account)| (keccak256(address), account.clone())),
-    )
-}
-
-/// Hashes and sorts account keys, then proceeds to calculating the root hash of the state
-/// represented as MPT.
-/// See [`state_root_unsorted`] for more info.
-pub fn state_root_unhashed<A: Into<TrieAccount>>(
-    state: impl IntoIterator<Item = (Address, A)>,
-) -> B256 {
-    state_root_unsorted(state.into_iter().map(|(address, account)| (keccak256(address), account)))
-}
-
-/// Sorts the hashed account keys and calculates the root hash of the state represented as MPT.
-/// See [`state_root`] for more info.
-pub fn state_root_unsorted<A: Into<TrieAccount>>(
-    state: impl IntoIterator<Item = (B256, A)>,
-) -> B256 {
-    state_root(state.into_iter().sorted_by_key(|(key, _)| *key))
-}
-
-/// Calculates the root hash of the state represented as MPT.
-/// Corresponds to [geth's `deriveHash`](https://github.com/ethereum/go-ethereum/blob/6c149fd4ad063f7c24d726a73bc0546badd1bc73/core/genesis.go#L119).
-///
-/// # Panics
-///
-/// If the items are not in sorted order.
-pub fn state_root<A: Into<TrieAccount>>(state: impl IntoIterator<Item = (B256, A)>) -> B256 {
-    let mut hb = HashBuilder::default();
-    let mut account_rlp_buf = Vec::new();
-    for (hashed_key, account) in state {
-        account_rlp_buf.clear();
-        account.into().encode(&mut account_rlp_buf);
-        hb.add_leaf(Nibbles::unpack(hashed_key), &account_rlp_buf);
-    }
-    hb.root()
-}
-
-/// Hashes storage keys, sorts them and them calculates the root hash of the storage trie.
-/// See [`storage_root_unsorted`] for more info.
-pub fn storage_root_unhashed(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
-    storage_root_unsorted(storage.into_iter().map(|(slot, value)| (keccak256(slot), value)))
-}
-
-/// Sorts and calculates the root hash of account storage trie.
-/// See [`storage_root`] for more info.
-pub fn storage_root_unsorted(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
-    storage_root(storage.into_iter().sorted_by_key(|(key, _)| *key))
-}
-
-/// Calculates the root hash of account storage trie.
-///
-/// # Panics
-///
-/// If the items are not in sorted order.
-pub fn storage_root(storage: impl IntoIterator<Item = (B256, U256)>) -> B256 {
-    let mut hb = HashBuilder::default();
-    for (hashed_slot, value) in storage {
-        hb.add_leaf(Nibbles::unpack(hashed_slot), alloy_rlp::encode_fixed_size(&value).as_ref());
-    }
-    hb.root()
-}
-
-/// Implementation of hasher using our keccak256 hashing function
-/// for compatibility with `triehash` crate.
-#[cfg(any(test, feature = "test-utils"))]
-pub mod triehash {
-    use super::{keccak256, B256};
-    use hash_db::Hasher;
-    use plain_hasher::PlainHasher;
-
-    /// A [Hasher] that calculates a keccak256 hash of the given data.
-    #[derive(Default, Debug, Clone, PartialEq, Eq)]
-    #[non_exhaustive]
-    pub struct KeccakHasher;
-
-    #[cfg(any(test, feature = "test-utils"))]
-    impl Hasher for KeccakHasher {
-        type Out = B256;
-        type StdHasher = PlainHasher;
-
-        const LENGTH: usize = 32;
-
-        fn hash(x: &[u8]) -> Self::Out {
-            keccak256(x)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         bloom, constants::EMPTY_ROOT_HASH, hex_literal::hex, Block, GenesisAccount, Log, TxType,
-        GOERLI, HOLESKY, MAINNET, SEPOLIA,
+        GOERLI, HOLESKY, MAINNET, SEPOLIA, U256,
     };
-    use alloy_primitives::{b256, LogData};
+    use alloy_primitives::{b256, Address, LogData};
     use alloy_rlp::Decodable;
+    use reth_trie_common::root::{state_root_ref_unhashed, state_root_unhashed};
     use std::collections::HashMap;
 
     #[test]

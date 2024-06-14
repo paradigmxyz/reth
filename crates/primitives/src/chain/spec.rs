@@ -5,13 +5,13 @@ use crate::{
     },
     holesky_nodes,
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
-    proofs::state_root_ref_unhashed,
     revm_primitives::{address, b256},
     Address, BlockNumber, Chain, ChainKind, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis,
     Hardfork, Head, Header, NamedChain, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH,
     MAINNET_DEPOSIT_CONTRACT, U256,
 };
 use once_cell::sync::Lazy;
+use reth_trie_common::root::state_root_ref_unhashed;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -24,8 +24,8 @@ pub use alloy_eips::eip1559::BaseFeeParams;
 #[cfg(feature = "optimism")]
 pub(crate) use crate::{
     constants::{
-        OP_BASE_FEE_PARAMS, OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
-        OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
+        BASE_SEPOLIA_BASE_FEE_PARAMS, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS, OP_BASE_FEE_PARAMS,
+        OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
     },
     net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes},
 };
@@ -293,6 +293,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1710374401)),
             (Hardfork::Ecotone, ForkCondition::Timestamp(1710374401)),
+            (Hardfork::Fjord, ForkCondition::Timestamp(1720627201)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
@@ -342,6 +343,7 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1708534800)),
             (Hardfork::Ecotone, ForkCondition::Timestamp(1708534800)),
+            (Hardfork::Fjord, ForkCondition::Timestamp(1716998400)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
@@ -391,11 +393,12 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1708534800)),
             (Hardfork::Ecotone, ForkCondition::Timestamp(1708534800)),
+            (Hardfork::Fjord, ForkCondition::Timestamp(1716998400)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London, OP_SEPOLIA_BASE_FEE_PARAMS),
-                (Hardfork::Canyon, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS),
+                (Hardfork::London, BASE_SEPOLIA_BASE_FEE_PARAMS),
+                (Hardfork::Canyon, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
         ),
@@ -440,6 +443,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
             (Hardfork::Cancun, ForkCondition::Timestamp(1710374401)),
             (Hardfork::Ecotone, ForkCondition::Timestamp(1710374401)),
+            (Hardfork::Fjord, ForkCondition::Timestamp(1720627201)),
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
@@ -1722,10 +1726,11 @@ impl OptimismGenesisInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount};
-    use std::{collections::HashMap, str::FromStr};
+    use reth_trie_common::TrieAccount;
 
+    use super::*;
+    use crate::{b256, hex, ChainConfig, GenesisAccount};
+    use std::{collections::HashMap, str::FromStr};
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);
@@ -2366,7 +2371,15 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 0, timestamp: 1710374401, ..Default::default() },
-                    ForkId { hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]), next: 0 },
+                    ForkId { hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]), next: 1720627201 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1720627200, ..Default::default() },
+                    ForkId { hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]), next: 1720627201 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1720627201, ..Default::default() },
+                    ForkId { hash: ForkHash([0xe4, 0x01, 0x0e, 0xb9]), next: 0 },
                 ),
             ],
         );
@@ -2396,7 +2409,15 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 0, timestamp: 1708534800, ..Default::default() },
-                    ForkId { hash: ForkHash([0xcc, 0x17, 0xc7, 0xeb]), next: 0 },
+                    ForkId { hash: ForkHash([0xcc, 0x17, 0xc7, 0xeb]), next: 1716998400 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1716998399, ..Default::default() },
+                    ForkId { hash: ForkHash([0xcc, 0x17, 0xc7, 0xeb]), next: 1716998400 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1716998400, ..Default::default() },
+                    ForkId { hash: ForkHash([0x54, 0x0a, 0x8c, 0x5d]), next: 0 },
                 ),
             ],
         );
@@ -2415,7 +2436,7 @@ Post-merge hard forks (timestamp based):
                 // TODO: complete these, see https://github.com/paradigmxyz/reth/issues/8012
                 (
                     Head { number: 105235063, timestamp: 1710374401, ..Default::default() },
-                    ForkId { hash: ForkHash([0x19, 0xda, 0x4c, 0x52]), next: 0 },
+                    ForkId { hash: ForkHash([0x19, 0xda, 0x4c, 0x52]), next: 1720627201 },
                 ),
             ],
         );
@@ -2445,7 +2466,15 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     Head { number: 0, timestamp: 1708534800, ..Default::default() },
-                    ForkId { hash: ForkHash([0xbe, 0x96, 0x9b, 0x17]), next: 0 },
+                    ForkId { hash: ForkHash([0xbe, 0x96, 0x9b, 0x17]), next: 1716998400 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1716998399, ..Default::default() },
+                    ForkId { hash: ForkHash([0xbe, 0x96, 0x9b, 0x17]), next: 1716998400 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1716998400, ..Default::default() },
+                    ForkId { hash: ForkHash([0x4e, 0x45, 0x7a, 0x49]), next: 0 },
                 ),
             ],
         );
@@ -2802,7 +2831,7 @@ Post-merge hard forks (timestamp based):
 
         for (key, expected_rlp) in key_rlp {
             let account = chainspec.genesis.alloc.get(&key).expect("account should exist");
-            assert_eq!(&alloy_rlp::encode(TrieAccount::from(account.clone())), expected_rlp)
+            assert_eq!(&alloy_rlp::encode(TrieAccount::from(account.clone())), expected_rlp);
         }
 
         assert_eq!(chainspec.genesis_hash, None);
@@ -3303,7 +3332,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn latest_base_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0x51, 0xcc, 0x98, 0xb3]), next: 0 },
+            ForkId { hash: ForkHash([0xe4, 0x01, 0x0e, 0xb9]), next: 0 },
             BASE_MAINNET.latest_fork_id()
         )
     }

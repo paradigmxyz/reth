@@ -1,9 +1,5 @@
-use crate::metrics::SyncMetrics;
-use reth_primitives::{
-    constants::MGAS_TO_GAS,
-    stage::{StageCheckpoint, StageId},
-    BlockNumber,
-};
+use crate::{metrics::SyncMetrics, StageCheckpoint, StageId};
+use reth_primitives::{constants::MGAS_TO_GAS, BlockNumber};
 use std::{
     future::Future,
     pin::Pin,

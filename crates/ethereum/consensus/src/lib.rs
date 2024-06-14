@@ -10,11 +10,15 @@
 
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
-    validate_block_pre_execution, validate_header_extradata, validate_header_standalone,
+    validate_4844_header_standalone, validate_against_parent_eip1559_base_fee,
+    validate_against_parent_hash_number, validate_against_parent_timestamp,
+    validate_block_pre_execution, validate_header_base_fee, validate_header_extradata,
+    validate_header_gas,
 };
 use reth_primitives::{
-    BlockWithSenders, Chain, ChainSpec, Hardfork, Header, SealedBlock, SealedHeader,
-    EMPTY_OMMER_ROOT_HASH, U256,
+    constants::MINIMUM_GAS_LIMIT, eip4844::calculate_excess_blob_gas, BlockWithSenders, Chain,
+    ChainSpec, GotExpected, Hardfork, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH,
+    U256,
 };
 use std::{sync::Arc, time::SystemTime};
 
@@ -32,14 +36,125 @@ pub struct EthBeaconConsensus {
 
 impl EthBeaconConsensus {
     /// Create a new instance of [`EthBeaconConsensus`]
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
+    }
+
+    /// Validates that the EIP-4844 header fields are correct with respect to the parent block. This
+    /// ensures that the `blob_gas_used` and `excess_blob_gas` fields exist in the child header, and
+    /// that the `excess_blob_gas` field matches the expected `excess_blob_gas` calculated from the
+    /// parent header fields.
+    pub fn validate_against_parent_4844(
+        header: &SealedHeader,
+        parent: &SealedHeader,
+    ) -> Result<(), ConsensusError> {
+        // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
+        //
+        // > For the first post-fork block, both parent.blob_gas_used and parent.excess_blob_gas
+        // > are evaluated as 0.
+        //
+        // This means in the first post-fork block, calculate_excess_blob_gas will return 0.
+        let parent_blob_gas_used = parent.blob_gas_used.unwrap_or(0);
+        let parent_excess_blob_gas = parent.excess_blob_gas.unwrap_or(0);
+
+        if header.blob_gas_used.is_none() {
+            return Err(ConsensusError::BlobGasUsedMissing)
+        }
+        let excess_blob_gas = header.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)?;
+
+        let expected_excess_blob_gas =
+            calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
+        if expected_excess_blob_gas != excess_blob_gas {
+            return Err(ConsensusError::ExcessBlobGasDiff {
+                diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
+                parent_excess_blob_gas,
+                parent_blob_gas_used,
+            })
+        }
+
+        Ok(())
+    }
+
+    /// Checks the gas limit for consistency between parent and self headers.
+    ///
+    /// The maximum allowable difference between self and parent gas limits is determined by the
+    /// parent's gas limit divided by the elasticity multiplier (1024).
+    fn validate_against_parent_gas_limit(
+        &self,
+        header: &SealedHeader,
+        parent: &SealedHeader,
+    ) -> Result<(), ConsensusError> {
+        // Determine the parent gas limit, considering elasticity multiplier on the London fork.
+        let parent_gas_limit =
+            if self.chain_spec.fork(Hardfork::London).transitions_at_block(header.number) {
+                parent.gas_limit *
+                    self.chain_spec
+                        .base_fee_params_at_timestamp(header.timestamp)
+                        .elasticity_multiplier as u64
+            } else {
+                parent.gas_limit
+            };
+
+        // Check for an increase in gas limit beyond the allowed threshold.
+        if header.gas_limit > parent_gas_limit {
+            if header.gas_limit - parent_gas_limit >= parent_gas_limit / 1024 {
+                return Err(ConsensusError::GasLimitInvalidIncrease {
+                    parent_gas_limit,
+                    child_gas_limit: header.gas_limit,
+                })
+            }
+        }
+        // Check for a decrease in gas limit beyond the allowed threshold.
+        else if parent_gas_limit - header.gas_limit >= parent_gas_limit / 1024 {
+            return Err(ConsensusError::GasLimitInvalidDecrease {
+                parent_gas_limit,
+                child_gas_limit: header.gas_limit,
+            })
+        }
+        // Check if the self gas limit is below the minimum required limit.
+        else if header.gas_limit < MINIMUM_GAS_LIMIT {
+            return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: header.gas_limit })
+        }
+
+        Ok(())
     }
 }
 
 impl Consensus for EthBeaconConsensus {
     fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError> {
-        validate_header_standalone(header, &self.chain_spec)?;
+        validate_header_gas(header)?;
+        validate_header_base_fee(header, &self.chain_spec)?;
+
+        // EIP-4895: Beacon chain push withdrawals as operations
+        if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) &&
+            header.withdrawals_root.is_none()
+        {
+            return Err(ConsensusError::WithdrawalsRootMissing)
+        } else if !self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) &&
+            header.withdrawals_root.is_some()
+        {
+            return Err(ConsensusError::WithdrawalsRootUnexpected)
+        }
+
+        // Ensures that EIP-4844 fields are valid once cancun is active.
+        if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
+            validate_4844_header_standalone(header)?;
+        } else if header.blob_gas_used.is_some() {
+            return Err(ConsensusError::BlobGasUsedUnexpected)
+        } else if header.excess_blob_gas.is_some() {
+            return Err(ConsensusError::ExcessBlobGasUnexpected)
+        } else if header.parent_beacon_block_root.is_some() {
+            return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
+        }
+
+        if self.chain_spec.is_prague_active_at_timestamp(header.timestamp) {
+            if header.requests_root.is_none() {
+                return Err(ConsensusError::RequestsRootMissing)
+            }
+        } else if header.requests_root.is_some() {
+            return Err(ConsensusError::RequestsRootUnexpected)
+        }
+
         Ok(())
     }
 
@@ -48,31 +163,36 @@ impl Consensus for EthBeaconConsensus {
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        header.validate_against_parent(parent, &self.chain_spec).map_err(ConsensusError::from)?;
+        validate_against_parent_hash_number(header, parent)?;
+
+        validate_against_parent_timestamp(header, parent)?;
+
+        // TODO Check difficulty increment between parent and self
+        // Ace age did increment it by some formula that we need to follow.
+        self.validate_against_parent_gas_limit(header, parent)?;
+
+        validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
+
+        // ensure that the blob gas fields for this block
+        if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
+            Self::validate_against_parent_4844(header, parent)?;
+        }
+
         Ok(())
     }
 
-    #[allow(unused_assignments)]
-    #[allow(unused_mut)]
     fn validate_header_with_total_difficulty(
         &self,
         header: &Header,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
-        let mut is_post_merge = self
+        let is_post_merge = self
             .chain_spec
             .fork(Hardfork::Paris)
             .active_at_ttd(total_difficulty, header.difficulty);
 
-        #[cfg(feature = "optimism")]
-        {
-            // If OP-Stack then bedrock activation number determines when TTD (eth Merge) has been
-            // reached.
-            is_post_merge = self.chain_spec.is_bedrock_active_at_block(header.number);
-        }
-
         if is_post_merge {
-            if !self.chain_spec.is_optimism() && !header.is_zero_difficulty() {
+            if !header.is_zero_difficulty() {
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
 
@@ -134,5 +254,99 @@ impl Consensus for EthBeaconConsensus {
         input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec, input.receipts, input.requests)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use reth_primitives::{proofs, ChainSpecBuilder, B256};
+
+    use super::*;
+
+    fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
+        let header = Header { gas_limit, ..Default::default() };
+        header.seal(B256::ZERO)
+    }
+
+    #[test]
+    fn test_valid_gas_limit_increase() {
+        let parent = header_with_gas_limit(1024 * 10);
+        let child = header_with_gas_limit(parent.gas_limit + 5);
+
+        assert_eq!(
+            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
+                .validate_against_parent_gas_limit(&child, &parent),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn test_gas_limit_below_minimum() {
+        let parent = header_with_gas_limit(MINIMUM_GAS_LIMIT);
+        let child = header_with_gas_limit(MINIMUM_GAS_LIMIT - 1);
+
+        assert_eq!(
+            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
+                .validate_against_parent_gas_limit(&child, &parent),
+            Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: child.gas_limit })
+        );
+    }
+
+    #[test]
+    fn test_invalid_gas_limit_increase_exceeding_limit() {
+        let parent = header_with_gas_limit(1024 * 10);
+        let child = header_with_gas_limit(parent.gas_limit + parent.gas_limit / 1024 + 1);
+
+        assert_eq!(
+            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
+                .validate_against_parent_gas_limit(&child, &parent),
+            Err(ConsensusError::GasLimitInvalidIncrease {
+                parent_gas_limit: parent.gas_limit,
+                child_gas_limit: child.gas_limit,
+            })
+        );
+    }
+
+    #[test]
+    fn test_valid_gas_limit_decrease_within_limit() {
+        let parent = header_with_gas_limit(1024 * 10);
+        let child = header_with_gas_limit(parent.gas_limit - 5);
+
+        assert_eq!(
+            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
+                .validate_against_parent_gas_limit(&child, &parent),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn test_invalid_gas_limit_decrease_exceeding_limit() {
+        let parent = header_with_gas_limit(1024 * 10);
+        let child = header_with_gas_limit(parent.gas_limit - parent.gas_limit / 1024 - 1);
+
+        assert_eq!(
+            EthBeaconConsensus::new(Arc::new(ChainSpec::default()))
+                .validate_against_parent_gas_limit(&child, &parent),
+            Err(ConsensusError::GasLimitInvalidDecrease {
+                parent_gas_limit: parent.gas_limit,
+                child_gas_limit: child.gas_limit,
+            })
+        );
+    }
+
+    #[test]
+    fn shanghai_block_zero_withdrawals() {
+        // ensures that if shanghai is activated, and we include a block with a withdrawals root,
+        // that the header is valid
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().shanghai_activated().build());
+
+        let header = Header {
+            base_fee_per_gas: Some(1337u64),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            ..Default::default()
+        }
+        .seal_slow();
+
+        assert_eq!(EthBeaconConsensus::new(chain_spec).validate_header(&header), Ok(()));
     }
 }

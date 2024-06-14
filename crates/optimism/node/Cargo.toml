@@ -29,14 +29,13 @@ reth-evm.workspace = true
 reth-revm.workspace = true
 reth-evm-optimism.workspace = true
 reth-beacon-consensus.workspace = true
+reth-optimism-consensus.workspace = true
 revm-primitives.workspace = true
+reth-discv5.workspace = true
 
 # async
 async-trait.workspace = true
-hyper.workspace = true
-reqwest = { workspace = true, default-features = false, features = [
-    "rustls-tls-native-roots",
-] }
+reqwest = { workspace = true, features = ["rustls-tls-native-roots"] }
 tracing.workspace = true
 
 # misc

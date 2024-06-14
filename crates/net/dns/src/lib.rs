@@ -22,8 +22,8 @@ use crate::{
 pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
-use reth_network_types::pk2id;
-use reth_primitives::{EnrForkIdEntry, ForkId, NodeRecord};
+use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
+use reth_network_peers::{pk2id, NodeRecord};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
@@ -411,9 +411,11 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
 mod tests {
     use super::*;
     use crate::tree::TreeRootEntry;
+    use alloy_chains::Chain;
     use alloy_rlp::{Decodable, Encodable};
     use enr::EnrKey;
-    use reth_primitives::{Chain, ForkHash, Hardfork, MAINNET};
+    use reth_ethereum_forks::{ForkHash, Hardfork};
+    use reth_primitives::MAINNET;
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
 

@@ -103,7 +103,26 @@ pub const OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON: u128 = 250;
 /// Base fee max change denominator for Optimism Sepolia as defined in the Optimism
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
 #[cfg(feature = "optimism")]
-pub const OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 10;
+pub const OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 6;
+
+/// Base fee max change denominator for Base Sepolia as defined in the Optimism
+/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
+#[cfg(feature = "optimism")]
+pub const BASE_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 10;
+
+/// Get the base fee parameters for Base Sepolia.
+#[cfg(feature = "optimism")]
+pub const BASE_SEPOLIA_BASE_FEE_PARAMS: BaseFeeParams = BaseFeeParams {
+    max_change_denominator: OP_SEPOLIA_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
+    elasticity_multiplier: BASE_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+};
+
+/// Get the base fee parameters for Base Sepolia (post Canyon).
+#[cfg(feature = "optimism")]
+pub const BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS: BaseFeeParams = BaseFeeParams {
+    max_change_denominator: OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
+    elasticity_multiplier: BASE_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+};
 
 /// Get the base fee parameters for Optimism Sepolia.
 #[cfg(feature = "optimism")]

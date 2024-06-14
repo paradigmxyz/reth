@@ -17,6 +17,7 @@ reth-config.workspace = true
 reth-trie.workspace = true
 reth-etl.workspace = true
 reth-codecs.workspace = true
+reth-stages-types.workspace = true
 
 # misc
 eyre.workspace = true

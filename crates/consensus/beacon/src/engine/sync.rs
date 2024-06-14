@@ -11,8 +11,8 @@ use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
 };
-use reth_primitives::{stage::PipelineTarget, BlockNumber, ChainSpec, SealedBlock, B256};
-use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineWithResult};
+use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, B256};
+use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventSender;
 use std::{
@@ -54,8 +54,6 @@ where
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
     range_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock>>,
-    /// If enabled, the pipeline will be triggered continuously, as soon as it becomes idle
-    run_pipeline_continuously: bool,
     /// Max block after which the consensus engine would terminate the sync. Used for debugging
     /// purposes.
     max_block: Option<BlockNumber>,
@@ -73,7 +71,6 @@ where
         pipeline: Pipeline<DB>,
         client: Client,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
-        run_pipeline_continuously: bool,
         max_block: Option<BlockNumber>,
         chain_spec: Arc<ChainSpec>,
         event_sender: EventSender<BeaconConsensusEngineEvent>,
@@ -89,7 +86,6 @@ where
             inflight_full_block_requests: Vec::new(),
             inflight_block_range_requests: Vec::new(),
             range_buffered_blocks: BinaryHeap::new(),
-            run_pipeline_continuously,
             event_sender,
             max_block,
             metrics: EngineSyncMetrics::default(),
@@ -120,11 +116,6 @@ where
     pub(crate) fn cancel_full_block_request(&mut self, hash: B256) {
         self.inflight_full_block_requests.retain(|req| *req.hash() != hash);
         self.update_block_download_metrics();
-    }
-
-    /// Returns whether or not the sync controller is set to run the pipeline continuously.
-    pub(crate) const fn run_pipeline_continuously(&self) -> bool {
-        self.run_pipeline_continuously
     }
 
     /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
@@ -271,20 +262,14 @@ where
     fn try_spawn_pipeline(&mut self) -> Option<EngineSyncEvent> {
         match &mut self.pipeline_state {
             PipelineState::Idle(pipeline) => {
-                let target = self.pending_pipeline_target.take();
-
-                if target.is_none() && !self.run_pipeline_continuously {
-                    // nothing to sync
-                    return None
-                }
-
+                let target = self.pending_pipeline_target.take()?;
                 let (tx, rx) = oneshot::channel();
 
                 let pipeline = pipeline.take().expect("exists");
                 self.pipeline_task_spawner.spawn_critical_blocking(
                     "pipeline task",
                     Box::pin(async move {
-                        let result = pipeline.run_as_fut(target).await;
+                        let result = pipeline.run_as_fut(Some(target)).await;
                         let _ = tx.send(result);
                     }),
                 );
@@ -294,7 +279,7 @@ where
                 // outdated (included in the range the pipeline is syncing anyway)
                 self.clear_block_download_requests();
 
-                Some(EngineSyncEvent::PipelineStarted(target))
+                Some(EngineSyncEvent::PipelineStarted(Some(target)))
             }
             PipelineState::Running(_) => None,
         }
@@ -431,13 +416,15 @@ mod tests {
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
     use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, stage::StageCheckpoint, BlockBody, ChainSpecBuilder,
-        Header, PruneModes, SealedHeader, MAINNET,
+        constants::ETHEREUM_BLOCK_GAS_LIMIT, BlockBody, ChainSpecBuilder, Header, SealedHeader,
+        MAINNET,
     };
     use reth_provider::{
-        test_utils::create_test_provider_factory_with_chain_spec, BundleStateWithReceipts,
+        test_utils::create_test_provider_factory_with_chain_spec, ExecutionOutcome,
     };
+    use reth_prune_types::PruneModes;
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
+    use reth_stages_api::StageCheckpoint;
     use reth_static_file::StaticFileProducer;
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, future::poll_fn, ops::Range};
@@ -445,13 +432,13 @@ mod tests {
 
     struct TestPipelineBuilder {
         pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-        executor_results: Vec<BundleStateWithReceipts>,
+        executor_results: Vec<ExecutionOutcome>,
         max_block: Option<BlockNumber>,
     }
 
     impl TestPipelineBuilder {
         /// Create a new [`TestPipelineBuilder`].
-        fn new() -> Self {
+        const fn new() -> Self {
             Self {
                 pipeline_exec_outputs: VecDeque::new(),
                 executor_results: Vec::new(),
@@ -470,7 +457,7 @@ mod tests {
 
         /// Set the executor results to use for the test consensus engine.
         #[allow(dead_code)]
-        fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
+        fn with_executor_results(mut self, executor_results: Vec<ExecutionOutcome>) -> Self {
             self.executor_results = executor_results;
             self
         }
@@ -548,8 +535,6 @@ mod tests {
                 pipeline,
                 client,
                 Box::<TokioTaskExecutor>::default(),
-                // run_pipeline_continuously: false here until we want to test this
-                false,
                 self.max_block,
                 chain_spec,
                 Default::default(),

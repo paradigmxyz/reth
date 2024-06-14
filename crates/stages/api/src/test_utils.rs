@@ -1,8 +1,7 @@
 #![allow(missing_docs)]
 
-use crate::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
 use reth_db_api::database::Database;
-use reth_primitives::stage::StageId;
 use reth_provider::DatabaseProviderRW;
 use std::collections::VecDeque;
 
@@ -17,7 +16,7 @@ pub struct TestStage {
 }
 
 impl TestStage {
-    pub fn new(id: StageId) -> Self {
+    pub const fn new(id: StageId) -> Self {
         Self { id, exec_outputs: VecDeque::new(), unwind_outputs: VecDeque::new() }
     }
 

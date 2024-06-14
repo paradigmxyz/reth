@@ -41,7 +41,7 @@ use reth_eth_wire::{
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_network_p2p::error::{RequestError, RequestResult};
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{PooledTransactionsElement, TxHash};
 use schnellru::ByLength;
 #[cfg(debug_assertions)]
@@ -1152,7 +1152,7 @@ pub struct GetPooledTxRequestFut {
 
 impl GetPooledTxRequestFut {
     #[inline]
-    fn new(
+    const fn new(
         peer_id: PeerId,
         requested_hashes: RequestTxHashes,
         response: oneshot::Receiver<RequestResult<PooledTransactions>>,

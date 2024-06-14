@@ -3,11 +3,13 @@
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
 use crate::{
+    common::WithConfigs,
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcServerHandles, RpcContext},
     DefaultNodeLauncher, Node, NodeHandle,
 };
+use discv5::ListenConfig;
 use futures::Future;
 use reth_db::{
     test_utils::{create_test_rw_db_with_path, tempdir_path, TempDatabase},
@@ -18,12 +20,14 @@ use reth_db_api::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_exex::ExExContext;
-use reth_network::{NetworkBuilder, NetworkConfig, NetworkHandle};
+use reth_network::{
+    NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
+};
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::{
-    args::DatadirArgs,
+    args::{get_secret_key, DatadirArgs},
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
-    dirs::{DataDirPath, MaybePlatformPath},
+    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     node_config::NodeConfig,
     primitives::{kzg::KzgSettings, Head},
     utils::write_peers_to_file,
@@ -32,8 +36,12 @@ use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, ChainSpec};
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
+use secp256k1::SecretKey;
 pub use states::*;
-use std::sync::Arc;
+use std::{
+    net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    sync::Arc,
+};
 
 mod states;
 
@@ -403,10 +411,8 @@ pub struct BuilderContext<Node: FullNodeTypes> {
     pub(crate) provider: Node::Provider,
     /// The executor of the node.
     pub(crate) executor: TaskExecutor,
-    /// The config of the node
-    pub(crate) config: NodeConfig,
-    /// loaded config
-    pub(crate) reth_config: reth_config::Config,
+    /// Config container
+    pub(crate) config_container: WithConfigs,
 }
 
 impl<Node: FullNodeTypes> BuilderContext<Node> {
@@ -415,10 +421,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         head: Head,
         provider: Node::Provider,
         executor: TaskExecutor,
-        config: NodeConfig,
-        reth_config: reth_config::Config,
+        config_container: WithConfigs,
     ) -> Self {
-        Self { head, provider, executor, config, reth_config }
+        Self { head, provider, executor, config_container }
     }
 
     /// Returns the configured provider to interact with the blockchain.
@@ -433,7 +438,12 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
 
     /// Returns the config of the node.
     pub const fn config(&self) -> &NodeConfig {
-        &self.config
+        &self.config_container.config
+    }
+
+    /// Returns the loaded reh.toml config.
+    pub const fn reth_config(&self) -> &reth_config::Config {
+        &self.config_container.toml_config
     }
 
     /// Returns the executor of the node.
@@ -448,6 +458,11 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.provider().chain_spec()
     }
 
+    /// Returns true if the node is configured as --dev
+    pub const fn is_dev(&self) -> bool {
+        self.config().dev.dev
+    }
+
     /// Returns the transaction pool config of the node.
     pub fn pool_config(&self) -> PoolConfig {
         self.config().txpool.pool_config()
@@ -460,29 +475,14 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
 
     /// Returns the config for payload building.
     pub fn payload_builder_config(&self) -> impl PayloadBuilderConfig {
-        self.config.builder.clone()
-    }
-
-    /// Returns the default network config for the node.
-    pub fn network_config(&self) -> eyre::Result<NetworkConfig<Node::Provider>> {
-        self.config.network_config(
-            &self.reth_config,
-            self.provider.clone(),
-            self.executor.clone(),
-            self.head,
-        )
+        self.config().builder.clone()
     }
 
     /// Creates the [`NetworkBuilder`] for the node.
     pub async fn network_builder(&self) -> eyre::Result<NetworkBuilder<Node::Provider, (), ()>> {
-        self.config
-            .build_network(
-                &self.reth_config,
-                self.provider.clone(),
-                self.executor.clone(),
-                self.head,
-            )
-            .await
+        let network_config = self.network_config()?;
+        let builder = NetworkManager::builder(network_config).await?;
+        Ok(builder)
     }
 
     /// Convenience function to start the network.
@@ -505,8 +505,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.executor.spawn_critical("p2p txpool", txpool);
         self.executor.spawn_critical("p2p eth request handler", eth);
 
-        let default_peers_path = self.config.datadir().known_peers();
-        let known_peers_file = self.config.network.persistent_peers_file(default_peers_path);
+        let default_peers_path = self.config().datadir().known_peers();
+        let known_peers_file = self.config().network.persistent_peers_file(default_peers_path);
         self.executor.spawn_critical_with_graceful_shutdown_signal(
             "p2p network task",
             |shutdown| {
@@ -518,6 +518,82 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
 
         handle
     }
+
+    /// Returns the default network config for the node.
+    pub fn network_config(&self) -> eyre::Result<NetworkConfig<Node::Provider>> {
+        let network_builder = self.network_config_builder();
+        Ok(self.build_network_config(network_builder?))
+    }
+
+    /// Get the [`NetworkConfigBuilder`].
+    pub fn network_config_builder(&self) -> eyre::Result<NetworkConfigBuilder> {
+        let secret_key = self.network_secret(&self.config().datadir())?;
+        let default_peers_path = self.config().datadir().known_peers();
+        Ok(self.config().network.network_config(
+            self.reth_config(),
+            self.config().chain.clone(),
+            secret_key,
+            default_peers_path,
+        ))
+    }
+
+    /// Get the network secret from the given data dir
+    fn network_secret(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<SecretKey> {
+        let network_secret_path =
+            self.config().network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
+        let secret_key = get_secret_key(&network_secret_path)?;
+        Ok(secret_key)
+    }
+
+    /// Builds the [`NetworkConfig`].
+    pub fn build_network_config(
+        &self,
+        network_builder: NetworkConfigBuilder,
+    ) -> NetworkConfig<Node::Provider> {
+        network_builder
+            .with_task_executor(Box::new(self.executor.clone()))
+            .set_head(self.head)
+            .listener_addr(SocketAddr::new(
+                self.config().network.addr,
+                // set discovery port based on instance number
+                self.config().network.port + self.config().instance - 1,
+            ))
+            .discovery_addr(SocketAddr::new(
+                self.config().network.discovery.addr,
+                // set discovery port based on instance number
+                self.config().network.discovery.port + self.config().instance - 1,
+            ))
+            .map_discv5_config_builder(|builder| {
+                // Use rlpx address if none given
+                let discv5_addr_ipv4 = self.config().network.discovery.discv5_addr.or(
+                    match self.config().network.addr {
+                        IpAddr::V4(ip) => Some(ip),
+                        IpAddr::V6(_) => None,
+                    },
+                );
+                let discv5_addr_ipv6 = self.config().network.discovery.discv5_addr_ipv6.or(
+                    match self.config().network.addr {
+                        IpAddr::V4(_) => None,
+                        IpAddr::V6(ip) => Some(ip),
+                    },
+                );
+
+                let discv5_port_ipv4 =
+                    self.config().network.discovery.discv5_port + self.config().instance - 1;
+                let discv5_port_ipv6 =
+                    self.config().network.discovery.discv5_port_ipv6 + self.config().instance - 1;
+
+                builder.discv5_config(
+                    discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
+                        discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port_ipv4)),
+                        discv5_addr_ipv6
+                            .map(|addr| SocketAddrV6::new(addr, discv5_port_ipv6, 0, 0)),
+                    ))
+                    .build(),
+                )
+            })
+            .build(self.provider.clone())
+    }
 }
 
 impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
@@ -526,7 +602,7 @@ impl<Node: FullNodeTypes> std::fmt::Debug for BuilderContext<Node> {
             .field("head", &self.head)
             .field("provider", &std::any::type_name::<Node::Provider>())
             .field("executor", &self.executor)
-            .field("config", &self.config)
+            .field("config", &self.config())
             .finish()
     }
 }

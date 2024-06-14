@@ -13,7 +13,7 @@ mod chain_info;
 pub use chain_info::CanonChainTracker;
 
 mod header_sync_gap;
-pub use header_sync_gap::{HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode};
+pub use header_sync_gap::{HeaderSyncGap, HeaderSyncGapProvider};
 
 mod state;
 pub use state::StateWriter;
@@ -47,3 +47,6 @@ pub use full::FullProvider;
 
 mod tree_viewer;
 pub use tree_viewer::TreeViewer;
+
+mod finalized_block;
+pub use finalized_block::{FinalizedBlockReader, FinalizedBlockWriter};

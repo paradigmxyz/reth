@@ -7,8 +7,7 @@ use proptest::{
     strategy::ValueTree,
     test_runner::{basic_result_cache, TestRunner},
 };
-use reth_primitives::trie::Nibbles;
-use reth_trie::prefix_set::PrefixSetMut;
+use reth_trie::{prefix_set::PrefixSetMut, Nibbles};
 use std::collections::BTreeSet;
 
 /// Abstractions used for benching

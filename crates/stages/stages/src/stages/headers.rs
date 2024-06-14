@@ -10,25 +10,21 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
-use reth_primitives::{
-    stage::{
-        CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
-    },
-    BlockHash, BlockNumber, SealedHeader, StaticFileSegment,
-};
+use reth_primitives::{BlockHash, BlockNumber, SealedHeader, StaticFileSegment, B256};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, DatabaseProviderRW, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
-    HeaderSyncMode,
 };
 use reth_stages_api::{
-    BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
+    BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
+    HeadersCheckpoint, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderError;
 use std::{
     sync::Arc,
     task::{ready, Context, Poll},
 };
+use tokio::sync::watch;
 use tracing::*;
 
 /// The headers stage.
@@ -48,8 +44,8 @@ pub struct HeaderStage<Provider, Downloader: HeaderDownloader> {
     provider: Provider,
     /// Strategy for downloading the headers
     downloader: Downloader,
-    /// The sync mode for the stage.
-    mode: HeaderSyncMode,
+    /// The tip for the stage.
+    tip: watch::Receiver<B256>,
     /// Consensus client implementation
     consensus: Arc<dyn Consensus>,
     /// Current sync gap.
@@ -72,14 +68,14 @@ where
     pub fn new(
         database: Provider,
         downloader: Downloader,
-        mode: HeaderSyncMode,
+        tip: watch::Receiver<B256>,
         consensus: Arc<dyn Consensus>,
         etl_config: EtlConfig,
     ) -> Self {
         Self {
             provider: database,
             downloader,
-            mode,
+            tip,
             consensus,
             sync_gap: None,
             hash_collector: Collector::new(etl_config.file_size / 2, etl_config.dir.clone()),
@@ -210,7 +206,7 @@ where
         }
 
         // Lookup the head and tip of the sync range
-        let gap = self.provider.sync_gap(self.mode.clone(), current_checkpoint.block_number)?;
+        let gap = self.provider.sync_gap(self.tip.clone(), current_checkpoint.block_number)?;
         let tip = gap.target.tip();
         self.sync_gap = Some(gap.clone());
 
@@ -380,12 +376,11 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
-    use reth_primitives::{
-        stage::StageUnitCheckpoint, BlockBody, SealedBlock, SealedBlockWithSenders, B256,
-    };
+    use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders, B256};
     use reth_provider::{
-        BlockWriter, BundleStateWithReceipts, ProviderFactory, StaticFileProviderFactory,
+        BlockWriter, ExecutionOutcome, ProviderFactory, StaticFileProviderFactory,
     };
+    use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
     use reth_trie::{updates::TrieUpdates, HashedPostState};
     use test_runner::HeadersTestRunner;
@@ -441,7 +436,7 @@ mod tests {
                 HeaderStage::new(
                     self.db.factory.clone(),
                     (*self.downloader_factory)(),
-                    HeaderSyncMode::Tip(self.channel.1.clone()),
+                    self.channel.1.clone(),
                     self.consensus.clone(),
                     EtlConfig::default(),
                 )
@@ -634,7 +629,7 @@ mod tests {
         provider
             .append_blocks_with_state(
                 sealed_blocks,
-                BundleStateWithReceipts::default(),
+                ExecutionOutcome::default(),
                 HashedPostState::default(),
                 TrieUpdates::default(),
                 None,

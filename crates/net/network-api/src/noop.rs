@@ -9,7 +9,7 @@ use crate::{
 };
 use enr::{secp256k1::SecretKey, Enr};
 use reth_eth_wire::{DisconnectReason, ProtocolVersion};
-use reth_network_types::NodeRecord;
+use reth_network_peers::NodeRecord;
 use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
 use std::net::{IpAddr, SocketAddr};
 

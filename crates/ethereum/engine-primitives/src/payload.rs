@@ -1,7 +1,7 @@
 //! Contains types required for building a payload.
 
 use alloy_rlp::Encodable;
-use reth_engine_primitives::{BuiltPayload, PayloadBuilderAttributes};
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     constants::EIP1559_INITIAL_BASE_FEE, revm::config::revm_spec_by_timestamp_after_merge, Address,
     BlobTransactionSidecar, ChainSpec, Hardfork, Header, SealedBlock, Withdrawals, B256, U256,
@@ -39,7 +39,7 @@ pub struct EthBuiltPayload {
 
 impl EthBuiltPayload {
     /// Initializes the payload with the given initial block.
-    pub fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
+    pub const fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
         Self { id, block, fees, sidecars: Vec::new() }
     }
 

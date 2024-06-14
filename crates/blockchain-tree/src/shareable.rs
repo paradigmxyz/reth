@@ -14,9 +14,10 @@ use reth_primitives::{
     SealedHeader,
 };
 use reth_provider::{
-    BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullBundleStateDataProvider,
+    BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullExecutionDataProvider,
     ProviderError,
 };
+use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
 use tracing::trace;
 
@@ -58,11 +59,13 @@ where
         res
     }
 
-    fn finalize_block(&self, finalized_block: BlockNumber) {
+    fn finalize_block(&self, finalized_block: BlockNumber) -> ProviderResult<()> {
         trace!(target: "blockchain_tree", finalized_block, "Finalizing block");
         let mut tree = self.tree.write();
-        tree.finalize_block(finalized_block);
+        tree.finalize_block(finalized_block)?;
         tree.update_chains_metrics();
+
+        Ok(())
     }
 
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
@@ -174,7 +177,7 @@ where
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn FullBundleStateDataProvider>> {
+    ) -> Option<Box<dyn FullExecutionDataProvider>> {
         trace!(target: "blockchain_tree", ?block_hash, "Finding pending state provider");
         let provider = self.tree.read().post_state_data(block_hash)?;
         Some(Box::new(provider))

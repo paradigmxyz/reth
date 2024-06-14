@@ -89,7 +89,7 @@ where
             client: self.client.clone(),
             _pool: self.pool.clone(),
             _executor: self.executor.clone(),
-            _builder: self.builder.clone(),
+            builder: self.builder.clone(),
             config,
         })
     }

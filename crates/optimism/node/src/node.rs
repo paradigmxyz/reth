@@ -11,11 +11,13 @@ use reth_evm_optimism::{OpExecutorProvider, OptimismEvmConfig};
 use reth_network::{NetworkHandle, NetworkManager};
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ExecutorBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder,
+        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
+        PayloadServiceBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes},
     BuilderContext, Node, PayloadBuilderConfig,
 };
+use reth_optimism_consensus::OptimismBeaconConsensus;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
@@ -47,6 +49,7 @@ impl OptimismNode {
         OptimismPayloadBuilder,
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
+        OptimismConsensusBuilder,
     >
     where
         Node: FullNodeTypes<Engine = OptimismEngineTypes>,
@@ -61,6 +64,7 @@ impl OptimismNode {
             ))
             .network(OptimismNetworkBuilder { disable_txpool_gossip })
             .executor(OptimismExecutorBuilder::default())
+            .consensus(OptimismConsensusBuilder::default())
     }
 }
 
@@ -74,6 +78,7 @@ where
         OptimismPayloadBuilder,
         OptimismNetworkBuilder,
         OptimismExecutorBuilder,
+        OptimismConsensusBuilder,
     >;
 
     fn components_builder(self) -> Self::ComponentsBuilder {
@@ -269,7 +274,26 @@ where
         pool: Pool,
     ) -> eyre::Result<NetworkHandle> {
         let Self { disable_txpool_gossip } = self;
-        let mut network_config = ctx.network_config()?;
+
+        let args = &ctx.config().network;
+
+        let network_builder = ctx
+            .network_config_builder()?
+            // purposefully disable discv4
+            .disable_discv4_discovery()
+            // apply discovery settings
+            .apply(|builder| {
+                let rlpx_socket = (args.addr, args.port).into();
+                let mut builder = args.discovery.apply_to_builder(builder, rlpx_socket);
+
+                if !args.discovery.disable_discovery {
+                    builder = builder.discovery_v5(reth_discv5::Config::builder(rlpx_socket));
+                }
+
+                builder
+            });
+
+        let mut network_config = ctx.build_network_config(network_builder);
 
         // When `sequencer_endpoint` is configured, the node will forward all transactions to a
         // Sequencer node for execution and inclusion on L1, and disable its own txpool
@@ -281,5 +305,21 @@ where
         let handle = ctx.start_network(network, pool);
 
         Ok(handle)
+    }
+}
+
+/// A basic optimism consensus builder.
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct OptimismConsensusBuilder;
+
+impl<Node> ConsensusBuilder<Node> for OptimismConsensusBuilder
+where
+    Node: FullNodeTypes,
+{
+    type Consensus = OptimismBeaconConsensus;
+
+    async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
+        Ok(OptimismBeaconConsensus::new(ctx.chain_spec()))
     }
 }
