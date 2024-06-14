@@ -3,6 +3,7 @@ bin/                        @onbjerg
 crates/blockchain-tree      @rakita @rkrasiuk
 crates/cli/                 @onbjerg @mattsse
 crates/consensus            @rkrasiuk @mattsse @Rjected
+crates/engine               @rkrasiuk @mattsse @Rjected
 crates/exex                 @onbjerg @shekhirin
 crates/metrics              @onbjerg
 crates/net/                 @emhane @mattsse @Rjected
