@@ -10,10 +10,10 @@
 
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
-    validate_4844_header_standalone, validate_against_parent_eip1559_base_fee,
-    validate_against_parent_hash_number, validate_against_parent_timestamp,
-    validate_block_pre_execution, validate_header_base_fee, validate_header_extradata,
-    validate_header_gas,
+    validate_4844_header_standalone, validate_against_parent_4844,
+    validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
+    validate_against_parent_timestamp, validate_block_pre_execution, validate_header_base_fee,
+    validate_header_extradata, validate_header_gas,
 };
 use reth_primitives::{
     constants::MINIMUM_GAS_LIMIT, eip4844::calculate_excess_blob_gas, BlockWithSenders, Chain,
@@ -38,41 +38,6 @@ impl EthBeaconConsensus {
     /// Create a new instance of [`EthBeaconConsensus`]
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
-    }
-
-    /// Validates that the EIP-4844 header fields are correct with respect to the parent block. This
-    /// ensures that the `blob_gas_used` and `excess_blob_gas` fields exist in the child header, and
-    /// that the `excess_blob_gas` field matches the expected `excess_blob_gas` calculated from the
-    /// parent header fields.
-    pub fn validate_against_parent_4844(
-        header: &SealedHeader,
-        parent: &SealedHeader,
-    ) -> Result<(), ConsensusError> {
-        // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
-        //
-        // > For the first post-fork block, both parent.blob_gas_used and parent.excess_blob_gas
-        // > are evaluated as 0.
-        //
-        // This means in the first post-fork block, calculate_excess_blob_gas will return 0.
-        let parent_blob_gas_used = parent.blob_gas_used.unwrap_or(0);
-        let parent_excess_blob_gas = parent.excess_blob_gas.unwrap_or(0);
-
-        if header.blob_gas_used.is_none() {
-            return Err(ConsensusError::BlobGasUsedMissing)
-        }
-        let excess_blob_gas = header.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)?;
-
-        let expected_excess_blob_gas =
-            calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
-        if expected_excess_blob_gas != excess_blob_gas {
-            return Err(ConsensusError::ExcessBlobGasDiff {
-                diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
-                parent_excess_blob_gas,
-                parent_blob_gas_used,
-            })
-        }
-
-        Ok(())
     }
 
     /// Checks the gas limit for consistency between parent and self headers.
@@ -175,7 +140,7 @@ impl Consensus for EthBeaconConsensus {
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            Self::validate_against_parent_4844(header, parent)?;
+            validate_against_parent_4844(header, parent)?;
         }
 
         Ok(())
