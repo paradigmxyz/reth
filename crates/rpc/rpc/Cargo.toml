@@ -49,7 +49,7 @@ jsonrpsee.workspace = true
 http.workspace = true
 http-body.workspace = true
 hyper.workspace = true
-jsonwebtoken = "8"
+jsonwebtoken.workspace = true
 
 # async
 async-trait.workspace = true
