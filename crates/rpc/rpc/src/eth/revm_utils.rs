@@ -67,43 +67,21 @@ impl EvmOverrides {
     }
 
     /// Adds state overrides to an existing instance.
-    pub fn with_state(mut self, state: Option<StateOverride>) -> Self {
-        self.state = state;
+    pub fn with_state(mut self, state: StateOverride) -> Self {
+        self.state = Some(state);
         self
     }
 
     /// Adds block overrides to an existing instance.
-    pub fn with_block(mut self, block: Option<Box<BlockOverrides>>) -> Self {
-        self.block = block;
+    pub fn with_block(mut self, block: Box<BlockOverrides>) -> Self {
+        self.block = Some(block);
         self
-    }
-
-    /// Clears the state overrides.
-    pub fn clear_state(&mut self) {
-        self.state = None;
-    }
-
-    /// Clears the block overrides.
-    pub fn clear_block(&mut self) {
-        self.block = None;
-    }
-
-    /// Clears all overrides.
-    pub fn clear_all(&mut self) {
-        self.clear_state();
-        self.clear_block();
     }
 }
 
 impl From<Option<StateOverride>> for EvmOverrides {
     fn from(state: Option<StateOverride>) -> Self {
         Self::state(state)
-    }
-}
-
-impl From<Option<Box<BlockOverrides>>> for EvmOverrides {
-    fn from(block: Option<Box<BlockOverrides>>) -> Self {
-        Self::block(block)
     }
 }
 
