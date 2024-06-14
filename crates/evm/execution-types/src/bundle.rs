@@ -276,7 +276,11 @@ impl ExecutionOutcome {
         // Truncate higher state to [at..].
         let at_idx = higher_state.block_number_to_index(at).unwrap();
         higher_state.receipts = higher_state.receipts.split_off(at_idx).into();
-        higher_state.requests = higher_state.requests.split_off(at_idx);
+        // Ensure that there are enough requests to truncate.
+        // Sometimes we just have receipts and no requests.
+        if at_idx < higher_state.requests.len() {
+            higher_state.requests.truncate(at_idx);
+        }
         higher_state.bundle.take_n_reverts(at_idx);
         higher_state.first_block = at;
 
