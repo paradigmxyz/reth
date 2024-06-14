@@ -31,7 +31,7 @@ pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
 
 impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     /// Creates a new instance of the node builder with the given configuration and types.
-    pub fn new(config: NodeConfig, database: T::DB) -> Self {
+    pub const fn new(config: NodeConfig, database: T::DB) -> Self {
         Self { config, adapter: NodeTypesAdapter::new(database) }
     }
 

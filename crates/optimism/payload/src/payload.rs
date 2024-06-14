@@ -179,7 +179,7 @@ pub struct OptimismBuiltPayload {
 
 impl OptimismBuiltPayload {
     /// Initializes the payload with the given initial block.
-    pub fn new(
+    pub const fn new(
         id: PayloadId,
         block: SealedBlock,
         fees: U256,

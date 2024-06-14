@@ -129,7 +129,7 @@ pub struct EngineStoreStream<S> {
 
 impl<S> EngineStoreStream<S> {
     /// Create new engine store stream wrapper.
-    pub fn new(stream: S, path: PathBuf) -> Self {
+    pub const fn new(stream: S, path: PathBuf) -> Self {
         Self { stream, store: EngineMessageStore::new(path) }
     }
 }

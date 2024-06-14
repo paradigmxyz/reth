@@ -32,7 +32,7 @@ pub struct EthBeaconConsensus {
 
 impl EthBeaconConsensus {
     /// Create a new instance of [`EthBeaconConsensus`]
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
