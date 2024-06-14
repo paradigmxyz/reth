@@ -12,8 +12,8 @@
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
-    validate_against_parent_timestamp, validate_block_pre_execution, validate_header_base_fee,
-    validate_header_extradata, validate_header_gas,
+    validate_against_parent_timestamp, validate_header_base_fee, validate_header_extradata,
+    validate_header_gas, validate_ommer_hash, validate_transaction_root,
 };
 use reth_primitives::{
     BlockWithSenders, ChainSpec, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
@@ -112,8 +112,16 @@ impl Consensus for OptimismBeaconConsensus {
         Ok(())
     }
 
+    /// Validate a block without regard for state:
+    ///
+    /// - Compares the ommer hash in the block header to the block body
+    /// - Compares the transactions root in the block header to the block body
     fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
-        validate_block_pre_execution(block, &self.chain_spec)
+        // Even though there's no ommers in optimism, `ommer_hash` is still used to calculate the
+        // header hash.
+        validate_ommer_hash(block)?;
+
+        validate_transaction_root(block)
     }
 
     fn validate_block_post_execution(

@@ -4,18 +4,20 @@ use crate::{
     args::{get_secret_key, NetworkArgs},
     commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
-    utils::{get_single_body, get_single_header},
+    utils::get_single_header,
 };
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_cli_runner::CliContext;
 use reth_config::Config;
+use reth_consensus::Consensus;
 use reth_db::DatabaseEnv;
 use reth_errors::BlockValidationError;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::BlockHashOrNumber;
+use reth_network_p2p::bodies::client::BodiesClient;
+use reth_primitives::{BlockHashOrNumber, ChainSpec, SealedBlock, SealedHeader};
 use reth_provider::{
     AccountExtReader, ChainSpecProvider, ExecutionOutcome, HashingWriter, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
@@ -229,4 +231,39 @@ impl Command {
 
         Ok(())
     }
+}
+
+/// Get a body from network based on header
+async fn get_single_body<Client>(
+    client: Client,
+    chain_spec: Arc<ChainSpec>,
+    header: SealedHeader,
+) -> eyre::Result<SealedBlock>
+where
+    Client: BodiesClient,
+{
+    let (peer_id, response) = client.get_block_body(header.hash()).await?.split();
+
+    if response.is_none() {
+        client.report_bad_message(peer_id);
+        eyre::bail!("Invalid number of bodies received. Expected: 1. Received: 0")
+    }
+
+    let block = response.unwrap();
+    let block = SealedBlock {
+        header,
+        body: block.transactions,
+        ommers: block.ommers,
+        withdrawals: block.withdrawals,
+        requests: block.requests,
+    };
+
+    #[cfg(feature = "optimism")]
+    reth_node_optimism::OptimismBeaconConsensus::new(chain_spec)
+        .validate_block_pre_execution(&block)?;
+    #[cfg(not(feature = "optimism"))]
+    reth_beacon_consensus::EthBeaconConsensus::new(chain_spec)
+        .validate_block_pre_execution(&block)?;
+
+    Ok(block)
 }

@@ -6575,11 +6575,8 @@ dependencies = [
 name = "reth-consensus-common"
 version = "1.0.0-rc.1"
 dependencies = [
- "mockall",
- "rand 0.8.5",
  "reth-consensus",
  "reth-primitives",
- "reth-storage-api",
 ]
 
 [[package]]
@@ -6943,9 +6940,12 @@ dependencies = [
 name = "reth-ethereum-consensus"
 version = "1.0.0-rc.1"
 dependencies = [
+ "mockall",
+ "rand 0.8.5",
  "reth-consensus",
  "reth-consensus-common",
  "reth-primitives",
+ "reth-storage-api",
  "tracing",
 ]
 
@@ -7458,7 +7458,6 @@ dependencies = [
  "rand 0.8.5",
  "reth-beacon-consensus",
  "reth-config",
- "reth-consensus-common",
  "reth-db",
  "reth-db-api",
  "reth-discv4",

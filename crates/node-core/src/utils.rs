@@ -2,21 +2,18 @@
 //! blocks from the network.
 
 use eyre::Result;
-use reth_consensus_common::validation::validate_block_pre_execution;
 use reth_fs_util as fs;
 use reth_network::NetworkManager;
 use reth_network_p2p::{
-    bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
-use reth_primitives::{BlockHashOrNumber, ChainSpec, HeadersDirection, SealedBlock, SealedHeader};
+use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedHeader};
 use reth_provider::BlockReader;
 use reth_rpc_types::engine::{JwtError, JwtSecret};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
-    sync::Arc,
 };
 use tracing::{debug, info, trace, warn};
 
@@ -95,34 +92,4 @@ where
     }
 
     Ok(header)
-}
-
-/// Get a body from network based on header
-pub async fn get_single_body<Client>(
-    client: Client,
-    chain_spec: Arc<ChainSpec>,
-    header: SealedHeader,
-) -> Result<SealedBlock>
-where
-    Client: BodiesClient,
-{
-    let (peer_id, response) = client.get_block_body(header.hash()).await?.split();
-
-    if response.is_none() {
-        client.report_bad_message(peer_id);
-        eyre::bail!("Invalid number of bodies received. Expected: 1. Received: 0")
-    }
-
-    let block = response.unwrap();
-    let block = SealedBlock {
-        header,
-        body: block.transactions,
-        ommers: block.ommers,
-        withdrawals: block.withdrawals,
-        requests: block.requests,
-    };
-
-    validate_block_pre_execution(&block, &chain_spec)?;
-
-    Ok(block)
 }
