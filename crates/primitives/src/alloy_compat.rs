@@ -5,7 +5,7 @@ use crate::{
     Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844,
     TxLegacy, TxType,
 };
-use alloy_primitives::{TxKind, U128};
+use alloy_primitives::TxKind;
 use alloy_rlp::Error as RlpError;
 
 impl TryFrom<alloy_rpc_types::Block> for Block {
@@ -229,19 +229,17 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             #[cfg(feature = "optimism")]
             Some(TxType::Deposit) => {
                 Ok(Self::Deposit(crate::transaction::TxDeposit {
-                    // TODO: Uses the wrong errors, need alloy ConversionError enum updated with new
-                    // errors for this. https://github.com/alloy-rs/alloy/pull/875/
                     source_hash: tx
                         .other
                         .get_deserialized::<String>("sourceHash")
-                        .ok_or(ConversionError::MissingBlobVersionedHashes)?
-                        .map_err(|_| ConversionError::MissingAccessList)?
+                        .ok_or(ConversionError::Custom(String::from("MissingSourceHash")))?
+                        .map_err(|_| ConversionError::Custom(String::from("MissingSourceHash")))?
                         .parse()
-                        .map_err(|_| ConversionError::MissingAccessList)?,
+                        .map_err(|_| ConversionError::Custom(String::from("InvalidSourceHash")))?,
                     from: tx.from,
                     to: TxKind::from(tx.to),
-                    mint: Option::transpose(tx.other.get_deserialized::<U128>("mint"))
-                        .map_err(|_| ConversionError::MissingMaxFeePerBlobGas)?
+                    mint: Option::transpose(tx.other.get_deserialized::<alloy_primitives::U128>("mint"))
+                        .map_err(|_| ConversionError::Custom(String::from("MissingMintValue")))?
                         .and_then(|num| {
                             if num.to::<u128>() == 0 {
                                 None
