@@ -6,7 +6,7 @@ use serde::{
     ser::SerializeSeq,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::fmt;
+use core::fmt;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;

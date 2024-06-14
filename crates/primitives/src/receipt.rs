@@ -10,7 +10,10 @@ use proptest::strategy::Strategy;
 #[cfg(feature = "zstd-codec")]
 use reth_codecs::CompactZstd;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
-use std::{cmp::Ordering, ops::Deref};
+use core::{cmp::Ordering, ops::Deref};
+
+#[cfg(not(feature = "std"))]
+use alloc::{vec,vec::Vec};
 
 /// Receipt containing result of transaction execution.
 #[cfg_attr(feature = "zstd-codec", main_codec(no_arbitrary, zstd))]

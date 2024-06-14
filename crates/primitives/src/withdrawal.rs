@@ -3,8 +3,9 @@
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{AsRef, Deref, DerefMut, From, IntoIterator};
 use reth_codecs::{main_codec, Compact};
+
 #[cfg(not(feature = "std"))]
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 
 use core::{
     mem,
