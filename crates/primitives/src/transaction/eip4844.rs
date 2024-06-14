@@ -4,15 +4,11 @@ use crate::{
     B256, U256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
+use core::mem;
 use reth_codecs::{main_codec, Compact, CompactPlaceholder};
-#[cfg(feature = "std")]
-use std::mem;
 
 #[cfg(feature = "c-kzg")]
 use crate::kzg::KzgSettings;
-
-#[cfg(not(feature = "std"))]
-use core::mem;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;

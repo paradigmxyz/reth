@@ -1,14 +1,10 @@
 use crate::revm_primitives::{Bytecode as RevmBytecode, Bytes};
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
+use core::ops::Deref;
 use reth_codecs::Compact;
 use revm_primitives::JumpTable;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "std")]
-use std::ops::Deref;
-
-#[cfg(not(feature = "std"))]
-use core::ops::Deref;
 
 pub use reth_primitives_traits::Account;
 

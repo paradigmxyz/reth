@@ -1,10 +1,3 @@
-#[cfg(feature = "std")]
-use std::{
-    fmt,
-    ops::{Deref, DerefMut},
-};
-
-#[cfg(not(feature = "std"))]
 use core::{
     fmt,
     ops::{Deref, DerefMut},

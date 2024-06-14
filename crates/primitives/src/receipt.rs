@@ -11,16 +11,11 @@ use reth_codecs::CompactZstd;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 
 #[cfg(feature = "std")]
-use std::{
-    cmp::Ordering,
-    ops::{Deref, DerefMut},
-    vec,
-};
+use std::vec;
 
 #[cfg(not(feature = "std"))]
 use alloc::{vec, vec::Vec};
 
-#[cfg(not(feature = "std"))]
 use core::{
     cmp::Ordering,
     ops::{Deref, DerefMut},

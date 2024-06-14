@@ -1,15 +1,11 @@
 use bytes::BufMut;
+use core::{fmt, ops::Deref};
 use roaring::RoaringTreemap;
 use serde::{
     de::{SeqAccess, Unexpected, Visitor},
     ser::SerializeSeq,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-#[cfg(feature = "std")]
-use std::{fmt, ops::Deref};
-
-#[cfg(not(feature = "std"))]
-use core::{fmt, ops::Deref};
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;

@@ -3,12 +3,11 @@ use crate::{
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
+use core::{mem, ops::Deref};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::{any, prop_compose};
 use reth_codecs::derive_arbitrary;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "std")]
-use std::{mem, ops::Deref};
 
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
@@ -16,9 +15,6 @@ pub use alloy_eips::eip1898::{
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
-
-#[cfg(not(feature = "std"))]
-use core::{mem, ops::Deref};
 
 // HACK(onbjerg): we need this to always set `requests` to `None` since we might otherwise generate
 // a block with `None` withdrawals and `Some` requests, in which case we end up trying to decode the

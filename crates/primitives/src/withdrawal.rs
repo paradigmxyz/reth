@@ -2,18 +2,12 @@
 
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs::{main_codec, Compact};
-
 #[cfg(feature = "std")]
-use std::{
-    mem,
-    ops::{Deref, DerefMut},
-    slice, vec,
-};
+use std::vec;
 
 #[cfg(not(feature = "std"))]
 use alloc::{vec, vec::Vec};
 
-#[cfg(not(feature = "std"))]
 use core::{
     mem,
     ops::{Deref, DerefMut},

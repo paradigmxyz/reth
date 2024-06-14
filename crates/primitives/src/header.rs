@@ -9,16 +9,11 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::BufMut;
+use core::{mem, ops::Deref};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, main_codec, Compact};
 use serde::{Deserialize, Serialize};
-
-#[cfg(feature = "std")]
-use std::{mem, ops::Deref};
-
-#[cfg(not(feature = "std"))]
-use core::{mem, ops::Deref};
 
 /// Errors that can occur during header sanity checks.
 #[derive(Debug, PartialEq, Eq)]

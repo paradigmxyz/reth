@@ -15,16 +15,10 @@ use reth_trie_common::root::state_root_ref_unhashed;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "std")]
-use std::{
-    collections::BTreeMap,
-    fmt,
-    fmt::{Display, Formatter},
-    sync::Arc,
-};
+use std::{collections::BTreeMap, sync::Arc};
 
 pub use alloy_eips::eip1559::BaseFeeParams;
 
-#[cfg(not(feature = "std"))]
 use core::{
     fmt,
     fmt::{Display, Formatter},

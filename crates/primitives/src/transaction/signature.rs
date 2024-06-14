@@ -2,13 +2,9 @@ use crate::{transaction::util::secp256k1, Address, B256, U256};
 use alloy_primitives::Bytes;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use bytes::Buf;
+use core::mem;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "std")]
-use std::mem;
-
-#[cfg(not(feature = "std"))]
-use core::mem;
 
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
 /// to EIP-2 should have an S value less than or equal to this.
