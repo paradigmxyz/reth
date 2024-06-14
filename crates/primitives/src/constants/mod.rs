@@ -10,6 +10,9 @@ pub use reth_primitives_traits::constants::*;
 #[cfg(feature = "optimism")]
 use crate::chain::BaseFeeParams;
 
+/// Gas units, for example [`GIGAGAS`](gas_units::GIGAGAS).
+pub mod gas_units;
+
 /// [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#parameters) constants.
 pub mod eip4844;
 
