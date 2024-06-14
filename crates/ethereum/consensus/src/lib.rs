@@ -620,7 +620,7 @@ mod tests {
     #[test]
     fn cancun_block_incorrect_blob_gas_used() {
         let consensus = EthBeaconConsensus::new(Arc::new(
-            ChainSpecBuilder::mainnet().shanghai_activated().build(),
+            ChainSpecBuilder::mainnet().cancun_activated().build(),
         ));
 
         // create a tx with 10 blobs
