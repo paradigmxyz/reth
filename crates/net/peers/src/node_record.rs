@@ -42,8 +42,10 @@ pub struct NodeRecord {
 }
 
 impl NodeRecord {
+    /// Derive the [`NodeRecord`] from the secret key and addr.
+    ///
+    /// Note: this will set both the TCP and UDP ports to the port of the addr.
     #[cfg(feature = "secp256k1")]
-    /// Derive the [`NodeRecord`] from the secret key and addr
     pub fn from_secret_key(addr: SocketAddr, sk: &secp256k1::SecretKey) -> Self {
         let pk = secp256k1::PublicKey::from_secret_key(secp256k1::SECP256K1, sk);
         let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
@@ -73,8 +75,19 @@ impl NodeRecord {
         self
     }
 
+    /// Sets the tcp port
+    pub const fn with_tcp_port(mut self, port: u16) -> Self {
+        self.tcp_port = port;
+        self
+    }
+
+    /// Sets the udp port
+    pub const fn with_udp_port(mut self, port: u16) -> Self {
+        self.udp_port = port;
+        self
+    }
+
     /// Creates a new record from a socket addr and peer id.
-    #[allow(dead_code)]
     pub const fn new(addr: SocketAddr, id: PeerId) -> Self {
         Self { address: addr.ip(), tcp_port: addr.port(), udp_port: addr.port(), id }
     }

@@ -197,7 +197,9 @@ where
         let incoming = ConnectionListener::bind(listener_addr).await.map_err(|err| {
             NetworkError::from_io_error(err, ServiceKind::Listener(listener_addr))
         })?;
-        let listener_address = Arc::new(Mutex::new(incoming.local_address()));
+
+        // retrieve the tcp address of the socket
+        let listener_addr = incoming.local_address();
 
         // resolve boot nodes
         let mut resolved_boot_nodes = vec![];
@@ -214,6 +216,7 @@ where
         });
 
         let discovery = Discovery::new(
+            listener_addr,
             discovery_v4_addr,
             secret_key,
             discovery_v4_config,
@@ -248,7 +251,7 @@ where
 
         let handle = NetworkHandle::new(
             Arc::clone(&num_active_peers),
-            listener_address,
+            Arc::new(Mutex::new(listener_addr)),
             to_manager_tx,
             secret_key,
             local_peer_id,
@@ -314,7 +317,7 @@ where
         NetworkBuilder { network: self, transactions: (), request_handler: () }
     }
 
-    /// Returns the [`SocketAddr`] that listens for incoming connections.
+    /// Returns the [`SocketAddr`] that listens for incoming tcp connections.
     pub const fn local_addr(&self) -> SocketAddr {
         self.swarm.listener().local_address()
     }
