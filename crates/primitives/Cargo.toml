@@ -121,7 +121,7 @@ alloy-compat = [
     "alloy-rpc-types",
 ]
 std = ["thiserror-no-std/std"]
-test-utils = ["dep:plain_hasher", "dep:hash-db""reth-primitives-traits/test-utils"]
+test-utils = ["reth-primitives-traits/test-utils"]
 
 [[bench]]
 name = "recover_ecdsa_crit"

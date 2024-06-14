@@ -12,17 +12,6 @@ use reth_codecs::CompactZstd;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 use std::{cmp::Ordering, ops::Deref};
 
-#[cfg(feature = "std")]
-use std::vec;
-
-#[cfg(not(feature = "std"))]
-use alloc::{vec, vec::Vec};
-
-use core::{
-    cmp::Ordering,
-    ops::{Deref, DerefMut},
-};
-
 /// Receipt containing result of transaction execution.
 #[cfg_attr(feature = "zstd-codec", main_codec(no_arbitrary, zstd))]
 #[cfg_attr(not(feature = "zstd-codec"), main_codec(no_arbitrary))]

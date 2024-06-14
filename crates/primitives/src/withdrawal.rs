@@ -3,15 +3,11 @@
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{AsRef, Deref, DerefMut, From, IntoIterator};
 use reth_codecs::{main_codec, Compact};
-#[cfg(feature = "std")]
-use std::vec;
-
 #[cfg(not(feature = "std"))]
 use alloc::{vec, vec::Vec};
 
 use core::{
     mem,
-    ops::{Deref, DerefMut},
     slice,
 };
 

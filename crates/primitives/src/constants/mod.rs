@@ -6,7 +6,6 @@ use crate::{
 };
 
 pub use reth_primitives_traits::constants::*;
-use core::time::Duration;
 
 #[cfg(feature = "optimism")]
 use crate::chain::BaseFeeParams;

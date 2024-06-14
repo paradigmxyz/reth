@@ -1,7 +1,6 @@
 use crate::revm_primitives::{Bytecode as RevmBytecode, Bytes};
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
-use core::ops::Deref;
 use derive_more::Deref;
 use reth_codecs::Compact;
 use revm_primitives::JumpTable;
