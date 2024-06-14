@@ -216,17 +216,17 @@ impl ExecutionOutcome {
         &self.receipts[index]
     }
 
-    /// Is bundle state empty of blocks.
+    /// Is execution outcome empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Number of blocks in bundle state.
+    /// Number of blocks in execution outcome.
     pub fn len(&self) -> usize {
         self.receipts.len()
     }
 
-    /// Return first block of the bundle
+    /// Return first block of the execution outcome
     pub const fn first_block(&self) -> BlockNumber {
         self.first_block
     }
