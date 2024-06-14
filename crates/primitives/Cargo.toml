@@ -117,8 +117,11 @@ optimism = [
     "reth-ethereum-forks/optimism",
     "revm/optimism",
 ]
-alloy-compat = ["alloy-rpc-types"]
-test-utils = []
+alloy-compat = [
+    "reth-primitives-traits/alloy-compat",
+    "alloy-rpc-types",
+]
+test-utils = ["reth-primitives-traits/test-utils"]
 
 [[bench]]
 name = "recover_ecdsa_crit"
