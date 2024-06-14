@@ -478,6 +478,18 @@ impl Transaction {
         }
     }
 
+    /// This sets the transaction's gas limit.
+    pub fn set_gas_limit(&mut self, gas_limit: u64) {
+        match self {
+            Self::Legacy(tx) => tx.gas_limit = gas_limit,
+            Self::Eip2930(tx) => tx.gas_limit = gas_limit,
+            Self::Eip1559(tx) => tx.gas_limit = gas_limit,
+            Self::Eip4844(tx) => tx.gas_limit = gas_limit,
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.gas_limit = gas_limit,
+        }
+    }
+
     /// This sets the transaction's nonce.
     pub fn set_nonce(&mut self, nonce: u64) {
         match self {
