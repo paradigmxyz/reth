@@ -39,7 +39,7 @@ metrics.workspace = true
 
 # misc
 aquamarine.workspace = true
-linked_hash_set = "0.1.4"
+linked_hash_set.workspace = true
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
