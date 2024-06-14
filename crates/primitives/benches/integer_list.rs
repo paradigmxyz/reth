@@ -89,19 +89,12 @@ criterion_main!(benches);
 /// adapted to work with `sucds = "0.8.1"`
 #[allow(unused, unreachable_pub)]
 mod elias_fano {
+    use derive_more::Deref;
     use std::{fmt, ops::Deref};
     use sucds::{mii_sequences::EliasFano, Serializable};
 
-    #[derive(Clone, PartialEq, Eq, Default)]
+    #[derive(Clone, PartialEq, Eq, Default, Deref)]
     pub struct IntegerList(pub EliasFano);
-
-    impl Deref for IntegerList {
-        type Target = EliasFano;
-
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
 
     impl fmt::Debug for IntegerList {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
