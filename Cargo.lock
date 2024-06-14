@@ -7951,9 +7951,9 @@ dependencies = [
  "reth-engine-primitives",
  "reth-network-peers",
  "reth-primitives",
+ "reth-rpc-eth-api",
  "reth-rpc-types",
  "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -8041,6 +8041,16 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "reth-rpc-eth-api"
+version = "1.0.0-rc.1"
+dependencies = [
+ "jsonrpsee",
+ "reth-primitives",
+ "reth-rpc-types",
+ "serde_json",
 ]
 
 [[package]]

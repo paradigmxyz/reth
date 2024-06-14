@@ -19,7 +19,6 @@ mod anvil;
 mod bundle;
 mod debug;
 mod engine;
-mod eth;
 mod eth_filter;
 mod eth_pubsub;
 mod ganache;
@@ -45,7 +44,6 @@ pub mod servers {
         bundle::{EthBundleApiServer, EthCallBundleApiServer},
         debug::DebugApiServer,
         engine::{EngineApiServer, EngineEthApiServer},
-        eth::EthApiServer,
         eth_filter::EthFilterApiServer,
         eth_pubsub::EthPubSubApiServer,
         mev::MevApiServer,
@@ -58,6 +56,7 @@ pub mod servers {
         validation::BlockSubmissionValidationApiServer,
         web3::Web3ApiServer,
     };
+    pub use reth_rpc_eth_api::EthApiServer;
 }
 
 /// re-export of all client traits
@@ -73,7 +72,6 @@ pub mod clients {
         bundle::{EthBundleApiClient, EthCallBundleApiClient},
         debug::DebugApiClient,
         engine::{EngineApiClient, EngineEthApiClient},
-        eth::EthApiClient,
         eth_filter::EthFilterApiClient,
         ganache::GanacheApiClient,
         hardhat::HardhatApiClient,
@@ -86,4 +84,5 @@ pub mod clients {
         validation::BlockSubmissionValidationApiClient,
         web3::Web3ApiClient,
     };
+    pub use reth_rpc_eth_api::EthApiClient;
 }

@@ -1,0 +1,24 @@
+[package]
+name = "reth-rpc-eth-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Reth RPC `eth_` API implementation"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-rpc-types.workspace = true
+reth-primitives.workspace = true
+
+# rpc
+jsonrpsee.workspace = true
+serde_json.workspace = true
+
+[features]
+client = ["jsonrpsee/client", "jsonrpsee/async-client"]
