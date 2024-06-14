@@ -1,24 +1,17 @@
 use bytes::BufMut;
+use derive_more::Deref;
 use roaring::RoaringTreemap;
 use serde::{
     de::{SeqAccess, Unexpected, Visitor},
     ser::SerializeSeq,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::{fmt, ops::Deref};
+use std::fmt;
 
 /// Uses Roaring Bitmaps to hold a list of integers. It provides really good compression with the
 /// capability to access its elements without decoding it.
-#[derive(Clone, PartialEq, Default)]
+#[derive(Clone, PartialEq, Default, Deref)]
 pub struct IntegerList(pub RoaringTreemap);
-
-impl Deref for IntegerList {
-    type Target = RoaringTreemap;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
 
 impl fmt::Debug for IntegerList {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

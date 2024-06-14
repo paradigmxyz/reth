@@ -5,20 +5,23 @@ use alloy_primitives::{keccak256, BlockHash};
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
+use derive_more::{AsRef, Deref};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
-use std::{mem, ops::Deref};
+use std::mem;
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
 #[main_codec(no_arbitrary)]
 #[add_arbitrary_tests(rlp, compact)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref)]
 pub struct SealedHeader {
     /// Locked Header hash.
     hash: BlockHash,
     /// Locked Header fields.
+    #[as_ref]
+    #[deref]
     header: Header,
 }
 
@@ -91,20 +94,6 @@ impl Decodable for SealedHeader {
         *buf = *b;
 
         Ok(Self { header, hash })
-    }
-}
-
-impl AsRef<Header> for SealedHeader {
-    fn as_ref(&self) -> &Header {
-        &self.header
-    }
-}
-
-impl Deref for SealedHeader {
-    type Target = Header;
-
-    fn deref(&self) -> &Self::Target {
-        &self.header
     }
 }
 

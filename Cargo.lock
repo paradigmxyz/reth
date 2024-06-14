@@ -7730,6 +7730,7 @@ dependencies = [
  "alloy-rpc-types-eth 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=00d81d7)",
  "arbitrary",
  "bytes",
+ "derive_more",
  "modular-bitfield",
  "proptest",
  "proptest-derive",

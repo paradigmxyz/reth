@@ -488,7 +488,7 @@ pub enum ChainSplit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::B256;
+    use reth_primitives::{Receipt, Receipts, TxType, B256};
     use revm::primitives::{AccountInfo, HashMap};
 
     #[test]
@@ -624,5 +624,85 @@ mod tests {
             chain.clone().split(ChainSplitTarget::Number(0)),
             ChainSplit::NoSplitPending(chain)
         );
+    }
+
+    #[test]
+    fn receipts_by_block_hash() {
+        // Create a default SealedBlockWithSenders object
+        let block: SealedBlockWithSenders = SealedBlockWithSenders::default();
+
+        // Define block hashes for block1 and block2
+        let block1_hash = B256::new([0x01; 32]);
+        let block2_hash = B256::new([0x02; 32]);
+
+        // Clone the default block into block1 and block2
+        let mut block1 = block.clone();
+        let mut block2 = block;
+
+        // Set the hashes of block1 and block2
+        block1.block.header.set_hash(block1_hash);
+        block2.block.header.set_hash(block2_hash);
+
+        // Create a random receipt object, receipt1
+        let receipt1 = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            success: true,
+            #[cfg(feature = "optimism")]
+            deposit_nonce: Some(18),
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: Some(34),
+        };
+
+        // Create another random receipt object, receipt2
+        let receipt2 = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 1325345,
+            logs: vec![],
+            success: true,
+            #[cfg(feature = "optimism")]
+            deposit_nonce: Some(18),
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: Some(34),
+        };
+
+        // Create a Receipts object with a vector of receipt vectors
+        let receipts =
+            Receipts { receipt_vec: vec![vec![Some(receipt1.clone())], vec![Some(receipt2)]] };
+
+        // Create an ExecutionOutcome object with the created bundle, receipts, an empty requests
+        // vector, and first_block set to 10
+        let execution_outcome = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts,
+            requests: vec![],
+            first_block: 10,
+        };
+
+        // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
+        // including block1_hash and block2_hash, and the execution_outcome
+        let chain = Chain {
+            blocks: BTreeMap::from([(10, block1), (11, block2)]),
+            execution_outcome: execution_outcome.clone(),
+            ..Default::default()
+        };
+
+        // Assert that the proper receipt vector is returned for block1_hash
+        assert_eq!(chain.receipts_by_block_hash(block1_hash), Some(vec![&receipt1]));
+
+        // Create an ExecutionOutcome object with a single receipt vector containing receipt1
+        let execution_outcome1 = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: Receipts { receipt_vec: vec![vec![Some(receipt1)]] },
+            requests: vec![],
+            first_block: 10,
+        };
+
+        // Assert that the execution outcome at the first block contains only the first receipt
+        assert_eq!(chain.execution_outcome_at_block(10), Some(execution_outcome1));
+
+        // Assert that the execution outcome at the tip block contains the whole execution outcome
+        assert_eq!(chain.execution_outcome_at_block(11), Some(execution_outcome));
     }
 }
