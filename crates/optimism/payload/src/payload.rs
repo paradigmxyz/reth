@@ -7,13 +7,12 @@ use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     revm::config::revm_spec_by_timestamp_after_merge,
-    revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
-    Address, BlobTransactionSidecar, ChainSpec, Header, SealedBlock, TransactionSigned,
-    Withdrawals, B256, U256,
+    revm_primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg},
+    Address, ChainSpec, Header, SealedBlock, TransactionSigned, Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, OptimismExecutionPayloadEnvelopeV3,
-    OptimismExecutionPayloadEnvelopeV4, PayloadId,
+    BlobsBundleV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadV1,
+    OptimismExecutionPayloadEnvelopeV3, OptimismExecutionPayloadEnvelopeV4, PayloadId,
 };
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, block_to_payload_v4,
@@ -114,20 +113,6 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
         // ensure we're not missing any timestamp based hardforks
         let spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
 
-        // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
-        // cancun now, we need to set the excess blob gas to the default value
-        let blob_excess_gas_and_price = parent
-            .next_block_excess_blob_gas()
-            .or_else(|| {
-                if spec_id.is_enabled_in(SpecId::CANCUN) {
-                    // default excess blob gas is zero
-                    Some(0)
-                } else {
-                    None
-                }
-            })
-            .map(BlobExcessGasAndPrice::new);
-
         let block_env = BlockEnv {
             number: U256::from(parent.number + 1),
             coinbase: self.suggested_fee_recipient(),
@@ -141,8 +126,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
                     .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp()))
                     .unwrap_or_default(),
             ),
-            // calculate excess gas based on parent block's blob gas usage
-            blob_excess_gas_and_price,
+            blob_excess_gas_and_price: None,
         };
 
         let cfg_with_handler_cfg;
@@ -166,9 +150,6 @@ pub struct OptimismBuiltPayload {
     pub(crate) block: SealedBlock,
     /// The fees of the block
     pub(crate) fees: U256,
-    /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
-    /// empty.
-    pub(crate) sidecars: Vec<BlobTransactionSidecar>,
     /// The rollup's chainspec.
     pub(crate) chain_spec: Arc<ChainSpec>,
     /// The payload attributes.
@@ -186,7 +167,7 @@ impl OptimismBuiltPayload {
         chain_spec: Arc<ChainSpec>,
         attributes: OptimismPayloadBuilderAttributes,
     ) -> Self {
-        Self { id, block, fees, sidecars: Vec::new(), chain_spec, attributes }
+        Self { id, block, fees, chain_spec, attributes }
     }
 
     /// Returns the identifier of the payload.
@@ -202,11 +183,6 @@ impl OptimismBuiltPayload {
     /// Fees of the block
     pub const fn fees(&self) -> U256 {
         self.fees
-    }
-
-    /// Adds sidecars to the payload.
-    pub fn extend_sidecars(&mut self, sidecars: Vec<BlobTransactionSidecar>) {
-        self.sidecars.extend(sidecars)
     }
 }
 
@@ -248,7 +224,7 @@ impl From<OptimismBuiltPayload> for ExecutionPayloadEnvelopeV2 {
 
 impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
     fn from(value: OptimismBuiltPayload) -> Self {
-        let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
+        let OptimismBuiltPayload { block, fees, chain_spec, attributes, .. } = value;
 
         let parent_beacon_block_root =
             if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp()) {
@@ -268,14 +244,14 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV3 {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
-            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            blobs_bundle: BlobsBundleV1::new([]),
             parent_beacon_block_root,
         }
     }
 }
 impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV4 {
     fn from(value: OptimismBuiltPayload) -> Self {
-        let OptimismBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
+        let OptimismBuiltPayload { block, fees, chain_spec, attributes, .. } = value;
 
         let parent_beacon_block_root =
             if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp()) {
@@ -295,7 +271,7 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV4 {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
-            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            blobs_bundle: BlobsBundleV1::new([]),
             parent_beacon_block_root,
         }
     }
