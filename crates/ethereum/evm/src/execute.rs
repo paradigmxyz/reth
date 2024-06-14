@@ -1,6 +1,6 @@
 //! Ethereum block executor.
 
-use crate::EthEvmConfig;
+use crate::{taiko::{check_anchor_tx, TaikoData}, EthEvmConfig};
 use reth_evm::{
     execute::{
         BatchBlockOutput, BatchExecutor, EthBlockExecutionInput, EthBlockOutput, Executor,
@@ -13,8 +13,7 @@ use reth_interfaces::{
     provider::ProviderError,
 };
 use reth_primitives::{
-    BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, PruneModes, Receipt, Receipts,
-    Withdrawals, U256,
+    BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, PruneModes, Receipt, Receipts, Withdrawals, U256
 };
 use reth_provider::BundleStateWithReceipts;
 use reth_revm::{
@@ -27,14 +26,14 @@ use reth_revm::{
     Evm, State,
 };
 use revm_primitives::{
-    db::{Database, DatabaseCommit}, Address, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, HashMap, ResultAndState
+    db::{Database, DatabaseCommit}, Address, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState
 };
 use std::sync::Arc;
 use tracing::debug;
-use revm_primitives::address;
 use revm_primitives::EVMError;
 use reth_revm::JournaledState;
 use revm_primitives::HashSet;
+use anyhow::Result;
 
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
@@ -144,6 +143,7 @@ where
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
         optimistic: bool,
+        taiko_data: Option<TaikoData>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
     where
         DB: Database<Error = ProviderError>,
@@ -162,9 +162,27 @@ where
         // execute transactions
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
-        let mut tx_number = 0;
-        for (sender, transaction) in block.transactions_with_sender() {
+        for (idx, (sender, transaction)) in block.transactions_with_sender().enumerate() {
             //println!("tx: {:?}", tx_number);
+
+            let is_anchor = is_taiko && idx == 0;
+
+            // verify the anchor tx
+            if is_anchor {
+                check_anchor_tx(transaction, sender, &block.block, taiko_data.clone().unwrap())
+                    .map_err(|e| BlockExecutionError::CanonicalRevert { inner: e.to_string() })?;
+            }
+
+            // if the signature was not valid, the sender address will have been set to zero
+            if *sender == Address::ZERO {
+                // Signature can be invalid if not taiko or not the anchor tx
+                if is_taiko && !is_anchor {
+                    // If the signature is not valid, skip the transaction
+                    continue;
+                }
+                // In all other cases, the tx needs to have a valid signature
+                return Err(BlockExecutionError::CanonicalRevert { inner: "invalid tx".to_string() });
+            }
 
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
@@ -182,14 +200,10 @@ where
 
             EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender, ());
 
-            let is_anchor = is_taiko && tx_number == 0;
-
+            // Set taiko specific data
             evm.tx_mut().taiko.is_anchor = is_anchor;
             // set the treasury address
-            //tx_env.taiko.treasury = chain_spec.l2_contract.unwrap_or_default();
-            evm.tx_mut().taiko.treasury = address!("1670090000000000000000000000000000010001");
-
-            tx_number += 1;
+            evm.tx_mut().taiko.treasury = taiko_data.clone().unwrap().l2_contract;
 
             // Execute transaction.
             let res = evm.transact().map_err(move |err| {
@@ -200,7 +214,6 @@ where
                 }
             });
             if res.is_err() {
-
                 // Clear the state for the next tx
                 evm.context.evm.journaled_state = JournaledState::new(evm.context.evm.journaled_state.spec, HashSet::new());
 
@@ -216,8 +229,7 @@ where
                 match res {
                     Err(BlockValidationError::EVM { hash, error }) => match *error {
                         EVMError::Transaction(invalid_transaction) => {
-                            //#[cfg(feature = "std")]
-                            println!("Invalid tx at {}: {:?}", tx_number, invalid_transaction);
+                            println!("Invalid tx at {}: {:?}", idx, invalid_transaction);
                             // skip the tx
                             continue;
                         },
@@ -286,17 +298,25 @@ pub struct EthBlockExecutor<EvmConfig, DB> {
     inspector: Option<InspectorStack>,
     /// Allows the execution to continue even when a tx is invalid
     optimistic: bool,
+    /// Taiko data
+    taiko_data: Option<TaikoData>,
 }
 
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
     /// Creates a new Ethereum block executor.
     pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
-        Self { executor: EthEvmExecutor { chain_spec, evm_config }, state, inspector: None, optimistic: false }
+        Self { executor: EthEvmExecutor { chain_spec, evm_config }, state, inspector: None, optimistic: false, taiko_data: None }
     }
 
     /// Sets the inspector stack for debugging.
     pub fn with_inspector(mut self, inspector: Option<InspectorStack>) -> Self {
         self.inspector = inspector;
+        self
+    }
+
+    /// Optimistic execution
+    pub fn taiko_data(mut self, taiko_data: TaikoData) -> Self {
+        self.taiko_data = Some(taiko_data);
         self
     }
 
@@ -367,11 +387,11 @@ where
                     env,
                     inspector,
                 );
-                self.executor.execute_pre_and_transactions(block, evm, self.optimistic)?
+                self.executor.execute_pre_and_transactions(block, evm, self.optimistic, self.taiko_data.clone())?
             } else {
                 let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
 
-                self.executor.execute_pre_and_transactions(block, evm, self.optimistic)?
+                self.executor.execute_pre_and_transactions(block, evm, self.optimistic, self.taiko_data.clone())?
             }
         };
 

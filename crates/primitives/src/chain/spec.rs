@@ -14,7 +14,6 @@ use std::{
     fmt::{Display, Formatter},
     sync::Arc,
 };
-use alloy_chains::ChainKind::Id;
 
 pub use alloy_eips::eip1559::BaseFeeParams;
 
@@ -85,26 +84,29 @@ pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: 167009.into(),
         genesis: serde_json::from_str(include_str!("../../res/genesis/mainnet.json"))
             .expect("Can't deserialize Mainnet genesis json"),
-        genesis_hash: Some(b256!(
-            "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
-        )),
-        // <https://etherscan.io/block/15537394>
-        paris_block_and_final_difficulty: Some((
-            15537394,
-            U256::from(58_750_003_716_598_352_816_469u128),
-        )),
+        genesis_hash: None,
+        paris_block_and_final_difficulty: None,
         fork_timestamps: ForkTimestamps::default().shanghai(0),
         hardforks: BTreeMap::from([
-            (Hardfork::Shanghai, ForkCondition::Block(0)),
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Dao, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(1561651)),
+            (Hardfork::Berlin, ForkCondition::Block(4460644)),
+            (Hardfork::London, ForkCondition::Block(5062605)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
         ]),
-        // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
-        deposit_contract: Some(DepositContract::new(
-            address!("00000000219ab540356cbb839cbe05303d7705fa"),
-            11052984,
-            b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
-        )),
-        base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        prune_delete_limit: 3500,
+        deposit_contract: None,
+        ..Default::default()
     }
     .into()
 });
@@ -115,26 +117,29 @@ pub static TAIKO_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: 167000.into(),
         genesis: serde_json::from_str(include_str!("../../res/genesis/mainnet.json"))
             .expect("Can't deserialize Mainnet genesis json"),
-        genesis_hash: Some(b256!(
-            "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
-        )),
-        // <https://etherscan.io/block/15537394>
-        paris_block_and_final_difficulty: Some((
-            15537394,
-            U256::from(58_750_003_716_598_352_816_469u128),
-        )),
-        fork_timestamps: ForkTimestamps::default().shanghai(1681338455).cancun(1710338135),
+        genesis_hash: None,
+        paris_block_and_final_difficulty: None,
+        fork_timestamps: ForkTimestamps::default().shanghai(0),
         hardforks: BTreeMap::from([
-            (Hardfork::Shanghai, ForkCondition::Block(0)),
+            (Hardfork::Frontier, ForkCondition::Block(0)),
+            (Hardfork::Homestead, ForkCondition::Block(0)),
+            (Hardfork::Dao, ForkCondition::Block(0)),
+            (Hardfork::Tangerine, ForkCondition::Block(0)),
+            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+            (Hardfork::Byzantium, ForkCondition::Block(0)),
+            (Hardfork::Constantinople, ForkCondition::Block(0)),
+            (Hardfork::Petersburg, ForkCondition::Block(0)),
+            (Hardfork::Istanbul, ForkCondition::Block(1561651)),
+            (Hardfork::Berlin, ForkCondition::Block(4460644)),
+            (Hardfork::London, ForkCondition::Block(5062605)),
+            (
+                Hardfork::Paris,
+                ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(0) },
+            ),
+            (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
         ]),
-        // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
-        deposit_contract: Some(DepositContract::new(
-            address!("00000000219ab540356cbb839cbe05303d7705fa"),
-            11052984,
-            b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
-        )),
-        base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        prune_delete_limit: 3500,
+        deposit_contract: None,
+        ..Default::default()
     }
     .into()
 });

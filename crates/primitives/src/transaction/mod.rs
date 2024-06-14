@@ -1145,11 +1145,12 @@ impl TransactionSigned {
     where
         T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
     {
-        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
-            txes.into_iter().map(|tx| tx.recover_signer()).collect()
+        let signers = if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
+            txes.into_iter().map(|tx| tx.recover_signer().unwrap_or_default()).collect()
         } else {
-            txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
-        }
+            txes.into_par_iter().map(|tx| tx.recover_signer().unwrap_or_default()).collect()
+        };
+        Some(signers)
     }
 
     /// Recovers a list of signers from a transaction list iterator _without ensuring that the
@@ -1161,11 +1162,12 @@ impl TransactionSigned {
     where
         T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self>,
     {
-        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
-            txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
+        let signers = if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
+            txes.into_iter().map(|tx| tx.recover_signer_unchecked().unwrap_or_default()).collect()
         } else {
-            txes.into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
-        }
+            txes.into_par_iter().map(|tx| tx.recover_signer_unchecked().unwrap_or_default()).collect()
+        };
+        Some(signers)
     }
 
     /// Returns the [TransactionSignedEcRecovered] transaction with the given sender.

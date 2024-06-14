@@ -57,7 +57,7 @@ pub use block::{
 pub use chain::{
     AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, Chain, ChainInfo, ChainSpec,
     ChainSpecBuilder, DisplayHardforks, ForkBaseFeeParams, ForkCondition, ForkTimestamps,
-    NamedChain, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA, TAIKO_A7,
+    NamedChain, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA, TAIKO_A7, TAIKO_MAINNET,
 };
 #[cfg(feature = "zstd-codec")]
 pub use compression::*;

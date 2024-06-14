@@ -15,6 +15,7 @@ use reth_primitives::{
     Address, ChainSpec, Head, Header, Transaction, U256,
 };
 pub mod execute;
+pub mod taiko;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone, Copy, Default)]

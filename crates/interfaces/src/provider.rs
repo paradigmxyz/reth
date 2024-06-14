@@ -128,6 +128,9 @@ pub enum ProviderError {
     /// Consistent view error.
     #[error("failed to initialize consistent view: {0}")]
     ConsistentView(Box<ConsistentViewError>),
+    /// RPC error.
+    #[error("failed to fetch data from RPC: {0}")]
+    RPC(String),
 }
 
 impl From<reth_primitives::fs::FsPathError> for ProviderError {
