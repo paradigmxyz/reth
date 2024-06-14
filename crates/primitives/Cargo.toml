@@ -111,15 +111,17 @@ c-kzg = [
     "alloy-eips/kzg",
 ]
 zstd-codec = ["dep:zstd"]
-clap = ["reth-static-file-types/clap"]
 optimism = [
     "reth-codecs/optimism",
     "reth-ethereum-forks/optimism",
     "revm/optimism",
 ]
-alloy-compat = ["alloy-rpc-types"]
+alloy-compat = [
+    "reth-primitives-traits/alloy-compat",
+    "alloy-rpc-types",
+]
 std = ["thiserror-no-std/std"]
-test-utils = ["dep:plain_hasher", "dep:hash-db"]
+test-utils = ["dep:plain_hasher", "dep:hash-db""reth-primitives-traits/test-utils"]
 
 [[bench]]
 name = "recover_ecdsa_crit"

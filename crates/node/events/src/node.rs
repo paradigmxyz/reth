@@ -1,6 +1,7 @@
 //! Support for handling events emitted by node components.
 
 use crate::cl::ConsensusLayerHealthEvent;
+use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
@@ -10,7 +11,6 @@ use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::{constants, BlockNumber, B256};
 use reth_prune::PrunerEvent;
-use reth_rpc_types::engine::ForkchoiceState;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
 use reth_static_file::StaticFileProducerEvent;
 use std::{

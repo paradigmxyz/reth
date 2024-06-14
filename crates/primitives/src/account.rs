@@ -2,6 +2,7 @@ use crate::revm_primitives::{Bytecode as RevmBytecode, Bytes};
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use core::ops::Deref;
+use derive_more::Deref;
 use reth_codecs::Compact;
 use revm_primitives::JumpTable;
 use serde::{Deserialize, Serialize};
@@ -11,7 +12,7 @@ pub use reth_primitives_traits::Account;
 /// Bytecode for an account.
 ///
 /// A wrapper around [`revm::primitives::Bytecode`][RevmBytecode] with encoding/decoding support.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Deref)]
 pub struct Bytecode(pub RevmBytecode);
 
 impl Bytecode {
@@ -20,14 +21,6 @@ impl Bytecode {
     /// No analysis will be performed.
     pub fn new_raw(bytes: Bytes) -> Self {
         Self(RevmBytecode::new_raw(bytes))
-    }
-}
-
-impl Deref for Bytecode {
-    type Target = RevmBytecode;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 

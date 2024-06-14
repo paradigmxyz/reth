@@ -4,11 +4,13 @@ use crate::{logs_bloom, Bloom, Bytes, TxType, B256};
 use alloy_primitives::Log;
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
+use derive_more::{Deref, DerefMut, From, IntoIterator};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::strategy::Strategy;
 #[cfg(feature = "zstd-codec")]
 use reth_codecs::CompactZstd;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
+use std::{cmp::Ordering, ops::Deref};
 
 #[cfg(feature = "std")]
 use std::vec;
@@ -72,7 +74,7 @@ impl Receipt {
 }
 
 /// A collection of receipts organized as a two-dimensional vector.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, From, Deref, DerefMut, IntoIterator)]
 pub struct Receipts {
     /// A two-dimensional vector of optional `Receipt` instances.
     pub receipt_vec: Vec<Vec<Option<Receipt>>>,
@@ -117,38 +119,9 @@ impl Receipts {
     }
 }
 
-impl From<Vec<Vec<Option<Receipt>>>> for Receipts {
-    fn from(receipt_vec: Vec<Vec<Option<Receipt>>>) -> Self {
-        Self { receipt_vec }
-    }
-}
-
 impl From<Vec<Receipt>> for Receipts {
     fn from(block_receipts: Vec<Receipt>) -> Self {
         Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
-    }
-}
-
-impl Deref for Receipts {
-    type Target = Vec<Vec<Option<Receipt>>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.receipt_vec
-    }
-}
-
-impl DerefMut for Receipts {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.receipt_vec
-    }
-}
-
-impl IntoIterator for Receipts {
-    type Item = Vec<Option<Receipt>>;
-    type IntoIter = vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.receipt_vec.into_iter()
     }
 }
 

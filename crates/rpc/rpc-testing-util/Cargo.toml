@@ -24,10 +24,8 @@ futures.workspace = true
 jsonrpsee = { workspace = true, features = ["client", "async-client"] }
 serde_json.workspace = true
 
-
 # assertions
 similar-asserts.workspace = true
-
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "rt"] }

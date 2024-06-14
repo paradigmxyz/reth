@@ -51,9 +51,31 @@ impl EvmOverrides {
         Self { state, block: None }
     }
 
+    /// Creates a new instance with the given block overrides.
+    pub const fn block(block: Option<Box<BlockOverrides>>) -> Self {
+        Self { state: None, block }
+    }
+
     /// Returns `true` if the overrides contain state overrides.
     pub const fn has_state(&self) -> bool {
         self.state.is_some()
+    }
+
+    /// Returns `true` if the overrides contain block overrides.
+    pub const fn has_block(&self) -> bool {
+        self.block.is_some()
+    }
+
+    /// Adds state overrides to an existing instance.
+    pub fn with_state(mut self, state: StateOverride) -> Self {
+        self.state = Some(state);
+        self
+    }
+
+    /// Adds block overrides to an existing instance.
+    pub fn with_block(mut self, block: Box<BlockOverrides>) -> Self {
+        self.block = Some(block);
+        self
     }
 }
 

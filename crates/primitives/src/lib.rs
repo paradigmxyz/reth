@@ -34,7 +34,7 @@ pub mod constants;
 pub mod eip4844;
 mod error;
 pub mod genesis;
-mod header;
+pub mod header;
 mod integer_list;
 mod log;
 mod net;
