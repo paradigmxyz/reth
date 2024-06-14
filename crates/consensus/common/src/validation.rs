@@ -10,6 +10,7 @@ use reth_primitives::{
 };
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
+#[inline]
 pub fn validate_header_gas(header: &SealedHeader) -> Result<(), ConsensusError> {
     if header.gas_used > header.gas_limit {
         return Err(ConsensusError::HeaderGasUsedExceedsGasLimit {
@@ -20,7 +21,8 @@ pub fn validate_header_gas(header: &SealedHeader) -> Result<(), ConsensusError> 
     Ok(())
 }
 
-/// Check if base fee is set.
+/// Ensure the EIP-1559 base fee is set if the London hardfork is active.
+#[inline]
 pub fn validate_header_base_fee(
     header: &SealedHeader,
     chain_spec: &ChainSpec,
@@ -146,6 +148,7 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
 ///
 /// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
 /// This must be 32 bytes or fewer; formally Hx.
+#[inline]
 pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> {
     if header.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
         Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
@@ -158,6 +161,7 @@ pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> 
 ///
 /// This function ensures that the header block number is sequential and that the hash of the parent
 /// header matches the parent hash in the header.
+#[inline]
 pub fn validate_against_parent_hash_number(
     header: &SealedHeader,
     parent: &SealedHeader,
@@ -180,6 +184,7 @@ pub fn validate_against_parent_hash_number(
 }
 
 /// Validates the base fee against the parent and EIP-1559 rules.
+#[inline]
 pub fn validate_against_parent_eip1559_base_fee(
     header: &SealedHeader,
     parent: &SealedHeader,
@@ -210,6 +215,7 @@ pub fn validate_against_parent_eip1559_base_fee(
 }
 
 /// Validates the timestamp against the parent to make sure it is in the past.
+#[inline]
 pub fn validate_against_parent_timestamp(
     header: &SealedHeader,
     parent: &SealedHeader,
