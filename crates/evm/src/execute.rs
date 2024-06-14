@@ -14,11 +14,11 @@ pub use reth_storage_errors::provider::ProviderError;
 ///
 /// The trait cannot commit the state changes to the database directly, see [`EvmCommitter`].
 pub trait EvmTransact {
-    /// The environment for the executor.
+    /// The environment for the evm.
     type Env;
-    /// The output produced by the executor.
+    /// The output produced by the evm.
     type Output;
-    /// The error produced by the executor.
+    /// The error produced by the evm.
     type Error;
 
     /// Transacts with the current env to produce an output without
@@ -42,6 +42,7 @@ pub trait EvmCommit: EvmTransact {
     /// return them.
     fn transact_and_commit(&mut self) -> Result<Self::Output, Self::Error>;
 }
+
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
 ///
