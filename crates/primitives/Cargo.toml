@@ -24,7 +24,7 @@ revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
 alloy-chains = { workspace = true, features = ["serde", "rlp"] }
-alloy-consensus = { workspace = true, features = ["arbitrary", "serde"] }
+alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-rpc-types = { workspace = true, optional = true }
@@ -96,6 +96,7 @@ arbitrary = [
     "nybbles/arbitrary",
     "alloy-trie/arbitrary",
     "alloy-chains/arbitrary",
+    "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
