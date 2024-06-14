@@ -1,0 +1,43 @@
+[package]
+name = "reth-primitives-traits"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Common types in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-codecs.workspace = true
+
+alloy-genesis.workspace = true
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+
+# required by reth-codecs
+modular-bitfield.workspace = true
+bytes.workspace = true
+serde.workspace = true
+
+# arbitrary utils
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
+
+[dev-dependencies]
+arbitrary = { workspace = true, features = ["derive"] }
+proptest.workspace = true
+proptest-derive.workspace = true
+test-fuzz.workspace = true
+
+[features]
+arbitrary = [
+    "dep:arbitrary",
+    "dep:proptest",
+    "dep:proptest-derive"
+]
+

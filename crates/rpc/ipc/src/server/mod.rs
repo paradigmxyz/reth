@@ -48,8 +48,8 @@ mod ipc;
 mod rpc_service;
 
 /// Ipc Server implementation
-
-// This is an adapted `jsonrpsee` Server, but for `Ipc` connections.
+///
+/// This is an adapted `jsonrpsee` Server, but for `Ipc` connections.
 pub struct IpcServer<HttpMiddleware = Identity, RpcMiddleware = Identity> {
     /// The endpoint we listen for incoming transactions
     endpoint: String,
@@ -82,7 +82,7 @@ where
 {
     /// Start responding to connections requests.
     ///
-    /// This will run on the tokio runtime until the server is stopped or the ServerHandle is
+    /// This will run on the tokio runtime until the server is stopped or the `ServerHandle` is
     /// dropped.
     ///
     /// ```
@@ -91,7 +91,7 @@ where
     /// async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     ///     let server = Builder::default().build("/tmp/my-uds");
     ///     let mut module = RpcModule::new(());
-    ///     module.register_method("say_hello", |_, _| "lo")?;
+    ///     module.register_method("say_hello", |_, _, _| "lo")?;
     ///     let handle = server.start(module).await?;
     ///
     ///     // In this example we don't care about doing shutdown so let's it run forever.
@@ -273,7 +273,7 @@ pub(crate) struct ServiceData {
     ///
     /// This is used for subscriptions.
     pub(crate) method_sink: MethodSink,
-    /// ServerConfig
+    /// `ServerConfig`
     pub(crate) server_cfg: Settings,
 }
 
@@ -284,7 +284,7 @@ pub struct RpcServiceBuilder<L>(tower::ServiceBuilder<L>);
 
 impl Default for RpcServiceBuilder<Identity> {
     fn default() -> Self {
-        RpcServiceBuilder(tower::ServiceBuilder::new())
+        Self(tower::ServiceBuilder::new())
     }
 }
 
@@ -342,7 +342,7 @@ impl<L> RpcServiceBuilder<L> {
     }
 }
 
-/// JsonRPSee service compatible with `tower`.
+/// `JsonRPSee` service compatible with `tower`.
 ///
 /// # Note
 /// This is similar to [`hyper::service::service_fn`](https://docs.rs/hyper/latest/hyper/service/fn.service_fn.html).
@@ -355,8 +355,7 @@ pub struct TowerServiceNoHttp<L> {
 impl<RpcMiddleware> Service<String> for TowerServiceNoHttp<RpcMiddleware>
 where
     RpcMiddleware: for<'a> Layer<RpcService>,
-    <RpcMiddleware as Layer<RpcService>>::Service: Send + Sync + 'static,
-    for<'a> <RpcMiddleware as Layer<RpcService>>::Service: RpcServiceT<'a>,
+    for<'a> <RpcMiddleware as Layer<RpcService>>::Service: Send + Sync + 'static + RpcServiceT<'a>,
 {
     /// The response of a handled RPC call
     ///
@@ -391,7 +390,7 @@ where
         let rpc_service = self.rpc_middleware.service(RpcService::new(
             self.inner.methods.clone(),
             max_response_body_size,
-            self.inner.conn_id as usize,
+            self.inner.conn_id.into(),
             cfg,
         ));
         // an ipc connection needs to handle read+write concurrently
@@ -577,7 +576,7 @@ pub struct Builder<HttpMiddleware, RpcMiddleware> {
 
 impl Default for Builder<Identity, Identity> {
     fn default() -> Self {
-        Builder {
+        Self {
             settings: Settings::default(),
             id_provider: Arc::new(RandomIntegerIdProvider),
             rpc_middleware: RpcServiceBuilder::new(),
@@ -588,31 +587,31 @@ impl Default for Builder<Identity, Identity> {
 
 impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     /// Set the maximum size of a request body in bytes. Default is 10 MiB.
-    pub fn max_request_body_size(mut self, size: u32) -> Self {
+    pub const fn max_request_body_size(mut self, size: u32) -> Self {
         self.settings.max_request_body_size = size;
         self
     }
 
     /// Set the maximum size of a response body in bytes. Default is 10 MiB.
-    pub fn max_response_body_size(mut self, size: u32) -> Self {
+    pub const fn max_response_body_size(mut self, size: u32) -> Self {
         self.settings.max_response_body_size = size;
         self
     }
 
     /// Set the maximum size of a log
-    pub fn max_log_length(mut self, size: u32) -> Self {
+    pub const fn max_log_length(mut self, size: u32) -> Self {
         self.settings.max_log_length = size;
         self
     }
 
     /// Set the maximum number of connections allowed. Default is 100.
-    pub fn max_connections(mut self, max: u32) -> Self {
+    pub const fn max_connections(mut self, max: u32) -> Self {
         self.settings.max_connections = max;
         self
     }
 
     /// Set the maximum number of connections allowed. Default is 1024.
-    pub fn max_subscriptions_per_connection(mut self, max: u32) -> Self {
+    pub const fn max_subscriptions_per_connection(mut self, max: u32) -> Self {
         self.settings.max_subscriptions_per_connection = max;
         self
     }
@@ -634,7 +633,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     /// # Panics
     ///
     /// Panics if the buffer capacity is 0.
-    pub fn set_message_buffer_capacity(mut self, c: u32) -> Self {
+    pub const fn set_message_buffer_capacity(mut self, c: u32) -> Self {
         self.settings.message_buffer_capacity = c;
         self
     }
@@ -860,8 +859,8 @@ mod tests {
 
         loop {
             match select(closed, stream.next()).await {
-                // subscription closed.
-                Either::Left((_, _)) => break Ok(()),
+                // subscription closed or stream is closed.
+                Either::Left((_, _)) | Either::Right((None, _)) => break Ok(()),
 
                 // received new item from the stream.
                 Either::Right((Some(Ok(item)), c)) => {
@@ -871,7 +870,7 @@ mod tests {
                     // and you might want to do something smarter if it's
                     // critical that "the most recent item" must be sent when it is produced.
                     if sink.send(notif).await.is_err() {
-                        break Ok(());
+                        break Ok(())
                     }
 
                     closed = c;
@@ -879,9 +878,6 @@ mod tests {
 
                 // Send back back the error.
                 Either::Right((Some(Err(e)), _)) => break Err(e.into()),
-
-                // Stream is closed.
-                Either::Right((None, _)) => break Ok(()),
             }
         }
     }
@@ -900,7 +896,7 @@ mod tests {
         let endpoint = dummy_endpoint();
         let server = Builder::default().max_response_body_size(100).build(&endpoint);
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _| "a".repeat(101)).unwrap();
+        module.register_method("anything", |_, _, _| "a".repeat(101)).unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -915,7 +911,7 @@ mod tests {
         let endpoint = dummy_endpoint();
         let server = Builder::default().max_request_body_size(100).build(&endpoint);
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _| "succeed").unwrap();
+        module.register_method("anything", |_, _, _| "succeed").unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -943,7 +939,7 @@ mod tests {
         let endpoint = dummy_endpoint();
         let server = Builder::default().max_connections(2).build(&endpoint);
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _| "succeed").unwrap();
+        module.register_method("anything", |_, _, _| "succeed").unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -977,7 +973,7 @@ mod tests {
         let server = Builder::default().build(&endpoint);
         let mut module = RpcModule::new(());
         let msg = r#"{"jsonrpc":"2.0","id":83,"result":"0x7a69"}"#;
-        module.register_method("eth_chainId", move |_, _| msg).unwrap();
+        module.register_method("eth_chainId", move |_, _, _| msg).unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -991,7 +987,7 @@ mod tests {
         let endpoint = dummy_endpoint();
         let server = Builder::default().build(&endpoint);
         let mut module = RpcModule::new(());
-        module.register_method("anything", |_, _| "ok").unwrap();
+        module.register_method("anything", |_, _, _| "ok").unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -1017,7 +1013,7 @@ mod tests {
         let server = Builder::default().build(&endpoint);
         let mut module = RpcModule::new(());
         let msg = r#"{"admin":"1.0","debug":"1.0","engine":"1.0","eth":"1.0","ethash":"1.0","miner":"1.0","net":"1.0","rpc":"1.0","txpool":"1.0","web3":"1.0"}"#;
-        module.register_method("rpc_modules", move |_, _| msg).unwrap();
+        module.register_method("rpc_modules", move |_, _, _| msg).unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 
@@ -1040,7 +1036,7 @@ mod tests {
                 "subscribe_hello",
                 "s_hello",
                 "unsubscribe_hello",
-                |_, pending, tx| async move {
+                |_, pending, tx, _| async move {
                     let rx = tx.subscribe();
                     let stream = BroadcastStream::new(rx);
                     pipe_from_stream_with_bounded_buffer(pending, stream).await?;
@@ -1092,8 +1088,8 @@ mod tests {
         let mut module = RpcModule::new(());
         let goodbye_msg = r#"{"jsonrpc":"2.0","id":1,"result":"goodbye"}"#;
         let hello_msg = r#"{"jsonrpc":"2.0","id":2,"result":"hello"}"#;
-        module.register_method("say_hello", move |_, _| hello_msg).unwrap();
-        module.register_method("say_goodbye", move |_, _| goodbye_msg).unwrap();
+        module.register_method("say_hello", move |_, _, _| hello_msg).unwrap();
+        module.register_method("say_goodbye", move |_, _, _| goodbye_msg).unwrap();
         let handle = server.start(module).await.unwrap();
         tokio::spawn(handle.stopped());
 

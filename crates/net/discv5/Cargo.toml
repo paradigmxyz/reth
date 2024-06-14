@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-metrics.workspace = true
-reth-network-types.workspace = true
+reth-network-peers = { workspace = true, features = ["secp256k1"] }
 
 # ethereum
 alloy-rlp.workspace = true

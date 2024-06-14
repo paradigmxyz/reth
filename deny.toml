@@ -38,6 +38,7 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "0BSD",
     "ISC",
     "Unicode-DFS-2016",
     "Unlicense",
@@ -88,9 +89,9 @@ unknown-registry = "warn"
 # in the allow list is encountered
 unknown-git = "deny"
 allow-git = [
-    # TODO: remove, see ./Cargo.toml
+    # TODO: Please avoid adding new entries to this list.
     "https://github.com/alloy-rs/alloy",
     "https://github.com/foundry-rs/block-explorers",
-    "https://github.com/paradigmxyz/evm-inspectors",
-    "https://github.com/sigp/discv5",
+    "https://github.com/bluealloy/revm",
+    "https://github.com/paradigmxyz/revm-inspectors",
 ]

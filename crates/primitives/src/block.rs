@@ -1,5 +1,5 @@
 use crate::{
-    Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
+    Address, Bytes, GotExpected, Header, Requests, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
 use alloy_rlp::{RlpDecodable, RlpEncodable};
@@ -12,6 +12,16 @@ use std::ops::Deref;
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
+
+// HACK(onbjerg): we need this to always set `requests` to `None` since we might otherwise generate
+// a block with `None` withdrawals and `Some` requests, in which case we end up trying to decode the
+// requests as withdrawals
+#[cfg(any(feature = "arbitrary", test))]
+prop_compose! {
+    pub fn empty_requests_strategy()(_ in 0..1) -> Option<Requests> {
+        None
+    }
+}
 
 /// Ethereum full block.
 ///
@@ -45,6 +55,9 @@ pub struct Block {
         proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
     )]
     pub withdrawals: Option<Withdrawals>,
+    /// Block requests.
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
+    pub requests: Option<Requests>,
 }
 
 impl Block {
@@ -55,6 +68,7 @@ impl Block {
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,
+            requests: self.requests,
         }
     }
 
@@ -67,10 +81,11 @@ impl Block {
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,
+            requests: self.requests,
         }
     }
 
-    /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
+    /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
     pub fn senders(&self) -> Option<Vec<Address>> {
         TransactionSigned::recover_signers(&self.body, self.body.len())
     }
@@ -92,7 +107,7 @@ impl Block {
     ///
     /// If the number of senders does not match the number of transactions in the block, this falls
     /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
-    /// See also [TransactionSigned::recover_signer_unchecked]
+    /// See also [`TransactionSigned::recover_signer_unchecked`]
     ///
     /// Returns an error if a signature is invalid.
     #[track_caller]
@@ -129,6 +144,32 @@ impl Block {
         self.body.iter().any(|tx| tx.is_eip4844())
     }
 
+    /// Returns an iterator over all blob transactions of the block
+    #[inline]
+    pub fn blob_transactions_iter(&self) -> impl Iterator<Item = &TransactionSigned> + '_ {
+        self.body.iter().filter(|tx| tx.is_eip4844())
+    }
+
+    /// Returns only the blob transactions, if any, from the block body.
+    #[inline]
+    pub fn blob_transactions(&self) -> Vec<&TransactionSigned> {
+        self.blob_transactions_iter().collect()
+    }
+
+    /// Returns an iterator over all blob versioned hashes from the block body.
+    #[inline]
+    pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
+        self.blob_transactions_iter()
+            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
+            .flatten()
+    }
+
+    /// Returns all blob versioned hashes from the block body.
+    #[inline]
+    pub fn blob_versioned_hashes(&self) -> Vec<&B256> {
+        self.blob_versioned_hashes_iter().collect()
+    }
+
     /// Calculates a heuristic for the in-memory size of the [Block].
     #[inline]
     pub fn size(&self) -> usize {
@@ -144,51 +185,6 @@ impl Deref for Block {
     type Target = Header;
     fn deref(&self) -> &Self::Target {
         &self.header
-    }
-}
-
-#[cfg(feature = "alloy-compat")]
-impl TryFrom<alloy_rpc_types::Block> for Block {
-    type Error = alloy_rpc_types::ConversionError;
-
-    fn try_from(block: alloy_rpc_types::Block) -> Result<Self, Self::Error> {
-        use alloy_rpc_types::ConversionError;
-
-        let body = {
-            let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
-                .transactions
-            {
-                alloy_rpc_types::BlockTransactions::Full(transactions) => transactions
-                    .into_iter()
-                    .map(|tx| {
-                        let signature = tx.signature.ok_or(ConversionError::MissingSignature)?;
-                        Ok(TransactionSigned::from_transaction_and_signature(
-                            tx.try_into()?,
-                            crate::Signature {
-                                r: signature.r,
-                                s: signature.s,
-                                odd_y_parity: signature
-                                    .y_parity
-                                    .unwrap_or(alloy_rpc_types::Parity(false))
-                                    .0,
-                            },
-                        ))
-                    })
-                    .collect(),
-                alloy_rpc_types::BlockTransactions::Hashes(_) |
-                alloy_rpc_types::BlockTransactions::Uncle => {
-                    return Err(ConversionError::MissingFullTransactions)
-                }
-            };
-            transactions?
-        };
-
-        Ok(Self {
-            header: block.header.try_into()?,
-            body,
-            ommers: Default::default(),
-            withdrawals: block.withdrawals.map(Into::into),
-        })
     }
 }
 
@@ -302,14 +298,17 @@ pub struct SealedBlock {
         proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
     )]
     pub withdrawals: Option<Withdrawals>,
+    /// Block requests.
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
+    pub requests: Option<Requests>,
 }
 
 impl SealedBlock {
     /// Create a new sealed block instance using the sealed header and block body.
     #[inline]
     pub fn new(header: SealedHeader, body: BlockBody) -> Self {
-        let BlockBody { transactions, ommers, withdrawals } = body;
-        Self { header, body: transactions, ommers, withdrawals }
+        let BlockBody { transactions, ommers, withdrawals, requests } = body;
+        Self { header, body: transactions, ommers, withdrawals, requests }
     }
 
     /// Header hash.
@@ -324,7 +323,7 @@ impl SealedBlock {
         (self.header, self.body, self.ommers)
     }
 
-    /// Splits the [BlockBody] and [SealedHeader] into separate components
+    /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
     #[inline]
     pub fn split_header_body(self) -> (SealedHeader, BlockBody) {
         (
@@ -333,6 +332,7 @@ impl SealedBlock {
                 transactions: self.body,
                 ommers: self.ommers,
                 withdrawals: self.withdrawals,
+                requests: self.requests,
             },
         )
     }
@@ -363,7 +363,7 @@ impl SealedBlock {
         self.blob_versioned_hashes_iter().collect()
     }
 
-    /// Expensive operation that recovers transaction signer. See [SealedBlockWithSenders].
+    /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
     pub fn senders(&self) -> Option<Vec<Address>> {
         TransactionSigned::recover_signers(&self.body, self.body.len())
     }
@@ -388,10 +388,11 @@ impl SealedBlock {
             body: self.body,
             ommers: self.ommers,
             withdrawals: self.withdrawals,
+            requests: self.requests,
         }
     }
 
-    /// Calculates a heuristic for the in-memory size of the [SealedBlock].
+    /// Calculates a heuristic for the in-memory size of the [`SealedBlock`].
     #[inline]
     pub fn size(&self) -> usize {
         self.header.size() +
@@ -437,7 +438,7 @@ impl SealedBlock {
         Ok(())
     }
 
-    /// Returns a vector of transactions RLP encoded with [TransactionSigned::encode_enveloped].
+    /// Returns a vector of transactions RLP encoded with [`TransactionSigned::encode_enveloped`].
     pub fn raw_transactions(&self) -> Vec<Bytes> {
         self.body.iter().map(|tx| tx.envelope_encoded()).collect()
     }
@@ -484,7 +485,7 @@ impl SealedBlockWithSenders {
         (self.block, self.senders)
     }
 
-    /// Returns the unsealed [BlockWithSenders]
+    /// Returns the unsealed [`BlockWithSenders`]
     #[inline]
     pub fn unseal(self) -> BlockWithSenders {
         let Self { block, senders } = self;
@@ -559,16 +560,21 @@ pub struct BlockBody {
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
     pub withdrawals: Option<Withdrawals>,
+    /// Requests in the block.
+    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
+    pub requests: Option<Requests>,
 }
 
 impl BlockBody {
     /// Create a [`Block`] from the body and its header.
+    // todo(onbjerg): should this not just take `self`? its used in one place
     pub fn create_block(&self, header: Header) -> Block {
         Block {
             header,
             body: self.transactions.clone(),
             ommers: self.ommers.clone(),
             withdrawals: self.withdrawals.clone(),
+            requests: self.requests.clone(),
         }
     }
 
@@ -588,7 +594,13 @@ impl BlockBody {
         self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
     }
 
-    /// Calculates a heuristic for the in-memory size of the [BlockBody].
+    /// Calculate the requests root for the block body, if requests exist. If there are no
+    /// requests, this will return `None`.
+    pub fn calculate_requests_root(&self) -> Option<B256> {
+        self.requests.as_ref().map(|r| crate::proofs::calculate_requests_root(&r.0))
+    }
+
+    /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
     #[inline]
     pub fn size(&self) -> usize {
         self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
@@ -603,7 +615,12 @@ impl BlockBody {
 
 impl From<Block> for BlockBody {
     fn from(block: Block) -> Self {
-        Self { transactions: block.body, ommers: block.ommers, withdrawals: block.withdrawals }
+        Self {
+            transactions: block.body,
+            ommers: block.ommers,
+            withdrawals: block.withdrawals,
+            requests: block.requests,
+        }
     }
 }
 
@@ -646,6 +663,9 @@ pub fn generate_valid_header(
         header.excess_blob_gas = None;
         header.parent_beacon_block_root = None;
     }
+
+    // todo(onbjerg): adjust this for eip-7589
+    header.requests_root = None;
 
     header
 }

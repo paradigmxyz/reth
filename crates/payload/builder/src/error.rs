@@ -1,6 +1,6 @@
 //! Error types emitted by types or implementations of this crate.
 
-use reth_interfaces::{provider::ProviderError, RethError};
+use reth_errors::{ProviderError, RethError};
 use reth_primitives::{revm_primitives::EVMError, B256};
 use reth_transaction_pool::BlobStoreError;
 use tokio::sync::oneshot;
@@ -14,6 +14,9 @@ pub enum PayloadBuilderError {
     /// An oneshot channels has been closed.
     #[error("sender has been dropped")]
     ChannelClosed,
+    /// If there's no payload to resolve.
+    #[error("missing payload")]
+    MissingPayload,
     /// Error occurring in the blob store.
     #[error(transparent)]
     BlobStore(#[from] BlobStoreError),
@@ -37,18 +40,18 @@ impl PayloadBuilderError {
     where
         E: std::error::Error + Send + Sync + 'static,
     {
-        PayloadBuilderError::Other(Box::new(error))
+        Self::Other(Box::new(error))
     }
 }
 
 impl From<ProviderError> for PayloadBuilderError {
     fn from(error: ProviderError) -> Self {
-        PayloadBuilderError::Internal(RethError::Provider(error))
+        Self::Internal(RethError::Provider(error))
     }
 }
 
 impl From<oneshot::error::RecvError> for PayloadBuilderError {
     fn from(_: oneshot::error::RecvError) -> Self {
-        PayloadBuilderError::ChannelClosed
+        Self::ChannelClosed
     }
 }

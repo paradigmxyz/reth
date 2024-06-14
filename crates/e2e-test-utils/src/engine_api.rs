@@ -13,7 +13,7 @@ use reth::{
 };
 use reth_payload_builder::PayloadId;
 use reth_primitives::B256;
-use reth_rpc::AuthClientService;
+use reth_rpc_layer::AuthClientService;
 use std::marker::PhantomData;
 
 /// Helper for engine api operations

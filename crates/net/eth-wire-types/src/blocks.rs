@@ -2,7 +2,7 @@
 //! types.
 
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
+use reth_codecs_derive::{add_arbitrary_tests, derive_arbitrary};
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -79,13 +79,13 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
             ))
         }
 
-        Ok(BlockHeaders(headers))
+        Ok(Self(headers))
     }
 }
 
 impl From<Vec<Header>> for BlockHeaders {
     fn from(headers: Vec<Header>) -> Self {
-        BlockHeaders(headers)
+        Self(headers)
     }
 }
 
@@ -100,7 +100,7 @@ pub struct GetBlockBodies(
 
 impl From<Vec<B256>> for GetBlockBodies {
     fn from(hashes: Vec<B256>) -> Self {
-        GetBlockBodies(hashes)
+        Self(hashes)
     }
 }
 
@@ -122,7 +122,7 @@ pub struct BlockBodies(
 
 impl From<Vec<BlockBody>> for BlockBodies {
     fn from(bodies: Vec<BlockBody>) -> Self {
-        BlockBodies(bodies)
+        Self(bodies)
     }
 }
 
@@ -172,9 +172,10 @@ mod tests {
         // 0xa1 = 0x80 (start of string) + 0x21 (33, length of string)
         let long_rlp = hex!("a1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         let decode_result = BlockHashOrNumber::decode(&mut &long_rlp[..]);
-        if decode_result.is_ok() {
-            panic!("Decoding a bytestring longer than 32 bytes should not decode successfully");
-        }
+        assert!(
+            decode_result.is_err(),
+            "Decoding a bytestring longer than 32 bytes should not decode successfully"
+        );
     }
 
     #[test]
@@ -183,9 +184,7 @@ mod tests {
         // 0x89 = 0x80 (start of string) + 0x09 (9, length of string)
         let long_number = hex!("89ffffffffffffffffff");
         let decode_result = BlockHashOrNumber::decode(&mut &long_number[..]);
-        if decode_result.is_ok() {
-            panic!("Decoding a number longer than 64 bits (but not exactly 32 bytes) should not decode successfully");
-        }
+        assert!(decode_result.is_err(), "Decoding a number longer than 64 bits (but not exactly 32 bytes) should not decode successfully");
     }
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
@@ -296,6 +295,7 @@ mod tests {
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
+                    requests_root: None
                 },
             ]),
         }.encode(&mut data);
@@ -330,6 +330,7 @@ mod tests {
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
+                    requests_root: None
                 },
             ]),
         };
@@ -430,9 +431,11 @@ mod tests {
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
+                            requests_root: None
                         },
                     ],
                     withdrawals: None,
+                    requests: None
                 }
             ]),
         };
@@ -504,9 +507,11 @@ mod tests {
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
+                            requests_root: None
                         },
                     ],
                     withdrawals: None,
+                    requests: None
                 }
             ]),
         };

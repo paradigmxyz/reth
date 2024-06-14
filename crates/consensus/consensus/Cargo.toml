@@ -11,11 +11,14 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# reth
 reth-primitives.workspace = true
 
 # misc
 auto_impl.workspace = true
-thiserror.workspace = true
+thiserror-no-std = {workspace = true, default-features = false }
 
 [features]
+default = ["std"]
+std = ["thiserror-no-std/std"]
 test-utils = []

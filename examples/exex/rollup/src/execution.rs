@@ -3,7 +3,7 @@ use alloy_consensus::{Blob, SidecarCoder, SimpleCoder};
 use alloy_rlp::Decodable as _;
 use eyre::OptionExt;
 use reth::transaction_pool::TransactionPool;
-use reth_interfaces::executor::BlockValidationError;
+use reth_execution_errors::BlockValidationError;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv};
 use reth_node_ethereum::EthEvmConfig;
 use reth_primitives::{
@@ -273,7 +273,6 @@ mod tests {
         test_utils::{testing_pool, MockTransaction},
         TransactionOrigin, TransactionPool,
     };
-    use reth_interfaces::test_utils::generators::{self, sign_tx_with_key_pair};
     use reth_primitives::{
         bytes,
         constants::ETH_TO_WEI,
@@ -282,6 +281,7 @@ mod tests {
         BlockNumber, Receipt, SealedBlockWithSenders, Transaction, TxEip2930, TxKind, U256,
     };
     use reth_revm::Evm;
+    use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
     use rusqlite::Connection;
     use secp256k1::{Keypair, Secp256k1};
 

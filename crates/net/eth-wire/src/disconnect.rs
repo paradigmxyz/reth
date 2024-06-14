@@ -50,25 +50,19 @@ pub enum DisconnectReason {
 impl Display for DisconnectReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let message = match self {
-            DisconnectReason::DisconnectRequested => "disconnect requested",
-            DisconnectReason::TcpSubsystemError => "TCP sub-system error",
-            DisconnectReason::ProtocolBreach => {
-                "breach of protocol, e.g. a malformed message, bad RLP, etc."
-            }
-            DisconnectReason::UselessPeer => "useless peer",
-            DisconnectReason::TooManyPeers => "too many peers",
-            DisconnectReason::AlreadyConnected => "already connected",
-            DisconnectReason::IncompatibleP2PProtocolVersion => "incompatible P2P protocol version",
-            DisconnectReason::NullNodeIdentity => {
-                "null node identity received - this is automatically invalid"
-            }
-            DisconnectReason::ClientQuitting => "client quitting",
-            DisconnectReason::UnexpectedHandshakeIdentity => "unexpected identity in handshake",
-            DisconnectReason::ConnectedToSelf => {
-                "identity is the same as this node (i.e. connected to itself)"
-            }
-            DisconnectReason::PingTimeout => "ping timeout",
-            DisconnectReason::SubprotocolSpecific => "some other reason specific to a subprotocol",
+            Self::DisconnectRequested => "disconnect requested",
+            Self::TcpSubsystemError => "TCP sub-system error",
+            Self::ProtocolBreach => "breach of protocol, e.g. a malformed message, bad RLP, etc.",
+            Self::UselessPeer => "useless peer",
+            Self::TooManyPeers => "too many peers",
+            Self::AlreadyConnected => "already connected",
+            Self::IncompatibleP2PProtocolVersion => "incompatible P2P protocol version",
+            Self::NullNodeIdentity => "null node identity received - this is automatically invalid",
+            Self::ClientQuitting => "client quitting",
+            Self::UnexpectedHandshakeIdentity => "unexpected identity in handshake",
+            Self::ConnectedToSelf => "identity is the same as this node (i.e. connected to itself)",
+            Self::PingTimeout => "ping timeout",
+            Self::SubprotocolSpecific => "some other reason specific to a subprotocol",
         };
         f.write_str(message)
     }
@@ -86,19 +80,19 @@ impl TryFrom<u8> for DisconnectReason {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0x00 => Ok(DisconnectReason::DisconnectRequested),
-            0x01 => Ok(DisconnectReason::TcpSubsystemError),
-            0x02 => Ok(DisconnectReason::ProtocolBreach),
-            0x03 => Ok(DisconnectReason::UselessPeer),
-            0x04 => Ok(DisconnectReason::TooManyPeers),
-            0x05 => Ok(DisconnectReason::AlreadyConnected),
-            0x06 => Ok(DisconnectReason::IncompatibleP2PProtocolVersion),
-            0x07 => Ok(DisconnectReason::NullNodeIdentity),
-            0x08 => Ok(DisconnectReason::ClientQuitting),
-            0x09 => Ok(DisconnectReason::UnexpectedHandshakeIdentity),
-            0x0a => Ok(DisconnectReason::ConnectedToSelf),
-            0x0b => Ok(DisconnectReason::PingTimeout),
-            0x10 => Ok(DisconnectReason::SubprotocolSpecific),
+            0x00 => Ok(Self::DisconnectRequested),
+            0x01 => Ok(Self::TcpSubsystemError),
+            0x02 => Ok(Self::ProtocolBreach),
+            0x03 => Ok(Self::UselessPeer),
+            0x04 => Ok(Self::TooManyPeers),
+            0x05 => Ok(Self::AlreadyConnected),
+            0x06 => Ok(Self::IncompatibleP2PProtocolVersion),
+            0x07 => Ok(Self::NullNodeIdentity),
+            0x08 => Ok(Self::ClientQuitting),
+            0x09 => Ok(Self::UnexpectedHandshakeIdentity),
+            0x0a => Ok(Self::ConnectedToSelf),
+            0x0b => Ok(Self::PingTimeout),
+            0x10 => Ok(Self::SubprotocolSpecific),
             _ => Err(UnknownDisconnectReason(value)),
         }
     }
@@ -143,9 +137,9 @@ impl Decodable for DisconnectReason {
         // string 0x80
         if buf[0] == 0x00 {
             buf.advance(1);
-            Ok(DisconnectReason::DisconnectRequested)
+            Ok(Self::DisconnectRequested)
         } else {
-            DisconnectReason::try_from(u8::decode(buf)?)
+            Self::try_from(u8::decode(buf)?)
                 .map_err(|_| RlpError::Custom("unknown disconnect reason"))
         }
     }

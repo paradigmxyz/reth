@@ -2,7 +2,7 @@
 
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
-use reth_codecs::derive_arbitrary;
+use reth_codecs_derive::derive_arbitrary;
 use reth_primitives::{
     transaction::TransactionConversionError, PooledTransactionsElement, TransactionSigned, B256,
 };
@@ -24,7 +24,7 @@ where
     T: Into<B256>,
 {
     fn from(hashes: Vec<T>) -> Self {
-        GetPooledTransactions(hashes.into_iter().map(|h| h.into()).collect())
+        Self(hashes.into_iter().map(|h| h.into()).collect())
     }
 }
 
@@ -71,7 +71,7 @@ impl TryFrom<Vec<TransactionSigned>> for PooledTransactions {
 
 impl FromIterator<PooledTransactionsElement> for PooledTransactions {
     fn from_iter<I: IntoIterator<Item = PooledTransactionsElement>>(iter: I) -> Self {
-        PooledTransactions(iter.into_iter().collect())
+        Self(iter.into_iter().collect())
     }
 }
 

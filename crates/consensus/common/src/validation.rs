@@ -1,7 +1,6 @@
 //! Collection of methods for block validation.
 
 use reth_consensus::ConsensusError;
-use reth_interfaces::RethResult;
 use reth_primitives::{
     constants::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
@@ -9,7 +8,6 @@ use reth_primitives::{
     },
     ChainSpec, GotExpected, Hardfork, Header, SealedBlock, SealedHeader,
 };
-use reth_provider::{HeaderProvider, WithdrawalsProvider};
 
 /// Validate header standalone
 pub fn validate_header_standalone(
@@ -53,6 +51,14 @@ pub fn validate_header_standalone(
         return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
     }
 
+    if chain_spec.is_prague_active_at_timestamp(header.timestamp) {
+        if header.requests_root.is_none() {
+            return Err(ConsensusError::RequestsRootMissing)
+        }
+    } else if header.requests_root.is_some() {
+        return Err(ConsensusError::RequestsRootUnexpected)
+    }
+
     Ok(())
 }
 
@@ -62,7 +68,7 @@ pub fn validate_header_standalone(
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_standalone(
+pub fn validate_block_pre_execution(
     block: &SealedBlock,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
@@ -107,34 +113,20 @@ pub fn validate_block_standalone(
         }
     }
 
-    Ok(())
-}
-
-/// Validate block with regard to chain (parent)
-///
-/// Checks:
-///  If we already know the block.
-///  If parent is known
-///
-/// Returns parent block header
-pub fn validate_block_regarding_chain<PROV: HeaderProvider + WithdrawalsProvider>(
-    block: &SealedBlock,
-    provider: &PROV,
-) -> RethResult<SealedHeader> {
-    let hash = block.header.hash();
-
-    // Check if block is known.
-    if provider.is_known(&hash)? {
-        return Err(ConsensusError::BlockKnown { hash, number: block.header.number }.into())
+    // EIP-7685: General purpose execution layer requests
+    if chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+        let requests = block.requests.as_ref().ok_or(ConsensusError::BodyRequestsMissing)?;
+        let requests_root = reth_primitives::proofs::calculate_requests_root(&requests.0);
+        let header_requests_root =
+            block.requests_root.as_ref().ok_or(ConsensusError::RequestsRootMissing)?;
+        if requests_root != *header_requests_root {
+            return Err(ConsensusError::BodyRequestsRootDiff(
+                GotExpected { got: requests_root, expected: *header_requests_root }.into(),
+            ))
+        }
     }
 
-    // Check if parent is known.
-    let parent = provider
-        .header(&block.parent_hash)?
-        .ok_or(ConsensusError::ParentUnknown { hash: block.parent_hash })?;
-
-    // Return parent header.
-    Ok(parent.seal(block.parent_hash))
+    Ok(())
 }
 
 /// Validates that the EIP-4844 header fields exist and conform to the spec. This ensures that:
@@ -195,16 +187,15 @@ pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> 
 mod tests {
     use super::*;
     use mockall::mock;
-    use reth_interfaces::{
-        provider::ProviderResult,
-        test_utils::generators::{self, Rng},
-    };
+    use rand::Rng;
     use reth_primitives::{
         hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber,
         BlockNumber, Bytes, ChainSpecBuilder, Signature, Transaction, TransactionSigned, TxEip4844,
         Withdrawal, Withdrawals, U256,
     };
-    use reth_provider::AccountReader;
+    use reth_storage_api::{
+        errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,
+    };
     use std::ops::RangeBounds;
 
     mock! {
@@ -305,7 +296,7 @@ mod tests {
     }
 
     fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
-        let mut rng = generators::rng();
+        let mut rng = rand::thread_rng();
         let request = Transaction::Eip4844(TxEip4844 {
             chain_id: 1u64,
             nonce,
@@ -313,7 +304,8 @@ mod tests {
             max_priority_fee_per_gas: 0x28f000fff,
             max_fee_per_blob_gas: 0x7,
             gas_limit: 10,
-            to: Address::default().into(),
+            placeholder: Some(()),
+            to: Address::default(),
             value: U256::from(3_u64),
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),
@@ -351,6 +343,7 @@ mod tests {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
+            requests_root: None
         };
         // size: 0x9b5
 
@@ -364,7 +357,16 @@ mod tests {
         let ommers = Vec::new();
         let body = Vec::new();
 
-        (SealedBlock { header: header.seal_slow(), body, ommers, withdrawals: None }, parent)
+        (
+            SealedBlock {
+                header: header.seal_slow(),
+                body,
+                ommers,
+                withdrawals: None,
+                requests: None,
+            },
+            parent,
+        )
     }
 
     #[test]
@@ -391,29 +393,21 @@ mod tests {
 
         // Single withdrawal
         let block = create_block_with_withdrawals(&[1]);
-        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+        assert_eq!(validate_block_pre_execution(&block, &chain_spec), Ok(()));
 
         // Multiple increasing withdrawals
         let block = create_block_with_withdrawals(&[1, 2, 3]);
-        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
+        assert_eq!(validate_block_pre_execution(&block, &chain_spec), Ok(()));
         let block = create_block_with_withdrawals(&[5, 6, 7, 8, 9]);
-        assert_eq!(validate_block_standalone(&block, &chain_spec), Ok(()));
-
+        assert_eq!(validate_block_pre_execution(&block, &chain_spec), Ok(()));
         let (_, parent) = mock_block();
-        let provider = Provider::new(Some(parent.clone()));
-        let block = create_block_with_withdrawals(&[0, 1, 2]);
-        let res = validate_block_regarding_chain(&block, &provider);
-        assert!(res.is_ok());
 
         // Withdrawal index should be the last withdrawal index + 1
         let mut provider = Provider::new(Some(parent));
-        let block = create_block_with_withdrawals(&[3, 4, 5]);
         provider
             .withdrawals_provider
             .expect_latest_withdrawal()
             .return_const(Ok(Some(Withdrawal { index: 2, ..Default::default() })));
-        let res = validate_block_regarding_chain(&block, &provider);
-        assert!(res.is_ok());
     }
 
     #[test]
@@ -452,6 +446,7 @@ mod tests {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
+            requests: None,
         };
 
         let block = SealedBlock::new(header, body);
@@ -461,7 +456,7 @@ mod tests {
 
         // validate blob, it should fail blob gas used validation
         assert_eq!(
-            validate_block_standalone(&block, &chain_spec),
+            validate_block_pre_execution(&block, &chain_spec),
             Err(ConsensusError::BlobGasUsedDiff(GotExpected {
                 got: 1,
                 expected: expected_blob_gas_used

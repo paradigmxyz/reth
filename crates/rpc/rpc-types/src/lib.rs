@@ -9,12 +9,11 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
+#[allow(hidden_glob_reexports)]
 mod eth;
 mod mev;
 mod net;
 mod peer;
-pub mod relay;
 mod rpc;
 
 // re-export for convenience
@@ -30,6 +29,9 @@ pub mod trace {
 
 // Anvil specific rpc types coming from alloy.
 pub use alloy_rpc_types_anvil as anvil;
+
+// re-export beacon
+pub use alloy_rpc_types_beacon as beacon;
 
 // Ethereum specific rpc types related to typed transaction requests and the engine API.
 pub use eth::{

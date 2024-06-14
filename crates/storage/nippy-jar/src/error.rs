@@ -8,7 +8,7 @@ pub enum NippyJarError {
     #[error(transparent)]
     Disconnect(#[from] std::io::Error),
     #[error(transparent)]
-    FileSystem(#[from] reth_primitives::fs::FsPathError),
+    FileSystem(#[from] reth_fs_util::FsPathError),
     #[error("{0}")]
     Custom(String),
     #[error(transparent)]
@@ -40,7 +40,7 @@ pub enum NippyJarError {
     #[error("the size of an offset must be at most 8 bytes, got {offset_size}")]
     OffsetSizeTooBig {
         /// The read offset size in number of bytes.
-        offset_size: u64,
+        offset_size: u8,
     },
     #[error("attempted to read an out of bounds offset: {index}")]
     OffsetOutOfBounds {
@@ -57,4 +57,6 @@ pub enum NippyJarError {
     InvalidPruning(u64, u64),
     #[error("jar has been frozen and cannot be modified.")]
     FrozenJar,
+    #[error("File is in an inconsistent state.")]
+    InconsistentState,
 }

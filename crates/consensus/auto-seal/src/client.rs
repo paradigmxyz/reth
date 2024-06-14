@@ -1,13 +1,13 @@
 //! This includes download client implementations for auto sealing miners.
 
 use crate::Storage;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     headers::client::{HeadersClient, HeadersFut, HeadersRequest},
     priority::Priority,
 };
-use reth_network_types::{PeerId, WithPeerId};
+use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
 use std::fmt::Debug;
 use tracing::{trace, warn};
@@ -23,7 +23,7 @@ pub struct AutoSealClient {
 }
 
 impl AutoSealClient {
-    pub(crate) fn new(storage: Storage) -> Self {
+    pub(crate) const fn new(storage: Storage) -> Self {
         Self { storage }
     }
 

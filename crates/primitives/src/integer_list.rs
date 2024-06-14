@@ -28,7 +28,7 @@ impl fmt::Debug for IntegerList {
 }
 
 impl IntegerList {
-    /// Creates an IntegerList from a list of integers.
+    /// Creates an `IntegerList` from a list of integers.
     ///
     /// # Returns
     ///
@@ -123,7 +123,7 @@ impl<'de> Visitor<'de> for IntegerListVisitor {
 }
 
 impl<'de> Deserialize<'de> for IntegerList {
-    fn deserialize<D>(deserializer: D) -> Result<IntegerList, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {

@@ -1,12 +1,12 @@
 use futures_util::StreamExt;
 use reth::network::{NetworkEvent, NetworkEvents, NetworkHandle, PeersInfo};
 use reth_primitives::NodeRecord;
+use reth_tokio_util::EventStream;
 use reth_tracing::tracing::info;
-use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// Helper for network operations
 pub struct NetworkTestContext {
-    network_events: UnboundedReceiverStream<NetworkEvent>,
+    network_events: EventStream<NetworkEvent>,
     network: NetworkHandle,
 }
 

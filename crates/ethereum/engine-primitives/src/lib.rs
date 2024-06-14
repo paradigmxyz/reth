@@ -11,14 +11,15 @@
 mod payload;
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 
-use reth_engine_primitives::{
+use reth_engine_primitives::EngineTypes;
+use reth_payload_primitives::{
     validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    EngineTypes, PayloadOrAttributes,
+    PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives::ChainSpec;
 use reth_rpc_types::{
     engine::{
-        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
+        ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
         PayloadAttributes as EthPayloadAttributes,
     },
     ExecutionPayloadV1,
@@ -29,13 +30,17 @@ use reth_rpc_types::{
 #[non_exhaustive]
 pub struct EthEngineTypes;
 
-impl EngineTypes for EthEngineTypes {
+impl PayloadTypes for EthEngineTypes {
     type PayloadAttributes = EthPayloadAttributes;
     type PayloadBuilderAttributes = EthPayloadBuilderAttributes;
+}
+
+impl EngineTypes for EthEngineTypes {
     type BuiltPayload = EthBuiltPayload;
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadV4 = ExecutionPayloadEnvelopeV4;
 
     fn validate_version_specific_fields(
         chain_spec: &ChainSpec,

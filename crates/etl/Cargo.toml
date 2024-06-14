@@ -6,11 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-exclude.workspace = true
 
 [dependencies]
 tempfile.workspace = true
-reth-db.workspace = true
+reth-db-api.workspace = true
 rayon.workspace = true
 
 [dev-dependencies]

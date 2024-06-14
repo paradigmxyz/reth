@@ -1,8 +1,9 @@
 //! Ethereum protocol-related constants
 
 use crate::{
+    chain::DepositContract,
     revm_primitives::{address, b256},
-    Address, B256, U256,
+    B256, U256,
 };
 use std::time::Duration;
 
@@ -52,7 +53,7 @@ pub const ETHEREUM_BLOCK_GAS_LIMIT: u64 = 30_000_000;
 /// significant harm in leaving this setting as is.
 pub const MIN_PROTOCOL_BASE_FEE: u64 = 7;
 
-/// Same as [MIN_PROTOCOL_BASE_FEE] but as a U256.
+/// Same as [`MIN_PROTOCOL_BASE_FEE`] but as a U256.
 pub const MIN_PROTOCOL_BASE_FEE_U256: U256 = U256::from_limbs([7u64, 0, 0, 0]);
 
 /// Initial base fee as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)
@@ -66,6 +67,13 @@ pub const EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u64 = 2;
 
 /// Minimum gas limit allowed for transactions.
 pub const MINIMUM_GAS_LIMIT: u64 = 5000;
+
+/// Deposit contract address
+pub const MAINNET_DEPOSIT_CONTRACT: DepositContract = DepositContract::new(
+    address!("00000000219ab540356cbb839cbe05303d7705fa"),
+    11052984,
+    b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
+);
 
 /// Base fee max change denominator for Optimism Mainnet as defined in the Optimism
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
@@ -95,7 +103,26 @@ pub const OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON: u128 = 250;
 /// Base fee max change denominator for Optimism Sepolia as defined in the Optimism
 /// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
 #[cfg(feature = "optimism")]
-pub const OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 10;
+pub const OP_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 6;
+
+/// Base fee max change denominator for Base Sepolia as defined in the Optimism
+/// [transaction costs](https://community.optimism.io/docs/developers/build/differences/#transaction-costs) doc.
+#[cfg(feature = "optimism")]
+pub const BASE_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER: u128 = 10;
+
+/// Get the base fee parameters for Base Sepolia.
+#[cfg(feature = "optimism")]
+pub const BASE_SEPOLIA_BASE_FEE_PARAMS: BaseFeeParams = BaseFeeParams {
+    max_change_denominator: OP_SEPOLIA_EIP1559_DEFAULT_BASE_FEE_MAX_CHANGE_DENOMINATOR,
+    elasticity_multiplier: BASE_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+};
+
+/// Get the base fee parameters for Base Sepolia (post Canyon).
+#[cfg(feature = "optimism")]
+pub const BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS: BaseFeeParams = BaseFeeParams {
+    max_change_denominator: OP_SEPOLIA_EIP1559_BASE_FEE_MAX_CHANGE_DENOMINATOR_CANYON,
+    elasticity_multiplier: BASE_SEPOLIA_EIP1559_DEFAULT_ELASTICITY_MULTIPLIER,
+};
 
 /// Get the base fee parameters for Optimism Sepolia.
 #[cfg(feature = "optimism")]
@@ -196,13 +223,6 @@ pub const BEACON_CONSENSUS_REORG_UNWIND_DEPTH: u64 = 3;
 /// See:
 /// <https://github.com/ethereum/go-ethereum/blob/a196f3e8a22b6ad22ced5c2e3baf32bc3ebd4ec9/consensus/ethash/consensus.go#L227-L229>
 pub const ALLOWED_FUTURE_BLOCK_TIME_SECONDS: u64 = 15;
-
-/// The address for the beacon roots contract defined in EIP-4788.
-pub const BEACON_ROOTS_ADDRESS: Address = address!("000F3df6D732807Ef1319fB7B8bB8522d0Beac02");
-
-/// The caller to be used when calling the EIP-4788 beacon roots contract at the beginning of the
-/// block.
-pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
 
 #[cfg(test)]
 mod tests {

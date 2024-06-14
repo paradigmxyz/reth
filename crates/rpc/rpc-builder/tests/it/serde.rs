@@ -6,7 +6,7 @@ use jsonrpsee::{
     types::Request,
 };
 use reth_primitives::U256;
-use reth_rpc_builder::RethRpcModule;
+use reth_rpc_server_types::RethRpcModule;
 use serde_json::value::RawValue;
 
 struct RawRpcParams(Box<RawValue>);

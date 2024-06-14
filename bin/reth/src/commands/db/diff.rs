@@ -4,15 +4,8 @@ use crate::{
     utils::DbTool,
 };
 use clap::Parser;
-use reth_db::{
-    cursor::DbCursorRO, database::Database, open_db_read_only, table::Table, transaction::DbTx,
-    AccountChangeSets, AccountsHistory, AccountsTrie, BlockBodyIndices, BlockOmmers,
-    BlockWithdrawals, Bytecodes, CanonicalHeaders, DatabaseEnv, HashedAccounts, HashedStorages,
-    HeaderNumbers, HeaderTerminalDifficulties, Headers, PlainAccountState, PlainStorageState,
-    PruneCheckpoints, Receipts, StageCheckpointProgresses, StageCheckpoints, StorageChangeSets,
-    StoragesHistory, StoragesTrie, Tables, TransactionBlocks, TransactionHashNumbers,
-    TransactionSenders, Transactions, VersionHistory,
-};
+use reth_db::{open_db_read_only, tables_to_generic, DatabaseEnv, Tables};
+use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -20,6 +13,7 @@ use std::{
     hash::Hash,
     io::Write,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 use tracing::{info, warn};
 
@@ -57,7 +51,7 @@ impl Command {
     ///
     /// The discrepancies and extra elements, along with a brief summary of the diff results are
     /// then written to a file in the output directory.
-    pub fn execute(self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<()> {
+    pub fn execute(self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<()> {
         warn!("Make sure the node is not running when running `reth db diff`!");
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
@@ -78,83 +72,11 @@ impl Command {
             secondary_tx.disable_long_read_transaction_safety();
 
             let output_dir = self.output.clone();
-            match table {
-                Tables::CanonicalHeaders => {
-                    find_diffs::<CanonicalHeaders>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::HeaderTerminalDifficulties => {
-                    find_diffs::<HeaderTerminalDifficulties>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::HeaderNumbers => {
-                    find_diffs::<HeaderNumbers>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::Headers => find_diffs::<Headers>(primary_tx, secondary_tx, output_dir)?,
-                Tables::BlockBodyIndices => {
-                    find_diffs::<BlockBodyIndices>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::BlockOmmers => {
-                    find_diffs::<BlockOmmers>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::BlockWithdrawals => {
-                    find_diffs::<BlockWithdrawals>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::TransactionBlocks => {
-                    find_diffs::<TransactionBlocks>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::Transactions => {
-                    find_diffs::<Transactions>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::TransactionHashNumbers => {
-                    find_diffs::<TransactionHashNumbers>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::Receipts => find_diffs::<Receipts>(primary_tx, secondary_tx, output_dir)?,
-                Tables::PlainAccountState => {
-                    find_diffs::<PlainAccountState>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::PlainStorageState => {
-                    find_diffs::<PlainStorageState>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::Bytecodes => find_diffs::<Bytecodes>(primary_tx, secondary_tx, output_dir)?,
-                Tables::AccountsHistory => {
-                    find_diffs::<AccountsHistory>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::StoragesHistory => {
-                    find_diffs::<StoragesHistory>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::AccountChangeSets => {
-                    find_diffs::<AccountChangeSets>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::StorageChangeSets => {
-                    find_diffs::<StorageChangeSets>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::HashedAccounts => {
-                    find_diffs::<HashedAccounts>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::HashedStorages => {
-                    find_diffs::<HashedStorages>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::AccountsTrie => {
-                    find_diffs::<AccountsTrie>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::StoragesTrie => {
-                    find_diffs::<StoragesTrie>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::TransactionSenders => {
-                    find_diffs::<TransactionSenders>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::StageCheckpoints => {
-                    find_diffs::<StageCheckpoints>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::StageCheckpointProgresses => {
-                    find_diffs::<StageCheckpointProgresses>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::PruneCheckpoints => {
-                    find_diffs::<PruneCheckpoints>(primary_tx, secondary_tx, output_dir)?
-                }
-                Tables::VersionHistory => {
-                    find_diffs::<VersionHistory>(primary_tx, secondary_tx, output_dir)?
-                }
-            };
+            tables_to_generic!(table, |Table| find_diffs::<Table>(
+                primary_tx,
+                secondary_tx,
+                output_dir
+            ))?;
         }
 
         Ok(())
@@ -171,7 +93,7 @@ where
     T::Key: Hash,
     T::Value: PartialEq,
 {
-    let table = T::TABLE;
+    let table = T::NAME;
 
     info!("Analyzing table {table}...");
     let result = find_diffs_advanced::<T>(&primary_tx, &secondary_tx)?;
@@ -415,10 +337,9 @@ enum ExtraTableElement<T: Table> {
 
 impl<T: Table> ExtraTableElement<T> {
     /// Return the key for the extra element
-    fn key(&self) -> &T::Key {
+    const fn key(&self) -> &T::Key {
         match self {
-            Self::First { key, .. } => key,
-            Self::Second { key, .. } => key,
+            Self::First { key, .. } | Self::Second { key, .. } => key,
         }
     }
 }

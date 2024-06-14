@@ -1,7 +1,7 @@
 use crate::primitives::U256;
 use clap::Args;
 use reth_rpc::eth::gas_oracle::GasPriceOracleConfig;
-use reth_rpc_builder::constants::{
+use reth_rpc_server_types::constants::gas_oracle::{
     DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
     DEFAULT_MAX_GAS_PRICE,
 };
@@ -28,7 +28,7 @@ pub struct GasPriceOracleArgs {
 }
 
 impl GasPriceOracleArgs {
-    /// Returns a [GasPriceOracleConfig] from the arguments.
+    /// Returns a [`GasPriceOracleConfig`] from the arguments.
     pub fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
         let Self { blocks, ignore_price, max_price, percentile } = self;
         GasPriceOracleConfig {

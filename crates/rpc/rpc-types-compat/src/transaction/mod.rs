@@ -1,7 +1,7 @@
 //! Compatibility functions for rpc `Transaction` type.
 
 use alloy_rpc_types::request::{TransactionInput, TransactionRequest};
-use reth_primitives::{BlockNumber, TransactionSignedEcRecovered, TxKind, TxType, B256};
+use reth_primitives::{Address, BlockNumber, TransactionSignedEcRecovered, TxKind, TxType, B256};
 use reth_rpc_types::Transaction;
 use signature::from_primitive_signature;
 pub use typed::*;
@@ -42,15 +42,14 @@ fn fill(
     let signer = tx.signer();
     let signed_tx = tx.into_signed();
 
-    let to = match signed_tx.kind() {
+    let to: Option<Address> = match signed_tx.kind() {
         TxKind::Create => None,
-        TxKind::Call(to) => Some(*to),
+        TxKind::Call(to) => Some(Address(*to)),
     };
 
     #[allow(unreachable_patterns)]
     let (gas_price, max_fee_per_gas) = match signed_tx.tx_type() {
-        TxType::Legacy => (Some(signed_tx.max_fee_per_gas()), None),
-        TxType::Eip2930 => (Some(signed_tx.max_fee_per_gas()), None),
+        TxType::Legacy | TxType::Eip2930 => (Some(signed_tx.max_fee_per_gas()), None),
         TxType::Eip1559 | TxType::Eip4844 => {
             // the gas price field for EIP1559 is set to `min(tip, gasFeeCap - baseFee) +
             // baseFee`
@@ -114,7 +113,7 @@ fn fill(
     }
 }
 
-/// Convert [TransactionSignedEcRecovered] to [TransactionRequest]
+/// Convert [`TransactionSignedEcRecovered`] to [`TransactionRequest`]
 pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> TransactionRequest {
     let from = tx.signer();
     let to = Some(tx.transaction.to().into());

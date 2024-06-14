@@ -21,7 +21,7 @@ pub mod providers;
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
-    StaticFileWriter,
+    StaticFileAccess, StaticFileWriter,
 };
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -29,13 +29,12 @@ pub use providers::{
 pub mod test_utils;
 
 /// Re-export provider error.
-pub use reth_interfaces::provider::ProviderError;
+pub use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
-pub mod chain;
-pub use chain::{Chain, DisplayBlocksChain};
+pub use reth_execution_types::*;
 
 pub mod bundle_state;
-pub use bundle_state::{BundleStateWithReceipts, OriginalValuesKnown, StateChanges, StateReverts};
+pub use bundle_state::{OriginalValuesKnown, StateChanges, StateReverts};
 
 pub(crate) fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {
     let start = match bounds.start_bound() {

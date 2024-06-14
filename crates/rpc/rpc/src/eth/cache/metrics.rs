@@ -9,7 +9,7 @@ pub(crate) struct CacheMetrics {
     /// The number of queued consumers.
     pub(crate) queued_consumers_count: Gauge,
     /// The number of cache hits.
-    pub(crate) hits: Counter,
+    pub(crate) hits_total: Counter,
     /// The number of cache misses.
-    pub(crate) misses: Counter,
+    pub(crate) misses_total: Counter,
 }
