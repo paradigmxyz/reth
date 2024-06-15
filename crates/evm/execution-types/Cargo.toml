@@ -18,7 +18,7 @@ reth-trie.workspace = true
 revm.workspace = true
 
 [dev-dependencies]
-reth-primitives = { workspace = true, features = ["test-utils"] }
+reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
