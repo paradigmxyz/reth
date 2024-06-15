@@ -302,10 +302,9 @@ impl ExecutionOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::{eip6110::DepositRequest, eip7002::WithdrawalRequest};
+    use alloy_eips::eip6110::DepositRequest;
     use alloy_primitives::{FixedBytes, LogData};
-    use reth_primitives::{Address, Receipts, Request, Requests, TxType, B256};
-    use std::collections::HashMap;
+    use reth_primitives::{Receipts, Request, Requests, TxType, B256};
 
     #[test]
     fn test_block_number_to_index() {
