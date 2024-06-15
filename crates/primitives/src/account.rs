@@ -79,6 +79,12 @@ impl Compact for Bytecode {
     }
 }
 
+impl From<Bytecode> for RevmBytecode {
+    fn from(value: Bytecode) -> Self {
+        value.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

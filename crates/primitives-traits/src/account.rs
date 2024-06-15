@@ -2,6 +2,7 @@ use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, B256, U256};
 use reth_codecs::{main_codec, Compact};
+use revm_primitives::AccountInfo;
 
 /// An Ethereum account.
 #[main_codec]
@@ -43,5 +44,27 @@ impl Account {
     /// In case of no bytecode, returns [`KECCAK_EMPTY`].
     pub fn get_bytecode_hash(&self) -> B256 {
         self.bytecode_hash.unwrap_or(KECCAK_EMPTY)
+    }
+}
+
+impl From<Account> for AccountInfo {
+    fn from(account: Account) -> Self {
+        AccountInfo {
+            balance: account.balance,
+            nonce: account.nonce,
+            code_hash: account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+            code: None,
+        }
+    }
+}
+
+impl From<AccountInfo> for Account {
+    fn from(account_info: AccountInfo) -> Self {
+        Self {
+            nonce: account_info.nonce,
+            balance: account_info.balance,
+            bytecode_hash: (account_info.code_hash != KECCAK_EMPTY)
+                .then_some(account_info.code_hash),
+        }
     }
 }
