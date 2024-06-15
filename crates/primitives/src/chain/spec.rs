@@ -10,20 +10,14 @@ use crate::{
     Hardfork, Head, Header, NamedChain, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH,
     MAINNET_DEPOSIT_CONTRACT, U256,
 };
-use derive_more::From;
-use once_cell::sync::Lazy;
-use reth_trie_common::root::state_root_ref_unhashed;
-use serde::{Deserialize, Serialize};
-
-#[cfg(feature = "std")]
-use std::{collections::BTreeMap, sync::Arc};
-
-pub use alloy_eips::eip1559::BaseFeeParams;
-
 use core::{
     fmt,
     fmt::{Display, Formatter},
 };
+use derive_more::From;
+use once_cell::sync::Lazy;
+use reth_trie_common::root::state_root_ref_unhashed;
+use serde::{Deserialize, Serialize};
 
 #[cfg(not(feature = "std"))]
 use alloc::{
@@ -33,6 +27,10 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+#[cfg(feature = "std")]
+use std::{collections::BTreeMap, sync::Arc};
+
+pub use alloy_eips::eip1559::BaseFeeParams;
 
 #[cfg(feature = "optimism")]
 pub(crate) use crate::{

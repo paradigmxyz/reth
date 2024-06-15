@@ -2,7 +2,6 @@ use crate::{transaction::util::secp256k1, Address, B256, U256};
 use alloy_primitives::Bytes;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use bytes::Buf;
-use core::mem;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
@@ -194,7 +193,7 @@ impl Signature {
     /// Calculates a heuristic for the in-memory size of the [Signature].
     #[inline]
     pub const fn size(&self) -> usize {
-        mem::size_of::<Self>()
+        core::mem::size_of::<Self>()
     }
 }
 

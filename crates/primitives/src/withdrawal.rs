@@ -7,8 +7,6 @@ use reth_codecs::{main_codec, Compact};
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-use core::{mem, slice};
-
 /// Re-export from `alloy_eips`.
 #[doc(inline)]
 pub use alloy_eips::eip4895::Withdrawal;
@@ -42,22 +40,22 @@ impl Withdrawals {
     /// Calculate the total size, including capacity, of the Withdrawals.
     #[inline]
     pub fn total_size(&self) -> usize {
-        self.capacity() * mem::size_of::<Withdrawal>()
+        self.capacity() * core::mem::size_of::<Withdrawal>()
     }
 
     /// Calculate a heuristic for the in-memory size of the [Withdrawals].
     #[inline]
     pub fn size(&self) -> usize {
-        self.len() * mem::size_of::<Withdrawal>()
+        self.len() * core::mem::size_of::<Withdrawal>()
     }
 
     /// Get an iterator over the Withdrawals.
-    pub fn iter(&self) -> slice::Iter<'_, Withdrawal> {
+    pub fn iter(&self) -> core::slice::Iter<'_, Withdrawal> {
         self.0.iter()
     }
 
     /// Get a mutable iterator over the Withdrawals.
-    pub fn iter_mut(&mut self) -> slice::IterMut<'_, Withdrawal> {
+    pub fn iter_mut(&mut self) -> core::slice::IterMut<'_, Withdrawal> {
         self.0.iter_mut()
     }
 

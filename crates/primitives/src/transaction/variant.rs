@@ -5,7 +5,6 @@ use crate::{
     Address, Transaction, TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash,
     B256,
 };
-
 use core::ops::Deref;
 
 /// Represents various different transaction formats used in reth.
