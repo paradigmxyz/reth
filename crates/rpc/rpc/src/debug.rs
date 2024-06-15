@@ -14,13 +14,10 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
-    eth::{
-        api::{EthTransactions, LoadBlock, LoadTransaction, StateCacheDB, TraceExt},
-        error::{EthApiError, EthResult},
-        revm_utils::{prepare_call_env, EvmOverrides},
-    },
-    result::{internal_rpc_err, ToRpcResult},
-    EthApiSpec,
+    result::internal_rpc_err,
+    revm_utils::{prepare_call_env, EvmOverrides},
+    servers::{EthApiSpec, EthTransactions, LoadBlock, LoadTransaction, TraceExt},
+    EthApiError, EthResult, StateCacheDb, ToRpcResult,
 };
 use reth_rpc_types::{
     trace::geth::{
@@ -536,7 +533,7 @@ where
         &self,
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
-        db: &mut StateCacheDB<'_>,
+        db: &mut StateCacheDb<'_>,
         transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::EvmState)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;

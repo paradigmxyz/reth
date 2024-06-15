@@ -11,9 +11,9 @@
 
 use std::sync::Arc;
 
-use reth_rpc::{
-    call_impl, eth::api::EthApiInner, eth_call_impl, eth_fees_impl, eth_state_impl,
-    eth_transactions_impl, load_block_impl, load_fee_impl, load_state_impl, load_transaction_impl,
+use reth_rpc_eth_api::{
+    call_impl, eth_call_impl, eth_fees_impl, eth_state_impl, eth_transactions_impl,
+    load_block_impl, load_fee_impl, load_state_impl, load_transaction_impl, servers::EthApiInner,
     spawn_blocking_impl, trace_impl,
 };
 

@@ -176,14 +176,12 @@ use reth_provider::{
 };
 use reth_rpc::{
     eth::{
-        api::RawTransactionForwarder,
-        cache::{cache_new_blocks_task, EthStateCache},
-        fee_history_cache_new_blocks_task,
-        gas_oracle::GasPriceOracle,
-        EthBundle, FeeHistoryCache,
+        cache::cache_new_blocks_task, fee_history::fee_history_cache_new_blocks_task,
+        servers::RawTransactionForwarder, EthApi, EthBundle, EthFilter, EthPubSub, EthStateCache,
+        EthSubscriptionIdProvider, FeeHistoryCache, GasPriceOracle,
     },
-    AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
+    AdminApi, DebugApi, EngineEthApi, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi,
+    Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};

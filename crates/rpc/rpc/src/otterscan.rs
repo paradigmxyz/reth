@@ -4,8 +4,8 @@ use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
-    eth::api::{LoadBlock, LoadTransaction, TraceExt},
     result::internal_rpc_err,
+    servers::{LoadBlock, LoadTransaction, TraceExt},
 };
 use reth_rpc_types::{
     trace::otterscan::{

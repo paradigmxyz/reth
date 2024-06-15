@@ -1,4 +1,5 @@
-use crate::result::ToRpcResult;
+use std::sync::Arc;
+
 use alloy_primitives::B256;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -10,7 +11,8 @@ use reth_rpc_types::{
     admin::{EthProtocolInfo, NodeInfo, Ports, ProtocolInfo},
     PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo,
 };
-use std::sync::Arc;
+
+use crate::result::ToRpcResult;
 
 /// `admin` API implementation.
 ///

@@ -1,10 +1,6 @@
-use reth_rpc::{
-    eth::{
-        cache::{EthStateCache, EthStateCacheConfig},
-        gas_oracle::GasPriceOracleConfig,
-        EthApi, EthFilterConfig, FeeHistoryCacheConfig, RPC_DEFAULT_GAS_CAP,
-    },
-    EthFilter, EthPubSub,
+use reth_rpc::eth::{
+    EthApi, EthFilter, EthFilterConfig, EthPubSub, EthStateCache, EthStateCacheConfig,
+    FeeHistoryCacheConfig, GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
 };
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE,

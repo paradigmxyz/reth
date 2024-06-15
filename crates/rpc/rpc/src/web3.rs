@@ -1,9 +1,10 @@
-use crate::result::ToRpcResult;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{keccak256, Bytes, B256};
 use reth_rpc_api::Web3ApiServer;
+
+use crate::result::ToRpcResult;
 
 /// `web3` API implementation.
 ///

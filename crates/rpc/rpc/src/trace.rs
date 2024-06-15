@@ -7,10 +7,10 @@ use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, SealedHe
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
-use reth_rpc_eth_api::eth::{
-    api::{LoadBlock, LoadTransaction, TraceExt},
+use reth_rpc_eth_api::{
     error::{EthApiError, EthResult},
     revm_utils::{prepare_call_env, EvmOverrides},
+    servers::{LoadBlock, LoadTransaction, TraceExt},
     utils::recover_raw_transaction,
 };
 use reth_rpc_types::{
