@@ -374,8 +374,9 @@ mod tests {
 
         // Create a BundleBuilder object and insert the initial data
         let mut state_builder = BundleBuilder::default();
-        state_builder.state_original_account_info(Address::new([2; 20]), AccountInfo::default());
-        state_builder.revert_account_info(123, Address::new([2; 20]), AccountInfo::default());
+        state_builder = state_builder
+            .state_original_account_info(Address::new([2; 20]), AccountInfo::default())
+            .revert_account_info(123, Address::new([2; 20]), Some(Some(AccountInfo::default())));
 
         // Assert that creating a new ExecutionOutcome using the from_state_builder method matches
         // exec_res

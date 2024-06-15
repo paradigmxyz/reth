@@ -49,7 +49,7 @@ impl Account {
 
 impl From<Account> for AccountInfo {
     fn from(account: Account) -> Self {
-        AccountInfo {
+        Self {
             balance: account.balance,
             nonce: account.nonce,
             code_hash: account.bytecode_hash.unwrap_or(KECCAK_EMPTY),

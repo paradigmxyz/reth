@@ -674,7 +674,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         if TAKE {
             // iterate over local plain state remove all account and all storages.
-            for (address, bundle_account) in bundle_state.state.iter() {
+            for (address, bundle_account) in &bundle_state.state {
                 // revert account if needed.
                 if bundle_account.is_info_changed() {
                     let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
@@ -686,7 +686,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
 
                 // revert storages
-                for (storage_key, storage_slot) in bundle_account.storage.iter() {
+                for (storage_key, storage_slot) in &bundle_account.storage {
                     let storage_key: B256 = (*storage_key).into();
                     let storage_entry =
                         StorageEntry { key: storage_key, value: storage_slot.original_value() };
