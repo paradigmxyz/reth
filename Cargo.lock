@@ -140,7 +140,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#2ff80d765a059c5e76469714362b43a6e4726460"
+source = "git+https://github.com/alloy-rs/alloy#1c702463125ee90f5f9566713b21c039f9952228"
 dependencies = [
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy)",
  "alloy-primitives",
@@ -189,7 +189,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#2ff80d765a059c5e76469714362b43a6e4726460"
+source = "git+https://github.com/alloy-rs/alloy#1c702463125ee90f5f9566713b21c039f9952228"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -407,7 +407,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#2ff80d765a059c5e76469714362b43a6e4726460"
+source = "git+https://github.com/alloy-rs/alloy#1c702463125ee90f5f9566713b21c039f9952228"
 dependencies = [
  "alloy-rpc-types-eth 0.1.0 (git+https://github.com/alloy-rs/alloy)",
  "alloy-serde 0.1.0 (git+https://github.com/alloy-rs/alloy)",
@@ -479,7 +479,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#2ff80d765a059c5e76469714362b43a6e4726460"
+source = "git+https://github.com/alloy-rs/alloy#1c702463125ee90f5f9566713b21c039f9952228"
 dependencies = [
  "alloy-consensus 0.1.0 (git+https://github.com/alloy-rs/alloy)",
  "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy)",
@@ -518,7 +518,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "0.1.0"
-source = "git+https://github.com/alloy-rs/alloy#2ff80d765a059c5e76469714362b43a6e4726460"
+source = "git+https://github.com/alloy-rs/alloy#1c702463125ee90f5f9566713b21c039f9952228"
 dependencies = [
  "alloy-primitives",
  "serde",
