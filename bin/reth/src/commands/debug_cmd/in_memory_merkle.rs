@@ -27,7 +27,8 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_tasks::TaskExecutor;
-use reth_trie::{updates::TrieKey, StateRoot};
+use reth_trie::updates::TrieKey;
+use reth_trie_db::state_root;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
 
@@ -208,7 +209,7 @@ impl Command {
         let accounts = provider_rw.basic_accounts(account_lists)?;
         provider_rw.insert_account_for_hashing(accounts)?;
 
-        let (state_root, incremental_trie_updates) = StateRoot::incremental_root_with_updates(
+        let (state_root, incremental_trie_updates) = state_root::incremental_root_with_updates(
             provider_rw.tx_ref(),
             block.number..=block.number,
         )?;

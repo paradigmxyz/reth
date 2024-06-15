@@ -210,7 +210,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         // traversal.
         if subnode.nibble() >= 0xf || (subnode.nibble() < 0 && !allow_root_to_child_nibble) {
             self.stack.pop();
-            self.move_to_next_sibling(false);
+            self.move_to_next_sibling(false)?;
             return Ok(())
         }
 

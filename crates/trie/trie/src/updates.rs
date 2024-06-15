@@ -1,4 +1,7 @@
-use crate::{trie_cursor::TrieCursorRwFactory, walker::TrieWalker};
+use crate::{
+    trie_cursor::{TrieCursor, TrieCursorRwFactory},
+    walker::TrieWalker,
+};
 use derive_more::Deref;
 use reth_primitives::{
     trie::{
@@ -124,11 +127,12 @@ impl TrieUpdates {
     }
 
     /// Flush updates all aggregated updates to the database.
-    pub fn flush<F: TrieCursorRwFactory>(self, factory: &F) -> Result<(), F::Err> {
+    pub fn flush<F: TrieCursorRwFactory, T: Into<F>>(self, factory: T) -> Result<(), F::Err> {
         if self.trie_operations.is_empty() {
             return Ok(())
         }
 
+        let factory: F = factory.into();
         let mut account_trie_cursor = factory.account_trie_cursor_rw()?;
         let mut storage_trie_cursor = factory.storage_tries_cursor_rw()?;
 
@@ -160,8 +164,8 @@ impl TrieUpdates {
                     if !nibbles.is_empty() {
                         // Delete the old entry if it exists.
                         if storage_trie_cursor
-                            .seek_by_key_subkey(hashed_address, nibbles.clone())?
-                            .filter(|e| e.nibbles == nibbles)
+                            .seek_by_key_subkey(hashed_address, nibbles.clone().0)?
+                            .filter(|e| e.0 == nibbles.0)
                             .is_some()
                         {
                             storage_trie_cursor.delete_current()?;

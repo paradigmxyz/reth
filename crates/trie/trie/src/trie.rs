@@ -40,6 +40,17 @@ pub struct StateRoot<T, H> {
 }
 
 impl<T, H> StateRoot<T, H> {
+    pub fn new(trie_cursor_factory: T, hashed_cursor_factory: H) -> Self {
+        Self {
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            prefix_sets: Default::default(),
+            previous_state: None,
+            threshold: 0,
+            metrics: Default::default(),
+        }
+    }
+
     /// Set the prefix sets.
     pub fn with_prefix_sets(mut self, prefix_sets: TriePrefixSets) -> Self {
         self.prefix_sets = prefix_sets;

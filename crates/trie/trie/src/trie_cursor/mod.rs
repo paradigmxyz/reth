@@ -43,7 +43,7 @@ pub trait TrieCursorRwFactory {
     /// Create a storage tries cursor.
     fn storage_tries_cursor_rw(
         &self,
-    ) -> Result<Box<dyn TrieCursorRw<B256, StorageTrieEntry, Err = Self::Err> + '_>, Self::Err>;
+    ) -> Result<Box<dyn DupTrieCursorRw<B256, StorageTrieEntry, Err = Self::Err> + '_>, Self::Err>;
 }
 
 #[auto_impl::auto_impl(Box)]
@@ -70,18 +70,42 @@ pub trait TrieCursor: Send + Sync + TrieCursorErr {
     fn current(&mut self) -> Result<Option<TrieKey>, <Box<Self> as TrieCursorErr>::Err>;
 }
 
+#[auto_impl::auto_impl(Box)]
+/// A cursor for navigating a trie that works with both Tables and DupSort tables.
+pub trait DupTrieCursor<K>: Send + Sync + TrieCursorErr {
+    /// Move the cursor to the key and return if it is an exact match.
+    fn seek_exact(
+        &mut self,
+        key: K,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, <Box<Self> as TrieCursorErr>::Err>;
+
+    /// Move the cursor to the key and return a value matching of greater than the key.
+    fn seek_by_key_subkey(
+        &mut self,
+        key: K,
+        subkey: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, <Box<Self> as TrieCursorErr>::Err>;
+
+    /// Get the current entry.
+    fn current(&mut self) -> Result<Option<TrieKey>, <Box<Self> as TrieCursorErr>::Err>;
+}
+
 /// A cursor for writing into a trie that works with both Tables and DupSort tables.
+#[auto_impl::auto_impl(Box)]
 pub trait TrieCursorWrite<K, V>: Send + Sync + TrieCursorErr {
     /// Deletes value at the current cursor position.
-    fn delete_current(&mut self) -> Result<(), Self::Err>;
+    fn delete_current(&mut self) -> Result<(), <Box<Self> as TrieCursorErr>::Err>;
 
     /// Deletes all values associated with key at the current cursor position.
-    fn delete_current_duplicates(&mut self) -> Result<(), Self::Err>;
+    fn delete_current_duplicates(&mut self) -> Result<(), <Box<Self> as TrieCursorErr>::Err>;
 
     /// Updates `value` currently associated with `key` if it exists.
     /// Otherwise, inserts a new `key`-`value` pair.
-    fn upsert(&mut self, key: K, value: V) -> Result<(), Self::Err>;
+    fn upsert(&mut self, key: K, value: V) -> Result<(), <Box<Self> as TrieCursorErr>::Err>;
 }
 
 #[auto_impl::auto_impl(&mut, Box)]
 pub trait TrieCursorRw<K, V>: TrieCursor + TrieCursorWrite<K, V> + Send + Sync {}
+
+#[auto_impl::auto_impl(&mut, Box)]
+pub trait DupTrieCursorRw<K, V>: DupTrieCursor<K> + TrieCursorWrite<K, V> + Send + Sync {}

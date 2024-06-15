@@ -12,7 +12,7 @@ use reth_primitives::ChainSpec;
 use reth_provider::{
     providers::StaticFileProvider, BlockNumReader, HeaderProvider, ProviderError, ProviderFactory,
 };
-use reth_trie::StateRoot;
+use reth_trie_db::state_root;
 use std::{fs, sync::Arc};
 use tracing::*;
 
@@ -78,7 +78,7 @@ impl Command {
             entry = storage_trie_cursor.next()?;
         }
 
-        let state_root = StateRoot::from_tx(tx_mut).root()?;
+        let state_root = state_root::from_tx(tx_mut).root()?;
         if state_root != best_header.state_root {
             eyre::bail!(
                 "Recovery failed. Incorrect state root. Expected: {:?}. Received: {:?}",

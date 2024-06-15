@@ -17,7 +17,8 @@ use reth_provider::{
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
 };
-use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
+use reth_trie::{IntermediateStateRootState, StateRootProgress};
+use reth_trie_db::{state_root, trie_cursor::DbTxRefWrapper};
 use std::fmt::Debug;
 use tracing::*;
 
@@ -211,7 +212,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             });
 
             let tx = provider.tx_ref();
-            let progress = StateRoot::from_tx(tx)
+            let progress = state_root::from_tx(tx)
                 .with_intermediate_state(checkpoint.map(IntermediateStateRootState::from))
                 .root_with_progress()
                 .map_err(|e| {
@@ -220,7 +221,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                 })?;
             match progress {
                 StateRootProgress::Progress(state, hashed_entries_walked, updates) => {
-                    updates.flush(tx)?;
+                    updates.flush::<DbTxRefWrapper<'_, DB::TXMut>, &DB::TXMut>(tx)?;
 
                     let checkpoint = MerkleCheckpoint::new(
                         to_block,
@@ -240,7 +241,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     })
                 }
                 StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
-                    updates.flush(tx)?;
+                    updates.flush::<DbTxRefWrapper<'_, DB::TXMut>, &DB::TXMut>(tx)?;
 
                     entities_checkpoint.processed += hashed_entries_walked as u64;
 
@@ -250,12 +251,12 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie");
             let (root, updates) =
-                StateRoot::incremental_root_with_updates(provider.tx_ref(), range)
+                state_root::incremental_root_with_updates(provider.tx_ref(), range)
                     .map_err(|e| {
                         error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                         StageError::Fatal(Box::new(e))
                     })?;
-            updates.flush(provider.tx_ref())?;
+            updates.flush::<DbTxRefWrapper<'_, DB::TXMut>, &DB::TXMut>(provider.tx_ref())?;
 
             let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
                 provider.count_entries::<tables::HashedStorages>()?)
@@ -318,7 +319,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
 
         // Unwind trie only if there are transitions
         if !range.is_empty() {
-            let (block_root, updates) = StateRoot::incremental_root_with_updates(tx, range)
+            let (block_root, updates) = state_root::incremental_root_with_updates(tx, range)
                 .map_err(|e| StageError::Fatal(Box::new(e)))?;
 
             // Validate the calculated state root
@@ -328,7 +329,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             validate_state_root(block_root, target.seal_slow(), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
-            updates.flush(provider.tx_ref())?;
+            updates.flush::<DbTxRefWrapper<'_, DB::TXMut>, &DB::TXMut>(provider.tx_ref())?;
 
             // TODO(alexey): update entities checkpoint
         } else {

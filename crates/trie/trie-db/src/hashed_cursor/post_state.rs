@@ -17,10 +17,11 @@ impl<'a, CF> HashedPostStateCursorFactory<'a, CF> {
 }
 
 impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorFactory<'a, CF> {
+    type Err = CF::Err;
     type AccountCursor = HashedPostStateAccountCursor<'a, CF::AccountCursor>;
     type StorageCursor = HashedPostStateStorageCursor<'a, CF::StorageCursor>;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, CF::AccountCursor::Err> {
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, Self::Err> {
         let cursor = self.cursor_factory.hashed_account_cursor()?;
         Ok(HashedPostStateAccountCursor::new(cursor, self.post_state))
     }
@@ -28,7 +29,7 @@ impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorF
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor, CF::AccountCursor::Err> {
+    ) -> Result<Self::StorageCursor, Self::Err> {
         let cursor = self.cursor_factory.hashed_storage_cursor(hashed_address)?;
         Ok(HashedPostStateStorageCursor::new(cursor, self.post_state, hashed_address))
     }

@@ -9,12 +9,15 @@ use reth_primitives::{
 };
 use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, ProviderError};
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    hashed_cursor::HashedCursorFactory,
     node_iter::{TrieElement, TrieNodeIter},
     trie_cursor::TrieCursorFactory,
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashedPostState, StorageRoot,
+    StorageRoot,
+};
+use reth_trie_db::{
+    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::DbTxRefWrapper, HashedPostState,
 };
 use std::collections::HashMap;
 use thiserror::Error;
@@ -95,8 +98,11 @@ where
             .map(|(hashed_address, prefix_set)| {
                 let provider_ro = self.view.provider_ro()?;
                 let storage_root_result = StorageRoot::new_hashed(
-                    provider_ro.tx_ref(),
-                    HashedPostStateCursorFactory::new(provider_ro.tx_ref(), &hashed_state_sorted),
+                    DbTxRefWrapper::from(provider_ro.tx_ref()),
+                    HashedPostStateCursorFactory::new(
+                        DbTxRefWrapper::from(provider_ro.tx_ref()),
+                        &hashed_state_sorted,
+                    ),
                     hashed_address,
                     #[cfg(feature = "metrics")]
                     self.metrics.storage_trie.clone(),
@@ -111,9 +117,11 @@ where
         let mut trie_updates = TrieUpdates::default();
 
         let provider_ro = self.view.provider_ro()?;
-        let hashed_cursor_factory =
-            HashedPostStateCursorFactory::new(provider_ro.tx_ref(), &hashed_state_sorted);
-        let trie_cursor_factory = provider_ro.tx_ref();
+        let hashed_cursor_factory = HashedPostStateCursorFactory::new(
+            DbTxRefWrapper::from(provider_ro.tx_ref()),
+            &hashed_state_sorted,
+        );
+        let trie_cursor_factory = DbTxRefWrapper::from(provider_ro.tx_ref());
 
         let walker = TrieWalker::new(
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
@@ -140,7 +148,7 @@ where
                         None => {
                             tracker.inc_missed_leaves();
                             StorageRoot::new_hashed(
-                                trie_cursor_factory,
+                                DbTxRefWrapper::from(provider_ro.tx_ref()),
                                 hashed_cursor_factory.clone(),
                                 hashed_address,
                                 #[cfg(feature = "metrics")]

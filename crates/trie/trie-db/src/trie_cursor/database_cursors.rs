@@ -5,19 +5,29 @@ use reth_db::{
     DatabaseError,
 };
 use reth_primitives::{
-    trie::{BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey},
+    trie::{
+        BranchNodeCompact, Nibbles, StorageTrieEntry, StoredBranchNode, StoredNibbles,
+        StoredNibblesSubKey,
+    },
     B256,
 };
 use reth_trie::{
     trie_cursor::{
-        TrieCursor, TrieCursorErr, TrieCursorFactory, TrieCursorRw, TrieCursorRwFactory,
-        TrieCursorWrite,
+        DupTrieCursor, DupTrieCursorRw, TrieCursor, TrieCursorErr, TrieCursorFactory, TrieCursorRw,
+        TrieCursorRwFactory, TrieCursorWrite,
     },
     updates::TrieKey,
 };
 
 /// New-type for a [`DbTx`] and/or [`DbTxMut`] reference with [`TrieCursorFactory`] support.
-pub struct DbTxRefWrapper<'a, TX>(&'a TX);
+#[derive(Debug)]
+pub struct DbTxRefWrapper<'a, TX>(pub &'a TX);
+
+impl<'a, TX> Clone for DbTxRefWrapper<'a, TX> {
+    fn clone(&self) -> Self {
+        Self(self.0)
+    }
+}
 
 /// Converts reference to [`DbTx`] into [`DbTxRefWrapper`].
 impl<'a, TX: DbTx> From<&'a TX> for DbTxRefWrapper<'a, TX> {
@@ -52,35 +62,23 @@ impl<'a, TX: DbTxMut> TrieCursorRwFactory for DbTxRefWrapper<'a, TX> {
     fn account_trie_cursor_rw(
         &self,
     ) -> Result<
-        Box<
-            dyn TrieCursorRw<
-                    tables::AccountsTrie::Key,
-                    tables::AccountsTrie::Value,
-                    Err = Self::Err,
-                > + '_,
-        >,
+        Box<dyn TrieCursorRw<StoredNibbles, StoredBranchNode, Err = Self::Err> + '_>,
         Self::Err,
     > {
-        self.0
-            .cursor_write::<tables::AccountsTrie>()
-            .map(|v| Box::new(DatabaseAccountTrieCursor::new(v)))
+        self.0.cursor_write::<tables::AccountsTrie>().map(|v| {
+            Box::new(DatabaseAccountTrieCursor::new(v))
+                as Box<dyn TrieCursorRw<StoredNibbles, StoredBranchNode, Err = Self::Err>>
+        })
     }
 
     fn storage_tries_cursor_rw(
         &self,
-    ) -> Result<
-        Box<
-            dyn TrieCursorRw<
-                    tables::StoragesTrie::Key,
-                    tables::StoragesTrie::Value,
-                    Err = Self::Err,
-                > + '_,
-        >,
-        Self::Err,
-    > {
-        self.0
-            .cursor_dup_write::<tables::StoragesTrie>()
-            .map(|v| Box::new(DatabaseStorageTrieCursor::new(v, B256::ZERO)))
+    ) -> Result<Box<dyn DupTrieCursorRw<B256, StorageTrieEntry, Err = Self::Err> + '_>, Self::Err>
+    {
+        self.0.cursor_dup_write::<tables::StoragesTrie>().map(|v| {
+            Box::new(DatabaseStoragesTrieCursor::new(v))
+                as Box<dyn DupTrieCursorRw<B256, StorageTrieEntry, Err = Self::Err>>
+        })
     }
 }
 
@@ -97,7 +95,7 @@ impl<C> DatabaseAccountTrieCursor<C> {
 
 impl<C> TrieCursorErr for DatabaseAccountTrieCursor<C>
 where
-    C: DbCursorRO<tables::AccountsTrie> + Send + Sync,
+    C: Send + Sync,
 {
     type Err = DatabaseError;
 }
@@ -125,15 +123,7 @@ where
     }
 }
 
-impl<C> TrieCursorErr for DatabaseAccountTrieCursor<C>
-where
-    C: DbCursorRW<tables::AccountsTrie> + Send + Sync,
-{
-    type Err = DatabaseError;
-}
-
-impl<C> TrieCursorWrite<tables::AccountsTrie::Key, tables::AccountsTrie::Value>
-    for DatabaseAccountTrieCursor<C>
+impl<C> TrieCursorWrite<StoredNibbles, StoredBranchNode> for DatabaseAccountTrieCursor<C>
 where
     C: DbCursorRW<tables::AccountsTrie> + Send + Sync,
 {
@@ -145,24 +135,24 @@ where
         unimplemented!("Duplicate keys are not supported for accounts trie")
     }
 
-    fn upsert(
-        &mut self,
-        key: tables::AccountsTrie::Key,
-        value: tables::AccountsTrie::Value,
-    ) -> Result<(), Self::Err> {
+    fn upsert(&mut self, key: StoredNibbles, value: StoredBranchNode) -> Result<(), Self::Err> {
         self.0.upsert(key, value)
     }
 }
 
+impl<C> TrieCursorRw<StoredNibbles, StoredBranchNode> for DatabaseAccountTrieCursor<C> where
+    C: DbCursorRW<tables::AccountsTrie> + DbCursorRO<tables::AccountsTrie> + Send + Sync
+{
+}
+
 impl<C> TrieCursorErr for DatabaseStorageTrieCursor<C>
 where
-    C: DbCursorRW<tables::StoragesTrie> + DbDupCursorRW<tables::StoragesTrie> + Send + Sync,
+    C: Send + Sync,
 {
     type Err = DatabaseError;
 }
 
-impl<C> TrieCursorWrite<tables::StoragesTrie::Key, tables::StoragesTrie::Value>
-    for DatabaseStorageTrieCursor<C>
+impl<C> TrieCursorWrite<B256, StorageTrieEntry> for DatabaseStorageTrieCursor<C>
 where
     C: DbCursorRW<tables::StoragesTrie> + DbDupCursorRW<tables::StoragesTrie> + Send + Sync,
 {
@@ -174,11 +164,7 @@ where
         self.cursor.delete_current_duplicates()
     }
 
-    fn upsert(
-        &mut self,
-        key: tables::StoragesTrie::Key,
-        value: tables::StoragesTrie::Value,
-    ) -> Result<(), Self::Err> {
+    fn upsert(&mut self, key: B256, value: StorageTrieEntry) -> Result<(), Self::Err> {
         self.cursor.upsert(key, value)
     }
 }
@@ -199,9 +185,23 @@ impl<C> DatabaseStorageTrieCursor<C> {
     }
 }
 
-impl<C> TrieCursorErr for DatabaseStorageTrieCursor<C>
+/// A cursor over the storage tries stored in the database.
+#[derive(Debug)]
+pub struct DatabaseStoragesTrieCursor<C> {
+    /// The underlying cursor.
+    pub cursor: C,
+}
+
+impl<C> DatabaseStoragesTrieCursor<C> {
+    /// Create a new storage trie cursor.
+    pub const fn new(cursor: C) -> Self {
+        Self { cursor }
+    }
+}
+
+impl<C> TrieCursorErr for DatabaseStoragesTrieCursor<C>
 where
-    C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie> + Send + Sync,
+    C: Send + Sync,
 {
     type Err = DatabaseError;
 }
@@ -234,6 +234,62 @@ where
     fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
         Ok(self.cursor.current()?.map(|(k, v)| TrieKey::StorageNode(k, v.nibbles)))
     }
+}
+
+impl<C> DupTrieCursor<B256> for DatabaseStoragesTrieCursor<C>
+where
+    C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie> + Send + Sync,
+{
+    /// Seeks an exact match for the given key in the storage trie.
+    fn seek_exact(&mut self, key: B256) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
+        Ok(self.cursor.seek_exact(key.clone())?.map(|value| (value.1.nibbles.0, value.1.node)))
+    }
+
+    fn seek_by_key_subkey(
+        &mut self,
+        key: B256,
+        subkey: Nibbles,
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, <Box<Self> as TrieCursorErr>::Err> {
+        self.cursor
+            .seek_by_key_subkey(key, StoredNibblesSubKey(subkey.clone()))
+            .map(|value| value.map(|value| (value.nibbles.0, value.node)))
+    }
+
+    /// Retrieves the current value in the storage trie cursor.
+    fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
+        Ok(self.cursor.current()?.map(|(k, v)| TrieKey::StorageNode(k, v.nibbles)))
+    }
+}
+
+impl<C> TrieCursorWrite<B256, StorageTrieEntry> for DatabaseStoragesTrieCursor<C>
+where
+    C: DbCursorRW<tables::StoragesTrie> + DbDupCursorRW<tables::StoragesTrie> + Send + Sync,
+{
+    fn delete_current(&mut self) -> Result<(), <Box<Self> as TrieCursorErr>::Err> {
+        self.cursor.delete_current()
+    }
+
+    fn delete_current_duplicates(&mut self) -> Result<(), <Box<Self> as TrieCursorErr>::Err> {
+        self.cursor.delete_current_duplicates()
+    }
+
+    fn upsert(
+        &mut self,
+        key: B256,
+        value: StorageTrieEntry,
+    ) -> Result<(), <Box<Self> as TrieCursorErr>::Err> {
+        self.cursor.upsert(key, value)
+    }
+}
+
+impl<C> DupTrieCursorRw<B256, StorageTrieEntry> for DatabaseStoragesTrieCursor<C> where
+    C: DbDupCursorRW<tables::StoragesTrie>
+        + DbCursorRW<tables::StoragesTrie>
+        + DbDupCursorRO<tables::StoragesTrie>
+        + DbCursorRO<tables::StoragesTrie>
+        + Send
+        + Sync
+{
 }
 
 #[cfg(test)]

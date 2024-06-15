@@ -12,14 +12,19 @@ use reth_trie::metrics::{TrieRootMetrics, TrieType};
 
 pub mod state_root {
     use super::*;
+    use crate::trie_cursor::DbTxRefWrapper;
+    use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 
     /// Create a new [`StateRoot`] instance.
-    pub fn from_tx<TX: DbTx>(tx: &TX) -> StateRoot<&TX, &TX> {
-        StateRoot::default()
-            .with_threshold(100_000)
-            .with_trie_cursor_factory(tx)
-            .with_hashed_cursor_factory(tx)
-            .with_prefix_sets(TriePrefixSets::default())
+    pub fn from_tx<'a, TX: DbTx>(
+        tx: &'a TX,
+    ) -> StateRoot<DbTxRefWrapper<'a, TX>, DbTxRefWrapper<'a, TX>> {
+        StateRoot::<DbTxRefWrapper<'a, TX>, DbTxRefWrapper<'a, TX>>::new(
+            DbTxRefWrapper::from(tx),
+            DbTxRefWrapper::from(tx),
+        )
+        .with_threshold(100_000)
+        .with_prefix_sets(TriePrefixSets::default())
     }
 
     /// Given a block number range, identifies all the accounts and storage keys that
@@ -28,12 +33,12 @@ pub mod state_root {
     /// # Returns
     ///
     /// An instance of state root calculator with account and storage prefixes loaded.
-    pub fn incremental_root_calculator<TX: DbTx>(
-        tx: &TX,
+    pub fn incremental_root_calculator<'a, TX: DbTx>(
+        tx: &'a TX,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<StateRoot<&TX, &TX>, StateRootError> {
+    ) -> Result<StateRoot<DbTxRefWrapper<'a, TX>, DbTxRefWrapper<'a, TX>>, StateRootError> {
         let loaded_prefix_sets = PrefixSetLoader::new(tx).load(range)?;
-        Ok(StateRoot::from_tx(tx).with_prefix_sets(loaded_prefix_sets))
+        Ok(from_tx(tx).with_prefix_sets(loaded_prefix_sets))
     }
 
     /// Computes the state root of the trie with the changed account and storage prefixes and
@@ -42,7 +47,7 @@ pub mod state_root {
     /// # Returns
     ///
     /// The updated state root.
-    pub fn incremental_root<TX: DbTx>(
+    pub fn incremental_root<TX: DbTx + TrieCursorFactory + HashedCursorFactory>(
         tx: &TX,
         range: RangeInclusive<BlockNumber>,
     ) -> Result<B256, StateRootError> {

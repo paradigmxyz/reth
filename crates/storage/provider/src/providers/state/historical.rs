@@ -15,7 +15,8 @@ use reth_primitives::{
     StaticFileSegment, StorageKey, StorageValue, B256,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::updates::TrieUpdates;
+use reth_trie_db::HashedPostState;
 use revm::db::BundleState;
 use std::fmt::Debug;
 

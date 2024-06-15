@@ -5,7 +5,7 @@ use reth_primitives::{
     Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, StorageEntry, B256,
     U256,
 };
-use reth_trie::HashedPostState;
+use reth_trie_db::HashedPostState;
 use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,

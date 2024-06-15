@@ -17,7 +17,8 @@ use reth_provider::{
     DatabaseProviderRW, HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError,
     ProviderFactory, StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
 };
-use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
+use reth_trie::{IntermediateStateRootState, StateRootProgress};
+use reth_trie_db::{state_root, trie_cursor::DbTxRefWrapper};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -456,7 +457,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
     let mut total_flushed_updates = 0;
 
     loop {
-        match StateRootComputer::from_tx(tx)
+        match state_root::from_tx(tx)
             .with_intermediate_state(intermediate_state)
             .root_with_progress()?
         {
@@ -471,7 +472,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
                 );
 
                 intermediate_state = Some(*state);
-                updates.flush(tx)?;
+                updates.flush::<DbTxRefWrapper<'_, DB::TXMut>, &DB::TXMut>(tx)?;
 
                 total_flushed_updates += updates_len;
 
@@ -485,7 +486,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
             StateRootProgress::Complete(root, _, updates) => {
                 let updates_len = updates.len();
 
-                updates.flush(tx)?;
+                updates.flush::<DbTxRefWrapper<'_, DB::TXMut>, &DB::TXMut>(tx)?;
 
                 total_flushed_updates += updates_len;
 

@@ -45,8 +45,8 @@ use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
     updates::TrieUpdates,
-    HashedPostState, StateRoot,
 };
+use reth_trie_db::{state_root, trie_cursor::DbTxRefWrapper, HashedPostState};
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::{
     cmp::Ordering,
@@ -2296,7 +2296,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     .collect(),
                 destroyed_accounts,
             };
-            let (state_root, trie_updates) = StateRoot::from_tx(&self.tx)
+            let (state_root, trie_updates) = state_root::from_tx(&self.tx)
                 .with_prefix_sets(prefix_sets)
                 .root_with_updates()
                 .map_err(Into::<reth_db::DatabaseError>::into)?;
@@ -2307,7 +2307,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     block_hash: end_block_hash,
                 })))
             }
-            trie_updates.flush(&self.tx)?;
+            trie_updates.flush::<DbTxRefWrapper<'_, TX>, &TX>(&self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertMerkleTree);
 
@@ -2480,7 +2480,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                 storage_prefix_sets,
                 destroyed_accounts,
             };
-            let (new_state_root, trie_updates) = StateRoot::from_tx(&self.tx)
+            let (new_state_root, trie_updates) = state_root::from_tx(&self.tx)
                 .with_prefix_sets(prefix_sets)
                 .root_with_updates()
                 .map_err(Into::<reth_db::DatabaseError>::into)?;
@@ -2503,7 +2503,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                     block_hash: parent_hash,
                 })))
             }
-            trie_updates.flush(&self.tx)?;
+            trie_updates.flush::<DbTxRefWrapper<'_, TX>, &TX>(&self.tx)?;
         }
 
         // get blocks
@@ -2704,7 +2704,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         // insert hashes and intermediate merkle nodes
         {
             HashedStateChanges(hashed_state).write_to_db(&self.tx)?;
-            trie_updates.flush(&self.tx)?;
+            trie_updates.flush::<DbTxRefWrapper<'_, TX>, &TX>(&self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 

@@ -3,7 +3,8 @@ use reth_db::models::StoredBlockBodyIndices;
 use reth_primitives::{BlockNumber, PruneModes, SealedBlockWithSenders};
 use reth_storage_api::BlockReader;
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::updates::TrieUpdates;
+use reth_trie_db::HashedPostState;
 use std::ops::RangeInclusive;
 
 /// BlockExecution Writer

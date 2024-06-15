@@ -6,7 +6,7 @@ use reth_db::{
     DatabaseError,
 };
 use reth_primitives::{StorageEntry, U256};
-use reth_trie::HashedPostState;
+use reth_trie_db::HashedPostState;
 
 /// Changes to the hashed state.
 #[derive(Debug, Default)]

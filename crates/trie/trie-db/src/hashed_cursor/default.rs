@@ -7,18 +7,48 @@ use reth_primitives::{Account, B256, U256};
 use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 
 /// New-type for a [`DbTx`] reference with [`HashedCursorFactory`] support.
+#[derive(Clone)]
 pub struct DbTxRefWrapper<'a, TX: DbTx>(&'a TX);
+
+/// Converts reference to [`DbTx`] into [`DbTxRefWrapper`].
+impl<'a, TX: DbTx> From<&'a TX> for DbTxRefWrapper<'a, TX> {
+    fn from(value: &'a TX) -> Self {
+        Self(value)
+    }
+}
 
 /// New-type for a [`DbCursorRO`] reference with [`HashedCursor`] support.
 pub struct DbCursorROWrapper<T: DbCursorRO<tables::HashedAccounts>>(T);
 
-impl<'a, TX: DbTx> HashedCursorFactory for DbTxRefWrapper<'a, TX> {
-    type AccountCursor = <TX as DbTx>::Cursor<tables::HashedAccounts>;
+impl<'a, TX: DbTx> HashedCursorFactory for crate::trie_cursor::DbTxRefWrapper<'a, TX> {
+    type Err = reth_db::DatabaseError;
+    type AccountCursor = DbCursorROWrapper<<TX as DbTx>::Cursor<tables::HashedAccounts>>;
     type StorageCursor =
         DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
-        self.0.cursor_read::<tables::HashedAccounts>()
+        Ok(DbCursorROWrapper(self.0.cursor_read::<tables::HashedAccounts>()?))
+    }
+
+    fn hashed_storage_cursor(
+        &self,
+        hashed_address: B256,
+    ) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
+        Ok(DatabaseHashedStorageCursor::new(
+            self.0.cursor_dup_read::<tables::HashedStorages>()?,
+            hashed_address,
+        ))
+    }
+}
+
+impl<'a, TX: DbTx> HashedCursorFactory for &DbTxRefWrapper<'a, TX> {
+    type Err = reth_db::DatabaseError;
+    type AccountCursor = DbCursorROWrapper<<TX as DbTx>::Cursor<tables::HashedAccounts>>;
+    type StorageCursor =
+        DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>;
+
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
+        Ok(DbCursorROWrapper(self.0.cursor_read::<tables::HashedAccounts>()?))
     }
 
     fn hashed_storage_cursor(

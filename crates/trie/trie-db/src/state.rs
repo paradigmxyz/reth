@@ -1,4 +1,4 @@
-use crate::state_root;
+use crate::{hashed_cursor::HashedPostStateCursorFactory, state_root, trie_cursor::DbTxRefWrapper};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_db::{
     cursor::DbCursorRO,
@@ -13,7 +13,6 @@ use reth_primitives::{
     U256,
 };
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::{PrefixSetMut, TriePrefixSets},
     updates::TrieUpdates,
 };
@@ -240,7 +239,10 @@ impl HashedPostState {
         let sorted = self.clone().into_sorted();
         let prefix_sets = self.construct_prefix_sets();
         state_root::from_tx(tx)
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
+            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
+                DbTxRefWrapper::from(tx),
+                &sorted,
+            ))
             .with_prefix_sets(prefix_sets)
             .root()
     }
@@ -254,7 +256,10 @@ impl HashedPostState {
         let sorted = self.clone().into_sorted();
         let prefix_sets = self.construct_prefix_sets();
         state_root::from_tx(tx)
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
+            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
+                DbTxRefWrapper::from(tx),
+                &sorted,
+            ))
             .with_prefix_sets(prefix_sets)
             .root_with_updates()
     }
