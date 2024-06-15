@@ -190,8 +190,12 @@ pub fn insert_state<'a, 'b, DB: Database>(
     }
 
     // Create an execution outcome
-    let execution_outcome =
-        ExecutionOutcome::new_init(bundle_builder, Receipts::default(), block, Vec::new());
+    let execution_outcome = ExecutionOutcome::from_state_builder(
+        bundle_builder,
+        Receipts::default(),
+        block,
+        Vec::new(),
+    );
 
     // Write the execution outcome to the database storage
     execution_outcome.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;

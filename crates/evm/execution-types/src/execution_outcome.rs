@@ -65,7 +65,7 @@ impl ExecutionOutcome {
     ///
     /// This constructor initializes a new `ExecutionOutcome` instance using detailed
     /// initialization parameters.
-    pub fn new_init(
+    pub fn from_state_builder(
         state_builder: BundleBuilder,
         receipts: Receipts,
         first_block: BlockNumber,
@@ -377,10 +377,10 @@ mod tests {
         state_builder.state_original_account_info(Address::new([2; 20]), AccountInfo::default());
         state_builder.revert_account_info(123, Address::new([2; 20]), AccountInfo::default());
 
-        // Assert that creating a new ExecutionOutcome using the new_init method matches
+        // Assert that creating a new ExecutionOutcome using the from_state_builder method matches
         // exec_res
         assert_eq!(
-            ExecutionOutcome::new_init(state_builder, receipts, first_block, requests,),
+            ExecutionOutcome::from_state_builder(state_builder, receipts, first_block, requests,),
             exec_res
         );
     }
