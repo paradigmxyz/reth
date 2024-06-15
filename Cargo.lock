@@ -7607,7 +7607,6 @@ version = "1.0.0-rc.1"
 dependencies = [
  "futures-util",
  "metrics",
- "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-engine-primitives",
  "reth-metrics",

@@ -20,10 +20,9 @@ mod payload;
 pub use payload::PayloadOrAttributes;
 
 use reth_primitives::ChainSpec;
-use std::fmt::Debug;
 
 /// The types that are used by the engine API.
-pub trait PayloadTypes: Send + Sync + Unpin {
+pub trait PayloadTypes: Send + Sync + core::fmt::Debug + Unpin + Send + Sync + Clone {
     /// The RPC payload attributes type the CL node emits via the engine API.
     type PayloadAttributes: PayloadAttributes + Unpin;
 
