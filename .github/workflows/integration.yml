@@ -91,7 +91,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Run no_std checks
-        run: ./scripts/check_no_std.sh
+        run: .github/scripts/check_no_std.sh
 
   integration-success:
     name: integration success
