@@ -6,7 +6,6 @@ use crate::{
         revm_utils::{
             apply_state_overrides, build_call_evm_env, caller_gas_allowance,
             cap_tx_gas_limit_with_caller_allowance, get_precompiles, prepare_call_env,
-            EvmOverrides,
         },
         EthTransactions,
     },
@@ -20,8 +19,8 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
-    state::StateOverride, AccessListWithGasUsed, Bundle, EthCallResponse, StateContext,
-    TransactionRequest,
+    state::{EvmOverrides, StateOverride},
+    AccessListWithGasUsed, Bundle, EthCallResponse, StateContext, TransactionRequest,
 };
 use reth_transaction_pool::TransactionPool;
 use revm::{

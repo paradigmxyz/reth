@@ -1,9 +1,9 @@
 use alloy_consensus::{
     BlobTransactionSidecar, SidecarBuilder, SimpleCoder, TxEip4844Variant, TxEnvelope,
 };
-use alloy_network::{eip2718::Encodable2718, EthereumSigner, TransactionBuilder};
+use alloy_network::{eip2718::Encodable2718, EthereumWallet, TransactionBuilder};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
-use alloy_signer_wallet::LocalWallet;
+use alloy_signer_local::PrivateKeySigner;
 use eyre::Ok;
 use reth_primitives::{hex, Address, Bytes, U256};
 
@@ -13,19 +13,22 @@ pub struct TransactionTestContext;
 
 impl TransactionTestContext {
     /// Creates a static transfer and signs it, returning bytes
-    pub async fn transfer_tx(chain_id: u64, wallet: LocalWallet) -> TxEnvelope {
+    pub async fn transfer_tx(chain_id: u64, wallet: PrivateKeySigner) -> TxEnvelope {
         let tx = tx(chain_id, None, 0);
         Self::sign_tx(wallet, tx).await
     }
 
     /// Creates a static transfer and signs it, returning bytes
-    pub async fn transfer_tx_bytes(chain_id: u64, wallet: LocalWallet) -> Bytes {
+    pub async fn transfer_tx_bytes(chain_id: u64, wallet: PrivateKeySigner) -> Bytes {
         let signed = Self::transfer_tx(chain_id, wallet).await;
         signed.encoded_2718().into()
     }
 
     /// Creates a tx with blob sidecar and sign it
-    pub async fn tx_with_blobs(chain_id: u64, wallet: LocalWallet) -> eyre::Result<TxEnvelope> {
+    pub async fn tx_with_blobs(
+        chain_id: u64,
+        wallet: PrivateKeySigner,
+    ) -> eyre::Result<TxEnvelope> {
         let mut tx = tx(chain_id, None, 0);
 
         let mut builder = SidecarBuilder::<SimpleCoder>::new();
@@ -40,13 +43,16 @@ impl TransactionTestContext {
     }
 
     /// Signs an arbitrary TransactionRequest using the provided wallet
-    pub async fn sign_tx(wallet: LocalWallet, tx: TransactionRequest) -> TxEnvelope {
-        let signer = EthereumSigner::from(wallet);
+    pub async fn sign_tx(wallet: PrivateKeySigner, tx: TransactionRequest) -> TxEnvelope {
+        let signer = EthereumWallet::from(wallet);
         tx.build(&signer).await.unwrap()
     }
 
     /// Creates a tx with blob sidecar and sign it, returning bytes
-    pub async fn tx_with_blobs_bytes(chain_id: u64, wallet: LocalWallet) -> eyre::Result<Bytes> {
+    pub async fn tx_with_blobs_bytes(
+        chain_id: u64,
+        wallet: PrivateKeySigner,
+    ) -> eyre::Result<Bytes> {
         let signed = Self::tx_with_blobs(chain_id, wallet).await?;
 
         Ok(signed.encoded_2718().into())
@@ -54,12 +60,12 @@ impl TransactionTestContext {
 
     pub async fn optimism_l1_block_info_tx(
         chain_id: u64,
-        wallet: LocalWallet,
+        wallet: PrivateKeySigner,
         nonce: u64,
     ) -> Bytes {
         let l1_block_info = Bytes::from_static(&hex!("7ef9015aa044bae9d41b8380d781187b426c6fe43df5fb2fb57bd4466ef6a701e1f01e015694deaddeaddeaddeaddeaddeaddeaddeaddead000194420000000000000000000000000000000000001580808408f0d18001b90104015d8eb900000000000000000000000000000000000000000000000000000000008057650000000000000000000000000000000000000000000000000000000063d96d10000000000000000000000000000000000000000000000000000000000009f35273d89754a1e0387b89520d989d3be9c37c1f32495a88faf1ea05c61121ab0d1900000000000000000000000000000000000000000000000000000000000000010000000000000000000000002d679b567db6187c0c8323fa982cfb88b74dbcc7000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240"));
         let tx = tx(chain_id, Some(l1_block_info), nonce);
-        let signer = EthereumSigner::from(wallet);
+        let signer = EthereumWallet::from(wallet);
         tx.build(&signer).await.unwrap().encoded_2718().into()
     }
 
