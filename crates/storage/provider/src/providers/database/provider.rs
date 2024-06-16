@@ -615,9 +615,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             );
         }
 
-        let mut state_storage: HashMap<Address, HashMap<U256, (U256, U256)>> = HashMap::new();
-        let mut revert_storage: HashMap<BlockNumberAddress, Vec<(U256, U256)>> = HashMap::new();
-
         // add storage changeset changes
         for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
             let BlockNumberAddress((block_number, address)) = block_and_address;
@@ -631,7 +628,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
             }
 
-            let account_state = match state_storage.entry(address) {
+            let account_state = match bundle_builder.get_state_storage_mut().entry(address) {
                 hash_map::Entry::Occupied(entry) => entry.into_mut(),
                 hash_map::Entry::Vacant(entry) => entry.insert(HashMap::new()),
             };
@@ -650,18 +647,11 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
             };
 
-            revert_storage
-                .entry(block_and_address)
+            bundle_builder
+                .get_revert_storage_mut()
+                .entry((block_number, address))
                 .or_default()
                 .push((old_storage.key.into(), old_storage.value));
-
-            bundle_builder = bundle_builder
-                .state_storage(address, state_storage.entry(address).or_default().clone());
-            bundle_builder = bundle_builder.revert_storage(
-                block_number,
-                address,
-                revert_storage.entry(block_and_address).or_default().clone(),
-            );
         }
 
         let bundle_state = bundle_builder.build();
