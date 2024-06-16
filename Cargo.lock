@@ -6649,6 +6649,7 @@ dependencies = [
  "reth-etl",
  "reth-primitives",
  "reth-provider",
+ "reth-revm",
  "reth-stages-types",
  "reth-trie",
  "serde",

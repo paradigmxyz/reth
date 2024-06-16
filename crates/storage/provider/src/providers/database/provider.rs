@@ -1,6 +1,5 @@
 use crate::{
-    bundle_state::{BundleStateInit, ExecutionOutcome, HashedStateChanges, RevertsInit},
-    bundle_state::{BundleStateWithReceipts, HashedStateChanges},
+    bundle_state::{ExecutionOutcome, HashedStateChanges},
     providers::{database::metrics, static_file::StaticFileWriter, StaticFileProvider},
     to_range,
     traits::{
@@ -32,14 +31,11 @@ use reth_evm::ConfigureEvmEnv;
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives::{
     keccak256,
-    revm::{config::revm_spec, env::fill_block_env},
     revm::{
         compat::{into_reth_acc, into_revm_acc},
         config::revm_spec,
         env::fill_block_env,
     },
-    stage::{StageCheckpoint, StageId},
-    trie::Nibbles,
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
     ChainInfo, ChainSpec, GotExpected, Head, Header, Receipt, Requests, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta,
@@ -673,7 +669,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         if TAKE {
             // iterate over local plain state remove all account and all storages.
 
-            for (address, bundle_account) in bundle_state.state.iter() {
+            for (address, bundle_account) in &bundle_state.state {
                 // revert account if needed.
                 if bundle_account.is_info_changed() {
                     let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
@@ -685,7 +681,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
 
                 // revert storages
-                for (storage_key, storage_slot) in bundle_account.storage.iter() {
+                for (storage_key, storage_slot) in &bundle_account.storage {
                     let storage_key: B256 = (*storage_key).into();
                     let storage_entry =
                         StorageEntry { key: storage_key, value: storage_slot.original_value() };
@@ -726,7 +722,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         Ok(ExecutionOutcome::new(
             bundle_state,
-            reth_primitives::Receipts::from_vec(receipts),
+            reth_primitives::Receipts::from(receipts),
             start_block_number,
             Vec::new(),
         ))

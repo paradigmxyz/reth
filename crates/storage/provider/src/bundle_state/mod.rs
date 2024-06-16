@@ -8,7 +8,6 @@ mod state_reverts;
 pub use bundle_state_with_receipts::{
     AccountRevertInit, BundleStateInit, ExecutionOutcome, OriginalValuesKnown, RevertsInit,
 };
-pub use bundle_state_with_receipts::{BundleStateWithReceipts, OriginalValuesKnown};
 pub use hashed_state_changes::HashedStateChanges;
 pub use state_changes::StateChanges;
 pub use state_reverts::{StateReverts, StorageRevertsIter};

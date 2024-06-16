@@ -6,11 +6,6 @@ use reth_db_api::{
 };
 pub use reth_execution_types::*;
 use reth_primitives::StaticFileSegment;
-use reth_evm::execute::BatchBlockExecutionOutput;
-use reth_primitives::{
-    logs_bloom, revm::compat::into_reth_acc, Account, Address, BlockHash, BlockNumber, Bloom,
-    Bytecode, Log, Receipt, Receipts, StaticFileSegment, B256, U256,
-};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 pub use revm::db::states::OriginalValuesKnown;
 
@@ -85,7 +80,6 @@ mod tests {
         revm::compat::{into_reth_acc, into_revm_acc},
         Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
     };
-    use reth_primitives::{keccak256, revm::compat::into_revm_acc, StorageEntry};
     use reth_trie::{test_utils::state_root, StateRoot};
     use revm::{
         db::{
