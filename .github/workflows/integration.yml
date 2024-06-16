@@ -78,21 +78,6 @@ jobs:
             -- db get static-file headers 100000 \
             | grep 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4
 
-  no-std:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          target: riscv32imac-unknown-none-elf
-      - uses: taiki-e/install-action@cargo-hack
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-      - name: Run no_std checks
-        run: .github/scripts/check_no_std.sh
-
   integration-success:
     name: integration success
     runs-on: ubuntu-latest
