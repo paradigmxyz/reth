@@ -56,7 +56,7 @@ impl MyEvmConfig {
 
     /// A custom precompile that does nothing
     fn my_precompile(_data: &Bytes, _gas: u64, _env: &Env) -> PrecompileResult {
-        Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::new() })
+        Ok(PrecompileOutput::new(0, Bytes::new()))
     }
 }
 
