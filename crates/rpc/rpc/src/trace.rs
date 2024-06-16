@@ -316,7 +316,7 @@ where
             .flat_map(|traces| traces.into_iter().flatten().flat_map(|traces| traces.into_iter()))
             .collect::<Vec<_>>();
 
-        // add reward traces
+        // include all the block reward traces
         let reward_blocks =
             blocks.iter().map(|block| self.inner.eth_api.block_by_id(block.number.into()));
 
