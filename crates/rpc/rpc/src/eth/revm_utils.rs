@@ -137,7 +137,7 @@ impl FillableTransaction for TransactionSigned {
 
 /// Returns the addresses of the precompiles corresponding to the `SpecId`.
 #[inline]
-pub(crate) fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
+pub fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
     let spec = PrecompileSpecId::from_spec_id(spec_id);
     Precompiles::new(spec).addresses().copied().map(Address::from)
 }
@@ -151,7 +151,7 @@ pub(crate) fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Addre
 ///  - `disable_eip3607` is set to `true`
 ///  - `disable_base_fee` is set to `true`
 ///  - `nonce` is set to `None`
-pub(crate) fn prepare_call_env<DB>(
+pub fn prepare_call_env<DB>(
     mut cfg: CfgEnvWithHandlerCfg,
     mut block: BlockEnv,
     request: TransactionRequest,
@@ -221,7 +221,7 @@ where
 /// `eth_call`.
 ///
 /// Note: this does _not_ access the Database to check the sender.
-pub(crate) fn build_call_evm_env(
+pub fn build_call_evm_env(
     cfg: CfgEnvWithHandlerCfg,
     block: BlockEnv,
     request: TransactionRequest,
@@ -234,10 +234,7 @@ pub(crate) fn build_call_evm_env(
 ///
 /// All [`TxEnv`] fields are derived from the given [`TransactionRequest`], if fields are `None`,
 /// they fall back to the [`BlockEnv`]'s settings.
-pub(crate) fn create_txn_env(
-    block_env: &BlockEnv,
-    request: TransactionRequest,
-) -> EthResult<TxEnv> {
+pub fn create_txn_env(block_env: &BlockEnv, request: TransactionRequest) -> EthResult<TxEnv> {
     // Ensure that if versioned hashes are set, they're not empty
     if request.blob_versioned_hashes.as_ref().map_or(false, |hashes| hashes.is_empty()) {
         return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
@@ -300,10 +297,7 @@ pub(crate) fn create_txn_env(
 }
 
 /// Caps the configured [`TxEnv`] `gas_limit` with the allowance of the caller.
-pub(crate) fn cap_tx_gas_limit_with_caller_allowance<DB>(
-    db: &mut DB,
-    env: &mut TxEnv,
-) -> EthResult<()>
+pub fn cap_tx_gas_limit_with_caller_allowance<DB>(db: &mut DB, env: &mut TxEnv) -> EthResult<()>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
@@ -321,7 +315,7 @@ where
 ///
 /// Returns an error if the caller has insufficient funds.
 /// Caution: This assumes non-zero `env.gas_price`. Otherwise, zero allowance will be returned.
-pub(crate) fn caller_gas_allowance<DB>(db: &mut DB, env: &TxEnv) -> EthResult<U256>
+pub fn caller_gas_allowance<DB>(db: &mut DB, env: &TxEnv) -> EthResult<U256>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
@@ -343,7 +337,8 @@ where
 }
 
 /// Helper type for representing the fees of a [`TransactionRequest`]
-pub(crate) struct CallFees {
+#[derive(Debug)]
+pub struct CallFees {
     /// EIP-1559 priority fee
     max_priority_fee_per_gas: Option<U256>,
     /// Unified gas price setting
@@ -506,10 +501,7 @@ fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
 }
 
 /// Applies the given state overrides (a set of [`AccountOverride`]) to the [`CacheDB`].
-pub(crate) fn apply_state_overrides<DB>(
-    overrides: StateOverride,
-    db: &mut CacheDB<DB>,
-) -> EthResult<()>
+pub fn apply_state_overrides<DB>(overrides: StateOverride, db: &mut CacheDB<DB>) -> EthResult<()>
 where
     DB: DatabaseRef,
     EthApiError: From<<DB as DatabaseRef>::Error>,
@@ -581,9 +573,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::constants::GWEI_TO_WEI;
-
     use super::*;
+    use reth_primitives::constants::GWEI_TO_WEI;
 
     #[test]
     fn test_ensure_0_fallback() {
