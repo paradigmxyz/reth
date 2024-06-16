@@ -591,7 +591,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
-        // let mut reverts: RevertsInit = HashMap::new();
 
         // Iterate over the account changesets in reverse order.
         for (block_number, account_before) in account_changeset.into_iter().rev() {
