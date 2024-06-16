@@ -3089,6 +3089,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "exex-discv5"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "discv5",
+ "eyre",
+ "futures-util",
+ "reth",
+ "reth-chainspec",
+ "reth-discv5",
+ "reth-exex",
+ "reth-exex-test-utils",
+ "reth-node-api",
+ "reth-node-ethereum",
+ "reth-testing-utils",
+ "reth-tracing",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
 name = "eyre"
 version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
