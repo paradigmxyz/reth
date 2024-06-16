@@ -12,7 +12,7 @@ use reth::{
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,
-        precompile::{Precompile, PrecompileSpecId, Precompiles},
+        precompile::{Precompile, PrecompileOutput, PrecompileSpecId, Precompiles},
         Database, Evm, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
@@ -56,7 +56,7 @@ impl MyEvmConfig {
 
     /// A custom precompile that does nothing
     fn my_precompile(_data: &Bytes, _gas: u64, _env: &Env) -> PrecompileResult {
-        Ok((0, Bytes::new()))
+        Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::new() })
     }
 }
 
