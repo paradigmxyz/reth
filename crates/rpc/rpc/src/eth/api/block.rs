@@ -75,9 +75,8 @@ where
         };
 
         // If no block and receipts found, return None
-        let (block, receipts) = match block_and_receipts {
-            Some(data) => data,
-            None => return Ok(None),
+        let Some((block, receipts)) = block_and_receipts else {
+            return Ok(None);
         };
 
         // Extract block details
