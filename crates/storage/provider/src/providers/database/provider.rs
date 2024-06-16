@@ -580,7 +580,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
 
-
         // Create an empty bundle builder to accumulate the state changes
         let mut bundle_builder = BundleBuilder::new(range);
 
@@ -590,7 +589,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         // anything.
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
-
 
         // Iterate over the account changesets in reverse order.
         for (block_number, account_before) in account_changeset.into_iter().rev() {
