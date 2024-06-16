@@ -21,13 +21,14 @@ use futures_util::{
     future::{select, BoxFuture},
     Future, FutureExt, TryFutureExt,
 };
+use once_cell::sync::Lazy;
 use std::{
     any::Any,
     fmt::{Display, Formatter},
     pin::{pin, Pin},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex, OnceLock,
     },
     task::{ready, Context, Poll},
 };
@@ -44,6 +45,11 @@ pub mod shutdown;
 
 #[cfg(feature = "rayon")]
 pub mod pool;
+
+// todo comments
+static MANAGER: Lazy<Mutex<Option<TaskManager>>> =
+    Lazy::new(|| Mutex::new(Some(TaskManager::new(Handle::current()))));
+static EXECUTOR: OnceLock<TaskExecutor> = OnceLock::new();
 
 /// A type that can spawn tasks.
 ///
@@ -174,10 +180,28 @@ impl TaskManager {
     ///
     /// This will panic if called outside the context of a Tokio runtime.
     pub fn current() -> Self {
-        let handle = Handle::current();
-        Self::new(handle)
+        let manager = MANAGER
+            .lock()
+            .expect("todo")
+            .take()
+            .expect("TaskManager::current() called more than once");
+        EXECUTOR
+            .set(TaskExecutor {
+                handle: manager.handle.clone(),
+                on_shutdown: manager.on_shutdown.clone(),
+                panicked_tasks_tx: manager.panicked_tasks_tx.clone(),
+                metrics: Default::default(),
+                graceful_tasks: Arc::clone(&manager.graceful_tasks),
+            })
+            .expect("todo");
+        manager
+        //let manager = MANAGER.get_or_init(|| Some(TaskManager::new(Handle::current())))
+        //manager.take().expect("TaskManager::current() called twice")
+        //let handle = Handle::current();
+        //Self::new(handle)
     }
 
+    // todo not pub
     /// Create a new instance connected to the given handle's tokio runtime.
     pub fn new(handle: Handle) -> Self {
         let (panicked_tasks_tx, panicked_tasks_rx) = unbounded_channel();
@@ -192,6 +216,7 @@ impl TaskManager {
         }
     }
 
+    // todo not pub
     /// Returns a new [`TaskExecutor`] that can spawn new tasks onto the tokio runtime this type is
     /// connected to.
     pub fn executor(&self) -> TaskExecutor {
@@ -296,6 +321,11 @@ pub struct TaskExecutor {
 // === impl TaskExecutor ===
 
 impl TaskExecutor {
+    // todo comments
+    pub fn current() -> Self {
+        EXECUTOR.get().expect("todo").clone()
+    }
+
     /// Returns the [Handle] to the tokio runtime.
     pub const fn handle(&self) -> &Handle {
         &self.handle

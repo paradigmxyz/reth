@@ -25,14 +25,21 @@ metrics.workspace = true
 # misc
 tracing.workspace = true
 thiserror.workspace = true
-dyn-clone.workspace = true 
+dyn-clone.workspace = true
+once_cell.workspace = true
 
 # feature `rayon`
 rayon = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
+tokio = { workspace = true, features = [
+	"sync",
+	"rt",
+	"rt-multi-thread",
+	"time",
+	"macros",
+] }
 
 [features]
 rayon = ["dep:rayon", "pin-project"]
