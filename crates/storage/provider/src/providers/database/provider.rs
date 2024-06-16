@@ -580,7 +580,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
 
-        // let mut state: BundleStateInit = HashMap::new();
 
         // Create an empty bundle builder to accumulate the state changes
         let mut bundle_builder = BundleBuilder::new(range);
