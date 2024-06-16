@@ -113,6 +113,9 @@ pub enum EthApiError {
     /// Evm generic purpose error.
     #[error("Revm error: {0}")]
     EvmCustom(String),
+    /// Evm precompile error
+    #[error("Revm precompile error: {0}")]
+    EvmPrecompile(String),
     /// Error encountered when converting a transaction type
     #[error("Transaction conversion error")]
     TransactionConversionError,
@@ -151,6 +154,7 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::Internal(_) |
             EthApiError::TransactionNotFound |
             EthApiError::EvmCustom(_) |
+            EthApiError::EvmPrecompile(_) |
             EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
             EthApiError::UnknownBlockNumber | EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
@@ -221,6 +225,7 @@ where
             EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => Self::ExcessBlobGasNotSet,
             EVMError::Database(err) => err.into(),
             EVMError::Custom(err) => Self::EvmCustom(err),
+            EVMError::Precompile(err) => Self::EvmPrecompile(err),
         }
     }
 }
