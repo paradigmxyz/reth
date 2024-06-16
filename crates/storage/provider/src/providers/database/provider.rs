@@ -701,7 +701,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                     }
 
                     // insert value if needed
-                    if storage_slot.original_value() != U256::ZERO {
+                    if !storage_slot.original_value().is_zero() {
                         plain_storage_cursor.upsert(*address, storage_entry)?;
                     }
                 }
