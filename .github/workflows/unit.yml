@@ -38,7 +38,7 @@ jobs:
       - name: Run tests
         run: |
           cargo nextest run \
-            --features "asm-keccak ${{ matrix.network }}" \
+            --locked --features "asm-keccak ${{ matrix.network }}" \
             --workspace --exclude examples --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/2 \
             -E "!kind(test)"

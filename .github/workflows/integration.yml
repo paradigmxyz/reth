@@ -40,14 +40,14 @@ jobs:
         name: Run tests
         run: |
           cargo nextest run \
-            --features "asm-keccak ${{ matrix.network }}" \
+            --locked --features "asm-keccak ${{ matrix.network }}" \
             --workspace --exclude examples --exclude ef-tests \
             -E "kind(test)"
       - if: matrix.network == 'optimism'
         name: Run tests
         run: |
           cargo nextest run \
-            -p reth-node-optimism --features "optimism"
+            --locked -p reth-node-optimism --features "optimism"
 
   sync:
     name: sync / 100k blocks
