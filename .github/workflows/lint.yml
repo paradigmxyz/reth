@@ -45,6 +45,21 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
 
+  no-std:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          target: riscv32imac-unknown-none-elf
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Run no_std checks
+        run: .github/scripts/check_no_std.sh
+
   crate-checks:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -150,34 +165,17 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      [
-        clippy-binaries,
-        clippy,
-        crate-checks,
-        docs,
-        fmt,
-        book,
-        codespell,
-        grafana,
-      ]
+      - clippy-binaries
+      - clippy
+      - crate-checks
+      - docs
+      - fmt
+      - book
+      - codespell
+      - grafana
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
         uses: re-actors/alls-green@release/v1
         with:
           jobs: ${{ toJSON(needs) }}
-
-  no-std:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          target: riscv32imac-unknown-none-elf
-      - uses: taiki-e/install-action@cargo-hack
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-      - name: Run no_std checks
-        run: .github/scripts/check_no_std.sh
