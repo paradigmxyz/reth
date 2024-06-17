@@ -9,7 +9,10 @@ use reth::{
         Address, Bytes, U256,
     },
     revm::{
-        handler::register::EvmHandler, inspector_handle_register, precompile::{Precompile, PrecompileSpecId}, ContextPrecompile, ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector
+        handler::register::EvmHandler,
+        inspector_handle_register,
+        precompile::{Precompile, PrecompileSpecId},
+        ContextPrecompile, ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
 };
@@ -17,10 +20,16 @@ use reth_chainspec::{Chain, ChainSpec};
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
-use reth_primitives::{revm_primitives::{SpecId, StatefulPrecompileMut}, Genesis, Header, TransactionSigned};
+use reth_primitives::{
+    revm_primitives::{SpecId, StatefulPrecompileMut},
+    Genesis, Header, TransactionSigned,
+};
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};
-use std::{collections::HashMap, sync::{Arc, RwLock}};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 /// A cache for precompile inputs / outputs.
 ///
@@ -41,7 +50,7 @@ pub struct PrecompileCache {
 #[non_exhaustive]
 pub struct MyEvmConfig {
     // TODO: do we need this arc rwlock at all?
-    precompile_cache: Arc<RwLock<PrecompileCache>>
+    precompile_cache: Arc<RwLock<PrecompileCache>>,
 }
 
 impl MyEvmConfig {
@@ -51,22 +60,24 @@ impl MyEvmConfig {
     /// [ConfigureEvm::evm_with_inspector]
     ///
     /// This will use the default mainnet precompiles and wrap them with a cache.
-    pub fn set_precompiles<EXT, DB>(handler: &mut EvmHandler<EXT, DB>, cache: Arc<RwLock<PrecompileCache>>)
-    where
+    pub fn set_precompiles<EXT, DB>(
+        handler: &mut EvmHandler<EXT, DB>,
+        cache: Arc<RwLock<PrecompileCache>>,
+    ) where
         DB: Database,
     {
         // first we need the evm spec id, which determines the precompiles
         let spec_id = handler.cfg.spec_id;
 
-        let mut loaded_precompiles: ContextPrecompiles<DB> = ContextPrecompiles::new(PrecompileSpecId::from_spec_id(spec_id));
+        let mut loaded_precompiles: ContextPrecompiles<DB> =
+            ContextPrecompiles::new(PrecompileSpecId::from_spec_id(spec_id));
         for (address, precompile) in loaded_precompiles.to_mut().iter_mut() {
-            *precompile = Self::wrap_precompile(precompile.clone(), cache.clone(), *address, spec_id);
+            *precompile =
+                Self::wrap_precompile(precompile.clone(), cache.clone(), *address, spec_id);
         }
 
         // install the precompiles
-        handler.pre_execution.load_precompiles = Arc::new(move || {
-            loaded_precompiles.clone()
-        });
+        handler.pre_execution.load_precompiles = Arc::new(move || loaded_precompiles.clone());
     }
 
     /// Given a [`ContextPrecompile`] and a [`PrecompileCache`], create a new precompile that wraps
@@ -77,12 +88,15 @@ impl MyEvmConfig {
         address: Address,
         spec_id: SpecId,
     ) -> ContextPrecompile<DB>
-        where
-            DB: Database,
+    where
+        DB: Database,
     {
         // get or insert the cache for this address / spec
         let mut cache = cache.write().unwrap();
-        let cache = cache.cache.entry((address, spec_id)).or_insert(Arc::new(RwLock::new(LruMap::new(ByLength::new(1024)))));
+        let cache = cache
+            .cache
+            .entry((address, spec_id))
+            .or_insert(Arc::new(RwLock::new(LruMap::new(ByLength::new(1024)))));
 
         let ContextPrecompile::Ordinary(precompile) = precompile else {
             // context stateful precompiles are not supported, due to lifetime issues or skill
@@ -90,10 +104,7 @@ impl MyEvmConfig {
             panic!("precompile is not ordinary");
         };
 
-        let wrapped = WrappedPrecompile {
-            precompile,
-            cache: cache.clone(),
-        };
+        let wrapped = WrappedPrecompile { precompile, cache: cache.clone() };
 
         ContextPrecompile::Ordinary(Precompile::StatefulMut(Box::new(wrapped)))
     }
@@ -109,12 +120,7 @@ pub struct WrappedPrecompile {
 }
 
 impl StatefulPrecompileMut for WrappedPrecompile {
-    fn call_mut(
-        &mut self,
-        bytes: &Bytes,
-        gas_price: u64,
-        _env: &Env,
-    ) -> PrecompileResult {
+    fn call_mut(&mut self, bytes: &Bytes, gas_price: u64, _env: &Env) -> PrecompileResult {
         let mut cache = self.cache.write().unwrap();
         let key = (bytes.clone(), gas_price);
 
