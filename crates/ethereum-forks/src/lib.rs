@@ -15,6 +15,10 @@
 // TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
 #![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
 
 mod forkid;
 mod hardfork;
