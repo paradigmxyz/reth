@@ -8,6 +8,9 @@ use crate::{
 use alloy_primitives::TxKind;
 use alloy_rlp::Error as RlpError;
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 impl TryFrom<alloy_rpc_types::Block> for Block {
     type Error = alloy_rpc_types::ConversionError;
 

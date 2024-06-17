@@ -8,6 +8,9 @@ use reth_trie_common::root::{ordered_trie_root, ordered_trie_root_with_encoder};
 
 use alloy_eips::eip7685::Encodable7685;
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// Calculate a transaction root.
 ///
 /// `(rlp(index), encoded(tx))` pairs.

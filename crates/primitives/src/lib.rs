@@ -17,13 +17,16 @@
 // TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
 #![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
 
 mod account;
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
 pub mod basefee;
 mod block;
-mod chain;
 #[cfg(feature = "zstd-codec")]
 mod compression;
 pub mod constants;
@@ -33,7 +36,6 @@ pub mod genesis;
 pub mod header;
 mod integer_list;
 mod log;
-mod net;
 pub mod proofs;
 mod receipt;
 mod request;
@@ -50,31 +52,31 @@ pub use block::{
     Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders,
     ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
 };
-pub use chain::{
-    AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, Chain, ChainInfo, ChainKind, ChainSpec,
-    ChainSpecBuilder, DepositContract, DisplayHardforks, ForkBaseFeeParams, ForkCondition,
-    NamedChain, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
-};
 #[cfg(feature = "zstd-codec")]
 pub use compression::*;
 pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
-    KECCAK_EMPTY, MAINNET_DEPOSIT_CONTRACT, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+    KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use error::{GotExpected, GotExpectedBoxed};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
-pub use net::{
-    goerli_nodes, holesky_nodes, mainnet_nodes, parse_nodes, sepolia_nodes, NodeRecord,
-    NodeRecordParseError, TrustedPeer, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
-    SEPOLIA_BOOTNODES,
-};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
 pub use request::Requests;
+pub use reth_chainspec::{
+    net::{
+        goerli_nodes, holesky_nodes, mainnet_nodes, parse_nodes, sepolia_nodes, NodeRecord,
+        NodeRecordParseError, TrustedPeer, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
+        SEPOLIA_BOOTNODES,
+    },
+    AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, Chain, ChainInfo, ChainKind, ChainSpec,
+    ChainSpecBuilder, DepositContract, DisplayHardforks, ForkBaseFeeParams, ForkCondition,
+    NamedChain, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
+};
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
@@ -136,13 +138,13 @@ pub use c_kzg as kzg;
 /// Optimism specific re-exports
 #[cfg(feature = "optimism")]
 mod optimism {
-    pub use crate::{
-        chain::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA},
+    pub use crate::transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID};
+    pub use reth_chainspec::{
         net::{
             base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes, OP_BOOTNODES,
             OP_TESTNET_BOOTNODES,
         },
-        transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID},
+        BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA,
     };
 }
 

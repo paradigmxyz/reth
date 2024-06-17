@@ -9,6 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod error;
+
 pub use error::{EngineObjectValidationError, PayloadBuilderError, VersionSpecificValidationError};
 
 /// Contains traits to abstract over payload attributes types and default implementations of the
@@ -22,7 +23,10 @@ pub use payload::PayloadOrAttributes;
 use reth_primitives::ChainSpec;
 
 /// The types that are used by the engine API.
-pub trait PayloadTypes: Send + Sync + core::fmt::Debug + Unpin + Send + Sync + Clone {
+pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone {
+    /// The built payload type.
+    type BuiltPayload: BuiltPayload + Clone + Unpin;
+
     /// The RPC payload attributes type the CL node emits via the engine API.
     type PayloadAttributes: PayloadAttributes + Unpin;
 

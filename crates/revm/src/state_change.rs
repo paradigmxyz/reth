@@ -319,14 +319,14 @@ where
         let mut source_address = Address::ZERO;
         data.copy_to_slice(source_address.as_mut_slice());
 
-        let mut validator_public_key = FixedBytes::<48>::ZERO;
-        data.copy_to_slice(validator_public_key.as_mut_slice());
+        let mut validator_pubkey = FixedBytes::<48>::ZERO;
+        data.copy_to_slice(validator_pubkey.as_mut_slice());
 
         let amount = data.get_u64();
 
         withdrawal_requests.push(Request::WithdrawalRequest(WithdrawalRequest {
             source_address,
-            validator_public_key,
+            validator_pubkey,
             amount,
         }));
     }
