@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 # reth
 revm.workspace = true
-revm-inspectors.workspace = true
+revm-inspectors = { workspace = true, features = ["js-tracer"] }
 revm-primitives.workspace = true
 reth-errors.workspace = true
 reth-evm.workspace = true
