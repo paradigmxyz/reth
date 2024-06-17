@@ -27,7 +27,7 @@ pub struct NoopBlockchainTree {
 
 impl NoopBlockchainTree {
     /// Create a new `NoopBlockchainTree` with a canon state notification sender.
-    pub fn with_canon_state_notifications(
+    pub const fn with_canon_state_notifications(
         canon_state_notification_sender: CanonStateNotificationSender,
     ) -> Self {
         Self { canon_state_notification_sender: Some(canon_state_notification_sender) }

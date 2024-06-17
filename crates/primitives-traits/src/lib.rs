@@ -10,6 +10,18 @@
 #![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+#[cfg(feature = "alloy-compat")]
+mod alloy_compat;
+
+/// Common constants.
+pub mod constants;
+
 /// Minimal account
 pub mod account;
 pub use account::Account;
+
+/// Common header types
+pub mod header;
+#[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
+pub use header::test_utils;
+pub use header::{Header, HeaderError, SealedHeader};

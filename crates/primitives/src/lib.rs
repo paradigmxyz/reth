@@ -17,6 +17,10 @@
 // TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
 #![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
 
 mod account;
 #[cfg(feature = "alloy-compat")]
@@ -30,7 +34,7 @@ pub mod constants;
 pub mod eip4844;
 mod error;
 pub mod genesis;
-mod header;
+pub mod header;
 mod integer_list;
 mod log;
 mod net;
@@ -63,7 +67,7 @@ pub use constants::{
 };
 pub use error::{GotExpected, GotExpectedBoxed};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
-pub use header::{Header, HeaderValidationError, HeadersDirection, SealedHeader};
+pub use header::{Header, HeadersDirection, SealedHeader};
 pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
 pub use net::{

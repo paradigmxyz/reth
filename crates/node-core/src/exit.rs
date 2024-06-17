@@ -22,7 +22,7 @@ pub struct NodeExitFuture {
 
 impl NodeExitFuture {
     /// Create a new `NodeExitFuture`.
-    pub fn new(
+    pub const fn new(
         consensus_engine_rx: oneshot::Receiver<Result<(), BeaconConsensusEngineError>>,
         terminate: bool,
     ) -> Self {
