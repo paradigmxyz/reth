@@ -19,14 +19,9 @@ use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, U256};
 /// - Definition: [Yellow Paper][yp] (page 15, 11.3)
 ///
 /// [yp]: https://ethereum.github.io/yellowpaper/paper.pdf
-pub fn base_block_reward(
-    chain_spec: &ChainSpec,
-    block_number: BlockNumber,
-    block_difficulty: U256,
-    total_difficulty: U256,
-) -> Option<u128> {
+pub fn base_block_reward(chain_spec: &ChainSpec, block_number: BlockNumber) -> Option<u128> {
     if chain_spec.chain == Chain::goerli() ||
-        chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, block_difficulty)
+        chain_spec.is_paris_active_at_block(block_number).unwrap_or(false)
     {
         None
     } else if chain_spec.fork(Hardfork::Constantinople).active_at_block(block_number) {
@@ -53,12 +48,9 @@ pub fn base_block_reward(
 /// #
 /// // This is block 126 on mainnet.
 /// let block_number = 126;
-/// let block_difficulty = U256::from(18_145_285_642usize);
-/// let total_difficulty = U256::from(2_235_668_675_900usize);
 /// let number_of_ommers = 1;
 ///
-/// let reward = base_block_reward(&MAINNET, block_number, block_difficulty, total_difficulty)
-///     .map(|reward| block_reward(reward, 1));
+/// let reward = base_block_reward(&MAINNET, block_number).map(|reward| block_reward(reward, 1));
 ///
 /// // The base block reward is 5 ETH, and the ommer inclusion reward is 1/32th of 5 ETH.
 /// assert_eq!(reward.unwrap(), ETH_TO_WEI * 5 + ((ETH_TO_WEI * 5) >> 5));
@@ -108,20 +100,39 @@ mod tests {
 
     #[test]
     fn calc_base_block_reward() {
-        // ((block number, td), reward)
+        // (block number, reward)
         let cases = [
             // Pre-byzantium
-            ((0, U256::ZERO), Some(ETH_TO_WEI * 5)),
+            (0, Some(ETH_TO_WEI * 5)),
             // Byzantium
-            ((4370000, U256::ZERO), Some(ETH_TO_WEI * 3)),
+            (4370000, Some(ETH_TO_WEI * 3)),
             // Petersburg
-            ((7280000, U256::ZERO), Some(ETH_TO_WEI * 2)),
+            (7280000, Some(ETH_TO_WEI * 2)),
             // Merge
-            ((10000000, U256::from(58_750_000_000_000_000_000_000_u128)), None),
+            (15537394, None),
         ];
 
-        for ((block_number, td), expected_reward) in cases {
-            assert_eq!(base_block_reward(&MAINNET, block_number, U256::ZERO, td), expected_reward);
+        for (block_number, expected_reward) in cases {
+            assert_eq!(base_block_reward(&MAINNET, block_number), expected_reward);
+        }
+    }
+
+    #[test]
+    fn calc_goerli_block_reward() {
+        // (block number, reward)
+        let cases = [
+            // Pre-byzantium
+            (0, None),
+            // Berlin
+            (4460644, None),
+            // London
+            (5062605, None),
+            // Merge
+            (7382818, None),
+        ];
+
+        for (block_number, expected_reward) in cases {
+            assert_eq!(base_block_reward(&GOERLI, block_number), expected_reward);
         }
     }
 
