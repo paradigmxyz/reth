@@ -4,9 +4,10 @@ use crate::{transaction::OptimismTxMeta, OptimismApi};
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
 use reth_provider::{BlockIdReader, ChainSpecProvider};
 use reth_rpc::eth::{
-    api::{LoadReceipt, ReceiptBuilder},
     cache::EthStateCache,
     error::{EthApiError, EthResult},
+    servers::LoadReceipt,
+    ReceiptBuilder,
 };
 use reth_rpc_types::{AnyTransactionReceipt, OptimismTransactionReceiptFields};
 

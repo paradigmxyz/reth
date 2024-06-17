@@ -3,8 +3,9 @@
 use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, HeaderProvider};
 use reth_rpc::eth::{
-    api::{EthBlocks, LoadBlock, LoadReceipt, ReceiptBuilder},
     error::EthResult,
+    servers::{EthBlocks, LoadBlock, LoadReceipt},
+    ReceiptBuilder,
 };
 use reth_rpc_types::{AnyTransactionReceipt, BlockId};
 

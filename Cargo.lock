@@ -7937,6 +7937,7 @@ dependencies = [
  "reth-rpc-eth-api",
  "reth-rpc-types",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -23,6 +23,9 @@ reth-network-peers.workspace = true
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 serde = { workspace = true, features = ["derive"] }
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [features]
 client = [
     "jsonrpsee/client",

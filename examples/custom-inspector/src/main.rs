@@ -23,7 +23,7 @@ use reth::{
     },
     rpc::{
         compat::transaction::transaction_to_call_request,
-        eth::{api::Call, revm_utils::EvmOverrides},
+        eth::{revm_utils::EvmOverrides, servers::Call},
     },
     transaction_pool::TransactionPool,
 };

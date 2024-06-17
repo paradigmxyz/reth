@@ -9,7 +9,7 @@ use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome, StateProviderFactory,
 };
 use reth_rpc::eth::{
-    api::{LoadPendingBlock, SpawnBlocking},
+    servers::{LoadPendingBlock, SpawnBlocking},
     PendingBlock,
 };
 use reth_transaction_pool::TransactionPool;

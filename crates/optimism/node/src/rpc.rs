@@ -3,8 +3,8 @@
 use jsonrpsee::types::ErrorObject;
 use reqwest::Client;
 use reth_rpc::eth::{
-    api::RawTransactionForwarder,
     error::{EthApiError, EthResult},
+    servers::RawTransactionForwarder,
 };
 use reth_rpc_types::ToRpcError;
 use std::sync::{atomic::AtomicUsize, Arc};
