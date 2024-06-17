@@ -853,6 +853,12 @@ impl ChainSpec {
         self.fork(Hardfork::Homestead).active_at_block(block_number)
     }
 
+    /// The Paris hardfork (merge) is activated via ttd, if we know the block is known then this
+    /// returns true if the block number is greater than or equal to the Paris (merge) block.
+    pub fn is_paris_active_at_block(&self, block_number: u64) -> Option<bool> {
+        self.paris_block_and_final_difficulty.map(|(paris_block, _)| block_number >= paris_block)
+    }
+
     /// Convenience method to check if [`Hardfork::Bedrock`] is active at a given block number.
     #[cfg(feature = "optimism")]
     #[inline]
