@@ -1312,7 +1312,7 @@ mod tests {
         let request = requests.first().unwrap();
         let withdrawal_request = request.as_withdrawal_request().unwrap();
         assert_eq!(withdrawal_request.source_address, sender_address);
-        assert_eq!(withdrawal_request.validator_public_key, validator_public_key);
+        assert_eq!(withdrawal_request.validator_pubkey, validator_public_key);
         assert_eq!(withdrawal_request.amount, u64::from_be_bytes(withdrawal_amount.into()));
     }
 
