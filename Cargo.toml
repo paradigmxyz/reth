@@ -344,7 +344,7 @@ revm = { version = "9.0.0", features = [
 revm-primitives = { version = "4.0.0", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "6bbf303" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "79774a6" }
 
 # eth
 alloy-chains = "0.1.15"
@@ -497,7 +497,7 @@ similar-asserts = "1.5.0"
 test-fuzz = "5"
 
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm.git", rev = "8f4c153" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm.git", rev = "8f4c153" }
-revm-precompile = { git = "https://github.com/bluealloy/revm.git", rev = "8f4c153" }
-revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "8f4c153" }
+revm = { git = "https://github.com/bluealloy/revm.git", rev = "dd98b3b" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm.git", rev = "dd98b3b" }
+revm-precompile = { git = "https://github.com/bluealloy/revm.git", rev = "dd98b3b" }
+revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "dd98b3b" }
