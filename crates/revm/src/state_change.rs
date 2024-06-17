@@ -32,15 +32,19 @@ use std::collections::HashMap;
 pub fn post_block_balance_increments(
     chain_spec: &ChainSpec,
     block_number: u64,
+    block_difficulty: U256,
     beneficiary: Address,
     block_timestamp: u64,
+    total_difficulty: U256,
     ommers: &[Header],
     withdrawals: Option<&[Withdrawal]>,
 ) -> HashMap<Address, u128> {
     let mut balance_increments = HashMap::new();
 
     // Add block rewards if they are enabled.
-    if let Some(base_block_reward) = calc::base_block_reward(chain_spec, block_number) {
+    if let Some(base_block_reward) =
+        calc::base_block_reward(chain_spec, block_number, block_difficulty, total_difficulty)
+    {
         // Ommer rewards
         for ommer in ommers {
             *balance_increments.entry(ommer.beneficiary).or_default() +=

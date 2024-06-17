@@ -298,7 +298,7 @@ where
         }?;
 
         // 3. apply post execution changes
-        self.post_execution(block)?;
+        self.post_execution(block, total_difficulty)?;
 
         Ok(output)
     }
@@ -312,12 +312,18 @@ where
 
     /// Apply post execution state changes that do not require an [EVM](Evm), such as: block
     /// rewards, withdrawals, and irregular DAO hardfork state change
-    pub fn post_execution(&mut self, block: &BlockWithSenders) -> Result<(), BlockExecutionError> {
+    pub fn post_execution(
+        &mut self,
+        block: &BlockWithSenders,
+        total_difficulty: U256,
+    ) -> Result<(), BlockExecutionError> {
         let mut balance_increments = post_block_balance_increments(
             self.chain_spec(),
             block.number,
+            block.difficulty,
             block.beneficiary,
             block.timestamp,
+            total_difficulty,
             &block.ommers,
             block.withdrawals.as_ref().map(Withdrawals::as_ref),
         );

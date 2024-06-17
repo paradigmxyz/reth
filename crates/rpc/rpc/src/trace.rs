@@ -362,30 +362,35 @@ where
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
         if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            if let Some(base_block_reward) =
-                base_block_reward(self.provider().chain_spec().as_ref(), block.header.number)
-            {
-                let block_reward = block_reward(base_block_reward, block.ommers.len());
-                traces.push(reward_trace(
-                    &block.header,
-                    RewardAction {
-                        author: block.header.beneficiary,
-                        reward_type: RewardType::Block,
-                        value: U256::from(block_reward),
-                    },
-                ));
-
-                for uncle in &block.ommers {
-                    let uncle_reward =
-                        ommer_reward(base_block_reward, block.header.number, uncle.number);
+            if let Some(header_td) = self.provider().header_td(&block.header.hash())? {
+                if let Some(base_block_reward) = base_block_reward(
+                    self.provider().chain_spec().as_ref(),
+                    block.header.number,
+                    block.header.difficulty,
+                    header_td,
+                ) {
+                    let block_reward = block_reward(base_block_reward, block.ommers.len());
                     traces.push(reward_trace(
                         &block.header,
                         RewardAction {
-                            author: uncle.beneficiary,
-                            reward_type: RewardType::Uncle,
-                            value: U256::from(uncle_reward),
+                            author: block.header.beneficiary,
+                            reward_type: RewardType::Block,
+                            value: U256::from(block_reward),
                         },
                     ));
+
+                    for uncle in &block.ommers {
+                        let uncle_reward =
+                            ommer_reward(base_block_reward, block.header.number, uncle.number);
+                        traces.push(reward_trace(
+                            &block.header,
+                            RewardAction {
+                                author: uncle.beneficiary,
+                                reward_type: RewardType::Uncle,
+                                value: U256::from(uncle_reward),
+                            },
+                        ));
+                    }
                 }
             }
         }
