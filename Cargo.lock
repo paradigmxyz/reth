@@ -3094,6 +3094,7 @@ version = "0.0.0"
 dependencies = [
  "clap",
  "discv5",
+ "enr",
  "eyre",
  "futures-util",
  "reth",
@@ -3108,6 +3109,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
