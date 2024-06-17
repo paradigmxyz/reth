@@ -6503,8 +6503,8 @@ name = "reth-chainspec"
 version = "1.0.0-rc.1"
 dependencies = [
  "alloy-chains",
- "alloy-eips 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=00d81d7)",
- "alloy-genesis 0.1.0 (git+https://github.com/alloy-rs/alloy?rev=00d81d7)",
+ "alloy-eips 0.1.0",
+ "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-trie",
@@ -6514,7 +6514,6 @@ dependencies = [
  "rand 0.8.5",
  "reth-ethereum-forks",
  "reth-network-peers",
- "reth-primitives",
  "reth-primitives-traits",
  "reth-rpc-types",
  "reth-trie-common",
@@ -7684,7 +7683,6 @@ dependencies = [
 name = "reth-primitives"
 version = "1.0.0-rc.1"
 dependencies = [
- "alloy-chains",
  "alloy-consensus 0.1.0",
  "alloy-eips 0.1.0",
  "alloy-genesis",
@@ -7707,9 +7705,9 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "rayon",
+ "reth-chainspec",
  "reth-codecs",
  "reth-ethereum-forks",
- "reth-network-peers",
  "reth-primitives-traits",
  "reth-static-file-types",
  "reth-trie-common",

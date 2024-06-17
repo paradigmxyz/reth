@@ -12,7 +12,7 @@ pub use alloy_chains::{Chain, ChainKind, NamedChain};
 pub use info::ChainInfo;
 pub use spec::{
     AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder,
-    DisplayHardforks, ForkBaseFeeParams, ForkCondition, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
+    DisplayHardforks, ForkBaseFeeParams, ForkCondition, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA, DepositContract
 };
 #[cfg(feature = "optimism")]
 pub use spec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
@@ -27,6 +27,9 @@ pub mod net;
 
 /// The chain spec module.
 mod spec;
+
+/// Chain specific constants
+pub(crate) mod constants;
 
 #[cfg(test)]
 mod tests {

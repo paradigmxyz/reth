@@ -16,11 +16,10 @@ reth-ethereum-forks.workspace = true
 reth-network-peers.workspace = true
 reth-trie-common.workspace = true
 reth-primitives-traits.workspace = true
-reth-primitives.workspace = true
 
 # ethereum
 alloy-chains = { workspace = true, features = ["serde", "rlp"] }
-alloy-eips.workspace = true
+alloy-eips = { workspace = true, features = ["serde"] }
 alloy-genesis.workspace = true
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-trie.workspace = true
@@ -42,10 +41,13 @@ reth-rpc-types.workspace = true
 rand.workspace = true
 
 [features]
+default = ["std"]
 optimism = [
-    "reth-primitives/optimism",
     "reth-ethereum-forks/optimism"
 ]
-
+std = []
+arbitrary = [
+    "alloy-chains/arbitrary"
+]
 
 

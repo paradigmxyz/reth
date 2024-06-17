@@ -1,3 +1,4 @@
+use crate::constants::MAINNET_DEPOSIT_CONTRACT;
 use alloy_chains::{Chain, ChainKind, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -6,25 +7,36 @@ use derive_more::From;
 use once_cell::sync::Lazy;
 use reth_ethereum_forks::{ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head};
 use reth_network_peers::NodeRecord;
-use reth_primitives::{
-    constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS, EMPTY_WITHDRAWALS},
-    EMPTY_OMMER_ROOT_HASH, MAINNET_DEPOSIT_CONTRACT,
+use reth_primitives_traits::{
+    constants::{
+        EIP1559_INITIAL_BASE_FEE, EMPTY_OMMER_ROOT_HASH, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
+        EMPTY_WITHDRAWALS,
+    },
+    Header, SealedHeader,
 };
-use reth_primitives_traits::{Header, SealedHeader};
 use reth_trie_common::root::state_root_ref_unhashed;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
+use core::{
+    fmt,
     fmt::{Display, Formatter},
-    sync::Arc,
 };
+#[cfg(not(feature = "std"))]
+use alloc::{
+    collections::BTreeMap,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+#[cfg(feature = "std")]
+use std::{collections::BTreeMap, sync::Arc};
 
-pub use alloy_eips::eip1559::BaseFeeParams;
 #[cfg(feature = "optimism")]
-pub(crate) use reth_primitives::constants::{
+use crate::constants::optimism::{
     BASE_SEPOLIA_BASE_FEE_PARAMS, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS, OP_BASE_FEE_PARAMS,
     OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
 };
+pub use alloy_eips::eip1559::BaseFeeParams;
 
 #[cfg(feature = "optimism")]
 use crate::net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes};
@@ -1470,7 +1482,7 @@ struct DisplayFork {
 }
 
 impl Display for DisplayFork {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let name_with_eip = if let Some(eip) = &self.eip {
             format!("{} ({})", self.name, eip)
         } else {
@@ -1506,7 +1518,7 @@ impl Display for DisplayFork {
 /// # Examples
 ///
 /// ```
-/// # use reth_primitives::MAINNET;
+/// # use reth_chainspec::MAINNET;
 /// println!("{}", MAINNET.display_hardforks());
 /// ```
 ///
@@ -1544,13 +1556,13 @@ pub struct DisplayHardforks {
 }
 
 impl Display for DisplayHardforks {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         fn format(
             header: &str,
             forks: &[DisplayFork],
             next_is_empty: bool,
             f: &mut Formatter<'_>,
-        ) -> std::fmt::Result {
+        ) -> fmt::Result {
             writeln!(f, "{header}:")?;
             let mut iter = forks.iter().peekable();
             while let Some(fork) = iter.next() {
