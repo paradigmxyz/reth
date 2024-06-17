@@ -1,6 +1,6 @@
 # Transaction types
 
-Over time, the Ethereum network has undergone various upgrades and improvements to enhance transaction efficiency, security, and user experience. Three significant transaction types that have evolved are:
+Over time, the Ethereum network has undergone various upgrades and improvements to enhance transaction efficiency, security, and user experience. Four significant transaction types that have evolved are:
 
 - Legacy Transactions,
 - EIP-2930 Transactions,
