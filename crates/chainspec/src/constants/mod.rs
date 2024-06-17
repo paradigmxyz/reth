@@ -13,7 +13,6 @@ pub(crate) mod optimism;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloy_eips::calc_next_block_base_fee;
 
     #[test]
