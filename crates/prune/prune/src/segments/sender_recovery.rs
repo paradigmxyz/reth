@@ -77,13 +77,13 @@ impl<DB: Database> Segment<DB> for SenderRecovery {
 #[cfg(test)]
 mod tests {
     use crate::segments::{PruneInput, PruneOutput, Segment, SenderRecovery};
+    use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
         FoldWhile::{Continue, Done},
         Itertools,
     };
     use reth_db::tables;
-    use reth_primitives::{BlockNumber, TxNumber, B256};
     use reth_provider::PruneCheckpointReader;
     use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
