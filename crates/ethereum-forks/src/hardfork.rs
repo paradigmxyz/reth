@@ -1,14 +1,14 @@
-#[cfg(not(feature = "std"))]
-use alloc::str::FromStr;
 use alloy_chains::Chain;
 use core::{
     fmt,
     fmt::{Display, Formatter},
+    str::FromStr,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "std")]
-use std::str::FromStr;
+
+#[cfg(not(feature = "std"))]
+use alloc::{format, string::String};
 
 /// Represents the consensus type of a blockchain fork.
 ///
