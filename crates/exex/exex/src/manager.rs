@@ -109,7 +109,9 @@ impl ExExHandle {
                 // [ExExNotification::ChainReverted] cases and always send the
                 // notification, because the ExEx should be aware of the reorgs and reverts lower
                 // than its finished height
-                ExExNotification::ChainReorged { .. } | ExExNotification::ChainReverted { .. } => {}
+                ExExNotification::ChainReorged { .. } |
+                ExExNotification::ChainReverted { .. } |
+                ExExNotification::FinalizedBlock(_) => {}
             }
         }
 
@@ -288,6 +290,7 @@ impl Future for ExExManager {
                 debug!(
                     committed_tip = ?notification.committed_chain().map(|chain| chain.tip().number),
                     reverted_tip = ?notification.reverted_chain().map(|chain| chain.tip().number),
+                    finalized_block = ?notification.finalized_block().map(|b| b.header().number),
                     "Received new notification"
                 );
                 self.push_notification(notification);

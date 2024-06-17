@@ -1,13 +1,14 @@
 //! Support for launching execution extensions.
 
 use crate::{common::WithConfigs, exex::BoxedLaunchExEx};
-use futures::future;
+use futures::{future, StreamExt};
 use reth_exex::{ExExContext, ExExHandle, ExExManager, ExExManagerHandle};
 use reth_node_api::FullNodeComponents;
 use reth_primitives::Head;
-use reth_provider::CanonStateSubscriptions;
+use reth_provider::{CanonStateSubscriptions, FinalizedBlocksSubscriptions};
 use reth_tracing::tracing::{debug, info};
 use std::{fmt, fmt::Debug};
+use tokio::select;
 
 /// Can launch execution extensions.
 pub struct ExExLauncher<Node: FullNodeComponents> {
@@ -91,15 +92,28 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
 
         // send notifications from the blockchain tree to exex manager
         let mut canon_state_notifications = components.provider().subscribe_to_canonical_state();
+        let mut finalized_block_notifications = components.provider().finalized_block_stream();
         let mut handle = exex_manager_handle.clone();
+
         components.task_executor().spawn_critical(
             "exex manager blockchain tree notifications",
             async move {
-                while let Ok(notification) = canon_state_notifications.recv().await {
-                    handle
-                        .send_async(notification.into())
-                        .await
-                        .expect("blockchain tree notification could not be sent to exex manager");
+                loop {
+                    select! {
+                        Ok(notification) = canon_state_notifications.recv() => {
+                            handle
+                                .send_async(notification.into())
+                                .await
+                                .expect("blockchain tree notification could not be sent to exex manager");
+                        }
+                        block_header = finalized_block_notifications.next() => {
+                            handle
+                                .send_async(block_header.into())
+                                .await
+                                .expect("blockchain tree notification could not be sent to exex manager");
+                        }
+                        else => break
+                    }
                 }
             },
         );

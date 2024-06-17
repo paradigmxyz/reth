@@ -2,10 +2,11 @@ use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    EvmEnvProvider, FullExecutionDataProvider, HeaderProvider, ProviderError,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
-    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
+    EvmEnvProvider, FinalizedBlockNotifications, FinalizedBlocksSubscriptions,
+    FullExecutionDataProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
+    ReceiptProvider, ReceiptProviderIdExt, RequestsProvider, StageCheckpointReader,
+    StateProviderBox, StateProviderFactory, StaticFileProviderFactory, TransactionVariant,
+    TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
@@ -894,6 +895,15 @@ where
 {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
         self.tree.subscribe_to_canonical_state()
+    }
+}
+
+impl<DB> FinalizedBlocksSubscriptions for BlockchainProvider<DB>
+where
+    DB: Send + Sync,
+{
+    fn subscribe_to_finalized_blocks(&self) -> FinalizedBlockNotifications {
+        self.chain_info.subscribe_to_finalized_blocks()
     }
 }
 

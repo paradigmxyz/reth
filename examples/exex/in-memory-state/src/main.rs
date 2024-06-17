@@ -46,6 +46,9 @@ impl<Node: FullNodeComponents + Unpin> Future for InMemoryStateExEx<Node> {
                     this.execution_outcome.revert_to(old.first().number - 1);
                     info!(reverted_chain = ?old.range(), "Received revert");
                 }
+                ExExNotification::FinalizedBlock(header) => {
+                    info!(finalized_block = ?header, "Finalized block");
+                }
             };
 
             if let Some(committed_chain) = notification.committed_chain() {

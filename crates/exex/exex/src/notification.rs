@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use reth_provider::{CanonStateNotification, Chain};
+use reth_primitives::SealedHeader;
+use reth_provider::{CanonStateNotification, Chain, FinalizedBlockNotification};
 
 /// Notifications sent to an `ExEx`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +23,8 @@ pub enum ExExNotification {
         /// The old chain before reversion.
         old: Arc<Chain>,
     },
+    /// Finalized block header.
+    FinalizedBlock(Option<SealedHeader>),
 }
 
 impl ExExNotification {
@@ -30,7 +33,7 @@ impl ExExNotification {
     pub fn committed_chain(&self) -> Option<Arc<Chain>> {
         match self {
             Self::ChainCommitted { new } | Self::ChainReorged { old: _, new } => Some(new.clone()),
-            Self::ChainReverted { .. } => None,
+            _ => None,
         }
     }
 
@@ -39,7 +42,15 @@ impl ExExNotification {
     pub fn reverted_chain(&self) -> Option<Arc<Chain>> {
         match self {
             Self::ChainReorged { old, new: _ } | Self::ChainReverted { old } => Some(old.clone()),
-            Self::ChainCommitted { .. } => None,
+            _ => None,
+        }
+    }
+
+    /// Returns a finalized block header.
+    pub fn finalized_block(&self) -> Option<SealedHeader> {
+        match self {
+            Self::FinalizedBlock(b) => b.clone(),
+            _ => None,
         }
     }
 }
@@ -50,5 +61,11 @@ impl From<CanonStateNotification> for ExExNotification {
             CanonStateNotification::Commit { new } => Self::ChainCommitted { new },
             CanonStateNotification::Reorg { old, new } => Self::ChainReorged { old, new },
         }
+    }
+}
+
+impl From<FinalizedBlockNotification> for ExExNotification {
+    fn from(notification: FinalizedBlockNotification) -> Self {
+        Self::FinalizedBlock(notification)
     }
 }
