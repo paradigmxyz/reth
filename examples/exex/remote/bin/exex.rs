@@ -8,7 +8,6 @@ use futures::TryFutureExt;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
-use reth_tracing::tracing::info;
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{transport::Server, Request, Response, Status};
@@ -49,18 +48,6 @@ async fn exex<Node: FullNodeComponents>(
     notifications: Arc<broadcast::Sender<ExExNotification>>,
 ) -> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.recv().await {
-        match &notification {
-            ExExNotification::ChainCommitted { new } => {
-                info!(committed_chain = ?new.range(), "Received commit");
-            }
-            ExExNotification::ChainReorged { old, new } => {
-                info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
-            }
-            ExExNotification::ChainReverted { old } => {
-                info!(reverted_chain = ?old.range(), "Received revert");
-            }
-        };
-
         if let Some(committed_chain) = notification.committed_chain() {
             ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
         }
