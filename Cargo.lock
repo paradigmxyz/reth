@@ -7993,6 +7993,7 @@ dependencies = [
  "reth-errors",
  "reth-evm",
  "reth-evm-ethereum",
+ "reth-evm-optimism",
  "reth-metrics",
  "reth-network-api",
  "reth-primitives",

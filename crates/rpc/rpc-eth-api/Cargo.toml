@@ -29,6 +29,7 @@ reth-rpc-types-compat.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie.workspace = true
 reth-transaction-pool.workspace = true
+reth-evm-optimism = { workspace = true, optional = true }
 
 # ethereum
 alloy-dyn-abi = { workspace = true, features = ["eip712"] }
@@ -63,4 +64,4 @@ reth-testing-utils.workspace = true
 
 [features]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]
-optimism = ["reth-primitives/optimism"]
+optimism = ["reth-primitives/optimism", "reth-evm-optimism"]

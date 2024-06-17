@@ -8,6 +8,8 @@ mod block;
 mod call;
 mod fees;
 mod pending_block;
+#[cfg(feature = "optimism")]
+mod optimism;
 mod receipt;
 mod spec;
 mod state;

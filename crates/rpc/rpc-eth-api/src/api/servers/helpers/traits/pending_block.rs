@@ -184,6 +184,7 @@ pub trait LoadPendingBlock {
     /// Calculates receipts root in block building.
     ///
     /// Panics if block is not in the [`ExecutionOutcome`]'s block range.
+    #[cfg(not(feature = "optimism"))]
     fn receipts_root(
         &self,
         _block_env: &BlockEnv,
@@ -191,6 +192,25 @@ pub trait LoadPendingBlock {
         block_number: BlockNumber,
     ) -> B256 {
         execution_outcome.receipts_root_slow(block_number).expect("Block is present")
+    }
+
+    /// Calculates receipts root in block building.
+    ///
+    /// Panics if block is not in the [`ExecutionOutcome`]'s block range.
+    #[cfg(feature = "optimism")]
+    fn receipts_root(
+        &self,
+        _block_env: &BlockEnv,
+        execution_outcome: &ExecutionOutcome,
+        block_number: BlockNumber,
+    ) -> B256 {
+        execution_outcome
+            .optimism_receipts_root_slow(
+                block_number,
+                self.provider().chain_spec().as_ref(),
+                _block_env.timestamp.to::<u64>(),
+            )
+            .expect("Block is present")
     }
 
     /// Builds a pending block using the configured provider and pool.
