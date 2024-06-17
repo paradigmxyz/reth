@@ -88,7 +88,8 @@ struct CompilerEvmConfigInner {
 }
 
 impl CompilerEvmConfig {
-    fn new(compiler_is_done: Arc<AtomicBool>, out_dir: PathBuf) -> Self {
+    /// Return new compiler EVM configuration.
+    pub fn new(compiler_is_done: Arc<AtomicBool>, out_dir: PathBuf) -> Self {
         Self(Some(Arc::new(Mutex::new(CompilerEvmConfigInner {
             compiler_is_done,
             out_dir,
@@ -97,7 +98,8 @@ impl CompilerEvmConfig {
         }))))
     }
 
-    fn disabled() -> Self {
+    /// Return configuration with compiler disabled.
+    pub fn disabled() -> Self {
         Self(None)
     }
 
