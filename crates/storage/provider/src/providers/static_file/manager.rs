@@ -9,6 +9,7 @@ use crate::{
 };
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use parking_lot::RwLock;
+use reth_chainspec::ChainInfo;
 use reth_db::{
     lockfile::StorageLock,
     static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
@@ -24,8 +25,8 @@ use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     keccak256,
     static_file::{find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive},
-    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
+    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Header, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };

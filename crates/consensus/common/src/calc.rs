@@ -1,4 +1,5 @@
-use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, Chain, ChainSpec, Hardfork, U256};
+use reth_chainspec::{Chain, ChainSpec, Hardfork};
+use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, U256};
 /// Calculates the base block reward.
 ///
 /// The base block reward is defined as:
@@ -45,9 +46,10 @@ pub fn base_block_reward(
 /// # Examples
 ///
 /// ```
+/// # use reth_chainspec::MAINNET;
 /// # use reth_consensus_common::calc::{base_block_reward, block_reward};
 /// # use reth_primitives::constants::ETH_TO_WEI;
-/// # use reth_primitives::{MAINNET, U256};
+/// # use reth_primitives::U256;
 /// #
 /// // This is block 126 on mainnet.
 /// let block_number = 126;
@@ -102,7 +104,7 @@ pub const fn ommer_reward(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::MAINNET;
+    use reth_chainspec::MAINNET;
 
     #[test]
     fn calc_base_block_reward() {

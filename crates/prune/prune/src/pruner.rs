@@ -332,9 +332,9 @@ impl<DB: Database> Pruner<DB> {
 mod tests {
 
     use crate::Pruner;
+    use reth_chainspec::MAINNET;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_exex_types::FinishedExExHeight;
-    use reth_primitives::MAINNET;
     use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 
     #[test]

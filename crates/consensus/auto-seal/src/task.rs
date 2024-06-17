@@ -1,9 +1,10 @@
 use crate::{mode::MiningMode, Storage};
 use futures_util::{future::BoxFuture, FutureExt};
 use reth_beacon_consensus::{BeaconEngineMessage, ForkchoiceStatus};
+use reth_chainspec::ChainSpec;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_primitives::{ChainSpec, IntoRecoveredTransaction};
+use reth_primitives::IntoRecoveredTransaction;
 use reth_provider::{CanonChainTracker, StateProviderFactory};
 use reth_rpc_types::engine::ForkchoiceState;
 use reth_stages_api::PipelineEvent;

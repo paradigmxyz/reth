@@ -1,7 +1,7 @@
 //! Command that dumps genesis block JSON configuration to stdout
 use crate::args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS};
 use clap::Parser;
-use reth_primitives::ChainSpec;
+use reth_chainspec::ChainSpec;
 use std::sync::Arc;
 
 /// Dumps genesis block JSON configuration to stdout
@@ -39,7 +39,7 @@ mod tests {
                 DumpGenesisCommand::parse_from(["reth", "--chain", chain]);
             assert_eq!(
                 Ok(args.chain.chain),
-                chain.parse::<reth_primitives::Chain>(),
+                chain.parse::<reth_chainspec::Chain>(),
                 "failed to parse chain {chain}"
             );
         }

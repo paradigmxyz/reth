@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 reth-primitives.workspace = true
+reth-chainspec = { workspace = true, optional = true }
 reth-execution-errors.workspace = true
 reth-trie.workspace = true
 
@@ -23,4 +24,4 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
 [features]
-optimism = []
+optimism = ["dep:reth-chainspec"]

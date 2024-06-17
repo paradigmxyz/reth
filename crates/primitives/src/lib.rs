@@ -67,16 +67,6 @@ pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
 pub use request::Requests;
-pub use reth_chainspec::{
-    net::{
-        goerli_nodes, holesky_nodes, mainnet_nodes, parse_nodes, sepolia_nodes, NodeRecord,
-        NodeRecordParseError, TrustedPeer, GOERLI_BOOTNODES, HOLESKY_BOOTNODES, MAINNET_BOOTNODES,
-        SEPOLIA_BOOTNODES,
-    },
-    AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, Chain, ChainInfo, ChainKind, ChainSpec,
-    ChainSpecBuilder, DepositContract, DisplayHardforks, ForkBaseFeeParams, ForkCondition,
-    NamedChain, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
-};
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 

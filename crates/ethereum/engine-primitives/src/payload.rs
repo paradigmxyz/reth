@@ -1,10 +1,11 @@
 //! Contains types required for building a payload.
 
 use alloy_rlp::Encodable;
+use reth_chainspec::ChainSpec;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     constants::EIP1559_INITIAL_BASE_FEE, revm::config::revm_spec_by_timestamp_after_merge, Address,
-    BlobTransactionSidecar, ChainSpec, Hardfork, Header, SealedBlock, Withdrawals, B256, U256,
+    BlobTransactionSidecar, Hardfork, Header, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
