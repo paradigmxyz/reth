@@ -86,8 +86,8 @@ impl MyEvmConfig {
         handler.pre_execution.load_precompiles = Arc::new(move || loaded_precompiles.clone());
     }
 
-    /// Given a [`ContextPrecompile`] and a [`PrecompileCache`], create a new precompile that wraps
-    /// the precompile with the cache.
+    /// Given a [`ContextPrecompile`] and cache for a specific precompile, create a new precompile
+    /// that wraps the precompile with the cache.
     fn wrap_precompile<DB>(
         precompile: ContextPrecompile<DB>,
         cache: Arc<RwLock<LruMap<(Bytes, u64), PrecompileResult>>>,
