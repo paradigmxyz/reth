@@ -25,6 +25,10 @@ reth-provider = { workspace = true, features = ["optimism"] }
 reth-transaction-pool.workspace = true
 reth-tasks.workspace = true
 
+# ethereum
+alloy-network.workspace = true
+op-alloy-rpc-types.git = "https://github.com/alloy-rs/op-alloy"
+
 # async
 futures.workspace = true
 tokio = { workspace = true, features = ["sync"] }
