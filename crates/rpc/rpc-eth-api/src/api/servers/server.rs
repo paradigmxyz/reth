@@ -1,3 +1,7 @@
+//! Implementation of the [`jsonrpsee`] generated [`reth_rpc_api::EthApiServer`] trait
+//! Handles RPC requests for the `eth_` namespace.
+
+use alloy_dyn_abi::TypedData;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
 use reth_rpc_types::{
@@ -389,9 +393,9 @@ where
     }
 
     /// Handler for: `eth_signTypedData`
-    async fn sign_typed_data(&self, address: Address, data: serde_json::Value) -> Result<Bytes> {
+    async fn sign_typed_data(&self, address: Address, data: TypedData) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?address, ?data, "Serving eth_signTypedData");
-        Ok(EthTransactions::sign_typed_data(self, data, address)?)
+        Ok(EthTransactions::sign_typed_data(self, &data, address)?)
     }
 
     /// Handler for: `eth_getProof`

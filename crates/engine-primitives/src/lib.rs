@@ -9,14 +9,17 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use core::fmt;
-use reth_payload_primitives::{
+pub use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes,
     PayloadTypes,
 };
 use reth_primitives::ChainSpec;
 use serde::{de::DeserializeOwned, ser::Serialize};
 
-/// The types that are used by the engine API.
+/// This type defines the versioned types of the engine API.
+///
+/// This includes the execution payload types and payload attributes that are used to trigger a
+/// payload job. Hence this trait is also [`PayloadTypes`].
 pub trait EngineTypes:
     PayloadTypes + DeserializeOwned + Serialize + fmt::Debug + Unpin + Send + Sync + Clone
 {

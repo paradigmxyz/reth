@@ -89,7 +89,6 @@ impl EthSigner for DevSigner {
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
         let encoded = payload.eip712_signing_hash().map_err(|_| SignError::InvalidTypedData)?;
-        // let b256 = encoded;
         self.sign_hash(encoded, address)
     }
 }
@@ -113,8 +112,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sign_type_data() {
-        let eip_712_example = serde_json::json!(
-            r#"{
+        let eip_712_example = r#"{
             "types": {
             "EIP712Domain": [
                 {
@@ -177,9 +175,8 @@ mod tests {
             },
             "contents": "Hello, Bob!"
         }
-        }"#
-        );
-        let data: TypedData = serde_json::from_value(eip_712_example).unwrap();
+        }"#;
+        let data: TypedData = serde_json::from_str(eip_712_example).unwrap();
         let signer = build_signer();
         let sig = signer.sign_typed_data(Address::default(), &data).unwrap();
         let expected = Signature {

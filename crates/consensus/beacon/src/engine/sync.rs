@@ -438,7 +438,7 @@ mod tests {
 
     impl TestPipelineBuilder {
         /// Create a new [`TestPipelineBuilder`].
-        fn new() -> Self {
+        const fn new() -> Self {
             Self {
                 pipeline_exec_outputs: VecDeque::new(),
                 executor_results: Vec::new(),

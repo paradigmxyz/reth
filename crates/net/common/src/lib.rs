@@ -10,7 +10,4 @@
 
 pub mod ban_list;
 
-/// Traits related to tokio streams
-pub mod stream;
-
 pub mod ratelimit;

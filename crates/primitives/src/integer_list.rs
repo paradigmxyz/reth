@@ -1,24 +1,20 @@
 use bytes::BufMut;
+use core::fmt;
+use derive_more::Deref;
 use roaring::RoaringTreemap;
 use serde::{
     de::{SeqAccess, Unexpected, Visitor},
     ser::SerializeSeq,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::{fmt, ops::Deref};
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Uses Roaring Bitmaps to hold a list of integers. It provides really good compression with the
 /// capability to access its elements without decoding it.
-#[derive(Clone, PartialEq, Default)]
+#[derive(Clone, PartialEq, Default, Deref)]
 pub struct IntegerList(pub RoaringTreemap);
-
-impl Deref for IntegerList {
-    type Target = RoaringTreemap;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
 
 impl fmt::Debug for IntegerList {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -105,7 +101,7 @@ struct IntegerListVisitor;
 impl<'de> Visitor<'de> for IntegerListVisitor {
     type Value = IntegerList;
 
-    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("a usize array")
     }
 
@@ -144,7 +140,7 @@ impl<'a> Arbitrary<'a> for IntegerList {
 }
 
 /// Primitives error type.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror_no_std::Error)]
 pub enum RoaringBitmapError {
     /// The provided input is invalid.
     #[error("the provided input is invalid")]

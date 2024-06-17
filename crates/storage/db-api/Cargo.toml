@@ -18,7 +18,7 @@ reth-primitives.workspace = true
 reth-prune-types.workspace = true
 reth-storage-errors.workspace = true
 reth-stages-types.workspace = true
-reth-trie-types.workspace = true
+reth-trie-common.workspace = true
 
 # codecs
 modular-bitfield.workspace = true

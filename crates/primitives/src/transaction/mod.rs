@@ -8,12 +8,12 @@ use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
 use bytes::Buf;
+use core::mem;
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
-use std::mem;
 
 pub use access_list::{AccessList, AccessListItem};
 pub use eip1559::TxEip1559;
@@ -59,6 +59,9 @@ mod optimism;
 pub use optimism::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Either a transaction hash or number.
 pub type TxHashOrNumber = BlockHashOrNumber;
@@ -475,6 +478,18 @@ impl Transaction {
             Self::Eip4844(blob_tx) => blob_tx.encode_with_signature(signature, out, with_header),
             #[cfg(feature = "optimism")]
             Self::Deposit(deposit_tx) => deposit_tx.encode(out, with_header),
+        }
+    }
+
+    /// This sets the transaction's gas limit.
+    pub fn set_gas_limit(&mut self, gas_limit: u64) {
+        match self {
+            Self::Legacy(tx) => tx.gas_limit = gas_limit,
+            Self::Eip2930(tx) => tx.gas_limit = gas_limit,
+            Self::Eip1559(tx) => tx.gas_limit = gas_limit,
+            Self::Eip4844(tx) => tx.gas_limit = gas_limit,
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.gas_limit = gas_limit,
         }
     }
 

@@ -216,17 +216,17 @@ impl ExecutionOutcome {
         &self.receipts[index]
     }
 
-    /// Is bundle state empty of blocks.
+    /// Is execution outcome empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Number of blocks in bundle state.
+    /// Number of blocks in the execution outcome.
     pub fn len(&self) -> usize {
         self.receipts.len()
     }
 
-    /// Return first block of the bundle
+    /// Return first block of the execution outcome
     pub const fn first_block(&self) -> BlockNumber {
         self.first_block
     }
@@ -247,6 +247,8 @@ impl ExecutionOutcome {
 
         // remove receipts
         self.receipts.truncate(new_len);
+        // remove requests
+        self.requests.truncate(new_len);
         // Revert last n reverts.
         self.bundle.revert(rm_trx);
 
@@ -274,6 +276,11 @@ impl ExecutionOutcome {
         // Truncate higher state to [at..].
         let at_idx = higher_state.block_number_to_index(at).unwrap();
         higher_state.receipts = higher_state.receipts.split_off(at_idx).into();
+        // Ensure that there are enough requests to truncate.
+        // Sometimes we just have receipts and no requests.
+        if at_idx < higher_state.requests.len() {
+            higher_state.requests = higher_state.requests.split_off(at_idx);
+        }
         higher_state.bundle.take_n_reverts(at_idx);
         higher_state.first_block = at;
 
@@ -595,37 +602,51 @@ mod tests {
 
     #[test]
     fn test_revert_to() {
+        // Create a random receipt object
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            success: true,
+            #[cfg(feature = "optimism")]
+            deposit_nonce: Some(18),
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: Some(34),
+        };
+
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 46913,
-                logs: vec![],
-                success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            })]],
+            receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt.clone())]],
         };
 
         // Define the first block number
         let first_block = 123;
 
+        // Create a DepositRequest object with specific attributes.
+        let request = Request::DepositRequest(DepositRequest {
+            pubkey: FixedBytes::<48>::from([1; 48]),
+            withdrawal_credentials: B256::from([0; 32]),
+            amount: 1111,
+            signature: FixedBytes::<96>::from([2; 96]),
+            index: 222,
+        });
+
+        // Create a vector of Requests containing the request.
+        let requests = vec![Requests(vec![request]), Requests(vec![request])];
+
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
-        let mut exec_res = ExecutionOutcome {
-            bundle: Default::default(),
-            receipts: receipts.clone(),
-            requests: vec![],
-            first_block,
-        };
+        let mut exec_res =
+            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
 
         // Assert that the revert_to method returns true when reverting to the initial block number.
         assert!(exec_res.revert_to(123));
 
-        // Assert that the receipts remain unchanged after reverting to the initial block number.
-        assert_eq!(exec_res.receipts, receipts);
+        // Assert that the receipts are properly cut after reverting to the initial block number.
+        assert_eq!(exec_res.receipts, Receipts { receipt_vec: vec![vec![Some(receipt)]] });
+
+        // Assert that the requests are properly cut after reverting to the initial block number.
+        assert_eq!(exec_res.requests, vec![Requests(vec![request])]);
 
         // Assert that the revert_to method returns false when attempting to revert to a block
         // number greater than the initial block number.
@@ -687,5 +708,78 @@ mod tests {
                 first_block: 123,
             }
         );
+    }
+
+    #[test]
+    fn test_split_at_execution_outcome() {
+        // Create a random receipt object
+        let receipt = Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            success: true,
+            #[cfg(feature = "optimism")]
+            deposit_nonce: Some(18),
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: Some(34),
+        };
+
+        // Create a Receipts object with a vector of receipt vectors
+        let receipts = Receipts {
+            receipt_vec: vec![
+                vec![Some(receipt.clone())],
+                vec![Some(receipt.clone())],
+                vec![Some(receipt.clone())],
+            ],
+        };
+
+        // Define the first block number
+        let first_block = 123;
+
+        // Create a DepositRequest object with specific attributes.
+        let request = Request::DepositRequest(DepositRequest {
+            pubkey: FixedBytes::<48>::from([1; 48]),
+            withdrawal_credentials: B256::from([0; 32]),
+            amount: 1111,
+            signature: FixedBytes::<96>::from([2; 96]),
+            index: 222,
+        });
+
+        // Create a vector of Requests containing the request.
+        let requests =
+            vec![Requests(vec![request]), Requests(vec![request]), Requests(vec![request])];
+
+        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
+        // first_block
+        let exec_res =
+            ExecutionOutcome { bundle: Default::default(), receipts, requests, first_block };
+
+        // Split the ExecutionOutcome at block number 124
+        let result = exec_res.clone().split_at(124);
+
+        // Define the expected lower ExecutionOutcome after splitting
+        let lower_execution_outcome = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] },
+            requests: vec![Requests(vec![request])],
+            first_block,
+        };
+
+        // Define the expected higher ExecutionOutcome after splitting
+        let higher_execution_outcome = ExecutionOutcome {
+            bundle: Default::default(),
+            receipts: Receipts {
+                receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
+            },
+            requests: vec![Requests(vec![request]), Requests(vec![request])],
+            first_block: 124,
+        };
+
+        // Assert that the split result matches the expected lower and higher outcomes
+        assert_eq!(result.0, Some(lower_execution_outcome));
+        assert_eq!(result.1, higher_execution_outcome);
+
+        // Assert that splitting at the first block number returns None for the lower outcome
+        assert_eq!(exec_res.clone().split_at(123), (None, exec_res));
     }
 }

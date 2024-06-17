@@ -7,14 +7,12 @@ use crate::{
     trie_cursor::TrieCursorFactory,
     updates::{TrieKey, TrieOp, TrieUpdates},
     walker::TrieWalker,
-    HashBuilder, Nibbles,
+    HashBuilder, Nibbles, TrieAccount,
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{StateRootError, StorageRootError};
-use reth_primitives::{
-    constants::EMPTY_ROOT_HASH, keccak256, proofs::IntoTrieAccount, Address, BlockNumber, B256,
-};
+use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, BlockNumber, B256};
 use std::ops::RangeInclusive;
 use tracing::{debug, trace};
 
@@ -282,7 +280,7 @@ where
                     };
 
                     account_rlp.clear();
-                    let account = IntoTrieAccount::to_trie_account((account, storage_root));
+                    let account = TrieAccount::from((account, storage_root));
                     account.encode(&mut account_rlp as &mut dyn BufMut);
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 
@@ -558,10 +556,9 @@ mod tests {
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         transaction::DbTxMut,
     };
-    use reth_primitives::{
-        hex_literal::hex, proofs::triehash::KeccakHasher, Account, StorageEntry, U256,
-    };
+    use reth_primitives::{hex_literal::hex, Account, StorageEntry, U256};
     use reth_provider::{test_utils::create_test_provider_factory, DatabaseProviderRW};
+    use reth_trie_common::triehash::KeccakHasher;
     use std::{
         collections::{BTreeMap, HashMap},
         ops::Mul,
@@ -828,8 +825,7 @@ mod tests {
     }
 
     fn encode_account(account: Account, storage_root: Option<B256>) -> Vec<u8> {
-        let account =
-            IntoTrieAccount::to_trie_account((account, storage_root.unwrap_or(EMPTY_ROOT_HASH)));
+        let account = TrieAccount::from((account, storage_root.unwrap_or(EMPTY_ROOT_HASH)));
         let mut account_rlp = Vec::with_capacity(account.length());
         account.encode(&mut account_rlp);
         account_rlp

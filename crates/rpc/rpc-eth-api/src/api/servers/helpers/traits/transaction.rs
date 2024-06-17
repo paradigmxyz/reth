@@ -493,15 +493,8 @@ pub trait EthTransactions: LoadTransaction {
     }
 
     /// Encodes and signs the typed data according EIP-712. Payload must implement Eip712 trait.
-    fn sign_typed_data(&self, data: serde_json::Value, account: Address) -> EthResult<Bytes> {
-        Ok(self
-            .find_signer(&account)?
-            .sign_typed_data(
-                account,
-                &serde_json::from_value::<TypedData>(data)
-                    .map_err(|_| SignError::InvalidTypedData)?,
-            )?
-            .to_hex_bytes())
+    fn sign_typed_data(&self, data: &TypedData, account: Address) -> EthResult<Bytes> {
+        Ok(self.find_signer(&account)?.sign_typed_data(account, data)?.to_hex_bytes())
     }
 
     /// Returns the signer for the given account, if found in configured signers.

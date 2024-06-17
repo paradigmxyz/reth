@@ -12,7 +12,7 @@ pub(crate) struct CanonicalChain {
 }
 
 impl CanonicalChain {
-    pub(crate) fn new(chain: BTreeMap<BlockNumber, BlockHash>) -> Self {
+    pub(crate) const fn new(chain: BTreeMap<BlockNumber, BlockHash>) -> Self {
         Self { chain }
     }
 

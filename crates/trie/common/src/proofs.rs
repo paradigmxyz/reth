@@ -1,12 +1,13 @@
 //! Merkle trie proofs.
 
-use super::{traits::IntoTrieAccount, Nibbles};
-use crate::{keccak256, Account, Address, Bytes, B256, U256};
+use crate::{Nibbles, TrieAccount};
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rlp::encode_fixed_size;
 use alloy_trie::{
     proof::{verify_proof, ProofVerificationError},
     EMPTY_ROOT_HASH,
 };
+use reth_primitives_traits::Account;
 
 /// The merkle proof with the relevant account info.
 #[derive(PartialEq, Eq, Debug)]
@@ -26,7 +27,7 @@ pub struct AccountProof {
 
 impl AccountProof {
     /// Create new account proof entity.
-    pub fn new(address: Address) -> Self {
+    pub const fn new(address: Address) -> Self {
         Self {
             address,
             info: None,
@@ -64,7 +65,7 @@ impl AccountProof {
         let expected = if self.info.is_none() && self.storage_root == EMPTY_ROOT_HASH {
             None
         } else {
-            Some(alloy_rlp::encode(IntoTrieAccount::to_trie_account((
+            Some(alloy_rlp::encode(TrieAccount::from((
                 self.info.unwrap_or_default(),
                 self.storage_root,
             ))))
@@ -120,5 +121,31 @@ impl StorageProof {
         let expected =
             if self.value.is_zero() { None } else { Some(encode_fixed_size(&self.value).to_vec()) };
         verify_proof(root, self.nibbles.clone(), expected, &self.proof)
+    }
+}
+
+/// Implementation of hasher using our keccak256 hashing function
+/// for compatibility with `triehash` crate.
+#[cfg(any(test, feature = "test-utils"))]
+pub mod triehash {
+    use alloy_primitives::{keccak256, B256};
+    use hash_db::Hasher;
+    use plain_hasher::PlainHasher;
+
+    /// A [Hasher] that calculates a keccak256 hash of the given data.
+    #[derive(Default, Debug, Clone, PartialEq, Eq)]
+    #[non_exhaustive]
+    pub struct KeccakHasher;
+
+    #[cfg(any(test, feature = "test-utils"))]
+    impl Hasher for KeccakHasher {
+        type Out = B256;
+        type StdHasher = PlainHasher;
+
+        const LENGTH: usize = 32;
+
+        fn hash(x: &[u8]) -> Self::Out {
+            keccak256(x)
+        }
     }
 }

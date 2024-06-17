@@ -547,6 +547,44 @@ impl StaticFileProviderRW {
         Ok(result)
     }
 
+    /// Appends multiple receipts to the static file.
+    ///
+    /// Returns the current [`TxNumber`] as seen in the static file, if any.
+    pub fn append_receipts<I>(&mut self, receipts: I) -> ProviderResult<Option<TxNumber>>
+    where
+        I: IntoIterator<Item = Result<(TxNumber, Receipt), ProviderError>>,
+    {
+        let mut receipts_iter = receipts.into_iter().peekable();
+        // If receipts are empty, we can simply return None
+        if receipts_iter.peek().is_none() {
+            return Ok(None);
+        }
+
+        let start = Instant::now();
+        self.ensure_no_queued_prune()?;
+
+        // At this point receipts contains at least one receipt, so this would be overwritten.
+        let mut tx_number = 0;
+        let mut count: u64 = 0;
+
+        for receipt_result in receipts_iter {
+            let (tx_num, receipt) = receipt_result?;
+            tx_number = self.append_with_tx_number(StaticFileSegment::Receipts, tx_num, receipt)?;
+            count += 1;
+        }
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operations(
+                StaticFileSegment::Receipts,
+                StaticFileProviderOperation::Append,
+                count,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(Some(tx_number))
+    }
+
     /// Adds an instruction to prune `to_delete`transactions during commit.
     ///
     /// Note: `last_block` refers to the block the unwinds ends at.
