@@ -6943,7 +6943,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "serde",
- "thiserror",
+ "thiserror-no-std",
 ]
 
 [[package]]
