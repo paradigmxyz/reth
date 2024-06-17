@@ -4,6 +4,9 @@ use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{AsRef, Deref, DerefMut, From, IntoIterator};
 use reth_codecs::{main_codec, Compact};
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// Re-export from `alloy_eips`.
 #[doc(inline)]
 pub use alloy_eips::eip4895::Withdrawal;
@@ -37,22 +40,22 @@ impl Withdrawals {
     /// Calculate the total size, including capacity, of the Withdrawals.
     #[inline]
     pub fn total_size(&self) -> usize {
-        self.capacity() * std::mem::size_of::<Withdrawal>()
+        self.capacity() * core::mem::size_of::<Withdrawal>()
     }
 
     /// Calculate a heuristic for the in-memory size of the [Withdrawals].
     #[inline]
     pub fn size(&self) -> usize {
-        self.len() * std::mem::size_of::<Withdrawal>()
+        self.len() * core::mem::size_of::<Withdrawal>()
     }
 
     /// Get an iterator over the Withdrawals.
-    pub fn iter(&self) -> std::slice::Iter<'_, Withdrawal> {
+    pub fn iter(&self) -> core::slice::Iter<'_, Withdrawal> {
         self.0.iter()
     }
 
     /// Get a mutable iterator over the Withdrawals.
-    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Withdrawal> {
+    pub fn iter_mut(&mut self) -> core::slice::IterMut<'_, Withdrawal> {
         self.0.iter_mut()
     }
 

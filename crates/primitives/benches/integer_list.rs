@@ -232,7 +232,7 @@ mod elias_fano {
     }
 
     /// Primitives error type.
-    #[derive(Debug, thiserror::Error)]
+    #[derive(Debug, thiserror_no_std::Error)]
     pub enum EliasFanoError {
         /// The provided input is invalid.
         #[error("{0}")]

@@ -193,7 +193,7 @@ impl Signature {
     /// Calculates a heuristic for the in-memory size of the [Signature].
     #[inline]
     pub const fn size(&self) -> usize {
-        std::mem::size_of::<Self>()
+        core::mem::size_of::<Self>()
     }
 }
 

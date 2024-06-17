@@ -9,6 +9,9 @@ use alloy_eips::{eip4788::BEACON_ROOTS_ADDRESS, eip7002::WITHDRAWAL_REQUEST_PRED
 #[cfg(feature = "optimism")]
 use revm_primitives::OptimismFields;
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// Fill block environment from Block.
 pub fn fill_block_env(
     block_env: &mut BlockEnv,
@@ -73,7 +76,7 @@ pub fn block_coinbase(chain_spec: &ChainSpec, header: &Header, after_merge: bool
 }
 
 /// Error type for recovering Clique signer from a header.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror_no_std::Error)]
 pub enum CliqueSignerRecoveryError {
     /// Header extradata is too short.
     #[error("Invalid extra data length")]

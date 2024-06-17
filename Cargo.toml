@@ -467,7 +467,7 @@ http-body = "1.0"
 jsonwebtoken = "9"
 
 # crypto
-secp256k1 = { version = "0.28", default-features = false, features = [
+secp256k1 = { version = "0.29", default-features = false, features = [
     "global-context",
     "recovery",
 ] }
