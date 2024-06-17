@@ -1,7 +1,9 @@
+//! Configuration for RPC cache.
+
 use reth_rpc_server_types::constants::cache::*;
 use serde::{Deserialize, Serialize};
 
-/// Settings for the [`EthStateCache`](crate::eth::cache::EthStateCache).
+/// Settings for the [`EthStateCache`](crate::EthStateCache).
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EthStateCacheConfig {

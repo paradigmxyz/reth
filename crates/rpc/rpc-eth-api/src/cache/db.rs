@@ -1,3 +1,7 @@
+//! Helper types to workaround 'higher-ranked lifetime error'
+//! <https://github.com/rust-lang/rust/issues/100013> in default implementation of
+//! [`Call`](crate::servers::Call).
+
 use reth_primitives::{B256, U256};
 use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};

@@ -1,3 +1,6 @@
+//! Metered cache, which also provides storage for senders in order to queue queries that result in
+//! a cache miss.
+
 use super::metrics::CacheMetrics;
 use schnellru::{ByLength, Limiter, LruMap};
 use std::{
@@ -12,9 +15,9 @@ where
     K: Hash + Eq,
     L: Limiter<K, V>,
 {
-    /// The LRU cache for the
+    /// The LRU cache.
     cache: LruMap<K, V, L>,
-    /// All queued consumers
+    /// All queued consumers.
     queued: HashMap<K, Vec<S>>,
     /// Cache metrics
     metrics: CacheMetrics,

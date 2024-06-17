@@ -18,7 +18,7 @@ where
 {
     /// Returns the current ethereum protocol version.
     ///
-    /// Note: This returns an `U64`, since this should return as hex string.
+    /// Note: This returns an [`U64`], since this should return as hex string.
     async fn protocol_version(&self) -> RethResult<U64> {
         let status = self.network().network_status().await.map_err(RethError::other)?;
         Ok(U64::from(status.protocol_version))
@@ -42,7 +42,7 @@ where
         self.network().is_syncing()
     }
 
-    /// Returns the [SyncStatus] of the network
+    /// Returns the [`SyncStatus`] of the network
     fn sync_status(&self) -> RethResult<SyncStatus> {
         let status = if self.is_syncing() {
             let current_block = U256::from(

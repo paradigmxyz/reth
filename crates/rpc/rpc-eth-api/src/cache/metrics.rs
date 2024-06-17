@@ -1,3 +1,5 @@
+//! Tracks state of RPC cache.
+
 use metrics::Counter;
 use reth_metrics::{metrics::Gauge, Metrics};
 
