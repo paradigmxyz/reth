@@ -1,4 +1,4 @@
-use alloy_rpc_types::admin::EthProtocolInfo;
+use alloy_rpc_types_admin::EthProtocolInfo;
 use serde::{Deserialize, Serialize};
 
 /// The status of the network being ran by the local node.

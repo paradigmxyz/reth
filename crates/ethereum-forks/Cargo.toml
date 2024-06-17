@@ -22,7 +22,7 @@ crc = "3"
 
 # misc
 serde = { workspace = true, features = ["derive"], optional = true }
-thiserror.workspace = true
+thiserror-no-std = { workspace = true, default-features = false }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -35,7 +35,8 @@ proptest.workspace = true
 proptest-derive.workspace = true
 
 [features]
-default = ["serde"]
+default = ["std", "serde"]
+std = ["thiserror-no-std/std"]
 serde = ["dep:serde"]
 arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
 optimism = []
