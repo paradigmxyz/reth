@@ -1,6 +1,7 @@
+use reth_chainspec::ChainSpec;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Address, ChainSpec, Header, SealedBlock, Withdrawals, B256, U256,
+    Address, Header, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{
     engine::{OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId},

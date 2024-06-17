@@ -1,6 +1,6 @@
 use futures_util::StreamExt;
 use reth::network::{NetworkEvent, NetworkEvents, NetworkHandle, PeersInfo};
-use reth_primitives::NodeRecord;
+use reth_chainspec::net::NodeRecord;
 use reth_tokio_util::EventStream;
 use reth_tracing::tracing::info;
 

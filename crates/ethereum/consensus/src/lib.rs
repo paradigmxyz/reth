@@ -8,6 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use reth_chainspec::{Chain, ChainSpec, Hardfork};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
@@ -16,8 +17,8 @@ use reth_consensus_common::validation::{
     validate_header_extradata, validate_header_gas,
 };
 use reth_primitives::{
-    constants::MINIMUM_GAS_LIMIT, BlockWithSenders, Chain, ChainSpec, Hardfork, Header,
-    SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
+    constants::MINIMUM_GAS_LIMIT, BlockWithSenders, Header, SealedBlock, SealedHeader,
+    EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
 
@@ -223,9 +224,9 @@ impl Consensus for EthBeaconConsensus {
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::{proofs, ChainSpecBuilder, B256};
-
     use super::*;
+    use reth_chainspec::ChainSpecBuilder;
+    use reth_primitives::{proofs, B256};
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
         let header = Header { gas_limit, ..Default::default() };

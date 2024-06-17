@@ -4,11 +4,12 @@ use reth::{
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
+use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{
     node::NodeTestContext, setup, transaction::TransactionTestContext, wallet::Wallet,
 };
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
+use reth_primitives::Genesis;
 use std::sync::Arc;
 
 #[tokio::test]

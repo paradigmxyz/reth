@@ -16,15 +16,15 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
+use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     constants::{EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
-    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainSpec, Header, Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256,
-    U256,
+    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Header,
+    Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256, U256,
 };
 use reth_provider::{BlockReaderIdExt, ExecutionOutcome, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;

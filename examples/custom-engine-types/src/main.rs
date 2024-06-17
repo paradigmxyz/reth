@@ -38,6 +38,7 @@ use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
     PayloadBuilder, PayloadConfig,
 };
+use reth_chainspec::{Chain, ChainSpec};
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
     validate_version_specific_fields, EngineTypes, PayloadAttributes, PayloadBuilderAttributes,
@@ -50,7 +51,7 @@ use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
     PayloadBuilderService,
 };
-use reth_primitives::{Address, Chain, ChainSpec, Genesis, Header, Withdrawals, B256};
+use reth_primitives::{Address, Genesis, Header, Withdrawals, B256};
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,

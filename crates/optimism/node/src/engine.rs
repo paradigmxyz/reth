@@ -1,3 +1,4 @@
+use reth_chainspec::{ChainSpec, Hardfork};
 use reth_node_api::{
     payload::{
         validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
@@ -7,7 +8,6 @@ use reth_node_api::{
     EngineTypes,
 };
 use reth_optimism_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
-use reth_primitives::{ChainSpec, Hardfork};
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV2, OptimismExecutionPayloadEnvelopeV3,

@@ -12,8 +12,8 @@ use reth_network_api::{
     ReputationChangeKind,
 };
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
-use reth_network_peers::PeerId;
-use reth_primitives::{Head, NodeRecord, TransactionSigned, B256};
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_primitives::{Head, TransactionSigned, B256};
 use reth_rpc_types::NetworkStatus;
 use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;

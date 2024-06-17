@@ -1,4 +1,5 @@
-use crate::{ChainSpec, Hardfork, Head};
+use reth_chainspec::ChainSpec;
+use reth_ethereum_forks::{Hardfork, Head};
 
 /// Returns the spec id at the given timestamp.
 ///
@@ -86,7 +87,8 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ChainSpecBuilder, MAINNET, U256};
+    use crate::U256;
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
 
     #[test]
     fn test_to_revm_spec() {
@@ -148,7 +150,7 @@ mod tests {
         {
             #[inline(always)]
             fn op_cs(f: impl FnOnce(ChainSpecBuilder) -> ChainSpecBuilder) -> ChainSpec {
-                let cs = ChainSpecBuilder::mainnet().chain(crate::Chain::from_id(10));
+                let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10));
                 f(cs).build()
             }
             assert_eq!(

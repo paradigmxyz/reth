@@ -1,9 +1,9 @@
 use crate::{providers::StaticFileProvider, ProviderFactory};
+use reth_chainspec::{ChainSpec, MAINNET};
 use reth_db::{
     test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
     DatabaseEnv,
 };
-use reth_primitives::{ChainSpec, MAINNET};
 use std::sync::Arc;
 
 pub mod blocks;
