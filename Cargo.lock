@@ -7979,7 +7979,10 @@ dependencies = [
 name = "reth-rpc-eth-api"
 version = "1.0.0-rc.1"
 dependencies = [
+ "alloy-consensus 0.1.0",
  "alloy-dyn-abi",
+ "alloy-network",
+ "alloy-rpc-types-eth 0.1.0",
  "alloy-sol-types",
  "async-trait",
  "auto_impl",

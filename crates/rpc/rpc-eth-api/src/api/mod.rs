@@ -1,6 +1,7 @@
 //! `eth_` RPC API.
 
 use alloy_dyn_abi::TypedData;
+use alloy_network::Network;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
 use reth_rpc_types::{
@@ -18,7 +19,7 @@ pub mod servers;
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EthApi {
+pub trait EthApi: Network {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
@@ -82,7 +83,7 @@ pub trait EthApi {
     async fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> RpcResult<Option<Vec<AnyTransactionReceipt>>>;
+    ) -> RpcResult<Option<Vec<<Self as Network>::ReceiptResponse>>>;
 
     /// Returns an uncle block of the given block and index.
     #[method(name = "getUncleByBlockHashAndIndex")]
@@ -108,7 +109,10 @@ pub trait EthApi {
 
     /// Returns the information about a transaction requested by transaction hash.
     #[method(name = "getTransactionByHash")]
-    async fn transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Transaction>>;
+    async fn transaction_by_hash(
+        &self,
+        hash: B256,
+    ) -> RpcResult<Option<<Self as Network>::TransactionResponse>>;
 
     /// Returns information about a raw transaction by block hash and transaction index position.
     #[method(name = "getRawTransactionByBlockHashAndIndex")]
@@ -124,7 +128,7 @@ pub trait EthApi {
         &self,
         hash: B256,
         index: Index,
-    ) -> RpcResult<Option<Transaction>>;
+    ) -> RpcResult<Option<<Self as Network>::TransactionResponse>>;
 
     /// Returns information about a raw transaction by block number and transaction index
     /// position.
@@ -141,11 +145,14 @@ pub trait EthApi {
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> RpcResult<Option<Transaction>>;
+    ) -> RpcResult<Option<<Self as Network>::TransactionResponse>>;
 
     /// Returns the receipt of a transaction by transaction hash.
     #[method(name = "getTransactionReceipt")]
-    async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<AnyTransactionReceipt>>;
+    async fn transaction_receipt(
+        &self,
+        hash: B256,
+    ) -> RpcResult<Option<<Self as Network>::ReceiptResponse>>;
 
     /// Returns the balance of the account of given address.
     #[method(name = "getBalance")]
@@ -174,17 +181,20 @@ pub trait EthApi {
 
     /// Returns the block's header at given number.
     #[method(name = "getHeaderByNumber")]
-    async fn header_by_number(&self, hash: BlockNumberOrTag) -> RpcResult<Option<Header>>;
+    async fn header_by_number(
+        &self,
+        hash: BlockNumberOrTag,
+    ) -> RpcResult<Option<<Self as Network>::Header>>;
 
     /// Returns the block's header at given hash.
     #[method(name = "getHeaderByHash")]
-    async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<Header>>;
+    async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<<Self as Network>::Header>>;
 
     /// Executes a new message call immediately without creating a transaction on the block chain.
     #[method(name = "call")]
     async fn call(
         &self,
-        request: TransactionRequest,
+        request: <Self as Network>::TransactionRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
@@ -217,7 +227,7 @@ pub trait EthApi {
     #[method(name = "createAccessList")]
     async fn create_access_list(
         &self,
-        request: TransactionRequest,
+        request: <Self as Network>::TransactionRequest,
         block_number: Option<BlockId>,
     ) -> RpcResult<AccessListWithGasUsed>;
 
@@ -286,7 +296,10 @@ pub trait EthApi {
     /// Sends transaction; will block waiting for signer to return the
     /// transaction hash.
     #[method(name = "sendTransaction")]
-    async fn send_transaction(&self, request: TransactionRequest) -> RpcResult<B256>;
+    async fn send_transaction(
+        &self,
+        request: <Self as Network>::TransactionRequest,
+    ) -> RpcResult<B256>;
 
     /// Sends signed transaction, returning its hash.
     #[method(name = "sendRawTransaction")]
@@ -300,7 +313,10 @@ pub trait EthApi {
     /// Signs a transaction that can be submitted to the network at a later time using with
     /// `sendRawTransaction.`
     #[method(name = "signTransaction")]
-    async fn sign_transaction(&self, transaction: TransactionRequest) -> RpcResult<Bytes>;
+    async fn sign_transaction(
+        &self,
+        transaction: <Self as Network>::TransactionRequest,
+    ) -> RpcResult<Bytes>;
 
     /// Signs data via [EIP-712](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md).
     #[method(name = "signTypedData")]

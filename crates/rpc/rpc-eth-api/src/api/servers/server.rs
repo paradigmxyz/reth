@@ -2,6 +2,7 @@
 //! the `eth_` namespace.
 
 use alloy_dyn_abi::TypedData;
+use alloy_network::Network;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
 use reth_rpc_types::{
@@ -24,7 +25,8 @@ use crate::{
 #[async_trait::async_trait]
 impl<T> EthApiServer for T
 where
-    Self: EthApiSpec
+    Self: Network
+        + EthApiSpec
         + EthTransactions
         + EthBlocks
         + EthState
@@ -117,7 +119,7 @@ where
     async fn block_receipts(
         &self,
         block_id: BlockId,
-    ) -> Result<Option<Vec<AnyTransactionReceipt>>> {
+    ) -> Result<Option<Vec<<Self as Network>::ReceiptResponse>>> {
         trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockReceipts");
         Ok(EthBlocks::block_receipts(self, block_id).await?)
     }
@@ -149,7 +151,10 @@ where
     }
 
     /// Handler for: `eth_getTransactionByHash`
-    async fn transaction_by_hash(&self, hash: B256) -> Result<Option<Transaction>> {
+    async fn transaction_by_hash(
+        &self,
+        hash: B256,
+    ) -> Result<Option<<Self as Network>::TransactionResponse>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
         Ok(EthTransactions::transaction_by_hash(self, hash).await?.map(Into::into))
     }
@@ -169,7 +174,7 @@ where
         &self,
         hash: B256,
         index: Index,
-    ) -> Result<Option<reth_rpc_types::Transaction>> {
+    ) -> Result<Option<<Self as Network>::TransactionResponse>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getTransactionByBlockHashAndIndex");
         Ok(EthTransactions::transaction_by_block_and_tx_index(self, hash, index).await?)
     }
@@ -189,13 +194,16 @@ where
         &self,
         number: BlockNumberOrTag,
         index: Index,
-    ) -> Result<Option<reth_rpc_types::Transaction>> {
+    ) -> Result<Option<<Self as Network>::TransactionResponse>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getTransactionByBlockNumberAndIndex");
         Ok(EthTransactions::transaction_by_block_and_tx_index(self, number, index).await?)
     }
 
     /// Handler for: `eth_getTransactionReceipt`
-    async fn transaction_receipt(&self, hash: B256) -> Result<Option<AnyTransactionReceipt>> {
+    async fn transaction_receipt(
+        &self,
+        hash: B256,
+    ) -> Result<Option<<Self as Network>::ReceiptResponse>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionReceipt");
         Ok(EthTransactions::transaction_receipt(self, hash).await?)
     }
@@ -235,13 +243,16 @@ where
     }
 
     /// Handler for: `eth_getHeaderByNumber`
-    async fn header_by_number(&self, block_number: BlockNumberOrTag) -> Result<Option<Header>> {
+    async fn header_by_number(
+        &self,
+        block_number: BlockNumberOrTag,
+    ) -> Result<Option<<Self as Network>::Header>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_getHeaderByNumber");
         Ok(EthBlocks::rpc_block_header(self, block_number).await?)
     }
 
     /// Handler for: `eth_getHeaderByHash`
-    async fn header_by_hash(&self, hash: B256) -> Result<Option<Header>> {
+    async fn header_by_hash(&self, hash: B256) -> Result<Option<<Self as Network>::Header>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
         Ok(EthBlocks::rpc_block_header(self, hash).await?)
     }
@@ -249,7 +260,7 @@ where
     /// Handler for: `eth_call`
     async fn call(
         &self,
-        request: TransactionRequest,
+        request: <Self as Network>::TransactionRequest,
         block_number: Option<BlockId>,
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
@@ -278,7 +289,7 @@ where
     /// Handler for: `eth_createAccessList`
     async fn create_access_list(
         &self,
-        request: TransactionRequest,
+        request: <Self as Network>::TransactionRequest,
         block_number: Option<BlockId>,
     ) -> Result<AccessListWithGasUsed> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
@@ -291,7 +302,7 @@ where
     /// Handler for: `eth_estimateGas`
     async fn estimate_gas(
         &self,
-        request: TransactionRequest,
+        request: <Self as Network>::TransactionRequest,
         block_number: Option<BlockId>,
         state_override: Option<StateOverride>,
     ) -> Result<U256> {
@@ -370,7 +381,10 @@ where
     }
 
     /// Handler for: `eth_sendTransaction`
-    async fn send_transaction(&self, request: TransactionRequest) -> Result<B256> {
+    async fn send_transaction(
+        &self,
+        request: <Self as Network>::TransactionRequest,
+    ) -> Result<B256> {
         trace!(target: "rpc::eth", ?request, "Serving eth_sendTransaction");
         Ok(EthTransactions::send_transaction(self, request).await?)
     }
@@ -388,7 +402,10 @@ where
     }
 
     /// Handler for: `eth_signTransaction`
-    async fn sign_transaction(&self, _transaction: TransactionRequest) -> Result<Bytes> {
+    async fn sign_transaction(
+        &self,
+        _transaction: <Self as Network>::TransactionRequest,
+    ) -> Result<Bytes> {
         Err(internal_rpc_err("unimplemented"))
     }
 

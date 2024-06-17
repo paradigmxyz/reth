@@ -32,6 +32,9 @@ reth-transaction-pool.workspace = true
 
 # ethereum
 alloy-dyn-abi = { workspace = true, features = ["eip712"] }
+alloy-consensus.workspace = true
+alloy-network.workspace = true
+alloy-rpc-types-eth.workspace = true
 alloy-sol-types.workspace = true
 secp256k1.workspace = true
 
