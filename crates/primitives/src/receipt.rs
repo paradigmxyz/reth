@@ -11,6 +11,7 @@ use proptest::strategy::Strategy;
 #[cfg(feature = "zstd-codec")]
 use reth_codecs::CompactZstd;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
+use serde::{Deserialize, Serialize};
 
 #[cfg(not(feature = "std"))]
 use alloc::{vec, vec::Vec};
@@ -66,7 +67,19 @@ impl Receipt {
 }
 
 /// A collection of receipts organized as a two-dimensional vector.
-#[derive(Clone, Debug, PartialEq, Eq, Default, From, Deref, DerefMut, IntoIterator)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    From,
+    Deref,
+    DerefMut,
+    IntoIterator,
+)]
 pub struct Receipts {
     /// A two-dimensional vector of optional `Receipt` instances.
     pub receipt_vec: Vec<Vec<Option<Receipt>>>,

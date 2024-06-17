@@ -24,9 +24,11 @@ revm.workspace = true
 auto_impl.workspace = true
 futures-util.workspace = true
 parking_lot = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 parking_lot.workspace = true
 
 [features]
+serde = ["dep:serde"]
 test-utils = ["dep:parking_lot"]
