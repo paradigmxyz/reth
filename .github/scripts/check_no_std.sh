@@ -9,7 +9,7 @@ no_std_packages=(
 
 # Loop through each package and check it for no_std compliance
 for package in "${no_std_packages[@]}"; do
-  cmd="cargo +stable check -p $package --target riscv32imac-unknown-none-elf --no-default-features"
+  cmd="cargo +stable check -p $package --no-default-features"
   
   if [ -n "$CI" ]; then
     echo "::group::$cmd"
