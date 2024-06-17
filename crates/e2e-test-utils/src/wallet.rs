@@ -1,9 +1,9 @@
 use alloy_signer::Signer;
-use alloy_signer_wallet::{coins_bip39::English, LocalWallet, MnemonicBuilder};
+use alloy_signer_local::{coins_bip39::English, MnemonicBuilder, PrivateKeySigner};
 
 /// One of the accounts of the genesis allocations.
 pub struct Wallet {
-    pub inner: LocalWallet,
+    pub inner: PrivateKeySigner,
     pub inner_nonce: u64,
     pub chain_id: u64,
     amount: usize,
@@ -27,7 +27,7 @@ impl Wallet {
         self.derivation_path.as_deref().unwrap_or("m/44'/60'/0'/0/")
     }
 
-    pub fn gen(&self) -> Vec<LocalWallet> {
+    pub fn gen(&self) -> Vec<PrivateKeySigner> {
         let builder = MnemonicBuilder::<English>::default().phrase(TEST_MNEMONIC);
 
         // use the derivation path

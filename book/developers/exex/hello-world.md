@@ -160,3 +160,7 @@ and it's safe to prune the associated data.
 </div>
 
 What we've arrived at is the [minimal ExEx example](https://github.com/paradigmxyz/reth/blob/b8cd7be6c92a71aea5341cdeba685f124c6de540/examples/exex/minimal/src/main.rs) that we provide in the Reth repository.
+
+## What's next?
+
+Let's do something a bit more interesting, and see how you can [keep track of some state](./tracking-state.md) inside your ExEx.

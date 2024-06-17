@@ -50,7 +50,7 @@ rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile = { workspace = true, optional = true }
-thiserror.workspace = true
+thiserror-no-std = { workspace = true , default-features = false }
 zstd = { version = "0.13", features = ["experimental"], optional = true }
 roaring = "0.10.2"
 
@@ -87,7 +87,7 @@ pprof = { workspace = true, features = [
 secp256k1.workspace = true
 
 [features]
-default = ["c-kzg", "zstd-codec", "alloy-compat"]
+default = ["c-kzg", "zstd-codec", "alloy-compat", "std"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "reth-primitives-traits/arbitrary",
@@ -111,7 +111,6 @@ c-kzg = [
     "alloy-eips/kzg",
 ]
 zstd-codec = ["dep:zstd"]
-clap = ["reth-static-file-types/clap"]
 optimism = [
     "reth-codecs/optimism",
     "reth-ethereum-forks/optimism",
@@ -121,6 +120,7 @@ alloy-compat = [
     "reth-primitives-traits/alloy-compat",
     "alloy-rpc-types",
 ]
+std = ["thiserror-no-std/std"]
 test-utils = ["reth-primitives-traits/test-utils"]
 
 [[bench]]

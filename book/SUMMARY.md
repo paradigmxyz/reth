@@ -76,4 +76,6 @@
    - [Execution Extensions](./developers/exex/exex.md)
       - [How do ExExes work?](./developers/exex/how-it-works.md)
       - [Hello World](./developers/exex/hello-world.md)
+      - [Tracking State](./developers/exex/tracking-state.md)
+      - [Remote](./developers/exex/remote.md)
    - [Contribute](./developers/contribute.md)

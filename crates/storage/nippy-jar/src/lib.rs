@@ -514,6 +514,8 @@ impl DataReader {
         // Ensure that the size of an offset is at most 8 bytes.
         if offset_size > 8 {
             return Err(NippyJarError::OffsetSizeTooBig { offset_size })
+        } else if offset_size == 0 {
+            return Err(NippyJarError::OffsetSizeTooSmall { offset_size })
         }
 
         Ok(Self { data_file, data_mmap, offset_file, offset_size, offset_mmap })
@@ -551,7 +553,7 @@ impl DataReader {
     fn offset_at(&self, index: usize) -> Result<u64, NippyJarError> {
         let mut buffer: [u8; 8] = [0; 8];
 
-        let offset_end = index + self.offset_size as usize;
+        let offset_end = index.saturating_add(self.offset_size as usize);
         if offset_end > self.offset_mmap.len() {
             return Err(NippyJarError::OffsetOutOfBounds { index })
         }
