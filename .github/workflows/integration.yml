@@ -41,7 +41,7 @@ jobs:
         run: |
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }}" \
-            --workspace --exclude examples --exclude ef-tests \
+            --workspace --exclude examples --exclude exex-remote --exclude ef-tests \
             -E "kind(test)"
       - if: matrix.network == 'optimism'
         name: Run tests
