@@ -6,7 +6,8 @@ use crate::{
     Metrics, PrunerError, PrunerEvent,
 };
 use reth_db_api::database::Database;
-use reth_primitives::{BlockNumber, FinishedExExHeight, StaticFileSegment};
+use reth_exex_types::FinishedExExHeight;
+use reth_primitives::{BlockNumber, StaticFileSegment};
 use reth_provider::{
     DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
 };
@@ -332,7 +333,8 @@ mod tests {
 
     use crate::Pruner;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_primitives::{FinishedExExHeight, MAINNET};
+    use reth_exex_types::FinishedExExHeight;
+    use reth_primitives::MAINNET;
     use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 
     #[test]

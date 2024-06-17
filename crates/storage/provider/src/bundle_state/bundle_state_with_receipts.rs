@@ -9,7 +9,7 @@ use reth_primitives::StaticFileSegment;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 pub use revm::db::states::OriginalValuesKnown;
 
-impl StateWriter for BundleStateWithReceipts {
+impl StateWriter for ExecutionOutcome {
     fn write_to_storage<TX>(
         self,
         tx: &TX,
@@ -42,12 +42,14 @@ impl StateWriter for BundleStateWithReceipts {
             if let Some(static_file_producer) = &mut static_file_producer {
                 // Increment block on static file header.
                 static_file_producer.increment_block(StaticFileSegment::Receipts, block_number)?;
-
-                for (tx_idx, receipt) in receipts.into_iter().enumerate() {
-                    let receipt = receipt
-                        .expect("receipt should not be filtered when saving to static files.");
-                    static_file_producer.append_receipt(first_tx_index + tx_idx as u64, receipt)?;
-                }
+                let receipts = receipts.into_iter().enumerate().map(|(tx_idx, receipt)| {
+                    Ok((
+                        first_tx_index + tx_idx as u64,
+                        receipt
+                            .expect("receipt should not be filtered when saving to static files."),
+                    ))
+                });
+                static_file_producer.append_receipts(receipts)?;
             } else if !receipts.is_empty() {
                 for (tx_idx, receipt) in receipts.into_iter().enumerate() {
                     if let Some(receipt) = receipt {
@@ -280,6 +282,7 @@ mod tests {
                         EvmStorageSlot {
                             present_value: U256::from(2),
                             original_value: U256::from(1),
+                            ..Default::default()
                         },
                     )]),
                 },
@@ -288,7 +291,7 @@ mod tests {
 
         state.merge_transitions(BundleRetention::Reverts);
 
-        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1)
+        ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -386,7 +389,7 @@ mod tests {
         )]));
 
         state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 2)
+        ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 2, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -450,7 +453,7 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0)
+        ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
@@ -470,7 +473,11 @@ mod tests {
                 // 0x00 => 1 => 2
                 storage: HashMap::from([(
                     U256::ZERO,
-                    EvmStorageSlot { original_value: U256::from(1), present_value: U256::from(2) },
+                    EvmStorageSlot {
+                        original_value: U256::from(1),
+                        present_value: U256::from(2),
+                        ..Default::default()
+                    },
                 )]),
             },
         )]));
@@ -592,7 +599,7 @@ mod tests {
 
         let bundle = state.take_bundle();
 
-        BundleStateWithReceipts::new(bundle, Receipts::new(), 1)
+        ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -755,7 +762,7 @@ mod tests {
             },
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(init_state.take_bundle(), Receipts::new(), 0)
+        ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
@@ -800,7 +807,7 @@ mod tests {
 
         // Commit block #1 changes to the database.
         state.merge_transitions(BundleRetention::Reverts);
-        BundleStateWithReceipts::new(state.take_bundle(), Receipts::new(), 1)
+        ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new())
             .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
@@ -830,10 +837,11 @@ mod tests {
 
     #[test]
     fn revert_to_indices() {
-        let base = BundleStateWithReceipts {
+        let base = ExecutionOutcome {
             bundle: BundleState::default(),
-            receipts: Receipts::from_vec(vec![vec![Some(Receipt::default()); 2]; 7]),
+            receipts: vec![vec![Some(Receipt::default()); 2]; 7].into(),
             first_block: 10,
+            requests: Vec::new(),
         };
 
         let mut this = base.clone();
@@ -895,10 +903,15 @@ mod tests {
 
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
             assert_eq!(
-                BundleStateWithReceipts::new(state.bundle_state.clone(), Receipts::default(), 0)
-                    .hash_state_slow()
-                    .state_root(&tx)
-                    .unwrap(),
+                ExecutionOutcome::new(
+                    state.bundle_state.clone(),
+                    Receipts::default(),
+                    0,
+                    Vec::new()
+                )
+                .hash_state_slow()
+                .state_root(&tx)
+                .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
                     address,
                     (account, storage.into_iter())
@@ -1041,10 +1054,11 @@ mod tests {
             .build();
         assert_eq!(previous_state.reverts.len(), 1);
 
-        let mut test = BundleStateWithReceipts {
+        let mut test = ExecutionOutcome {
             bundle: present_state,
-            receipts: Receipts::from_vec(vec![vec![Some(Receipt::default()); 2]; 1]),
+            receipts: vec![vec![Some(Receipt::default()); 2]; 1].into(),
             first_block: 2,
+            requests: Vec::new(),
         };
 
         test.prepend_state(previous_state);

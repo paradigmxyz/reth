@@ -1,4 +1,7 @@
-pub use reth_network_types::{NodeRecord, NodeRecordParseError, TrustedPeer};
+pub use reth_network_peers::{NodeRecord, NodeRecordParseError, TrustedPeer};
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 // Ethereum bootnodes come from <https://github.com/ledgerwatch/erigon/blob/devel/params/bootnodes.go>
 // OP bootnodes come from <https://github.com/ethereum-optimism/op-geth/blob/optimism/params/bootnodes.go>

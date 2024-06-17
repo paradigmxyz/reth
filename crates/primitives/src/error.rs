@@ -1,7 +1,10 @@
-use std::{
+use core::{
     fmt,
     ops::{Deref, DerefMut},
 };
+
+#[cfg(not(feature = "std"))]
+use alloc::boxed::Box;
 
 /// A pair of values, one of which is expected and one of which is actual.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -18,6 +21,7 @@ impl<T: fmt::Display> fmt::Display for GotExpected<T> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<T: fmt::Debug + fmt::Display> std::error::Error for GotExpected<T> {}
 
 impl<T> From<(T, T)> for GotExpected<T> {
@@ -55,6 +59,7 @@ impl<T: fmt::Display> fmt::Display for GotExpectedBoxed<T> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<T: fmt::Debug + fmt::Display> std::error::Error for GotExpectedBoxed<T> {}
 
 impl<T> Deref for GotExpectedBoxed<T> {

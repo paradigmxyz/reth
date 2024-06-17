@@ -1,7 +1,7 @@
 use reth_node_api::{
     payload::{
         validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
-        EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes,
+        EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes, PayloadTypes,
         VersionSpecificValidationError,
     },
     EngineTypes,
@@ -21,9 +21,12 @@ use reth_rpc_types::{
 #[non_exhaustive]
 pub struct OptimismEngineTypes;
 
-impl EngineTypes for OptimismEngineTypes {
+impl PayloadTypes for OptimismEngineTypes {
     type PayloadAttributes = OptimismPayloadAttributes;
     type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
+}
+
+impl EngineTypes for OptimismEngineTypes {
     type BuiltPayload = OptimismBuiltPayload;
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;

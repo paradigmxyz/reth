@@ -27,7 +27,7 @@ revm.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync", "time"] }
-futures-core = "0.3"
+futures-core.workspace = true
 futures-util.workspace = true
 
 # metrics

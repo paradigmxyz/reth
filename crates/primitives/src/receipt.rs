@@ -4,15 +4,16 @@ use crate::{logs_bloom, Bloom, Bytes, TxType, B256};
 use alloy_primitives::Log;
 use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::{Buf, BufMut};
+use core::{cmp::Ordering, ops::Deref};
+use derive_more::{Deref, DerefMut, From, IntoIterator};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::strategy::Strategy;
 #[cfg(feature = "zstd-codec")]
 use reth_codecs::CompactZstd;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
-use std::{
-    cmp::Ordering,
-    ops::{Deref, DerefMut},
-};
+
+#[cfg(not(feature = "std"))]
+use alloc::{vec, vec::Vec};
 
 /// Receipt containing result of transaction execution.
 #[cfg_attr(feature = "zstd-codec", main_codec(no_arbitrary, zstd))]
@@ -65,28 +66,13 @@ impl Receipt {
 }
 
 /// A collection of receipts organized as a two-dimensional vector.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, From, Deref, DerefMut, IntoIterator)]
 pub struct Receipts {
     /// A two-dimensional vector of optional `Receipt` instances.
     pub receipt_vec: Vec<Vec<Option<Receipt>>>,
 }
 
 impl Receipts {
-    /// Create a new `Receipts` instance with an empty vector.
-    pub const fn new() -> Self {
-        Self { receipt_vec: vec![] }
-    }
-
-    /// Create a new `Receipts` instance from an existing vector.
-    pub fn from_vec(vec: Vec<Vec<Option<Receipt>>>) -> Self {
-        Self { receipt_vec: vec }
-    }
-
-    /// Create a new `Receipts` instance from a single block receipt.
-    pub fn from_block_receipt(block_receipts: Vec<Receipt>) -> Self {
-        Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
-    }
-
     /// Returns the length of the `Receipts` vector.
     pub fn len(&self) -> usize {
         self.receipt_vec.len()
@@ -125,32 +111,15 @@ impl Receipts {
     }
 }
 
-impl Deref for Receipts {
-    type Target = Vec<Vec<Option<Receipt>>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.receipt_vec
-    }
-}
-
-impl DerefMut for Receipts {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.receipt_vec
-    }
-}
-
-impl IntoIterator for Receipts {
-    type Item = Vec<Option<Receipt>>;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.receipt_vec.into_iter()
+impl From<Vec<Receipt>> for Receipts {
+    fn from(block_receipts: Vec<Receipt>) -> Self {
+        Self { receipt_vec: vec![block_receipts.into_iter().map(Option::Some).collect()] }
     }
 }
 
 impl FromIterator<Vec<Option<Receipt>>> for Receipts {
     fn from_iter<I: IntoIterator<Item = Vec<Option<Receipt>>>>(iter: I) -> Self {
-        Self::from_vec(iter.into_iter().collect())
+        iter.into_iter().collect::<Vec<_>>().into()
     }
 }
 

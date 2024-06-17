@@ -12,7 +12,7 @@ use reth::{
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,
-        precompile::{Precompile, PrecompileSpecId, Precompiles},
+        precompile::{Precompile, PrecompileOutput, PrecompileSpecId, Precompiles},
         Database, Evm, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
@@ -56,7 +56,7 @@ impl MyEvmConfig {
 
     /// A custom precompile that does nothing
     fn my_precompile(_data: &Bytes, _gas: u64, _env: &Env) -> PrecompileResult {
-        Ok((0, Bytes::new()))
+        Ok(PrecompileOutput::new(0, Bytes::new()))
     }
 }
 
@@ -130,7 +130,7 @@ async fn main() -> eyre::Result<()> {
 
     let tasks = TaskManager::current();
 
-    // create optimism genesis with canyon at block 2
+    // create a custom chain spec
     let spec = ChainSpec::builder()
         .chain(Chain::mainnet())
         .genesis(Genesis::default())
@@ -145,7 +145,9 @@ async fn main() -> eyre::Result<()> {
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
+        // configure the node with regular ethereum types
         .with_types::<EthereumNode>()
+        // use default ethereum components but with our executor
         .with_components(EthereumNode::components().executor(MyExecutorBuilder::default()))
         .launch()
         .await

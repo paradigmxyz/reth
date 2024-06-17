@@ -5,27 +5,38 @@ use crate::{
     },
     holesky_nodes,
     net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
-    proofs::state_root_ref_unhashed,
     revm_primitives::{address, b256},
     Address, BlockNumber, Chain, ChainKind, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis,
     Hardfork, Head, Header, NamedChain, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH,
     MAINNET_DEPOSIT_CONTRACT, U256,
 };
-use once_cell::sync::Lazy;
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
+use core::{
+    fmt,
     fmt::{Display, Formatter},
-    sync::Arc,
 };
+use derive_more::From;
+use once_cell::sync::Lazy;
+use reth_trie_common::root::state_root_ref_unhashed;
+use serde::{Deserialize, Serialize};
+
+#[cfg(not(feature = "std"))]
+use alloc::{
+    collections::BTreeMap,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+#[cfg(feature = "std")]
+use std::{collections::BTreeMap, sync::Arc};
 
 pub use alloy_eips::eip1559::BaseFeeParams;
 
 #[cfg(feature = "optimism")]
 pub(crate) use crate::{
     constants::{
-        OP_BASE_FEE_PARAMS, OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
-        OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
+        BASE_SEPOLIA_BASE_FEE_PARAMS, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS, OP_BASE_FEE_PARAMS,
+        OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
     },
     net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes},
 };
@@ -397,8 +408,8 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         ]),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London, OP_SEPOLIA_BASE_FEE_PARAMS),
-                (Hardfork::Canyon, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS),
+                (Hardfork::London, BASE_SEPOLIA_BASE_FEE_PARAMS),
+                (Hardfork::Canyon, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
         ),
@@ -484,14 +495,8 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 
 /// A type alias to a vector of tuples of [Hardfork] and [`BaseFeeParams`], sorted by [Hardfork]
 /// activation order. This is used to specify dynamic EIP-1559 parameters for chains like Optimism.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
-
-impl From<Vec<(Hardfork, BaseFeeParams)>> for ForkBaseFeeParams {
-    fn from(params: Vec<(Hardfork, BaseFeeParams)>) -> Self {
-        Self(params)
-    }
-}
 
 /// An Ethereum chain specification.
 ///
@@ -845,6 +850,12 @@ impl ChainSpec {
     #[inline]
     pub fn is_homestead_active_at_block(&self, block_number: u64) -> bool {
         self.fork(Hardfork::Homestead).active_at_block(block_number)
+    }
+
+    /// The Paris hardfork (merge) is activated via ttd, if we know the block is known then this
+    /// returns true if the block number is greater than or equal to the Paris (merge) block.
+    pub fn is_paris_active_at_block(&self, block_number: u64) -> Option<bool> {
+        self.paris_block_and_final_difficulty.map(|(paris_block, _)| block_number >= paris_block)
     }
 
     /// Convenience method to check if [`Hardfork::Bedrock`] is active at a given block number.
@@ -1476,7 +1487,7 @@ struct DisplayFork {
 }
 
 impl Display for DisplayFork {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let name_with_eip = if let Some(eip) = &self.eip {
             format!("{} ({})", self.name, eip)
         } else {
@@ -1550,13 +1561,13 @@ pub struct DisplayHardforks {
 }
 
 impl Display for DisplayHardforks {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         fn format(
             header: &str,
             forks: &[DisplayFork],
             next_is_empty: bool,
             f: &mut Formatter<'_>,
-        ) -> std::fmt::Result {
+        ) -> fmt::Result {
             writeln!(f, "{header}:")?;
             let mut iter = forks.iter().peekable();
             while let Some(fork) = iter.next() {
@@ -1726,10 +1737,11 @@ impl OptimismGenesisInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{b256, hex, trie::TrieAccount, ChainConfig, GenesisAccount};
-    use std::{collections::HashMap, str::FromStr};
+    use reth_trie_common::TrieAccount;
 
+    use super::*;
+    use crate::{b256, hex, ChainConfig, GenesisAccount};
+    use std::{collections::HashMap, str::FromStr};
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);
@@ -2830,7 +2842,7 @@ Post-merge hard forks (timestamp based):
 
         for (key, expected_rlp) in key_rlp {
             let account = chainspec.genesis.alloc.get(&key).expect("account should exist");
-            assert_eq!(&alloy_rlp::encode(TrieAccount::from(account.clone())), expected_rlp)
+            assert_eq!(&alloy_rlp::encode(TrieAccount::from(account.clone())), expected_rlp);
         }
 
         assert_eq!(chainspec.genesis_hash, None);

@@ -3,7 +3,7 @@ use crate::{
     eth::{
         api::pending_block::PendingBlockEnv,
         error::{EthApiError, EthResult, RpcInvalidTransactionError, SignError},
-        revm_utils::{prepare_call_env, EvmOverrides},
+        revm_utils::prepare_call_env,
         utils::recover_raw_transaction,
     },
     EthApi, EthApiSpec,
@@ -26,6 +26,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
+    state::EvmOverrides,
     transaction::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
@@ -1734,7 +1735,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     }
 
     let rpc_receipt = reth_rpc_types::Receipt {
-        status: receipt.success,
+        status: receipt.success.into(),
         cumulative_gas_used: receipt.cumulative_gas_used as u128,
         logs,
     };

@@ -1,5 +1,15 @@
+[workspace.package]
+version = "1.0.0-rc.1"
+edition = "2021"
+rust-version = "1.79"
+license = "MIT OR Apache-2.0"
+homepage = "https://paradigmxyz.github.io/reth"
+repository = "https://github.com/paradigmxyz/reth"
+exclude = [".github/"]
+
 [workspace]
 members = [
+    "bin/reth-bench/",
     "bin/reth/",
     "crates/blockchain-tree/",
     "crates/blockchain-tree-api/",
@@ -9,6 +19,8 @@ members = [
     "crates/consensus/beacon/",
     "crates/consensus/common/",
     "crates/consensus/consensus/",
+    "crates/consensus/debug-client/",
+    "crates/ethereum-forks/",
     "crates/e2e-test-utils/",
     "crates/engine-primitives/",
     "crates/errors/",
@@ -24,6 +36,7 @@ members = [
     "crates/evm/execution-types",
     "crates/exex/exex/",
     "crates/exex/test-utils/",
+    "crates/exex/types/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
     "crates/net/common/",
@@ -38,7 +51,7 @@ members = [
     "crates/net/network-api/",
     "crates/net/network/",
     "crates/net/p2p/",
-    "crates/net/types/",
+    "crates/net/peers/",
     "crates/node-core/",
     "crates/node/api/",
     "crates/node/builder/",
@@ -53,6 +66,7 @@ members = [
     "crates/payload/primitives/",
     "crates/payload/validator/",
     "crates/primitives/",
+    "crates/primitives-traits/",
     "crates/prune/prune",
     "crates/prune/types",
     "crates/revm/",
@@ -67,6 +81,7 @@ members = [
     "crates/rpc/rpc/",
     "crates/stages/api/",
     "crates/stages/stages/",
+    "crates/stages/types/",
     "crates/static-file/types/",
     "crates/static-file/static-file",
     "crates/storage/codecs/",
@@ -84,6 +99,7 @@ members = [
     "crates/tokio-util/",
     "crates/tracing/",
     "crates/transaction-pool/",
+    "crates/trie/common",
     "crates/trie/parallel/",
     "crates/trie/trie",
     "examples/beacon-api-sidecar-fetcher/",
@@ -106,7 +122,7 @@ members = [
     "examples/rpc-db/",
     "examples/txpool-tracing/",
     "testing/ef-tests/",
-    "testing/testing-utils"
+    "testing/testing-utils",
 ]
 default-members = ["bin/reth"]
 
@@ -192,15 +208,6 @@ redundant_pub_crate = "allow"
 significant_drop_in_scrutinee = "allow"
 significant_drop_tightening = "allow"
 
-[workspace.package]
-version = "0.2.0-beta.9"
-edition = "2021"
-rust-version = "1.76"
-license = "MIT OR Apache-2.0"
-homepage = "https://paradigmxyz.github.io/reth"
-repository = "https://github.com/paradigmxyz/reth"
-exclude = [".github/"]
-
 # Speed up tests.
 [profile.dev.package]
 proptest.opt-level = 3
@@ -233,6 +240,7 @@ incremental = false
 [workspace.dependencies]
 # reth
 reth = { path = "bin/reth" }
+reth-bench = { path = "bin/reth-bench" }
 reth-auto-seal-consensus = { path = "crates/consensus/auto-seal" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-beacon-consensus = { path = "crates/consensus/beacon" }
@@ -244,6 +252,7 @@ reth-codecs-derive = { path = "crates/storage/codecs/derive" }
 reth-config = { path = "crates/config" }
 reth-consensus = { path = "crates/consensus/consensus" }
 reth-consensus-common = { path = "crates/consensus/common" }
+reth-consensus-debug-client = { path = "crates/consensus/debug-client" }
 reth-db = { path = "crates/storage/db", default-features = false }
 reth-db-api = { path = "crates/storage/db-api" }
 reth-db-common = { path = "crates/storage/db-common" }
@@ -269,6 +278,7 @@ reth-execution-errors = { path = "crates/evm/execution-errors" }
 reth-execution-types = { path = "crates/evm/execution-types" }
 reth-exex = { path = "crates/exex/exex" }
 reth-exex-test-utils = { path = "crates/exex/test-utils" }
+reth-exex-types = { path = "crates/exex/types" }
 reth-fs-util = { path = "crates/fs-util" }
 reth-ipc = { path = "crates/rpc/ipc" }
 reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
@@ -279,7 +289,7 @@ reth-net-common = { path = "crates/net/common" }
 reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
-reth-network-types = { path = "crates/net/types" }
+reth-network-peers = { path = "crates/net/peers", default-features = false }
 reth-network-p2p = { path = "crates/net/p2p" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
 reth-node-api = { path = "crates/node/api" }
@@ -295,6 +305,7 @@ reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-primitives = { path = "crates/primitives" }
+reth-primitives-traits = { path = "crates/primitives-traits" }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types" }
@@ -310,6 +321,7 @@ reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
+reth-stages-types = { path = "crates/stages/types" }
 reth-static-file = { path = "crates/static-file/static-file" }
 reth-static-file-types = { path = "crates/static-file/types" }
 reth-storage-api = { path = "crates/storage/storage-api" }
@@ -320,12 +332,19 @@ reth-tokio-util = { path = "crates/tokio-util" }
 reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
 reth-trie = { path = "crates/trie/trie" }
+reth-trie-common = { path = "crates/trie/common" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "9.0.0", features = [ "std", "secp256k1", "blst", ], default-features = false }
-revm-primitives = { version = "4.0.0", features = [ "std", ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/evm-inspectors", rev = "53aa2b2" }
+revm = { version = "9.0.0", features = [
+    "std",
+    "secp256k1",
+    "blst",
+], default-features = false }
+revm-primitives = { version = "4.0.0", features = [
+    "std",
+], default-features = false }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "79774a6" }
 
 # eth
 alloy-chains = "0.1.15"
@@ -334,21 +353,36 @@ alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.4"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "cc68b93" }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "cc68b93" }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "cc68b93" }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "cc68b93" }
-alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "cc68b93" }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "cc68b93" }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "cc68b93" }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "cc68b93", default-features = false, features = [
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false, features = [
+    "eth",
+] }
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-serde = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false, features = [
     "reqwest",
 ] }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "cc68b93" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "cc68b93" }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "cc68b93" }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "cc68b93" }
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cc68b93" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "6cb3713" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", features = [
+    "reqwest-rustls-tls",
+], default-features = false }
+alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
 
 # misc
 auto_impl = "1"
@@ -361,9 +395,11 @@ derive_more = "0.99.17"
 fdlimit = "0.3.0"
 eyre = "0.6"
 generic-array = "0.14"
+linked_hash_set = "0.1"
 tracing = "0.1.0"
 tracing-appender = "0.2"
 thiserror = "1.0"
+thiserror-no-std = { version = "2.0.2", default-features = false }
 serde_json = "1.0.94"
 serde = { version = "1.0", default-features = false }
 serde_with = "3.3.0"
@@ -405,27 +441,33 @@ tokio-util = { version = "0.7.4", features = ["codec"] }
 # async
 async-stream = "0.3"
 async-trait = "0.1.68"
-futures = "0.3.26"
+futures = "0.3"
+futures-util = "0.3"
+futures-core = "0.3"
 pin-project = "1.0.12"
-futures-util = "0.3.25"
-hyper = "0.14.25"
+hyper = "1.3"
+hyper-util = "0.1.5"
 reqwest = { version = "0.12", default-features = false }
 tower = "0.4"
-tower-http = "0.4"
-http = "0.2.8"
-http-body = "0.4.5"
+tower-http = "0.5"
 
 # p2p
 discv5 = "0.6.0"
 igd-next = "0.14.3"
 
 # rpc
-jsonrpsee = "0.22"
-jsonrpsee-core = "0.22"
-jsonrpsee-types = "0.22"
+jsonrpsee = "0.23"
+jsonrpsee-core = "0.23"
+jsonrpsee-types = "0.23"
+jsonrpsee-http-client = "0.23"
+
+# http
+http = "1.0"
+http-body = "1.0"
+jsonwebtoken = "9"
 
 # crypto
-secp256k1 = { version = "0.28", default-features = false, features = [
+secp256k1 = { version = "0.29", default-features = false, features = [
     "global-context",
     "recovery",
 ] }
@@ -455,7 +497,7 @@ similar-asserts = "1.5.0"
 test-fuzz = "5"
 
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm", rev = "a28a543" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a28a543" }
-revm-precompile = { git = "https://github.com/bluealloy/revm", rev = "a28a543" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "a28a543" }
+revm = { git = "https://github.com/bluealloy/revm.git", rev = "dd98b3b" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm.git", rev = "dd98b3b" }
+revm-precompile = { git = "https://github.com/bluealloy/revm.git", rev = "dd98b3b" }
+revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "dd98b3b" }

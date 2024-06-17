@@ -6,7 +6,7 @@
 
 **Modular, contributor-friendly and blazing-fast implementation of the Ethereum protocol**
 
-![](./assets/reth-beta.png)
+![](./assets/reth-prod.png)
 
 **[Install](https://paradigmxyz.github.io/reth/installation/installation.html)**
 | [User Book](https://reth.rs)
@@ -38,26 +38,20 @@ More concretely, our goals are:
 
 ## Status
 
-Reth is performant, feature-complete, [Cancun-ready](https://paradigmxyz.github.io/reth/run/run-a-node.html), and OP Stack Ecotone compatible via the [OP Reth binary](https://paradigmxyz.github.io/reth/run/optimism.html?highlight=optimism#running-on-optimism).
-
-We actively recommend professional node operators to switch to Reth in production for performance and cost reasons in use cases where high performance with great margins is required such as RPC, MEV, Indexing, Simulations, and P2P activities.
-
-While we are aware of parties running Reth staking nodes in production, we do *not* encourage usage in production staking environments by non-professionals until our audits are done, and the 1.0 version of Reth is released, but we are available to support without warranty or liability.
+Reth is production ready, and suitable for usage in mission-critical environments such as staking or high-uptime services. We also actively recommend professional node operators to switch to Reth in production for performance and cost reasons in use cases where high performance with great margins is required such as RPC, MEV, Indexing, Simulations, and P2P activities.
 
 More historical context below:
-* We are releasing 1.0 "production-ready" stable Reth once our Reth & Revm audits are done. ETA ~May 2024.
-    * Reth is currently undergoing an audit with [Sigma Prime](https://sigmaprime.io/), the developers of [Lighthouse](https://github.com/sigp/lighthouse), the Rust Consensus Layer implementation.
-    * Revm (the EVM used in Reth) is undergoing an audit with [Guido Vranken](https://twitter.com/guidovranken) (#1 [Ethereum Bug Bounty](https://ethereum.org/en/bug-bounty)).
-* We are releasing [beta](https://github.com/paradigmxyz/reth/releases/tag/v0.2.0-beta.1) on Monday March 4th 2024, our first breaking change to the database model, providing faster query speed, smaller database footprint, and allowing "history" to be mounted on separate drives.
+* We released 1.0 "production-ready" stable Reth in June 2024.
+    * Reth completed an audit with [Sigma Prime](https://sigmaprime.io/), the developers of [Lighthouse](https://github.com/sigp/lighthouse), the Rust Consensus Layer implementation. Find it [here](./Sigma_Prime_Paradigm_Reth_Security_Assessment_Report_v1_0.pdf).
+    * Revm (the EVM used in Reth) underwent an audit with [Guido Vranken](https://twitter.com/guidovranken) (#1 [Ethereum Bug Bounty](https://ethereum.org/en/bug-bounty)). We will publish the results soon.
+* We released multiple iterative beta versions, up to [beta.9](https://github.com/paradigmxyz/reth/releases/tag/v0.2.0-beta.9) on Monday June 3rd 2024 the last beta release.
+* We released [beta](https://github.com/paradigmxyz/reth/releases/tag/v0.2.0-beta.1) on Monday March 4th 2024, our first breaking change to the database model, providing faster query speed, smaller database footprint, and allowing "history" to be mounted on separate drives.
 * We shipped iterative improvements until the last alpha release on February 28th 2024, [0.1.0-alpha.21](https://github.com/paradigmxyz/reth/releases/tag/v0.1.0-alpha.21).
 * We [initially announced](https://www.paradigm.xyz/2023/06/reth-alpha) [0.1.0-alpha.1](https://github.com/paradigmxyz/reth/releases/tag/v0.1.0-alpha.1) in June 20th 2023.
 
-
-We will be updating the documentation with the completion status of each component, as well as include more contributing guidelines (design docs, architecture diagrams, repository layouts) and "good first issues".
-
-We appreciate your patience until we get there. Until then, we are happy to answer all questions in the Telegram link above.
-
 ### Database compatibility
+
+We do not have any breaking database changes since beta.1, and do not plan any in the near future.
 
 Reth [v0.2.0-beta.1](https://github.com/paradigmxyz/reth/releases/tag/v0.2.0-beta.1) includes
 a [set of breaking database changes](https://github.com/paradigmxyz/reth/pull/5191) that makes it impossible to use database files produced by earlier versions.
@@ -95,7 +89,7 @@ When updating this, also update:
 - .github/workflows/lint.yml
 -->
 
-The Minimum Supported Rust Version (MSRV) of this project is [1.76.0](https://blog.rust-lang.org/2024/02/08/Rust-1.76.0.html).
+The Minimum Supported Rust Version (MSRV) of this project is [1.79.0](https://blog.rust-lang.org/2024/06/13/Rust-1.79.0.html).
 
 See the book for detailed instructions on how to [build from source](https://paradigmxyz.github.io/reth/installation/source.html).
 

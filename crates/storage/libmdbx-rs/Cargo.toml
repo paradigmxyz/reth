@@ -1,34 +1,27 @@
 [package]
 name = "reth-libmdbx"
+description = "Idiomatic and safe MDBX wrapper"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "Apache-2.0"
-description = "Idiomatic and safe MDBX wrapper with good licence"
 homepage.workspace = true
 repository.workspace = true
 
 [lints]
 workspace = true
 
-[lib]
-name = "reth_libmdbx"
-
 [dependencies]
+reth-mdbx-sys.workspace = true
+
 bitflags.workspace = true
 byteorder = "1"
 derive_more.workspace = true
 indexmap = "2"
-libc = "0.2"
 parking_lot.workspace = true
 thiserror.workspace = true
 dashmap = { workspace = true, features = ["inline"], optional = true }
 tracing.workspace = true
-
-ffi = { package = "reth-mdbx-sys", path = "./mdbx-sys" }
-
-[target.'cfg(not(windows))'.dependencies]
-libffi = "3.2.0"
 
 [features]
 default = []
@@ -36,7 +29,11 @@ return-borrowed = []
 read-tx-timeouts = ["dashmap", "dashmap/inline"]
 
 [dev-dependencies]
-pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
+pprof = { workspace = true, features = [
+    "flamegraph",
+    "frame-pointer",
+    "criterion",
+] }
 criterion.workspace = true
 rand.workspace = true
 rand_xorshift = "0.3"

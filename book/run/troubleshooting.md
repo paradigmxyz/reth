@@ -1,7 +1,5 @@
 # Troubleshooting
 
-As Reth is still in alpha, while running the node you can experience some problems related to different parts of the system: pipeline sync, blockchain tree, p2p, database, etc.
-
 This page tries to answer how to deal with the most popular issues.
 
 ## Database

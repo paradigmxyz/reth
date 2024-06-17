@@ -32,12 +32,12 @@ use reth_db_api::{
     table::{Decode, DupSort, Encode, Table},
 };
 use reth_primitives::{
-    stage::StageCheckpoint,
-    trie::{StorageTrieEntry, StoredBranchNode, StoredNibbles, StoredNibblesSubKey},
     Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt, Requests,
     StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
+use reth_stages_types::StageCheckpoint;
+use reth_trie_common::{StorageTrieEntry, StoredBranchNode, StoredNibbles, StoredNibblesSubKey};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

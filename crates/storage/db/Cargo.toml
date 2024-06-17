@@ -23,7 +23,9 @@ reth-libmdbx = { workspace = true, optional = true, features = [
 ] }
 reth-nippy-jar.workspace = true
 reth-prune-types.workspace = true
+reth-stages-types.workspace = true
 reth-tracing.workspace = true
+reth-trie-common.workspace = true
 
 # codecs
 serde = { workspace = true, default-features = false }
@@ -41,7 +43,7 @@ derive_more.workspace = true
 eyre.workspace = true
 paste.workspace = true
 rustc-hash.workspace = true
-sysinfo = "0.30"
+sysinfo = { version = "0.30", default-features = false }
 
 # arbitrary utils
 strum = { workspace = true, features = ["derive"] }
@@ -77,6 +79,7 @@ mdbx = ["reth-libmdbx"]
 bench = []
 arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
 optimism = []
+disable-lock = []
 
 [[bench]]
 name = "hash_keys"

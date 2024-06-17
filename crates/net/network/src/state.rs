@@ -18,7 +18,7 @@ use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
 use reth_network_api::PeerKind;
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{ForkId, B256};
 use reth_provider::BlockNumReader;
 use std::{
@@ -534,7 +534,7 @@ mod tests {
         BlockBodies, EthVersion,
     };
     use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
-    use reth_network_types::PeerId;
+    use reth_network_peers::PeerId;
     use reth_primitives::{BlockBody, Header, B256};
     use reth_provider::test_utils::NoopProvider;
     use std::{

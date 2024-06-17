@@ -16,5 +16,4 @@ workspace = true
 alloy-primitives.workspace = true
 
 # async
-pin-project.workspace = true
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["time"] }
