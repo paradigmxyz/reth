@@ -12,8 +12,8 @@ use reth::{
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,
-        precompile::{Precompile, PrecompileOutput, PrecompileSpecId, Precompiles},
-        Database, Evm, EvmBuilder, GetInspector,
+        precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
+        ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
 };
@@ -45,12 +45,12 @@ impl MyEvmConfig {
 
         // install the precompiles
         handler.pre_execution.load_precompiles = Arc::new(move || {
-            let mut precompiles = Precompiles::new(PrecompileSpecId::from_spec_id(spec_id)).clone();
-            precompiles.inner.insert(
+            let mut precompiles = ContextPrecompiles::new(PrecompileSpecId::from_spec_id(spec_id));
+            precompiles.extend([(
                 address!("0000000000000000000000000000000000000999"),
-                Precompile::Env(Self::my_precompile),
-            );
-            precompiles.into()
+                Precompile::Env(Self::my_precompile).into(),
+            )]);
+            precompiles
         });
     }
 
