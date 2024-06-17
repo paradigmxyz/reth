@@ -3,22 +3,27 @@
 //! Previously version of Apache licenced [`ethereum-forkid`](https://crates.io/crates/ethereum-forkid).
 
 use crate::Head;
+#[cfg(not(feature = "std"))]
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 use alloy_primitives::{hex, BlockNumber, B256};
 use alloy_rlp::{Error as RlpError, *};
 #[cfg(any(test, feature = "arbitrary"))]
 use arbitrary::Arbitrary;
+use core::{
+    cmp::Ordering,
+    fmt,
+    ops::{Add, AddAssign},
+};
 use crc::*;
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest_derive::Arbitrary as PropTestArbitrary;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
-    fmt,
-    ops::{Add, AddAssign},
-};
-use thiserror::Error;
+#[cfg(feature = "std")]
+use std::collections::{BTreeMap, BTreeSet};
 
 const CRC_32_IEEE: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 const TIMESTAMP_BEFORE_ETHEREUM_MAINNET: u64 = 1_300_000_000;
@@ -174,7 +179,7 @@ impl From<EnrForkIdEntry> for ForkId {
 }
 
 /// Reason for rejecting provided `ForkId`.
-#[derive(Clone, Copy, Debug, Error, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, thiserror_no_std::Error, PartialEq, Eq, Hash)]
 pub enum ValidationError {
     /// Remote node is outdated and needs a software update.
     #[error(
