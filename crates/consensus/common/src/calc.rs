@@ -29,12 +29,19 @@ pub fn base_block_reward(
         chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, block_difficulty)
     {
         None
-    } else if chain_spec.fork(Hardfork::Constantinople).active_at_block(block_number) {
-        Some(ETH_TO_WEI * 2)
-    } else if chain_spec.fork(Hardfork::Byzantium).active_at_block(block_number) {
-        Some(ETH_TO_WEI * 3)
     } else {
-        Some(ETH_TO_WEI * 5)
+        Some(base_block_reward_pre_merge(chain_spec, block_number))
+    }
+}
+
+/// Calculates the base block reward before the merge.
+pub fn base_block_reward_pre_merge(chain_spec: &ChainSpec, block_number: BlockNumber) -> u128 {
+    if chain_spec.fork(Hardfork::Constantinople).active_at_block(block_number) {
+        ETH_TO_WEI * 2
+    } else if chain_spec.fork(Hardfork::Byzantium).active_at_block(block_number) {
+        ETH_TO_WEI * 3
+    } else {
+        ETH_TO_WEI * 5
     }
 }
 
