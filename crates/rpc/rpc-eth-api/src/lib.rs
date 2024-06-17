@@ -26,11 +26,15 @@ pub mod revm_utils;
 pub mod transaction;
 pub mod utils;
 
+#[cfg(feature = "client")]
 pub use api::{
-    bundle::{
-        EthBundleApiClient, EthBundleApiServer, EthCallBundleApiClient, EthCallBundleApiServer,
-    },
-    filter::{EthFilterApiClient, EthFilterApiServer},
+    bundle::{EthBundleApiClient, EthCallBundleApiClient},
+    filter::EthFilterApiClient,
+    EthApiClient,
+};
+pub use api::{
+    bundle::{EthBundleApiServer, EthCallBundleApiServer},
+    filter::EthFilterApiServer,
     pubsub::EthPubSubApiServer,
     servers::{
         self,
@@ -39,7 +43,7 @@ pub use api::{
         pubsub::EthPubSub,
         EthApi,
     },
-    EthApiClient, EthApiServer,
+    EthApiServer,
 };
 pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,
