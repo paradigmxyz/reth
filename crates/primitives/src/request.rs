@@ -7,6 +7,9 @@ use derive_more::{Deref, DerefMut, From, IntoIterator};
 use reth_codecs::{main_codec, Compact};
 use revm_primitives::Bytes;
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// A list of EIP-7685 requests.
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash, Deref, DerefMut, From, IntoIterator)]

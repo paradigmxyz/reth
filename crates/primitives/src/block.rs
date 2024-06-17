@@ -14,6 +14,9 @@ use reth_codecs::derive_arbitrary;
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 // HACK(onbjerg): we need this to always set `requests` to `None` since we might otherwise generate
 // a block with `None` withdrawals and `Some` requests, in which case we end up trying to decode the
 // requests as withdrawals
@@ -177,9 +180,9 @@ impl Block {
     pub fn size(&self) -> usize {
         self.header.size() +
             // take into account capacity
-            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * core::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * core::mem::size_of::<Header>() +
+            self.withdrawals.as_ref().map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 }
 
@@ -392,9 +395,9 @@ impl SealedBlock {
     pub fn size(&self) -> usize {
         self.header.size() +
             // take into account capacity
-            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * core::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * core::mem::size_of::<Header>() +
+            self.withdrawals.as_ref().map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 
     /// Calculates the total gas used by blob transactions in the sealed block.
@@ -573,12 +576,12 @@ impl BlockBody {
     #[inline]
     pub fn size(&self) -> usize {
         self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
-            self.transactions.capacity() * std::mem::size_of::<TransactionSigned>() +
+            self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() +
-            self.ommers.capacity() * std::mem::size_of::<Header>() +
+            self.ommers.capacity() * core::mem::size_of::<Header>() +
             self.withdrawals
                 .as_ref()
-                .map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+                .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 }
 
