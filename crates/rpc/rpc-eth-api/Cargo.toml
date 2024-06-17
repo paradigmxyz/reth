@@ -36,7 +36,7 @@ alloy-sol-types.workspace = true
 secp256k1.workspace = true
 
 # rpc
-jsonrpsee.workspace = true
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
 serde_json.workspace = true
 
 # async
