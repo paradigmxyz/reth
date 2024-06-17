@@ -8179,16 +8179,17 @@ dependencies = [
 name = "reth-static-file"
 version = "1.0.0-rc.1"
 dependencies = [
+ "alloy-primitives",
  "assert_matches",
  "parking_lot 0.12.3",
  "rayon",
  "reth-db",
  "reth-db-api",
  "reth-nippy-jar",
- "reth-primitives",
  "reth-provider",
  "reth-prune-types",
  "reth-stages",
+ "reth-static-file-types",
  "reth-storage-errors",
  "reth-testing-utils",
  "reth-tokio-util",
