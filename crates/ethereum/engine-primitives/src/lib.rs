@@ -31,12 +31,12 @@ use reth_rpc_types::{
 pub struct EthEngineTypes;
 
 impl PayloadTypes for EthEngineTypes {
+    type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = EthPayloadAttributes;
     type PayloadBuilderAttributes = EthPayloadBuilderAttributes;
 }
 
 impl EngineTypes for EthEngineTypes {
-    type BuiltPayload = EthBuiltPayload;
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
