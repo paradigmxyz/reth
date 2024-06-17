@@ -1,4 +1,5 @@
-use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, Chain, ChainSpec, Hardfork, U256};
+use reth_chainspec::{Chain, ChainSpec, Hardfork};
+use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, U256};
 /// Calculates the base block reward.
 ///
 /// The base block reward is defined as:
@@ -102,7 +103,7 @@ pub const fn ommer_reward(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::MAINNET;
+    use reth_chainspec::MAINNET;
 
     #[test]
     fn calc_base_block_reward() {

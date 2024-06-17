@@ -8,11 +8,11 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use reth_chainspec::ChainSpec;
 pub use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes,
     PayloadTypes,
 };
-use reth_primitives::ChainSpec;
 use serde::{de::DeserializeOwned, ser::Serialize};
 
 /// This type defines the versioned types of the engine API.

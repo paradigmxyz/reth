@@ -32,6 +32,9 @@ mod spec;
 /// Chain specific constants
 pub(crate) mod constants;
 
+/// Re-export for convenience
+pub use reth_ethereum_forks::*;
+
 #[cfg(test)]
 mod tests {
     use super::*;

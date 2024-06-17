@@ -43,8 +43,8 @@ use reth_eth_wire::{
 };
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::ReputationChangeKind;
-use reth_network_peers::PeerId;
-use reth_primitives::{ForkId, NodeRecord};
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_primitives::ForkId;
 use reth_provider::{BlockNumReader, BlockReader};
 use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
 use reth_tasks::shutdown::GracefulShutdown;

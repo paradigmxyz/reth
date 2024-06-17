@@ -31,6 +31,7 @@ eyre.workspace = true
 
 [dev-dependencies]
 reth.workspace = true
+reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-exex.workspace = true
 reth-node-api.workspace = true

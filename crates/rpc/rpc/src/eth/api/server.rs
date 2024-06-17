@@ -433,11 +433,12 @@ mod tests {
         EthApi,
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
+    use reth_chainspec::BaseFeeParams;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams, Block, BlockNumberOrTag, Header,
-        TransactionSigned, B256, U64,
+        constants::ETHEREUM_BLOCK_GAS_LIMIT, Block, BlockNumberOrTag, Header, TransactionSigned,
+        B256, U64,
     };
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},

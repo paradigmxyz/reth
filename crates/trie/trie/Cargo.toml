@@ -42,6 +42,7 @@ triehash = { version = "0.8", optional = true }
 
 [dev-dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
