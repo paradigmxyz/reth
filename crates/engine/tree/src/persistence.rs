@@ -23,7 +23,7 @@ pub struct Persistence<DB> {
 impl<Writer> Persistence<Writer> {
     // TODO: initialization
     /// Writes the cloned tree state to the database
-    fn write(&self, blocks: Vec<ExecutedBlock>) {
+    fn write(&mut self, blocks: Vec<ExecutedBlock>) {
         todo!("implement this")
     }
 }
@@ -53,11 +53,12 @@ where
         }
 
         if let Some(blocks) = most_recent_save_action {
-            for _block in blocks {
-                // TODO: write block and other info to disk
+            if blocks.is_empty() {
+                todo!("return error or something");
             }
-
-            todo!("insert blocks")
+            let last_block_hash = blocks.last().unwrap().block().hash();
+            this.write(blocks);
+            Poll::Ready(Some(PersistenceOutput::RemoveBlocksBefore(last_block_hash)))
         } else {
             Poll::Pending
         }
