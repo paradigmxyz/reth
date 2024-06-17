@@ -47,7 +47,7 @@
 //! ```
 //! # async fn launch() {
 //! use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
-//! use reth_primitives::mainnet_nodes;
+//! use reth_chainspec::net::mainnet_nodes;
 //! use reth_provider::test_utils::NoopProvider;
 //!
 //! // This block provider implementation is used for testing purposes.
