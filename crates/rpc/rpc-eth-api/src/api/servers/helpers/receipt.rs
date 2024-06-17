@@ -1,7 +1,7 @@
 //! Builds an RPC receipt response w.r.t. data layout of network.
 
 /// Implements [`LoadReceipt`](crate::servers::LoadReceipt) for a type, that has similar
-/// data layout to [`EthApi`].
+/// data layout to [`EthApi`](crate::EthApi).
 #[macro_export]
 macro_rules! load_receipt_impl {
     ($network_api:ty) => {
