@@ -1,5 +1,5 @@
-//! Implementation of the [`jsonrpsee`] generated [`reth_rpc_api::EthApiServer`] trait
-//! Handles RPC requests for the `eth_` namespace.
+//! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for 
+//! the `eth_` namespace.
 
 use alloy_dyn_abi::TypedData;
 use jsonrpsee::core::RpcResult as Result;
