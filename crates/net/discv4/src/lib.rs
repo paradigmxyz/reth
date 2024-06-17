@@ -2285,10 +2285,11 @@ pub enum DiscoveryUpdate {
 mod tests {
     use super::*;
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
+    use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable};
     use rand::{thread_rng, Rng};
     use reth_chainspec::net::mainnet_nodes;
-    use reth_primitives::{hex, EnrForkIdEntry, ForkHash};
+    use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
     use std::future::poll_fn;
 
     #[tokio::test]

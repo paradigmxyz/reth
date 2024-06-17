@@ -6702,7 +6702,6 @@ dependencies = [
  "reth-net-common",
  "reth-net-nat",
  "reth-network-peers",
- "reth-primitives",
  "reth-tracing",
  "schnellru",
  "secp256k1",
@@ -6717,6 +6716,7 @@ dependencies = [
 name = "reth-discv5"
 version = "1.0.0-rc.1"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "derive_more",
  "discv5",
@@ -6728,9 +6728,9 @@ dependencies = [
  "multiaddr",
  "rand 0.8.5",
  "reth-chainspec",
+ "reth-ethereum-forks",
  "reth-metrics",
  "reth-network-peers",
- "reth-primitives",
  "reth-tracing",
  "secp256k1",
  "thiserror",
@@ -7003,9 +7003,9 @@ dependencies = [
 name = "reth-etl"
 version = "1.0.0-rc.1"
 dependencies = [
+ "alloy-primitives",
  "rayon",
  "reth-db-api",
- "reth-primitives",
  "tempfile",
 ]
 
