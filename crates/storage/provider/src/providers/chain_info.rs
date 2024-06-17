@@ -15,6 +15,7 @@ use crate::{FinalizedBlockNotifications, FinalizedBlocksSubscriptions};
 #[derive(Debug, Clone)]
 pub(crate) struct ChainInfoTracker {
     finalized_block_tx: watch::Sender<Option<SealedHeader>>,
+    safe_block_tx: watch::Sender<Option<SealedHeader>>,
     inner: Arc<ChainInfoInner>,
 }
 
@@ -22,14 +23,16 @@ impl ChainInfoTracker {
     /// Create a new chain info container for the given canonical head.
     pub(crate) fn new(head: SealedHeader) -> Self {
         let (finalized_block_tx, finalized_block_rx) = watch::channel(None);
+        let (safe_block_tx, safe_block_rx) = watch::channel(None);
         Self {
             finalized_block_tx,
+            safe_block_tx,
             inner: Arc::new(ChainInfoInner {
                 last_forkchoice_update: RwLock::new(None),
                 last_transition_configuration_exchange: RwLock::new(None),
                 canonical_head_number: AtomicU64::new(head.number),
                 canonical_head: RwLock::new(head),
-                safe_block: RwLock::new(None),
+                safe_block: safe_block_rx,
                 finalized_block: finalized_block_rx,
             }),
         }
@@ -68,7 +71,7 @@ impl ChainInfoTracker {
 
     /// Returns the safe header of the chain.
     pub(crate) fn get_safe_header(&self) -> Option<SealedHeader> {
-        self.inner.safe_block.read().clone()
+        self.inner.safe_block.borrow().clone()
     }
 
     /// Returns the finalized header of the chain.
@@ -90,7 +93,7 @@ impl ChainInfoTracker {
     /// Returns the safe header of the chain.
     #[allow(dead_code)]
     pub(crate) fn get_safe_num_hash(&self) -> Option<BlockNumHash> {
-        let h = self.inner.safe_block.read();
+        let h = self.inner.safe_block.borrow();
         h.as_ref().map(|h| h.num_hash())
     }
 
@@ -112,7 +115,9 @@ impl ChainInfoTracker {
 
     /// Sets the safe header of the chain.
     pub(crate) fn set_safe(&self, header: SealedHeader) {
-        self.inner.safe_block.write().replace(header);
+        self.safe_block_tx.send_modify(|h| {
+            let _ = h.replace(header);
+        });
     }
 
     /// Sets the finalized header of the chain.
@@ -145,7 +150,7 @@ struct ChainInfoInner {
     /// The canonical head of the chain.
     canonical_head: RwLock<SealedHeader>,
     /// The block that the beacon node considers safe.
-    safe_block: RwLock<Option<SealedHeader>>,
+    safe_block: watch::Receiver<Option<SealedHeader>>,
     /// The block that the beacon node considers finalized.
     finalized_block: watch::Receiver<Option<SealedHeader>>,
 }
