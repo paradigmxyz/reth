@@ -24,7 +24,7 @@ pub enum ExExNotification {
         old: Arc<Chain>,
     },
     /// Finalized block header.
-    FinalizedBlock(Option<SealedHeader>),
+    BlockFinalized(SealedHeader),
 }
 
 impl ExExNotification {
@@ -49,7 +49,7 @@ impl ExExNotification {
     /// Returns a finalized block header.
     pub fn finalized_block(&self) -> Option<SealedHeader> {
         match self {
-            Self::FinalizedBlock(b) => b.clone(),
+            Self::BlockFinalized(b) => Some(b.clone()),
             _ => None,
         }
     }
@@ -66,6 +66,6 @@ impl From<CanonStateNotification> for ExExNotification {
 
 impl From<FinalizedBlockNotification> for ExExNotification {
     fn from(notification: FinalizedBlockNotification) -> Self {
-        Self::FinalizedBlock(notification)
+        Self::BlockFinalized(notification)
     }
 }

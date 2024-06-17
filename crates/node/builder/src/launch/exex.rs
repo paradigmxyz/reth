@@ -107,10 +107,12 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                                 .expect("blockchain tree notification could not be sent to exex manager");
                         }
                         block_header = finalized_block_notifications.next() => {
-                            handle
-                                .send_async(block_header.into())
-                                .await
-                                .expect("blockchain tree notification could not be sent to exex manager");
+                            if let Some(notification) = block_header{
+                                handle
+                                    .send_async(notification.into())
+                                    .await
+                                    .expect("blockchain tree notification could not be sent to exex manager");
+                            }
                         }
                         else => break
                     }

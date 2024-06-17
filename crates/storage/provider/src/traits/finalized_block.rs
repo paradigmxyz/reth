@@ -20,11 +20,11 @@ pub trait FinalizedBlockWriter: Send + Sync {
     fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()>;
 }
 
-/// Type alias for a receiver that receives [`CanonStateNotification`]
-pub type FinalizedBlockNotifications = watch::Receiver<FinalizedBlockNotification>;
+/// Type alias for a receiver that receives [`FinalizedBlockNotification`]
+pub type FinalizedBlockNotifications = watch::Receiver<Option<FinalizedBlockNotification>>;
 
-/// Type alias for a sender that sends [`CanonStateNotification`]
-pub type FinalizedBlockNotificationSender = watch::Sender<FinalizedBlockNotification>;
+/// Type alias for a sender that sends [`FinalizedBlockNotification`]
+pub type FinalizedBlockNotificationSender = watch::Sender<Option<FinalizedBlockNotification>>;
 
 /// A type that allows to register finalized block event subscriptions.
 #[auto_impl(&, Arc)]
@@ -34,7 +34,7 @@ pub trait FinalizedBlocksSubscriptions: Send + Sync {
     /// A finalized block
     fn subscribe_to_finalized_blocks(&self) -> FinalizedBlockNotifications;
 
-    /// Convenience method to get a stream of [`CanonStateNotification`].
+    /// Convenience method to get a stream of [`FinalizedBlockNotification`].
     fn finalized_block_stream(&self) -> FinalizedBlockNotificationStream {
         FinalizedBlockNotificationStream {
             st: WatchStream::new(self.subscribe_to_finalized_blocks()),
@@ -42,12 +42,12 @@ pub trait FinalizedBlocksSubscriptions: Send + Sync {
     }
 }
 
-/// A Stream of [CanonStateNotification].
+/// A Stream of [FinalizedBlockNotification].
 #[derive(Debug)]
 #[pin_project::pin_project]
 pub struct FinalizedBlockNotificationStream {
     #[pin]
-    st: WatchStream<FinalizedBlockNotification>,
+    st: WatchStream<Option<FinalizedBlockNotification>>,
 }
 
 impl Stream for FinalizedBlockNotificationStream {
@@ -65,4 +65,4 @@ impl Stream for FinalizedBlockNotificationStream {
 }
 
 /// Finalized block header
-pub type FinalizedBlockNotification = Option<SealedHeader>;
+pub type FinalizedBlockNotification = SealedHeader;

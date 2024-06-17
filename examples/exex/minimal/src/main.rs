@@ -30,7 +30,7 @@ async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Res
             ExExNotification::ChainReverted { old } => {
                 info!(reverted_chain = ?old.range(), "Received revert");
             }
-            ExExNotification::FinalizedBlock(header) => {
+            ExExNotification::BlockFinalized(header) => {
                 info!(finalized_block = ?header, "Finalized block");
             }
         };

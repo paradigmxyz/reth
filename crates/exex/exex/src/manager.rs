@@ -111,7 +111,7 @@ impl ExExHandle {
                 // than its finished height
                 ExExNotification::ChainReorged { .. } |
                 ExExNotification::ChainReverted { .. } |
-                ExExNotification::FinalizedBlock(_) => {}
+                ExExNotification::BlockFinalized(_) => {}
             }
         }
 
