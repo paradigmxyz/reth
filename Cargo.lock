@@ -6499,6 +6499,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-chainspec"
+version = "1.0.0-rc.1"
+dependencies = [
+ "alloy-chains",
+ "alloy-eips 0.1.0",
+ "alloy-genesis",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-trie",
+ "derive_more",
+ "nybbles",
+ "once_cell",
+ "rand 0.8.5",
+ "reth-ethereum-forks",
+ "reth-network-peers",
+ "reth-primitives-traits",
+ "reth-rpc-types",
+ "reth-trie-common",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "reth-cli-runner"
 version = "1.0.0-rc.1"
 dependencies = [
@@ -7660,7 +7683,6 @@ dependencies = [
 name = "reth-primitives"
 version = "1.0.0-rc.1"
 dependencies = [
- "alloy-chains",
  "alloy-consensus 0.1.0",
  "alloy-eips 0.1.0",
  "alloy-genesis",
@@ -7683,9 +7705,9 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "rayon",
+ "reth-chainspec",
  "reth-codecs",
  "reth-ethereum-forks",
- "reth-network-peers",
  "reth-primitives-traits",
  "reth-static-file-types",
  "reth-trie-common",
