@@ -1,33 +1,30 @@
-use crate::tree::TreeState;
-use parking_lot::RwLock;
+use crate::tree::ExecutedBlock;
+use futures::ready;
 use reth_primitives::B256;
+use reth_provider::ProviderFactory;
 use std::{
-    collections::VecDeque,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
+use tokio::sync::mpsc::Receiver;
 
 // TODO: design questions:
 // * to support "unwinds" or not? ie, what do we do when we get a request to persist a chain that is
 // overlapping with the one on disk
-/// Writes parts of the tree to the database
-pub struct Persistence<Writer> {
-    // TODO: use the right type for the writer
+/// Writes parts of reth's in memory tree state to the database.
+pub struct Persistence<DB> {
     /// The db / static file provider to use
-    provider: Writer,
-    /// The tree state
-    tree_state: Arc<RwLock<TreeState>>,
+    provider: ProviderFactory<DB>,
     // TODO: handles for pushing requests
     /// Incoming requests to persist stuff
-    incoming: VecDeque<PersistenceAction>,
+    incoming: Receiver<PersistenceAction>,
 }
 
 impl<Writer> Persistence<Writer> {
     // TODO: initialization
     /// Writes the cloned tree state to the database
-    fn write(&self) {
-        todo!("need tree state to write")
+    fn write(&self, blocks: Vec<ExecutedBlock>) {
+        todo!("implement this")
     }
 }
 
@@ -35,35 +32,48 @@ impl<Writer> Persistence<Writer>
 where
     Writer: Unpin,
 {
-    /// Internal method to poll the persistence task
+    /// Internal method to poll the persistence task. This returns [`None`] if the channel for
+    /// incoming [`PersistenceAction`]s is closed.
     #[tracing::instrument(level = "debug", name = "Persistence::poll", skip(self, cx))]
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<PersistenceOutput>> {
         let this = self.get_mut();
-        // get most recent action
-        // drain actions to get the largest range that should be persisted?
-        let mut range_end = None;
-        // TODO: drain incoming for range end
 
-        if let Some(block_number) = range_end {
-            // clone tree state
-            // write cloned diff to disk
-            // produce updates for in memory tree
-            let mut tree = this.tree_state.write();
-            // todo: ensure there was no change to the blocks before lowest_block_number
-            tree.remove_before(block_number);
-            // update tree
+        // TODO: should we do this?
+        // if there are multiple, we can just get the most recent action
+        let mut most_recent_save_action = None;
+        while let Poll::Ready(action) = this.incoming.poll_recv(cx) {
+            let action = match action {
+                None => return Poll::Ready(None),
+                Some(action) => action,
+            };
+
+            // TODO: if we introduce other actions, logic here would be different
+            let PersistenceAction::SaveFinalizedBlocks(blocks) = action;
+            most_recent_save_action = Some(blocks);
         }
 
-        Poll::Pending
+        if let Some(blocks) = most_recent_save_action {
+            for _block in blocks {
+                // TODO: write block and other info to disk
+            }
+
+            todo!("insert blocks")
+        } else {
+            Poll::Pending
+        }
     }
 }
 
 /// A signal to the persistence task that part of the tree state can be persisted.
 pub enum PersistenceAction {
-    /// The tree state from before this block can be persisted
-    SaveBlocks(u64),
+    /// The section of tree state that should be persisted. These blocks are expected in order of
+    /// increasing block number.
+    SaveFinalizedBlocks(Vec<ExecutedBlock>),
+}
 
-    // TODO: maybe not necessary
-    /// The tree state from before this block hash has been finalized and can be persisted
-    SaveFinalizedBlock(B256),
+/// An output of the persistence task, that tells the tree that it needs something.
+pub enum PersistenceOutput {
+    /// Tells the tree that it can remove the blocks before the given hash, as they have been
+    /// persisted.
+    RemoveBlocksBefore(B256),
 }
