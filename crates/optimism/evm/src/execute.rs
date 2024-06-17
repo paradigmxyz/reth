@@ -44,7 +44,7 @@ impl OpExecutorProvider {
 
 impl<EvmConfig> OpExecutorProvider<EvmConfig> {
     /// Creates a new executor provider.
-    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         Self { chain_spec, evm_config }
     }
 }
@@ -236,7 +236,7 @@ pub struct OpBlockExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
     /// Creates a new Ethereum block executor.
-    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
         Self { executor: OpEvmExecutor { chain_spec, evm_config }, state }
     }
 

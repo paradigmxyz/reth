@@ -1,19 +1,9 @@
 //! Contains various benchmark output formats, either for logging or for
 //! serialization to / from files.
-//!
-//! This also contains common constants for units, for example [GIGAGAS].
 
+use reth_primitives::constants::gas_units::GIGAGAS;
 use serde::{ser::SerializeStruct, Serialize};
 use std::time::Duration;
-
-/// Represents one Kilogas, or `1_000` gas.
-const KILOGAS: u64 = 1_000;
-
-/// Represents one Megagas, or `1_000_000` gas.
-const MEGAGAS: u64 = KILOGAS * 1_000;
-
-/// Represents one Gigagas, or `1_000_000_000` gas.
-const GIGAGAS: u64 = MEGAGAS * 1_000;
 
 /// This is the suffix for gas output csv files.
 pub(crate) const GAS_OUTPUT_SUFFIX: &str = "total_gas.csv";

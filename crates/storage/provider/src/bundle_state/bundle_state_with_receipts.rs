@@ -42,12 +42,14 @@ impl StateWriter for ExecutionOutcome {
             if let Some(static_file_producer) = &mut static_file_producer {
                 // Increment block on static file header.
                 static_file_producer.increment_block(StaticFileSegment::Receipts, block_number)?;
-
-                for (tx_idx, receipt) in receipts.into_iter().enumerate() {
-                    let receipt = receipt
-                        .expect("receipt should not be filtered when saving to static files.");
-                    static_file_producer.append_receipt(first_tx_index + tx_idx as u64, receipt)?;
-                }
+                let receipts = receipts.into_iter().enumerate().map(|(tx_idx, receipt)| {
+                    Ok((
+                        first_tx_index + tx_idx as u64,
+                        receipt
+                            .expect("receipt should not be filtered when saving to static files."),
+                    ))
+                });
+                static_file_producer.append_receipts(receipts)?;
             } else if !receipts.is_empty() {
                 for (tx_idx, receipt) in receipts.into_iter().enumerate() {
                     if let Some(receipt) = receipt {
@@ -280,6 +282,7 @@ mod tests {
                         EvmStorageSlot {
                             present_value: U256::from(2),
                             original_value: U256::from(1),
+                            ..Default::default()
                         },
                     )]),
                 },
@@ -470,7 +473,11 @@ mod tests {
                 // 0x00 => 1 => 2
                 storage: HashMap::from([(
                     U256::ZERO,
-                    EvmStorageSlot { original_value: U256::from(1), present_value: U256::from(2) },
+                    EvmStorageSlot {
+                        original_value: U256::from(1),
+                        present_value: U256::from(2),
+                        ..Default::default()
+                    },
                 )]),
             },
         )]));

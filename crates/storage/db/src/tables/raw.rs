@@ -53,7 +53,7 @@ impl<K: Key> RawKey<K> {
 
     /// Creates a raw key from an existing `Vec`. Useful when we already have the encoded
     /// key.
-    pub fn from_vec(vec: Vec<u8>) -> Self {
+    pub const fn from_vec(vec: Vec<u8>) -> Self {
         Self { key: vec, _phantom: std::marker::PhantomData }
     }
 
@@ -118,7 +118,7 @@ impl<V: Value> RawValue<V> {
 
     /// Creates a raw value from an existing `Vec`. Useful when we already have the encoded
     /// value.
-    pub fn from_vec(vec: Vec<u8>) -> Self {
+    pub const fn from_vec(vec: Vec<u8>) -> Self {
         Self { value: vec, _phantom: std::marker::PhantomData }
     }
 

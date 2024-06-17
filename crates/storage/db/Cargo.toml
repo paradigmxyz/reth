@@ -25,7 +25,7 @@ reth-nippy-jar.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-tracing.workspace = true
-reth-trie-types.workspace = true
+reth-trie-common.workspace = true
 
 # codecs
 serde = { workspace = true, default-features = false }

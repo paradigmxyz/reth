@@ -57,7 +57,7 @@ pub struct TestEnv<DB> {
 }
 
 impl<DB> TestEnv<DB> {
-    fn new(
+    const fn new(
         db: DB,
         tip_rx: watch::Receiver<B256>,
         engine_handle: BeaconConsensusEngineHandle<EthEngineTypes>,

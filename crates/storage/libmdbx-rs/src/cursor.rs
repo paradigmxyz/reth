@@ -11,8 +11,7 @@ use ffi::{
     MDBX_NEXT_MULTIPLE, MDBX_NEXT_NODUP, MDBX_PREV, MDBX_PREV_DUP, MDBX_PREV_MULTIPLE,
     MDBX_PREV_NODUP, MDBX_SET, MDBX_SET_KEY, MDBX_SET_LOWERBOUND, MDBX_SET_RANGE,
 };
-use libc::c_void;
-use std::{borrow::Cow, fmt, marker::PhantomData, mem, ptr};
+use std::{borrow::Cow, ffi::c_void, fmt, marker::PhantomData, mem, ptr};
 
 /// A cursor for navigating the items within a database.
 pub struct Cursor<K>

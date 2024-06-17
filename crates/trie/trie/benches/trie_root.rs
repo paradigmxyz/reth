@@ -1,7 +1,8 @@
 #![allow(missing_docs, unreachable_pub)]
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
-use reth_primitives::{proofs::triehash::KeccakHasher, ReceiptWithBloom, B256};
+use reth_primitives::{ReceiptWithBloom, B256};
+use reth_trie::triehash::KeccakHasher;
 
 /// Benchmarks different implementations of the root calculation.
 pub fn trie_root_benchmark(c: &mut Criterion) {
@@ -41,8 +42,7 @@ criterion_main!(benches);
 mod implementations {
     use super::*;
     use alloy_rlp::Encodable;
-    use reth_primitives::proofs::adjust_index_for_rlp;
-    use reth_trie_types::{HashBuilder, Nibbles};
+    use reth_trie_common::{root::adjust_index_for_rlp, HashBuilder, Nibbles};
 
     pub fn trie_hash_ordered_trie_root(receipts: &[ReceiptWithBloom]) -> B256 {
         triehash::ordered_trie_root::<KeccakHasher, _>(receipts.iter().map(|receipt| {
