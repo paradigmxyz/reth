@@ -1,6 +1,6 @@
 //! Helper types for [`EthApiServer`](crate::EthApiServer) implementation.
 //!
-//! Transaction wrapper that lables transaction with its origin.
+//! Transaction wrapper that labels transaction with its origin.
 
 use reth_primitives::{TransactionSignedEcRecovered, B256};
 use reth_rpc_types::{Transaction, TransactionInfo};
