@@ -3,12 +3,18 @@ use parking_lot::{Mutex, MutexGuard, RwLock};
 use reth_beacon_consensus::{ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated};
 use reth_blockchain_tree::BlockBuffer;
 use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
+use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::ProviderResult;
+use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_payload_primitives::PayloadTypes;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Address, Block, BlockNumber, SealedBlock, SealedBlockWithSenders, B256};
-use reth_provider::BlockReader;
+use reth_primitives::{
+    Address, Block, BlockNumber, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders,
+    B256, U256,
+};
+use reth_provider::{BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory};
+use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
     engine::{
         CancunPayloadFields, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
@@ -23,12 +29,15 @@ use std::{
 };
 use tracing::*;
 
+mod memory_overlay;
+pub use memory_overlay::MemoryOverlayStateProvider;
+
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug)]
-struct ExecutedBlock {
+pub struct ExecutedBlock {
     block: Arc<SealedBlock>,
     senders: Arc<Vec<Address>>,
-    state: Arc<()>,
+    execution_output: Arc<ExecutionOutcome>,
     trie: Arc<()>,
 }
 
@@ -166,16 +175,19 @@ pub enum TreeEvent {
 }
 
 #[derive(Clone, Debug)]
-pub struct EngineApiTreeHandlerImpl<P, T: EngineTypes> {
+pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     provider: P,
+    executor_provider: E,
+    consensus: Arc<dyn Consensus>,
     payload_validator: ExecutionPayloadValidator,
     state: EngineApiTreeState,
     _marker: PhantomData<T>,
 }
 
-impl<P, T> EngineApiTreeHandlerImpl<P, T>
+impl<P, E, T> EngineApiTreeHandlerImpl<P, E, T>
 where
-    P: BlockReader,
+    P: BlockReader + StateProviderFactory,
+    E: BlockExecutorProvider,
     T: EngineTypes,
 {
     /// Return block from database or in-memory state by hash.
@@ -192,6 +204,23 @@ where
                 .map(|block| block.as_ref().clone().unseal());
         }
         Ok(block)
+    }
+
+    /// Return state provider with reference to in-memory blocks that overlay database state.
+    fn state_provider(
+        &self,
+        hash: B256,
+    ) -> ProviderResult<MemoryOverlayStateProvider<Box<dyn StateProvider>>> {
+        let mut in_memory = Vec::new();
+        let mut parent_hash = hash;
+        let tree_state = self.state.tree_state.read();
+        while let Some(executed) = tree_state.blocks_by_hash.get(&parent_hash) {
+            parent_hash = executed.block.parent_hash;
+            in_memory.insert(0, executed.clone());
+        }
+
+        let historical = self.provider.state_by_block_hash(parent_hash)?;
+        Ok(MemoryOverlayStateProvider::new(in_memory, historical))
     }
 
     /// Return the parent hash of the lowest buffered ancestor for the requested block, if there
@@ -306,15 +335,46 @@ where
 
     fn insert_block(
         &self,
-        _block: SealedBlockWithSenders,
+        block: SealedBlockWithSenders,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
+        // TODO: perform various checks
+
+        let state_provider = self.state_provider(block.parent_hash).unwrap();
+        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
+
+        let block_number = block.number;
+        let block_hash = block.hash();
+        let block = block.unseal();
+        let output = executor.execute((&block, U256::MAX).into()).unwrap();
+        self.consensus
+            .validate_block_post_execution(
+                &block,
+                PostExecutionInput::new(&output.receipts, &output.requests),
+            )
+            .unwrap();
+
+        // TODO: compute and validate state root
+
+        let _executed = ExecutedBlock {
+            block: Arc::new(block.block.seal(block_hash)),
+            senders: Arc::new(block.senders),
+            execution_output: Arc::new(ExecutionOutcome::new(
+                output.state,
+                Receipts::from(output.receipts),
+                block_number,
+                vec![Requests::from(output.requests)],
+            )),
+            trie: Arc::new(()),
+        };
+
         todo!()
     }
 }
 
-impl<P, T> EngineApiTreeHandler for EngineApiTreeHandlerImpl<P, T>
+impl<P, E, T> EngineApiTreeHandler for EngineApiTreeHandlerImpl<P, E, T>
 where
-    P: BlockReader + Clone,
+    P: BlockReader + StateProviderFactory + Clone,
+    E: BlockExecutorProvider,
     T: EngineTypes,
 {
     type Engine = T;
