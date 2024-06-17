@@ -9,18 +9,16 @@ pub use headers::Headers;
 mod receipts;
 pub use receipts::Receipts;
 
+use alloy_primitives::BlockNumber;
 use reth_db::{RawKey, RawTable};
 use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
 use reth_nippy_jar::NippyJar;
-use reth_primitives::{
-    static_file::{
-        find_fixed_range, Compression, Filters, InclusionFilter, PerfectHashingFunction,
-        SegmentConfig, SegmentHeader,
-    },
-    BlockNumber, StaticFileSegment,
-};
 use reth_provider::{
     providers::StaticFileProvider, DatabaseProviderRO, ProviderError, TransactionsProviderExt,
+};
+use reth_static_file_types::{
+    find_fixed_range, Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentConfig,
+    SegmentHeader, StaticFileSegment,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{ops::RangeInclusive, path::Path};
