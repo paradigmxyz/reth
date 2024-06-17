@@ -12,7 +12,7 @@ use crate::{
     RpcInvalidTransactionError,
 };
 
-/// Fee related functions for the [`EthApiServer`](reth_rpc_eth_api::EthApiServer) trait in the
+/// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
 pub trait EthFees: LoadFee {
     /// Returns a suggestion for a gas price for legacy transactions.

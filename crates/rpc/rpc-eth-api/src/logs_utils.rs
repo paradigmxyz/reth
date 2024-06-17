@@ -1,4 +1,4 @@
-//! Helper functions for [`EthFilterApiServer`](crate::api::filter::EthFilterApi) implementation.
+//! Helper functions for [`EthFilterApiServer`](crate::EthFilterApiServer) implementation.
 //!
 //! Log parsing for building filter.
 

@@ -1,4 +1,4 @@
-//! Helper types for [`EthApiServer`](crate::api::EthApi) implementation.
+//! Helper types for [`EthApiServer`](crate::EthApiServer) implementation.
 //!
 //! Types used in block building.
 

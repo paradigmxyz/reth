@@ -11,11 +11,12 @@
 //! and can reduce overall performance of all concurrent requests handled via the jsonrpsee server.
 //!
 //! To avoid this, all blocking or CPU intensive handlers must be spawned to a separate task. See
-//! the [`EthApi`] handler implementations for examples. The rpc-api traits make no use of the
-//! available jsonrpsee `blocking` attribute to give implementers more freedom because the
-//! `blocking` attribute and async handlers are mutually exclusive. However, as mentioned above, a
-//! lot of handlers make use of async functions, caching for example, but are also using blocking
-//! disk-io, hence these calls are spawned as futures to a blocking task manually.
+//! the [`EthApi`](reth_rpc_eth_api::EthApi) handler implementations for examples. The rpc-api
+//! traits make no use of the available jsonrpsee `blocking` attribute to give implementers more
+//! freedom because the `blocking` attribute and async handlers are mutually exclusive. However, as
+//! mentioned above, a lot of handlers make use of async functions, caching for example, but are
+//! also using blocking disk-io, hence these calls are spawned as futures to a blocking task
+//! manually.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",

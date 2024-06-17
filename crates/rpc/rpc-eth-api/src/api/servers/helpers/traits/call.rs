@@ -33,7 +33,7 @@ use crate::{
     ESTIMATE_GAS_ERROR_RATIO, MIN_TRANSACTION_GAS,
 };
 
-/// Execution related functions for the [`EthApiServer`](reth_rpc_eth_api::EthApiServer) trait in
+/// Execution related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
 pub trait EthCall: Call + LoadPendingBlock {
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].

@@ -1,4 +1,4 @@
-//! Helper type for [`EthPubSubApiServer`](crate::api::pubsub::EthPubSubApi) implementation.
+//! Helper type for [`EthPubSubApiServer`](crate::EthPubSubApiServer) implementation.
 //!
 //! Generates IDs for tracking subscriptions.
 

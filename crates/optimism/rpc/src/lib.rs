@@ -26,7 +26,7 @@ pub mod transaction;
 /// `Eth` API implementation for OP networks.
 ///
 /// This type provides OP specific extension of default functionality for handling `eth_` related
-/// requests. See [`EthApi`](reth_rpc::EthApi) for the default L1 implementation.
+/// requests. See [`EthApi`](reth_rpc_eth_api::EthApi) for the default L1 implementation.
 #[allow(missing_debug_implementations)]
 #[allow(dead_code)]
 #[derive(Clone)]

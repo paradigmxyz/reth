@@ -29,7 +29,7 @@ use crate::{
     EthApiError, EthResult, EthStateCache, SignError, TransactionSource,
 };
 
-/// Transaction related functions for the [`EthApiServer`](reth_rpc_eth_api::EthApiServer) trait in
+/// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
 ///
 /// This includes utilities for transaction tracing, transacting and inspection.
