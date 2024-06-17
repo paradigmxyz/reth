@@ -1,6 +1,5 @@
-use reth_primitives::{
-    b256, BaseFeeParams, Chain, ChainSpec, ForkCondition, Hardfork, NodeRecord, B256,
-};
+use reth_chainspec::{net::NodeRecord, BaseFeeParams, Chain, ChainSpec, ForkCondition, Hardfork};
+use reth_primitives::{b256, B256};
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -16,7 +15,7 @@ pub(crate) fn bsc_chain_spec() -> Arc<ChainSpec> {
         paris_block_and_final_difficulty: None,
         hardforks: BTreeMap::from([(Hardfork::Shanghai, ForkCondition::Timestamp(SHANGHAI_TIME))]),
         deposit_contract: None,
-        base_fee_params: reth_primitives::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+        base_fee_params: reth_chainspec::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 0,
     }
     .into()

@@ -414,8 +414,8 @@ mod tests {
     use alloy_chains::Chain;
     use alloy_rlp::{Decodable, Encodable};
     use enr::EnrKey;
+    use reth_chainspec::MAINNET;
     use reth_ethereum_forks::{ForkHash, Hardfork};
-    use reth_primitives::MAINNET;
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
 

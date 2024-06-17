@@ -1,8 +1,9 @@
 use reth::{rpc::types::engine::PayloadAttributes, tasks::TaskManager};
+use reth_chainspec::{ChainSpecBuilder, BASE_MAINNET};
 use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet, NodeHelperType};
 use reth_node_optimism::{OptimismBuiltPayload, OptimismNode, OptimismPayloadBuilderAttributes};
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_primitives::{Address, ChainSpecBuilder, Genesis, B256, BASE_MAINNET};
+use reth_primitives::{Address, Genesis, B256};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

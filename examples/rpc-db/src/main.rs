@@ -13,13 +13,13 @@
 //! ```
 
 use reth::{
-    primitives::ChainSpecBuilder,
     providers::{
         providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
     },
     utils::db::open_db_read_only,
 };
+use reth_chainspec::ChainSpecBuilder;
 use reth_db::mdbx::DatabaseArguments;
 use reth_db_api::models::ClientVersion;
 

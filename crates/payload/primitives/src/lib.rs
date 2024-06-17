@@ -20,7 +20,7 @@ pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
 mod payload;
 pub use payload::PayloadOrAttributes;
 
-use reth_primitives::ChainSpec;
+use reth_chainspec::ChainSpec;
 
 /// The types that are used by the engine API.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone {

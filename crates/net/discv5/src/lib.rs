@@ -22,8 +22,8 @@ use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
-use reth_network_peers::PeerId;
-use reth_primitives::{bytes::Bytes, EnrForkIdEntry, ForkId, NodeRecord};
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_primitives::{bytes::Bytes, EnrForkIdEntry, ForkId};
 use secp256k1::SecretKey;
 use tokio::{sync::mpsc, task};
 use tracing::{debug, error, trace};
@@ -652,7 +652,7 @@ pub async fn lookup(
 mod test {
     use super::*;
     use ::enr::{CombinedKey, EnrKey};
-    use reth_primitives::MAINNET;
+    use reth_chainspec::MAINNET;
     use secp256k1::rand::thread_rng;
     use tracing::trace;
 

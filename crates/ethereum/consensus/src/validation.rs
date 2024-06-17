@@ -1,7 +1,7 @@
+use reth_chainspec::ChainSpec;
 use reth_consensus::ConsensusError;
 use reth_primitives::{
-    gas_spent_by_transactions, BlockWithSenders, Bloom, ChainSpec, GotExpected, Receipt, Request,
-    B256,
+    gas_spent_by_transactions, BlockWithSenders, Bloom, GotExpected, Receipt, Request, B256,
 };
 
 /// Validate a block with regard to execution results:

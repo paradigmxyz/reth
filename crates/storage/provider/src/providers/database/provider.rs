@@ -14,6 +14,7 @@ use crate::{
     WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
+use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db::{tables, BlockNumberList};
 use reth_db_api::{
     common::KeyValue,
@@ -33,10 +34,10 @@ use reth_primitives::{
     keccak256,
     revm::{config::revm_spec, env::fill_block_env},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, GotExpected, Head, Header, Receipt, Requests, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta,
-    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, Withdrawals, B256, U256,
+    GotExpected, Head, Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta, TransactionSigned,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
+    Withdrawals, B256, U256,
 };
 use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};

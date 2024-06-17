@@ -17,10 +17,11 @@ use reth::{
     },
     tasks::TaskManager,
 };
+use reth_chainspec::{Chain, ChainSpec};
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
-use reth_primitives::{Chain, ChainSpec, Genesis, Header, TransactionSigned};
+use reth_primitives::{Genesis, Header, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
 

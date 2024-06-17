@@ -2,6 +2,7 @@
 
 use crate::version::P2P_CLIENT_VERSION;
 use clap::Args;
+use reth_chainspec::{net::mainnet_nodes, ChainSpec};
 use reth_config::Config;
 use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
@@ -17,7 +18,7 @@ use reth_network::{
     },
     HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
-use reth_primitives::{mainnet_nodes, ChainSpec, TrustedPeer};
+use reth_network_peers::TrustedPeer;
 use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},

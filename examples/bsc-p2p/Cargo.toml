@@ -8,6 +8,7 @@ license.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+reth-chainspec.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
 reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true

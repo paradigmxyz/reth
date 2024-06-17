@@ -10,6 +10,7 @@ repository.workspace = true
 
 [dependencies]
 reth.workspace = true
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-tracing.workspace = true
 reth-db.workspace = true
