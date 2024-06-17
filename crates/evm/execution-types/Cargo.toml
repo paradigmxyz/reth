@@ -24,4 +24,4 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
 [features]
-optimism = ["reth-chainspec"]
+optimism = ["dep:reth-chainspec"]
