@@ -1,8 +1,20 @@
 use crate::constants::MAINNET_DEPOSIT_CONTRACT;
+#[cfg(not(feature = "std"))]
+use alloc::{
+    collections::BTreeMap,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use alloy_chains::{Chain, ChainKind, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
+use core::{
+    fmt,
+    fmt::{Display, Formatter},
+};
 use derive_more::From;
 use once_cell::sync::Lazy;
 use reth_ethereum_forks::{ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head};
@@ -16,18 +28,6 @@ use reth_primitives_traits::{
 };
 use reth_trie_common::root::state_root_ref_unhashed;
 use serde::{Deserialize, Serialize};
-use core::{
-    fmt,
-    fmt::{Display, Formatter},
-};
-#[cfg(not(feature = "std"))]
-use alloc::{
-    collections::BTreeMap,
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
 #[cfg(feature = "std")]
 use std::{collections::BTreeMap, sync::Arc};
 
