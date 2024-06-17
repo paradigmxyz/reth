@@ -5,13 +5,14 @@ use crate::{
     segments::{PruneInput, Segment},
     Metrics, PrunerError, PrunerEvent,
 };
+use alloy_primitives::BlockNumber;
 use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
-use reth_primitives::{BlockNumber, StaticFileSegment};
 use reth_provider::{
     DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
 };
 use reth_prune_types::{PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment};
+use reth_static_file_types::StaticFileSegment;
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
     collections::BTreeMap,
