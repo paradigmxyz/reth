@@ -208,7 +208,7 @@ pub trait EthCall: Call + LoadPendingBlock {
 
         // we want to disable this in eth_createAccessList, since this is common practice used by
         // other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
-        env.cfg.disable_block_gas_limit = true;
+        env.env.cfg.disable_block_gas_limit = true;
 
         // The basefee should be ignored for eth_createAccessList
         // See:
@@ -511,7 +511,7 @@ pub trait Call: LoadState + SpawnBlocking {
         // The basefee should be ignored for eth_createAccessList
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
-        cfg.disable_base_fee = true;
+        cfg.cfg_env.disable_base_fee = true;
 
         // Keep a copy of gas related request values
         let tx_request_gas_limit = request.gas;

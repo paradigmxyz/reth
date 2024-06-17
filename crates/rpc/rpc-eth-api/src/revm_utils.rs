@@ -110,16 +110,16 @@ where
 {
     // we want to disable this in eth_call, since this is common practice used by other node
     // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
-    cfg.disable_block_gas_limit = true;
+    cfg.cfg_env.disable_block_gas_limit = true;
 
     // Disabled because eth_call is sometimes used with eoa senders
     // See <https://github.com/paradigmxyz/reth/issues/1959>
-    cfg.disable_eip3607 = true;
+    cfg.cfg_env.disable_eip3607 = true;
 
     // The basefee should be ignored for eth_call
     // See:
     // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
-    cfg.disable_base_fee = true;
+    cfg.cfg_env.disable_base_fee = true;
 
     // apply block overrides, we need to apply them first so that they take effect when we we create
     // the evm env via `build_call_evm_env`, e.g. basefee
