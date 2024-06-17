@@ -1,12 +1,9 @@
 use std::sync::Arc;
 
-use exex_remote::{
-    codec::to_u8_slice,
-    proto::{
-        remote_ex_ex_server::{RemoteExEx, RemoteExExServer},
-        ExExNotification as ProtoExExNotification, Notification as ProtoNotification,
-        SubscribeRequest as ProtoSubscribeRequest,
-    },
+use exex_remote::proto::{
+    remote_ex_ex_server::{RemoteExEx, RemoteExExServer},
+    ExExNotification as ProtoExExNotification, Notification as ProtoNotification,
+    SubscribeRequest as ProtoSubscribeRequest,
 };
 use futures::TryFutureExt;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
@@ -59,7 +56,8 @@ impl RemoteExEx for ExExService {
             while let Ok(notification) = notifications.recv().await {
                 if matches_filter(&notification) {
                     tx.send(Ok(ProtoNotification {
-                        data: unsafe { to_u8_slice(&notification) }.to_vec(),
+                        data: bincode::serialize(&notification)
+                            .expect("failed to serialize notification"),
                     }))
                     .await
                     .expect("failed to send notification to client");

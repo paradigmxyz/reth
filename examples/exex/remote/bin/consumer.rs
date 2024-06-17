@@ -1,13 +1,14 @@
-use exex_remote::{
-    codec::from_u8_slice,
-    proto::{
-        remote_ex_ex_client::RemoteExExClient, ExExNotification as ProtoExExNotification,
-        Notification, SubscribeRequest,
-    },
+use exex_remote::proto::{
+    remote_ex_ex_client::RemoteExExClient, ExExNotification as ProtoExExNotification, Notification,
+    SubscribeRequest,
 };
+use reth_exex::ExExNotification;
+use reth_tracing::{tracing::info, RethTracer, Tracer};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    let _ = RethTracer::new().init()?;
+
     let mut client = RemoteExExClient::connect("http://[::1]:10000").await?;
 
     let mut stream = client
@@ -22,11 +23,19 @@ async fn main() -> eyre::Result<()> {
         .into_inner();
 
     while let Some(Notification { data }) = stream.message().await? {
-        // TODO(alexey): it doesn't work, because data inside the notification is boxed.
-        //  We need to implement a proper encoding via Serde.
-        // let notification = unsafe { from_u8_slice(&data) };
-        // println!("{:?}", notification);
-        println!("{:?}", data);
+        let notification = bincode::deserialize::<ExExNotification>(&data)?;
+
+        match notification {
+            ExExNotification::ChainCommitted { new } => {
+                info!(committed_chain = ?new.range(), "Received commit");
+            }
+            ExExNotification::ChainReorged { old, new } => {
+                info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
+            }
+            ExExNotification::ChainReverted { old } => {
+                info!(reverted_chain = ?old.range(), "Received revert");
+            }
+        };
     }
 
     Ok(())

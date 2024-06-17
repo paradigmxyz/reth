@@ -17,10 +17,13 @@ reth-trie.workspace = true
 
 revm.workspace = true
 
+serde = { workspace = true, optional = true }
+
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["test-utils"] }
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
 [features]
+serde = ["dep:serde", "reth-trie/serde", "revm/serde"]
 optimism = []
