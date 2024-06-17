@@ -72,8 +72,14 @@ impl MyEvmConfig {
         let mut loaded_precompiles: ContextPrecompiles<DB> =
             ContextPrecompiles::new(PrecompileSpecId::from_spec_id(spec_id));
         for (address, precompile) in loaded_precompiles.to_mut().iter_mut() {
-            *precompile =
-                Self::wrap_precompile(precompile.clone(), cache.clone(), *address, spec_id);
+            // get or insert the cache for this address / spec
+            let mut cache = cache.write().unwrap();
+            let cache = cache
+                .cache
+                .entry((*address, spec_id))
+                .or_insert(Arc::new(RwLock::new(LruMap::new(ByLength::new(1024)))));
+
+            *precompile = Self::wrap_precompile(precompile.clone(), cache.clone());
         }
 
         // install the precompiles
@@ -84,20 +90,11 @@ impl MyEvmConfig {
     /// the precompile with the cache.
     fn wrap_precompile<DB>(
         precompile: ContextPrecompile<DB>,
-        cache: Arc<RwLock<PrecompileCache>>,
-        address: Address,
-        spec_id: SpecId,
+        cache: Arc<RwLock<LruMap<(Bytes, u64), PrecompileResult>>>,
     ) -> ContextPrecompile<DB>
     where
         DB: Database,
     {
-        // get or insert the cache for this address / spec
-        let mut cache = cache.write().unwrap();
-        let cache = cache
-            .cache
-            .entry((address, spec_id))
-            .or_insert(Arc::new(RwLock::new(LruMap::new(ByLength::new(1024)))));
-
         let ContextPrecompile::Ordinary(precompile) = precompile else {
             // context stateful precompiles are not supported, due to lifetime issues or skill
             // issues
@@ -185,9 +182,12 @@ impl ConfigureEvm for MyEvmConfig {
 }
 
 /// Builds a regular ethereum block executor that uses the custom EVM.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct MyExecutorBuilder;
+pub struct MyExecutorBuilder {
+    /// The precompile cache to use for all executors.
+    precompile_cache: Arc<RwLock<PrecompileCache>>,
+}
 
 impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
@@ -200,10 +200,8 @@ where
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
-        Ok((
-            MyEvmConfig::default(),
-            EthExecutorProvider::new(ctx.chain_spec(), MyEvmConfig::default()),
-        ))
+        let evm_config = MyEvmConfig { precompile_cache: self.precompile_cache.clone() };
+        Ok((evm_config.clone(), EthExecutorProvider::new(ctx.chain_spec(), evm_config)))
     }
 }
 
