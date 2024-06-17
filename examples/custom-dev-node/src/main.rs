@@ -8,7 +8,7 @@ use reth::{
     builder::{NodeBuilder, NodeHandle},
     providers::CanonStateSubscriptions,
     rpc::eth::EthTransactions,
-    tasks::TaskManager,
+    tasks::TaskExecutor,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
@@ -17,8 +17,6 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    let tasks = TaskManager::current();
-
     // create node config
     let node_config = NodeConfig::test()
         .dev()
@@ -26,7 +24,7 @@ async fn main() -> eyre::Result<()> {
         .with_chain(custom_chain());
 
     let NodeHandle { mut node, node_exit_future: _ } = NodeBuilder::new(node_config)
-        .testing_node(tasks.executor())
+        .testing_node(TaskExecutor::current())
         .node(EthereumNode::default())
         .launch()
         .await?;

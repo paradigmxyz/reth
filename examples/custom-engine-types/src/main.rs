@@ -31,7 +31,7 @@ use reth::{
     },
     primitives::revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     providers::{CanonStateSubscriptions, StateProviderFactory},
-    tasks::TaskManager,
+    tasks::TaskExecutor,
     transaction_pool::TransactionPool,
 };
 use reth_basic_payload_builder::{
@@ -331,8 +331,6 @@ where
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
-    let tasks = TaskManager::current();
-
     // create optimism genesis with canyon at block 2
     let spec = ChainSpec::builder()
         .chain(Chain::mainnet())
@@ -347,7 +345,7 @@ async fn main() -> eyre::Result<()> {
         NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
 
     let handle = NodeBuilder::new(node_config)
-        .testing_node(tasks.executor())
+        .testing_node(TaskExecutor::current())
         .launch_node(MyCustomNode::default())
         .await
         .unwrap();

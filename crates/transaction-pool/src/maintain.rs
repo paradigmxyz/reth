@@ -684,7 +684,7 @@ mod tests {
     use reth_fs_util as fs;
     use reth_primitives::{hex, PooledTransactionsElement, MAINNET, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-    use reth_tasks::TaskManager;
+    use reth_tasks::{TaskExecutor, TaskManager};
 
     #[test]
     fn changed_acc_entry() {
@@ -723,12 +723,12 @@ mod tests {
 
         txpool.add_transaction(TransactionOrigin::Local, transaction.clone()).await.unwrap();
 
-        let handle = tokio::runtime::Handle::current();
-        let manager = TaskManager::new(handle);
+        let manager = TaskManager::take();
         let config = LocalTransactionBackupConfig::with_local_txs_backup(transactions_path.clone());
-        manager.executor().spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
-            backup_local_transactions_task(shutdown, txpool.clone(), config)
-        });
+        TaskExecutor::current()
+            .spawn_critical_with_graceful_shutdown_signal("test task", |shutdown| {
+                backup_local_transactions_task(shutdown, txpool.clone(), config)
+            });
 
         let mut txns = txpool.get_local_transactions();
         let tx_on_finish = txns.pop().expect("there should be 1 transaction");

@@ -46,9 +46,10 @@ pub mod shutdown;
 #[cfg(feature = "rayon")]
 pub mod pool;
 
-// todo comments
+/// The global task manager. Required to initialize the task executor.
 static MANAGER: Lazy<Mutex<Option<TaskManager>>> =
     Lazy::new(|| Mutex::new(Some(TaskManager::new(Handle::current()))));
+/// The global task executor. Required to spawn tasks.
 static EXECUTOR: OnceLock<TaskExecutor> = OnceLock::new();
 
 /// A type that can spawn tasks.
@@ -76,12 +77,11 @@ static EXECUTOR: OnceLock<TaskExecutor> = OnceLock::new();
 /// Use the [`TaskExecutor`] that spawns task directly onto the tokio runtime via the [Handle].
 ///
 /// ```
-/// # use reth_tasks::TaskManager;
+/// # use reth_tasks::{TaskExecutor};
 /// fn t() {
 ///  use reth_tasks::TaskSpawner;
 /// let rt = tokio::runtime::Runtime::new().unwrap();
-/// let manager = TaskManager::new(rt.handle().clone());
-/// let executor = manager.executor();
+/// let executor = TaskExecutor::current();
 /// let task = TaskSpawner::spawn(&executor, Box::pin(async {
 ///     // -- snip --
 /// }));
@@ -149,7 +149,7 @@ impl TaskSpawner for TokioTaskExecutor {
 /// The main purpose of this type is to be able to monitor if a critical task panicked, for
 /// diagnostic purposes, since tokio task essentially fail silently. Therefore, this type is a
 /// Stream that yields the name of panicked task, See [`TaskExecutor::spawn_critical`]. In order to
-/// execute Tasks use the [`TaskExecutor`] type [`TaskManager::executor`].
+/// execute Tasks use the [`TaskExecutor`] type [`TaskExecutor::current`].
 #[derive(Debug)]
 #[must_use = "TaskManager must be polled to monitor critical tasks"]
 pub struct TaskManager {
@@ -174,34 +174,23 @@ pub struct TaskManager {
 // === impl TaskManager ===
 
 impl TaskManager {
-    /// Returns a a [`TaskManager`] over the currently running Runtime.
+    /// Returns the global [`TaskManager`] over the current tokio runtime.
     ///
     /// # Panics
     ///
-    /// This will panic if called outside the context of a Tokio runtime.
-    pub fn current() -> Self {
+    /// This will panic if:
+    /// * called outside the context of a Tokio runtime; or
+    /// * called more than once.
+    pub fn take() -> Self {
         let manager = MANAGER
             .lock()
-            .expect("todo")
+            .expect("Failed to lock TaskManager")
             .take()
-            .expect("TaskManager::current() called more than once");
-        EXECUTOR
-            .set(TaskExecutor {
-                handle: manager.handle.clone(),
-                on_shutdown: manager.on_shutdown.clone(),
-                panicked_tasks_tx: manager.panicked_tasks_tx.clone(),
-                metrics: Default::default(),
-                graceful_tasks: Arc::clone(&manager.graceful_tasks),
-            })
-            .expect("todo");
+            .expect("TaskManager::take() called more than once");
+        EXECUTOR.set(TaskExecutor::new(&manager)).expect("Failed to set TaskExecutor");
         manager
-        //let manager = MANAGER.get_or_init(|| Some(TaskManager::new(Handle::current())))
-        //manager.take().expect("TaskManager::current() called twice")
-        //let handle = Handle::current();
-        //Self::new(handle)
     }
 
-    // todo not pub
     /// Create a new instance connected to the given handle's tokio runtime.
     pub fn new(handle: Handle) -> Self {
         let (panicked_tasks_tx, panicked_tasks_rx) = unbounded_channel();
@@ -213,19 +202,6 @@ impl TaskManager {
             signal: Some(signal),
             on_shutdown,
             graceful_tasks: Arc::new(AtomicUsize::new(0)),
-        }
-    }
-
-    // todo not pub
-    /// Returns a new [`TaskExecutor`] that can spawn new tasks onto the tokio runtime this type is
-    /// connected to.
-    pub fn executor(&self) -> TaskExecutor {
-        TaskExecutor {
-            handle: self.handle.clone(),
-            on_shutdown: self.on_shutdown.clone(),
-            panicked_tasks_tx: self.panicked_tasks_tx.clone(),
-            metrics: Default::default(),
-            graceful_tasks: Arc::clone(&self.graceful_tasks),
         }
     }
 
@@ -321,9 +297,33 @@ pub struct TaskExecutor {
 // === impl TaskExecutor ===
 
 impl TaskExecutor {
-    // todo comments
+    /// Returns a [`TaskExecutor`] over the current tokio runtime.
+    ///
+    /// # Panics
+    ///
+    /// Panics can occur if static state cannot be initialized or retrieved. Should not
+    /// happen in practice.
     pub fn current() -> Self {
-        EXECUTOR.get().expect("todo").clone()
+        match EXECUTOR.get() {
+            Some(executor) => executor.clone(),
+            None => {
+                let guard = MANAGER.lock().expect("Failed to lock TaskManager");
+                let manager = guard.as_ref().expect("Failed to get TaskManager");
+                EXECUTOR.set(Self::new(manager)).expect("Failed to set TaskExecutor");
+                EXECUTOR.get().expect("Failed to get TaskExecutor").clone()
+            }
+        }
+    }
+
+    /// Create a new instance connected to the given manager's tokio runtime.
+    pub fn new(manager: &TaskManager) -> Self {
+        Self {
+            handle: manager.handle.clone(),
+            on_shutdown: manager.on_shutdown.clone(),
+            panicked_tasks_tx: manager.panicked_tasks_tx.clone(),
+            metrics: Default::default(),
+            graceful_tasks: Arc::clone(&manager.graceful_tasks),
+        }
     }
 
     /// Returns the [Handle] to the tokio runtime.
@@ -689,7 +689,7 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let handle = runtime.handle().clone();
         let manager = TaskManager::new(handle);
-        let executor = manager.executor();
+        let executor = TaskExecutor::new(&manager);
 
         executor.spawn_critical("this is a critical task", async { panic!("intentionally panic") });
 
@@ -706,7 +706,7 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let handle = runtime.handle().clone();
         let manager = TaskManager::new(handle.clone());
-        let executor = manager.executor();
+        let executor = TaskExecutor::new(&manager);
 
         let (signal, shutdown) = signal();
 
@@ -726,7 +726,7 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let handle = runtime.handle().clone();
         let manager = TaskManager::new(handle.clone());
-        let executor = manager.executor();
+        let executor = TaskExecutor::new(&manager);
 
         let (signal, shutdown) = signal();
 
@@ -745,7 +745,7 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let handle = runtime.handle().clone();
         let manager = TaskManager::new(handle);
-        let executor = manager.executor();
+        let executor = TaskExecutor::new(&manager);
 
         let val = Arc::new(AtomicBool::new(false));
         let c = val.clone();
@@ -764,7 +764,7 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let handle = runtime.handle().clone();
         let manager = TaskManager::new(handle);
-        let executor = manager.executor();
+        let executor = TaskExecutor::new(&manager);
 
         let counter = Arc::new(AtomicUsize::new(0));
         let num = 10;
@@ -789,7 +789,7 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let handle = runtime.handle().clone();
         let manager = TaskManager::new(handle);
-        let executor = manager.executor();
+        let executor = TaskExecutor::new(&manager);
 
         let timeout = Duration::from_millis(500);
         let val = Arc::new(AtomicBool::new(false));

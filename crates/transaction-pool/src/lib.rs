@@ -111,7 +111,7 @@
 //! use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_tasks::TaskSpawner;
-//! use reth_tasks::TaskManager;
+//! use reth_tasks::TaskExecutor;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
 //! use reth_transaction_pool::maintain::{maintain_transaction_pool_future};
@@ -121,9 +121,8 @@
 //!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 //!     {
 //!     let blob_store = InMemoryBlobStore::default();
-//!     let rt = tokio::runtime::Runtime::new().unwrap();
-//!     let manager = TaskManager::new(rt.handle().clone());
-//!     let executor = manager.executor();
+//!     let _rt = tokio::runtime::Runtime::new().unwrap();
+//!     let executor = TaskExecutor::current();
 //!     let pool = Pool::eth_pool(
 //!         TransactionValidationTaskExecutor::eth(client.clone(), MAINNET.clone(), blob_store.clone(), executor.clone()),
 //!         blob_store,
