@@ -110,6 +110,7 @@ c-kzg = [
 ]
 zstd-codec = ["dep:zstd"]
 optimism = [
+    "reth-chainspec/optimism",
     "reth-codecs/optimism",
     "reth-ethereum-forks/optimism",
     "revm/optimism",
