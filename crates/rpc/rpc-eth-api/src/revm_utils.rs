@@ -4,7 +4,7 @@ use std::cmp::min;
 
 use reth_primitives::{Address, TxKind, B256, U256};
 use reth_rpc_types::{
-    state::{AccountOverride, StateOverride},
+    state::{AccountOverride, EvmOverrides, StateOverride},
     BlockOverrides, TransactionRequest,
 };
 #[cfg(feature = "optimism")]
@@ -21,64 +21,6 @@ use revm::{
 use tracing::trace;
 
 use crate::{EthApiError, EthResult, RpcInvalidTransactionError};
-
-/// Helper type that bundles various overrides for EVM Execution.
-///
-/// By `Default`, no overrides are included.
-#[derive(Debug, Clone, Default)]
-pub struct EvmOverrides {
-    /// Applies overrides to the state before execution.
-    pub state: Option<StateOverride>,
-    /// Applies overrides to the block before execution.
-    ///
-    /// This is a `Box` because less common and only available in debug trace endpoints.
-    pub block: Option<Box<BlockOverrides>>,
-}
-
-impl EvmOverrides {
-    /// Creates a new instance with the given overrides
-    pub const fn new(state: Option<StateOverride>, block: Option<Box<BlockOverrides>>) -> Self {
-        Self { state, block }
-    }
-
-    /// Creates a new instance with the given state overrides.
-    pub const fn state(state: Option<StateOverride>) -> Self {
-        Self { state, block: None }
-    }
-
-    /// Creates a new instance with the given block overrides.
-    pub const fn block(block: Option<Box<BlockOverrides>>) -> Self {
-        Self { state: None, block }
-    }
-
-    /// Returns `true` if the overrides contain state overrides.
-    pub const fn has_state(&self) -> bool {
-        self.state.is_some()
-    }
-
-    /// Returns `true` if the overrides contain block overrides.
-    pub const fn has_block(&self) -> bool {
-        self.block.is_some()
-    }
-
-    /// Adds state overrides to an existing instance.
-    pub fn with_state(mut self, state: StateOverride) -> Self {
-        self.state = Some(state);
-        self
-    }
-
-    /// Adds block overrides to an existing instance.
-    pub fn with_block(mut self, block: Box<BlockOverrides>) -> Self {
-        self.block = Some(block);
-        self
-    }
-}
-
-impl From<Option<StateOverride>> for EvmOverrides {
-    fn from(state: Option<StateOverride>) -> Self {
-        Self::state(state)
-    }
-}
 
 /// Returns the addresses of the precompiles corresponding to the `SpecId`.
 #[inline]

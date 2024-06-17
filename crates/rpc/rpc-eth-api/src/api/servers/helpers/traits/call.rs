@@ -14,8 +14,9 @@ use reth_primitives::{
 use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
 use reth_rpc_types::{
-    state::StateOverride, AccessListWithGasUsed, BlockId, Bundle, EthCallResponse, StateContext,
-    TransactionInfo, TransactionRequest,
+    state::{EvmOverrides, StateOverride},
+    AccessListWithGasUsed, BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
+    TransactionRequest,
 };
 use revm::{Database, DatabaseCommit};
 use revm_inspectors::access_list::AccessListInspector;
@@ -26,7 +27,7 @@ use crate::{
     error::ensure_success,
     revm_utils::{
         apply_state_overrides, build_call_evm_env, caller_gas_allowance,
-        cap_tx_gas_limit_with_caller_allowance, get_precompiles, prepare_call_env, EvmOverrides,
+        cap_tx_gas_limit_with_caller_allowance, get_precompiles, prepare_call_env,
     },
     servers::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace},
     EthApiError, EthResult, RevertError, RpcInvalidTransactionError, StateCacheDb,

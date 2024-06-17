@@ -377,7 +377,7 @@ mod tests {
             }),
             Request::WithdrawalRequest(WithdrawalRequest {
                 source_address: Address::from([1; 20]),
-                validator_public_key: FixedBytes::<48>::from([10; 48]),
+                validator_pubkey: FixedBytes::<48>::from([10; 48]),
                 amount: 72,
             }),
         ])];

@@ -9,12 +9,12 @@ use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_eth_api::{
     error::{EthApiError, EthResult},
-    revm_utils::{prepare_call_env, EvmOverrides},
+    revm_utils::prepare_call_env,
     servers::{LoadBlock, LoadTransaction, TraceExt},
     utils::recover_raw_transaction,
 };
 use reth_rpc_types::{
-    state::StateOverride,
+    state::{EvmOverrides, StateOverride},
     trace::{
         filter::TraceFilter,
         opcode::{BlockOpcodeGas, TransactionOpcodeGas},

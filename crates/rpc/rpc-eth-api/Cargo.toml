@@ -38,6 +38,7 @@ secp256k1.workspace = true
 
 # rpc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
+jsonrpsee-types.workspace = true
 serde_json.workspace = true
 
 # async
@@ -64,4 +65,9 @@ reth-testing-utils.workspace = true
 
 [features]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]
-optimism = ["reth-primitives/optimism", "reth-evm-optimism"]
+optimism = [
+    "reth-primitives/optimism",
+    "reth-evm-optimism",
+    "revm/optimism",
+    "reth-provider/optimism"
+]

@@ -7,9 +7,9 @@ pub mod traits;
 mod block;
 mod call;
 mod fees;
-mod pending_block;
 #[cfg(feature = "optimism")]
 mod optimism;
+mod pending_block;
 mod receipt;
 mod spec;
 mod state;

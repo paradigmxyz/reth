@@ -2,7 +2,7 @@
 
 use reth_primitives::{Address, Receipt, TransactionMeta, TransactionSigned, TxKind};
 use reth_rpc_types::{
-    other::OtherFields, AnyReceiptEnvelope, AnyTransactionReceipt, Log, ReceiptWithBloom,
+    AnyReceiptEnvelope, AnyTransactionReceipt, Log, OtherFields, ReceiptWithBloom,
     TransactionReceipt, WithOtherFields,
 };
 use revm_primitives::calc_blob_gasprice;

@@ -5,16 +5,16 @@ use alloy_dyn_abi::TypedData;
 use jsonrpsee::core::RpcResult as Result;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
 use reth_rpc_types::{
-    serde_helpers::JsonStorageKey, state::StateOverride, AccessListWithGasUsed,
-    AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
-    FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction,
-    TransactionRequest, Work,
+    serde_helpers::JsonStorageKey,
+    state::{EvmOverrides, StateOverride},
+    AccessListWithGasUsed, AnyTransactionReceipt, BlockOverrides, Bundle,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
+    StateContext, SyncStatus, Transaction, TransactionRequest, Work,
 };
 use tracing::trace;
 
 use crate::{
     result::internal_rpc_err,
-    revm_utils::EvmOverrides,
     servers::{
         EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadReceipt, Trace,
     },

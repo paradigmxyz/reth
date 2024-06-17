@@ -1,7 +1,5 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
-use crate::EthApi;
-
 /// Implements [`LoadPendingBlock`](crate::servers::LoadPendingBlock) for a type, that has similar
 /// data layout to [`EthApi`].
 #[macro_export]
@@ -45,4 +43,5 @@ macro_rules! load_pending_block_impl {
     };
 }
 
-load_pending_block_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
+#[cfg(not(feature = "optimism"))]
+load_pending_block_impl!(crate::EthApi<Provider, Pool, Network, EvmConfig>);

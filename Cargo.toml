@@ -348,7 +348,7 @@ revm = { version = "9.0.0", features = [
 revm-primitives = { version = "4.0.0", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "52f632e" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "79774a6" }
 
 # eth
 alloy-chains = "0.1.15"
@@ -357,33 +357,36 @@ alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.4"
-alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false, features = [
+alloy-rpc-types = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false, features = [
     "eth",
 ] }
-alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false, features = [
+alloy-rpc-types-anvil = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-types-beacon = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-types-admin = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-types-txpool = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-serde = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-types-eth = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-types-trace = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-node-bindings = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-provider = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false, features = [
     "reqwest",
 ] }
-alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "00d81d7" }
-alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-signer-wallet = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7" }
-alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", features = [
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", default-features = false, rev = "6cb3713" }
+alloy-signer = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-signer-local = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-network = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-transport = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713" }
+alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", features = [
     "reqwest-rustls-tls",
 ], default-features = false }
-alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
-alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", rev = "00d81d7", default-features = false }
+alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-pubsub = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-json-rpc = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
+alloy-rpc-client = { git = "https://github.com/alloy-rs/alloy", rev = "6cb3713", default-features = false }
 
 # misc
 auto_impl = "1"
@@ -498,7 +501,7 @@ similar-asserts = "1.5.0"
 test-fuzz = "5"
 
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm.git", rev = "8f4c153" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm.git", rev = "8f4c153" }
-revm-precompile = { git = "https://github.com/bluealloy/revm.git", rev = "8f4c153" }
-revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "8f4c153" }
+revm = { git = "https://github.com/bluealloy/revm.git", rev = "dd98b3b" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm.git", rev = "dd98b3b" }
+revm-precompile = { git = "https://github.com/bluealloy/revm.git", rev = "dd98b3b" }
+revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "dd98b3b" }
