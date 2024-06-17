@@ -1,7 +1,4 @@
-use exex_remote::proto::{
-    remote_ex_ex_client::RemoteExExClient, ExExNotification as ProtoExExNotification, Notification,
-    SubscribeRequest,
-};
+use exex_remote::proto::{remote_ex_ex_client::RemoteExExClient, Notification, SubscribeRequest};
 use reth_exex::ExExNotification;
 use reth_tracing::{tracing::info, RethTracer, Tracer};
 
@@ -11,17 +8,7 @@ async fn main() -> eyre::Result<()> {
 
     let mut client = RemoteExExClient::connect("http://[::1]:10000").await?;
 
-    let mut stream = client
-        .subscribe(SubscribeRequest {
-            notifications: vec![
-                ProtoExExNotification::ChainCommitted as i32,
-                ProtoExExNotification::ChainReorged as i32,
-                ProtoExExNotification::ChainReverted as i32,
-            ],
-        })
-        .await?
-        .into_inner();
-
+    let mut stream = client.subscribe(SubscribeRequest {}).await?.into_inner();
     while let Some(Notification { data }) = stream.message().await? {
         let notification = bincode::deserialize::<ExExNotification>(&data)?;
 

@@ -6,15 +6,7 @@ service RemoteExEx {
   rpc Subscribe(SubscribeRequest) returns (stream Notification) {}
 }
 
-message SubscribeRequest {
-  repeated ExExNotification notifications = 1;
-}
-
-enum ExExNotification {
-  CHAIN_COMMITTED = 0;
-  CHAIN_REORGED = 1;
-  CHAIN_REVERTED = 2;
-}
+message SubscribeRequest {}
 
 message Notification {
   bytes data = 1;

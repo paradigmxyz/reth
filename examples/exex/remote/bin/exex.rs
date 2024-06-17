@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use exex_remote::proto::{
     remote_ex_ex_server::{RemoteExEx, RemoteExExServer},
-    ExExNotification as ProtoExExNotification, Notification as ProtoNotification,
-    SubscribeRequest as ProtoSubscribeRequest,
+    Notification as ProtoNotification, SubscribeRequest as ProtoSubscribeRequest,
 };
 use futures::TryFutureExt;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
@@ -25,43 +24,19 @@ impl RemoteExEx for ExExService {
 
     async fn subscribe(
         &self,
-        request: Request<ProtoSubscribeRequest>,
+        _request: Request<ProtoSubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let (tx, rx) = mpsc::channel(1);
 
         let mut notifications = self.notifications.subscribe();
-        let filter = request
-            .into_inner()
-            .notifications
-            .into_iter()
-            .map(|notification| {
-                move |exex_notification: &ExExNotification| match notification.try_into() {
-                    Ok(ProtoExExNotification::ChainCommitted) => {
-                        matches!(exex_notification, ExExNotification::ChainCommitted { .. })
-                    }
-                    Ok(ProtoExExNotification::ChainReorged) => {
-                        matches!(exex_notification, ExExNotification::ChainReorged { .. })
-                    }
-                    Ok(ProtoExExNotification::ChainReverted) => {
-                        matches!(exex_notification, ExExNotification::ChainReverted { .. })
-                    }
-                    Err(_) => false,
-                }
-            })
-            .collect::<Vec<_>>();
-        let matches_filter =
-            move |exex_notification: &ExExNotification| filter.iter().any(|f| f(exex_notification));
-
         tokio::spawn(async move {
             while let Ok(notification) = notifications.recv().await {
-                if matches_filter(&notification) {
-                    tx.send(Ok(ProtoNotification {
-                        data: bincode::serialize(&notification)
-                            .expect("failed to serialize notification"),
-                    }))
-                    .await
-                    .expect("failed to send notification to client");
-                }
+                tx.send(Ok(ProtoNotification {
+                    data: bincode::serialize(&notification)
+                        .expect("failed to serialize notification"),
+                }))
+                .await
+                .expect("failed to send notification to client");
             }
         });
 
@@ -69,10 +44,6 @@ impl RemoteExEx for ExExService {
     }
 }
 
-/// An ExEx is just a future, which means you can implement all of it in an async function!
-///
-/// This ExEx just prints out whenever either a new chain of blocks being added, or a chain of
-/// blocks being re-orged. After processing the chain, emits an [ExExEvent::FinishedHeight] event.
 async fn exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
     notifications: Arc<broadcast::Sender<ExExNotification>>,
