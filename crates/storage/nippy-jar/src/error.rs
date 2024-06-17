@@ -42,7 +42,7 @@ pub enum NippyJarError {
         /// The read offset size in number of bytes.
         offset_size: u8,
     },
-    #[error("the size of an offset must be at least 1 bytes, got {offset_size}")]
+    #[error("the size of an offset must be at least 1 byte, got {offset_size}")]
     OffsetSizeTooSmall {
         /// The read offset size in number of bytes.
         offset_size: u8,
