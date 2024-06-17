@@ -7508,6 +7508,8 @@ dependencies = [
 name = "reth-node-ethereum"
 version = "1.0.0-rc.1"
 dependencies = [
+ "alloy-genesis",
+ "alloy-primitives",
  "eyre",
  "futures",
  "futures-util",
@@ -7528,7 +7530,6 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-payload-builder",
- "reth-primitives",
  "reth-provider",
  "reth-tracing",
  "reth-transaction-pool",
