@@ -867,7 +867,7 @@ impl<'a> StateProvider for StateProviderTraitObjWrapper<'a> {
         &self,
         address: revm_primitives::Address,
         keys: &[B256],
-    ) -> reth_errors::ProviderResult<reth_primitives::proofs::AccountProof> {
+    ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {
         self.0.proof(address, keys)
     }
 

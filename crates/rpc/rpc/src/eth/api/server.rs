@@ -1,15 +1,6 @@
 //! Implementation of the [`jsonrpsee`] generated [`reth_rpc_api::EthApiServer`] trait
 //! Handles RPC requests for the `eth_` namespace.
 
-use super::EthApiSpec;
-use crate::{
-    eth::{
-        api::{EthApi, EthTransactions},
-        error::EthApiError,
-        revm_utils::EvmOverrides,
-    },
-    result::{internal_rpc_err, ToRpcResult},
-};
 use alloy_dyn_abi::TypedData;
 use jsonrpsee::core::RpcResult as Result;
 use reth_evm::ConfigureEvm;
@@ -413,7 +404,7 @@ where
     /// Handler for: `eth_signTypedData`
     async fn sign_typed_data(&self, address: Address, data: TypedData) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?address, ?data, "Serving eth_signTypedData");
-        Ok(EthTransactions::sign_typed_data(self, data, address)?)
+        Ok(EthTransactions::sign_typed_data(self, &data, address)?)
     }
 
     /// Handler for: `eth_getProof`
