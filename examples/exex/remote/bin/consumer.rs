@@ -9,7 +9,10 @@ use reth_tracing::{tracing::info, RethTracer, Tracer};
 async fn main() -> eyre::Result<()> {
     let _ = RethTracer::new().init()?;
 
-    let mut client = RemoteExExClient::connect("http://[::1]:10000").await?;
+    let mut client = RemoteExExClient::connect("http://[::1]:10000")
+        .await?
+        .max_encoding_message_size(usize::MAX)
+        .max_decoding_message_size(usize::MAX);
 
     let mut stream = client.subscribe(SubscribeRequest {}).await?.into_inner();
     while let Some(notification) = stream.message().await? {
