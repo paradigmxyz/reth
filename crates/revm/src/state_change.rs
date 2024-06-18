@@ -22,6 +22,14 @@ use revm::{
     },
     Database, DatabaseCommit, Evm,
 };
+
+// reuse revm's hashbrown implementation for no-std
+#[cfg(not(feature = "std"))]
+use crate::precompile::HashMap;
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, format, string::ToString, vec::Vec};
+
+#[cfg(feature = "std")]
 use std::collections::HashMap;
 
 /// Collect all balance changes at the end of the block.
@@ -86,7 +94,7 @@ pub fn apply_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCo
     parent_block_hash: B256,
 ) -> Result<(), BlockExecutionError>
 where
-    DB::Error: std::fmt::Display,
+    DB::Error: core::fmt::Display,
 {
     // If Prague is not activated or this is the genesis block, no hashes are added.
     if !chain_spec.is_prague_active_at_timestamp(block_timestamp) || block_number == 0 {
@@ -153,7 +161,7 @@ pub fn apply_beacon_root_contract_call<EXT, DB: Database + DatabaseCommit>(
     evm: &mut Evm<'_, EXT, DB>,
 ) -> Result<(), BlockExecutionError>
 where
-    DB::Error: std::fmt::Display,
+    DB::Error: core::fmt::Display,
 {
     if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
         return Ok(())
@@ -256,7 +264,7 @@ pub fn apply_withdrawal_requests_contract_call<EXT, DB: Database + DatabaseCommi
     evm: &mut Evm<'_, EXT, DB>,
 ) -> Result<Vec<Request>, BlockExecutionError>
 where
-    DB::Error: std::fmt::Display,
+    DB::Error: core::fmt::Display,
 {
     // get previous env
     let previous_env = Box::new(evm.context.env().clone());
