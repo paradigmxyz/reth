@@ -316,24 +316,18 @@ where
             .flat_map(|traces| traces.into_iter().flatten().flat_map(|traces| traces.into_iter()))
             .collect::<Vec<_>>();
 
+        // add reward traces for all blocks
         for block in &blocks {
-            let is_paris_activated =
-                self.provider().chain_spec().is_paris_active_at_block(block.number);
-
-            // if the Paris hardfork is activated on current block, no need to check the later
-            // blocks
-            if is_paris_activated.is_some_and(|activated| activated) {
-                break
-            }
-
-            if let Some(base_block_reward) =
-                self.calculate_base_block_reward(&block.header, is_paris_activated)?
-            {
+            if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
                 all_traces.extend(self.extract_reward_traces(
                     &block.header,
                     &block.ommers,
                     base_block_reward,
                 ));
+            } else {
+                // no block reward, means we're past the Paris hardfork and don't expect any rewards
+                // because the blocks in ascending order
+                break
             }
         }
 
@@ -385,11 +379,7 @@ where
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
         if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            let is_paris_activated =
-                self.provider().chain_spec().is_paris_active_at_block(block.number);
-            if let Some(base_block_reward) =
-                self.calculate_base_block_reward(&block.header, is_paris_activated)?
-            {
+            if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
                 traces.extend(self.extract_reward_traces(
                     &block.header,
                     &block.ommers,
@@ -484,27 +474,26 @@ where
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),
-            block_number: block.number,
+            block_number: block.header.number,
             transactions,
         }))
     }
 
-    /// Calculates the base block reward for the given block based on the Paris hardfork status:
+    /// Calculates the base block reward for the given block:
     ///
     /// - if Paris hardfork is activated, no block rewards are given
     /// - if Paris hardfork is not activated, calculate block rewards with block number only
     /// - if Paris hardfork is unknown, calculate block rewards with block number and ttd
-    fn calculate_base_block_reward(
-        &self,
-        header: &Header,
-        is_paris_activated: Option<bool>,
-    ) -> EthResult<Option<u128>> {
+    fn calculate_base_block_reward(&self, header: &Header) -> EthResult<Option<u128>> {
         let chain_spec = self.provider().chain_spec();
+        let is_paris_activated = chain_spec.is_paris_active_at_block(header.number);
 
         Ok(match is_paris_activated {
             Some(true) => None,
-            Some(false) => Some(base_block_reward_pre_merge(chain_spec.as_ref(), header.number)),
+            Some(false) => Some(base_block_reward_pre_merge(&chain_spec, header.number)),
             None => {
+                // if Paris hardfork is unknown, we need to fetch the total difficulty at the
+                // block's height and check if it is pre-merge to calculate the base block reward
                 if let Some(header_td) = self.provider().header_td_by_number(header.number)? {
                     base_block_reward(
                         chain_spec.as_ref(),
@@ -519,14 +508,16 @@ where
         })
     }
 
-    /// Extracts the reward traces for the given block.
+    /// Extracts the reward traces for the given block:
+    ///  - block reward
+    ///  - uncle rewards
     fn extract_reward_traces(
         &self,
         header: &Header,
         ommers: &[Header],
         base_block_reward: u128,
     ) -> Vec<LocalizedTransactionTrace> {
-        let mut traces = Vec::new();
+        let mut traces = Vec::with_capacity(ommers.len() + 1);
 
         let block_reward = block_reward(base_block_reward, ommers.len());
         traces.push(reward_trace(
