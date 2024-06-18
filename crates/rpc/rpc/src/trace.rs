@@ -6,7 +6,9 @@ use crate::eth::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_consensus_common::calc::{base_block_reward, block_reward, ommer_reward};
+use reth_consensus_common::calc::{
+    base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
+};
 use reth_primitives::{
     revm::env::tx_env_with_recovered, BlockId, Bytes, SealedBlock, SealedHeader, B256, U256,
 };
@@ -264,7 +266,8 @@ where
         }
 
         // fetch all blocks in that range
-        let blocks = self.provider().block_range(start..=end)?;
+        // let blocks = self.provider().block_range(start..=end)?;
+        let blocks = self.provider().sealed_block_with_senders_range(start..=end)?;
 
         // find relevant blocks to trace
         let mut target_blocks = Vec::new();
@@ -316,14 +319,46 @@ where
             .flat_map(|traces| traces.into_iter().flatten().flat_map(|traces| traces.into_iter()))
             .collect::<Vec<_>>();
 
-        // include all the block reward traces
-        let reward_blocks =
-            blocks.iter().map(|block| self.inner.eth_api.block_by_id(block.number.into()));
-
-        for block in (futures::future::try_join_all(reward_blocks).await?).into_iter().flatten() {
-            if let Some(reward_traces) = self.extract_block_reward_traces(block).await? {
-                all_traces.extend(reward_traces)
+        let mut is_paris_actived = None;
+        for block in &blocks {
+            // check if the Paris hardfork is actived or not, no need to recheck if it's
+            // activation is known
+            if is_paris_actived.is_none() {
+                is_paris_actived =
+                    self.provider().chain_spec().is_paris_active_at_block(block.number);
             }
+
+            // 1. if Paris hardfork is actived, no block rewards are given
+            // 2. if Paris hardfork is not actived, calulate block rewards with block number only
+            // 3. if Paris hardfork is unknown, calculate block rewards with block number and ttd
+            let base_block_reward = match is_paris_actived {
+                Some(true) => break,
+                Some(false) => base_block_reward_pre_merge(
+                    self.provider().chain_spec().as_ref(),
+                    block.header.number,
+                ),
+                None => {
+                    if let Some(header_td) = self.provider().header_td(&block.header.hash())? {
+                        if let Some(base_block_reward) = base_block_reward(
+                            self.provider().chain_spec().as_ref(),
+                            block.header.number,
+                            block.header.difficulty,
+                            header_td,
+                        ) {
+                            base_block_reward
+                        } else {
+                            continue
+                        }
+                    } else {
+                        continue
+                    }
+                }
+            };
+
+            let reward_traces =
+                self.extract_block_reward_traces_with_base_block_reward(block, base_block_reward);
+
+            all_traces.extend(reward_traces)
         }
 
         Ok(all_traces)
@@ -374,7 +409,7 @@ where
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
         if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            if let Some(reward_traces) = self.extract_block_reward_traces(block).await? {
+            if let Ok(Some(reward_traces)) = self.extract_block_reward_traces(&block) {
                 traces.extend(reward_traces);
             }
         }
@@ -471,45 +506,59 @@ where
     }
 
     /// Extracts the reward traces for the given block.
-    async fn extract_block_reward_traces(
+    fn extract_block_reward_traces(
         &self,
-        block: SealedBlock,
+        block: &SealedBlock,
     ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
         if let Some(header_td) = self.provider().header_td(&block.header.hash())? {
-            let mut traces = Vec::new();
             if let Some(base_block_reward) = base_block_reward(
                 self.provider().chain_spec().as_ref(),
                 block.header.number,
                 block.header.difficulty,
                 header_td,
             ) {
-                let block_reward = block_reward(base_block_reward, block.ommers.len());
-                traces.push(reward_trace(
-                    &block.header,
-                    RewardAction {
-                        author: block.header.beneficiary,
-                        reward_type: RewardType::Block,
-                        value: U256::from(block_reward),
-                    },
-                ));
-
-                for uncle in &block.ommers {
-                    let uncle_reward =
-                        ommer_reward(base_block_reward, block.header.number, uncle.number);
-                    traces.push(reward_trace(
-                        &block.header,
-                        RewardAction {
-                            author: uncle.beneficiary,
-                            reward_type: RewardType::Uncle,
-                            value: U256::from(uncle_reward),
-                        },
-                    ));
-                }
+                return Ok(Some(
+                    self.extract_block_reward_traces_with_base_block_reward(
+                        block,
+                        base_block_reward,
+                    ),
+                ))
             }
-            Ok(Some(traces))
+            Ok(None)
         } else {
             Ok(None)
         }
+    }
+
+    fn extract_block_reward_traces_with_base_block_reward(
+        &self,
+        block: &SealedBlock,
+        base_block_reward: u128,
+    ) -> Vec<LocalizedTransactionTrace> {
+        let mut traces = Vec::new();
+
+        let block_reward = block_reward(base_block_reward, block.ommers.len());
+        traces.push(reward_trace(
+            &block.header,
+            RewardAction {
+                author: block.header.beneficiary,
+                reward_type: RewardType::Block,
+                value: U256::from(block_reward),
+            },
+        ));
+
+        for uncle in &block.ommers {
+            let uncle_reward = ommer_reward(base_block_reward, block.header.number, uncle.number);
+            traces.push(reward_trace(
+                &block.header,
+                RewardAction {
+                    author: uncle.beneficiary,
+                    reward_type: RewardType::Uncle,
+                    value: U256::from(uncle_reward),
+                },
+            ));
+        }
+        traces
     }
 }
 
