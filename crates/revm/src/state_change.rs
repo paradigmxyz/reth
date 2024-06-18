@@ -17,10 +17,19 @@ use reth_storage_errors::provider::ProviderError;
 use revm::{
     interpreter::Host,
     primitives::{
-        Account, AccountInfo, Bytecode, EvmStorageSlot, ExecutionResult, FixedBytes, ResultAndState,
+        Account, AccountInfo, Bytecode, EvmStorageSlot, ExecutionResult, FixedBytes,
+        ResultAndState, BLOCKHASH_SERVE_WINDOW,
     },
     Database, DatabaseCommit, Evm,
 };
+
+// reuse revm's hashbrown implementation for no-std
+#[cfg(not(feature = "std"))]
+use crate::precompile::HashMap;
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, format, string::ToString, vec::Vec};
+
+#[cfg(feature = "std")]
 use std::collections::HashMap;
 
 /// Collect all balance changes at the end of the block.
@@ -67,9 +76,6 @@ pub fn post_block_balance_increments(
     balance_increments
 }
 
-/// todo: temporary move over of constants from revm until we've migrated to the latest version
-pub const HISTORY_SERVE_WINDOW: u64 = 8192;
-
 /// Applies the pre-block state change outlined in [EIP-2935] to store historical blockhashes in a
 /// system contract.
 ///
@@ -88,7 +94,7 @@ pub fn apply_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCo
     parent_block_hash: B256,
 ) -> Result<(), BlockExecutionError>
 where
-    DB::Error: std::fmt::Display,
+    DB::Error: core::fmt::Display,
 {
     // If Prague is not activated or this is the genesis block, no hashes are added.
     if !chain_spec.is_prague_active_at_timestamp(block_timestamp) || block_number == 0 {
@@ -131,7 +137,7 @@ fn eip2935_block_hash_slot<DB: Database<Error = ProviderError>>(
     block_number: u64,
     block_hash: B256,
 ) -> Result<(U256, EvmStorageSlot), BlockValidationError> {
-    let slot = U256::from(block_number % HISTORY_SERVE_WINDOW);
+    let slot = U256::from(block_number % BLOCKHASH_SERVE_WINDOW as u64);
     let current_hash = db
         .storage(HISTORY_STORAGE_ADDRESS, slot)
         .map_err(BlockValidationError::BlockHashAccountLoadingFailed)?;
@@ -155,7 +161,7 @@ pub fn apply_beacon_root_contract_call<EXT, DB: Database + DatabaseCommit>(
     evm: &mut Evm<'_, EXT, DB>,
 ) -> Result<(), BlockExecutionError>
 where
-    DB::Error: std::fmt::Display,
+    DB::Error: core::fmt::Display,
 {
     if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
         return Ok(())
@@ -258,7 +264,7 @@ pub fn apply_withdrawal_requests_contract_call<EXT, DB: Database + DatabaseCommi
     evm: &mut Evm<'_, EXT, DB>,
 ) -> Result<Vec<Request>, BlockExecutionError>
 where
-    DB::Error: std::fmt::Display,
+    DB::Error: core::fmt::Display,
 {
     // get previous env
     let previous_env = Box::new(evm.context.env().clone());

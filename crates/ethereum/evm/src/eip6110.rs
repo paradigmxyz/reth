@@ -6,6 +6,9 @@ use reth_evm::execute::BlockValidationError;
 use reth_primitives::{Receipt, Request};
 use revm_primitives::Log;
 
+#[cfg(not(feature = "std"))]
+use alloc::{string::ToString, vec::Vec};
+
 sol! {
     #[allow(missing_docs)]
     event DepositEvent(

@@ -31,6 +31,11 @@ use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
+
+#[cfg(not(feature = "std"))]
+use alloc::{sync::Arc, vec, vec::Vec};
+
+#[cfg(feature = "std")]
 use std::sync::Arc;
 
 /// Provides executors to execute regular ethereum blocks
@@ -467,11 +472,10 @@ mod tests {
         keccak256, public_key_to_address, Account, Block, Transaction, TxKind, TxLegacy, B256,
     };
     use reth_revm::{
-        database::StateProviderDatabase, state_change::HISTORY_SERVE_WINDOW,
-        test_utils::StateProviderTest, TransitionState,
+        database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use revm_primitives::{b256, fixed_bytes, Bytes};
+    use revm_primitives::{b256, fixed_bytes, Bytes, BLOCKHASH_SERVE_WINDOW};
     use secp256k1::{Keypair, Secp256k1};
     use std::collections::HashMap;
 
@@ -976,7 +980,7 @@ mod tests {
 
     #[test]
     fn eip_2935_fork_activation_within_window_bounds() {
-        let fork_activation_block = HISTORY_SERVE_WINDOW - 10;
+        let fork_activation_block = (BLOCKHASH_SERVE_WINDOW - 10) as u64;
         let db = create_state_provider_with_block_hashes(fork_activation_block);
 
         let chain_spec = Arc::new(
@@ -1039,7 +1043,7 @@ mod tests {
 
     #[test]
     fn eip_2935_fork_activation_outside_window_bounds() {
-        let fork_activation_block = HISTORY_SERVE_WINDOW + 256;
+        let fork_activation_block = (BLOCKHASH_SERVE_WINDOW + 256) as u64;
         let db = create_state_provider_with_block_hashes(fork_activation_block);
 
         let chain_spec = Arc::new(
@@ -1090,7 +1094,7 @@ mod tests {
                 .state_mut()
                 .storage(
                     HISTORY_STORAGE_ADDRESS,
-                    U256::from(fork_activation_block % HISTORY_SERVE_WINDOW - 1)
+                    U256::from(fork_activation_block % BLOCKHASH_SERVE_WINDOW as u64 - 1)
                 )
                 .unwrap(),
             U256::ZERO
