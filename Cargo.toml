@@ -394,6 +394,7 @@ alloy-json-rpc = { version = "0.1", default-features = false }
 alloy-rpc-client = { version = "0.1", default-features = false }
 
 # misc
+ahash = "0.8"
 auto_impl = "1"
 aquamarine = "0.5"
 bytes = "1.5"

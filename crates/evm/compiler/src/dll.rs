@@ -2,11 +2,8 @@ use libloading::Library;
 use reth_primitives::B256;
 use revm::primitives::SpecId;
 use revm_jit::{debug_time, trace_time, EvmCompilerFn};
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    marker::PhantomData,
-    path::Path,
-};
+use rustc_hash::FxHashMap;
+use std::{collections::hash_map::Entry, marker::PhantomData, path::Path};
 
 /// A handle to an open EVM compiler-generated DLL.
 #[derive(Debug)]
@@ -14,7 +11,7 @@ pub struct EvmCompilerDll {
     /// The underlying shared library.
     pub lib: Library,
     /// The cache of loaded functions.
-    pub cache: HashMap<B256, Option<EvmCompilerFn>>,
+    pub cache: FxHashMap<B256, Option<EvmCompilerFn>>,
 }
 
 impl EvmCompilerDll {
@@ -38,7 +35,7 @@ impl EvmCompilerDll {
     }
 
     unsafe fn open_inner(filename: &Path) -> Result<Self, libloading::Error> {
-        Library::new(filename).map(|lib| Self { lib, cache: HashMap::new() })
+        Library::new(filename).map(|lib| Self { lib, cache: FxHashMap::default() })
     }
 
     /// Returns the function for the given bytecode hash.

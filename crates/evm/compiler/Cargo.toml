@@ -19,13 +19,14 @@ revm.workspace = true
 revm-jit = { workspace = true, features = ["llvm-prefer-dynamic"] }
 
 confy.workspace = true
+indexmap = { workspace = true, features = ["serde"] }
 libloading = "0.8"
 rayon.workspace = true
+rustc-hash.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-indexmap = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 reth-tracing.workspace = true

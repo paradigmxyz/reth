@@ -7087,6 +7087,7 @@ dependencies = [
  "revm",
  "revm-jit",
  "revm-jit-build",
+ "rustc-hash",
  "serde",
  "serde_json",
  "similar-asserts",
