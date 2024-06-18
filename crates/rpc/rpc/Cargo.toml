@@ -96,4 +96,5 @@ optimism = [
     "reth-provider/optimism",
     "dep:reth-evm-optimism",
     "reth-evm-optimism/optimism",
+    "reth-revm/optimism",
 ]

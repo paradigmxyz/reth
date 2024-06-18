@@ -37,3 +37,4 @@ reth-trie.workspace = true
 
 [features]
 test-utils = ["dep:reth-trie"]
+optimism = ["revm/optimism"]
