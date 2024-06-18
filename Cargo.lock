@@ -6702,7 +6702,6 @@ dependencies = [
  "reth-net-common",
  "reth-net-nat",
  "reth-network-peers",
- "reth-primitives",
  "reth-tracing",
  "schnellru",
  "secp256k1",
@@ -6717,6 +6716,7 @@ dependencies = [
 name = "reth-discv5"
 version = "1.0.0-rc.1"
 dependencies = [
+ "alloy-primitives",
  "alloy-rlp",
  "derive_more",
  "discv5",
@@ -6728,9 +6728,9 @@ dependencies = [
  "multiaddr",
  "rand 0.8.5",
  "reth-chainspec",
+ "reth-ethereum-forks",
  "reth-metrics",
  "reth-network-peers",
- "reth-primitives",
  "reth-tracing",
  "secp256k1",
  "thiserror",
@@ -7003,9 +7003,9 @@ dependencies = [
 name = "reth-etl"
 version = "1.0.0-rc.1"
 dependencies = [
+ "alloy-primitives",
  "rayon",
  "reth-db-api",
- "reth-primitives",
  "tempfile",
 ]
 
@@ -7508,6 +7508,8 @@ dependencies = [
 name = "reth-node-ethereum"
 version = "1.0.0-rc.1"
 dependencies = [
+ "alloy-genesis",
+ "alloy-primitives",
  "eyre",
  "futures",
  "futures-util",
@@ -7528,7 +7530,6 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-payload-builder",
- "reth-primitives",
  "reth-provider",
  "reth-tracing",
  "reth-transaction-pool",
@@ -7643,7 +7644,6 @@ version = "1.0.0-rc.1"
 dependencies = [
  "futures-util",
  "metrics",
- "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-engine-primitives",
  "reth-metrics",
@@ -7812,10 +7812,10 @@ dependencies = [
  "reth-errors",
  "reth-exex-types",
  "reth-metrics",
- "reth-primitives",
  "reth-provider",
  "reth-prune-types",
  "reth-stages",
+ "reth-static-file-types",
  "reth-testing-utils",
  "reth-tokio-util",
  "reth-tracing",
@@ -8133,6 +8133,7 @@ dependencies = [
 name = "reth-stages-api"
 version = "1.0.0-rc.1"
 dependencies = [
+ "alloy-primitives",
  "aquamarine",
  "assert_matches",
  "auto_impl",
@@ -8143,11 +8144,12 @@ dependencies = [
  "reth-errors",
  "reth-metrics",
  "reth-network-p2p",
- "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
  "reth-stages-types",
  "reth-static-file",
+ "reth-static-file-types",
  "reth-testing-utils",
  "reth-tokio-util",
  "thiserror",
@@ -8177,16 +8179,17 @@ dependencies = [
 name = "reth-static-file"
 version = "1.0.0-rc.1"
 dependencies = [
+ "alloy-primitives",
  "assert_matches",
  "parking_lot 0.12.3",
  "rayon",
  "reth-db",
  "reth-db-api",
  "reth-nippy-jar",
- "reth-primitives",
  "reth-provider",
  "reth-prune-types",
  "reth-stages",
+ "reth-static-file-types",
  "reth-storage-errors",
  "reth-testing-utils",
  "reth-tokio-util",

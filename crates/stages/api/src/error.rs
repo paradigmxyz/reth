@@ -1,9 +1,11 @@
 use crate::PipelineEvent;
+use alloy_primitives::{BlockNumber, TxNumber};
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, DatabaseError, RethError};
 use reth_network_p2p::error::DownloadError;
-use reth_primitives::{BlockNumber, SealedHeader, StaticFileSegment, TxNumber};
+use reth_primitives_traits::SealedHeader;
 use reth_provider::ProviderError;
+use reth_static_file_types::StaticFileSegment;
 use thiserror::Error;
 use tokio::sync::broadcast::error::SendError;
 

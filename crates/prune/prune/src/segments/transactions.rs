@@ -76,13 +76,13 @@ impl<DB: Database> Segment<DB> for Transactions {
 #[cfg(test)]
 mod tests {
     use crate::segments::{PruneInput, PruneOutput, Segment, Transactions};
+    use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
         FoldWhile::{Continue, Done},
         Itertools,
     };
     use reth_db::tables;
-    use reth_primitives::{BlockNumber, TxNumber, B256};
     use reth_provider::PruneCheckpointReader;
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,

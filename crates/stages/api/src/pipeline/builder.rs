@@ -1,6 +1,6 @@
 use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageId, StageSet};
+use alloy_primitives::{BlockNumber, B256};
 use reth_db_api::database::Database;
-use reth_primitives::{BlockNumber, B256};
 use reth_provider::ProviderFactory;
 use reth_static_file::StaticFileProducer;
 use tokio::sync::watch;

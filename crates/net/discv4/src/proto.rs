@@ -542,10 +542,11 @@ mod tests {
         test_utils::{rng_endpoint, rng_ipv4_record, rng_ipv6_record, rng_message},
         DEFAULT_DISCOVERY_PORT, SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS,
     };
+    use alloy_primitives::hex;
     use assert_matches::assert_matches;
     use enr::EnrPublicKey;
     use rand::{thread_rng, Rng, RngCore};
-    use reth_primitives::{hex, ForkHash};
+    use reth_ethereum_forks::ForkHash;
 
     #[test]
     fn test_endpoint_ipv_v4() {

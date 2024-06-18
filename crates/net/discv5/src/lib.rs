@@ -17,13 +17,14 @@ use std::{
 };
 
 use ::enr::Enr;
+use alloy_primitives::bytes::Bytes;
 use discv5::ListenConfig;
 use enr::{discv4_id_to_discv5_id, EnrCombinedKeyWrapper};
 use futures::future::join_all;
 use itertools::Itertools;
 use rand::{Rng, RngCore};
+use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
 use reth_network_peers::{NodeRecord, PeerId};
-use reth_primitives::{bytes::Bytes, EnrForkIdEntry, ForkId};
 use secp256k1::SecretKey;
 use tokio::{sync::mpsc, task};
 use tracing::{debug, error, trace};
@@ -777,11 +778,11 @@ mod test {
     #[allow(unused)]
     #[allow(clippy::assign_op_pattern)]
     mod sigp {
+        use alloy_primitives::U256;
         use enr::{
             k256::sha2::digest::generic_array::{typenum::U32, GenericArray},
             NodeId,
         };
-        use reth_primitives::U256;
 
         /// A `Key` is a cryptographic hash, identifying both the nodes participating in
         /// the Kademlia DHT, as well as records stored in the DHT.

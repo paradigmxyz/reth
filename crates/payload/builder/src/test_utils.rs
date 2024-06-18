@@ -5,7 +5,7 @@ use crate::{
     EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
     PayloadJobGenerator,
 };
-use reth_engine_primitives::EngineTypes;
+use reth_payload_primitives::PayloadTypes;
 use reth_primitives::{Block, U256};
 use reth_provider::CanonStateNotification;
 use std::{
@@ -24,7 +24,7 @@ pub fn test_payload_service<Engine>() -> (
     PayloadBuilderHandle<Engine>,
 )
 where
-    Engine: EngineTypes<
+    Engine: PayloadTypes<
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
             BuiltPayload = EthBuiltPayload,
         > + 'static,
@@ -35,7 +35,7 @@ where
 /// Creates a new [`PayloadBuilderService`] for testing purposes and spawns it in the background.
 pub fn spawn_test_payload_service<Engine>() -> PayloadBuilderHandle<Engine>
 where
-    Engine: EngineTypes<
+    Engine: PayloadTypes<
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
             BuiltPayload = EthBuiltPayload,
         > + 'static,
