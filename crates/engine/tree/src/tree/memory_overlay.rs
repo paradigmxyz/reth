@@ -98,8 +98,7 @@ where
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         for block in self.in_memory.iter().rev() {
-            if let Some(value) = block.execution_output.state. .storage(&address, storage_key.into())
-            {
+            if let Some(value) = block.execution_output.storage(&address, storage_key.into()) {
                 return Ok(Some(value))
             }
         }
@@ -109,7 +108,7 @@ where
 
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         for block in self.in_memory.iter().rev() {
-            if let Some(contract) = block.execution_output.state.bytecode(&code_hash) {
+            if let Some(contract) = block.execution_output.bytecode(&code_hash) {
                 return Ok(Some(contract))
             }
         }
