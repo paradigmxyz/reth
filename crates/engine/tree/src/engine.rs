@@ -49,12 +49,14 @@ where
     T: EngineRequestHandler,
     D: BlockDownloader,
 {
+    type Event = T::Event;
+
     fn on_event(&mut self, event: FromOrchestrator) {
         // delegate event to the handler
         self.handler.on_event(event.into());
     }
 
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<HandlerEvent> {
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<HandlerEvent<Self::Event>> {
         loop {
             // drain the handler first
             loop {
@@ -68,6 +70,10 @@ where
                                         // bubble up pipeline request
                                         // TODO: clear downloads in progress
                                         return Poll::Ready(HandlerEvent::Pipeline(target))
+                                    }
+                                    HandlerEvent::Event(ev) => {
+                                        // bubble up the event
+                                        return Poll::Ready(HandlerEvent::Event(ev));
                                     }
                                 }
                             }
@@ -103,6 +109,8 @@ where
 
 /// A type that processes incoming requests (e.g. requests from the consensus layer, engine API)
 pub trait EngineRequestHandler: Send + Sync {
+    /// Even type this handler can emit
+    type Event: Send;
     /// The request type this handler can process.
     type Request;
 
@@ -110,7 +118,7 @@ pub trait EngineRequestHandler: Send + Sync {
     fn on_event(&mut self, event: FromEngine<Self::Request>);
 
     /// Advances the handler.
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent>;
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>>;
 }
 
 /// An [`EngineRequestHandler`] that processes engine API requests.
@@ -156,6 +164,8 @@ impl<T> EngineRequestHandler for EngineApiRequestHandler<T>
 where
     T: EngineApiTreeHandler,
 {
+    // TODO: add events for reporting
+    type Event = ();
     type Request = BeaconEngineMessage<T::Engine>;
 
     fn on_event(&mut self, event: FromEngine<Self::Request>) {
@@ -190,7 +200,7 @@ where
         todo!()
     }
 
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent> {
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
         // advance tree tasks, trigger
         todo!()
     }
@@ -210,9 +220,9 @@ impl<Req> From<FromOrchestrator> for FromEngine<Req> {
 }
 
 #[derive(Debug)]
-pub enum RequestHandlerEvent {
+pub enum RequestHandlerEvent<T> {
     Idle,
-    HandlerEvent(HandlerEvent),
+    HandlerEvent(HandlerEvent<T>),
     Download(DownloadRequest),
 }
 
