@@ -266,7 +266,6 @@ where
         }
 
         // fetch all blocks in that range
-        // let blocks = self.provider().block_range(start..=end)?;
         let blocks = self.provider().sealed_block_with_senders_range(start..=end)?;
 
         // find relevant blocks to trace
@@ -322,7 +321,7 @@ where
         let mut is_paris_activated = None;
         for block in &blocks {
             // check if the Paris hardfork is activated or not, no need to recheck if it's
-            // activation is known
+            // activation status is already known
             if is_paris_activated.is_none() {
                 is_paris_activated =
                     self.provider().chain_spec().is_paris_active_at_block(block.number);
@@ -483,7 +482,11 @@ where
         }))
     }
 
-    /// Calculates the base block reward for the given block.
+    /// Calculates the base block reward for the given block based on the Paris hardfork status:
+    ///
+    /// - if Paris hardfork is activated, no block rewards are given
+    /// - if Paris hardfork is not activated, calculate block rewards with block number only
+    /// - if Paris hardfork is unknown, calculate block rewards with block number and ttd
     fn calculate_base_block_reward(
         &self,
         block: &SealedBlock,
@@ -491,9 +494,6 @@ where
     ) -> EthResult<Option<u128>> {
         let chain_spec = self.provider().chain_spec();
 
-        // 1. if Paris hardfork is activated, no block rewards are given
-        // 2. if Paris hardfork is not activated, calculate block rewards with block number only
-        // 3. if Paris hardfork is unknown, calculate block rewards with block number and ttd
         Ok(match is_paris_activated {
             Some(true) => None,
             Some(false) => {
