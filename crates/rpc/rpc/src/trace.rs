@@ -319,17 +319,17 @@ where
             .flat_map(|traces| traces.into_iter().flatten().flat_map(|traces| traces.into_iter()))
             .collect::<Vec<_>>();
 
-        let mut is_paris_actived = None;
+        let mut is_paris_activated = None;
         for block in &blocks {
-            // check if the Paris hardfork is actived or not, no need to recheck if it's
+            // check if the Paris hardfork is activated or not, no need to recheck if it's
             // activation is known
-            if is_paris_actived.is_none() {
-                is_paris_actived =
+            if is_paris_activated.is_none() {
+                is_paris_activated =
                     self.provider().chain_spec().is_paris_active_at_block(block.number);
             }
 
             if let Some(base_block_reward) =
-                self.calculate_base_block_reward(block, is_paris_actived)?
+                self.calculate_base_block_reward(block, is_paris_activated)?
             {
                 all_traces.extend(self.extract_reward_traces(block, base_block_reward));
             }
@@ -487,14 +487,14 @@ where
     fn calculate_base_block_reward(
         &self,
         block: &SealedBlock,
-        is_paris_actived: Option<bool>,
+        is_paris_activated: Option<bool>,
     ) -> EthResult<Option<u128>> {
         let chain_spec = self.provider().chain_spec();
 
-        // 1. if Paris hardfork is actived, no block rewards are given
-        // 2. if Paris hardfork is not actived, calculate block rewards with block number only
+        // 1. if Paris hardfork is activated, no block rewards are given
+        // 2. if Paris hardfork is not activated, calculate block rewards with block number only
         // 3. if Paris hardfork is unknown, calculate block rewards with block number and ttd
-        Ok(match is_paris_actived {
+        Ok(match is_paris_activated {
             Some(true) => None,
             Some(false) => {
                 Some(base_block_reward_pre_merge(chain_spec.as_ref(), block.header.number))
