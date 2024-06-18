@@ -1,6 +1,6 @@
 //! Ethereum protocol-related constants
 
-use alloy_primitives::{b256, B256, U256};
+use alloy_primitives::{address, b256, Address, B256, U256};
 use core::time::Duration;
 
 /// The client version: `reth/v{major}.{minor}.{patch}`
@@ -130,6 +130,9 @@ pub const EMPTY_OMMER_ROOT_HASH: B256 =
 /// Root hash of an empty trie: `0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421`
 pub const EMPTY_ROOT_HASH: B256 =
     b256!("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
+
+/// From address from Optimism system txs: `0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001`
+pub const OP_SYSTEM_TX_FROM_ADDR: Address = address!("deaddeaddeaddeaddeaddeaddeaddeaddead0001");
 
 /// Transactions root of empty receipts set.
 pub const EMPTY_RECEIPTS: B256 = EMPTY_ROOT_HASH;
