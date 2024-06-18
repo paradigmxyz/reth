@@ -11,12 +11,13 @@ use crate::{
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use discv5::ListenConfig;
+use reth_chainspec::ChainSpec;
 use reth_config::Config;
 use reth_db::create_db;
 use reth_network::NetworkConfigBuilder;
 use reth_network_p2p::bodies::client::BodiesClient;
 use reth_node_core::args::DatadirArgs;
-use reth_primitives::{BlockHashOrNumber, ChainSpec};
+use reth_primitives::BlockHashOrNumber;
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use std::{
     net::{IpAddr, SocketAddrV4, SocketAddrV6},

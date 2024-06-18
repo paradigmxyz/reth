@@ -4,6 +4,7 @@ use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     EthEvmConfig,
 };
+use reth_chainspec::{ChainSpec, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{
@@ -14,8 +15,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, Receipt, Request, Withdrawals,
-    MAINNET, U256,
+    BlockNumber, BlockWithSenders, Hardfork, Header, Receipt, Request, Withdrawals, U256,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
@@ -461,10 +461,10 @@ mod tests {
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
+    use reth_chainspec::{ChainSpecBuilder, ForkCondition};
     use reth_primitives::{
         constants::{EMPTY_ROOT_HASH, ETH_TO_WEI},
-        keccak256, public_key_to_address, Account, Block, ChainSpecBuilder, ForkCondition,
-        Transaction, TxKind, TxLegacy, B256,
+        keccak256, public_key_to_address, Account, Block, Transaction, TxKind, TxLegacy, B256,
     };
     use reth_revm::{
         database::StateProviderDatabase, state_change::HISTORY_SERVE_WINDOW,
@@ -1312,7 +1312,7 @@ mod tests {
         let request = requests.first().unwrap();
         let withdrawal_request = request.as_withdrawal_request().unwrap();
         assert_eq!(withdrawal_request.source_address, sender_address);
-        assert_eq!(withdrawal_request.validator_public_key, validator_public_key);
+        assert_eq!(withdrawal_request.validator_pubkey, validator_public_key);
         assert_eq!(withdrawal_request.amount, u64::from_be_bytes(withdrawal_amount.into()));
     }
 

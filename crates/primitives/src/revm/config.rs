@@ -1,4 +1,5 @@
-use crate::{ChainSpec, Hardfork, Head};
+use reth_chainspec::ChainSpec;
+use reth_ethereum_forks::{Hardfork, Head};
 
 /// Returns the spec id at the given timestamp.
 ///
@@ -10,7 +11,9 @@ pub fn revm_spec_by_timestamp_after_merge(
 ) -> revm_primitives::SpecId {
     #[cfg(feature = "optimism")]
     if chain_spec.is_optimism() {
-        return if chain_spec.fork(Hardfork::Ecotone).active_at_timestamp(timestamp) {
+        return if chain_spec.fork(Hardfork::Fjord).active_at_timestamp(timestamp) {
+            revm_primitives::FJORD
+        } else if chain_spec.fork(Hardfork::Ecotone).active_at_timestamp(timestamp) {
             revm_primitives::ECOTONE
         } else if chain_spec.fork(Hardfork::Canyon).active_at_timestamp(timestamp) {
             revm_primitives::CANYON
@@ -86,7 +89,58 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ChainSpecBuilder, MAINNET, U256};
+    use crate::U256;
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
+
+    #[test]
+    fn test_revm_spec_by_timestamp_after_merge() {
+        assert_eq!(
+            revm_spec_by_timestamp_after_merge(
+                &ChainSpecBuilder::mainnet().cancun_activated().build(),
+                0
+            ),
+            revm_primitives::CANCUN
+        );
+        assert_eq!(
+            revm_spec_by_timestamp_after_merge(
+                &ChainSpecBuilder::mainnet().shanghai_activated().build(),
+                0
+            ),
+            revm_primitives::SHANGHAI
+        );
+        assert_eq!(
+            revm_spec_by_timestamp_after_merge(&ChainSpecBuilder::mainnet().build(), 0),
+            revm_primitives::MERGE
+        );
+        #[cfg(feature = "optimism")]
+        {
+            #[inline(always)]
+            fn op_cs(f: impl FnOnce(ChainSpecBuilder) -> ChainSpecBuilder) -> ChainSpec {
+                let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10));
+                f(cs).build()
+            }
+            assert_eq!(
+                revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.fjord_activated()), 0),
+                revm_primitives::FJORD
+            );
+            assert_eq!(
+                revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.ecotone_activated()), 0),
+                revm_primitives::ECOTONE
+            );
+            assert_eq!(
+                revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.canyon_activated()), 0),
+                revm_primitives::CANYON
+            );
+            assert_eq!(
+                revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.bedrock_activated()), 0),
+                revm_primitives::BEDROCK
+            );
+            assert_eq!(
+                revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.regolith_activated()), 0),
+                revm_primitives::REGOLITH
+            );
+        }
+    }
 
     #[test]
     fn test_to_revm_spec() {
@@ -148,7 +202,7 @@ mod tests {
         {
             #[inline(always)]
             fn op_cs(f: impl FnOnce(ChainSpecBuilder) -> ChainSpecBuilder) -> ChainSpec {
-                let cs = ChainSpecBuilder::mainnet().chain(crate::Chain::from_id(10));
+                let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10));
                 f(cs).build()
             }
             assert_eq!(
@@ -176,6 +230,15 @@ mod tests {
 
     #[test]
     fn test_eth_spec() {
+        assert_eq!(
+            revm_spec(&MAINNET, Head { timestamp: 1710338135, ..Default::default() }),
+            revm_primitives::CANCUN
+        );
+        assert_eq!(
+            revm_spec(&MAINNET, Head { timestamp: 1681338455, ..Default::default() }),
+            revm_primitives::SHANGHAI
+        );
+
         assert_eq!(
             revm_spec(
                 &MAINNET,

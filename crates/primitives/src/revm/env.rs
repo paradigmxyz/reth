@@ -1,13 +1,16 @@
 use crate::{
     recover_signer_unchecked,
     revm_primitives::{BlockEnv, Env, TransactTo, TxEnv},
-    Address, Bytes, Chain, ChainSpec, Header, Transaction, TransactionSignedEcRecovered, TxKind,
-    B256, U256,
+    Address, Bytes, Header, Transaction, TransactionSignedEcRecovered, TxKind, B256, U256,
 };
+use reth_chainspec::{Chain, ChainSpec};
 
 use alloy_eips::{eip4788::BEACON_ROOTS_ADDRESS, eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS};
 #[cfg(feature = "optimism")]
 use revm_primitives::OptimismFields;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Fill block environment from Block.
 pub fn fill_block_env(
@@ -73,7 +76,7 @@ pub fn block_coinbase(chain_spec: &ChainSpec, header: &Header, after_merge: bool
 }
 
 /// Error type for recovering Clique signer from a header.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror_no_std::Error)]
 pub enum CliqueSignerRecoveryError {
     /// Header extradata is too short.
     #[error("Invalid extra data length")]
@@ -371,7 +374,7 @@ pub fn fill_op_tx_env<T: AsRef<Transaction>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GOERLI;
+    use reth_chainspec::GOERLI;
 
     #[test]
     fn test_recover_genesis_goerli_signer() {

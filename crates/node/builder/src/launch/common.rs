@@ -5,6 +5,7 @@ use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_auto_seal_consensus::MiningMode;
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_chainspec::{Chain, ChainSpec};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitDatabaseError};
@@ -15,7 +16,7 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
 };
-use reth_primitives::{BlockNumber, Chain, ChainSpec, Head, B256};
+use reth_primitives::{BlockNumber, Head, B256};
 use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;

@@ -271,7 +271,7 @@ impl EtlFile {
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::{TxHash, TxNumber};
+    use alloy_primitives::{TxHash, TxNumber};
 
     use super::*;
 

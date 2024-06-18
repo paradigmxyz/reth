@@ -3,6 +3,7 @@ use alloy_eips::{
     eip7002::WithdrawalRequest,
 };
 use alloy_rlp::Buf;
+use reth_chainspec::ChainSpec;
 use reth_consensus_common::calc;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
@@ -10,7 +11,7 @@ use reth_primitives::{
         fill_tx_env_with_beacon_root_contract_call,
         fill_tx_env_with_withdrawal_requests_contract_call,
     },
-    Address, ChainSpec, Header, Request, Withdrawal, B256, U256,
+    Address, Header, Request, Withdrawal, B256, U256,
 };
 use reth_storage_errors::provider::ProviderError;
 use revm::{
@@ -319,14 +320,14 @@ where
         let mut source_address = Address::ZERO;
         data.copy_to_slice(source_address.as_mut_slice());
 
-        let mut validator_public_key = FixedBytes::<48>::ZERO;
-        data.copy_to_slice(validator_public_key.as_mut_slice());
+        let mut validator_pubkey = FixedBytes::<48>::ZERO;
+        data.copy_to_slice(validator_pubkey.as_mut_slice());
 
         let amount = data.get_u64();
 
         withdrawal_requests.push(Request::WithdrawalRequest(WithdrawalRequest {
             source_address,
-            validator_public_key,
+            validator_pubkey,
             amount,
         }));
     }
