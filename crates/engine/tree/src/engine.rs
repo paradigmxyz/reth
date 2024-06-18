@@ -69,8 +69,6 @@ where
                                         // TODO: clear downloads in progress
                                         return Poll::Ready(HandlerEvent::Pipeline(target))
                                     }
-                                    HandlerEvent::WriteAccessPaused => {}
-                                    HandlerEvent::WriteAccessAcquired => {}
                                 }
                             }
                             RequestHandlerEvent::Download(req) => {

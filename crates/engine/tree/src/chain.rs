@@ -106,8 +106,6 @@ where
                                 this.pipeline.on_action(PipelineAction::Start(target));
                                 continue 'outer
                             }
-                            HandlerEvent::WriteAccessPaused => {}
-                            HandlerEvent::WriteAccessAcquired => {}
                         }
                     }
                     Poll::Pending => {
@@ -170,19 +168,11 @@ pub trait ChainHandler: Send + Sync {
 #[derive(Clone, Debug)]
 pub enum HandlerEvent {
     Pipeline(PipelineTarget),
-    /// Ack paused write access to the database
-    WriteAccessPaused,
-    /// Operating in write-access mode
-    WriteAccessAcquired,
 }
 
 /// Internal events issued by the [`ChainOrchestrator`].
 #[derive(Clone, Debug)]
 pub enum FromOrchestrator {
-    /// Request to temporarily freeze write access to the database.
-    PausedWriteHookAccess,
-    /// Orchestrator no longer requires exclusive write access to the database.
-    ReleaseWriteHookAccess,
     /// Invoked when pipeline sync finished
     PipelineFinished,
     /// Invoked when pipeline started
@@ -193,16 +183,16 @@ pub enum FromOrchestrator {
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum OrchestratorState {
     /// Orchestrator has exclusive write access to the database.
-    WriteAccess,
+    PipelineActive,
     /// Node is actively processing the chain.
     #[default]
     Idle,
 }
 
 impl OrchestratorState {
-    /// Returns `true` if the state is [`OrchestratorState::WriteAccess`].
-    pub const fn is_write_access(&self) -> bool {
-        matches!(self, Self::WriteAccess)
+    /// Returns `true` if the state is [`OrchestratorState::PipelineActive`].
+    pub const fn is_pipeline_active(&self) -> bool {
+        matches!(self, Self::PipelineActive)
     }
 
     /// Returns `true` if the state is [`OrchestratorState::Idle`].
