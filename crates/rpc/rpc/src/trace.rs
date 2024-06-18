@@ -9,9 +9,7 @@ use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };
-use reth_primitives::{
-    revm::env::tx_env_with_recovered, BlockId, Bytes, SealedBlock, SealedHeader, B256, U256,
-};
+use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, Header, B256, U256};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
@@ -266,7 +264,7 @@ where
         }
 
         // fetch all blocks in that range
-        let blocks = self.provider().sealed_block_with_senders_range(start..=end)?;
+        let blocks = self.provider().block_range(start..=end)?;
 
         // find relevant blocks to trace
         let mut target_blocks = Vec::new();
@@ -328,9 +326,13 @@ where
             }
 
             if let Some(base_block_reward) =
-                self.calculate_base_block_reward(block, is_paris_activated)?
+                self.calculate_base_block_reward(&block.header, is_paris_activated)?
             {
-                all_traces.extend(self.extract_reward_traces(block, base_block_reward));
+                all_traces.extend(self.extract_reward_traces(
+                    &block.header,
+                    &block.ommers,
+                    base_block_reward,
+                ));
             }
         }
 
@@ -385,9 +387,13 @@ where
             let is_paris_activated =
                 self.provider().chain_spec().is_paris_active_at_block(block.number);
             if let Some(base_block_reward) =
-                self.calculate_base_block_reward(&block, is_paris_activated)?
+                self.calculate_base_block_reward(&block.header, is_paris_activated)?
             {
-                traces.extend(self.extract_reward_traces(&block, base_block_reward));
+                traces.extend(self.extract_reward_traces(
+                    &block.header,
+                    &block.ommers,
+                    base_block_reward,
+                ));
             }
         }
 
@@ -489,22 +495,20 @@ where
     /// - if Paris hardfork is unknown, calculate block rewards with block number and ttd
     fn calculate_base_block_reward(
         &self,
-        block: &SealedBlock,
+        header: &Header,
         is_paris_activated: Option<bool>,
     ) -> EthResult<Option<u128>> {
         let chain_spec = self.provider().chain_spec();
 
         Ok(match is_paris_activated {
             Some(true) => None,
-            Some(false) => {
-                Some(base_block_reward_pre_merge(chain_spec.as_ref(), block.header.number))
-            }
+            Some(false) => Some(base_block_reward_pre_merge(chain_spec.as_ref(), header.number)),
             None => {
-                if let Some(header_td) = self.provider().header_td(&block.header.hash())? {
+                if let Some(header_td) = self.provider().header_td_by_number(header.number)? {
                     base_block_reward(
                         chain_spec.as_ref(),
-                        block.header.number,
-                        block.header.difficulty,
+                        header.number,
+                        header.difficulty,
                         header_td,
                     )
                 } else {
@@ -517,25 +521,26 @@ where
     /// Extracts the reward traces for the given block.
     fn extract_reward_traces(
         &self,
-        block: &SealedBlock,
+        header: &Header,
+        ommers: &[Header],
         base_block_reward: u128,
     ) -> Vec<LocalizedTransactionTrace> {
         let mut traces = Vec::new();
 
-        let block_reward = block_reward(base_block_reward, block.ommers.len());
+        let block_reward = block_reward(base_block_reward, ommers.len());
         traces.push(reward_trace(
-            &block.header,
+            header,
             RewardAction {
-                author: block.header.beneficiary,
+                author: header.beneficiary,
                 reward_type: RewardType::Block,
                 value: U256::from(block_reward),
             },
         ));
 
-        for uncle in &block.ommers {
-            let uncle_reward = ommer_reward(base_block_reward, block.header.number, uncle.number);
+        for uncle in ommers {
+            let uncle_reward = ommer_reward(base_block_reward, header.number, uncle.number);
             traces.push(reward_trace(
-                &block.header,
+                header,
                 RewardAction {
                     author: uncle.beneficiary,
                     reward_type: RewardType::Uncle,
@@ -688,9 +693,9 @@ struct TraceApiInner<Provider, Eth> {
 
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
 /// beneficiary.
-fn reward_trace(header: &SealedHeader, reward: RewardAction) -> LocalizedTransactionTrace {
+fn reward_trace(header: &Header, reward: RewardAction) -> LocalizedTransactionTrace {
     LocalizedTransactionTrace {
-        block_hash: Some(header.hash()),
+        block_hash: Some(header.hash_slow()),
         block_number: Some(header.number),
         transaction_hash: None,
         transaction_position: None,
