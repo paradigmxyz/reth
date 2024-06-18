@@ -316,13 +316,14 @@ where
             .flat_map(|traces| traces.into_iter().flatten().flat_map(|traces| traces.into_iter()))
             .collect::<Vec<_>>();
 
-        let mut is_paris_activated = None;
         for block in &blocks {
-            // check if the Paris hardfork is activated or not, no need to recheck if it's
-            // activation status is already known
-            if is_paris_activated.is_none() {
-                is_paris_activated =
-                    self.provider().chain_spec().is_paris_active_at_block(block.number);
+            let is_paris_activated =
+                self.provider().chain_spec().is_paris_active_at_block(block.number);
+
+            // if the Paris hardfork is activated on current block, no need to check the later
+            // blocks
+            if is_paris_activated.is_some_and(|activated| activated) {
+                break
             }
 
             if let Some(base_block_reward) =
