@@ -8305,6 +8305,7 @@ dependencies = [
  "reth-provider",
  "reth-tasks",
  "reth-tracing",
+ "revm",
  "rustc-hash",
  "schnellru",
  "serde",
