@@ -256,7 +256,7 @@ impl BlockWithSenders {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp)]
+#[derive_arbitrary(rlp 32)]
 #[derive(
     Debug,
     Clone,
