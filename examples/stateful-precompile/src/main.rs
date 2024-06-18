@@ -49,7 +49,6 @@ pub struct PrecompileCache {
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct MyEvmConfig {
-    // TODO: do we need this arc rwlock at all?
     precompile_cache: Arc<RwLock<PrecompileCache>>,
 }
 
