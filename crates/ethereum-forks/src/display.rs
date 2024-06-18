@@ -58,14 +58,15 @@ impl Display for DisplayFork {
     }
 }
 
+// Todo: This will result in dep cycle so currently commented out
+// # Examples
+//
+// ```
+// # use reth_chainspec::MAINNET;
+// println!("{}", MAINNET.display_hardforks());
+// ```
+//
 /// A container for pretty-printing a list of hardforks.
-///
-/// # Examples
-///
-/// ```
-/// # use reth_primitives::MAINNET;
-/// println!("{}", MAINNET.display_hardforks());
-/// ```
 ///
 /// An example of the output:
 ///
