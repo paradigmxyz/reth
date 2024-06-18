@@ -154,7 +154,7 @@ where
 
     if total_decoded_receipts == 0 {
         error!(target: "reth::cli", "No receipts were imported, ensure the receipt file is valid and not empty");
-        return Ok(());
+        return Ok(())
     }
 
     let total_imported_receipts = static_file_provider

@@ -199,7 +199,7 @@ where
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let start_block = input.next_block();
@@ -294,7 +294,7 @@ where
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
-                break;
+                break
             }
         }
 
@@ -382,7 +382,7 @@ where
         if range.is_empty() {
             return Ok(UnwindOutput {
                 checkpoint: input.checkpoint.with_block_number(input.unwind_to),
-            });
+            })
         }
 
         // Unwind account and storage changesets, as well as receipts.
@@ -679,11 +679,11 @@ where
             loop {
                 if let Some(indices) = provider.block_body_indices(last_block)? {
                     if indices.last_tx_num() <= last_receipt_num {
-                        break;
+                        break
                     }
                 }
                 if last_block == 0 {
-                    break;
+                    break
                 }
                 last_block -= 1;
             }
@@ -694,7 +694,7 @@ where
             return Err(StageError::MissingStaticFileData {
                 block: missing_block,
                 segment: StaticFileSegment::Receipts,
-            });
+            })
         }
     }
 

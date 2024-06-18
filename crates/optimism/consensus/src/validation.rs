@@ -27,7 +27,7 @@ pub fn validate_block_post_execution(
             block.timestamp,
         ) {
             tracing::debug!(%error, ?receipts, "receipts verification failed");
-            return Err(error);
+            return Err(error)
         }
     }
 
@@ -38,7 +38,7 @@ pub fn validate_block_post_execution(
         return Err(ConsensusError::BlockGasUsed {
             gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
             gas_spent_by_tx: gas_spent_by_transactions(receipts),
-        });
+        })
     }
 
     Ok(())
@@ -81,13 +81,13 @@ fn compare_receipts_root_and_logs_bloom(
     if calculated_receipts_root != expected_receipts_root {
         return Err(ConsensusError::BodyReceiptRootDiff(
             GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }.into(),
-        ));
+        ))
     }
 
     if calculated_logs_bloom != expected_logs_bloom {
         return Err(ConsensusError::BodyBloomLogDiff(
             GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into(),
-        ));
+        ))
     }
 
     Ok(())

@@ -118,7 +118,7 @@ where
         if let Some((address, account)) = post_state_entry {
             if address == &key {
                 self.last_account = Some(*address);
-                return Ok(Some((*address, *account)));
+                return Ok(Some((*address, *account)))
             }
         }
 
@@ -273,7 +273,7 @@ where
         if let Some((slot, value)) = post_state_entry {
             if slot == &subkey {
                 self.last_slot = Some(*slot);
-                return Ok(Some((*slot, *value)));
+                return Ok(Some((*slot, *value)))
             }
         }
 

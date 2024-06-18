@@ -66,7 +66,7 @@ impl EthBeaconConsensus {
                 return Err(ConsensusError::GasLimitInvalidIncrease {
                     parent_gas_limit,
                     child_gas_limit: header.gas_limit,
-                });
+                })
             }
         }
         // Check for a decrease in gas limit beyond the allowed threshold.
@@ -74,13 +74,11 @@ impl EthBeaconConsensus {
             return Err(ConsensusError::GasLimitInvalidDecrease {
                 parent_gas_limit,
                 child_gas_limit: header.gas_limit,
-            });
+            })
         }
         // Check if the self gas limit is below the minimum required limit.
         else if header.gas_limit < MINIMUM_GAS_LIMIT {
-            return Err(ConsensusError::GasLimitInvalidMinimum {
-                child_gas_limit: header.gas_limit,
-            });
+            return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: header.gas_limit })
         }
 
         Ok(())
@@ -96,30 +94,30 @@ impl Consensus for EthBeaconConsensus {
         if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) &&
             header.withdrawals_root.is_none()
         {
-            return Err(ConsensusError::WithdrawalsRootMissing);
+            return Err(ConsensusError::WithdrawalsRootMissing)
         } else if !self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp) &&
             header.withdrawals_root.is_some()
         {
-            return Err(ConsensusError::WithdrawalsRootUnexpected);
+            return Err(ConsensusError::WithdrawalsRootUnexpected)
         }
 
         // Ensures that EIP-4844 fields are valid once cancun is active.
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
             validate_4844_header_standalone(header)?;
         } else if header.blob_gas_used.is_some() {
-            return Err(ConsensusError::BlobGasUsedUnexpected);
+            return Err(ConsensusError::BlobGasUsedUnexpected)
         } else if header.excess_blob_gas.is_some() {
-            return Err(ConsensusError::ExcessBlobGasUnexpected);
+            return Err(ConsensusError::ExcessBlobGasUnexpected)
         } else if header.parent_beacon_block_root.is_some() {
-            return Err(ConsensusError::ParentBeaconBlockRootUnexpected);
+            return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
         }
 
         if self.chain_spec.is_prague_active_at_timestamp(header.timestamp) {
             if header.requests_root.is_none() {
-                return Err(ConsensusError::RequestsRootMissing);
+                return Err(ConsensusError::RequestsRootMissing)
             }
         } else if header.requests_root.is_some() {
-            return Err(ConsensusError::RequestsRootUnexpected);
+            return Err(ConsensusError::RequestsRootUnexpected)
         }
 
         Ok(())
@@ -160,15 +158,15 @@ impl Consensus for EthBeaconConsensus {
 
         if is_post_merge {
             if !header.is_zero_difficulty() {
-                return Err(ConsensusError::TheMergeDifficultyIsNotZero);
+                return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
 
             if header.nonce != 0 {
-                return Err(ConsensusError::TheMergeNonceIsNotZero);
+                return Err(ConsensusError::TheMergeNonceIsNotZero)
             }
 
             if header.ommers_hash != EMPTY_OMMER_ROOT_HASH {
-                return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty);
+                return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
             }
 
             // Post-merge, the consensus layer is expected to perform checks such that the block
@@ -197,7 +195,7 @@ impl Consensus for EthBeaconConsensus {
                 return Err(ConsensusError::TimestampIsInFuture {
                     timestamp: header.timestamp,
                     present_timestamp,
-                });
+                })
             }
 
             // Goerli and early OP exception:

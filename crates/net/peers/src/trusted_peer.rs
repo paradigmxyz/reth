@@ -53,14 +53,14 @@ impl TrustedPeer {
                 let tcp_port = self.tcp_port;
                 let udp_port = self.udp_port;
 
-                return Ok(NodeRecord { address: ip.into(), id, tcp_port, udp_port });
+                return Ok(NodeRecord { address: ip.into(), id, tcp_port, udp_port })
             }
             Host::Ipv6(ip) => {
                 let id = self.id;
                 let tcp_port = self.tcp_port;
                 let udp_port = self.udp_port;
 
-                return Ok(NodeRecord { address: ip.into(), id, tcp_port, udp_port });
+                return Ok(NodeRecord { address: ip.into(), id, tcp_port, udp_port })
             }
             Host::Domain(domain) => domain,
         };

@@ -139,7 +139,7 @@ impl StaticFileProviderRW {
 
         self.writer.ensure_file_consistency(check_mode).map_err(|error| {
             if matches!(error, NippyJarError::InconsistentState) {
-                return inconsistent_error();
+                return inconsistent_error()
             }
             ProviderError::NippyJar(error.to_string())
         })?;
@@ -153,7 +153,7 @@ impl StaticFileProviderRW {
         let pruned_rows = expected_rows - self.writer.rows() as u64;
         if pruned_rows > 0 {
             if read_only {
-                return Err(inconsistent_error());
+                return Err(inconsistent_error())
             }
             self.user_header_mut().prune(pruned_rows);
         }
@@ -327,7 +327,7 @@ impl StaticFileProviderRW {
                 segment,
                 expected_block_number,
                 next_static_file_block,
-            ));
+            ))
         }
         Ok(())
     }
@@ -369,7 +369,7 @@ impl StaticFileProviderRW {
                     self.writer
                         .prune_rows(len as usize)
                         .map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-                    break;
+                    break
                 }
 
                 remaining_rows -= len;
@@ -634,7 +634,7 @@ impl StaticFileProviderRW {
         if self.prune_on_commit.is_some() {
             return Err(ProviderError::NippyJar(
                 "Pruning should be committed before appending or pruning more data".to_string(),
-            ));
+            ))
         }
         Ok(())
     }

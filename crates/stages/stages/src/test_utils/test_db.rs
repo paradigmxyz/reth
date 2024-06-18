@@ -490,7 +490,7 @@ impl StorageKind {
 
     fn tx_offset(&self) -> u64 {
         if let Self::Database(offset) = self {
-            return offset.unwrap_or_default();
+            return offset.unwrap_or_default()
         }
         0
     }

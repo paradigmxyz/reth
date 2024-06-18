@@ -74,7 +74,7 @@ impl EngineHooksController {
                     self.hooks.push_back(hook);
                 }
 
-                return Poll::Ready(Ok(result));
+                return Poll::Ready(Ok(result))
             }
             Poll::Pending => {
                 self.active_db_write_hook = Some(hook);
@@ -141,7 +141,7 @@ impl EngineHooksController {
                 db_write_active ||
                 args.finalized_block_number.is_none())
         {
-            return Poll::Pending;
+            return Poll::Pending
         }
 
         if let Poll::Ready(event) = hook.poll(cx, args)? {
@@ -155,7 +155,7 @@ impl EngineHooksController {
                 "Polled next hook"
             );
 
-            return Poll::Ready(Ok(result));
+            return Poll::Ready(Ok(result))
         } else {
             debug!(target: "consensus::engine::hooks", hook = hook.name(), "Next hook is not ready");
         }

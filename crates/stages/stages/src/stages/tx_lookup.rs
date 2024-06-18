@@ -101,7 +101,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
             }
         }
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         // 500MB temporary files
@@ -164,7 +164,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
                     "Transaction hashes inserted"
                 );
 
-                break;
+                break
             }
         }
 
@@ -191,7 +191,7 @@ impl<DB: Database> Stage<DB> for TransactionLookupStage {
         let mut rev_walker = body_cursor.walk_back(Some(*range.end()))?;
         while let Some((number, body)) = rev_walker.next().transpose()? {
             if number <= unwind_to {
-                break;
+                break
             }
 
             // Delete all transactions that belong to this block
@@ -514,7 +514,7 @@ mod tests {
                     let end_block = output.checkpoint.block_number;
 
                     if start_block > end_block {
-                        return Ok(());
+                        return Ok(())
                     }
 
                     let mut body_cursor =

@@ -8,7 +8,7 @@ use std::{collections::HashMap, net::IpAddr, time::Instant};
 /// Should be replaced with [`IpAddr::is_global`](std::net::IpAddr::is_global) once it is stable.
 pub const fn is_global(ip: &IpAddr) -> bool {
     if ip.is_unspecified() || ip.is_loopback() {
-        return false;
+        return false
     }
 
     match ip {
@@ -54,7 +54,7 @@ impl BanList {
             if let Some(until) = until {
                 if now > *until {
                     evicted.push(*peer);
-                    return false;
+                    return false
                 }
             }
             true
@@ -69,7 +69,7 @@ impl BanList {
             if let Some(until) = until {
                 if now > *until {
                     evicted.push(*peer);
-                    return false;
+                    return false
                 }
             }
             true

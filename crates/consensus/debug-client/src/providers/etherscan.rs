@@ -46,7 +46,7 @@ impl BlockProvider for EtherscanBlockProvider {
                 Ok(block) => block,
                 Err(err) => {
                     warn!(target: "consensus::debug-client", %err, "failed to fetch a block from Etherscan");
-                    continue;
+                    continue
                 }
             };
             let block_number = block.header.number.unwrap();

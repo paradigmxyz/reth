@@ -37,7 +37,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
 
         if extensions.is_empty() {
             // nothing to launch
-            return None;
+            return None
         }
 
         let mut exex_handles = Vec::with_capacity(extensions.len());

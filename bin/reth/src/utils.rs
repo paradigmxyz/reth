@@ -2,7 +2,6 @@
 
 use boyer_moore_magiclen::BMByte;
 use eyre::Result;
-use reth_chainspec::ChainSpec;
 use reth_db::{RawTable, TableRawRow};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -12,6 +11,7 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_fs_util as fs;
+use reth_primitives::ChainSpec;
 use reth_provider::{ChainSpecProvider, ProviderFactory};
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
@@ -68,18 +68,18 @@ impl<DB: Database> DbTool<DB> {
                     let (key, value) = (k.into_key(), v.into_value());
 
                     if key.len() + value.len() < filter.min_row_size {
-                        return None;
+                        return None
                     }
                     if key.len() < filter.min_key_size {
-                        return None;
+                        return None
                     }
                     if value.len() < filter.min_value_size {
-                        return None;
+                        return None
                     }
 
                     let result = || {
                         if filter.only_count {
-                            return None;
+                            return None
                         }
                         Some((
                             <T as Table>::Key::decode(&key).unwrap(),
@@ -93,12 +93,12 @@ impl<DB: Database> DbTool<DB> {
                                 searcher.find_first_in(&key).is_some()
                             {
                                 hits += 1;
-                                return result();
+                                return result()
                             }
                         }
                         None => {
                             hits += 1;
-                            return result();
+                            return result()
                         }
                     }
                 }

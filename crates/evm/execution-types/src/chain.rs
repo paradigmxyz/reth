@@ -126,13 +126,13 @@ impl Chain {
         block_number: BlockNumber,
     ) -> Option<ExecutionOutcome> {
         if self.tip().number == block_number {
-            return Some(self.execution_outcome.clone());
+            return Some(self.execution_outcome.clone())
         }
 
         if self.blocks.contains_key(&block_number) {
             let mut execution_outcome = self.execution_outcome.clone();
             execution_outcome.revert_to(block_number);
-            return Some(execution_outcome);
+            return Some(execution_outcome)
         }
         None
     }
@@ -259,7 +259,7 @@ impl Chain {
             return Err(BlockExecutionError::AppendChainDoesntConnect {
                 chain_tip: Box::new(chain_tip.num_hash()),
                 other_chain_fork: Box::new(other_fork_block),
-            });
+            })
         }
 
         // Insert blocks from other chain
@@ -296,23 +296,23 @@ impl Chain {
         let block_number = match split_at {
             ChainSplitTarget::Hash(block_hash) => {
                 let Some(block_number) = self.block_number(block_hash) else {
-                    return ChainSplit::NoSplitPending(self);
+                    return ChainSplit::NoSplitPending(self)
                 };
                 // If block number is same as tip whole chain is becoming canonical.
                 if block_number == chain_tip {
-                    return ChainSplit::NoSplitCanonical(self);
+                    return ChainSplit::NoSplitCanonical(self)
                 }
                 block_number
             }
             ChainSplitTarget::Number(block_number) => {
                 if block_number > chain_tip {
-                    return ChainSplit::NoSplitPending(self);
+                    return ChainSplit::NoSplitPending(self)
                 }
                 if block_number == chain_tip {
-                    return ChainSplit::NoSplitCanonical(self);
+                    return ChainSplit::NoSplitCanonical(self)
                 }
                 if block_number < *self.blocks.first_entry().expect("chain is never empty").key() {
-                    return ChainSplit::NoSplitPending(self);
+                    return ChainSplit::NoSplitPending(self)
                 }
                 block_number
             }

@@ -92,7 +92,7 @@ where
 {
     // If Prague is not activated or this is the genesis block, no hashes are added.
     if !chain_spec.is_prague_active_at_timestamp(block_timestamp) || block_number == 0 {
-        return Ok(());
+        return Ok(())
     }
     assert!(block_number > 0);
 
@@ -158,7 +158,7 @@ where
     DB::Error: std::fmt::Display,
 {
     if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
-        return Ok(());
+        return Ok(())
     }
 
     let parent_beacon_block_root =
@@ -171,9 +171,9 @@ where
             return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
                 parent_beacon_block_root,
             }
-            .into());
+            .into())
         }
-        return Ok(());
+        return Ok(())
     }
 
     // get previous env
@@ -190,7 +190,7 @@ where
                 parent_beacon_block_root: Box::new(parent_beacon_block_root),
                 message: e.to_string(),
             }
-            .into());
+            .into())
         }
     };
 
@@ -273,7 +273,7 @@ where
             return Err(BlockValidationError::WithdrawalRequestsContractCall {
                 message: format!("execution failed: {e}"),
             }
-            .into());
+            .into())
         }
     };
 
@@ -314,7 +314,7 @@ where
             return Err(BlockValidationError::WithdrawalRequestsContractCall {
                 message: "invalid withdrawal request length".to_string(),
             }
-            .into());
+            .into())
         }
 
         let mut source_address = Address::ZERO;

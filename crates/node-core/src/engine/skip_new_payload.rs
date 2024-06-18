@@ -53,7 +53,7 @@ where
                             skipped=this.skipped, "Skipping new payload"
                         );
                         let _ = tx.send(Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing)));
-                        continue;
+                        continue
                     } else {
                         *this.skipped = 0;
                         Some(BeaconEngineMessage::NewPayload { payload, cancun_fields, tx })
@@ -61,7 +61,7 @@ where
                 }
                 next => next,
             };
-            return Poll::Ready(item);
+            return Poll::Ready(item)
         }
     }
 }

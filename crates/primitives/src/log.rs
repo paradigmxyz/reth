@@ -1,6 +1,6 @@
 use crate::Bloom;
 
-pub use alloy_primitives::{Log, LogData};
+pub use alloy_primitives::Log;
 
 /// Calculate receipt logs bloom.
 pub fn logs_bloom<'a>(logs: impl IntoIterator<Item = &'a Log>) -> Bloom {

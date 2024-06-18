@@ -305,7 +305,7 @@ where
                             Box::new(state),
                             hashed_entries_walked,
                             trie_updates,
-                        ));
+                        ))
                     }
                 }
             }
@@ -487,7 +487,7 @@ where
                 EMPTY_ROOT_HASH,
                 0,
                 TrieUpdates::from([(TrieKey::StorageTrie(self.hashed_address), TrieOp::Delete)]),
-            ));
+            ))
         }
 
         let mut tracker = TrieTracker::default();
