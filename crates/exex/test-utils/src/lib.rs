@@ -146,7 +146,7 @@ pub type Adapter = NodeAdapter<
         RethFullAdapter<TmpDB, TestNode>,
     >>::Components,
 >;
-/// An ExExContext using the [`Adapter`] type.
+/// An [`ExExContext`] using the [`Adapter`] type.
 pub type TestExExContext = ExExContext<Adapter>;
 
 /// A helper type for testing Execution Extensions.
