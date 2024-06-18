@@ -1,24 +1,4 @@
-use crate::{
-    constants::{
-        EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_ROOT_HASH, EMPTY_TRANSACTIONS,
-        EMPTY_WITHDRAWALS,
-    },
-    holesky_nodes,
-    net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
-    revm_primitives::{address, b256},
-    Address, BlockNumber, Chain, ChainKind, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis,
-    Hardfork, Head, Header, NamedChain, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH,
-    MAINNET_DEPOSIT_CONTRACT, U256,
-};
-use core::{
-    fmt,
-    fmt::{Display, Formatter},
-};
-use derive_more::From;
-use once_cell::sync::Lazy;
-use reth_trie_common::root::state_root_ref_unhashed;
-use serde::{Deserialize, Serialize};
-
+use crate::constants::MAINNET_DEPOSIT_CONTRACT;
 #[cfg(not(feature = "std"))]
 use alloc::{
     collections::BTreeMap,
@@ -27,25 +7,46 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+use alloy_chains::{Chain, ChainKind, NamedChain};
+use alloy_genesis::Genesis;
+use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
+use alloy_trie::EMPTY_ROOT_HASH;
+use core::{
+    fmt,
+    fmt::{Display, Formatter},
+};
+use derive_more::From;
+use once_cell::sync::Lazy;
+use reth_ethereum_forks::{ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head};
+use reth_network_peers::NodeRecord;
+use reth_primitives_traits::{
+    constants::{
+        EIP1559_INITIAL_BASE_FEE, EMPTY_OMMER_ROOT_HASH, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
+        EMPTY_WITHDRAWALS,
+    },
+    Header, SealedHeader,
+};
+use reth_trie_common::root::state_root_ref_unhashed;
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "std")]
 use std::{collections::BTreeMap, sync::Arc};
 
+#[cfg(feature = "optimism")]
+use crate::constants::optimism::{
+    BASE_SEPOLIA_BASE_FEE_PARAMS, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS, OP_BASE_FEE_PARAMS,
+    OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
+};
 pub use alloy_eips::eip1559::BaseFeeParams;
 
 #[cfg(feature = "optimism")]
-pub(crate) use crate::{
-    constants::{
-        BASE_SEPOLIA_BASE_FEE_PARAMS, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS, OP_BASE_FEE_PARAMS,
-        OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
-    },
-    net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes},
-};
+use crate::net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes};
+use crate::net::{goerli_nodes, holesky_nodes, mainnet_nodes, sepolia_nodes};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::mainnet(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/mainnet.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
             .expect("Can't deserialize Mainnet genesis json"),
         genesis_hash: Some(b256!(
             "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
@@ -96,7 +97,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::goerli(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/goerli.json"))
             .expect("Can't deserialize Goerli genesis json"),
         genesis_hash: Some(b256!(
             "bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a"
@@ -138,7 +139,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::sepolia(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
             .expect("Can't deserialize Sepolia genesis json"),
         genesis_hash: Some(b256!(
             "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
@@ -184,7 +185,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::holesky(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/holesky.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/holesky.json"))
             .expect("Can't deserialize Holesky genesis json"),
         genesis_hash: Some(b256!(
             "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"
@@ -228,7 +229,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::dev(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/dev.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/dev.json"))
             .expect("Can't deserialize Dev testnet genesis json"),
         genesis_hash: Some(b256!(
             "2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"
@@ -274,7 +275,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::optimism_mainnet(),
         // genesis contains empty alloc field because state at first bedrock block is imported
         // manually from trusted source
-        genesis: serde_json::from_str(include_str!("../../res/genesis/optimism.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/optimism.json"))
             .expect("Can't deserialize Optimism Mainnet genesis json"),
         genesis_hash: Some(b256!(
             "7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b"
@@ -324,7 +325,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::from_named(NamedChain::OptimismSepolia),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia_op.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/sepolia_op.json"))
             .expect("Can't deserialize OP Sepolia genesis json"),
         genesis_hash: Some(b256!(
             "102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d"
@@ -374,7 +375,7 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::base_sepolia(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia_base.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/sepolia_base.json"))
             .expect("Can't deserialize Base Sepolia genesis json"),
         genesis_hash: Some(b256!(
             "0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"
@@ -424,7 +425,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::base_mainnet(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/base.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/base.json"))
             .expect("Can't deserialize Base genesis json"),
         genesis_hash: Some(b256!(
             "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
@@ -852,8 +853,9 @@ impl ChainSpec {
         self.fork(Hardfork::Homestead).active_at_block(block_number)
     }
 
-    /// The Paris hardfork (merge) is activated via ttd, if we know the block is known then this
-    /// returns true if the block number is greater than or equal to the Paris (merge) block.
+    /// The Paris hardfork (merge) is activated via ttd. If we have knowledge of the block, this
+    /// function will return true if the block number is greater than or equal to the Paris
+    /// (merge) block.
     pub fn is_paris_active_at_block(&self, block_number: u64) -> Option<bool> {
         self.paris_block_and_final_difficulty.map(|(paris_block, _)| block_number >= paris_block)
     }
@@ -1523,7 +1525,7 @@ impl Display for DisplayFork {
 /// # Examples
 ///
 /// ```
-/// # use reth_primitives::MAINNET;
+/// # use reth_chainspec::MAINNET;
 /// println!("{}", MAINNET.display_hardforks());
 /// ```
 ///
@@ -1737,11 +1739,15 @@ impl OptimismGenesisInfo {
 
 #[cfg(test)]
 mod tests {
+    use alloy_chains::Chain;
+    use alloy_genesis::{ChainConfig, GenesisAccount};
+    use reth_ethereum_forks::{ForkHash, ForkId, Head};
     use reth_trie_common::TrieAccount;
 
     use super::*;
-    use crate::{b256, hex, ChainConfig, GenesisAccount};
+    use alloy_primitives::{b256, hex};
     use std::{collections::HashMap, str::FromStr};
+
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);

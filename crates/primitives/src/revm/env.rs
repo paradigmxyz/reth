@@ -1,9 +1,9 @@
 use crate::{
     recover_signer_unchecked,
     revm_primitives::{BlockEnv, Env, TransactTo, TxEnv},
-    Address, Bytes, Chain, ChainSpec, Header, Transaction, TransactionSignedEcRecovered, TxKind,
-    B256, U256,
+    Address, Bytes, Header, Transaction, TransactionSignedEcRecovered, TxKind, B256, U256,
 };
+use reth_chainspec::{Chain, ChainSpec};
 
 use alloy_eips::{eip4788::BEACON_ROOTS_ADDRESS, eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS};
 #[cfg(feature = "optimism")]
@@ -374,7 +374,7 @@ pub fn fill_op_tx_env<T: AsRef<Transaction>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GOERLI;
+    use reth_chainspec::GOERLI;
 
     #[test]
     fn test_recover_genesis_goerli_signer() {

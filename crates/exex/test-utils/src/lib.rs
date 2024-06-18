@@ -10,6 +10,7 @@
 
 use futures_util::FutureExt;
 use reth_blockchain_tree::noop::NoopBlockchainTree;
+use reth_chainspec::{ChainSpec, MAINNET};
 use reth_consensus::test_utils::TestConsensus;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_db_common::init::init_genesis;
@@ -30,7 +31,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{ChainSpec, Head, SealedBlockWithSenders, MAINNET};
+use reth_primitives::{Head, SealedBlockWithSenders};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     BlockReader, Chain, ProviderFactory,

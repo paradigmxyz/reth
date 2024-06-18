@@ -8,14 +8,16 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
+use reth_chainspec::{
+    net::{mainnet_nodes, sepolia_nodes, TrustedPeer},
+    ChainSpec, MAINNET,
+};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_network_peers::{pk2id, PeerId};
-use reth_primitives::{
-    mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, TrustedPeer, MAINNET,
-};
+use reth_primitives::{ForkFilter, Head};
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
@@ -417,8 +419,8 @@ impl NetworkConfigBuilder {
     /// Calls a closure on [`reth_discv5::ConfigBuilder`], if discv5 discovery is enabled and the
     /// builder has been set.
     /// ```
+    /// use reth_chainspec::MAINNET;
     /// use reth_network::NetworkConfigBuilder;
-    /// use reth_primitives::MAINNET;
     /// use reth_provider::test_utils::NoopProvider;
     /// use secp256k1::{rand::thread_rng, SecretKey};
     ///
@@ -584,8 +586,9 @@ impl NetworkMode {
 mod tests {
     use super::*;
     use rand::thread_rng;
+    use reth_chainspec::Chain;
     use reth_dns_discovery::tree::LinkEntry;
-    use reth_primitives::{Chain, ForkHash};
+    use reth_primitives::ForkHash;
     use reth_provider::test_utils::NoopProvider;
     use std::collections::BTreeMap;
 

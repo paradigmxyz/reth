@@ -70,13 +70,13 @@ where
             + Copy,
     ) -> eyre::Result<
         Vec<(
-            <Node::Engine as EngineTypes>::BuiltPayload,
+            <Node::Engine as PayloadTypes>::BuiltPayload,
             <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
         )>,
     >
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
-            From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
+            From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {
@@ -99,12 +99,12 @@ where
         &mut self,
         attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
     ) -> eyre::Result<(
-        <<Node as NodeTypes>::Engine as EngineTypes>::BuiltPayload,
+        <<Node as NodeTypes>::Engine as PayloadTypes>::BuiltPayload,
         <<Node as NodeTypes>::Engine as PayloadTypes>::PayloadBuilderAttributes,
     )>
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
-            From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
+            From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
         // trigger new payload building draining the pool
         let eth_attr = self.payload.new_payload(attributes_generator).await.unwrap();
@@ -124,12 +124,12 @@ where
         versioned_hashes: Vec<B256>,
         attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
     ) -> eyre::Result<(
-        <Node::Engine as EngineTypes>::BuiltPayload,
+        <Node::Engine as PayloadTypes>::BuiltPayload,
         <<Node as NodeTypes>::Engine as PayloadTypes>::PayloadBuilderAttributes,
     )>
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
-            From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
+            From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
         let (payload, eth_attr) = self.new_payload(attributes_generator).await?;
 

@@ -50,6 +50,7 @@ tempfile = { workspace = true, optional = true }
 itertools.workspace = true
 
 [dev-dependencies]
+reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }

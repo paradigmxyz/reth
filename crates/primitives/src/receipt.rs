@@ -100,7 +100,7 @@ impl Receipts {
     pub fn optimism_root_slow(
         &self,
         index: usize,
-        chain_spec: &crate::ChainSpec,
+        chain_spec: &reth_chainspec::ChainSpec,
         timestamp: u64,
     ) -> Option<B256> {
         Some(crate::proofs::calculate_receipt_root_no_memo_optimism(

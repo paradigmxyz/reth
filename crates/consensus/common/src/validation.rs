@@ -1,5 +1,6 @@
 //! Collection of methods for block validation.
 
+use reth_chainspec::ChainSpec;
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     constants::{
@@ -7,7 +8,7 @@ use reth_primitives::{
         MAXIMUM_EXTRA_DATA_SIZE,
     },
     eip4844::calculate_excess_blob_gas,
-    ChainSpec, GotExpected, Hardfork, Header, SealedBlock, SealedHeader,
+    GotExpected, Hardfork, Header, SealedBlock, SealedHeader,
 };
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
@@ -270,10 +271,11 @@ mod tests {
     use super::*;
     use mockall::mock;
     use rand::Rng;
+    use reth_chainspec::ChainSpecBuilder;
     use reth_primitives::{
         hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber,
-        BlockNumber, Bytes, ChainSpecBuilder, Signature, Transaction, TransactionSigned, TxEip4844,
-        Withdrawal, Withdrawals, U256,
+        BlockNumber, Bytes, Signature, Transaction, TransactionSigned, TxEip4844, Withdrawal,
+        Withdrawals, U256,
     };
     use reth_storage_api::{
         errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,

@@ -277,7 +277,6 @@ mod tests {
     use alloy_primitives::{B256, U256};
     use alloy_rpc_types::Transaction as AlloyTransaction;
     use revm_primitives::{address, Address};
-    use serde_json;
 
     #[test]
     #[cfg(feature = "optimism")]
@@ -324,7 +323,7 @@ mod tests {
             assert_eq!(deposit_tx.mint, None);
             assert_eq!(deposit_tx.value, U256::ZERO);
             assert_eq!(deposit_tx.gas_limit, 796584);
-            assert_eq!(deposit_tx.is_system_transaction, false);
+            assert!(!deposit_tx.is_system_transaction);
         } else {
             panic!("Expected Deposit transaction");
         }
@@ -374,9 +373,9 @@ mod tests {
                 TxKind::from(address!("4200000000000000000000000000000000000007"))
             );
             assert_eq!(deposit_tx.mint, Some(656890000000000000000));
-            assert_eq!(deposit_tx.value, U256::from(0x239c2e16a5ca590000 as u128));
+            assert_eq!(deposit_tx.value, U256::from(0x239c2e16a5ca590000_u128));
             assert_eq!(deposit_tx.gas_limit, 491822);
-            assert_eq!(deposit_tx.is_system_transaction, false);
+            assert!(!deposit_tx.is_system_transaction);
         } else {
             panic!("Expected Deposit transaction");
         }

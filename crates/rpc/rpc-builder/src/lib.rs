@@ -1306,7 +1306,7 @@ impl RpcServerConfig {
 
     /// Returns true if any server is configured.
     ///
-    /// If no server is configured, no server will be be launched on [`RpcServerConfig::start`].
+    /// If no server is configured, no server will be launched on [`RpcServerConfig::start`].
     pub const fn has_server(&self) -> bool {
         self.http_server_config.is_some() ||
             self.ws_server_config.is_some() ||

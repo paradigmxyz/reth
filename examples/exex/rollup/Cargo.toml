@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 # reth
 reth.workspace = true
+reth-chainspec.workspace = true
 reth-exex.workspace = true
 reth-node-api.workspace = true
 reth-node-ethereum.workspace = true
@@ -25,7 +26,7 @@ alloy-consensus = { workspace = true, features = ["kzg"] }
 alloy-rlp.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
 eyre.workspace = true
-foundry-blob-explorers = { git = "https://github.com/foundry-rs/block-explorers" }
+foundry-blob-explorers = "0.1"
 once_cell.workspace = true
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 serde_json.workspace = true
