@@ -12,10 +12,7 @@ use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
 };
-use reth_blockchain_tree::{
-    noop::NoopBlockchainTree, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
-    TreeExternals,
-};
+use reth_blockchain_tree::{BlockchainTree, ShareableBlockchainTree, TreeExternals};
 use reth_consensus::Consensus;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_exex::ExExManagerHandle;
@@ -128,33 +125,16 @@ where
             .with_genesis()?
             .inspect(|this| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
-            });
-
-        debug!(target: "reth::cli", "Spawning stages metrics listener task");
-        let (sync_metrics_tx, sync_metrics_rx) = unbounded_channel();
-        let sync_metrics_listener = reth_stages::MetricsListener::new(sync_metrics_rx);
-        ctx.task_executor().spawn_critical("stages metrics listener task", sync_metrics_listener);
+            })
+            .with_metrics()
+            .with_blockchain_db().await?;
 
         // fetch the head block from the database
         let head = ctx.lookup_head()?;
 
-        // Configure the blockchain tree for the node
-        let tree_config = BlockchainTreeConfig::default();
-
-        // NOTE: This is a temporary workaround to provide the canon state notification sender to the components builder because there's a cyclic dependency between the blockchain provider and the tree component. This will be removed once the Blockchain provider no longer depends on an instance of the tree: <https://github.com/paradigmxyz/reth/issues/7154>
-        let (canon_state_notification_sender, _receiver) =
-            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
-
-        let blockchain_db = BlockchainProvider::new(
-            ctx.provider_factory().clone(),
-            Arc::new(NoopBlockchainTree::with_canon_state_notifications(
-                canon_state_notification_sender.clone(),
-            )),
-        )?;
-
         let builder_ctx = BuilderContext::new(
             head,
-            blockchain_db.clone(),
+            ctx.blockchain_db().clone(),
             ctx.task_executor().clone(),
             ctx.configs().clone(),
         );
@@ -169,17 +149,17 @@ where
             consensus.clone(),
             components.block_executor().clone(),
         );
-        let tree = BlockchainTree::new(tree_externals, tree_config, ctx.prune_modes())?
-            .with_sync_metrics_tx(sync_metrics_tx.clone())
+        let tree = BlockchainTree::new(tree_externals, *ctx.tree_config(), ctx.prune_modes())?
+            .with_sync_metrics_tx(ctx.sync_metrics_tx())
             // Note: This is required because we need to ensure that both the components and the
             // tree are using the same channel for canon state notifications. This will be removed
             // once the Blockchain provider no longer depends on an instance of the tree
-            .with_canon_state_notification_sender(canon_state_notification_sender);
+            .with_canon_state_notification_sender(ctx.canon_state_notification_sender());
 
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // Replace the tree component with the actual tree
-        let blockchain_db = blockchain_db.with_tree(blockchain_tree);
+        let blockchain_db = ctx.blockchain_db().clone().with_tree(blockchain_tree);
 
         debug!(target: "reth::cli", "configured blockchain tree");
 
@@ -255,7 +235,7 @@ where
                 consensus.clone(),
                 ctx.provider_factory().clone(),
                 ctx.task_executor(),
-                sync_metrics_tx,
+                ctx.sync_metrics_tx(),
                 ctx.prune_config(),
                 max_block,
                 static_file_producer,
@@ -277,7 +257,7 @@ where
                 consensus.clone(),
                 ctx.provider_factory().clone(),
                 ctx.task_executor(),
-                sync_metrics_tx,
+                ctx.sync_metrics_tx(),
                 ctx.prune_config(),
                 max_block,
                 static_file_producer,
@@ -294,7 +274,7 @@ where
         let initial_target = ctx.node_config().debug.tip;
 
         let mut pruner_builder =
-            ctx.pruner_builder().max_reorg_depth(tree_config.max_reorg_depth() as usize);
+            ctx.pruner_builder().max_reorg_depth(ctx.tree_config().max_reorg_depth() as usize);
         if let Some(exex_manager_handle) = &exex_manager_handle {
             pruner_builder =
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
