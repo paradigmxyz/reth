@@ -11,13 +11,11 @@ use alloy_chains::{Chain, ChainKind, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::EMPTY_ROOT_HASH;
-use core::{
-    fmt,
-    fmt::{Display, Formatter},
-};
 use derive_more::From;
 use once_cell::sync::Lazy;
-use reth_ethereum_forks::{ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head};
+use reth_ethereum_forks::{
+    DisplayHardforks, ForkCondition, ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head,
+};
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::{
     constants::{
@@ -853,6 +851,13 @@ impl ChainSpec {
         self.fork(Hardfork::Homestead).active_at_block(block_number)
     }
 
+    /// The Paris hardfork (merge) is activated via ttd. If we have knowledge of the block, this
+    /// function will return true if the block number is greater than or equal to the Paris
+    /// (merge) block.
+    pub fn is_paris_active_at_block(&self, block_number: u64) -> Option<bool> {
+        self.paris_block_and_final_difficulty.map(|(paris_block, _)| block_number >= paris_block)
+    }
+
     /// Convenience method to check if [`Hardfork::Bedrock`] is active at a given block number.
     #[cfg(feature = "optimism")]
     #[inline]
@@ -1360,275 +1365,6 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
     }
 }
 
-/// The condition at which a fork is activated.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum ForkCondition {
-    /// The fork is activated after a certain block.
-    Block(BlockNumber),
-    /// The fork is activated after a total difficulty has been reached.
-    TTD {
-        /// The block number at which TTD is reached, if it is known.
-        ///
-        /// This should **NOT** be set unless you want this block advertised as [EIP-2124][eip2124]
-        /// `FORK_NEXT`. This is currently only the case for Sepolia and Holesky.
-        ///
-        /// [eip2124]: https://eips.ethereum.org/EIPS/eip-2124
-        fork_block: Option<BlockNumber>,
-        /// The total difficulty after which the fork is activated.
-        total_difficulty: U256,
-    },
-    /// The fork is activated after a specific timestamp.
-    Timestamp(u64),
-    /// The fork is never activated
-    #[default]
-    Never,
-}
-
-impl ForkCondition {
-    /// Returns true if the fork condition is timestamp based.
-    pub const fn is_timestamp(&self) -> bool {
-        matches!(self, Self::Timestamp(_))
-    }
-
-    /// Checks whether the fork condition is satisfied at the given block.
-    ///
-    /// For TTD conditions, this will only return true if the activation block is already known.
-    ///
-    /// For timestamp conditions, this will always return false.
-    pub const fn active_at_block(&self, current_block: BlockNumber) -> bool {
-        matches!(self, Self::Block(block)
-        | Self::TTD { fork_block: Some(block), .. } if current_block >= *block)
-    }
-
-    /// Checks if the given block is the first block that satisfies the fork condition.
-    ///
-    /// This will return false for any condition that is not block based.
-    pub const fn transitions_at_block(&self, current_block: BlockNumber) -> bool {
-        matches!(self, Self::Block(block) if current_block == *block)
-    }
-
-    /// Checks whether the fork condition is satisfied at the given total difficulty and difficulty
-    /// of a current block.
-    ///
-    /// The fork is considered active if the _previous_ total difficulty is above the threshold.
-    /// To achieve that, we subtract the passed `difficulty` from the current block's total
-    /// difficulty, and check if it's above the Fork Condition's total difficulty (here:
-    /// `58_750_000_000_000_000_000_000`)
-    ///
-    /// This will return false for any condition that is not TTD-based.
-    pub fn active_at_ttd(&self, ttd: U256, difficulty: U256) -> bool {
-        matches!(self, Self::TTD { total_difficulty, .. }
-            if ttd.saturating_sub(difficulty) >= *total_difficulty)
-    }
-
-    /// Checks whether the fork condition is satisfied at the given timestamp.
-    ///
-    /// This will return false for any condition that is not timestamp-based.
-    pub const fn active_at_timestamp(&self, timestamp: u64) -> bool {
-        matches!(self, Self::Timestamp(time) if timestamp >= *time)
-    }
-
-    /// Checks whether the fork condition is satisfied at the given head block.
-    ///
-    /// This will return true if:
-    ///
-    /// - The condition is satisfied by the block number;
-    /// - The condition is satisfied by the timestamp;
-    /// - or the condition is satisfied by the total difficulty
-    pub fn active_at_head(&self, head: &Head) -> bool {
-        self.active_at_block(head.number) ||
-            self.active_at_timestamp(head.timestamp) ||
-            self.active_at_ttd(head.total_difficulty, head.difficulty)
-    }
-
-    /// Get the total terminal difficulty for this fork condition.
-    ///
-    /// Returns `None` for fork conditions that are not TTD based.
-    pub const fn ttd(&self) -> Option<U256> {
-        match self {
-            Self::TTD { total_difficulty, .. } => Some(*total_difficulty),
-            _ => None,
-        }
-    }
-
-    /// Returns the timestamp of the fork condition, if it is timestamp based.
-    pub const fn as_timestamp(&self) -> Option<u64> {
-        match self {
-            Self::Timestamp(timestamp) => Some(*timestamp),
-            _ => None,
-        }
-    }
-}
-
-/// A container to pretty-print a hardfork.
-///
-/// The fork is formatted depending on its fork condition:
-///
-/// - Block and timestamp based forks are formatted in the same manner (`{name} <({eip})>
-///   @{condition}`)
-/// - TTD based forks are formatted separately as `{name} <({eip})> @{ttd} (network is <not> known
-///   to be merged)`
-///
-/// An optional EIP can be attached to the fork to display as well. This should generally be in the
-/// form of just `EIP-x`, e.g. `EIP-1559`.
-#[derive(Debug)]
-struct DisplayFork {
-    /// The name of the hardfork (e.g. Frontier)
-    name: String,
-    /// The fork condition
-    activated_at: ForkCondition,
-    /// An optional EIP (e.g. `EIP-1559`).
-    eip: Option<String>,
-}
-
-impl Display for DisplayFork {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let name_with_eip = if let Some(eip) = &self.eip {
-            format!("{} ({})", self.name, eip)
-        } else {
-            self.name.clone()
-        };
-
-        match self.activated_at {
-            ForkCondition::Block(at) | ForkCondition::Timestamp(at) => {
-                write!(f, "{name_with_eip:32} @{at}")?;
-            }
-            ForkCondition::TTD { fork_block, total_difficulty } => {
-                write!(
-                    f,
-                    "{:32} @{} ({})",
-                    name_with_eip,
-                    total_difficulty,
-                    if fork_block.is_some() {
-                        "network is known to be merged"
-                    } else {
-                        "network is not known to be merged"
-                    }
-                )?;
-            }
-            ForkCondition::Never => unreachable!(),
-        }
-
-        Ok(())
-    }
-}
-
-/// A container for pretty-printing a list of hardforks.
-///
-/// # Examples
-///
-/// ```
-/// # use reth_chainspec::MAINNET;
-/// println!("{}", MAINNET.display_hardforks());
-/// ```
-///
-/// An example of the output:
-///
-/// ```text
-/// Pre-merge hard forks (block based):
-// - Frontier                         @0
-// - Homestead                        @1150000
-// - Dao                              @1920000
-// - Tangerine                        @2463000
-// - SpuriousDragon                   @2675000
-// - Byzantium                        @4370000
-// - Constantinople                   @7280000
-// - Petersburg                       @7280000
-// - Istanbul                         @9069000
-// - MuirGlacier                      @9200000
-// - Berlin                           @12244000
-// - London                           @12965000
-// - ArrowGlacier                     @13773000
-// - GrayGlacier                      @15050000
-// Merge hard forks:
-// - Paris                            @58750000000000000000000 (network is known to be merged)
-// Post-merge hard forks (timestamp based):
-// - Shanghai                         @1681338455
-/// ```
-#[derive(Debug)]
-pub struct DisplayHardforks {
-    /// A list of pre-merge (block based) hardforks
-    pre_merge: Vec<DisplayFork>,
-    /// A list of merge (TTD based) hardforks
-    with_merge: Vec<DisplayFork>,
-    /// A list of post-merge (timestamp based) hardforks
-    post_merge: Vec<DisplayFork>,
-}
-
-impl Display for DisplayHardforks {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        fn format(
-            header: &str,
-            forks: &[DisplayFork],
-            next_is_empty: bool,
-            f: &mut Formatter<'_>,
-        ) -> fmt::Result {
-            writeln!(f, "{header}:")?;
-            let mut iter = forks.iter().peekable();
-            while let Some(fork) = iter.next() {
-                write!(f, "- {fork}")?;
-                if !next_is_empty || iter.peek().is_some() {
-                    writeln!(f)?;
-                }
-            }
-            Ok(())
-        }
-
-        format(
-            "Pre-merge hard forks (block based)",
-            &self.pre_merge,
-            self.with_merge.is_empty(),
-            f,
-        )?;
-
-        if !self.with_merge.is_empty() {
-            format("Merge hard forks", &self.with_merge, self.post_merge.is_empty(), f)?;
-        }
-
-        if !self.post_merge.is_empty() {
-            format("Post-merge hard forks (timestamp based)", &self.post_merge, true, f)?;
-        }
-
-        Ok(())
-    }
-}
-
-impl DisplayHardforks {
-    /// Creates a new [`DisplayHardforks`] from an iterator of hardforks.
-    pub fn new(
-        hardforks: &BTreeMap<Hardfork, ForkCondition>,
-        known_paris_block: Option<u64>,
-    ) -> Self {
-        let mut pre_merge = Vec::new();
-        let mut with_merge = Vec::new();
-        let mut post_merge = Vec::new();
-
-        for (fork, condition) in hardforks {
-            let mut display_fork =
-                DisplayFork { name: fork.to_string(), activated_at: *condition, eip: None };
-
-            match condition {
-                ForkCondition::Block(_) => {
-                    pre_merge.push(display_fork);
-                }
-                ForkCondition::TTD { total_difficulty, .. } => {
-                    display_fork.activated_at = ForkCondition::TTD {
-                        fork_block: known_paris_block,
-                        total_difficulty: *total_difficulty,
-                    };
-                    with_merge.push(display_fork);
-                }
-                ForkCondition::Timestamp(_) => {
-                    post_merge.push(display_fork);
-                }
-                ForkCondition::Never => continue,
-            }
-        }
-
-        Self { pre_merge, with_merge, post_merge }
-    }
-}
-
 /// `PoS` deposit contract details.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DepositContract {
@@ -1734,7 +1470,7 @@ impl OptimismGenesisInfo {
 mod tests {
     use alloy_chains::Chain;
     use alloy_genesis::{ChainConfig, GenesisAccount};
-    use reth_ethereum_forks::{ForkHash, ForkId, Head};
+    use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use reth_trie_common::TrieAccount;
 
     use super::*;

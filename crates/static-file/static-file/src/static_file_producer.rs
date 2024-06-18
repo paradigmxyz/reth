@@ -1,12 +1,13 @@
 //! Support for producing static files.
 
 use crate::{segments, segments::Segment, StaticFileProducerEvent};
+use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use reth_db_api::database::Database;
-use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
 use reth_provider::{providers::StaticFileWriter, ProviderFactory, StaticFileProviderFactory};
 use reth_prune_types::PruneModes;
+use reth_static_file_types::HighestStaticFiles;
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
@@ -228,15 +229,16 @@ mod tests {
     use crate::static_file_producer::{
         StaticFileProducer, StaticFileProducerInner, StaticFileTargets,
     };
+    use alloy_primitives::{B256, U256};
     use assert_matches::assert_matches;
     use reth_db::{test_utils::TempDatabase, DatabaseEnv};
     use reth_db_api::{database::Database, transaction::DbTx};
-    use reth_primitives::{static_file::HighestStaticFiles, StaticFileSegment, B256, U256};
     use reth_provider::{
         providers::StaticFileWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
     };
     use reth_prune_types::PruneModes;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_static_file_types::{HighestStaticFiles, StaticFileSegment};
     use reth_testing_utils::{
         generators,
         generators::{random_block_range, random_receipt},

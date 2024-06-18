@@ -109,9 +109,9 @@ mod tests {
         storage_history::STORAGE_HISTORY_TABLES_TO_PRUNE, PruneInput, PruneOutput, Segment,
         StorageHistory,
     };
+    use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db::{tables, BlockNumberList};
-    use reth_primitives::{BlockNumber, B256};
     use reth_provider::PruneCheckpointReader;
     use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};

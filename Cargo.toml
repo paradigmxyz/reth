@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 edition = "2021"
 rust-version = "1.79"
 license = "MIT OR Apache-2.0"
@@ -109,6 +109,7 @@ members = [
     "examples/custom-dev-node/",
     "examples/custom-engine-types/",
     "examples/custom-evm/",
+    "examples/stateful-precompile/",
     "examples/custom-inspector/",
     "examples/custom-node-components/",
     "examples/custom-payload-builder/",
@@ -473,9 +474,7 @@ secp256k1 = { version = "0.29", default-features = false, features = [
     "global-context",
     "recovery",
 ] }
-# TODO: Remove `k256` feature: https://github.com/sigp/enr/pull/74
-enr = { version = "0.12.0", default-features = false, features = [
-    "k256",
+enr = { version = "0.12.1", default-features = false, features = [
     "rust-secp256k1",
 ] }
 

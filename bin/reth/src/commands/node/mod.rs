@@ -6,11 +6,11 @@ use crate::args::{
     RpcServerArgs, TxPoolArgs,
 };
 use clap::{value_parser, Args, Parser};
+use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliContext;
 use reth_db::{init_db, DatabaseEnv};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{node_config::NodeConfig, version};
-use reth_primitives::ChainSpec;
 use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
 
 /// Start the node
@@ -213,7 +213,7 @@ mod tests {
     fn parse_common_node_command_chain_args() {
         for chain in SUPPORTED_CHAINS {
             let args: NodeCommand = NodeCommand::<NoArgs>::parse_from(["reth", "--chain", chain]);
-            assert_eq!(args.chain.chain, chain.parse::<reth_primitives::Chain>().unwrap());
+            assert_eq!(args.chain.chain, chain.parse::<reth_chainspec::Chain>().unwrap());
         }
     }
 
@@ -305,7 +305,7 @@ mod tests {
     #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth
     fn parse_dev() {
         let cmd = NodeCommand::<NoArgs>::parse_from(["reth", "--dev"]);
-        let chain = reth_primitives::DEV.clone();
+        let chain = reth_chainspec::DEV.clone();
         assert_eq!(cmd.chain.chain, chain.chain);
         assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
         assert_eq!(

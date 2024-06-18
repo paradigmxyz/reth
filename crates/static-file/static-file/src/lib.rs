@@ -16,3 +16,6 @@ pub use static_file_producer::{
     StaticFileProducer, StaticFileProducerInner, StaticFileProducerResult,
     StaticFileProducerWithResult, StaticFileTargets,
 };
+
+// Re-export for convenience.
+pub use reth_static_file_types::*;

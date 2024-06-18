@@ -103,7 +103,7 @@ where
         let mut actions_to_queue: Vec<BlobTransactionEvent> = Vec::new();
 
         if txs.is_empty() {
-            return;
+            return
         }
 
         match self.pool.get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect()) {
@@ -157,7 +157,7 @@ where
         // Request locally first, otherwise request from CL
         loop {
             if let Some(mined_sidecar) = this.queued_actions.pop_front() {
-                return Poll::Ready(Some(Ok(mined_sidecar)));
+                return Poll::Ready(Some(Ok(mined_sidecar)))
             }
 
             // Check if any pending requests are ready and append to buffer
@@ -243,7 +243,7 @@ async fn fetch_blobs_for_block(
                 response.status().as_u16(),
                 "Unhandled HTTP status.".to_string(),
             )),
-        };
+        }
     }
 
     let bytes = match response.bytes().await {
