@@ -11,12 +11,13 @@ use crate::{
 };
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
+use reth_chainspec::{ChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives::{
     constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, BlockHashOrNumber,
-    BlockNumber, ChainSpec, Head, SealedHeader, B256, MAINNET,
+    BlockNumber, Head, SealedHeader, B256,
 };
 use reth_provider::{
     providers::StaticFileProvider, BlockHashReader, HeaderProvider, ProviderFactory,

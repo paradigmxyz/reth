@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-basic-payload-builder.workspace = true
@@ -57,6 +58,7 @@ alloy-primitives.workspace = true
 
 [features]
 optimism = [
+    "reth-chainspec/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",

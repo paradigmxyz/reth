@@ -5,11 +5,11 @@ use alloy_primitives::{keccak256, BlockHash};
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
+use core::mem;
 use derive_more::{AsRef, Deref};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::*;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
-use std::mem;
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.

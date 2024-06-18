@@ -1,7 +1,7 @@
 use crate::utils::eth_payload_attributes;
+use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{setup, transaction::TransactionTestContext};
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{ChainSpecBuilder, MAINNET};
 use std::sync::Arc;
 
 #[tokio::test]

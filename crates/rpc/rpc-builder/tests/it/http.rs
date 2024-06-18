@@ -11,9 +11,9 @@ use jsonrpsee::{
     rpc_params,
     types::error::ErrorCode,
 };
+use reth_chainspec::net::NodeRecord;
 use reth_primitives::{
-    hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, NodeRecord, TxHash, B256, B64,
-    U256, U64,
+    hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, TxHash, B256, B64, U256, U64,
 };
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},

@@ -12,8 +12,8 @@ use reth_discv5::{DiscoveredPeer, Discv5};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
-use reth_network_peers::PeerId;
-use reth_primitives::{EnrForkIdEntry, ForkId, NodeRecord};
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_primitives::{EnrForkIdEntry, ForkId};
 use secp256k1::SecretKey;
 use std::{
     collections::VecDeque,

@@ -1,6 +1,7 @@
 use super::filter::FilterError;
 use alloy_primitives::TxHash;
-use reth_primitives::{BlockNumHash, ChainInfo, Receipt};
+use reth_chainspec::ChainInfo;
+use reth_primitives::{BlockNumHash, Receipt};
 use reth_provider::{BlockReader, ProviderError};
 use reth_rpc_types::{FilteredParams, Log};
 

@@ -3,6 +3,7 @@ use alloy_eips::{
     eip7002::WithdrawalRequest,
 };
 use alloy_rlp::Buf;
+use reth_chainspec::ChainSpec;
 use reth_consensus_common::calc;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
@@ -10,7 +11,7 @@ use reth_primitives::{
         fill_tx_env_with_beacon_root_contract_call,
         fill_tx_env_with_withdrawal_requests_contract_call,
     },
-    Address, ChainSpec, Header, Request, Withdrawal, B256, U256,
+    Address, Header, Request, Withdrawal, B256, U256,
 };
 use reth_storage_errors::provider::ProviderError;
 use revm::{

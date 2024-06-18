@@ -1,4 +1,4 @@
-use reth_primitives::ChainSpec;
+use reth_chainspec::ChainSpec;
 use std::sync::Arc;
 
 /// A trait for reading the current chainspec.

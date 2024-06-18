@@ -39,6 +39,9 @@ use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::*;
 
+#[cfg(not(feature = "compiler"))]
+use reth_node_ethereum::EthEvmConfig;
+
 /// `reth debug execution` command
 #[derive(Debug, Parser)]
 pub struct Command {
@@ -115,7 +118,7 @@ impl Command {
     async fn build_pipeline<DB, Client>(
         &self,
         config: &Config,
-        data_dir: reth_node_core::dirs::ChainPath<reth_node_core::dirs::DataDirPath>,
+        _data_dir: reth_node_core::dirs::ChainPath<reth_node_core::dirs::DataDirPath>,
         client: Client,
         consensus: Arc<dyn Consensus>,
         provider_factory: ProviderFactory<DB>,
@@ -144,7 +147,7 @@ impl Command {
         #[cfg(not(feature = "compiler"))]
         let executor = EthExecutorProvider::new(self.env.chain.clone(), EthEvmConfig::default());
         #[cfg(feature = "compiler")]
-        let executor = self.build_evm(data_dir, task_executor).await?;
+        let executor = self.build_evm(_data_dir, task_executor).await?;
 
         let pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
