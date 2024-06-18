@@ -30,4 +30,6 @@ parking_lot = { workspace = true, optional = true }
 parking_lot.workspace = true
 
 [features]
+default = ["std"]
+std = []
 test-utils = ["dep:parking_lot"]
