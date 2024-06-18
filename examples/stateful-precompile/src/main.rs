@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use parking_lot::RwLock;
 use reth::{
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     primitives::{
@@ -26,10 +27,7 @@ use reth_primitives::{
 };
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
+use std::{collections::HashMap, sync::Arc};
 
 /// A cache for precompile inputs / outputs.
 ///
@@ -72,7 +70,7 @@ impl MyEvmConfig {
             ContextPrecompiles::new(PrecompileSpecId::from_spec_id(spec_id));
         for (address, precompile) in loaded_precompiles.to_mut().iter_mut() {
             // get or insert the cache for this address / spec
-            let mut cache = cache.write().unwrap();
+            let mut cache = cache.write();
             let cache = cache
                 .cache
                 .entry((*address, spec_id))
@@ -117,7 +115,7 @@ pub struct WrappedPrecompile {
 
 impl StatefulPrecompileMut for WrappedPrecompile {
     fn call_mut(&mut self, bytes: &Bytes, gas_price: u64, _env: &Env) -> PrecompileResult {
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write();
         let key = (bytes.clone(), gas_price);
 
         // get the result if it exists
