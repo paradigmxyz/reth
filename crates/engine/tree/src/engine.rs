@@ -2,12 +2,10 @@
 
 use crate::{
     chain::{ChainHandler, FromOrchestrator, HandlerEvent, OrchestratorState},
+    download::{BlockDownloader, DownloadAction, DownloadOutcome},
     tree::EngineApiTreeHandler,
 };
-use futures::{
-    stream::Fuse,
-    Stream, StreamExt,
-};
+use futures::{stream::Fuse, Stream, StreamExt};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_primitives::{SealedBlockWithSenders, B256};
 use std::{
@@ -31,7 +29,7 @@ use std::{
 ///
 /// The core logic is part of the [`EngineRequestHandler`], which is responsible for processing the
 /// incoming requests.
-pub struct EngineHandler<T>
+pub struct EngineHandler<T, D>
 where
     T: EngineRequestHandler,
 {
@@ -42,13 +40,14 @@ where
     /// Receiver for incoming requests that need to be processed.
     // TODO maybe use generic?
     incoming_requests: Fuse<Pin<Box<dyn Stream<Item = T::Request> + Send + Sync + 'static>>>,
-    /// Access to the network sync to download blocks on demand.
-    network_sync: (),
+    /// A downloader to download blocks on demand.
+    downloader: D,
 }
 
-impl<T> ChainHandler for EngineHandler<T>
+impl<T, D> ChainHandler for EngineHandler<T, D>
 where
     T: EngineRequestHandler,
+    D: BlockDownloader,
 {
     fn on_event(&mut self, event: FromOrchestrator) {
         // delegate event to the handler
@@ -57,7 +56,7 @@ where
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<HandlerEvent> {
         loop {
-            // drain the handler
+            // drain the handler first
             loop {
                 match self.handler.poll(cx) {
                     Poll::Ready(ev) => {
@@ -74,8 +73,9 @@ where
                                     HandlerEvent::WriteAccessAcquired => {}
                                 }
                             }
-                            RequestHandlerEvent::Download(_) => {
-                                // TODO delegate to network sync
+                            RequestHandlerEvent::Download(req) => {
+                                // delegate download request to the downloader
+                                self.downloader.on_action(DownloadAction::Download(req));
                             }
                         }
                     }
@@ -83,19 +83,22 @@ where
                 }
             }
 
-            let mut progress = false;
-
+            // pop the next incoming request
             if let Poll::Ready(Some(req)) = self.incoming_requests.poll_next_unpin(cx) {
-                // delegate new received request to the handler
+                // and delegate the request to the handler
                 self.handler.on_event(FromEngine::Request(req));
-                progress = true;
+                // skip downloading in this iteration to allow the handler to process the request
+                continue
             }
 
-            // TODO poll network sync
-
-            if !progress {
-                return Poll::Pending;
+            // advance the downloader
+            if let Poll::Ready(DownloadOutcome::Blocks(blocks)) = self.downloader.poll(cx) {
+                // delegate the downloaded blocks to the handler
+                self.handler.on_event(FromEngine::DownloadedBlocks(blocks));
+                continue
             }
+
+            return Poll::Pending
         }
     }
 }
