@@ -33,3 +33,6 @@ reth-revm = { workspace = true, features = ["test-utils"] }
 secp256k1.workspace = true
 serde_json.workspace = true
 
+[features]
+default = ["std"]
+std = []
