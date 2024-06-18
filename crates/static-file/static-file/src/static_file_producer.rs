@@ -111,7 +111,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
     pub fn run(&self, targets: StaticFileTargets) -> StaticFileProducerResult {
         // If there are no targets, do not produce any static files and return early
         if !targets.any() {
-            return Ok(targets)
+            return Ok(targets);
         }
 
         debug_assert!(targets.is_contiguous_to_highest_static_files(

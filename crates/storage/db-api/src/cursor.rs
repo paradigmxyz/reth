@@ -158,7 +158,7 @@ impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> Iterator for Walker<'cursor, T, C
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
         if start.is_some() {
-            return start
+            return start;
         }
 
         self.cursor.next().transpose()
@@ -235,7 +235,7 @@ impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> Iterator for ReverseWalker<'curso
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
         if start.is_some() {
-            return start
+            return start;
         }
 
         self.cursor.prev().transpose()
@@ -275,7 +275,7 @@ impl<'cursor, T: Table, CURSOR: DbCursorRO<T>> Iterator for RangeWalker<'cursor,
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.is_done {
-            return None
+            return None;
         }
 
         let next_item = self.start.take().or_else(|| self.cursor.next().transpose());
@@ -366,7 +366,7 @@ impl<'cursor, T: DupSort, CURSOR: DbDupCursorRO<T>> Iterator for DupWalker<'curs
     fn next(&mut self) -> Option<Self::Item> {
         let start = self.start.take();
         if start.is_some() {
-            return start
+            return start;
         }
         self.cursor.next_dup().transpose()
     }

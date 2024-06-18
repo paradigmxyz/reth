@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
 reth-eth-wire-types.workspace = true
 reth-primitives.workspace = true
 reth-fs-util.workspace = true

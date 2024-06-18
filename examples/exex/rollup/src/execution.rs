@@ -212,7 +212,7 @@ fn execute_transactions(
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
             // Execute transaction.
             // Fill revm structure.
@@ -225,7 +225,7 @@ fn execute_transactions(
                         EVMError::Transaction(err) => {
                             // if the transaction is invalid, we can skip it
                             debug!(%err, ?transaction, "Skipping invalid transaction");
-                            continue
+                            continue;
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt

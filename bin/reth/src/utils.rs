@@ -68,18 +68,18 @@ impl<DB: Database> DbTool<DB> {
                     let (key, value) = (k.into_key(), v.into_value());
 
                     if key.len() + value.len() < filter.min_row_size {
-                        return None
+                        return None;
                     }
                     if key.len() < filter.min_key_size {
-                        return None
+                        return None;
                     }
                     if value.len() < filter.min_value_size {
-                        return None
+                        return None;
                     }
 
                     let result = || {
                         if filter.only_count {
-                            return None
+                            return None;
                         }
                         Some((
                             <T as Table>::Key::decode(&key).unwrap(),
@@ -93,12 +93,12 @@ impl<DB: Database> DbTool<DB> {
                                 searcher.find_first_in(&key).is_some()
                             {
                                 hits += 1;
-                                return result()
+                                return result();
                             }
                         }
                         None => {
                             hits += 1;
-                            return result()
+                            return result();
                         }
                     }
                 }

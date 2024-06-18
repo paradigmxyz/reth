@@ -46,14 +46,14 @@ async fn main() -> eyre::Result<()> {
             if let DiscoveryUpdate::Added(peer) = update {
                 // Boot nodes hard at work, lets not disturb them
                 if MAINNET_BOOT_NODES.contains(&peer) {
-                    return
+                    return;
                 }
 
                 let (p2p_stream, their_hello) = match handshake_p2p(peer, our_key).await {
                     Ok(s) => s,
                     Err(e) => {
                         println!("Failed P2P handshake with peer {}, {}", peer.address, e);
-                        return
+                        return;
                     }
                 };
 
@@ -61,7 +61,7 @@ async fn main() -> eyre::Result<()> {
                     Ok(s) => s,
                     Err(e) => {
                         println!("Failed ETH handshake with peer {}, {}", peer.address, e);
-                        return
+                        return;
                     }
                 };
 

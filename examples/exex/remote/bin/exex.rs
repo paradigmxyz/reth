@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
-use exex_remote::proto::{
-    remote_ex_ex_server::{RemoteExEx, RemoteExExServer},
-    Notification as ProtoNotification, SubscribeRequest as ProtoSubscribeRequest,
+use exex_remote::{
+    codec,
+    proto::{
+        remote_ex_ex_server::{RemoteExEx, RemoteExExServer},
+        ExExNotification as ProtoExExNotification, SubscribeRequest as ProtoSubscribeRequest,
+    },
 };
 use futures::TryFutureExt;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
@@ -19,7 +22,7 @@ struct ExExService {
 
 #[tonic::async_trait]
 impl RemoteExEx for ExExService {
-    type SubscribeStream = ReceiverStream<Result<ProtoNotification, Status>>;
+    type SubscribeStream = ReceiverStream<Result<ProtoExExNotification, Status>>;
 
     async fn subscribe(
         &self,
@@ -30,12 +33,9 @@ impl RemoteExEx for ExExService {
         let mut notifications = self.notifications.subscribe();
         tokio::spawn(async move {
             while let Ok(notification) = notifications.recv().await {
-                tx.send(Ok(ProtoNotification {
-                    data: bincode::serialize(&notification)
-                        .expect("failed to serialize notification"),
-                }))
-                .await
-                .expect("failed to send notification to client");
+                tx.send(Ok(codec::to_proto_notification(&notification).expect("failed to encode")))
+                    .await
+                    .expect("failed to send notification to client");
             }
         });
 

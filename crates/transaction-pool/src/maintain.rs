@@ -681,9 +681,8 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
     };
-    use reth_chainspec::MAINNET;
     use reth_fs_util as fs;
-    use reth_primitives::{hex, PooledTransactionsElement, U256};
+    use reth_primitives::{hex, PooledTransactionsElement, MAINNET, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 

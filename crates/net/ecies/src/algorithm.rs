@@ -99,7 +99,7 @@ impl core::fmt::Debug for ECIES {
 
 fn split_at_mut<T>(arr: &mut [T], idx: usize) -> Result<(&mut [T], &mut [T]), ECIESError> {
     if idx > arr.len() {
-        return Err(ECIESErrorImpl::OutOfBounds { idx, len: arr.len() }.into())
+        return Err(ECIESErrorImpl::OutOfBounds { idx, len: arr.len() }.into());
     }
     Ok(arr.split_at_mut(idx))
 }
@@ -138,7 +138,7 @@ impl<'a> EncryptedMessage<'a> {
     pub fn parse(data: &mut [u8]) -> Result<EncryptedMessage<'_>, ECIESError> {
         // Auth data is 2 bytes, public key is 65 bytes
         if data.len() < 65 + 2 {
-            return Err(ECIESErrorImpl::EncryptedDataTooSmall.into())
+            return Err(ECIESErrorImpl::EncryptedDataTooSmall.into());
         }
         let (auth_data, encrypted) = data.split_at_mut(2);
 
@@ -164,7 +164,7 @@ impl<'a> EncryptedMessage<'a> {
 
         // now we can check if the encrypted data is long enough to contain the IV
         if data_iv.len() < 16 {
-            return Err(ECIESErrorImpl::EncryptedDataTooSmall.into())
+            return Err(ECIESErrorImpl::EncryptedDataTooSmall.into());
         }
         let (iv, encrypted_data) = data_iv.split_at_mut(16);
 
@@ -234,7 +234,7 @@ impl<'a> EncryptedMessage<'a> {
             &self.auth_data,
         );
         if check_tag != self.tag {
-            return Err(ECIESErrorImpl::TagCheckDecryptFailed.into())
+            return Err(ECIESErrorImpl::TagCheckDecryptFailed.into());
         }
 
         Ok(())
@@ -655,7 +655,7 @@ impl ECIES {
         //
         // The header is 16 bytes, and the mac is 16 bytes, so the data must be at least 32 bytes
         if data.len() < 32 {
-            return Err(ECIESErrorImpl::InvalidHeader.into())
+            return Err(ECIESErrorImpl::InvalidHeader.into());
         }
 
         let (header_bytes, mac_bytes) = split_at_mut(data, 16)?;
@@ -665,12 +665,12 @@ impl ECIES {
         self.ingress_mac.as_mut().unwrap().update_header(header);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
         if check_mac != mac {
-            return Err(ECIESErrorImpl::TagCheckHeaderFailed.into())
+            return Err(ECIESErrorImpl::TagCheckHeaderFailed.into());
         }
 
         self.ingress_aes.as_mut().unwrap().apply_keystream(header);
         if header.as_slice().len() < 3 {
-            return Err(ECIESErrorImpl::InvalidHeader.into())
+            return Err(ECIESErrorImpl::InvalidHeader.into());
         }
 
         let body_size = usize::try_from(header.as_slice().read_uint::<BigEndian>(3)?)?;
@@ -721,7 +721,7 @@ impl ECIES {
         self.ingress_mac.as_mut().unwrap().update_body(body);
         let check_mac = self.ingress_mac.as_mut().unwrap().digest();
         if check_mac != mac {
-            return Err(ECIESErrorImpl::TagCheckBodyFailed.into())
+            return Err(ECIESErrorImpl::TagCheckBodyFailed.into());
         }
 
         let size = self.body_size.unwrap();

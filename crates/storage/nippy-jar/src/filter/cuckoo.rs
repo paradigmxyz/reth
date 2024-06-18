@@ -28,7 +28,7 @@ impl Cuckoo {
 impl InclusionFilter for Cuckoo {
     fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
         if self.remaining == 0 {
-            return Err(NippyJarError::FilterMaxCapacity)
+            return Err(NippyJarError::FilterMaxCapacity);
         }
 
         self.remaining -= 1;

@@ -115,7 +115,7 @@ impl<DB: Database> TableViewer<(u64, Duration)> for ChecksumViewer<'_, DB> {
 
             total = index + 1;
             if total >= limit {
-                break
+                break;
             }
         }
 
