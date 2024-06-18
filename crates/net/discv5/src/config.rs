@@ -190,7 +190,7 @@ impl ConfigBuilder {
         self
     }
 
-    /// Sets the the number of times at which to run boost lookup queries to bootstrap the node.
+    /// Sets the number of times at which to run boost lookup queries to bootstrap the node.
     pub const fn bootstrap_lookup_countdown(mut self, counts: u64) -> Self {
         self.bootstrap_lookup_countdown = Some(counts);
         self

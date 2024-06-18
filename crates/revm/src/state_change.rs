@@ -17,7 +17,8 @@ use reth_storage_errors::provider::ProviderError;
 use revm::{
     interpreter::Host,
     primitives::{
-        Account, AccountInfo, Bytecode, EvmStorageSlot, ExecutionResult, FixedBytes, ResultAndState,
+        Account, AccountInfo, Bytecode, EvmStorageSlot, ExecutionResult, FixedBytes,
+        ResultAndState, BLOCKHASH_SERVE_WINDOW,
     },
     Database, DatabaseCommit, Evm,
 };
@@ -66,9 +67,6 @@ pub fn post_block_balance_increments(
 
     balance_increments
 }
-
-/// todo: temporary move over of constants from revm until we've migrated to the latest version
-pub const HISTORY_SERVE_WINDOW: u64 = 8192;
 
 /// Applies the pre-block state change outlined in [EIP-2935] to store historical blockhashes in a
 /// system contract.
@@ -131,7 +129,7 @@ fn eip2935_block_hash_slot<DB: Database<Error = ProviderError>>(
     block_number: u64,
     block_hash: B256,
 ) -> Result<(U256, EvmStorageSlot), BlockValidationError> {
-    let slot = U256::from(block_number % HISTORY_SERVE_WINDOW);
+    let slot = U256::from(block_number % BLOCKHASH_SERVE_WINDOW as u64);
     let current_hash = db
         .storage(HISTORY_STORAGE_ADDRESS, slot)
         .map_err(BlockValidationError::BlockHashAccountLoadingFailed)?;

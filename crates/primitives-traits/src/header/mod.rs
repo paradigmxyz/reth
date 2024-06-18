@@ -15,9 +15,9 @@ use alloy_eips::{
 use alloy_primitives::{keccak256, Address, BlockNumber, Bloom, Bytes, B256, B64, U256};
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::BufMut;
+use core::mem;
 use reth_codecs::{main_codec, Compact};
 use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
-use std::mem;
 
 /// Block header
 #[main_codec]
