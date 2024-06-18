@@ -109,6 +109,7 @@ members = [
     "examples/custom-dev-node/",
     "examples/custom-engine-types/",
     "examples/custom-evm/",
+    "examples/stateful-precompile/",
     "examples/custom-inspector/",
     "examples/custom-node-components/",
     "examples/custom-payload-builder/",
