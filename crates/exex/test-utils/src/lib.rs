@@ -160,6 +160,8 @@ pub struct TestExExHandle {
     pub events_rx: UnboundedReceiver<ExExEvent>,
     /// Channel for sending notifications to the Execution Extension
     pub notifications_tx: Sender<ExExNotification>,
+    /// Node task manager
+    pub tasks: TaskManager,
 }
 
 impl TestExExHandle {
@@ -283,7 +285,7 @@ pub async fn test_exex_context_with_chain_spec(
         components,
     };
 
-    Ok((ctx, TestExExHandle { genesis, provider_factory, events_rx, notifications_tx }))
+    Ok((ctx, TestExExHandle { genesis, provider_factory, events_rx, notifications_tx, tasks }))
 }
 
 /// Creates a new [`ExExContext`] with (mainnet)[`MAINNET`] chain spec.
