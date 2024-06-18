@@ -328,37 +328,11 @@ where
                     self.provider().chain_spec().is_paris_active_at_block(block.number);
             }
 
-            // 1. if Paris hardfork is actived, no block rewards are given
-            // 2. if Paris hardfork is not actived, calulate block rewards with block number only
-            // 3. if Paris hardfork is unknown, calculate block rewards with block number and ttd
-            let base_block_reward = match is_paris_actived {
-                Some(true) => break,
-                Some(false) => base_block_reward_pre_merge(
-                    self.provider().chain_spec().as_ref(),
-                    block.header.number,
-                ),
-                None => {
-                    if let Some(header_td) = self.provider().header_td(&block.header.hash())? {
-                        if let Some(base_block_reward) = base_block_reward(
-                            self.provider().chain_spec().as_ref(),
-                            block.header.number,
-                            block.header.difficulty,
-                            header_td,
-                        ) {
-                            base_block_reward
-                        } else {
-                            continue
-                        }
-                    } else {
-                        continue
-                    }
-                }
-            };
-
-            let reward_traces =
-                self.extract_block_reward_traces_with_base_block_reward(block, base_block_reward);
-
-            all_traces.extend(reward_traces)
+            if let Some(base_block_reward) =
+                self.calculate_base_block_reward(block, is_paris_actived)?
+            {
+                all_traces.extend(self.extract_reward_traces(block, base_block_reward));
+            }
         }
 
         Ok(all_traces)
@@ -409,8 +383,12 @@ where
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
         if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            if let Ok(Some(reward_traces)) = self.extract_block_reward_traces(&block) {
-                traces.extend(reward_traces);
+            let is_paris_actived =
+                self.provider().chain_spec().is_paris_active_at_block(block.number);
+            if let Some(base_block_reward) =
+                self.calculate_base_block_reward(&block, is_paris_actived)?
+            {
+                traces.extend(self.extract_reward_traces(&block, base_block_reward));
             }
         }
 
@@ -505,32 +483,39 @@ where
         }))
     }
 
-    /// Extracts the reward traces for the given block.
-    fn extract_block_reward_traces(
+    /// Calculates the base block reward for the given block.
+    fn calculate_base_block_reward(
         &self,
         block: &SealedBlock,
-    ) -> EthResult<Option<Vec<LocalizedTransactionTrace>>> {
-        if let Some(header_td) = self.provider().header_td(&block.header.hash())? {
-            if let Some(base_block_reward) = base_block_reward(
-                self.provider().chain_spec().as_ref(),
-                block.header.number,
-                block.header.difficulty,
-                header_td,
-            ) {
-                return Ok(Some(
-                    self.extract_block_reward_traces_with_base_block_reward(
-                        block,
-                        base_block_reward,
-                    ),
-                ))
+        is_paris_actived: Option<bool>,
+    ) -> EthResult<Option<u128>> {
+        let chain_spec = self.provider().chain_spec();
+
+        // 1. if Paris hardfork is actived, no block rewards are given
+        // 2. if Paris hardfork is not actived, calculate block rewards with block number only
+        // 3. if Paris hardfork is unknown, calculate block rewards with block number and ttd
+        Ok(match is_paris_actived {
+            Some(true) => None,
+            Some(false) => {
+                Some(base_block_reward_pre_merge(chain_spec.as_ref(), block.header.number))
             }
-            Ok(None)
-        } else {
-            Ok(None)
-        }
+            None => {
+                if let Some(header_td) = self.provider().header_td(&block.header.hash())? {
+                    base_block_reward(
+                        chain_spec.as_ref(),
+                        block.header.number,
+                        block.header.difficulty,
+                        header_td,
+                    )
+                } else {
+                    None
+                }
+            }
+        })
     }
 
-    fn extract_block_reward_traces_with_base_block_reward(
+    /// Extracts the reward traces for the given block.
+    fn extract_reward_traces(
         &self,
         block: &SealedBlock,
         base_block_reward: u128,
