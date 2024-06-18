@@ -43,6 +43,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+reth-chainspec.workspace = true
 reth-beacon-consensus.workspace = true
 reth-network-api.workspace = true
 reth-evm-ethereum.workspace = true

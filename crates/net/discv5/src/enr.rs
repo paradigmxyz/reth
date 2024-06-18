@@ -58,7 +58,8 @@ mod tests {
     use super::*;
     use alloy_rlp::Encodable;
     use discv5::enr::{CombinedKey, EnrKey};
-    use reth_primitives::{Hardfork, NodeRecord, MAINNET};
+    use reth_chainspec::{Hardfork, MAINNET};
+    use reth_network_peers::NodeRecord;
 
     #[test]
     fn discv5_discv4_id_conversion() {

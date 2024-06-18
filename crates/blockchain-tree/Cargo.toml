@@ -42,6 +42,7 @@ aquamarine.workspace = true
 linked_hash_set.workspace = true
 
 [dev-dependencies]
+reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }

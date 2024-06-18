@@ -6,7 +6,6 @@ use crate::{
     eth::{
         api::{EthApi, EthTransactions},
         error::EthApiError,
-        revm_utils::EvmOverrides,
     },
     result::{internal_rpc_err, ToRpcResult},
 };
@@ -21,9 +20,11 @@ use reth_provider::{
 };
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    serde_helpers::JsonStorageKey, state::StateOverride, AccessListWithGasUsed,
-    AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
-    FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, TransactionRequest, Work,
+    serde_helpers::JsonStorageKey,
+    state::{EvmOverrides, StateOverride},
+    AccessListWithGasUsed, AnyTransactionReceipt, BlockOverrides, Bundle,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
+    StateContext, SyncStatus, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
 use tracing::trace;
@@ -432,11 +433,12 @@ mod tests {
         EthApi,
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
+    use reth_chainspec::BaseFeeParams;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams, Block, BlockNumberOrTag, Header,
-        TransactionSigned, B256, U64,
+        constants::ETHEREUM_BLOCK_GAS_LIMIT, Block, BlockNumberOrTag, Header, TransactionSigned,
+        B256, U64,
     };
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},

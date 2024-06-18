@@ -1,6 +1,6 @@
 use crate::eth::{
     error::{EthApiError, EthResult},
-    revm_utils::{prepare_call_env, EvmOverrides},
+    revm_utils::prepare_call_env,
     utils::recover_raw_transaction,
     EthTransactions,
 };
@@ -12,7 +12,7 @@ use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProvide
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_types::{
-    state::StateOverride,
+    state::{EvmOverrides, StateOverride},
     trace::{
         filter::TraceFilter,
         opcode::{BlockOpcodeGas, TransactionOpcodeGas},

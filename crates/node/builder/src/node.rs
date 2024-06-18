@@ -1,4 +1,5 @@
 use crate::rpc::{RethRpcServerHandles, RpcRegistry};
+use reth_chainspec::ChainSpec;
 use reth_network::NetworkHandle;
 use reth_node_api::FullNodeComponents;
 use reth_node_core::{
@@ -7,7 +8,6 @@ use reth_node_core::{
     rpc::api::EngineApiClient,
 };
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_primitives::ChainSpec;
 use reth_provider::ChainSpecProvider;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;

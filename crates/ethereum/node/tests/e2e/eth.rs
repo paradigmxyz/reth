@@ -1,14 +1,15 @@
 use crate::utils::eth_payload_attributes;
+use alloy_genesis::Genesis;
 use reth::{
     args::RpcServerArgs,
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
+use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{
     node::NodeTestContext, setup, transaction::TransactionTestContext, wallet::Wallet,
 };
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
 use std::sync::Arc;
 
 #[tokio::test]

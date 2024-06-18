@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-net-common.workspace = true
 reth-network-api.workspace = true
@@ -82,7 +83,7 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 # alloy deps for testing against nodes
 alloy-node-bindings.workspace = true
-alloy-provider.workspace = true
+alloy-provider= { workspace = true, features = ["admin-api"] }
 
 # misc
 serial_test.workspace = true

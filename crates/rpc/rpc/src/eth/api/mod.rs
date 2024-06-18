@@ -13,13 +13,13 @@ use crate::eth::{
     traits::RawTransactionForwarder,
 };
 use async_trait::async_trait;
+use reth_chainspec::ChainInfo;
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Address, BlockId, BlockNumberOrTag, ChainInfo, SealedBlockWithSenders, SealedHeader, B256,
-    U256, U64,
+    Address, BlockId, BlockNumberOrTag, SealedBlockWithSenders, SealedHeader, B256, U256, U64,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderBox, StateProviderFactory,

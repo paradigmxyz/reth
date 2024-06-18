@@ -1,41 +1,50 @@
-use crate::{
-    constants::{
-        EIP1559_INITIAL_BASE_FEE, EMPTY_RECEIPTS, EMPTY_ROOT_HASH, EMPTY_TRANSACTIONS,
-        EMPTY_WITHDRAWALS,
-    },
-    holesky_nodes,
-    net::{goerli_nodes, mainnet_nodes, sepolia_nodes},
-    revm_primitives::{address, b256},
-    Address, BlockNumber, Chain, ChainKind, ForkFilter, ForkFilterKey, ForkHash, ForkId, Genesis,
-    Hardfork, Head, Header, NamedChain, NodeRecord, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH,
-    MAINNET_DEPOSIT_CONTRACT, U256,
+use crate::constants::MAINNET_DEPOSIT_CONTRACT;
+#[cfg(not(feature = "std"))]
+use alloc::{
+    collections::BTreeMap,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
 };
+use alloy_chains::{Chain, ChainKind, NamedChain};
+use alloy_genesis::Genesis;
+use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
+use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
 use once_cell::sync::Lazy;
+use reth_ethereum_forks::{
+    DisplayHardforks, ForkCondition, ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head,
+};
+use reth_network_peers::NodeRecord;
+use reth_primitives_traits::{
+    constants::{
+        EIP1559_INITIAL_BASE_FEE, EMPTY_OMMER_ROOT_HASH, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
+        EMPTY_WITHDRAWALS,
+    },
+    Header, SealedHeader,
+};
 use reth_trie_common::root::state_root_ref_unhashed;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
-    fmt::{Display, Formatter},
-    sync::Arc,
-};
+#[cfg(feature = "std")]
+use std::{collections::BTreeMap, sync::Arc};
 
+#[cfg(feature = "optimism")]
+use crate::constants::optimism::{
+    BASE_SEPOLIA_BASE_FEE_PARAMS, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS, OP_BASE_FEE_PARAMS,
+    OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
+};
 pub use alloy_eips::eip1559::BaseFeeParams;
 
 #[cfg(feature = "optimism")]
-pub(crate) use crate::{
-    constants::{
-        BASE_SEPOLIA_BASE_FEE_PARAMS, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS, OP_BASE_FEE_PARAMS,
-        OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
-    },
-    net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes},
-};
+use crate::net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes};
+use crate::net::{goerli_nodes, holesky_nodes, mainnet_nodes, sepolia_nodes};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::mainnet(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/mainnet.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
             .expect("Can't deserialize Mainnet genesis json"),
         genesis_hash: Some(b256!(
             "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
@@ -86,7 +95,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::goerli(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/goerli.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/goerli.json"))
             .expect("Can't deserialize Goerli genesis json"),
         genesis_hash: Some(b256!(
             "bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a"
@@ -128,7 +137,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::sepolia(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
             .expect("Can't deserialize Sepolia genesis json"),
         genesis_hash: Some(b256!(
             "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
@@ -174,7 +183,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::holesky(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/holesky.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/holesky.json"))
             .expect("Can't deserialize Holesky genesis json"),
         genesis_hash: Some(b256!(
             "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"
@@ -218,7 +227,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::dev(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/dev.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/dev.json"))
             .expect("Can't deserialize Dev testnet genesis json"),
         genesis_hash: Some(b256!(
             "2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"
@@ -264,7 +273,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::optimism_mainnet(),
         // genesis contains empty alloc field because state at first bedrock block is imported
         // manually from trusted source
-        genesis: serde_json::from_str(include_str!("../../res/genesis/optimism.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/optimism.json"))
             .expect("Can't deserialize Optimism Mainnet genesis json"),
         genesis_hash: Some(b256!(
             "7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b"
@@ -314,7 +323,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::from_named(NamedChain::OptimismSepolia),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia_op.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/sepolia_op.json"))
             .expect("Can't deserialize OP Sepolia genesis json"),
         genesis_hash: Some(b256!(
             "102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d"
@@ -364,7 +373,7 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::base_sepolia(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/sepolia_base.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/sepolia_base.json"))
             .expect("Can't deserialize Base Sepolia genesis json"),
         genesis_hash: Some(b256!(
             "0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"
@@ -414,7 +423,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::base_mainnet(),
-        genesis: serde_json::from_str(include_str!("../../res/genesis/base.json"))
+        genesis: serde_json::from_str(include_str!("../res/genesis/base.json"))
             .expect("Can't deserialize Base genesis json"),
         genesis_hash: Some(b256!(
             "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
@@ -840,6 +849,13 @@ impl ChainSpec {
     #[inline]
     pub fn is_homestead_active_at_block(&self, block_number: u64) -> bool {
         self.fork(Hardfork::Homestead).active_at_block(block_number)
+    }
+
+    /// The Paris hardfork (merge) is activated via ttd. If we have knowledge of the block, this
+    /// function will return true if the block number is greater than or equal to the Paris
+    /// (merge) block.
+    pub fn is_paris_active_at_block(&self, block_number: u64) -> Option<bool> {
+        self.paris_block_and_final_difficulty.map(|(paris_block, _)| block_number >= paris_block)
     }
 
     /// Convenience method to check if [`Hardfork::Bedrock`] is active at a given block number.
@@ -1349,275 +1365,6 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
     }
 }
 
-/// The condition at which a fork is activated.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum ForkCondition {
-    /// The fork is activated after a certain block.
-    Block(BlockNumber),
-    /// The fork is activated after a total difficulty has been reached.
-    TTD {
-        /// The block number at which TTD is reached, if it is known.
-        ///
-        /// This should **NOT** be set unless you want this block advertised as [EIP-2124][eip2124]
-        /// `FORK_NEXT`. This is currently only the case for Sepolia and Holesky.
-        ///
-        /// [eip2124]: https://eips.ethereum.org/EIPS/eip-2124
-        fork_block: Option<BlockNumber>,
-        /// The total difficulty after which the fork is activated.
-        total_difficulty: U256,
-    },
-    /// The fork is activated after a specific timestamp.
-    Timestamp(u64),
-    /// The fork is never activated
-    #[default]
-    Never,
-}
-
-impl ForkCondition {
-    /// Returns true if the fork condition is timestamp based.
-    pub const fn is_timestamp(&self) -> bool {
-        matches!(self, Self::Timestamp(_))
-    }
-
-    /// Checks whether the fork condition is satisfied at the given block.
-    ///
-    /// For TTD conditions, this will only return true if the activation block is already known.
-    ///
-    /// For timestamp conditions, this will always return false.
-    pub const fn active_at_block(&self, current_block: BlockNumber) -> bool {
-        matches!(self, Self::Block(block)
-        | Self::TTD { fork_block: Some(block), .. } if current_block >= *block)
-    }
-
-    /// Checks if the given block is the first block that satisfies the fork condition.
-    ///
-    /// This will return false for any condition that is not block based.
-    pub const fn transitions_at_block(&self, current_block: BlockNumber) -> bool {
-        matches!(self, Self::Block(block) if current_block == *block)
-    }
-
-    /// Checks whether the fork condition is satisfied at the given total difficulty and difficulty
-    /// of a current block.
-    ///
-    /// The fork is considered active if the _previous_ total difficulty is above the threshold.
-    /// To achieve that, we subtract the passed `difficulty` from the current block's total
-    /// difficulty, and check if it's above the Fork Condition's total difficulty (here:
-    /// `58_750_000_000_000_000_000_000`)
-    ///
-    /// This will return false for any condition that is not TTD-based.
-    pub fn active_at_ttd(&self, ttd: U256, difficulty: U256) -> bool {
-        matches!(self, Self::TTD { total_difficulty, .. }
-            if ttd.saturating_sub(difficulty) >= *total_difficulty)
-    }
-
-    /// Checks whether the fork condition is satisfied at the given timestamp.
-    ///
-    /// This will return false for any condition that is not timestamp-based.
-    pub const fn active_at_timestamp(&self, timestamp: u64) -> bool {
-        matches!(self, Self::Timestamp(time) if timestamp >= *time)
-    }
-
-    /// Checks whether the fork condition is satisfied at the given head block.
-    ///
-    /// This will return true if:
-    ///
-    /// - The condition is satisfied by the block number;
-    /// - The condition is satisfied by the timestamp;
-    /// - or the condition is satisfied by the total difficulty
-    pub fn active_at_head(&self, head: &Head) -> bool {
-        self.active_at_block(head.number) ||
-            self.active_at_timestamp(head.timestamp) ||
-            self.active_at_ttd(head.total_difficulty, head.difficulty)
-    }
-
-    /// Get the total terminal difficulty for this fork condition.
-    ///
-    /// Returns `None` for fork conditions that are not TTD based.
-    pub const fn ttd(&self) -> Option<U256> {
-        match self {
-            Self::TTD { total_difficulty, .. } => Some(*total_difficulty),
-            _ => None,
-        }
-    }
-
-    /// Returns the timestamp of the fork condition, if it is timestamp based.
-    pub const fn as_timestamp(&self) -> Option<u64> {
-        match self {
-            Self::Timestamp(timestamp) => Some(*timestamp),
-            _ => None,
-        }
-    }
-}
-
-/// A container to pretty-print a hardfork.
-///
-/// The fork is formatted depending on its fork condition:
-///
-/// - Block and timestamp based forks are formatted in the same manner (`{name} <({eip})>
-///   @{condition}`)
-/// - TTD based forks are formatted separately as `{name} <({eip})> @{ttd} (network is <not> known
-///   to be merged)`
-///
-/// An optional EIP can be attached to the fork to display as well. This should generally be in the
-/// form of just `EIP-x`, e.g. `EIP-1559`.
-#[derive(Debug)]
-struct DisplayFork {
-    /// The name of the hardfork (e.g. Frontier)
-    name: String,
-    /// The fork condition
-    activated_at: ForkCondition,
-    /// An optional EIP (e.g. `EIP-1559`).
-    eip: Option<String>,
-}
-
-impl Display for DisplayFork {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let name_with_eip = if let Some(eip) = &self.eip {
-            format!("{} ({})", self.name, eip)
-        } else {
-            self.name.clone()
-        };
-
-        match self.activated_at {
-            ForkCondition::Block(at) | ForkCondition::Timestamp(at) => {
-                write!(f, "{name_with_eip:32} @{at}")?;
-            }
-            ForkCondition::TTD { fork_block, total_difficulty } => {
-                write!(
-                    f,
-                    "{:32} @{} ({})",
-                    name_with_eip,
-                    total_difficulty,
-                    if fork_block.is_some() {
-                        "network is known to be merged"
-                    } else {
-                        "network is not known to be merged"
-                    }
-                )?;
-            }
-            ForkCondition::Never => unreachable!(),
-        }
-
-        Ok(())
-    }
-}
-
-/// A container for pretty-printing a list of hardforks.
-///
-/// # Examples
-///
-/// ```
-/// # use reth_primitives::MAINNET;
-/// println!("{}", MAINNET.display_hardforks());
-/// ```
-///
-/// An example of the output:
-///
-/// ```text
-/// Pre-merge hard forks (block based):
-// - Frontier                         @0
-// - Homestead                        @1150000
-// - Dao                              @1920000
-// - Tangerine                        @2463000
-// - SpuriousDragon                   @2675000
-// - Byzantium                        @4370000
-// - Constantinople                   @7280000
-// - Petersburg                       @7280000
-// - Istanbul                         @9069000
-// - MuirGlacier                      @9200000
-// - Berlin                           @12244000
-// - London                           @12965000
-// - ArrowGlacier                     @13773000
-// - GrayGlacier                      @15050000
-// Merge hard forks:
-// - Paris                            @58750000000000000000000 (network is known to be merged)
-// Post-merge hard forks (timestamp based):
-// - Shanghai                         @1681338455
-/// ```
-#[derive(Debug)]
-pub struct DisplayHardforks {
-    /// A list of pre-merge (block based) hardforks
-    pre_merge: Vec<DisplayFork>,
-    /// A list of merge (TTD based) hardforks
-    with_merge: Vec<DisplayFork>,
-    /// A list of post-merge (timestamp based) hardforks
-    post_merge: Vec<DisplayFork>,
-}
-
-impl Display for DisplayHardforks {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        fn format(
-            header: &str,
-            forks: &[DisplayFork],
-            next_is_empty: bool,
-            f: &mut Formatter<'_>,
-        ) -> std::fmt::Result {
-            writeln!(f, "{header}:")?;
-            let mut iter = forks.iter().peekable();
-            while let Some(fork) = iter.next() {
-                write!(f, "- {fork}")?;
-                if !next_is_empty || iter.peek().is_some() {
-                    writeln!(f)?;
-                }
-            }
-            Ok(())
-        }
-
-        format(
-            "Pre-merge hard forks (block based)",
-            &self.pre_merge,
-            self.with_merge.is_empty(),
-            f,
-        )?;
-
-        if !self.with_merge.is_empty() {
-            format("Merge hard forks", &self.with_merge, self.post_merge.is_empty(), f)?;
-        }
-
-        if !self.post_merge.is_empty() {
-            format("Post-merge hard forks (timestamp based)", &self.post_merge, true, f)?;
-        }
-
-        Ok(())
-    }
-}
-
-impl DisplayHardforks {
-    /// Creates a new [`DisplayHardforks`] from an iterator of hardforks.
-    pub fn new(
-        hardforks: &BTreeMap<Hardfork, ForkCondition>,
-        known_paris_block: Option<u64>,
-    ) -> Self {
-        let mut pre_merge = Vec::new();
-        let mut with_merge = Vec::new();
-        let mut post_merge = Vec::new();
-
-        for (fork, condition) in hardforks {
-            let mut display_fork =
-                DisplayFork { name: fork.to_string(), activated_at: *condition, eip: None };
-
-            match condition {
-                ForkCondition::Block(_) => {
-                    pre_merge.push(display_fork);
-                }
-                ForkCondition::TTD { total_difficulty, .. } => {
-                    display_fork.activated_at = ForkCondition::TTD {
-                        fork_block: known_paris_block,
-                        total_difficulty: *total_difficulty,
-                    };
-                    with_merge.push(display_fork);
-                }
-                ForkCondition::Timestamp(_) => {
-                    post_merge.push(display_fork);
-                }
-                ForkCondition::Never => continue,
-            }
-        }
-
-        Self { pre_merge, with_merge, post_merge }
-    }
-}
-
 /// `PoS` deposit contract details.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DepositContract {
@@ -1721,11 +1468,15 @@ impl OptimismGenesisInfo {
 
 #[cfg(test)]
 mod tests {
+    use alloy_chains::Chain;
+    use alloy_genesis::{ChainConfig, GenesisAccount};
+    use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use reth_trie_common::TrieAccount;
 
     use super::*;
-    use crate::{b256, hex, ChainConfig, GenesisAccount};
+    use alloy_primitives::{b256, hex};
     use std::{collections::HashMap, str::FromStr};
+
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
             let computed_id = spec.fork_id(block);

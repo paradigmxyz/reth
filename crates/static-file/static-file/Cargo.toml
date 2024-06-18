@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
 reth-provider.workspace = true
@@ -21,6 +20,9 @@ reth-storage-errors.workspace = true
 reth-nippy-jar.workspace = true
 reth-tokio-util.workspace = true
 reth-prune-types.workspace = true
+reth-static-file-types.workspace = true
+
+alloy-primitives.workspace = true
 
 # misc
 tracing.workspace = true

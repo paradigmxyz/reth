@@ -1,16 +1,18 @@
 use std::sync::Arc;
 
+use alloy_genesis::Genesis;
+use alloy_primitives::b256;
 use reth::{
     args::RpcServerArgs,
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     rpc::types::engine::PayloadStatusEnum,
     tasks::TaskManager,
 };
+use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{
     node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
 };
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{b256, ChainSpecBuilder, Genesis, MAINNET};
 use reth_transaction_pool::TransactionPool;
 
 use crate::utils::eth_payload_attributes;
