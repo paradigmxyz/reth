@@ -153,8 +153,7 @@ where
             }
 
             for header in &headers {
-                let mut ratio = header.gas_used as f64 / header.gas_limit as f64;
-                if ratio.is_infinite() { ratio = 1.0 };
+                let ratio = if header.gas_limit > 0 {header.gas_used as f64 / header.gas_limit as f64} else {1.0};
 
                 base_fee_per_gas.push(header.base_fee_per_gas.unwrap_or_default() as u128);
                 gas_used_ratio.push(ratio);
