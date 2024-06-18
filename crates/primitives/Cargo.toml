@@ -19,6 +19,7 @@ reth-ethereum-forks.workspace = true
 reth-static-file-types.workspace = true
 reth-trie-common.workspace = true
 reth-chainspec.workspace = true
+revm.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
@@ -102,6 +103,7 @@ arbitrary = [
 ]
 c-kzg = [
     "dep:c-kzg",
+    "revm/c-kzg",
     "revm-primitives/c-kzg",
     "dep:tempfile",
     "alloy-eips/kzg",
@@ -111,6 +113,7 @@ optimism = [
     "reth-chainspec/optimism",
     "reth-codecs/optimism",
     "reth-ethereum-forks/optimism",
+    "revm/optimism",
 ]
 alloy-compat = [
     "reth-primitives-traits/alloy-compat",
