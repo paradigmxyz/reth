@@ -59,10 +59,12 @@ proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 # eth
+reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 revm-primitives = { workspace = true, features = ["arbitrary"] }
 nybbles = { workspace = true, features = ["arbitrary"] }
 alloy-trie = { workspace = true, features = ["arbitrary"] }
 alloy-eips = { workspace = true, features = ["arbitrary"] }
+alloy-consensus = { workspace = true, features = ["arbitrary"] }
 
 assert_matches.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
