@@ -42,6 +42,8 @@ test-fuzz.workspace = true
 rand.workspace = true
 
 [features]
+default = ["std"]
+std = []
 test-utils = ["arbitrary"]
 arbitrary = [
     "dep:arbitrary",

@@ -1,7 +1,7 @@
 //! Ethereum protocol-related constants
 
 use alloy_primitives::{address, b256, Address, B256, U256};
-use std::time::Duration;
+use core::time::Duration;
 
 /// The client version: `reth/v{major}.{minor}.{patch}`
 pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"));
