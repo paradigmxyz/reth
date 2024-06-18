@@ -1089,7 +1089,7 @@ mod tests {
                 .state_mut()
                 .storage(
                     HISTORY_STORAGE_ADDRESS,
-                    U256::from(fork_activation_block % (BLOCKHASH_SERVE_WINDOW - 1) as u64)
+                    U256::from(fork_activation_block % BLOCKHASH_SERVE_WINDOW as u64 - 1)
                 )
                 .unwrap(),
             U256::ZERO
