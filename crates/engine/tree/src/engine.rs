@@ -4,10 +4,7 @@ use crate::{
     chain::{ChainHandler, FromOrchestrator, HandlerEvent, OrchestratorState},
     tree::EngineApiTreeHandler,
 };
-use futures::{
-    stream::Fuse,
-    Stream, StreamExt,
-};
+use futures::{stream::Fuse, Stream, StreamExt};
 use reth_beacon_consensus::BeaconEngineMessage;
 use reth_primitives::{SealedBlockWithSenders, B256};
 use std::{
@@ -70,8 +67,6 @@ where
                                         // TODO: clear downloads in progress
                                         return Poll::Ready(HandlerEvent::Pipeline(target))
                                     }
-                                    HandlerEvent::WriteAccessPaused => {}
-                                    HandlerEvent::WriteAccessAcquired => {}
                                 }
                             }
                             RequestHandlerEvent::Download(_) => {
