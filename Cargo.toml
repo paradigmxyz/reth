@@ -474,9 +474,7 @@ secp256k1 = { version = "0.29", default-features = false, features = [
     "global-context",
     "recovery",
 ] }
-# TODO: Remove `k256` feature: https://github.com/sigp/enr/pull/74
-enr = { version = "0.12.0", default-features = false, features = [
-    "k256",
+enr = { version = "0.12.1", default-features = false, features = [
     "rust-secp256k1",
 ] }
 
