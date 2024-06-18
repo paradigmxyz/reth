@@ -382,10 +382,10 @@ where
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
         if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            let is_paris_actived =
+            let is_paris_activated =
                 self.provider().chain_spec().is_paris_active_at_block(block.number);
             if let Some(base_block_reward) =
-                self.calculate_base_block_reward(&block, is_paris_actived)?
+                self.calculate_base_block_reward(&block, is_paris_activated)?
             {
                 traces.extend(self.extract_reward_traces(&block, base_block_reward));
             }
