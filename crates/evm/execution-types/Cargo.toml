@@ -26,5 +26,5 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
 [features]
-serde = ["dep:serde", "reth-trie/serde", "revm/serde"]
 optimism = ["dep:reth-chainspec"]
+serde = ["dep:serde", "reth-trie/serde", "revm/serde"]
