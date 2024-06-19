@@ -20,6 +20,9 @@ macro_rules! impl_fuzzer_with_input {
                 use reth_primitives::*;
 
                 #[allow(unused_imports)]
+                use reth_primitives_traits::*;
+
+                #[allow(unused_imports)]
                 use super::inputs::*;
 
                 #[allow(unused_imports)]
