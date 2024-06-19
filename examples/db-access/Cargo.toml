@@ -1,5 +1,5 @@
 [package]
-name = "db-access"
+name = "example-db-access"
 version = "0.0.0"
 publish = false
 edition.workspace = true
