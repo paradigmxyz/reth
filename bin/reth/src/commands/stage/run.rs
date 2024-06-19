@@ -15,7 +15,7 @@ use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookup
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
 use reth_provider::{
-    ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
+    ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory, StaticFileWriter,
 };
 use reth_stages::{
     stages::{
@@ -254,6 +254,7 @@ impl Command {
 
                 if self.commit {
                     provider_rw.commit()?;
+                    provider_factory.static_file_provider().commit()?;
                     provider_rw = provider_factory.provider_rw()?;
                 }
             }
@@ -276,6 +277,7 @@ impl Command {
                 provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
             }
             if self.commit {
+                provider_factory.static_file_provider().commit()?;
                 provider_rw.commit()?;
                 provider_rw = provider_factory.provider_rw()?;
             }
