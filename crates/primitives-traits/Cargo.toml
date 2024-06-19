@@ -52,6 +52,7 @@ default = ["std"]
 std = ["thiserror-no-std/std"]
 test-utils = ["arbitrary"]
 arbitrary = [
+    "alloy-consensus/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive"
