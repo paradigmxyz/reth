@@ -1063,9 +1063,7 @@ where
         };
 
         // we are splitting chain at the block hash that we want to make canonical
-        let Some(canonical) =
-            self.remove_and_split_chain(chain_id, ChainSplitTarget::Hash(block_hash))
-        else {
+        let Some(canonical) = self.remove_and_split_chain(chain_id, block_hash.into()) else {
             debug!(target: "blockchain_tree", ?block_hash, ?chain_id, "Chain not present");
             return Err(CanonicalError::from(BlockchainTreeError::BlockSideChainIdConsistency {
                 chain_id: chain_id.into(),
