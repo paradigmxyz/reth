@@ -1367,6 +1367,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_genesis::{Genesis, GenesisAccount};
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -1384,8 +1385,8 @@ mod tests {
         keccak256,
         proofs::calculate_transaction_root,
         revm_primitives::AccountInfo,
-        Account, Address, Genesis, GenesisAccount, Header, Signature, Transaction,
-        TransactionSigned, TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
+        Account, Address, Header, Signature, Transaction, TransactionSigned,
+        TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
     };
     use reth_provider::{
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec},

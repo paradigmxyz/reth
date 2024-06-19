@@ -57,6 +57,7 @@ reth-revm = { workspace = true, features = ["test-utils"] }
 reth-e2e-test-utils.workspace = true
 tokio.workspace = true
 alloy-primitives.workspace = true
+alloy-genesis.workspace = true
 
 [features]
 optimism = [

@@ -2490,8 +2490,9 @@ mod tests {
 
     mod new_payload {
         use super::*;
+        use alloy_genesis::Genesis;
         use reth_db::test_utils::create_test_static_files_dir;
-        use reth_primitives::{genesis::Genesis, Hardfork, U256};
+        use reth_primitives::{Hardfork, U256};
         use reth_provider::{
             providers::StaticFileProvider, test_utils::blocks::BlockchainTestData,
         };
