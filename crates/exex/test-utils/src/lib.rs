@@ -136,13 +136,18 @@ where
     }
 }
 
-type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
-type Adapter = NodeAdapter<
+/// A shared [`TempDatabase`] used for testing
+pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
+/// The [`NodeAdapter`] for the [`TestExExContext`]. Contains type necessary to
+/// boot the testing environment
+pub type Adapter = NodeAdapter<
     RethFullAdapter<TmpDB, TestNode>,
     <<TestNode as Node<FullNodeTypesAdapter<TestNode, TmpDB, BlockchainProvider<TmpDB>>>>::ComponentsBuilder as NodeComponentsBuilder<
         RethFullAdapter<TmpDB, TestNode>,
     >>::Components,
 >;
+/// An [`ExExContext`] using the [`Adapter`] type.
+pub type TestExExContext = ExExContext<Adapter>;
 
 /// A helper type for testing Execution Extensions.
 #[derive(Debug)]
@@ -155,6 +160,8 @@ pub struct TestExExHandle {
     pub events_rx: UnboundedReceiver<ExExEvent>,
     /// Channel for sending notifications to the Execution Extension
     pub notifications_tx: Sender<ExExNotification>,
+    /// Node task manager
+    pub tasks: TaskManager,
 }
 
 impl TestExExHandle {
@@ -278,7 +285,7 @@ pub async fn test_exex_context_with_chain_spec(
         components,
     };
 
-    Ok((ctx, TestExExHandle { genesis, provider_factory, events_rx, notifications_tx }))
+    Ok((ctx, TestExExHandle { genesis, provider_factory, events_rx, notifications_tx, tasks }))
 }
 
 /// Creates a new [`ExExContext`] with (mainnet)[`MAINNET`] chain spec.

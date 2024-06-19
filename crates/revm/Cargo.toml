@@ -36,5 +36,7 @@ tracing.workspace = true
 reth-trie.workspace = true
 
 [features]
+default = ["std"]
+std = []
 test-utils = ["dep:reth-trie"]
 optimism = ["revm/optimism"]

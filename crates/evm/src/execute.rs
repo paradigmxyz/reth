@@ -6,6 +6,9 @@ use reth_prune_types::PruneModes;
 use revm::db::BundleState;
 use revm_primitives::db::Database;
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_storage_errors::provider::ProviderError;
 
