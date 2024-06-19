@@ -22,6 +22,7 @@ use std::convert::Infallible;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use alloy_genesis::Genesis;
 use reth::{
     api::PayloadTypes,
     builder::{
@@ -51,7 +52,7 @@ use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
     PayloadBuilderService,
 };
-use reth_primitives::{Address, Genesis, Header, Withdrawals, B256};
+use reth_primitives::{Address, Header, Withdrawals, B256};
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,

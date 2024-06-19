@@ -2789,6 +2789,7 @@ dependencies = [
 name = "example-custom-engine-types"
 version = "0.0.0"
 dependencies = [
+ "alloy-genesis",
  "eyre",
  "reth",
  "reth-basic-payload-builder",
@@ -2810,6 +2811,7 @@ dependencies = [
 name = "example-custom-evm"
 version = "0.0.0"
 dependencies = [
+ "alloy-genesis",
  "eyre",
  "reth",
  "reth-chainspec",
@@ -2931,6 +2933,7 @@ name = "example-exex-rollup"
 version = "0.0.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-genesis",
  "alloy-rlp",
  "alloy-sol-types",
  "eyre",
@@ -3049,6 +3052,7 @@ dependencies = [
 name = "example-stateful-precompile"
 version = "0.0.0"
 dependencies = [
+ "alloy-genesis",
  "eyre",
  "parking_lot 0.12.3",
  "reth",
@@ -6422,6 +6426,7 @@ dependencies = [
 name = "reth-beacon-consensus"
 version = "1.0.0-rc.2"
 dependencies = [
+ "alloy-genesis",
  "assert_matches",
  "futures",
  "itertools 0.12.1",
@@ -6513,6 +6518,7 @@ dependencies = [
 name = "reth-blockchain-tree"
 version = "1.0.0-rc.2"
 dependencies = [
+ "alloy-genesis",
  "aquamarine",
  "assert_matches",
  "linked_hash_set",
@@ -6744,6 +6750,7 @@ dependencies = [
 name = "reth-db-common"
 version = "1.0.0-rc.2"
 dependencies = [
+ "alloy-genesis",
  "eyre",
  "reth-chainspec",
  "reth-codecs",
@@ -6997,6 +7004,7 @@ dependencies = [
 name = "reth-eth-wire-types"
 version = "1.0.0-rc.2"
 dependencies = [
+ "alloy-genesis",
  "alloy-rlp",
  "arbitrary",
  "async-stream",
@@ -7523,6 +7531,7 @@ dependencies = [
 name = "reth-node-core"
 version = "1.0.0-rc.2"
 dependencies = [
+ "alloy-genesis",
  "alloy-rpc-types-engine",
  "clap",
  "const-str",
@@ -7641,6 +7650,7 @@ dependencies = [
 name = "reth-node-optimism"
 version = "1.0.0-rc.2"
 dependencies = [
+ "alloy-genesis",
  "alloy-primitives",
  "async-trait",
  "clap",
@@ -7949,6 +7959,7 @@ name = "reth-rpc"
 version = "1.0.0-rc.2"
 dependencies = [
  "alloy-dyn-abi",
+ "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-sol-types",

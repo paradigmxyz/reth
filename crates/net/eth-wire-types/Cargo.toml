@@ -17,6 +17,7 @@ reth-chainspec.workspace = true
 reth-codecs-derive.workspace = true
 reth-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
+alloy-genesis.workspace = true
 
 bytes.workspace = true
 derive_more.workspace = true
