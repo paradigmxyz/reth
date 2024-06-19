@@ -13,15 +13,15 @@ use reth_consensus::{Consensus, ConsensusError};
 use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, Hardfork, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
-    CanonStateNotificationSender, CanonStateNotifications, Chain, ChainSpecProvider, ChainSplit,
-    ChainSplitTarget, DisplayBlocksChain, ExecutionOutcome, HeaderProvider, ProviderError,
-    StaticFileProviderFactory,
+    CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
+    ChainSplitTarget, DisplayBlocksChain, HeaderProvider, ProviderError, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
