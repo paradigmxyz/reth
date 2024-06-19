@@ -9,11 +9,12 @@ use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     receipt_file_client::ReceiptFileClient,
 };
+use reth_execution_types::ExecutionOutcome;
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_primitives::{Receipts, StaticFileSegment};
 use reth_provider::{
-    ExecutionOutcome, OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateWriter,
+    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateWriter,
     StaticFileProviderFactory, StaticFileWriter, StatsReader,
 };
 use reth_stages::StageId;

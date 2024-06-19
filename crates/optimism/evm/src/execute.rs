@@ -9,11 +9,11 @@ use reth_evm::{
     },
     ConfigureEvm,
 };
+use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_primitives::{
     BlockNumber, BlockWithSenders, Header, Receipt, Receipts, TxType, Withdrawals, U256,
 };
-use reth_provider::ExecutionOutcome;
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},

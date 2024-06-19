@@ -3,8 +3,8 @@
 use super::state::BlockchainId;
 use crate::canonical_chain::CanonicalChain;
 use linked_hash_set::LinkedHashSet;
+use reth_execution_types::Chain;
 use reth_primitives::{BlockHash, BlockNumHash, BlockNumber, SealedBlockWithSenders};
-use reth_provider::Chain;
 use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// Internal indices of the blocks and chains.

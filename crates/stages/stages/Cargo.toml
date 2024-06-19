@@ -25,6 +25,7 @@ reth-exex.workspace = true
 reth-network-p2p.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
+reth-execution-types.workspace = true
 reth-prune-types.workspace = true
 reth-storage-errors.workspace = true
 reth-revm.workspace = true

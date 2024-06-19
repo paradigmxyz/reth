@@ -13,12 +13,13 @@ use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_db_api::database::Database;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_execution_errors::BlockExecutionError;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView},
-    Chain, ExecutionOutcome, FullExecutionDataProvider, ProviderError, StateRootProvider,
+    FullExecutionDataProvider, ProviderError, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::updates::TrieUpdates;

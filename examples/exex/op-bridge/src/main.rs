@@ -1,10 +1,10 @@
 use alloy_sol_types::{sol, SolEventInterface};
 use futures::Future;
+use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{address, Address, Log, SealedBlockWithSenders, TransactionSigned};
-use reth_provider::Chain;
 use reth_tracing::tracing::info;
 use rusqlite::Connection;
 
@@ -259,12 +259,12 @@ mod tests {
 
     use alloy_sol_types::SolEvent;
     use reth::revm::db::BundleState;
+    use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_exex_test_utils::{test_exex_context, PollOnce};
     use reth_primitives::{
         Address, Block, Header, Log, Receipt, Transaction, TransactionSigned, TxKind, TxLegacy,
         TxType, U256,
     };
-    use reth_provider::{Chain, ExecutionOutcome};
     use reth_testing_utils::generators::sign_tx_with_random_key_pair;
     use rusqlite::Connection;
 
