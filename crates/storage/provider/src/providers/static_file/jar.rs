@@ -6,10 +6,11 @@ use crate::{
     to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
+use reth_chainspec::ChainInfo;
 use reth_db::static_file::{HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask};
 use reth_db_api::models::CompactU256;
 use reth_primitives::{
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, ChainInfo, Header, Receipt, SealedHeader,
+    Address, BlockHash, BlockHashOrNumber, BlockNumber, Header, Receipt, SealedHeader,
     TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, B256, U256,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};

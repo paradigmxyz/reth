@@ -167,7 +167,9 @@ impl Command {
                 OriginalValuesKnown::Yes,
             )?;
 
-            let checkpoint = Some(StageCheckpoint::new(block_number - 1));
+            let checkpoint = Some(StageCheckpoint::new(
+                block_number.checked_sub(1).ok_or(eyre::eyre!("GenesisBlockHasNoParent"))?,
+            ));
 
             let mut account_hashing_done = false;
             while !account_hashing_done {

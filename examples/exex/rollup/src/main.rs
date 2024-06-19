@@ -8,13 +8,11 @@ use alloy_sol_types::{sol, SolEventInterface, SolInterface};
 use db::Database;
 use execution::execute_block;
 use once_cell::sync::Lazy;
+use reth_chainspec::{ChainSpec, ChainSpecBuilder};
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{
-    address, Address, ChainSpec, ChainSpecBuilder, Genesis, SealedBlockWithSenders,
-    TransactionSigned, U256,
-};
+use reth_primitives::{address, Address, Genesis, SealedBlockWithSenders, TransactionSigned, U256};
 use reth_provider::Chain;
 use reth_tracing::tracing::{error, info};
 use rusqlite::Connection;

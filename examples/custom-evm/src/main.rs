@@ -12,15 +12,16 @@ use reth::{
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,
-        precompile::{Precompile, PrecompileSpecId, Precompiles},
-        Database, Evm, EvmBuilder, GetInspector,
+        precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
+        ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
 };
+use reth_chainspec::{Chain, ChainSpec};
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
-use reth_primitives::{Chain, ChainSpec, Genesis, Header, TransactionSigned};
+use reth_primitives::{Genesis, Header, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
 
@@ -45,18 +46,18 @@ impl MyEvmConfig {
 
         // install the precompiles
         handler.pre_execution.load_precompiles = Arc::new(move || {
-            let mut precompiles = Precompiles::new(PrecompileSpecId::from_spec_id(spec_id)).clone();
-            precompiles.inner.insert(
+            let mut precompiles = ContextPrecompiles::new(PrecompileSpecId::from_spec_id(spec_id));
+            precompiles.extend([(
                 address!("0000000000000000000000000000000000000999"),
-                Precompile::Env(Self::my_precompile),
-            );
-            precompiles.into()
+                Precompile::Env(Self::my_precompile).into(),
+            )]);
+            precompiles
         });
     }
 
     /// A custom precompile that does nothing
     fn my_precompile(_data: &Bytes, _gas: u64, _env: &Env) -> PrecompileResult {
-        Ok((0, Bytes::new()))
+        Ok(PrecompileOutput::new(0, Bytes::new()))
     }
 }
 

@@ -216,10 +216,10 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
 #[cfg(test)]
 mod tests {
     use crate::segments::{receipts_by_logs::ReceiptsByLogs, PruneInput, Segment};
+    use alloy_primitives::B256;
     use assert_matches::assert_matches;
     use reth_db::tables;
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
-    use reth_primitives::B256;
     use reth_provider::{PruneCheckpointReader, TransactionsProvider};
     use reth_prune_types::{PruneLimiter, PruneMode, PruneSegment, ReceiptsLogPruneConfig};
     use reth_stages::test_utils::{StorageKind, TestStageDB};

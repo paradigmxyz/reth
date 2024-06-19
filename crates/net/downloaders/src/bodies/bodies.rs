@@ -604,9 +604,10 @@ mod tests {
         test_utils::{generate_bodies, TestBodiesClient},
     };
     use assert_matches::assert_matches;
+    use reth_chainspec::MAINNET;
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
-    use reth_primitives::{BlockBody, B256, MAINNET};
+    use reth_primitives::{BlockBody, B256};
     use reth_provider::{providers::StaticFileProvider, ProviderFactory};
     use reth_testing_utils::{generators, generators::random_block_range};
     use std::collections::HashMap;

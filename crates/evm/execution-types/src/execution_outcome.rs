@@ -162,7 +162,7 @@ impl ExecutionOutcome {
     pub fn optimism_receipts_root_slow(
         &self,
         block_number: BlockNumber,
-        chain_spec: &reth_primitives::ChainSpec,
+        chain_spec: &reth_chainspec::ChainSpec,
         timestamp: u64,
     ) -> Option<B256> {
         self.receipts.optimism_root_slow(
