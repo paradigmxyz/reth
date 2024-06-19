@@ -182,30 +182,27 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                 }))
             }
             #[cfg(feature = "optimism")]
-            Some(TxType::Deposit) => Ok(Self::Deposit(crate::transaction::TxDeposit {
-                source_hash: tx
+            Some(TxType::Deposit) => {
+                let fields = tx
                     .other
-                    .get_deserialized::<String>("sourceHash")
-                    .ok_or_else(|| ConversionError::Custom("MissingSourceHash".to_string()))?
-                    .map_err(|_| ConversionError::Custom("MissingSourceHash".to_string()))?
-                    .parse()
-                    .map_err(|_| ConversionError::Custom("InvalidSourceHash".to_string()))?,
-                from: tx.from,
-                to: TxKind::from(tx.to),
-                mint: Option::transpose(
-                    tx.other.get_deserialized::<alloy_primitives::U128>("mint"),
-                )
-                .map_err(|_| ConversionError::Custom("MissingMintValue".to_string()))?
-                .map(|num| num.to::<u128>())
-                .filter(|num| *num > 0),
-                value: tx.value,
-                gas_limit: tx
-                    .gas
-                    .try_into()
-                    .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                is_system_transaction: tx.from == crate::constants::OP_SYSTEM_TX_FROM_ADDR,
-                input: tx.input,
-            })),
+                    .deserialize_into::<alloy_rpc_types::optimism::OptimismTransactionFields>()
+                    .map_err(|e| ConversionError::Custom(e.to_string()))?;
+                Ok(Self::Deposit(crate::transaction::TxDeposit {
+                    source_hash: fields
+                        .source_hash
+                        .ok_or_else(|| ConversionError::Custom("MissingSourceHash".to_string()))?,
+                    from: tx.from,
+                    to: TxKind::from(tx.to),
+                    mint: fields.mint.map(|n| n.to::<u128>()).filter(|n| *n != 0),
+                    value: tx.value,
+                    gas_limit: tx
+                        .gas
+                        .try_into()
+                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
+                    is_system_transaction: fields.is_system_tx.unwrap_or(false),
+                    input: tx.input,
+                }))
+            }
         }
     }
 }
@@ -272,6 +269,7 @@ impl TryFrom<alloy_rpc_types::Signature> for Signature {
 }
 
 #[cfg(test)]
+#[cfg(feature = "optimism")]
 mod tests {
     use super::*;
     use alloy_primitives::{B256, U256};
@@ -279,7 +277,6 @@ mod tests {
     use revm_primitives::{address, Address};
 
     #[test]
-    #[cfg(feature = "optimism")]
     fn optimism_deposit_tx_conversion_no_mint() {
         let input = r#"{
             "blockHash": "0xef664d656f841b5ad6a2b527b963f1eb48b97d7889d742f6cbff6950388e24cd",
@@ -330,7 +327,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "optimism")]
     fn optimism_deposit_tx_conversion_mint() {
         let input = r#"{
             "blockHash": "0x7194f63b105e93fb1a27c50d23d62e422d4185a68536c55c96284911415699b2",

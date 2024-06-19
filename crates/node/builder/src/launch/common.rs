@@ -5,6 +5,7 @@ use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_auto_seal_consensus::MiningMode;
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_blockchain_tree::{noop::NoopBlockchainTree, BlockchainTreeConfig};
 use reth_chainspec::{Chain, ChainSpec};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
@@ -17,16 +18,22 @@ use reth_node_core::{
     node_config::NodeConfig,
 };
 use reth_primitives::{BlockNumber, Head, B256};
-use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{
+    providers::{BlockchainProvider, StaticFileProvider},
+    CanonStateNotificationSender, ProviderFactory, StaticFileProviderFactory,
+};
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
-use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
+use reth_stages::{sets::DefaultStages, MetricEvent, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
 use std::{sync::Arc, thread::available_parallelism};
-use tokio::sync::{mpsc::Receiver, oneshot, watch};
+use tokio::sync::{
+    mpsc::{unbounded_channel, Receiver, UnboundedSender},
+    oneshot, watch,
+};
 
 /// Reusable setup for launching a node.
 ///
@@ -438,34 +445,6 @@ where
         self.right().static_file_provider()
     }
 
-    /// Creates a new [`StaticFileProducer`] with the attached database.
-    pub fn static_file_producer(&self) -> StaticFileProducer<DB> {
-        StaticFileProducer::new(
-            self.provider_factory().clone(),
-            self.prune_modes().unwrap_or_default(),
-        )
-    }
-
-    /// Convenience function to [`Self::init_genesis`]
-    pub fn with_genesis(self) -> Result<Self, InitDatabaseError> {
-        init_genesis(self.provider_factory().clone())?;
-        Ok(self)
-    }
-
-    /// Write the genesis block and state if it has not already been written
-    pub fn init_genesis(&self) -> Result<B256, InitDatabaseError> {
-        init_genesis(self.provider_factory().clone())
-    }
-
-    /// Returns the max block that the node should run to, looking it up from the network if
-    /// necessary
-    pub async fn max_block<C>(&self, client: C) -> eyre::Result<Option<BlockNumber>>
-    where
-        C: HeadersClient,
-    {
-        self.node_config().max_block(client, self.provider_factory().clone()).await
-    }
-
     /// Convenience function to [`Self::start_prometheus_endpoint`]
     pub async fn with_prometheus(self) -> eyre::Result<Self> {
         self.start_prometheus_endpoint().await?;
@@ -485,6 +464,120 @@ where
             .await
     }
 
+    /// Convenience function to [`Self::init_genesis`]
+    pub fn with_genesis(self) -> Result<Self, InitDatabaseError> {
+        init_genesis(self.provider_factory().clone())?;
+        Ok(self)
+    }
+
+    /// Write the genesis block and state if it has not already been written
+    pub fn init_genesis(&self) -> Result<B256, InitDatabaseError> {
+        init_genesis(self.provider_factory().clone())
+    }
+
+    /// Creates a new `WithMeteredProvider` container and attaches it to the
+    /// launch context.
+    pub fn with_metrics(self) -> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<DB>>> {
+        let (metrics_sender, metrics_receiver) = unbounded_channel();
+
+        let with_metrics =
+            WithMeteredProvider { provider_factory: self.right().clone(), metrics_sender };
+
+        debug!(target: "reth::cli", "Spawning stages metrics listener task");
+        let sync_metrics_listener = reth_stages::MetricsListener::new(metrics_receiver);
+        self.task_executor().spawn_critical("stages metrics listener task", sync_metrics_listener);
+
+        LaunchContextWith {
+            inner: self.inner,
+            attachment: self.attachment.map_right(|_| with_metrics),
+        }
+    }
+}
+
+impl<DB> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<DB>>>
+where
+    DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
+{
+    /// Returns the configured `ProviderFactory`.
+    const fn provider_factory(&self) -> &ProviderFactory<DB> {
+        &self.right().provider_factory
+    }
+
+    /// Returns the metrics sender.
+    fn sync_metrics_tx(&self) -> UnboundedSender<MetricEvent> {
+        self.right().metrics_sender.clone()
+    }
+
+    /// Creates a `BlockchainProvider` and attaches it to the launch context.
+    pub async fn with_blockchain_db(
+        self,
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB>>>> {
+        let tree_config = BlockchainTreeConfig::default();
+
+        // NOTE: This is a temporary workaround to provide the canon state notification sender to the components builder because there's a cyclic dependency between the blockchain provider and the tree component. This will be removed once the Blockchain provider no longer depends on an instance of the tree: <https://github.com/paradigmxyz/reth/issues/7154>
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
+
+        let blockchain_db = BlockchainProvider::new(
+            self.provider_factory().clone(),
+            Arc::new(NoopBlockchainTree::with_canon_state_notifications(
+                canon_state_notification_sender.clone(),
+            )),
+        )?;
+
+        let metered_providers = WithMeteredProviders {
+            provider_factory: self.provider_factory().clone(),
+            blockchain_db,
+            metrics_sender: self.sync_metrics_tx(),
+            tree_config,
+            canon_state_notification_sender,
+        };
+
+        let ctx = LaunchContextWith {
+            inner: self.inner,
+            attachment: self.attachment.map_right(|_| metered_providers),
+        };
+
+        Ok(ctx)
+    }
+}
+
+impl<DB> LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB>>>
+where
+    DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
+{
+    /// Returns access to the underlying database.
+    pub fn database(&self) -> &DB {
+        self.provider_factory().db_ref()
+    }
+
+    /// Returns the configured `ProviderFactory`.
+    pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
+        &self.right().provider_factory
+    }
+
+    /// Returns the static file provider to interact with the static files.
+    pub fn static_file_provider(&self) -> StaticFileProvider {
+        self.provider_factory().static_file_provider()
+    }
+
+    /// Creates a new [`StaticFileProducer`] with the attached database.
+    pub fn static_file_producer(&self) -> StaticFileProducer<DB> {
+        StaticFileProducer::new(
+            self.provider_factory().clone(),
+            self.prune_modes().unwrap_or_default(),
+        )
+    }
+
+    /// Returns the max block that the node should run to, looking it up from the network if
+    /// necessary
+    pub async fn max_block<C>(&self, client: C) -> eyre::Result<Option<BlockNumber>>
+    where
+        C: HeadersClient,
+    {
+        self.node_config().max_block(client, self.provider_factory().clone()).await
+    }
+
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
@@ -492,6 +585,26 @@ where
         self.node_config()
             .lookup_head(self.provider_factory().clone())
             .wrap_err("the head block is missing")
+    }
+
+    /// Returns the metrics sender.
+    pub fn sync_metrics_tx(&self) -> UnboundedSender<MetricEvent> {
+        self.right().metrics_sender.clone()
+    }
+
+    /// Returns a reference to the `BlockchainProvider`.
+    pub const fn blockchain_db(&self) -> &BlockchainProvider<DB> {
+        &self.right().blockchain_db
+    }
+
+    /// Returns a reference to the `BlockchainTreeConfig`.
+    pub const fn tree_config(&self) -> &BlockchainTreeConfig {
+        &self.right().tree_config
+    }
+
+    /// Returns the `CanonStateNotificationSender`.
+    pub fn canon_state_notification_sender(&self) -> CanonStateNotificationSender {
+        self.right().canon_state_notification_sender.clone()
     }
 }
 
@@ -553,6 +666,25 @@ pub struct WithConfigs {
     pub config: NodeConfig,
     /// The loaded reth.toml config.
     pub toml_config: reth_config::Config,
+}
+
+/// Helper container to bundle the [`ProviderFactory`], [`BlockchainProvider`]
+/// and a metrics sender.
+#[allow(missing_debug_implementations)]
+pub struct WithMeteredProviders<DB> {
+    provider_factory: ProviderFactory<DB>,
+    blockchain_db: BlockchainProvider<DB>,
+    metrics_sender: UnboundedSender<MetricEvent>,
+    canon_state_notification_sender: CanonStateNotificationSender,
+    tree_config: BlockchainTreeConfig,
+}
+
+/// Helper container type to bundle athe [`ProviderFactory`] and the metrics
+/// sender.
+#[derive(Debug)]
+pub struct WithMeteredProvider<DB> {
+    provider_factory: ProviderFactory<DB>,
+    metrics_sender: UnboundedSender<MetricEvent>,
 }
 
 #[cfg(test)]

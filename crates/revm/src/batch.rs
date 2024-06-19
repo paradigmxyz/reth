@@ -1,12 +1,15 @@
 //! Helper for handling execution of multiple blocks.
 
 use crate::{precompile::Address, primitives::alloy_primitives::BlockNumber};
+use core::time::Duration;
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{Receipt, Receipts, Request, Requests};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
-use std::time::Duration;
 use tracing::debug;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Takes care of:
 ///  - recording receipts during execution of multiple blocks.
@@ -78,7 +81,7 @@ impl BlockBatchRecord {
 
     /// Returns all recorded receipts.
     pub fn take_receipts(&mut self) -> Receipts {
-        std::mem::take(&mut self.receipts)
+        core::mem::take(&mut self.receipts)
     }
 
     /// Returns the recorded requests.
@@ -88,7 +91,7 @@ impl BlockBatchRecord {
 
     /// Returns all recorded requests.
     pub fn take_requests(&mut self) -> Vec<Requests> {
-        std::mem::take(&mut self.requests)
+        core::mem::take(&mut self.requests)
     }
 
     /// Returns the [`BundleRetention`] for the given block based on the configured prune modes.

@@ -31,6 +31,11 @@ use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
+
+#[cfg(not(feature = "std"))]
+use alloc::{sync::Arc, vec, vec::Vec};
+
+#[cfg(feature = "std")]
 use std::sync::Arc;
 
 /// Provides executors to execute regular ethereum blocks
