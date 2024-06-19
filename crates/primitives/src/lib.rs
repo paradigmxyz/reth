@@ -38,13 +38,11 @@ mod integer_list;
 mod log;
 pub mod proofs;
 mod receipt;
-mod request;
 /// Helpers for working with revm
 pub mod revm;
 pub use reth_static_file_types as static_file;
 mod storage;
 pub mod transaction;
-mod withdrawal;
 pub use account::{Account, Bytecode};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
@@ -66,7 +64,7 @@ pub use log::{logs_bloom, Log};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
-pub use request::Requests;
+pub use reth_primitives_traits::Requests;
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
@@ -87,7 +85,7 @@ pub use transaction::{
     LEGACY_TX_TYPE_ID,
 };
 
-pub use withdrawal::{Withdrawal, Withdrawals};
+pub use reth_primitives_traits::{Withdrawal, Withdrawals};
 
 // Re-exports
 pub use self::ruint::UintTryTo;

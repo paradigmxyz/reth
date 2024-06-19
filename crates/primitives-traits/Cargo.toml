@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 reth-codecs.workspace = true
 
-alloy-consensus.workspace = true
+alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
@@ -40,6 +40,7 @@ proptest.workspace = true
 proptest-derive.workspace = true
 test-fuzz.workspace = true
 rand.workspace = true
+serde_json.workspace = true
 
 [features]
 default = ["std"]

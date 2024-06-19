@@ -21,6 +21,12 @@ pub mod constants;
 pub mod account;
 pub use account::Account;
 
+pub mod request;
+pub use request::Requests;
+
+mod withdrawal;
+pub use withdrawal::{Withdrawal, Withdrawals};
+
 /// Common header types
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]

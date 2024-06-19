@@ -7776,6 +7776,7 @@ dependencies = [
  "reth-codecs",
  "revm-primitives",
  "serde",
+ "serde_json",
  "test-fuzz",
 ]
 
