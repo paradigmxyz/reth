@@ -19,10 +19,16 @@ pub mod constants;
 
 /// Minimal account
 pub mod account;
-pub use account::Account;
+pub use account::{Account, Bytecode};
 
 mod integer_list;
 pub use integer_list::IntegerList;
+
+pub mod request;
+pub use request::{Request, Requests};
+
+mod withdrawal;
+pub use withdrawal::{Withdrawal, Withdrawals};
 
 /// Common header types
 pub mod header;

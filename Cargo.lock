@@ -7717,7 +7717,6 @@ dependencies = [
 name = "reth-primitives"
 version = "1.0.0-rc.2"
 dependencies = [
- "alloy-consensus",
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
@@ -7726,7 +7725,6 @@ dependencies = [
  "alloy-trie",
  "arbitrary",
  "assert_matches",
- "byteorder",
  "bytes",
  "c-kzg",
  "criterion",
@@ -7769,6 +7767,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-eth",
  "arbitrary",
+ "byteorder",
  "bytes",
  "derive_more",
  "modular-bitfield",
