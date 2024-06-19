@@ -13,7 +13,6 @@ reth-node-ethereum.workspace = true
 reth-tracing.workspace = true
 
 eyre.workspace = true
-futures.workspace = true
 
 tonic = "0.11"
 prost = "0.12"

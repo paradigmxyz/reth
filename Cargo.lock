@@ -2976,7 +2976,6 @@ version = "0.0.0"
 dependencies = [
  "bincode",
  "eyre",
- "futures",
  "prost",
  "reth",
  "reth-exex",

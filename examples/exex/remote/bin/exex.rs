@@ -7,7 +7,6 @@ use exex_remote::{
         ExExNotification as ProtoExExNotification, SubscribeRequest as ProtoSubscribeRequest,
     },
 };
-use futures::TryFutureExt;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
@@ -66,18 +65,18 @@ fn main() -> eyre::Result<()> {
             .add_service(RemoteExExServer::new(ExExService {
                 notifications: notifications.clone(),
             }))
-            .serve("[::1]:10000".parse().unwrap())
-            .map_err(|err| err.into());
+            .serve("[::1]:10000".parse().unwrap());
 
-        let node = builder
+        let handle = builder
             .node(EthereumNode::default())
             .install_exex("Remote", |ctx| async move { Ok(exex(ctx, notifications)) })
             .launch()
-            .await?
-            .wait_for_node_exit();
+            .await?;
 
-        futures::try_join!(server, node)?;
+        handle.node.task_executor.spawn_critical("gRPC server", async move {
+            server.await.expect("gRPC server crashed")
+        });
 
-        Ok(())
+        handle.wait_for_node_exit().await
     })
 }

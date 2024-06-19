@@ -5,6 +5,8 @@ use reth::primitives::{Address, BlockHash, Bloom, TxHash, B256, U256};
 
 use crate::proto;
 
+/// Converts a [Reth ExEx notification](`reth_exex::ExExNotification`) into
+/// a [Protobuf ExEx notification](`proto::ExExNotification`)
 pub fn to_proto_notification(
     notification: &reth_exex::ExExNotification,
 ) -> eyre::Result<proto::ExExNotification> {
@@ -30,7 +32,7 @@ pub fn to_proto_notification(
     Ok(proto::ExExNotification { notification: Some(notification) })
 }
 
-pub fn to_proto_chain(chain: &reth::providers::Chain) -> eyre::Result<proto::Chain> {
+fn to_proto_chain(chain: &reth::providers::Chain) -> eyre::Result<proto::Chain> {
     let bundle_state = chain.execution_outcome().state();
     Ok(proto::Chain {
         blocks: chain
@@ -169,7 +171,7 @@ pub fn to_proto_chain(chain: &reth::providers::Chain) -> eyre::Result<proto::Cha
     })
 }
 
-pub fn to_proto_header(header: &reth::primitives::Header) -> proto::Header {
+fn to_proto_header(header: &reth::primitives::Header) -> proto::Header {
     proto::Header {
         parent_hash: header.parent_hash.to_vec(),
         ommers_hash: header.ommers_hash.to_vec(),
@@ -194,9 +196,7 @@ pub fn to_proto_header(header: &reth::primitives::Header) -> proto::Header {
     }
 }
 
-pub fn to_proto_transaction(
-    transaction: &reth::primitives::TransactionSigned,
-) -> proto::Transaction {
+fn to_proto_transaction(transaction: &reth::primitives::TransactionSigned) -> proto::Transaction {
     let hash = transaction.hash().to_vec();
     let signature = proto::Signature {
         r: transaction.signature.r.to_le_bytes_vec(),
@@ -292,7 +292,7 @@ pub fn to_proto_transaction(
     proto::Transaction { hash, signature: Some(signature), transaction: Some(transaction) }
 }
 
-pub fn to_proto_tx_kind(kind: &reth::primitives::TxKind) -> proto::TxKind {
+fn to_proto_tx_kind(kind: &reth::primitives::TxKind) -> proto::TxKind {
     proto::TxKind {
         kind: match kind {
             reth::primitives::TxKind::Create => Some(proto::tx_kind::Kind::Create(())),
@@ -303,14 +303,14 @@ pub fn to_proto_tx_kind(kind: &reth::primitives::TxKind) -> proto::TxKind {
     }
 }
 
-pub fn to_proto_access_list_item(item: &reth::primitives::AccessListItem) -> proto::AccessListItem {
+fn to_proto_access_list_item(item: &reth::primitives::AccessListItem) -> proto::AccessListItem {
     proto::AccessListItem {
         address: item.address.to_vec(),
         storage_keys: item.storage_keys.iter().map(|key| key.to_vec()).collect(),
     }
 }
 
-pub fn to_proto_account_info(
+fn to_proto_account_info(
     account_info: &reth::revm::primitives::AccountInfo,
 ) -> eyre::Result<proto::AccountInfo> {
     Ok(proto::AccountInfo {
@@ -321,9 +321,7 @@ pub fn to_proto_account_info(
     })
 }
 
-pub fn to_proto_bytecode(
-    bytecode: &reth::revm::primitives::Bytecode,
-) -> eyre::Result<proto::Bytecode> {
+fn to_proto_bytecode(bytecode: &reth::revm::primitives::Bytecode) -> eyre::Result<proto::Bytecode> {
     let bytecode = match bytecode {
         reth::revm::primitives::Bytecode::LegacyRaw(code) => {
             proto::bytecode::Bytecode::LegacyRaw(code.to_vec())
@@ -348,7 +346,7 @@ pub fn to_proto_bytecode(
     Ok(proto::Bytecode { bytecode: Some(bytecode) })
 }
 
-pub fn to_proto_account_status(status: reth::revm::db::AccountStatus) -> proto::AccountStatus {
+fn to_proto_account_status(status: reth::revm::db::AccountStatus) -> proto::AccountStatus {
     match status {
         reth::revm::db::AccountStatus::LoadedNotExisting => proto::AccountStatus::LoadedNotExisting,
         reth::revm::db::AccountStatus::Loaded => proto::AccountStatus::Loaded,
@@ -361,6 +359,8 @@ pub fn to_proto_account_status(status: reth::revm::db::AccountStatus) -> proto::
     }
 }
 
+/// Converts a [Protobuf ExEx notification](`proto::ExExNotification`) into
+/// a [Reth ExEx notification](`reth_exex::ExExNotification`)
 pub fn from_proto_notification(
     notification: &proto::ExExNotification,
 ) -> eyre::Result<reth_exex::ExExNotification> {
@@ -384,7 +384,7 @@ pub fn from_proto_notification(
     }
 }
 
-pub fn from_proto_chain(chain: &proto::Chain) -> eyre::Result<Arc<reth::providers::Chain>> {
+fn from_proto_chain(chain: &proto::Chain) -> eyre::Result<Arc<reth::providers::Chain>> {
     let execution_outcome = chain.execution_outcome.as_ref().ok_or_eyre("no execution outcome")?;
     let bundle = execution_outcome.bundle.as_ref().ok_or_eyre("no bundle")?;
     Ok(Arc::new(reth::providers::Chain::new(
@@ -560,7 +560,7 @@ pub fn from_proto_chain(chain: &proto::Chain) -> eyre::Result<Arc<reth::provider
     )))
 }
 
-pub fn from_proto_block(
+fn from_proto_block(
     block: &proto::Block,
 ) -> eyre::Result<reth::primitives::SealedBlockWithSenders> {
     let sealed_header = block.header.as_ref().ok_or_eyre("no sealed header")?;
@@ -594,7 +594,7 @@ pub fn from_proto_block(
     .ok_or_eyre("senders do not match transactions")
 }
 
-pub fn from_proto_header(header: &proto::Header) -> eyre::Result<reth::primitives::Header> {
+fn from_proto_header(header: &proto::Header) -> eyre::Result<reth::primitives::Header> {
     Ok(reth::primitives::Header {
         parent_hash: B256::try_from(header.parent_hash.as_slice())?,
         ommers_hash: B256::try_from(header.ommers_hash.as_slice())?,
@@ -629,7 +629,7 @@ pub fn from_proto_header(header: &proto::Header) -> eyre::Result<reth::primitive
     })
 }
 
-pub fn from_proto_transaction(
+fn from_proto_transaction(
     transaction: &proto::Transaction,
 ) -> eyre::Result<reth::primitives::TransactionSigned> {
     let hash = TxHash::try_from(transaction.hash.as_slice())?;
@@ -747,7 +747,7 @@ pub fn from_proto_transaction(
     Ok(reth::primitives::TransactionSigned { hash, signature, transaction })
 }
 
-pub fn from_proto_tx_kind(tx_kind: &proto::TxKind) -> eyre::Result<reth::primitives::TxKind> {
+fn from_proto_tx_kind(tx_kind: &proto::TxKind) -> eyre::Result<reth::primitives::TxKind> {
     Ok(match tx_kind.kind.as_ref().ok_or_eyre("no kind")? {
         proto::tx_kind::Kind::Create(()) => reth::primitives::TxKind::Create,
         proto::tx_kind::Kind::Call(address) => {
@@ -756,7 +756,7 @@ pub fn from_proto_tx_kind(tx_kind: &proto::TxKind) -> eyre::Result<reth::primiti
     })
 }
 
-pub fn from_proto_access_list_item(
+fn from_proto_access_list_item(
     item: &proto::AccessListItem,
 ) -> eyre::Result<reth::primitives::AccessListItem> {
     Ok(reth::primitives::AccessListItem {
@@ -769,7 +769,7 @@ pub fn from_proto_access_list_item(
     })
 }
 
-pub fn from_proto_account_info(
+fn from_proto_account_info(
     account_info: &proto::AccountInfo,
 ) -> eyre::Result<reth::revm::primitives::AccountInfo> {
     Ok(reth::revm::primitives::AccountInfo {
@@ -781,7 +781,7 @@ pub fn from_proto_account_info(
     })
 }
 
-pub fn from_proto_bytecode(
+fn from_proto_bytecode(
     bytecode: &proto::Bytecode,
 ) -> eyre::Result<reth::revm::primitives::Bytecode> {
     let bytecode = match bytecode.bytecode.as_ref().ok_or_eyre("no bytecode")? {
@@ -808,7 +808,7 @@ pub fn from_proto_bytecode(
     Ok(bytecode)
 }
 
-pub fn from_proto_account_status(status: proto::AccountStatus) -> reth::revm::db::AccountStatus {
+fn from_proto_account_status(status: proto::AccountStatus) -> reth::revm::db::AccountStatus {
     match status {
         proto::AccountStatus::LoadedNotExisting => reth::revm::db::AccountStatus::LoadedNotExisting,
         proto::AccountStatus::Loaded => reth::revm::db::AccountStatus::Loaded,
