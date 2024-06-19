@@ -29,6 +29,10 @@ reth-exex-test-utils.workspace = true
 
 tokio.workspace = true
 
+[features]
+default = []
+optimism = ["reth/optimism"]
+
 [[bin]]
 name = "exex"
 path = "bin/exex.rs"

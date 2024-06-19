@@ -40,16 +40,21 @@ impl TryFrom<&reth::providers::Chain> for proto::Chain {
         Ok(proto::Chain {
             blocks: chain
                 .blocks_iter()
-                .map(|block| proto::Block {
-                    header: Some(proto::SealedHeader {
-                        hash: block.header.hash().to_vec(),
-                        header: Some(block.header.header().into()),
-                    }),
-                    body: block.transactions().map(Into::into).collect(),
-                    ommers: block.ommers.iter().map(Into::into).collect(),
-                    senders: block.senders.iter().map(|sender| sender.to_vec()).collect(),
+                .map(|block| {
+                    Ok(proto::Block {
+                        header: Some(proto::SealedHeader {
+                            hash: block.header.hash().to_vec(),
+                            header: Some(block.header.header().into()),
+                        }),
+                        body: block
+                            .transactions()
+                            .map(TryInto::try_into)
+                            .collect::<eyre::Result<_>>()?,
+                        ommers: block.ommers.iter().map(Into::into).collect(),
+                        senders: block.senders.iter().map(|sender| sender.to_vec()).collect(),
+                    })
                 })
-                .collect(),
+                .collect::<eyre::Result<_>>()?,
             execution_outcome: Some(proto::ExecutionOutcome {
                 bundle: Some(proto::BundleState {
                     state: bundle_state
@@ -86,10 +91,15 @@ impl TryFrom<&reth::providers::Chain> for proto::Chain {
                     .execution_outcome()
                     .receipts()
                     .iter()
-                    .map(|block_receipts| proto::BlockReceipts {
-                        receipts: block_receipts.iter().map(Into::into).collect(),
+                    .map(|block_receipts| {
+                        Ok(proto::BlockReceipts {
+                            receipts: block_receipts
+                                .iter()
+                                .map(TryInto::try_into)
+                                .collect::<eyre::Result<_>>()?,
+                        })
                     })
-                    .collect(),
+                    .collect::<eyre::Result<_>>()?,
                 first_block: chain.execution_outcome().first_block,
             }),
         })
@@ -123,8 +133,10 @@ impl From<&reth::primitives::Header> for proto::Header {
     }
 }
 
-impl From<&reth::primitives::TransactionSigned> for proto::Transaction {
-    fn from(transaction: &reth::primitives::TransactionSigned) -> Self {
+impl TryFrom<&reth::primitives::TransactionSigned> for proto::Transaction {
+    type Error = eyre::Error;
+
+    fn try_from(transaction: &reth::primitives::TransactionSigned) -> Result<Self, Self::Error> {
         let hash = transaction.hash().to_vec();
         let signature = proto::Signature {
             r: transaction.signature.r.to_le_bytes_vec(),
@@ -141,7 +153,7 @@ impl From<&reth::primitives::TransactionSigned> for proto::Transaction {
                 value,
                 input,
             }) => proto::transaction::Transaction::Legacy(proto::TransactionLegacy {
-                chain_id: chain_id.clone(),
+                chain_id: *chain_id,
                 nonce: *nonce,
                 gas_price: gas_price.to_le_bytes().to_vec(),
                 gas_limit: *gas_limit,
@@ -159,7 +171,7 @@ impl From<&reth::primitives::TransactionSigned> for proto::Transaction {
                 access_list,
                 input,
             }) => proto::transaction::Transaction::Eip2930(proto::TransactionEip2930 {
-                chain_id: chain_id.clone(),
+                chain_id: *chain_id,
                 nonce: *nonce,
                 gas_price: gas_price.to_le_bytes().to_vec(),
                 gas_limit: *gas_limit,
@@ -179,7 +191,7 @@ impl From<&reth::primitives::TransactionSigned> for proto::Transaction {
                 access_list,
                 input,
             }) => proto::transaction::Transaction::Eip1559(proto::TransactionEip1559 {
-                chain_id: chain_id.clone(),
+                chain_id: *chain_id,
                 nonce: *nonce,
                 gas_limit: *gas_limit,
                 max_fee_per_gas: max_fee_per_gas.to_le_bytes().to_vec(),
@@ -203,7 +215,7 @@ impl From<&reth::primitives::TransactionSigned> for proto::Transaction {
                 max_fee_per_blob_gas,
                 input,
             }) => proto::transaction::Transaction::Eip4844(proto::TransactionEip4844 {
-                chain_id: chain_id.clone(),
+                chain_id: *chain_id,
                 nonce: *nonce,
                 gas_limit: *gas_limit,
                 max_fee_per_gas: max_fee_per_gas.to_le_bytes().to_vec(),
@@ -218,9 +230,13 @@ impl From<&reth::primitives::TransactionSigned> for proto::Transaction {
                 max_fee_per_blob_gas: max_fee_per_blob_gas.to_le_bytes().to_vec(),
                 input: input.to_vec(),
             }),
+            #[cfg(feature = "optimism")]
+            reth::primitives::Transaction::Deposit(_) => {
+                eyre::bail!("deposit transaction not supported")
+            }
         };
 
-        proto::Transaction { hash, signature: Some(signature), transaction: Some(transaction) }
+        Ok(proto::Transaction { hash, signature: Some(signature), transaction: Some(transaction) })
     }
 }
 
@@ -305,7 +321,7 @@ impl TryFrom<&reth::revm::primitives::Bytecode> for proto::Bytecode {
                 })
             }
             reth::revm::primitives::Bytecode::Eof(_) => {
-                return Err(eyre::eyre!("EOF bytecode not supported"))
+                eyre::bail!("EOF bytecode not supported");
             }
         };
         Ok(proto::Bytecode { bytecode: Some(bytecode) })
@@ -377,24 +393,36 @@ impl TryFrom<(Address, &reth::revm::db::states::reverts::AccountRevert)> for pro
     }
 }
 
-impl From<&Option<reth::primitives::Receipt>> for proto::Receipt {
-    fn from(receipt: &Option<reth::primitives::Receipt>) -> Self {
-        proto::Receipt {
-            receipt: Some(receipt.as_ref().map_or(proto::receipt::Receipt::Empty(()), |receipt| {
-                proto::receipt::Receipt::NonEmpty(receipt.into())
-            })),
-        }
+impl TryFrom<&Option<reth::primitives::Receipt>> for proto::Receipt {
+    type Error = eyre::Error;
+
+    fn try_from(receipt: &Option<reth::primitives::Receipt>) -> Result<Self, Self::Error> {
+        Ok(proto::Receipt {
+            receipt: Some(
+                receipt
+                    .as_ref()
+                    .map_or(eyre::Ok(proto::receipt::Receipt::Empty(())), |receipt| {
+                        Ok(proto::receipt::Receipt::NonEmpty(receipt.try_into()?))
+                    })?,
+            ),
+        })
     }
 }
 
-impl From<&reth::primitives::Receipt> for proto::NonEmptyReceipt {
-    fn from(receipt: &reth::primitives::Receipt) -> Self {
-        proto::NonEmptyReceipt {
+impl TryFrom<&reth::primitives::Receipt> for proto::NonEmptyReceipt {
+    type Error = eyre::Error;
+
+    fn try_from(receipt: &reth::primitives::Receipt) -> Result<Self, Self::Error> {
+        Ok(proto::NonEmptyReceipt {
             tx_type: match receipt.tx_type {
                 reth::primitives::TxType::Legacy => proto::TxType::Legacy,
                 reth::primitives::TxType::Eip2930 => proto::TxType::Eip2930,
                 reth::primitives::TxType::Eip1559 => proto::TxType::Eip1559,
                 reth::primitives::TxType::Eip4844 => proto::TxType::Eip4844,
+                #[cfg(feature = "optimism")]
+                reth::primitives::TxType::Deposit => {
+                    eyre::bail!("deposit transaction not supported")
+                }
             } as i32,
             success: receipt.success,
             cumulative_gas_used: receipt.cumulative_gas_used,
@@ -409,7 +437,7 @@ impl From<&reth::primitives::Receipt> for proto::NonEmptyReceipt {
                     }),
                 })
                 .collect(),
-        }
+        })
     }
 }
 
@@ -470,11 +498,11 @@ impl TryFrom<&proto::Chain> for reth::providers::Chain {
                             .reverts
                             .iter()
                             .map(|block_reverts| {
-                                Ok(block_reverts
+                                block_reverts
                                     .reverts
                                     .iter()
                                     .map(TryInto::try_into)
-                                    .collect::<eyre::Result<_>>()?)
+                                    .collect::<eyre::Result<_>>()
                             })
                             .collect::<eyre::Result<_>>()?,
                     ),
@@ -486,11 +514,11 @@ impl TryFrom<&proto::Chain> for reth::providers::Chain {
                         .receipts
                         .iter()
                         .map(|block_receipts| {
-                            Ok(block_receipts
+                            block_receipts
                                 .receipts
                                 .iter()
                                 .map(TryInto::try_into)
-                                .collect::<eyre::Result<_>>()?)
+                                .collect::<eyre::Result<_>>()
                         })
                         .collect::<eyre::Result<Vec<_>>>()?,
                 ),
@@ -597,7 +625,7 @@ impl TryFrom<&proto::Transaction> for reth::primitives::TransactionSigned {
                 value,
                 input,
             }) => reth::primitives::Transaction::Legacy(reth::primitives::TxLegacy {
-                chain_id: chain_id.clone(),
+                chain_id: *chain_id,
                 nonce: *nonce,
                 gas_price: u128::from_le_bytes(gas_price.as_slice().try_into()?),
                 gas_limit: *gas_limit,
@@ -616,7 +644,7 @@ impl TryFrom<&proto::Transaction> for reth::primitives::TransactionSigned {
                 access_list,
                 input,
             }) => reth::primitives::Transaction::Eip2930(reth::primitives::TxEip2930 {
-                chain_id: chain_id.clone(),
+                chain_id: *chain_id,
                 nonce: *nonce,
                 gas_price: u128::from_le_bytes(gas_price.as_slice().try_into()?),
                 gas_limit: *gas_limit,
@@ -641,7 +669,7 @@ impl TryFrom<&proto::Transaction> for reth::primitives::TransactionSigned {
                 access_list,
                 input,
             }) => reth::primitives::Transaction::Eip1559(reth::primitives::TxEip1559 {
-                chain_id: chain_id.clone(),
+                chain_id: *chain_id,
                 nonce: *nonce,
                 gas_limit: *gas_limit,
                 max_fee_per_gas: u128::from_le_bytes(max_fee_per_gas.as_slice().try_into()?),
@@ -671,7 +699,7 @@ impl TryFrom<&proto::Transaction> for reth::primitives::TransactionSigned {
                 max_fee_per_blob_gas,
                 input,
             }) => reth::primitives::Transaction::Eip4844(reth::primitives::TxEip4844 {
-                chain_id: chain_id.clone(),
+                chain_id: *chain_id,
                 nonce: *nonce,
                 gas_limit: *gas_limit,
                 max_fee_per_gas: u128::from_le_bytes(max_fee_per_gas.as_slice().try_into()?),
@@ -924,6 +952,10 @@ impl TryFrom<&proto::NonEmptyReceipt> for reth::primitives::Receipt {
                     })
                 })
                 .collect::<eyre::Result<_>>()?,
+            #[cfg(feature = "optimism")]
+            deposit_nonce: None,
+            #[cfg(feature = "optimism")]
+            deposit_receipt_version: None,
         })
     }
 }
