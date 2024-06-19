@@ -34,7 +34,7 @@ mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
 
 mod log;
-pub use log::{logs_bloom, Log};
+pub use log::{logs_bloom, Log, LogData};
 
 mod storage;
 pub use storage::StorageEntry;

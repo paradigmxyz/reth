@@ -7159,6 +7159,7 @@ dependencies = [
  "reth-primitives",
  "reth-trie",
  "revm",
+ "serde",
 ]
 
 [[package]]
@@ -7178,6 +7179,7 @@ dependencies = [
  "reth-provider",
  "reth-tasks",
  "reth-tracing",
+ "serde",
  "tokio",
  "tokio-util",
 ]
@@ -8417,6 +8419,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "revm",
+ "serde",
  "serde_json",
  "similar-asserts",
  "tokio",
