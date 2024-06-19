@@ -1,20 +1,24 @@
 use crate::tree::ExecutedBlock;
-use futures::ready;
+use futures::{ready, FutureExt};
 use reth_primitives::B256;
 use reth_provider::ProviderFactory;
 use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::sync::{mpsc::Receiver, oneshot};
+use tokio::{
+    sync::{mpsc::Receiver, oneshot},
+    task::{spawn_blocking, JoinHandle},
+};
 
 /// Writes parts of reth's in memory tree state to the database.
 pub struct Persistence<DB> {
     /// The db / static file provider to use
     provider: ProviderFactory<DB>,
-    // TODO: handles for pushing requests
     /// Incoming requests to persist stuff
     incoming: Receiver<PersistenceAction>,
+    /// The current active thread
+    active_writer_thread: Option<JoinHandle<()>>,
 }
 
 impl<Writer> Persistence<Writer> {
@@ -40,6 +44,13 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<PersistenceOutput>> {
         let this = self.get_mut();
 
+        if let Some(handle) = this.active_writer_thread {
+            // if pending we just keep waiting until we can do something
+            if let Err(_err) = ready!(handle.poll_unpin(cx)) {
+                todo!("handle errors");
+            }
+        }
+
         let action = match ready!(this.incoming.poll_recv(cx)) {
             None => return Poll::Ready(None),
             Some(action) => action,
@@ -49,24 +60,28 @@ where
             PersistenceAction::RemoveBlocksAbove(new_tip_num) => {
                 let (sender, receiver) = oneshot::channel();
 
-                // TODO: do something with this
-                let handle = std::thread::spawn(move || {
+                // spawn blocking so we can poll the thread later
+                let handle = spawn_blocking(move || {
                     let output = this.remove_blocks_above(new_tip_num);
                     sender.send(output).unwrap();
                 });
 
+                this.active_writer_thread = Some(handle);
+
                 Poll::Ready(Some(PersistenceOutput::AddBlocksAbove(receiver)))
-            },
+            }
             PersistenceAction::SaveFinalizedBlocks(blocks) => {
                 if blocks.is_empty() {
                     todo!("return error or something");
                 }
                 let last_block_hash = blocks.last().unwrap().block().hash();
 
-                // TODO: do something with this
-                let handle = std::thread::spawn(move || {
+                // spawn blocking so we can poll the thread later
+                let handle = spawn_blocking(move || {
                     this.write(blocks);
                 });
+
+                this.active_writer_thread = Some(handle);
 
                 Poll::Ready(Some(PersistenceOutput::RemoveBlocksBefore(last_block_hash)))
             }
