@@ -31,5 +31,8 @@ serde_json.workspace = true
 # tracing
 tracing.workspace = true
 
+[dev-dependencies]
+reth-primitives-traits.workspace = true
+
 [lints]
 workspace = true

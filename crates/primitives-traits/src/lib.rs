@@ -21,6 +21,9 @@ pub mod constants;
 pub mod account;
 pub use account::Account;
 
+mod integer_list;
+pub use integer_list::IntegerList;
+
 /// Common header types
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]

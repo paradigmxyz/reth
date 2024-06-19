@@ -24,6 +24,10 @@ alloy-rpc-types-eth = { workspace = true, optional = true }
 derive_more.workspace = true
 revm-primitives.workspace = true
 
+# misc
+thiserror-no-std = { workspace = true, default-features = false }
+roaring = "0.10.2"
+
 # required by reth-codecs
 modular-bitfield.workspace = true
 bytes.workspace = true
@@ -43,7 +47,7 @@ rand.workspace = true
 
 [features]
 default = ["std"]
-std = []
+std = ["thiserror-no-std/std"]
 test-utils = ["arbitrary"]
 arbitrary = [
     "dep:arbitrary",
