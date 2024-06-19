@@ -1,5 +1,4 @@
-use crate::Bloom;
-
+use alloy_primitives::Bloom;
 pub use alloy_primitives::Log;
 
 /// Calculate receipt logs bloom.
