@@ -1,6 +1,6 @@
-use reth_primitives::{
-    b256, BaseFeeParams, Chain, ChainSpec, ForkCondition, Hardfork, Head, NodeRecord, B256,
-};
+use reth_chainspec::{BaseFeeParams, Chain, ChainSpec, ForkCondition, Hardfork};
+use reth_discv4::NodeRecord;
+use reth_primitives::{b256, Head, B256};
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -24,7 +24,7 @@ pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
             (Hardfork::Shanghai, ForkCondition::Block(SHANGAI_BLOCK)),
         ]),
         deposit_contract: None,
-        base_fee_params: reth_primitives::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+        base_fee_params: reth_chainspec::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 0,
     }
     .into()

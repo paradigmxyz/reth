@@ -106,9 +106,9 @@ mod tests {
         account_history::ACCOUNT_HISTORY_TABLES_TO_PRUNE, AccountHistory, PruneInput, PruneOutput,
         Segment,
     };
+    use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db::{tables, BlockNumberList};
-    use reth_primitives::{BlockNumber, B256};
     use reth_provider::PruneCheckpointReader;
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,

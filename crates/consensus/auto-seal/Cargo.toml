@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-beacon-consensus.workspace = true
 reth-primitives.workspace = true
 reth-execution-errors.workspace = true
@@ -35,5 +36,4 @@ tokio-stream.workspace = true
 tracing.workspace = true
 
 [features]
-# Included solely to ignore certain tests.
-optimism = []
+optimism = ["reth-provider/optimism"]

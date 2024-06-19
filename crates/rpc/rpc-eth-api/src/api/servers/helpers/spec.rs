@@ -1,7 +1,8 @@
+use reth_chainspec::ChainInfo;
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{Address, ChainInfo, U256, U64};
+use reth_primitives::{Address, U256, U64};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_types::{SyncInfo, SyncStatus};
 use reth_transaction_pool::TransactionPool;

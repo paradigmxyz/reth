@@ -42,7 +42,7 @@ pub fn calculate_requests_root(requests: &[Request]) -> B256 {
 #[cfg(feature = "optimism")]
 pub fn calculate_receipt_root_optimism(
     receipts: &[ReceiptWithBloom],
-    chain_spec: &crate::ChainSpec,
+    chain_spec: &reth_chainspec::ChainSpec,
     timestamp: u64,
 ) -> B256 {
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
@@ -50,8 +50,8 @@ pub fn calculate_receipt_root_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(reth_chainspec::Hardfork::Regolith, timestamp) &&
+        !chain_spec.is_fork_active_at_timestamp(reth_chainspec::Hardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
@@ -90,7 +90,7 @@ pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
 #[cfg(feature = "optimism")]
 pub fn calculate_receipt_root_no_memo_optimism(
     receipts: &[&Receipt],
-    chain_spec: &crate::ChainSpec,
+    chain_spec: &reth_chainspec::ChainSpec,
     timestamp: u64,
 ) -> B256 {
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
@@ -98,8 +98,8 @@ pub fn calculate_receipt_root_no_memo_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(crate::Hardfork::Canyon, timestamp)
+    if chain_spec.is_fork_active_at_timestamp(reth_chainspec::Hardfork::Regolith, timestamp) &&
+        !chain_spec.is_fork_active_at_timestamp(reth_chainspec::Hardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
@@ -137,10 +137,11 @@ mod tests {
     use super::*;
     use crate::{
         bloom, constants::EMPTY_ROOT_HASH, hex_literal::hex, Block, GenesisAccount, Log, TxType,
-        GOERLI, HOLESKY, MAINNET, SEPOLIA, U256,
+        U256,
     };
     use alloy_primitives::{b256, Address, LogData};
     use alloy_rlp::Decodable;
+    use reth_chainspec::{GOERLI, HOLESKY, MAINNET, SEPOLIA};
     use reth_trie_common::root::{state_root_ref_unhashed, state_root_unhashed};
     use std::collections::HashMap;
 

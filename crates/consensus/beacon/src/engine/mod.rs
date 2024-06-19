@@ -1975,7 +1975,7 @@ mod tests {
         BeaconForkChoiceUpdateError,
     };
     use assert_matches::assert_matches;
-    use reth_primitives::{ChainSpecBuilder, MAINNET};
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::block_to_payload_v1;

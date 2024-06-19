@@ -1,3 +1,4 @@
+use alloy_primitives::BlockNumber;
 use reth_db::BlockNumberList;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -7,7 +8,6 @@ use reth_db_api::{
     transaction::DbTxMut,
     DatabaseError,
 };
-use reth_primitives::BlockNumber;
 use reth_provider::DatabaseProviderRW;
 
 /// Prune history indices up to the provided block, inclusive.

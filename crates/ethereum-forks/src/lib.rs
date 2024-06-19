@@ -20,6 +20,8 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
+mod display;
+mod forkcondition;
 mod forkid;
 mod hardfork;
 mod head;
@@ -29,6 +31,9 @@ pub use forkid::{
 };
 pub use hardfork::Hardfork;
 pub use head::Head;
+
+pub use display::DisplayHardforks;
+pub use forkcondition::ForkCondition;
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;

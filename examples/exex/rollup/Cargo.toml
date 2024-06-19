@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 # reth
 reth.workspace = true
+reth-chainspec.workspace = true
 reth-exex.workspace = true
 reth-node-api.workspace = true
 reth-node-ethereum.workspace = true

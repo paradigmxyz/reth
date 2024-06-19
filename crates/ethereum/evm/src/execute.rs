@@ -4,6 +4,7 @@ use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     EthEvmConfig,
 };
+use reth_chainspec::{ChainSpec, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{
@@ -14,8 +15,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, ChainSpec, Hardfork, Header, Receipt, Request, Withdrawals,
-    MAINNET, U256,
+    BlockNumber, BlockWithSenders, Hardfork, Header, Receipt, Request, Withdrawals, U256,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
@@ -31,6 +31,11 @@ use revm_primitives::{
     db::{Database, DatabaseCommit},
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
 };
+
+#[cfg(not(feature = "std"))]
+use alloc::{sync::Arc, vec, vec::Vec};
+
+#[cfg(feature = "std")]
 use std::sync::Arc;
 
 /// Provides executors to execute regular ethereum blocks
@@ -461,17 +466,16 @@ mod tests {
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
     };
+    use reth_chainspec::{ChainSpecBuilder, ForkCondition};
     use reth_primitives::{
         constants::{EMPTY_ROOT_HASH, ETH_TO_WEI},
-        keccak256, public_key_to_address, Account, Block, ChainSpecBuilder, ForkCondition,
-        Transaction, TxKind, TxLegacy, B256,
+        keccak256, public_key_to_address, Account, Block, Transaction, TxKind, TxLegacy, B256,
     };
     use reth_revm::{
-        database::StateProviderDatabase, state_change::HISTORY_SERVE_WINDOW,
-        test_utils::StateProviderTest, TransitionState,
+        database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use revm_primitives::{b256, fixed_bytes, Bytes};
+    use revm_primitives::{b256, fixed_bytes, Bytes, BLOCKHASH_SERVE_WINDOW};
     use secp256k1::{Keypair, Secp256k1};
     use std::collections::HashMap;
 
@@ -976,7 +980,7 @@ mod tests {
 
     #[test]
     fn eip_2935_fork_activation_within_window_bounds() {
-        let fork_activation_block = HISTORY_SERVE_WINDOW - 10;
+        let fork_activation_block = (BLOCKHASH_SERVE_WINDOW - 10) as u64;
         let db = create_state_provider_with_block_hashes(fork_activation_block);
 
         let chain_spec = Arc::new(
@@ -1039,7 +1043,7 @@ mod tests {
 
     #[test]
     fn eip_2935_fork_activation_outside_window_bounds() {
-        let fork_activation_block = HISTORY_SERVE_WINDOW + 256;
+        let fork_activation_block = (BLOCKHASH_SERVE_WINDOW + 256) as u64;
         let db = create_state_provider_with_block_hashes(fork_activation_block);
 
         let chain_spec = Arc::new(
@@ -1090,7 +1094,7 @@ mod tests {
                 .state_mut()
                 .storage(
                     HISTORY_STORAGE_ADDRESS,
-                    U256::from(fork_activation_block % HISTORY_SERVE_WINDOW - 1)
+                    U256::from(fork_activation_block % BLOCKHASH_SERVE_WINDOW as u64 - 1)
                 )
                 .unwrap(),
             U256::ZERO

@@ -1,8 +1,9 @@
 //! Loads chain metadata.
 
 use futures::Future;
+use reth_chainspec::ChainInfo;
 use reth_errors::RethResult;
-use reth_primitives::{Address, ChainInfo, U64};
+use reth_primitives::{Address, U64};
 use reth_rpc_types::SyncStatus;
 
 /// `Eth` API trait.

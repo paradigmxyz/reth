@@ -2,7 +2,8 @@
 //!
 //! Log parsing for building filter.
 
-use reth_primitives::{BlockNumHash, ChainInfo, Receipt, TxHash};
+use reth_chainspec::ChainInfo;
+use reth_primitives::{BlockNumHash, Receipt, TxHash};
 use reth_provider::{BlockReader, ProviderError};
 use reth_rpc_types::{FilteredParams, Log};
 

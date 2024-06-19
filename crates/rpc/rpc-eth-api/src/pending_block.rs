@@ -5,9 +5,8 @@
 use std::{fmt, time::Instant};
 
 use derive_more::Constructor;
-use reth_primitives::{
-    BlockId, BlockNumberOrTag, ChainSpec, SealedBlockWithSenders, SealedHeader, B256,
-};
+use reth_chainspec::ChainSpec;
+use reth_primitives::{BlockId, BlockNumberOrTag, SealedBlockWithSenders, SealedHeader, B256};
 use reth_provider::ProviderError;
 use reth_revm::state_change::{apply_beacon_root_contract_call, apply_blockhashes_update};
 use revm_primitives::{

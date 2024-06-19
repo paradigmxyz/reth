@@ -214,9 +214,9 @@ impl Discv4 {
     /// ```
     /// # use std::io;
     /// use rand::thread_rng;
+    /// use reth_chainspec::net::NodeRecord;
     /// use reth_discv4::{Discv4, Discv4Config};
     /// use reth_network_peers::{pk2id, PeerId};
-    /// use reth_primitives::NodeRecord;
     /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
     /// # async fn t() -> io::Result<()> {
@@ -2285,9 +2285,11 @@ pub enum DiscoveryUpdate {
 mod tests {
     use super::*;
     use crate::test_utils::{create_discv4, create_discv4_with_config, rng_endpoint, rng_record};
+    use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable};
     use rand::{thread_rng, Rng};
-    use reth_primitives::{hex, mainnet_nodes, EnrForkIdEntry, ForkHash};
+    use reth_chainspec::net::mainnet_nodes;
+    use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
     use std::future::poll_fn;
 
     #[tokio::test]

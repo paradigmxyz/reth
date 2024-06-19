@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
@@ -31,6 +32,7 @@ reth-config.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
+reth-network-peers.workspace = true
 reth-engine-primitives.workspace = true
 reth-tasks.workspace = true
 reth-consensus-common.workspace = true
@@ -96,7 +98,6 @@ procfs = "0.16.0"
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
-reth-network-peers.workspace = true
 
 [features]
 optimism = [
