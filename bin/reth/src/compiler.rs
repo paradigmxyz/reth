@@ -171,7 +171,7 @@ impl ConfigureEvmEnv for CompilerEvmConfig {
 
     fn fill_cfg_env(
         cfg_env: &mut reth_revm::primitives::CfgEnvWithHandlerCfg,
-        chain_spec: &reth_primitives::ChainSpec,
+        chain_spec: &reth_chainspec::ChainSpec,
         header: &reth_primitives::Header,
         total_difficulty: reth_primitives::U256,
     ) {
