@@ -36,5 +36,5 @@ pub enum EvmCompilerError {
     Hex(#[from] reth_primitives::hex::FromHexError),
     /// Compilation error.
     #[error("failed to compile contract with hash {0}: {1}")]
-    Compile(B256, #[source] revm_jit::Error),
+    Compile(B256, #[source] revmc::Error),
 }

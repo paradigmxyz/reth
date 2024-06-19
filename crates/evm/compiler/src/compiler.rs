@@ -4,7 +4,7 @@ use rayon::prelude::*;
 use reth_fs_util as fs;
 use reth_primitives::{keccak256, Bytes, B256};
 use revm::primitives::SpecId;
-use revm_jit::{debug_time, llvm, EvmCompiler, EvmLlvmBackend, Linker};
+use revmc::{debug_time, llvm, EvmCompiler, EvmLlvmBackend, Linker};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt, io,
@@ -330,7 +330,7 @@ impl EvmParCompiler {
         let contract_dir = self.out_dir.join(format!("{evm_version:?}/{hash:x}"));
         fs::create_dir_all(&contract_dir)?;
 
-        let opt_level = revm_jit::OptimizationLevel::Aggressive;
+        let opt_level = revmc::OptimizationLevel::Aggressive;
         let backend = EvmLlvmBackend::new(cx, true, opt_level).map_err(compile_error)?;
         let mut compiler = EvmCompiler::new(backend);
         if self.debug {

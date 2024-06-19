@@ -352,8 +352,8 @@ revm-primitives = { version = "4.0.0", features = [
 revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "4fe17f0" }
 
 # compiler
-revm-jit = { path = "../revm-jit/crates/revm-jit" }
-revm-jit-build = { path = "../revm-jit/crates/revm-jit-build" }
+revmc = { path = "../revmc/crates/revmc" }
+revmc-build = { path = "../revmc/crates/revmc-build" }
 
 # eth
 alloy-chains = "0.1.15"

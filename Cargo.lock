@@ -6402,7 +6402,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie",
- "revm-jit-build",
+ "revmc-build",
  "serde",
  "serde_json",
  "similar-asserts",
@@ -7156,8 +7156,8 @@ dependencies = [
  "reth-primitives",
  "reth-tracing",
  "revm",
- "revm-jit",
- "revm-jit-build",
+ "revmc",
+ "revmc-build",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -8591,66 +8591,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "revm-jit"
-version = "0.1.0"
-dependencies = [
- "alloy-primitives",
- "bitflags 2.5.0",
- "bitvec",
- "revm-interpreter",
- "revm-jit-backend",
- "revm-jit-builtins",
- "revm-jit-context",
- "revm-jit-llvm",
- "revm-primitives",
- "rustc-hash",
- "tracing",
-]
-
-[[package]]
-name = "revm-jit-backend"
-version = "0.1.0"
-dependencies = [
- "eyre",
- "ruint",
- "tracing",
-]
-
-[[package]]
-name = "revm-jit-build"
-version = "0.1.0"
-
-[[package]]
-name = "revm-jit-builtins"
-version = "0.1.0"
-dependencies = [
- "paste",
- "revm-interpreter",
- "revm-jit-backend",
- "revm-jit-context",
- "revm-primitives",
- "tracing",
-]
-
-[[package]]
-name = "revm-jit-context"
-version = "0.1.0"
-dependencies = [
- "revm-interpreter",
- "revm-primitives",
-]
-
-[[package]]
-name = "revm-jit-llvm"
-version = "0.1.0"
-dependencies = [
- "inkwell",
- "revm-jit-backend",
- "rustc-hash",
- "tracing",
-]
-
-[[package]]
 name = "revm-precompile"
 version = "7.0.0"
 source = "git+https://github.com/bluealloy/revm.git?rev=41e2f7f#41e2f7f9740c0fb70c5ba888a36453712b6de39c"
@@ -8686,6 +8626,66 @@ dependencies = [
  "hex",
  "once_cell",
  "serde",
+]
+
+[[package]]
+name = "revmc"
+version = "0.1.0"
+dependencies = [
+ "alloy-primitives",
+ "bitflags 2.5.0",
+ "bitvec",
+ "revm-interpreter",
+ "revm-primitives",
+ "revmc-backend",
+ "revmc-builtins",
+ "revmc-context",
+ "revmc-llvm",
+ "rustc-hash",
+ "tracing",
+]
+
+[[package]]
+name = "revmc-backend"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "ruint",
+ "tracing",
+]
+
+[[package]]
+name = "revmc-build"
+version = "0.1.0"
+
+[[package]]
+name = "revmc-builtins"
+version = "0.1.0"
+dependencies = [
+ "paste",
+ "revm-interpreter",
+ "revm-primitives",
+ "revmc-backend",
+ "revmc-context",
+ "tracing",
+]
+
+[[package]]
+name = "revmc-context"
+version = "0.1.0"
+dependencies = [
+ "revm-interpreter",
+ "revm-primitives",
+]
+
+[[package]]
+name = "revmc-llvm"
+version = "0.1.0"
+dependencies = [
+ "inkwell",
+ "revmc-backend",
+ "rustc-hash",
+ "tracing",
 ]
 
 [[package]]

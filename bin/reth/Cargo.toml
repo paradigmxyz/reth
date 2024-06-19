@@ -56,7 +56,9 @@ reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true
 reth-node-ethereum.workspace = true
-reth-node-optimism = { workspace = true, optional = true, features = ["optimism"] }
+reth-node-optimism = { workspace = true, optional = true, features = [
+    "optimism",
+] }
 reth-node-core.workspace = true
 reth-db-common.workspace = true
 reth-node-builder.workspace = true
@@ -90,11 +92,18 @@ rand.workspace = true
 # tui
 comfy-table = "7.0"
 crossterm = "0.27.0"
-ratatui = { version = "0.26", default-features = false, features = ["crossterm"] }
+ratatui = { version = "0.26", default-features = false, features = [
+    "crossterm",
+] }
 human_bytes = "0.4.1"
 
 # async
-tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
+tokio = { workspace = true, features = [
+    "sync",
+    "macros",
+    "time",
+    "rt-multi-thread",
+] }
 futures.workspace = true
 
 # misc
@@ -121,7 +130,7 @@ jsonrpsee.workspace = true
 assert_matches = "1.5.0"
 
 [build-dependencies]
-revm-jit-build = { workspace = true, optional = true }
+revmc-build = { workspace = true, optional = true }
 
 [features]
 default = ["jemalloc"]
@@ -151,7 +160,7 @@ optimism = [
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
 
-compiler = ["dep:reth-evm-compiler", "dep:revm-jit-build"]
+compiler = ["dep:reth-evm-compiler", "dep:revmc-build"]
 
 [[bin]]
 name = "reth"

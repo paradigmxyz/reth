@@ -1,7 +1,7 @@
 use libloading::Library;
 use reth_primitives::B256;
 use revm::primitives::SpecId;
-use revm_jit::{debug_time, trace_time, EvmCompilerFn};
+use revmc::{debug_time, trace_time, EvmCompilerFn};
 use rustc_hash::FxHashMap;
 use std::{collections::hash_map::Entry, marker::PhantomData, path::Path};
 

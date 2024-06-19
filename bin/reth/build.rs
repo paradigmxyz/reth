@@ -2,5 +2,5 @@
 
 fn main() {
     #[cfg(feature = "compiler")]
-    revm_jit_build::emit();
+    revmc_build::emit();
 }

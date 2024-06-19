@@ -16,7 +16,7 @@ reth-primitives.workspace = true
 reth-fs-util.workspace = true
 
 revm.workspace = true
-revm-jit = { workspace = true, features = ["llvm-prefer-dynamic"] }
+revmc = { workspace = true, features = ["llvm-prefer-dynamic"] }
 
 confy.workspace = true
 indexmap = { workspace = true, features = ["serde"] }
@@ -36,7 +36,7 @@ tempfile.workspace = true
 walkdir.workspace = true
 
 [build-dependencies]
-revm-jit-build.workspace = true
+revmc-build.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism", "revm/optimism", "revm-jit/optimism"]
+optimism = ["reth-primitives/optimism", "revm/optimism", "revmc/optimism"]
