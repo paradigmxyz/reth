@@ -51,7 +51,7 @@ zstd = { version = "0.13", features = ["experimental"], optional = true }
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
+# proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 # eth
@@ -64,6 +64,7 @@ alloy-eips = { workspace = true, features = ["arbitrary"] }
 assert_matches.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
 proptest-derive.workspace = true
 rand.workspace = true
 serde_json.workspace = true
@@ -94,7 +95,6 @@ arbitrary = [
     "alloy-eips/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
-    "dep:proptest-derive",
     "zstd-codec",
 ]
 c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg"]

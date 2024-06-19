@@ -38,31 +38,15 @@ prop_compose! {
 #[rlp(trailing)]
 pub struct Block {
     /// Block header.
-    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "valid_header_strategy()"))]
     #[deref]
     pub header: Header,
     /// Transactions in this block.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
-        )
-    )]
     pub body: Vec<TransactionSigned>,
     /// Ommers/uncles header.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(valid_header_strategy(), 0..=2)")
-    )]
     pub ommers: Vec<Header>,
     /// Block withdrawals.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
-    )]
     pub withdrawals: Option<Withdrawals>,
     /// Block requests.
-    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
     pub requests: Option<Requests>,
 }
 
@@ -278,27 +262,12 @@ pub struct SealedBlock {
     #[deref_mut]
     pub header: SealedHeader,
     /// Transactions with signatures.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
-        )
-    )]
     pub body: Vec<TransactionSigned>,
     /// Ommer/uncle headers
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(valid_header_strategy(), 0..=2)")
-    )]
     pub ommers: Vec<Header>,
     /// Block withdrawals.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
-    )]
     pub withdrawals: Option<Withdrawals>,
     /// Block requests.
-    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
     pub requests: Option<Requests>,
 }
 
@@ -518,23 +487,12 @@ impl SealedBlockWithSenders {
 #[rlp(trailing)]
 pub struct BlockBody {
     /// Transactions in the block
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
-        )
-    )]
     pub transactions: Vec<TransactionSigned>,
     /// Uncle headers for the given block
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(valid_header_strategy(), 0..=2)")
-    )]
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
     pub withdrawals: Option<Withdrawals>,
     /// Requests in the block.
-    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
     pub requests: Option<Requests>,
 }
 

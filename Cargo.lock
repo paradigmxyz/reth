@@ -5781,6 +5781,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "proptest-arbitrary-interop"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1981e49bd2432249da8b0e11e5557099a8e74690d6b94e721f7dc0bb7f3555f"
+dependencies = [
+ "arbitrary",
+ "proptest",
+]
+
+[[package]]
 name = "proptest-derive"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6182,6 +6192,7 @@ dependencies = [
  "ahash",
  "alloy-rlp",
  "aquamarine",
+ "arbitrary",
  "assert_matches",
  "backon",
  "boyer-moore-magiclen",
@@ -6199,6 +6210,7 @@ dependencies = [
  "libc",
  "metrics-process",
  "proptest",
+ "proptest-arbitrary-interop",
  "rand 0.8.5",
  "ratatui",
  "rayon",
@@ -6492,6 +6504,7 @@ dependencies = [
  "bytes",
  "modular-bitfield",
  "proptest",
+ "proptest-arbitrary-interop",
  "proptest-derive",
  "reth-codecs-derive",
  "serde",
@@ -6621,6 +6634,7 @@ dependencies = [
  "paste",
  "pprof",
  "proptest",
+ "proptest-arbitrary-interop",
  "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
@@ -6866,6 +6880,7 @@ dependencies = [
  "futures",
  "pin-project",
  "proptest",
+ "proptest-arbitrary-interop",
  "proptest-derive",
  "rand 0.8.5",
  "reth-chainspec",
@@ -6900,6 +6915,7 @@ dependencies = [
  "bytes",
  "derive_more",
  "proptest",
+ "proptest-arbitrary-interop",
  "proptest-derive",
  "rand 0.8.5",
  "reth-chainspec",
@@ -7688,6 +7704,7 @@ dependencies = [
  "once_cell",
  "pprof",
  "proptest",
+ "proptest-arbitrary-interop",
  "proptest-derive",
  "rand 0.8.5",
  "rayon",
@@ -7726,6 +7743,7 @@ dependencies = [
  "derive_more",
  "modular-bitfield",
  "proptest",
+ "proptest-arbitrary-interop",
  "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
@@ -7818,6 +7836,7 @@ dependencies = [
  "derive_more",
  "modular-bitfield",
  "proptest",
+ "proptest-arbitrary-interop",
  "proptest-derive",
  "reth-codecs",
  "serde",
@@ -8153,6 +8172,7 @@ dependencies = [
  "bytes",
  "modular-bitfield",
  "proptest",
+ "proptest-arbitrary-interop",
  "proptest-derive",
  "rand 0.8.5",
  "reth-codecs",
@@ -8285,6 +8305,7 @@ dependencies = [
  "paste",
  "pprof",
  "proptest",
+ "proptest-arbitrary-interop",
  "rand 0.8.5",
  "reth-chainspec",
  "reth-eth-wire-types",
@@ -8319,6 +8340,7 @@ dependencies = [
  "metrics",
  "once_cell",
  "proptest",
+ "proptest-arbitrary-interop",
  "rayon",
  "reth-chainspec",
  "reth-db",
@@ -8358,6 +8380,7 @@ dependencies = [
  "nybbles",
  "plain_hasher",
  "proptest",
+ "proptest-arbitrary-interop",
  "proptest-derive",
  "reth-codecs",
  "reth-primitives-traits",
@@ -8378,6 +8401,7 @@ dependencies = [
  "itertools 0.13.0",
  "metrics",
  "proptest",
+ "proptest-arbitrary-interop",
  "rand 0.8.5",
  "rayon",
  "reth-db",
