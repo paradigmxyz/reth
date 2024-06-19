@@ -66,4 +66,5 @@ optimism = [
     "reth-evm-optimism/optimism",
     "reth-optimism-payload-builder/optimism",
     "reth-beacon-consensus/optimism",
+    "reth-revm/optimism",
 ]
