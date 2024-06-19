@@ -41,7 +41,6 @@ pub mod revm;
 pub use reth_static_file_types as static_file;
 mod storage;
 pub mod transaction;
-pub use reth_primitives_traits::{Account, Bytecode};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{
@@ -61,7 +60,7 @@ pub use log::{logs_bloom, Log};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
-pub use reth_primitives_traits::Requests;
+pub use reth_primitives_traits::{Account, Bytecode, Request, Requests};
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
@@ -86,7 +85,6 @@ pub use reth_primitives_traits::{Withdrawal, Withdrawals};
 
 // Re-exports
 pub use self::ruint::UintTryTo;
-pub use alloy_consensus::Request;
 pub use alloy_primitives::{
     self, address, b256, bloom, bytes,
     bytes::{Buf, BufMut, BytesMut},
