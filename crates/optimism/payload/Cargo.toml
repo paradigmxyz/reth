@@ -42,4 +42,5 @@ optimism = [
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-evm-optimism/optimism",
+    "reth-revm/optimism",
 ]

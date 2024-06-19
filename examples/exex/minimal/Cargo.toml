@@ -1,5 +1,5 @@
 [package]
-name = "exex-minimal"
+name = "example-exex-minimal"
 version = "0.0.0"
 publish = false
 edition.workspace = true

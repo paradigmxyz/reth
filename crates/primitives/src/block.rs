@@ -1,5 +1,5 @@
 use crate::{
-    Address, Bytes, GotExpected, Header, Requests, SealedHeader, TransactionSigned,
+    Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
 pub use alloy_eips::eip1898::{
@@ -12,6 +12,7 @@ use proptest::prelude::prop_compose;
 use reth_codecs::derive_arbitrary;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
+use reth_primitives_traits::Requests;
 use serde::{Deserialize, Serialize};
 
 #[cfg(not(feature = "std"))]

@@ -1,5 +1,5 @@
 [package]
-name = "exex-in-memory-state"
+name = "example-exex-in-memory-state"
 version = "0.0.0"
 publish = false
 edition.workspace = true

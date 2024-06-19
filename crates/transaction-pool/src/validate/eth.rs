@@ -16,12 +16,12 @@ use reth_primitives::{
         ETHEREUM_BLOCK_GAS_LIMIT,
     },
     kzg::KzgSettings,
-    revm::compat::calculate_intrinsic_gas_after_merge,
-    GotExpected, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    Address, GotExpected, InvalidTransactionError, SealedBlock, TxKind, EIP1559_TX_TYPE_ID,
+    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
 };
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
+use revm::{interpreter::gas::validate_initial_tx_gas, primitives::SpecId};
 use std::{
     marker::PhantomData,
     sync::{atomic::AtomicBool, Arc},
@@ -726,6 +726,20 @@ pub fn ensure_intrinsic_gas<T: PoolTransaction>(
     } else {
         Ok(())
     }
+}
+
+/// Calculates the Intrinsic Gas usage for a Transaction
+///
+/// Caution: This only checks past the Merge hardfork.
+#[inline]
+pub fn calculate_intrinsic_gas_after_merge(
+    input: &[u8],
+    kind: &TxKind,
+    access_list: &[(Address, Vec<U256>)],
+    is_shanghai: bool,
+) -> u64 {
+    let spec_id = if is_shanghai { SpecId::SHANGHAI } else { SpecId::MERGE };
+    validate_initial_tx_gas(spec_id, input, kind.is_create(), access_list)
 }
 
 #[cfg(test)]

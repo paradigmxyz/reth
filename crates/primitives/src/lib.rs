@@ -22,7 +22,6 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
-mod account;
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
 pub mod basefee;
@@ -34,18 +33,13 @@ pub mod eip4844;
 mod error;
 pub mod genesis;
 pub mod header;
-mod integer_list;
 mod log;
 pub mod proofs;
 mod receipt;
-mod request;
 /// Helpers for working with revm
 pub mod revm;
 pub use reth_static_file_types as static_file;
-mod storage;
 pub mod transaction;
-mod withdrawal;
-pub use account::{Account, Bytecode};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{
@@ -61,14 +55,14 @@ pub use constants::{
 pub use error::{GotExpected, GotExpectedBoxed};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeadersDirection, SealedHeader};
-pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
-pub use request::Requests;
+pub use reth_primitives_traits::{
+    Account, Bytecode, Request, Requests, StorageEntry, Withdrawal, Withdrawals,
+};
 pub use static_file::StaticFileSegment;
-pub use storage::StorageEntry;
 
 pub use transaction::{
     BlobTransaction, BlobTransactionSidecar, FromRecoveredPooledTransaction,
@@ -87,11 +81,8 @@ pub use transaction::{
     LEGACY_TX_TYPE_ID,
 };
 
-pub use withdrawal::{Withdrawal, Withdrawals};
-
 // Re-exports
 pub use self::ruint::UintTryTo;
-pub use alloy_consensus::Request;
 pub use alloy_primitives::{
     self, address, b256, bloom, bytes,
     bytes::{Buf, BufMut, BytesMut},

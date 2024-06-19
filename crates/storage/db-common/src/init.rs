@@ -534,8 +534,9 @@ mod tests {
         transaction::DbTx,
     };
     use reth_primitives::{
-        Genesis, IntegerList, GOERLI_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+        Genesis, GOERLI_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
     };
+    use reth_primitives_traits::IntegerList;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
 
     fn collect_table_entries<DB, T>(
