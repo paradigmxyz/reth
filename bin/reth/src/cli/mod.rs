@@ -13,10 +13,10 @@ use crate::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
+use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;

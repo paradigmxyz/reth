@@ -164,8 +164,9 @@ mod tests {
     use super::*;
     use crate::StateRoot;
     use once_cell::sync::Lazy;
+    use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
     use reth_db_api::database::Database;
-    use reth_primitives::{Account, Bytes, Chain, ChainSpec, StorageEntry, HOLESKY, MAINNET, U256};
+    use reth_primitives::{Account, Bytes, StorageEntry, U256};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, ProviderFactory};
     use reth_storage_errors::provider::ProviderResult;
     use std::{str::FromStr, sync::Arc};

@@ -3,7 +3,7 @@ use reth_network::{
     error::{NetworkError, ServiceKind},
     Discovery, NetworkConfigBuilder, NetworkManager,
 };
-use reth_network_api::NetworkInfo;
+use reth_network_api::{NetworkInfo, PeersInfo};
 use reth_provider::test_utils::NoopProvider;
 use secp256k1::SecretKey;
 use std::{
@@ -59,8 +59,46 @@ async fn test_discovery_addr_in_use() {
     let any_port_listener = TcpListener::bind(addr).await.unwrap();
     let port = any_port_listener.local_addr().unwrap().port();
     let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port));
-    let _discovery = Discovery::new(addr, secret_key, Some(disc_config), None, None).await.unwrap();
+    let _discovery =
+        Discovery::new(addr, addr, secret_key, Some(disc_config), None, None).await.unwrap();
     let disc_config = Discv4Config::default();
-    let result = Discovery::new(addr, secret_key, Some(disc_config), None, None).await;
+    let result = Discovery::new(addr, addr, secret_key, Some(disc_config), None, None).await;
     assert!(is_addr_in_use_kind(&result.err().unwrap(), ServiceKind::Discovery(addr)));
+}
+
+// <https://github.com/paradigmxyz/reth/issues/8851>
+#[tokio::test(flavor = "multi_thread")]
+async fn test_tcp_port_node_record_no_discovery() {
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let config = NetworkConfigBuilder::new(secret_key)
+        .listener_port(0)
+        .disable_discovery()
+        .build_with_noop_provider();
+    let network = NetworkManager::new(config).await.unwrap();
+
+    let local_addr = network.local_addr();
+    // ensure we retrieved the port the OS chose
+    assert_ne!(local_addr.port(), 0);
+
+    let record = network.handle().local_node_record();
+    assert_eq!(record.tcp_port, local_addr.port());
+}
+
+// <https://github.com/paradigmxyz/reth/issues/8851>
+#[tokio::test(flavor = "multi_thread")]
+async fn test_tcp_port_node_record_discovery() {
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let config = NetworkConfigBuilder::new(secret_key)
+        .listener_port(0)
+        .discovery_port(0)
+        .build_with_noop_provider();
+    let network = NetworkManager::new(config).await.unwrap();
+
+    let local_addr = network.local_addr();
+    // ensure we retrieved the port the OS chose
+    assert_ne!(local_addr.port(), 0);
+
+    let record = network.handle().local_node_record();
+    assert_eq!(record.tcp_port, local_addr.port());
+    assert_ne!(record.udp_port, 0);
 }

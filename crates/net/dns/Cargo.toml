@@ -40,7 +40,7 @@ serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-primitives.workspace = true
+reth-chainspec.workspace = true
 alloy-rlp.workspace = true
 alloy-chains.workspace = true
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }

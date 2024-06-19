@@ -1371,6 +1371,7 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
     use reth_db_api::transaction::DbTxMut;
@@ -1385,9 +1386,8 @@ mod tests {
         keccak256,
         proofs::calculate_transaction_root,
         revm_primitives::AccountInfo,
-        Account, Address, ChainSpecBuilder, Genesis, GenesisAccount, Header, Signature,
-        Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
-        MAINNET,
+        Account, Address, Genesis, GenesisAccount, Header, Signature, Transaction,
+        TransactionSigned, TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
     };
     use reth_provider::{
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec},

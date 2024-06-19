@@ -2,16 +2,20 @@ use crate::{
     Address, Bytes, GotExpected, Header, Requests, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
-use alloy_rlp::{RlpDecodable, RlpEncodable};
-use derive_more::{Deref, DerefMut};
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::prelude::{any, prop_compose};
-use reth_codecs::derive_arbitrary;
-use serde::{Deserialize, Serialize};
-
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
+use alloy_rlp::{RlpDecodable, RlpEncodable};
+use derive_more::{Deref, DerefMut};
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::prelude::prop_compose;
+use reth_codecs::derive_arbitrary;
+#[cfg(any(test, feature = "arbitrary"))]
+pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
+use serde::{Deserialize, Serialize};
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 // HACK(onbjerg): we need this to always set `requests` to `None` since we might otherwise generate
 // a block with `None` withdrawals and `Some` requests, in which case we end up trying to decode the
@@ -176,9 +180,9 @@ impl Block {
     pub fn size(&self) -> usize {
         self.header.size() +
             // take into account capacity
-            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * core::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * core::mem::size_of::<Header>() +
+            self.withdrawals.as_ref().map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 }
 
@@ -252,7 +256,7 @@ impl BlockWithSenders {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp)]
+#[derive_arbitrary(rlp 32)]
 #[derive(
     Debug,
     Clone,
@@ -391,9 +395,9 @@ impl SealedBlock {
     pub fn size(&self) -> usize {
         self.header.size() +
             // take into account capacity
-            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * core::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * core::mem::size_of::<Header>() +
+            self.withdrawals.as_ref().map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 
     /// Calculates the total gas used by blob transactions in the sealed block.
@@ -572,12 +576,12 @@ impl BlockBody {
     #[inline]
     pub fn size(&self) -> usize {
         self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
-            self.transactions.capacity() * std::mem::size_of::<TransactionSigned>() +
+            self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() +
-            self.ommers.capacity() * std::mem::size_of::<Header>() +
+            self.ommers.capacity() * core::mem::size_of::<Header>() +
             self.withdrawals
                 .as_ref()
-                .map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+                .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 }
 
@@ -589,69 +593,6 @@ impl From<Block> for BlockBody {
             withdrawals: block.withdrawals,
             requests: block.requests,
         }
-    }
-}
-
-/// Generates a header which is valid __with respect to past and future forks__. This means, for
-/// example, that if the withdrawals root is present, the base fee per gas is also present.
-///
-/// If blob gas used were present, then the excess blob gas and parent beacon block root are also
-/// present. In this example, the withdrawals root would also be present.
-///
-/// This __does not, and should not guarantee__ that the header is valid with respect to __anything
-/// else__.
-#[cfg(any(test, feature = "arbitrary"))]
-pub const fn generate_valid_header(
-    mut header: Header,
-    eip_4844_active: bool,
-    blob_gas_used: u64,
-    excess_blob_gas: u64,
-    parent_beacon_block_root: B256,
-) -> Header {
-    // EIP-1559 logic
-    if header.base_fee_per_gas.is_none() {
-        // If EIP-1559 is not active, clear related fields
-        header.withdrawals_root = None;
-        header.blob_gas_used = None;
-        header.excess_blob_gas = None;
-        header.parent_beacon_block_root = None;
-    } else if header.withdrawals_root.is_none() {
-        // If EIP-4895 is not active, clear related fields
-        header.blob_gas_used = None;
-        header.excess_blob_gas = None;
-        header.parent_beacon_block_root = None;
-    } else if eip_4844_active {
-        // Set fields based on EIP-4844 being active
-        header.blob_gas_used = Some(blob_gas_used);
-        header.excess_blob_gas = Some(excess_blob_gas);
-        header.parent_beacon_block_root = Some(parent_beacon_block_root);
-    } else {
-        // If EIP-4844 is not active, clear related fields
-        header.blob_gas_used = None;
-        header.excess_blob_gas = None;
-        header.parent_beacon_block_root = None;
-    }
-
-    // todo(onbjerg): adjust this for eip-7589
-    header.requests_root = None;
-
-    header
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-prop_compose! {
-    /// Generates a proptest strategy for constructing an instance of a header which is valid __with
-    /// respect to past and future forks__.
-    ///
-    /// See docs for [generate_valid_header] for more information.
-    pub fn valid_header_strategy()(
-        header in any::<Header>(),
-        eip_4844_active in any::<bool>(),
-        blob_gas_used in any::<u64>(),
-        excess_blob_gas in any::<u64>(),
-        parent_beacon_block_root in any::<B256>()
-    ) -> Header {
-        generate_valid_header(header, eip_4844_active, blob_gas_used, excess_blob_gas, parent_beacon_block_root)
     }
 }
 

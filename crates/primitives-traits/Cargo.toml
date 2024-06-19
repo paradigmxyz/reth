@@ -14,9 +14,15 @@ workspace = true
 [dependencies]
 reth-codecs.workspace = true
 
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
-alloy-consensus.workspace = true
+alloy-rlp.workspace = true
+alloy-rpc-types-eth = { workspace = true, optional = true } 
+
+derive_more.workspace = true
+revm-primitives.workspace = true
 
 # required by reth-codecs
 modular-bitfield.workspace = true
@@ -33,11 +39,15 @@ arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
 test-fuzz.workspace = true
+rand.workspace = true
 
 [features]
+default = ["std"]
+std = []
+test-utils = ["arbitrary"]
 arbitrary = [
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive"
 ]
-
+alloy-compat = ["alloy-rpc-types-eth"]

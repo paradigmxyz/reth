@@ -14,8 +14,9 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-config.workspace = true
-reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
+reth-primitives.workspace = true
 reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
@@ -49,7 +50,8 @@ reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
-reth-static-file = { workspace = true }
+reth-static-file.workspace = true
+reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true

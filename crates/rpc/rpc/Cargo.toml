@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-server-types.workspace = true
@@ -49,7 +50,7 @@ jsonrpsee.workspace = true
 http.workspace = true
 http-body.workspace = true
 hyper.workspace = true
-jsonwebtoken = "8"
+jsonwebtoken.workspace = true
 
 # async
 async-trait.workspace = true
@@ -95,4 +96,5 @@ optimism = [
     "reth-provider/optimism",
     "dep:reth-evm-optimism",
     "reth-evm-optimism/optimism",
+    "reth-revm/optimism",
 ]

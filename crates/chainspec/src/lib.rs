@@ -1,28 +1,47 @@
+//! The spec of an Ethereum network
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
 pub use alloy_chains::{Chain, ChainKind, NamedChain};
 pub use info::ChainInfo;
 pub use spec::{
     AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder,
-    DepositContract, DisplayHardforks, ForkBaseFeeParams, ForkCondition, DEV, GOERLI, HOLESKY,
-    MAINNET, SEPOLIA,
+    DepositContract, ForkBaseFeeParams, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
 };
 #[cfg(feature = "optimism")]
 pub use spec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
-#[cfg(feature = "optimism")]
-#[cfg(test)]
-pub(crate) use spec::{
-    BASE_SEPOLIA_BASE_FEE_PARAMS, OP_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS,
-};
+#[cfg(not(feature = "std"))]
+extern crate alloc;
 
-// The chain spec module.
-mod spec;
-// The chain info module.
+// /// The config info module namely spec id.
+// pub mod config;
+/// The chain info module.
 mod info;
+
+/// Network related constants
+pub mod net;
+
+/// The chain spec module.
+mod spec;
+
+/// Chain specific constants
+pub(crate) mod constants;
+
+/// Re-export for convenience
+pub use reth_ethereum_forks::*;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::U256;
+    use alloy_primitives::U256;
     use alloy_rlp::Encodable;
     use std::str::FromStr;
 

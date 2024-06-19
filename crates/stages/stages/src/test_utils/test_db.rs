@@ -1,3 +1,4 @@
+use reth_chainspec::MAINNET;
 use reth_db::{
     tables,
     test_utils::{
@@ -16,7 +17,7 @@ use reth_db_api::{
 };
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader,
-    StaticFileSegment, StorageEntry, TxHash, TxNumber, B256, MAINNET, U256,
+    StaticFileSegment, StorageEntry, TxHash, TxNumber, B256, U256,
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},

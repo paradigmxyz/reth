@@ -10,6 +10,7 @@
 
 use futures_util::FutureExt;
 use reth_blockchain_tree::noop::NoopBlockchainTree;
+use reth_chainspec::{ChainSpec, MAINNET};
 use reth_consensus::test_utils::TestConsensus;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_db_common::init::init_genesis;
@@ -30,7 +31,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{ChainSpec, Head, SealedBlockWithSenders, MAINNET};
+use reth_primitives::{Head, SealedBlockWithSenders};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     BlockReader, Chain, ProviderFactory,
@@ -135,13 +136,18 @@ where
     }
 }
 
-type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
-type Adapter = NodeAdapter<
+/// A shared [`TempDatabase`] used for testing
+pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
+/// The [`NodeAdapter`] for the [`TestExExContext`]. Contains type necessary to
+/// boot the testing environment
+pub type Adapter = NodeAdapter<
     RethFullAdapter<TmpDB, TestNode>,
     <<TestNode as Node<FullNodeTypesAdapter<TestNode, TmpDB, BlockchainProvider<TmpDB>>>>::ComponentsBuilder as NodeComponentsBuilder<
         RethFullAdapter<TmpDB, TestNode>,
     >>::Components,
 >;
+/// An [`ExExContext`] using the [`Adapter`] type.
+pub type TestExExContext = ExExContext<Adapter>;
 
 /// A helper type for testing Execution Extensions.
 #[derive(Debug)]
@@ -154,6 +160,8 @@ pub struct TestExExHandle {
     pub events_rx: UnboundedReceiver<ExExEvent>,
     /// Channel for sending notifications to the Execution Extension
     pub notifications_tx: Sender<ExExNotification>,
+    /// Node task manager
+    pub tasks: TaskManager,
 }
 
 impl TestExExHandle {
@@ -277,7 +285,7 @@ pub async fn test_exex_context_with_chain_spec(
         components,
     };
 
-    Ok((ctx, TestExExHandle { genesis, provider_factory, events_rx, notifications_tx }))
+    Ok((ctx, TestExExHandle { genesis, provider_factory, events_rx, notifications_tx, tasks }))
 }
 
 /// Creates a new [`ExExContext`] with (mainnet)[`MAINNET`] chain spec.

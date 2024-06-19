@@ -6,10 +6,11 @@ use futures::{
     FutureExt, Stream, StreamExt,
 };
 use metrics::atomics::AtomicU64;
+use reth_chainspec::ChainSpec;
 use reth_primitives::{
     basefee::calc_next_block_base_fee,
     eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
-    ChainSpec, Receipt, SealedBlock, TransactionSigned, B256,
+    Receipt, SealedBlock, TransactionSigned, B256,
 };
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider};
 use reth_rpc_server_types::constants::gas_oracle::MAX_HEADER_HISTORY;

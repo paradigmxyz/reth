@@ -11,6 +11,7 @@ use crate::{
 };
 use discv5::ListenConfig;
 use futures::Future;
+use reth_chainspec::ChainSpec;
 use reth_db::{
     test_utils::{create_test_rw_db_with_path, tempdir_path, TempDatabase},
     DatabaseEnv,
@@ -32,7 +33,7 @@ use reth_node_core::{
     primitives::{kzg::KzgSettings, Head},
     utils::write_peers_to_file,
 };
-use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, ChainSpec};
+use reth_primitives::constants::eip4844::MAINNET_KZG_TRUSTED_SETUP;
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};

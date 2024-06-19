@@ -201,8 +201,8 @@ impl Environment {
     /// Note:
     ///
     /// * MDBX stores all the freelists in the designated database 0 in each environment, and the
-    ///   freelist count is stored at the beginning of the value as `libc::uint32_t` in the native
-    ///   byte order.
+    ///   freelist count is stored at the beginning of the value as `uint32_t` in the native byte
+    ///   order.
     ///
     /// * It will create a read transaction to traverse the freelist database.
     pub fn freelist(&self) -> Result<usize> {

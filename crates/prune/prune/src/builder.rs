@@ -1,8 +1,8 @@
 use crate::{segments::SegmentSet, Pruner};
+use reth_chainspec::MAINNET;
 use reth_config::PruneConfig;
 use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
-use reth_primitives::MAINNET;
 use reth_provider::ProviderFactory;
 use reth_prune_types::PruneModes;
 use std::time::Duration;

@@ -16,6 +16,7 @@ ef-tests = []
 asm-keccak = ["reth-primitives/asm-keccak"]
 
 [dependencies]
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx", "test-utils", "disable-lock"] }
 reth-db-api.workspace = true
