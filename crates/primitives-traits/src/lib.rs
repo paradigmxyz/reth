@@ -30,6 +30,12 @@ pub use request::{Request, Requests};
 mod withdrawal;
 pub use withdrawal::{Withdrawal, Withdrawals};
 
+mod error;
+pub use error::{GotExpected, GotExpectedBoxed};
+
+mod log;
+pub use log::{logs_bloom, Log};
+
 mod storage;
 pub use storage::StorageEntry;
 
