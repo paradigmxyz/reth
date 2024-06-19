@@ -91,7 +91,6 @@ arbitrary = [
     "reth-ethereum-forks/arbitrary",
     "nybbles/arbitrary",
     "alloy-trie/arbitrary",
-    "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
