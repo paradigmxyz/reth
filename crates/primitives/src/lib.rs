@@ -30,7 +30,6 @@ mod block;
 mod compression;
 pub mod constants;
 pub mod eip4844;
-mod error;
 pub mod genesis;
 pub mod header;
 mod log;
@@ -53,7 +52,7 @@ pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
     KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
-pub use error::{GotExpected, GotExpectedBoxed};
+pub use reth_primitives_traits::{GotExpected, GotExpectedBoxed};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeadersDirection, SealedHeader};
 pub use log::{logs_bloom, Log};
