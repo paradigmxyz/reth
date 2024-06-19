@@ -7665,28 +7665,6 @@ name = "reth-optimism-primitives"
 version = "1.0.0-rc.2"
 
 [[package]]
-name = "reth-optimism-rpc"
-version = "1.0.0-rc.2"
-dependencies = [
- "futures",
- "jsonrpsee",
- "parking_lot 0.12.3",
- "reth-evm",
- "reth-evm-optimism",
- "reth-network-api",
- "reth-primitives",
- "reth-provider",
- "reth-rpc",
- "reth-rpc-eth-api",
- "reth-rpc-types",
- "reth-tasks",
- "reth-transaction-pool",
- "revm",
- "thiserror",
- "tokio",
-]
-
-[[package]]
 name = "reth-payload-builder"
 version = "1.0.0-rc.2"
 dependencies = [

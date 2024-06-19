@@ -1,71 +1,62 @@
 //! Contains RPC handler implementations specific to transactions
 
-use crate::EthApi;
+use reth_provider::{BlockReaderIdExt, TransactionsProvider};
+use reth_transaction_pool::TransactionPool;
 
-/// Implements [`EthTransactions`](crate::servers::EthTransactions) for a type, that has similar
-/// data layout to [`EthApi`].
-#[macro_export]
-macro_rules! eth_transactions_impl {
-    ($network_api:ty) => {
-        impl<Provider, Pool, Network, EvmConfig> $crate::servers::EthTransactions for $network_api
-        where
-            Self: $crate::servers::LoadTransaction,
-            Pool: reth_transaction_pool::TransactionPool + 'static,
-            Provider: reth_provider::BlockReaderIdExt,
-        {
-            #[inline]
-            fn provider(&self) -> impl reth_provider::BlockReaderIdExt {
-                self.inner.provider()
-            }
+use crate::{
+    servers::{
+        EthSigner, EthTransactions, LoadTransaction, RawTransactionForwarder, SpawnBlocking,
+    },
+    EthApi, EthStateCache,
+};
 
-            #[inline]
-            fn raw_tx_forwarder(
-                &self,
-            ) -> Option<std::sync::Arc<dyn $crate::servers::RawTransactionForwarder>> {
-                self.inner.raw_tx_forwarder()
-            }
+impl<Provider, Pool, Network, EvmConfig> EthTransactions
+    for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: LoadTransaction,
+    Pool: TransactionPool + 'static,
+    Provider: BlockReaderIdExt,
+{
+    #[inline]
+    fn provider(&self) -> impl BlockReaderIdExt {
+        self.inner.provider()
+    }
 
-            #[inline]
-            fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn $crate::servers::EthSigner>>> {
-                self.inner.signers()
-            }
-        }
-    };
+    #[inline]
+    fn raw_tx_forwarder(&self) -> Option<std::sync::Arc<dyn RawTransactionForwarder>> {
+        self.inner.raw_tx_forwarder()
+    }
+
+    #[inline]
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
+        self.inner.signers()
+    }
 }
 
-/// Implements [`LoadTransaction`](crate::servers::LoadTransaction) for a type, that has similar
-/// data layout to [`EthApi`].
-#[macro_export]
-macro_rules! load_transaction_impl {
-    ($network_api:ty) => {
-        impl<Provider, Pool, Network, EvmConfig> $crate::servers::LoadTransaction for $network_api
-        where
-            Self: $crate::servers::SpawnBlocking,
-            Provider: reth_provider::TransactionsProvider,
-            Pool: reth_transaction_pool::TransactionPool,
-        {
-            type Pool = Pool;
+impl<Provider, Pool, Network, EvmConfig> LoadTransaction
+    for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: SpawnBlocking,
+    Provider: TransactionsProvider,
+    Pool: TransactionPool,
+{
+    type Pool = Pool;
 
-            #[inline]
-            fn provider(&self) -> impl reth_provider::TransactionsProvider {
-                self.inner.provider()
-            }
+    #[inline]
+    fn provider(&self) -> impl reth_provider::TransactionsProvider {
+        self.inner.provider()
+    }
 
-            #[inline]
-            fn cache(&self) -> &$crate::EthStateCache {
-                self.inner.cache()
-            }
+    #[inline]
+    fn cache(&self) -> &EthStateCache {
+        self.inner.cache()
+    }
 
-            #[inline]
-            fn pool(&self) -> &Self::Pool {
-                self.inner.pool()
-            }
-        }
-    };
+    #[inline]
+    fn pool(&self) -> &Self::Pool {
+        self.inner.pool()
+    }
 }
-
-eth_transactions_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
-load_transaction_impl!(EthApi<Provider, Pool, Network, EvmConfig>);
 
 #[cfg(test)]
 mod tests {
