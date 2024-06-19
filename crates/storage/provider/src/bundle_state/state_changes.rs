@@ -4,7 +4,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{revm::compat::into_reth_acc, Bytecode, StorageEntry, U256};
+use reth_primitives::{Bytecode, StorageEntry, U256};
 use reth_storage_errors::db::DatabaseError;
 use revm::db::states::{PlainStorageChangeset, StateChangeset};
 
@@ -34,7 +34,7 @@ impl StateChanges {
         for (address, account) in self.0.accounts {
             if let Some(account) = account {
                 tracing::trace!(target: "provider::bundle_state", ?address, "Updating plain state account");
-                accounts_cursor.upsert(address, into_reth_acc(account))?;
+                accounts_cursor.upsert(address, account.into())?;
             } else if accounts_cursor.seek_exact(address)?.is_some() {
                 tracing::trace!(target: "provider::bundle_state", ?address, "Deleting plain state account");
                 accounts_cursor.delete_current()?;
