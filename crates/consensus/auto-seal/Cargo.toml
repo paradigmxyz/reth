@@ -36,5 +36,4 @@ tokio-stream.workspace = true
 tracing.workspace = true
 
 [features]
-# Included solely to ignore certain tests.
-optimism = []
+optimism = ["reth-provider/optimism"]
