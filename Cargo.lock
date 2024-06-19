@@ -7779,6 +7779,7 @@ dependencies = [
  "revm-primitives",
  "roaring",
  "serde",
+ "serde_json",
  "test-fuzz",
  "thiserror-no-std",
 ]
