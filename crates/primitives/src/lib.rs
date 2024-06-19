@@ -39,7 +39,6 @@ mod receipt;
 /// Helpers for working with revm
 pub mod revm;
 pub use reth_static_file_types as static_file;
-mod storage;
 pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
@@ -60,9 +59,10 @@ pub use log::{logs_bloom, Log};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
-pub use reth_primitives_traits::{Account, Bytecode, Request, Requests, Withdrawal, Withdrawals};
+pub use reth_primitives_traits::{
+    Account, Bytecode, Request, Requests, StorageEntry, Withdrawal, Withdrawals,
+};
 pub use static_file::StaticFileSegment;
-pub use storage::StorageEntry;
 
 pub use transaction::{
     BlobTransaction, BlobTransactionSidecar, FromRecoveredPooledTransaction,

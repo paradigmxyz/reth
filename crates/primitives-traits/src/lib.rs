@@ -30,6 +30,9 @@ pub use request::{Request, Requests};
 mod withdrawal;
 pub use withdrawal::{Withdrawal, Withdrawals};
 
+mod storage;
+pub use storage::StorageEntry;
+
 /// Common header types
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
