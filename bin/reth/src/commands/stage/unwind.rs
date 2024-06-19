@@ -15,7 +15,7 @@ use reth_provider::{
 };
 use reth_prune_types::PruneModes;
 use reth_stages::{
-    sets::DefaultStages,
+    sets::{DefaultStages, OfflineStages},
     stages::{ExecutionStage, ExecutionStageThresholds},
     Pipeline, StageSet,
 };
@@ -40,6 +40,8 @@ pub struct Command {
 
     #[command(subcommand)]
     command: Subcommands,
+
+    offline: bool,
 }
 
 impl Command {
@@ -105,9 +107,16 @@ impl Command {
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let executor = block_executor!(provider_factory.chain_spec());
 
-        let pipeline = Pipeline::builder()
-            .with_tip_sender(tip_tx)
-            .add_stages(
+        let builder = if self.offline {
+            let stages = OfflineStages::new(executor, config.stages, PruneModes::default());
+            let stages = stages.builder().disable(reth_stages::StageId::SenderRecovery).build();
+            let mut builder = Pipeline::builder();
+            for stage in stages {
+                builder = builder.add_stage(stage);
+            }
+            builder
+        } else {
+            Pipeline::builder().with_tip_sender(tip_tx).add_stages(
                 DefaultStages::new(
                     provider_factory.clone(),
                     tip_rx,
@@ -131,10 +140,12 @@ impl Command {
                     ExExManagerHandle::empty(),
                 )),
             )
-            .build(
-                provider_factory.clone(),
-                StaticFileProducer::new(provider_factory, PruneModes::default()),
-            );
+        };
+
+        let pipeline = builder.build(
+            provider_factory.clone(),
+            StaticFileProducer::new(provider_factory, PruneModes::default()),
+        );
         Ok(pipeline)
     }
 }
