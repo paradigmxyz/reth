@@ -7906,7 +7906,6 @@ dependencies = [
  "reth-consensus-common",
  "reth-errors",
  "reth-evm-ethereum",
- "reth-evm-optimism",
  "reth-network-api",
  "reth-network-peers",
  "reth-primitives",
