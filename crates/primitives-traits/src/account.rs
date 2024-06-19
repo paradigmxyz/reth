@@ -5,7 +5,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use derive_more::Deref;
 use reth_codecs::{main_codec, Compact};
-use revm_primitives::{Bytecode as RevmBytecode, JumpTable};
+use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, JumpTable};
 use serde::{Deserialize, Serialize};
 
 /// An Ethereum account.
@@ -119,6 +119,28 @@ impl Compact for Bytecode {
             _ => unreachable!("Junk data in database: unknown Bytecode variant"),
         };
         (decoded, &[])
+    }
+}
+
+impl From<AccountInfo> for Account {
+    fn from(revm_acc: AccountInfo) -> Self {
+        let code_hash = revm_acc.code_hash;
+        Self {
+            balance: revm_acc.balance,
+            nonce: revm_acc.nonce,
+            bytecode_hash: (code_hash != KECCAK_EMPTY).then_some(code_hash),
+        }
+    }
+}
+
+impl From<Account> for AccountInfo {
+    fn from(reth_acc: Account) -> Self {
+        Self {
+            balance: reth_acc.balance,
+            nonce: reth_acc.nonce,
+            code_hash: reth_acc.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+            code: None,
+        }
     }
 }
 
