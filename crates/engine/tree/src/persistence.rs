@@ -17,7 +17,7 @@ pub struct Persistence<DB> {
     provider: ProviderFactory<DB>,
     /// Incoming requests to persist stuff
     incoming: Receiver<PersistenceAction>,
-    /// The current active thread
+    /// The currently active thread for writing
     active_writer_thread: Option<JoinHandle<()>>,
 }
 
@@ -49,6 +49,8 @@ where
             if let Err(_err) = ready!(handle.poll_unpin(cx)) {
                 todo!("handle errors");
             }
+
+            this.active_writer_thread.take();
         }
 
         let action = match ready!(this.incoming.poll_recv(cx)) {
