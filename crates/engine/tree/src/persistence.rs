@@ -63,6 +63,7 @@ where
                 // spawn blocking so we can poll the thread later
                 let handle = spawn_blocking(move || {
                     let output = this.remove_blocks_above(new_tip_num);
+                    // TODO: more error handling
                     sender.send(output).unwrap();
                 });
 
