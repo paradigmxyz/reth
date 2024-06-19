@@ -2,7 +2,7 @@ use crate::utils::EthNode;
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures::StreamExt;
-use reth::rpc::eth::EthTransactions;
+use reth::rpc::eth::servers::EthTransactions;
 use reth_chainspec::ChainSpec;
 use reth_e2e_test_utils::setup;
 use reth_provider::CanonStateSubscriptions;

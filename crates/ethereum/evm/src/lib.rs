@@ -44,9 +44,10 @@ impl ConfigureEvm for EthEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_chainspec::ChainSpec;
     use reth_primitives::{
         revm_primitives::{BlockEnv, CfgEnv, SpecId},
-        ChainSpec, Header, U256,
+        Header, U256,
     };
     use revm_primitives::CfgEnvWithHandlerCfg;
 
