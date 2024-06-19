@@ -12,13 +12,14 @@ use tokio::{
 };
 
 /// Writes parts of reth's in memory tree state to the database.
+///
+/// It's expected that this will be spawned in its own thread with [`std::thread::spawn`], since
+/// this performs blocking database operations.
 pub struct Persistence<DB> {
     /// The db / static file provider to use
     provider: ProviderFactory<DB>,
     /// Incoming requests to persist stuff
     incoming: Receiver<PersistenceAction>,
-    /// The currently active thread for writing
-    active_writer_thread: Option<JoinHandle<()>>,
 }
 
 impl<Writer> Persistence<Writer> {
@@ -38,55 +39,24 @@ impl<Writer> Persistence<Writer>
 where
     Writer: Unpin,
 {
-    /// Internal method to poll the persistence task. This returns [`None`] if the channel for
-    /// incoming [`PersistenceAction`]s is closed.
-    #[tracing::instrument(level = "debug", name = "Persistence::poll", skip(self, cx))]
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<PersistenceOutput>> {
-        let this = self.get_mut();
-
-        if let Some(handle) = this.active_writer_thread {
-            // if pending we just keep waiting until we can do something
-            if let Err(_err) = ready!(handle.poll_unpin(cx)) {
-                todo!("handle errors");
-            }
-
-            this.active_writer_thread.take();
-        }
-
-        let action = match ready!(this.incoming.poll_recv(cx)) {
-            None => return Poll::Ready(None),
-            Some(action) => action,
-        };
-
-        match action {
-            PersistenceAction::RemoveBlocksAbove(new_tip_num) => {
-                let (sender, receiver) = oneshot::channel();
-
-                // spawn blocking so we can poll the thread later
-                let handle = spawn_blocking(move || {
+    /// This is the main loop, that will listen to persistence events and perform the requested
+    /// database actions
+    async fn run(&mut self) {
+        // TODO: sync or async receiver?
+        while let Some(action) = self.incoming.recv().await {
+            match action {
+                PersistenceAction::RemoveBlocksAbove((new_tip_num, sender)) => {
+                    // spawn blocking so we can poll the thread later
                     let output = this.remove_blocks_above(new_tip_num);
-                    // TODO: more error handling
                     sender.send(output).unwrap();
-                });
-
-                this.active_writer_thread = Some(handle);
-
-                Poll::Ready(Some(PersistenceOutput::AddBlocksAbove(receiver)))
-            }
-            PersistenceAction::SaveFinalizedBlocks(blocks) => {
-                if blocks.is_empty() {
-                    todo!("return error or something");
                 }
-                let last_block_hash = blocks.last().unwrap().block().hash();
-
-                // spawn blocking so we can poll the thread later
-                let handle = spawn_blocking(move || {
+                PersistenceAction::SaveFinalizedBlocks((blocks, sender)) => {
+                    if blocks.is_empty() {
+                        todo!("return error or something");
+                    }
+                    let last_block_hash = blocks.last().unwrap().block().hash();
                     this.write(blocks);
-                });
-
-                this.active_writer_thread = Some(handle);
-
-                Poll::Ready(Some(PersistenceOutput::RemoveBlocksBefore(last_block_hash)))
+                }
             }
         }
     }
@@ -96,19 +66,8 @@ where
 pub enum PersistenceAction {
     /// The section of tree state that should be persisted. These blocks are expected in order of
     /// increasing block number.
-    SaveFinalizedBlocks(Vec<ExecutedBlock>),
+    SaveFinalizedBlocks((Vec<ExecutedBlock>, oneshot::Sender<B256>)),
 
     /// Removes the blocks above the given block number from the database.
-    RemoveBlocksAbove(u64),
-}
-
-/// An output of the persistence task, that tells the tree that it needs something.
-pub enum PersistenceOutput {
-    /// Tells the consumer that it can remove the blocks before the given hash, as they have been
-    /// persisted.
-    RemoveBlocksBefore(B256),
-
-    /// Tells the consumer that the following blocks have been un-persisted, or removed from the
-    /// datbase, and they should be re-added to any in memory data structures.
-    AddBlocksAbove(oneshot::Receiver<Vec<ExecutedBlock>>),
+    RemoveBlocksAbove((u64, oneshot::Sender<Vec<ExecutedBlock>>)),
 }
