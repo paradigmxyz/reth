@@ -407,6 +407,18 @@ impl StorageInner {
 
         // calculate the state root
         header.state_root = db.state_root(execution_outcome.state())?;
+
+        #[cfg(feature = "optimism")]
+        let receipts_root = execution_outcome
+            .optimism_receipts_root_slow(header.number, chain_spec.as_ref(), header.timestamp)
+            .expect("Block is present");
+
+        #[cfg(not(feature = "optimism"))]
+        let receipts_root =
+            execution_outcome.receipts_root_slow(header.number).expect("Block is present");
+
+        header.receipts_root = receipts_root;
+
         trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 
         // finally insert into storage
