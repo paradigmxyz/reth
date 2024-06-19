@@ -32,7 +32,6 @@ pub mod constants;
 pub mod eip4844;
 pub mod genesis;
 pub mod header;
-mod log;
 pub mod proofs;
 mod receipt;
 /// Helpers for working with revm
@@ -55,7 +54,7 @@ pub use constants::{
 pub use reth_primitives_traits::{GotExpected, GotExpectedBoxed};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeadersDirection, SealedHeader};
-pub use log::{logs_bloom, Log};
+pub use reth_primitives_traits::{logs_bloom, Log};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };

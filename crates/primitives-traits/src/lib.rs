@@ -33,6 +33,9 @@ pub use withdrawal::{Withdrawal, Withdrawals};
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
 
+mod log;
+pub use log::{logs_bloom, Log};
+
 /// Common header types
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
