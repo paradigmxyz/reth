@@ -22,7 +22,6 @@ reth-chainspec.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
-alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-rpc-types = { workspace = true, optional = true }

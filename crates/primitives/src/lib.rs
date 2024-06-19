@@ -60,7 +60,7 @@ pub use log::{logs_bloom, Log};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
-pub use reth_primitives_traits::{Account, Bytecode, Request, Requests};
+pub use reth_primitives_traits::{Account, Bytecode, Request, Requests, Withdrawal, Withdrawals};
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
@@ -80,8 +80,6 @@ pub use transaction::{
     TxHashOrNumber, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
-
-pub use reth_primitives_traits::{Withdrawal, Withdrawals};
 
 // Re-exports
 pub use self::ruint::UintTryTo;
