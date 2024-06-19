@@ -38,140 +38,61 @@ impl<'a> TryFrom<&'a reth::providers::Chain> for proto::Chain {
     fn try_from(chain: &'a reth::providers::Chain) -> Result<Self, Self::Error> {
         let bundle_state = chain.execution_outcome().state();
         Ok(proto::Chain {
-        blocks: chain
-            .blocks_iter()
-            .map(|block| proto::Block {
-                header: Some(proto::SealedHeader {
-                    hash: block.header.hash().to_vec(),
-                    header: Some(block.header.header().into()),
-                }),
-                body: block.transactions().map(Into::into).collect(),
-                ommers: block.ommers.iter().map(Into::into).collect(),
-                senders: block.senders.iter().map(|sender| sender.to_vec()).collect(),
-            })
-            .collect(),
-        execution_outcome: Some(proto::ExecutionOutcome {
-            bundle: Some(proto::BundleState {
-                state: bundle_state
-                    .state
-                    .iter()
-                    .map(|(address, account)| {
-                        Ok(proto::BundleAccount {
-                            address: address.to_vec(),
-                            info: account.info.as_ref().map(TryInto::try_into).transpose()?,
-                            original_info: account
-                                .original_info
-                                .as_ref()
-                                .map(TryInto::try_into)
-                                .transpose()?,
-                            storage: account
-                                .storage
-                                .iter()
-                                .map(|(key, slot)| proto::StorageSlot {
-                                    key: key.to_le_bytes_vec(),
-                                    previous_or_original_value: slot
-                                        .previous_or_original_value
-                                        .to_le_bytes_vec(),
-                                    present_value: slot.present_value.to_le_bytes_vec(),
-                                })
-                                .collect(),
-                            status: proto::AccountStatus::from(account.status) as i32,
-                        })
-                    })
-                    .collect::<eyre::Result<_>>()?,
-                contracts: bundle_state
-                    .contracts
-                    .iter()
-                    .map(|(hash, bytecode)| {
-                        Ok(proto::ContractBytecode {
-                            hash: hash.to_vec(),
-                            bytecode: Some(bytecode.try_into()?),
-                        })
-                    })
-                    .collect::<eyre::Result<_>>()?,
-                reverts: bundle_state
-                    .reverts
-                    .iter()
-                    .map(|block_reverts| Ok(proto::BlockReverts {
-                        reverts: block_reverts
-                            .iter()
-                            .map(|(address, revert)| Ok(proto::Revert {
-                                address: address.to_vec(),
-                                account: Some(proto::AccountInfoRevert { revert: Some(match &revert.account {
-                                    reth::revm::db::states::reverts::AccountInfoRevert::DoNothing => proto::account_info_revert::Revert::DoNothing(()),
-                                    reth::revm::db::states::reverts::AccountInfoRevert::DeleteIt => proto::account_info_revert::Revert::DeleteIt(()),
-                                    reth::revm::db::states::reverts::AccountInfoRevert::RevertTo(account_info) => proto::account_info_revert::Revert::RevertTo(account_info.try_into()?),
-                                })}),
-                                storage: revert.storage.iter().map(|(key, slot)| Ok(proto::RevertToSlot {
-                                    key: key.to_le_bytes_vec(),
-                                    revert: Some(match slot {
-                                        reth::revm::db::RevertToSlot::Some(value) => proto::revert_to_slot::Revert::Some(value.to_le_bytes_vec()),
-                                        reth::revm::db::RevertToSlot::Destroyed => proto::revert_to_slot::Revert::Destroyed(()),
-                                    }),
-                                })).collect::<eyre::Result<_>>()?,
-                                previous_status: proto::AccountStatus::from(revert.previous_status) as i32,
-                                wipe_storage: revert.wipe_storage,
-                            }))
-                            .collect::<eyre::Result<_>>()?,
-                    }))
-                    .collect::<eyre::Result<_>>()?,
-                state_size: bundle_state.state_size as u64,
-                reverts_size: bundle_state.reverts_size as u64,
-            }),
-            receipts: chain
-                .execution_outcome()
-                .receipts()
-                .iter()
-                .map(|block_receipts| proto::BlockReceipts {
-                    receipts: block_receipts
-                        .iter()
-                        .map(|receipt| proto::Receipt {
-                            receipt: Some(receipt.as_ref().map_or(
-                                proto::receipt::Receipt::Empty(()),
-                                |receipt| {
-                                    proto::receipt::Receipt::NonEmpty(proto::NonEmptyReceipt {
-                                        tx_type: match receipt.tx_type {
-                                            reth::primitives::TxType::Legacy => {
-                                                proto::TxType::Legacy
-                                            }
-                                            reth::primitives::TxType::Eip2930 => {
-                                                proto::TxType::Eip2930
-                                            }
-                                            reth::primitives::TxType::Eip1559 => {
-                                                proto::TxType::Eip1559
-                                            }
-                                            reth::primitives::TxType::Eip4844 => {
-                                                proto::TxType::Eip4844
-                                            }
-                                        } as i32,
-                                        success: receipt.success,
-                                        cumulative_gas_used: receipt.cumulative_gas_used,
-                                        logs: receipt
-                                            .logs
-                                            .iter()
-                                            .map(|log| proto::Log {
-                                                address: log.address.to_vec(),
-                                                data: Some(proto::LogData {
-                                                    topics: log
-                                                        .data
-                                                        .topics()
-                                                        .iter()
-                                                        .map(|topic| topic.to_vec())
-                                                        .collect(),
-                                                    data: log.data.data.to_vec(),
-                                                }),
-                                            })
-                                            .collect(),
-                                    })
-                                },
-                            )),
-                        })
-                        .collect(),
+            blocks: chain
+                .blocks_iter()
+                .map(|block| proto::Block {
+                    header: Some(proto::SealedHeader {
+                        hash: block.header.hash().to_vec(),
+                        header: Some(block.header.header().into()),
+                    }),
+                    body: block.transactions().map(Into::into).collect(),
+                    ommers: block.ommers.iter().map(Into::into).collect(),
+                    senders: block.senders.iter().map(|sender| sender.to_vec()).collect(),
                 })
                 .collect(),
-            first_block: chain.execution_outcome().first_block,
-        }),
-    })
+            execution_outcome: Some(proto::ExecutionOutcome {
+                bundle: Some(proto::BundleState {
+                    state: bundle_state
+                        .state
+                        .iter()
+                        .map(|(address, account)| (*address, account).try_into())
+                        .collect::<eyre::Result<_>>()?,
+                    contracts: bundle_state
+                        .contracts
+                        .iter()
+                        .map(|(hash, bytecode)| {
+                            Ok(proto::ContractBytecode {
+                                hash: hash.to_vec(),
+                                bytecode: Some(bytecode.try_into()?),
+                            })
+                        })
+                        .collect::<eyre::Result<_>>()?,
+                    reverts: bundle_state
+                        .reverts
+                        .iter()
+                        .map(|block_reverts| {
+                            Ok(proto::BlockReverts {
+                                reverts: block_reverts
+                                    .iter()
+                                    .map(|(address, revert)| (*address, revert).try_into())
+                                    .collect::<eyre::Result<_>>()?,
+                            })
+                        })
+                        .collect::<eyre::Result<_>>()?,
+                    state_size: bundle_state.state_size as u64,
+                    reverts_size: bundle_state.reverts_size as u64,
+                }),
+                receipts: chain
+                    .execution_outcome()
+                    .receipts()
+                    .iter()
+                    .map(|block_receipts| proto::BlockReceipts {
+                        receipts: block_receipts.iter().map(Into::into).collect(),
+                    })
+                    .collect(),
+                first_block: chain.execution_outcome().first_block,
+            }),
+        })
     }
 }
 
@@ -325,6 +246,30 @@ impl<'a> From<&'a reth::primitives::AccessListItem> for proto::AccessListItem {
     }
 }
 
+impl<'a> TryFrom<(Address, &'a reth::revm::db::BundleAccount)> for proto::BundleAccount {
+    type Error = eyre::Error;
+
+    fn try_from(
+        (address, account): (Address, &'a reth::revm::db::BundleAccount),
+    ) -> Result<Self, Self::Error> {
+        Ok(proto::BundleAccount {
+            address: address.to_vec(),
+            info: account.info.as_ref().map(TryInto::try_into).transpose()?,
+            original_info: account.original_info.as_ref().map(TryInto::try_into).transpose()?,
+            storage: account
+                .storage
+                .iter()
+                .map(|(key, slot)| proto::StorageSlot {
+                    key: key.to_le_bytes_vec(),
+                    previous_or_original_value: slot.previous_or_original_value.to_le_bytes_vec(),
+                    present_value: slot.present_value.to_le_bytes_vec(),
+                })
+                .collect(),
+            status: proto::AccountStatus::from(account.status) as i32,
+        })
+    }
+}
+
 impl<'a> TryFrom<&'a reth::revm::primitives::AccountInfo> for proto::AccountInfo {
     type Error = eyre::Error;
 
@@ -390,6 +335,86 @@ impl From<reth::revm::db::AccountStatus> for proto::AccountStatus {
     }
 }
 
+impl<'a> TryFrom<(Address, &reth::revm::db::states::reverts::AccountRevert)> for proto::Revert {
+    type Error = eyre::Error;
+
+    fn try_from(
+        (address, revert): (Address, &reth::revm::db::states::reverts::AccountRevert),
+    ) -> Result<Self, Self::Error> {
+        Ok(proto::Revert {
+            address: address.to_vec(),
+            account: Some(proto::AccountInfoRevert {
+                revert: Some(match &revert.account {
+                    reth::revm::db::states::reverts::AccountInfoRevert::DoNothing => {
+                        proto::account_info_revert::Revert::DoNothing(())
+                    }
+                    reth::revm::db::states::reverts::AccountInfoRevert::DeleteIt => {
+                        proto::account_info_revert::Revert::DeleteIt(())
+                    }
+                    reth::revm::db::states::reverts::AccountInfoRevert::RevertTo(account_info) => {
+                        proto::account_info_revert::Revert::RevertTo(account_info.try_into()?)
+                    }
+                }),
+            }),
+            storage: revert
+                .storage
+                .iter()
+                .map(|(key, slot)| {
+                    Ok(proto::RevertToSlot {
+                        key: key.to_le_bytes_vec(),
+                        revert: Some(match slot {
+                            reth::revm::db::RevertToSlot::Some(value) => {
+                                proto::revert_to_slot::Revert::Some(value.to_le_bytes_vec())
+                            }
+                            reth::revm::db::RevertToSlot::Destroyed => {
+                                proto::revert_to_slot::Revert::Destroyed(())
+                            }
+                        }),
+                    })
+                })
+                .collect::<eyre::Result<_>>()?,
+            previous_status: proto::AccountStatus::from(revert.previous_status) as i32,
+            wipe_storage: revert.wipe_storage,
+        })
+    }
+}
+
+impl<'a> From<&'a Option<reth::primitives::Receipt>> for proto::Receipt {
+    fn from(receipt: &'a Option<reth::primitives::Receipt>) -> Self {
+        proto::Receipt {
+            receipt: Some(receipt.as_ref().map_or(proto::receipt::Receipt::Empty(()), |receipt| {
+                proto::receipt::Receipt::NonEmpty(receipt.into())
+            })),
+        }
+    }
+}
+
+impl<'a> From<&'a reth::primitives::Receipt> for proto::NonEmptyReceipt {
+    fn from(receipt: &'a reth::primitives::Receipt) -> Self {
+        proto::NonEmptyReceipt {
+            tx_type: match receipt.tx_type {
+                reth::primitives::TxType::Legacy => proto::TxType::Legacy,
+                reth::primitives::TxType::Eip2930 => proto::TxType::Eip2930,
+                reth::primitives::TxType::Eip1559 => proto::TxType::Eip1559,
+                reth::primitives::TxType::Eip4844 => proto::TxType::Eip4844,
+            } as i32,
+            success: receipt.success,
+            cumulative_gas_used: receipt.cumulative_gas_used,
+            logs: receipt
+                .logs
+                .iter()
+                .map(|log| proto::Log {
+                    address: log.address.to_vec(),
+                    data: Some(proto::LogData {
+                        topics: log.data.topics().iter().map(|topic| topic.to_vec()).collect(),
+                        data: log.data.data.to_vec(),
+                    }),
+                })
+                .collect(),
+        }
+    }
+}
+
 impl<'a> TryFrom<&'a proto::ExExNotification> for reth_exex::ExExNotification {
     type Error = eyre::Error;
 
@@ -424,174 +449,58 @@ impl<'a> TryFrom<&'a proto::Chain> for reth::providers::Chain {
             chain.execution_outcome.as_ref().ok_or_eyre("no execution outcome")?;
         let bundle = execution_outcome.bundle.as_ref().ok_or_eyre("no bundle")?;
         Ok(reth::providers::Chain::new(
-        chain.blocks.iter().map(TryInto::try_into).collect::<eyre::Result<Vec<_>>>()?,
-        reth::providers::ExecutionOutcome {
-            bundle: reth::revm::db::BundleState {
-                state: bundle
-                    .state
-                    .iter()
-                    .map(|account| {
-                        Ok((
-                            Address::try_from(account.address.as_slice())?,
-                            reth::revm::db::BundleAccount {
-                                info: account
-                                    .info
-                                    .as_ref()
-                                    .map(TryInto::try_into)
-                                    .transpose()?,
-                                original_info: account
-                                    .original_info
-                                    .as_ref()
-                                    .map(TryInto::try_into)
-                                    .transpose()?,
-                                storage: account
-                                    .storage
-                                    .iter()
-                                    .map(|slot| {
-                                        Ok((
-                                        U256::try_from_le_slice(slot.key.as_slice())
-                                            .ok_or_eyre("failed to parse key")?,
-                                        reth::revm::db::states::StorageSlot {
-                                            previous_or_original_value: U256::try_from_le_slice(
-                                                slot.previous_or_original_value.as_slice(),
-                                            )
-                                            .ok_or_eyre(
-                                                "failed to parse previous or original value",
-                                            )?,
-                                            present_value: U256::try_from_le_slice(
-                                                slot.present_value.as_slice(),
-                                            )
-                                            .ok_or_eyre("failed to parse present value")?,
-                                        },
-                                    ))
-                                    })
-                                    .collect::<eyre::Result<_>>()?,
-                                status: proto::AccountStatus::try_from(
-                                    account.status,
-                                )?.into(),
-                            },
-                        ))
-                    })
-                    .collect::<eyre::Result<_>>()?,
-                contracts: bundle
-                    .contracts
-                    .iter()
-                    .map(|contract| {
-                        Ok((
-                            B256::try_from(contract.hash.as_slice())?,
-
-                                contract.bytecode.as_ref().ok_or_eyre("no bytecode")?.try_into()?,
-                        ))
-                    })
-                    .collect::<eyre::Result<_>>()?,
-                reverts: reth::revm::db::states::reverts::Reverts::new(
-                    bundle
-                        .reverts
+            chain.blocks.iter().map(TryInto::try_into).collect::<eyre::Result<Vec<_>>>()?,
+            reth::providers::ExecutionOutcome {
+                bundle: reth::revm::db::BundleState {
+                    state: bundle
+                        .state
                         .iter()
-                        .map(|block_reverts| {
-                            Ok(block_reverts
-                                .reverts
-                                .iter()
-                                .map(|revert| {
-                                    Ok((
-                                        Address::try_from(revert.address.as_slice())?,
-                                        reth::revm::db::states::reverts::AccountRevert {
-                                            account: match revert.account.as_ref().ok_or_eyre("no revert account")?.revert.as_ref().ok_or_eyre("no revert account revert")? {
-                                                proto::account_info_revert::Revert::DoNothing(()) => reth::revm::db::states::reverts::AccountInfoRevert::DoNothing,
-                                                proto::account_info_revert::Revert::DeleteIt(()) => reth::revm::db::states::reverts::AccountInfoRevert::DeleteIt,
-                                                proto::account_info_revert::Revert::RevertTo(account_info) => reth::revm::db::states::reverts::AccountInfoRevert::RevertTo(account_info.try_into()?),
-                                            },
-                                            storage: revert
-                                                .storage
-                                                .iter()
-                                                .map(|slot| Ok((
-                                                    U256::try_from_le_slice(slot.key.as_slice())
-                                                        .ok_or_eyre("failed to parse slot key")?,
-                                                    match slot.revert.as_ref().ok_or_eyre("no slot revert")? {
-                                                        proto::revert_to_slot::Revert::Some(value) => reth::revm::db::states::reverts::RevertToSlot::Some(U256::try_from_le_slice(value.as_slice()).ok_or_eyre("failed to parse slot revert")?),
-                                                        proto::revert_to_slot::Revert::Destroyed(()) => reth::revm::db::states::reverts::RevertToSlot::Destroyed,
-                                                    }
-                                                )))
-                                                .collect::<eyre::Result<_>>()?,
-                                            previous_status:
-                                                proto::AccountStatus::try_from(
-                                                    revert.previous_status,
-                                                )?.into(),
-                                            wipe_storage: revert.wipe_storage,
-                                        },
-                                    ))
-                                })
-                                .collect::<eyre::Result<_>>()?)
+                        .map(TryInto::try_into)
+                        .collect::<eyre::Result<_>>()?,
+                    contracts: bundle
+                        .contracts
+                        .iter()
+                        .map(|contract| {
+                            Ok((
+                                B256::try_from(contract.hash.as_slice())?,
+                                contract.bytecode.as_ref().ok_or_eyre("no bytecode")?.try_into()?,
+                            ))
                         })
                         .collect::<eyre::Result<_>>()?,
-                ),
-                state_size: bundle.state_size as usize,
-                reverts_size: bundle.reverts_size as usize,
-            },
-            receipts: reth::primitives::Receipts::from_iter(execution_outcome
-                .receipts
-                .iter()
-                .map(|block_receipts| {
-                    Ok(block_receipts
+                    reverts: reth::revm::db::states::reverts::Reverts::new(
+                        bundle
+                            .reverts
+                            .iter()
+                            .map(|block_reverts| {
+                                Ok(block_reverts
+                                    .reverts
+                                    .iter()
+                                    .map(TryInto::try_into)
+                                    .collect::<eyre::Result<_>>()?)
+                            })
+                            .collect::<eyre::Result<_>>()?,
+                    ),
+                    state_size: bundle.state_size as usize,
+                    reverts_size: bundle.reverts_size as usize,
+                },
+                receipts: reth::primitives::Receipts::from_iter(
+                    execution_outcome
                         .receipts
                         .iter()
-                        .map(|receipt| {
-                            Ok(match receipt.receipt.as_ref().ok_or_eyre("no receipt")? {
-                                proto::receipt::Receipt::Empty(()) => None,
-                                proto::receipt::Receipt::NonEmpty(receipt) => {
-                                    Some(reth::primitives::Receipt {
-                                        tx_type: match proto::TxType::try_from(receipt.tx_type)? {
-                                            proto::TxType::Legacy => {
-                                                reth::primitives::TxType::Legacy
-                                            }
-                                            proto::TxType::Eip2930 => {
-                                                reth::primitives::TxType::Eip2930
-                                            }
-                                            proto::TxType::Eip1559 => {
-                                                reth::primitives::TxType::Eip1559
-                                            }
-                                            proto::TxType::Eip4844 => {
-                                                reth::primitives::TxType::Eip4844
-                                            }
-                                        },
-                                        success: receipt.success,
-                                        cumulative_gas_used: receipt.cumulative_gas_used,
-                                        logs: receipt
-                                            .logs
-                                            .iter()
-                                            .map(|log| {
-                                                let data =
-                                                    log.data.as_ref().ok_or_eyre("no log data")?;
-                                                Ok(reth::primitives::Log {
-                                                    address: Address::try_from(
-                                                        log.address.as_slice(),
-                                                    )?,
-                                                    data: reth::primitives::LogData::new_unchecked(
-                                                        data.topics
-                                                            .iter()
-                                                            .map(|topic| {
-                                                                Ok(B256::try_from(
-                                                                    topic.as_slice(),
-                                                                )?)
-                                                            })
-                                                            .collect::<eyre::Result<_>>()?,
-                                                        data.data.clone().into(),
-                                                    ),
-                                                })
-                                            })
-                                            .collect::<eyre::Result<_>>()?,
-                                    })
-                                }
-                            })
+                        .map(|block_receipts| {
+                            Ok(block_receipts
+                                .receipts
+                                .iter()
+                                .map(TryInto::try_into)
+                                .collect::<eyre::Result<_>>()?)
                         })
-                        .collect::<eyre::Result<_>>()?)
-                })
-                .collect::<eyre::Result<Vec<_>>>()?),
-            first_block: execution_outcome.first_block,
-            requests: Default::default(),
-        },
-        None,
-    ))
+                        .collect::<eyre::Result<Vec<_>>>()?,
+                ),
+                first_block: execution_outcome.first_block,
+                requests: Default::default(),
+            },
+            None,
+        ))
     }
 }
 
@@ -883,5 +792,140 @@ impl From<proto::AccountStatus> for reth::revm::db::AccountStatus {
             }
             proto::AccountStatus::DestroyedAgain => reth::revm::db::AccountStatus::DestroyedAgain,
         }
+    }
+}
+
+impl<'a> TryFrom<&'a proto::BundleAccount> for (Address, reth::revm::db::BundleAccount) {
+    type Error = eyre::Error;
+
+    fn try_from(account: &'a proto::BundleAccount) -> Result<Self, Self::Error> {
+        Ok((
+            Address::try_from(account.address.as_slice())?,
+            reth::revm::db::BundleAccount {
+                info: account.info.as_ref().map(TryInto::try_into).transpose()?,
+                original_info: account.original_info.as_ref().map(TryInto::try_into).transpose()?,
+                storage: account
+                    .storage
+                    .iter()
+                    .map(|slot| {
+                        Ok((
+                            U256::try_from_le_slice(slot.key.as_slice())
+                                .ok_or_eyre("failed to parse key")?,
+                            reth::revm::db::states::StorageSlot {
+                                previous_or_original_value: U256::try_from_le_slice(
+                                    slot.previous_or_original_value.as_slice(),
+                                )
+                                .ok_or_eyre("failed to parse previous or original value")?,
+                                present_value: U256::try_from_le_slice(
+                                    slot.present_value.as_slice(),
+                                )
+                                .ok_or_eyre("failed to parse present value")?,
+                            },
+                        ))
+                    })
+                    .collect::<eyre::Result<_>>()?,
+                status: proto::AccountStatus::try_from(account.status)?.into(),
+            },
+        ))
+    }
+}
+
+impl<'a> TryFrom<&'a proto::Revert> for (Address, reth::revm::db::states::reverts::AccountRevert) {
+    type Error = eyre::Error;
+
+    fn try_from(revert: &'a proto::Revert) -> Result<Self, Self::Error> {
+        Ok((
+            Address::try_from(revert.address.as_slice())?,
+            reth::revm::db::states::reverts::AccountRevert {
+                account: match revert
+                    .account
+                    .as_ref()
+                    .ok_or_eyre("no revert account")?
+                    .revert
+                    .as_ref()
+                    .ok_or_eyre("no revert account revert")?
+                {
+                    proto::account_info_revert::Revert::DoNothing(()) => {
+                        reth::revm::db::states::reverts::AccountInfoRevert::DoNothing
+                    }
+                    proto::account_info_revert::Revert::DeleteIt(()) => {
+                        reth::revm::db::states::reverts::AccountInfoRevert::DeleteIt
+                    }
+                    proto::account_info_revert::Revert::RevertTo(account_info) => {
+                        reth::revm::db::states::reverts::AccountInfoRevert::RevertTo(
+                            account_info.try_into()?,
+                        )
+                    }
+                },
+                storage: revert
+                    .storage
+                    .iter()
+                    .map(|slot| {
+                        Ok((
+                            U256::try_from_le_slice(slot.key.as_slice())
+                                .ok_or_eyre("failed to parse slot key")?,
+                            match slot.revert.as_ref().ok_or_eyre("no slot revert")? {
+                                proto::revert_to_slot::Revert::Some(value) => {
+                                    reth::revm::db::states::reverts::RevertToSlot::Some(
+                                        U256::try_from_le_slice(value.as_slice())
+                                            .ok_or_eyre("failed to parse slot revert")?,
+                                    )
+                                }
+                                proto::revert_to_slot::Revert::Destroyed(()) => {
+                                    reth::revm::db::states::reverts::RevertToSlot::Destroyed
+                                }
+                            },
+                        ))
+                    })
+                    .collect::<eyre::Result<_>>()?,
+                previous_status: proto::AccountStatus::try_from(revert.previous_status)?.into(),
+                wipe_storage: revert.wipe_storage,
+            },
+        ))
+    }
+}
+
+impl<'a> TryFrom<&'a proto::Receipt> for Option<reth::primitives::Receipt> {
+    type Error = eyre::Error;
+
+    fn try_from(receipt: &'a proto::Receipt) -> Result<Self, Self::Error> {
+        Ok(match receipt.receipt.as_ref().ok_or_eyre("no receipt")? {
+            proto::receipt::Receipt::Empty(()) => None,
+            proto::receipt::Receipt::NonEmpty(receipt) => Some(receipt.try_into()?),
+        })
+    }
+}
+
+impl<'a> TryFrom<&'a proto::NonEmptyReceipt> for reth::primitives::Receipt {
+    type Error = eyre::Error;
+
+    fn try_from(receipt: &'a proto::NonEmptyReceipt) -> Result<Self, Self::Error> {
+        Ok(reth::primitives::Receipt {
+            tx_type: match proto::TxType::try_from(receipt.tx_type)? {
+                proto::TxType::Legacy => reth::primitives::TxType::Legacy,
+                proto::TxType::Eip2930 => reth::primitives::TxType::Eip2930,
+                proto::TxType::Eip1559 => reth::primitives::TxType::Eip1559,
+                proto::TxType::Eip4844 => reth::primitives::TxType::Eip4844,
+            },
+            success: receipt.success,
+            cumulative_gas_used: receipt.cumulative_gas_used,
+            logs: receipt
+                .logs
+                .iter()
+                .map(|log| {
+                    let data = log.data.as_ref().ok_or_eyre("no log data")?;
+                    Ok(reth::primitives::Log {
+                        address: Address::try_from(log.address.as_slice())?,
+                        data: reth::primitives::LogData::new_unchecked(
+                            data.topics
+                                .iter()
+                                .map(|topic| Ok(B256::try_from(topic.as_slice())?))
+                                .collect::<eyre::Result<_>>()?,
+                            data.data.clone().into(),
+                        ),
+                    })
+                })
+                .collect::<eyre::Result<_>>()?,
+        })
     }
 }
