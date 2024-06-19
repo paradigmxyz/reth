@@ -1,11 +1,8 @@
 use std::sync::Arc;
 
-use exex_remote::{
-    codec,
-    proto::{
-        remote_ex_ex_server::{RemoteExEx, RemoteExExServer},
-        ExExNotification as ProtoExExNotification, SubscribeRequest as ProtoSubscribeRequest,
-    },
+use exex_remote::proto::{
+    remote_ex_ex_server::{RemoteExEx, RemoteExExServer},
+    ExExNotification as ProtoExExNotification, SubscribeRequest as ProtoSubscribeRequest,
 };
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_api::FullNodeComponents;
@@ -32,7 +29,7 @@ impl RemoteExEx for ExExService {
         let mut notifications = self.notifications.subscribe();
         tokio::spawn(async move {
             while let Ok(notification) = notifications.recv().await {
-                tx.send(Ok(codec::to_proto_notification(&notification).expect("failed to encode")))
+                tx.send(Ok((&notification).try_into().expect("failed to encode")))
                     .await
                     .expect("failed to send notification to client");
             }

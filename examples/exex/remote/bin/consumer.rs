@@ -1,7 +1,4 @@
-use exex_remote::{
-    codec::from_proto_notification,
-    proto::{remote_ex_ex_client::RemoteExExClient, SubscribeRequest},
-};
+use exex_remote::proto::{remote_ex_ex_client::RemoteExExClient, SubscribeRequest};
 use reth_exex::ExExNotification;
 use reth_tracing::{tracing::info, RethTracer, Tracer};
 
@@ -16,7 +13,7 @@ async fn main() -> eyre::Result<()> {
 
     let mut stream = client.subscribe(SubscribeRequest {}).await?.into_inner();
     while let Some(notification) = stream.message().await? {
-        let notification = from_proto_notification(&notification)?;
+        let notification = ExExNotification::try_from(&notification)?;
 
         match notification {
             ExExNotification::ChainCommitted { new } => {
