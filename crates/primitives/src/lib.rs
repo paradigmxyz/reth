@@ -34,7 +34,6 @@ pub mod eip4844;
 mod error;
 pub mod genesis;
 pub mod header;
-mod integer_list;
 mod log;
 pub mod proofs;
 mod receipt;
@@ -59,7 +58,6 @@ pub use constants::{
 pub use error::{GotExpected, GotExpectedBoxed};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeadersDirection, SealedHeader};
-pub use integer_list::IntegerList;
 pub use log::{logs_bloom, Log};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,

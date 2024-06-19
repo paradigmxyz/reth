@@ -6646,6 +6646,7 @@ dependencies = [
  "reth-metrics",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-prune-types",
  "reth-stages-types",
  "reth-storage-errors",
@@ -6681,6 +6682,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-codecs",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-prune-types",
  "reth-stages-types",
  "reth-storage-errors",
@@ -6702,6 +6704,7 @@ dependencies = [
  "reth-db-api",
  "reth-etl",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-stages-types",
  "reth-trie",
@@ -7743,7 +7746,6 @@ dependencies = [
  "reth-static-file-types",
  "reth-trie-common",
  "revm-primitives",
- "roaring",
  "secp256k1",
  "serde",
  "serde_json",
@@ -7775,9 +7777,11 @@ dependencies = [
  "rand 0.8.5",
  "reth-codecs",
  "revm-primitives",
+ "roaring",
  "serde",
  "serde_json",
  "test-fuzz",
+ "thiserror-no-std",
 ]
 
 [[package]]

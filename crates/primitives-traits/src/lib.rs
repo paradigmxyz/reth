@@ -21,6 +21,9 @@ pub mod constants;
 pub mod account;
 pub use account::Account;
 
+mod integer_list;
+pub use integer_list::IntegerList;
+
 pub mod request;
 pub use request::Requests;
 
