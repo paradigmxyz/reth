@@ -2,6 +2,7 @@
 bin/                        @onbjerg
 crates/blockchain-tree/     @rakita @rkrasiuk @mattsse @Rjected
 crates/blockchain-tree-api/ @rakita @rkrasiuk @mattsse @Rjected
+crates/chainspec/           @Rjected @joshieDo @mattsse
 crates/cli/                 @onbjerg @mattsse
 crates/config/              @onbjerg
 crates/consensus/           @rkrasiuk @mattsse @Rjected
@@ -22,6 +23,7 @@ crates/node-core/           @mattsse @Rjected @onbjerg
 crates/optimism/            @mattsse @Rjected @fgimenez
 crates/payload/             @mattsse @Rjected
 crates/primitives/          @DaniPopes @Rjected
+crates/primitives-traits/   @DaniPopes @Rjected @joshieDo
 crates/prune/               @shekhirin @joshieDo
 crates/revm/                @mattsse @rakita
 crates/rpc/                 @mattsse @Rjected
