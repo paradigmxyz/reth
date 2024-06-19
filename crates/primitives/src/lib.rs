@@ -51,14 +51,15 @@ pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
     KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
-pub use reth_primitives_traits::{GotExpected, GotExpectedBoxed};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeadersDirection, SealedHeader};
-pub use reth_primitives_traits::{logs_bloom, Log};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
-pub use reth_primitives_traits::{Account, Bytecode, Request, Requests, Withdrawal, Withdrawals};
+pub use reth_primitives_traits::{
+    logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Log, Request, Requests,
+    Withdrawal, Withdrawals,
+};
 pub use static_file::StaticFileSegment;
 pub use storage::StorageEntry;
 
