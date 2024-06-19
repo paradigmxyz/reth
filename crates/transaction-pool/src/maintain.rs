@@ -11,6 +11,7 @@ use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
+use reth_execution_types::ExecutionOutcome;
 use reth_fs_util::FsPathError;
 use reth_primitives::{
     Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredPooledTransaction,
@@ -18,7 +19,7 @@ use reth_primitives::{
     TryFromRecoveredTransaction,
 };
 use reth_provider::{
-    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, ExecutionOutcome, ProviderError,
+    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, ProviderError,
     StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;

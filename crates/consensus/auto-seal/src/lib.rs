@@ -20,12 +20,13 @@ use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     constants::ETHEREUM_BLOCK_GAS_LIMIT, eip4844::calculate_excess_blob_gas, proofs, Block,
     BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom, Header,
     Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256, U256,
 };
-use reth_provider::{BlockReaderIdExt, ExecutionOutcome, StateProviderFactory, StateRootProvider};
+use reth_provider::{BlockReaderIdExt, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::TransactionPool;
 use std::{
