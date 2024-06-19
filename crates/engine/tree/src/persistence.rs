@@ -6,7 +6,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::{mpsc::Receiver, oneshot};
 
 /// Writes parts of reth's in memory tree state to the database.
 pub struct Persistence<DB> {
@@ -47,14 +47,15 @@ where
 
         match action {
             PersistenceAction::RemoveBlocksAbove(new_tip_num) => {
-                let output = this.remove_blocks_above(new_tip_num);
+                let (sender, receiver) = oneshot::channel();
 
                 // TODO: do something with this
                 let handle = std::thread::spawn(move || {
-                    this.write(blocks);
+                    let output = this.remove_blocks_above(new_tip_num);
+                    sender.send(output).unwrap();
                 });
 
-                Poll::Ready(Some(PersistenceOutput::AddBlocksAbove(output)))
+                Poll::Ready(Some(PersistenceOutput::AddBlocksAbove(receiver)))
             },
             PersistenceAction::SaveFinalizedBlocks(blocks) => {
                 if blocks.is_empty() {
@@ -91,5 +92,5 @@ pub enum PersistenceOutput {
 
     /// Tells the consumer that the following blocks have been un-persisted, or removed from the
     /// datbase, and they should be re-added to any in memory data structures.
-    AddBlocksAbove(Vec<ExecutedBlock>),
+    AddBlocksAbove(oneshot::Receiver<Vec<ExecutedBlock>>),
 }
