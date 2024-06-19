@@ -5,10 +5,10 @@ use reth::primitives::{Address, BlockHash, Bloom, TxHash, B256, U256};
 
 use crate::proto;
 
-impl<'a> TryFrom<&'a reth_exex::ExExNotification> for proto::ExExNotification {
+impl TryFrom<&reth_exex::ExExNotification> for proto::ExExNotification {
     type Error = eyre::Error;
 
-    fn try_from(notification: &'a reth_exex::ExExNotification) -> Result<Self, Self::Error> {
+    fn try_from(notification: &reth_exex::ExExNotification) -> Result<Self, Self::Error> {
         let notification = match notification {
             reth_exex::ExExNotification::ChainCommitted { new } => {
                 proto::ex_ex_notification::Notification::ChainCommitted(proto::ChainCommitted {
@@ -32,10 +32,10 @@ impl<'a> TryFrom<&'a reth_exex::ExExNotification> for proto::ExExNotification {
     }
 }
 
-impl<'a> TryFrom<&'a reth::providers::Chain> for proto::Chain {
+impl TryFrom<&reth::providers::Chain> for proto::Chain {
     type Error = eyre::Error;
 
-    fn try_from(chain: &'a reth::providers::Chain) -> Result<Self, Self::Error> {
+    fn try_from(chain: &reth::providers::Chain) -> Result<Self, Self::Error> {
         let bundle_state = chain.execution_outcome().state();
         Ok(proto::Chain {
             blocks: chain
@@ -96,8 +96,8 @@ impl<'a> TryFrom<&'a reth::providers::Chain> for proto::Chain {
     }
 }
 
-impl<'a> From<&'a reth::primitives::Header> for proto::Header {
-    fn from(header: &'a reth::primitives::Header) -> Self {
+impl From<&reth::primitives::Header> for proto::Header {
+    fn from(header: &reth::primitives::Header) -> Self {
         proto::Header {
             parent_hash: header.parent_hash.to_vec(),
             ommers_hash: header.ommers_hash.to_vec(),
@@ -123,8 +123,8 @@ impl<'a> From<&'a reth::primitives::Header> for proto::Header {
     }
 }
 
-impl<'a> From<&'a reth::primitives::TransactionSigned> for proto::Transaction {
-    fn from(transaction: &'a reth::primitives::TransactionSigned) -> Self {
+impl From<&reth::primitives::TransactionSigned> for proto::Transaction {
+    fn from(transaction: &reth::primitives::TransactionSigned) -> Self {
         let hash = transaction.hash().to_vec();
         let signature = proto::Signature {
             r: transaction.signature.r.to_le_bytes_vec(),
@@ -224,8 +224,8 @@ impl<'a> From<&'a reth::primitives::TransactionSigned> for proto::Transaction {
     }
 }
 
-impl<'a> From<&'a reth::primitives::TxKind> for proto::TxKind {
-    fn from(kind: &'a reth::primitives::TxKind) -> Self {
+impl From<&reth::primitives::TxKind> for proto::TxKind {
+    fn from(kind: &reth::primitives::TxKind) -> Self {
         proto::TxKind {
             kind: match kind {
                 reth::primitives::TxKind::Create => Some(proto::tx_kind::Kind::Create(())),
@@ -237,8 +237,8 @@ impl<'a> From<&'a reth::primitives::TxKind> for proto::TxKind {
     }
 }
 
-impl<'a> From<&'a reth::primitives::AccessListItem> for proto::AccessListItem {
-    fn from(item: &'a reth::primitives::AccessListItem) -> Self {
+impl From<&reth::primitives::AccessListItem> for proto::AccessListItem {
+    fn from(item: &reth::primitives::AccessListItem) -> Self {
         proto::AccessListItem {
             address: item.address.to_vec(),
             storage_keys: item.storage_keys.iter().map(|key| key.to_vec()).collect(),
@@ -246,11 +246,11 @@ impl<'a> From<&'a reth::primitives::AccessListItem> for proto::AccessListItem {
     }
 }
 
-impl<'a> TryFrom<(Address, &'a reth::revm::db::BundleAccount)> for proto::BundleAccount {
+impl TryFrom<(Address, &reth::revm::db::BundleAccount)> for proto::BundleAccount {
     type Error = eyre::Error;
 
     fn try_from(
-        (address, account): (Address, &'a reth::revm::db::BundleAccount),
+        (address, account): (Address, &reth::revm::db::BundleAccount),
     ) -> Result<Self, Self::Error> {
         Ok(proto::BundleAccount {
             address: address.to_vec(),
@@ -270,12 +270,10 @@ impl<'a> TryFrom<(Address, &'a reth::revm::db::BundleAccount)> for proto::Bundle
     }
 }
 
-impl<'a> TryFrom<&'a reth::revm::primitives::AccountInfo> for proto::AccountInfo {
+impl TryFrom<&reth::revm::primitives::AccountInfo> for proto::AccountInfo {
     type Error = eyre::Error;
 
-    fn try_from(
-        account_info: &'a reth::revm::primitives::AccountInfo,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(account_info: &reth::revm::primitives::AccountInfo) -> Result<Self, Self::Error> {
         Ok(proto::AccountInfo {
             balance: account_info.balance.to_le_bytes_vec(),
             nonce: account_info.nonce,
@@ -285,10 +283,10 @@ impl<'a> TryFrom<&'a reth::revm::primitives::AccountInfo> for proto::AccountInfo
     }
 }
 
-impl<'a> TryFrom<&'a reth::revm::primitives::Bytecode> for proto::Bytecode {
+impl TryFrom<&reth::revm::primitives::Bytecode> for proto::Bytecode {
     type Error = eyre::Error;
 
-    fn try_from(bytecode: &'a reth::revm::primitives::Bytecode) -> Result<Self, Self::Error> {
+    fn try_from(bytecode: &reth::revm::primitives::Bytecode) -> Result<Self, Self::Error> {
         let bytecode = match bytecode {
             reth::revm::primitives::Bytecode::LegacyRaw(code) => {
                 proto::bytecode::Bytecode::LegacyRaw(code.to_vec())
@@ -335,7 +333,7 @@ impl From<reth::revm::db::AccountStatus> for proto::AccountStatus {
     }
 }
 
-impl<'a> TryFrom<(Address, &reth::revm::db::states::reverts::AccountRevert)> for proto::Revert {
+impl TryFrom<(Address, &reth::revm::db::states::reverts::AccountRevert)> for proto::Revert {
     type Error = eyre::Error;
 
     fn try_from(
@@ -379,8 +377,8 @@ impl<'a> TryFrom<(Address, &reth::revm::db::states::reverts::AccountRevert)> for
     }
 }
 
-impl<'a> From<&'a Option<reth::primitives::Receipt>> for proto::Receipt {
-    fn from(receipt: &'a Option<reth::primitives::Receipt>) -> Self {
+impl From<&Option<reth::primitives::Receipt>> for proto::Receipt {
+    fn from(receipt: &Option<reth::primitives::Receipt>) -> Self {
         proto::Receipt {
             receipt: Some(receipt.as_ref().map_or(proto::receipt::Receipt::Empty(()), |receipt| {
                 proto::receipt::Receipt::NonEmpty(receipt.into())
@@ -389,8 +387,8 @@ impl<'a> From<&'a Option<reth::primitives::Receipt>> for proto::Receipt {
     }
 }
 
-impl<'a> From<&'a reth::primitives::Receipt> for proto::NonEmptyReceipt {
-    fn from(receipt: &'a reth::primitives::Receipt) -> Self {
+impl From<&reth::primitives::Receipt> for proto::NonEmptyReceipt {
+    fn from(receipt: &reth::primitives::Receipt) -> Self {
         proto::NonEmptyReceipt {
             tx_type: match receipt.tx_type {
                 reth::primitives::TxType::Legacy => proto::TxType::Legacy,
@@ -415,10 +413,10 @@ impl<'a> From<&'a reth::primitives::Receipt> for proto::NonEmptyReceipt {
     }
 }
 
-impl<'a> TryFrom<&'a proto::ExExNotification> for reth_exex::ExExNotification {
+impl TryFrom<&proto::ExExNotification> for reth_exex::ExExNotification {
     type Error = eyre::Error;
 
-    fn try_from(notification: &'a proto::ExExNotification) -> Result<Self, Self::Error> {
+    fn try_from(notification: &proto::ExExNotification) -> Result<Self, Self::Error> {
         Ok(match notification.notification.as_ref().ok_or_eyre("no notification")? {
             proto::ex_ex_notification::Notification::ChainCommitted(proto::ChainCommitted {
                 new,
@@ -441,10 +439,10 @@ impl<'a> TryFrom<&'a proto::ExExNotification> for reth_exex::ExExNotification {
     }
 }
 
-impl<'a> TryFrom<&'a proto::Chain> for reth::providers::Chain {
+impl TryFrom<&proto::Chain> for reth::providers::Chain {
     type Error = eyre::Error;
 
-    fn try_from(chain: &'a proto::Chain) -> Result<Self, Self::Error> {
+    fn try_from(chain: &proto::Chain) -> Result<Self, Self::Error> {
         let execution_outcome =
             chain.execution_outcome.as_ref().ok_or_eyre("no execution outcome")?;
         let bundle = execution_outcome.bundle.as_ref().ok_or_eyre("no bundle")?;
@@ -504,10 +502,10 @@ impl<'a> TryFrom<&'a proto::Chain> for reth::providers::Chain {
     }
 }
 
-impl<'a> TryFrom<&'a proto::Block> for reth::primitives::SealedBlockWithSenders {
+impl TryFrom<&proto::Block> for reth::primitives::SealedBlockWithSenders {
     type Error = eyre::Error;
 
-    fn try_from(block: &'a proto::Block) -> Result<Self, Self::Error> {
+    fn try_from(block: &proto::Block) -> Result<Self, Self::Error> {
         let sealed_header = block.header.as_ref().ok_or_eyre("no sealed header")?;
         let header = sealed_header.header.as_ref().ok_or_eyre("no header")?.try_into()?;
         let sealed_header = reth::primitives::SealedHeader::new(
@@ -539,10 +537,10 @@ impl<'a> TryFrom<&'a proto::Block> for reth::primitives::SealedBlockWithSenders 
     }
 }
 
-impl<'a> TryFrom<&'a proto::Header> for reth::primitives::Header {
+impl TryFrom<&proto::Header> for reth::primitives::Header {
     type Error = eyre::Error;
 
-    fn try_from(header: &'a proto::Header) -> Result<Self, Self::Error> {
+    fn try_from(header: &proto::Header) -> Result<Self, Self::Error> {
         Ok(reth::primitives::Header {
             parent_hash: B256::try_from(header.parent_hash.as_slice())?,
             ommers_hash: B256::try_from(header.ommers_hash.as_slice())?,
@@ -578,10 +576,10 @@ impl<'a> TryFrom<&'a proto::Header> for reth::primitives::Header {
     }
 }
 
-impl<'a> TryFrom<&'a proto::Transaction> for reth::primitives::TransactionSigned {
+impl TryFrom<&proto::Transaction> for reth::primitives::TransactionSigned {
     type Error = eyre::Error;
 
-    fn try_from(transaction: &'a proto::Transaction) -> Result<Self, Self::Error> {
+    fn try_from(transaction: &proto::Transaction) -> Result<Self, Self::Error> {
         let hash = TxHash::try_from(transaction.hash.as_slice())?;
         let signature = transaction.signature.as_ref().ok_or_eyre("no signature")?;
         let signature = reth::primitives::Signature {
@@ -704,10 +702,10 @@ impl<'a> TryFrom<&'a proto::Transaction> for reth::primitives::TransactionSigned
     }
 }
 
-impl<'a> TryFrom<&'a proto::TxKind> for reth::primitives::TxKind {
+impl TryFrom<&proto::TxKind> for reth::primitives::TxKind {
     type Error = eyre::Error;
 
-    fn try_from(tx_kind: &'a proto::TxKind) -> Result<Self, Self::Error> {
+    fn try_from(tx_kind: &proto::TxKind) -> Result<Self, Self::Error> {
         Ok(match tx_kind.kind.as_ref().ok_or_eyre("no kind")? {
             proto::tx_kind::Kind::Create(()) => reth::primitives::TxKind::Create,
             proto::tx_kind::Kind::Call(address) => {
@@ -717,10 +715,10 @@ impl<'a> TryFrom<&'a proto::TxKind> for reth::primitives::TxKind {
     }
 }
 
-impl<'a> TryFrom<&'a proto::AccessListItem> for reth::primitives::AccessListItem {
+impl TryFrom<&proto::AccessListItem> for reth::primitives::AccessListItem {
     type Error = eyre::Error;
 
-    fn try_from(item: &'a proto::AccessListItem) -> Result<Self, Self::Error> {
+    fn try_from(item: &proto::AccessListItem) -> Result<Self, Self::Error> {
         Ok(reth::primitives::AccessListItem {
             address: Address::try_from(item.address.as_slice())?,
             storage_keys: item
@@ -732,10 +730,10 @@ impl<'a> TryFrom<&'a proto::AccessListItem> for reth::primitives::AccessListItem
     }
 }
 
-impl<'a> TryFrom<&'a proto::AccountInfo> for reth::revm::primitives::AccountInfo {
+impl TryFrom<&proto::AccountInfo> for reth::revm::primitives::AccountInfo {
     type Error = eyre::Error;
 
-    fn try_from(account_info: &'a proto::AccountInfo) -> Result<Self, Self::Error> {
+    fn try_from(account_info: &proto::AccountInfo) -> Result<Self, Self::Error> {
         Ok(reth::revm::primitives::AccountInfo {
             balance: U256::try_from_le_slice(account_info.balance.as_slice())
                 .ok_or_eyre("failed to parse balance")?,
@@ -746,10 +744,10 @@ impl<'a> TryFrom<&'a proto::AccountInfo> for reth::revm::primitives::AccountInfo
     }
 }
 
-impl<'a> TryFrom<&'a proto::Bytecode> for reth::revm::primitives::Bytecode {
+impl TryFrom<&proto::Bytecode> for reth::revm::primitives::Bytecode {
     type Error = eyre::Error;
 
-    fn try_from(bytecode: &'a proto::Bytecode) -> Result<Self, Self::Error> {
+    fn try_from(bytecode: &proto::Bytecode) -> Result<Self, Self::Error> {
         Ok(match bytecode.bytecode.as_ref().ok_or_eyre("no bytecode")? {
             proto::bytecode::Bytecode::LegacyRaw(code) => {
                 reth::revm::primitives::Bytecode::LegacyRaw(code.clone().into())
@@ -795,10 +793,10 @@ impl From<proto::AccountStatus> for reth::revm::db::AccountStatus {
     }
 }
 
-impl<'a> TryFrom<&'a proto::BundleAccount> for (Address, reth::revm::db::BundleAccount) {
+impl TryFrom<&proto::BundleAccount> for (Address, reth::revm::db::BundleAccount) {
     type Error = eyre::Error;
 
-    fn try_from(account: &'a proto::BundleAccount) -> Result<Self, Self::Error> {
+    fn try_from(account: &proto::BundleAccount) -> Result<Self, Self::Error> {
         Ok((
             Address::try_from(account.address.as_slice())?,
             reth::revm::db::BundleAccount {
@@ -830,10 +828,10 @@ impl<'a> TryFrom<&'a proto::BundleAccount> for (Address, reth::revm::db::BundleA
     }
 }
 
-impl<'a> TryFrom<&'a proto::Revert> for (Address, reth::revm::db::states::reverts::AccountRevert) {
+impl TryFrom<&proto::Revert> for (Address, reth::revm::db::states::reverts::AccountRevert) {
     type Error = eyre::Error;
 
-    fn try_from(revert: &'a proto::Revert) -> Result<Self, Self::Error> {
+    fn try_from(revert: &proto::Revert) -> Result<Self, Self::Error> {
         Ok((
             Address::try_from(revert.address.as_slice())?,
             reth::revm::db::states::reverts::AccountRevert {
@@ -885,10 +883,10 @@ impl<'a> TryFrom<&'a proto::Revert> for (Address, reth::revm::db::states::revert
     }
 }
 
-impl<'a> TryFrom<&'a proto::Receipt> for Option<reth::primitives::Receipt> {
+impl TryFrom<&proto::Receipt> for Option<reth::primitives::Receipt> {
     type Error = eyre::Error;
 
-    fn try_from(receipt: &'a proto::Receipt) -> Result<Self, Self::Error> {
+    fn try_from(receipt: &proto::Receipt) -> Result<Self, Self::Error> {
         Ok(match receipt.receipt.as_ref().ok_or_eyre("no receipt")? {
             proto::receipt::Receipt::Empty(()) => None,
             proto::receipt::Receipt::NonEmpty(receipt) => Some(receipt.try_into()?),
@@ -896,10 +894,10 @@ impl<'a> TryFrom<&'a proto::Receipt> for Option<reth::primitives::Receipt> {
     }
 }
 
-impl<'a> TryFrom<&'a proto::NonEmptyReceipt> for reth::primitives::Receipt {
+impl TryFrom<&proto::NonEmptyReceipt> for reth::primitives::Receipt {
     type Error = eyre::Error;
 
-    fn try_from(receipt: &'a proto::NonEmptyReceipt) -> Result<Self, Self::Error> {
+    fn try_from(receipt: &proto::NonEmptyReceipt) -> Result<Self, Self::Error> {
         Ok(reth::primitives::Receipt {
             tx_type: match proto::TxType::try_from(receipt.tx_type)? {
                 proto::TxType::Legacy => reth::primitives::TxType::Legacy,
