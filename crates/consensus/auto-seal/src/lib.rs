@@ -264,7 +264,7 @@ impl StorageInner {
         ommers: &[Header],
         withdrawals: Option<&Withdrawals>,
         requests: Option<&Requests>,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: &ChainSpec,
     ) -> Header {
         // check previous block for base fee
         let base_fee_per_gas = self.headers.get(&self.best_block).and_then(|parent| {
@@ -368,7 +368,7 @@ impl StorageInner {
             &ommers,
             withdrawals.as_ref(),
             requests.as_ref(),
-            chain_spec,
+            &chain_spec,
         );
 
         let block = Block {
@@ -417,8 +417,7 @@ impl StorageInner {
         header.receipts_root = {
             let receipts_with_bloom =
                 receipts.iter().map(|r| r.clone().unwrap().bloom_slow()).collect::<Vec<Bloom>>();
-            header.logs_bloom =
-                receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.clone());
+            header.logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | *r);
             #[cfg(feature = "optimism")]
             let receipts_root = execution_outcome
                 .optimism_receipts_root_slow(header.number, &chain_spec, header.timestamp)
