@@ -23,8 +23,9 @@ use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
     constants::{EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
     eip4844::calculate_excess_blob_gas,
-    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Header,
-    Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256, U256,
+    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom,
+    Header, Receipt, Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256,
+    U256,
 };
 use reth_provider::{BlockReaderIdExt, ExecutionOutcome, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
@@ -387,8 +388,13 @@ impl StorageInner {
         );
 
         // execute the block
-        let BlockExecutionOutput { state, receipts, requests: block_execution_requests, .. } =
-            executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
+        let BlockExecutionOutput {
+            state,
+            receipts,
+            requests: block_execution_requests,
+            gas_used,
+            ..
+        } = executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
         let execution_outcome = ExecutionOutcome::new(
             state,
             receipts.into(),
@@ -405,8 +411,26 @@ impl StorageInner {
 
         trace!(target: "consensus::auto", ?execution_outcome, ?header, ?body, "executed block, calculating state root and completing header");
 
-        // calculate the state root
+        // update header fields
         header.state_root = db.state_root(execution_outcome.state())?;
+        let receipts: &[Option<Receipt>] = execution_outcome.receipts_by_block(header.number);
+        header.receipts_root = {
+            let receipts_with_bloom =
+                receipts.iter().map(|r| r.clone().unwrap().bloom_slow()).collect::<Vec<Bloom>>();
+            header.logs_bloom =
+                receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.clone());
+            #[cfg(feature = "optimism")]
+            let receipts_root = execution_outcome
+                .optimism_receipts_root_slow(header.number, &chain_spec, header.timestamp)
+                .expect("Receipts is present");
+
+            #[cfg(not(feature = "optimism"))]
+            let receipts_root =
+                execution_outcome.receipts_root_slow(header.number).expect("Receipts is present");
+
+            receipts_root
+        };
+        header.gas_used = gas_used;
         trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 
         // finally insert into storage
