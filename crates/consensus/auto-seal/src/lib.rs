@@ -367,6 +367,9 @@ impl StorageInner {
             &ommers,
             withdrawals.as_ref(),
             requests.as_ref(),
+            #[cfg(feature = "optimism")]
+            chain_spec.clone(),
+            #[cfg(not(feature = "optimism"))]
             chain_spec,
         );
 
@@ -410,7 +413,7 @@ impl StorageInner {
 
         #[cfg(feature = "optimism")]
         let receipts_root = execution_outcome
-            .optimism_receipts_root_slow(header.number, chain_spec.as_ref(), header.timestamp)
+            .optimism_receipts_root_slow(header.number, &chain_spec, header.timestamp)
             .expect("Block is present");
 
         #[cfg(not(feature = "optimism"))]
