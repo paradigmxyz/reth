@@ -22,7 +22,6 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
-mod account;
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
 pub mod basefee;
@@ -42,7 +41,7 @@ pub mod revm;
 pub use reth_static_file_types as static_file;
 mod storage;
 pub mod transaction;
-pub use account::{Account, Bytecode};
+pub use reth_primitives_traits::{Account, Bytecode};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{

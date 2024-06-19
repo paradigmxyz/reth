@@ -40,7 +40,6 @@ c-kzg = { workspace = true, features = ["serde"], optional = true }
 
 # misc
 bytes.workspace = true
-byteorder = "1"
 derive_more.workspace = true
 modular-bitfield.workspace = true
 once_cell.workspace = true
