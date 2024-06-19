@@ -1,5 +1,5 @@
 [package]
-name = "beacon-api-sse"
+name = "example-beacon-api-sse"
 version = "0.0.0"
 publish = false
 edition.workspace = true

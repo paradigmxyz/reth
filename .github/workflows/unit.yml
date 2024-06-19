@@ -39,7 +39,7 @@ jobs:
         run: |
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }}" \
-            --workspace --exclude examples --exclude ef-tests \
+            --workspace --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/2 \
             -E "!kind(test)"
 

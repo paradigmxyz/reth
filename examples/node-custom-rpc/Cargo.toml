@@ -1,5 +1,5 @@
 [package]
-name = "node-custom-rpc"
+name = "example-node-custom-rpc"
 version = "0.0.0"
 publish = false
 edition.workspace = true
