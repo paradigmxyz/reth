@@ -30,6 +30,8 @@ reth-rpc-types-compat.workspace = true
 revm-inspectors = { workspace = true, features = ["js-tracer"] }
 reth-network-peers.workspace = true
 
+reth-evm-optimism = { workspace = true, optional = true }
+
 # eth
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
