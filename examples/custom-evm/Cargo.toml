@@ -1,5 +1,5 @@
 [package]
-name = "custom-evm"
+name = "example-custom-evm"
 version = "0.0.0"
 publish = false
 edition.workspace = true

@@ -1,4 +1,4 @@
-use exex_remote::proto::{remote_ex_ex_client::RemoteExExClient, SubscribeRequest};
+use example_exex_remote::proto::{remote_ex_ex_client::RemoteExExClient, SubscribeRequest};
 use reth_exex::ExExNotification;
 use reth_tracing::{tracing::info, RethTracer, Tracer};
 

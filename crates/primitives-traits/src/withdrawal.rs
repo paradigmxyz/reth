@@ -68,7 +68,7 @@ impl Withdrawals {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Address;
+    use alloy_primitives::Address;
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::proptest;
 

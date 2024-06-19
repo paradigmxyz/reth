@@ -1,5 +1,5 @@
 [package]
-name = "bsc-p2p"
+name = "example-bsc-p2p"
 version = "0.0.0"
 publish = false
 edition.workspace = true

@@ -5,7 +5,7 @@ use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress},
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{revm::compat::into_reth_acc, BlockNumber, StorageEntry, B256, U256};
+use reth_primitives::{BlockNumber, StorageEntry, B256, U256};
 use reth_storage_errors::db::DatabaseError;
 use revm::db::states::{PlainStateReverts, PlainStorageRevert, RevertToSlot};
 use std::iter::Peekable;
@@ -82,7 +82,7 @@ impl StateReverts {
             for (address, info) in account_block_reverts {
                 account_changeset_cursor.append_dup(
                     block_number,
-                    AccountBeforeTx { address, info: info.map(into_reth_acc) },
+                    AccountBeforeTx { address, info: info.map(Into::into) },
                 )?;
             }
         }
