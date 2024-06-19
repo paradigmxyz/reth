@@ -122,6 +122,3 @@ name = "validate_blob_tx"
 required-features = ["arbitrary", "c-kzg"]
 harness = false
 
-[[bench]]
-name = "integer_list"
-harness = false
