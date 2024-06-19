@@ -1,8 +1,6 @@
 use reth_primitives::{
-    logs_bloom,
-    revm::compat::{into_reth_acc, into_revm_acc},
-    Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests, StorageEntry,
-    B256, U256,
+    logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests,
+    StorageEntry, B256, U256,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -81,8 +79,8 @@ impl ExecutionOutcome {
             state_init.into_iter().map(|(address, (original, present, storage))| {
                 (
                     address,
-                    original.map(into_revm_acc),
-                    present.map(into_revm_acc),
+                    original.map(Into::into),
+                    present.map(Into::into),
                     storage.into_iter().map(|(k, s)| (k.into(), s)).collect(),
                 )
             }),
@@ -91,7 +89,7 @@ impl ExecutionOutcome {
                 reverts.into_iter().map(|(address, (original, storage))| {
                     (
                         address,
-                        original.map(|i| i.map(into_revm_acc)),
+                        original.map(|i| i.map(Into::into)),
                         storage.into_iter().map(|entry| (entry.key.into(), entry.value)),
                     )
                 })
@@ -129,7 +127,7 @@ impl ExecutionOutcome {
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address).map(|a| a.info.clone().map(into_reth_acc))
+        self.bundle.account(address).map(|a| a.info.clone().map(Into::into))
     }
 
     /// Get storage if value is known.

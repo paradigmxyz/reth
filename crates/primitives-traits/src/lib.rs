@@ -36,6 +36,9 @@ pub use error::{GotExpected, GotExpectedBoxed};
 mod log;
 pub use log::{logs_bloom, Log};
 
+mod storage;
+pub use storage::StorageEntry;
+
 /// Common header types
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
