@@ -1,4 +1,4 @@
-use super::{B256, U256};
+use alloy_primitives::{B256, U256};
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
