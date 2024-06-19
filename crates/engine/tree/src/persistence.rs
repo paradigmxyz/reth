@@ -8,9 +8,6 @@ use std::{
 };
 use tokio::sync::mpsc::Receiver;
 
-// TODO: design questions:
-// * to support "unwinds" or not? ie, what do we do when we get a request to persist a chain that is
-// overlapping with the one on disk
 /// Writes parts of reth's in memory tree state to the database.
 pub struct Persistence<DB> {
     /// The db / static file provider to use
@@ -26,6 +23,11 @@ impl<Writer> Persistence<Writer> {
     fn write(&mut self, blocks: Vec<ExecutedBlock>) {
         todo!("implement this")
     }
+
+    /// Removes the blocks above the give block number from the database, returning them.
+    fn remove_blocks_above(&mut self, block_number: u64) -> Vec<ExecutedBlock> {
+        todo!("implement this")
+    }
 }
 
 impl<Writer> Persistence<Writer>
@@ -38,29 +40,35 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<PersistenceOutput>> {
         let this = self.get_mut();
 
-        // TODO: should we do this?
-        // if there are multiple, we can just get the most recent action
-        let mut most_recent_save_action = None;
-        while let Poll::Ready(action) = this.incoming.poll_recv(cx) {
-            let action = match action {
-                None => return Poll::Ready(None),
-                Some(action) => action,
-            };
+        let action = match ready!(this.incoming.poll_recv(cx)) {
+            None => return Poll::Ready(None),
+            Some(action) => action,
+        };
 
-            // TODO: if we introduce other actions, logic here would be different
-            let PersistenceAction::SaveFinalizedBlocks(blocks) = action;
-            most_recent_save_action = Some(blocks);
-        }
+        match action {
+            PersistenceAction::RemoveBlocksAbove(new_tip_num) => {
+                let output = this.remove_blocks_above(new_tip_num);
 
-        if let Some(blocks) = most_recent_save_action {
-            if blocks.is_empty() {
-                todo!("return error or something");
+                // TODO: do something with this
+                let handle = std::thread::spawn(move || {
+                    this.write(blocks);
+                });
+
+                Poll::Ready(Some(PersistenceOutput::AddBlocksAbove(output)))
+            },
+            PersistenceAction::SaveFinalizedBlocks(blocks) => {
+                if blocks.is_empty() {
+                    todo!("return error or something");
+                }
+                let last_block_hash = blocks.last().unwrap().block().hash();
+
+                // TODO: do something with this
+                let handle = std::thread::spawn(move || {
+                    this.write(blocks);
+                });
+
+                Poll::Ready(Some(PersistenceOutput::RemoveBlocksBefore(last_block_hash)))
             }
-            let last_block_hash = blocks.last().unwrap().block().hash();
-            this.write(blocks);
-            Poll::Ready(Some(PersistenceOutput::RemoveBlocksBefore(last_block_hash)))
-        } else {
-            Poll::Pending
         }
     }
 }
@@ -70,11 +78,18 @@ pub enum PersistenceAction {
     /// The section of tree state that should be persisted. These blocks are expected in order of
     /// increasing block number.
     SaveFinalizedBlocks(Vec<ExecutedBlock>),
+
+    /// Removes the blocks above the given block number from the database.
+    RemoveBlocksAbove(u64),
 }
 
 /// An output of the persistence task, that tells the tree that it needs something.
 pub enum PersistenceOutput {
-    /// Tells the tree that it can remove the blocks before the given hash, as they have been
+    /// Tells the consumer that it can remove the blocks before the given hash, as they have been
     /// persisted.
     RemoveBlocksBefore(B256),
+
+    /// Tells the consumer that the following blocks have been un-persisted, or removed from the
+    /// datbase, and they should be re-added to any in memory data structures.
+    AddBlocksAbove(Vec<ExecutedBlock>),
 }
