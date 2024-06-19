@@ -1,5 +1,4 @@
-use crate::{revm_primitives::AccountInfo, Account, Address, TxKind, KECCAK_EMPTY, U256};
-use revm::{interpreter::gas::validate_initial_tx_gas, primitives::SpecId};
+use crate::{revm_primitives::AccountInfo, Account, KECCAK_EMPTY};
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -26,18 +25,4 @@ pub fn into_revm_acc(reth_acc: Account) -> AccountInfo {
         code_hash: reth_acc.bytecode_hash.unwrap_or(KECCAK_EMPTY),
         code: None,
     }
-}
-
-/// Calculates the Intrinsic Gas usage for a Transaction
-///
-/// Caution: This only checks past the Merge hardfork.
-#[inline]
-pub fn calculate_intrinsic_gas_after_merge(
-    input: &[u8],
-    kind: &TxKind,
-    access_list: &[(Address, Vec<U256>)],
-    is_shanghai: bool,
-) -> u64 {
-    let spec_id = if is_shanghai { SpecId::SHANGHAI } else { SpecId::MERGE };
-    validate_initial_tx_gas(spec_id, input, kind.is_create(), access_list)
 }

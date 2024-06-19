@@ -19,7 +19,6 @@ reth-ethereum-forks.workspace = true
 reth-static-file-types.workspace = true
 reth-trie-common.workspace = true
 reth-chainspec.workspace = true
-revm.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
@@ -48,7 +47,7 @@ once_cell.workspace = true
 rayon.workspace = true
 serde.workspace = true
 tempfile = { workspace = true, optional = true }
-thiserror-no-std = { workspace = true , default-features = false }
+thiserror-no-std = { workspace = true, default-features = false }
 zstd = { version = "0.13", features = ["experimental"], optional = true }
 roaring = "0.10.2"
 
@@ -103,24 +102,15 @@ arbitrary = [
     "dep:proptest-derive",
     "zstd-codec",
 ]
-c-kzg = [
-    "dep:c-kzg",
-    "revm/c-kzg",
-    "revm-primitives/c-kzg",
-    "dep:tempfile",
-    "alloy-eips/kzg",
-]
+c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg"]
 zstd-codec = ["dep:zstd"]
 optimism = [
     "reth-chainspec/optimism",
     "reth-codecs/optimism",
     "reth-ethereum-forks/optimism",
-    "revm/optimism",
+    "revm-primitives/optimism",
 ]
-alloy-compat = [
-    "reth-primitives-traits/alloy-compat",
-    "alloy-rpc-types",
-]
+alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types"]
 std = ["thiserror-no-std/std"]
 test-utils = ["reth-primitives-traits/test-utils"]
 

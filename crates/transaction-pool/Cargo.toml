@@ -19,6 +19,7 @@ reth-primitives.workspace = true
 reth-fs-util.workspace = true
 reth-provider.workspace = true
 reth-tasks.workspace = true
+revm.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
