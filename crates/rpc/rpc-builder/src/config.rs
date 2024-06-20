@@ -50,7 +50,9 @@ pub trait RethRpcServerConfig {
     fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity>;
 
     /// Creates the [`RpcServerConfig`] from cli args.
-    fn rpc_server_config(&self) -> RpcServerConfig<impl tower::Layer<Identity> + Send + std::marker::Sync + 'static>;
+    fn rpc_server_config(
+        &self,
+    ) -> RpcServerConfig<impl tower::Layer<Identity> + Send + std::marker::Sync + 'static>;
 
     /// Creates the [`AuthServerConfig`] from cli args.
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError>;
@@ -160,7 +162,9 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_connections(self.rpc_max_connections.get())
     }
 
-    fn rpc_server_config(&self) -> RpcServerConfig<impl tower::Layer<Identity> + Send + Sync + 'static> {
+    fn rpc_server_config(
+        &self,
+    ) -> RpcServerConfig<impl tower::Layer<Identity> + Send + Sync + 'static> {
         let mut config = RpcServerConfig::new().with_jwt_secret(self.rpc_secret_key());
 
         if self.http {

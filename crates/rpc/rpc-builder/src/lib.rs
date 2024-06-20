@@ -1168,7 +1168,7 @@ where
 /// Once the [`RpcModule`] is built via [`RpcModuleBuilder`] the servers can be started, See also
 /// [`ServerBuilder::build`] and [`Server::start`](jsonrpsee::server::Server::start).
 #[derive(Debug)]
-pub struct RpcServerConfig<L = Identity> 
+pub struct RpcServerConfig<L = Identity>
 where
     L: tower::Layer<Identity> + Send + Sync + 'static,
 {
@@ -1197,7 +1197,7 @@ where
 // === impl RpcServerConfig ===
 impl Default for RpcServerConfig<Identity> {
     fn default() -> Self {
-        RpcServerConfig {
+        Self {
             http_server_config: None,
             http_cors_domains: None,
             http_addr: None,
@@ -1212,12 +1212,12 @@ impl Default for RpcServerConfig<Identity> {
     }
 }
 
-impl<L> RpcServerConfig<L> 
+impl<L> RpcServerConfig<L>
 where
     L: tower::Layer<Identity> + Send + Sync + 'static,
 {
     pub fn new() -> Self {
-        RpcServerConfig {
+        Self {
             http_server_config: None,
             http_cors_domains: None,
             http_addr: None,
@@ -1230,12 +1230,12 @@ where
             additional_middleware: None,
         }
     }
-    
-    pub fn with_additional_middleware<M>(self, layer: M) -> RpcServerConfig<M> 
+
+    pub fn with_additional_middleware<M>(self, layer: L) -> RpcServerConfig<L>
     where
         M: tower::Layer<L> + Send + Sync + 'static + tower::Layer<tower::layer::util::Identity>,
     {
-        RpcServerConfig {
+        Self {
             http_server_config: self.http_server_config,
             http_cors_domains: self.http_cors_domains,
             http_addr: self.http_addr,
@@ -1252,28 +1252,19 @@ where
     /// Creates a new config with only http set
     pub fn http(config: ServerBuilder<Identity, Identity>) -> Self {
         //Self::default().with_http(config)
-        RpcServerConfig {
-            http_server_config: Some(config),
-            ..RpcServerConfig::new()
-        }
+        Self { http_server_config: Some(config), ..RpcServerConfig::new() }
     }
 
     /// Creates a new config with only ws set
     pub fn ws(config: ServerBuilder<Identity, Identity>) -> Self {
         //Self::default().with_ws(config)
-        RpcServerConfig {
-            ws_server_config: Some(config),
-            ..RpcServerConfig::new()
-        }
+        Self { ws_server_config: Some(config), ..RpcServerConfig::new() }
     }
 
     /// Creates a new config with only ipc set
     pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> Self {
         //Self::default().with_ipc(config)
-        RpcServerConfig {
-            ipc_server_config: Some(config),
-            ..RpcServerConfig::new()
-        }
+        Self { ipc_server_config: Some(config), ..RpcServerConfig::new() }
     }
 
     /// Configures the http server
@@ -1774,8 +1765,11 @@ impl TransportRpcModules {
     }
 
     /// Convenience function for starting a server
-    pub async fn start_server<L>(self, builder: RpcServerConfig<L>) -> Result<RpcServerHandle, RpcError>
-        where
+    pub async fn start_server<L>(
+        self,
+        builder: RpcServerConfig<L>,
+    ) -> Result<RpcServerHandle, RpcError>
+    where
         L: tower::Layer<Identity> + Send + Sync + 'static,
     {
         builder.start(self).await
