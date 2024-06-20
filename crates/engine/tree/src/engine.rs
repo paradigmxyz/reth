@@ -154,8 +154,6 @@ where
 {
     /// The state of the top level orchestrator.
     orchestrator_state: OrchestratorState,
-    /// Needs to keep track of requested state changes by the orchestrator.
-    state: (),
     /// Currently in progress payload requests.
     pending_payloads: Vec<()>,
     /// Currently in progress fork choice updates.
@@ -165,18 +163,25 @@ where
     /// Manages the tree
     tree_handler: T,
     /// Events to yield.
-    buffered_events: VecDeque<()>,
+    buffered_events: VecDeque<EngineApiEvent>,
 }
 
-impl<T> EngineRequestHandler for EngineApiRequestHandler<T>
+impl<T> EngineApiRequestHandler<T>
 where
     T: EngineApiTreeHandler,
 {
-    // TODO: add events for reporting
-    type Event = ();
-    type Request = BeaconEngineMessage<T::Engine>;
+    /// Invoked when we receive a request to advance the chain.
+    fn on_engine_request(&mut self, req: BeaconEngineMessage<T::Engine>) {
+        if self.orchestrator_state.is_pipeline_active() {
+            // pipeline sync is running
+        }
 
-    fn on_event(&mut self, event: FromEngine<Self::Request>) {
+        match req {
+            BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {}
+            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {}
+            BeaconEngineMessage::TransitionConfigurationExchanged => {}
+        }
+
         // TODO check if we're currently syncing, or mutable access is currently held by the
         // orchestrator then we respond with SYNCING or delay forkchoice updates.  otherwise
         // we tell the tree to handle the requests, but we likely still need to tell the handler
@@ -204,15 +209,57 @@ where
 
         // the latter would give the handler more control over the execution of the requests, with
         // this model the logic of this type and the tree handler is very similar
+    }
 
-        todo!()
+    /// Invoked when we receive downloaded blocks.
+    fn on_downloaded_blocks(&mut self, blocks: Vec<SealedBlockWithSenders>) {
+        if self.orchestrator_state.is_pipeline_active() {
+            // pipeline sync is running, buffer the blocks
+        }
+    }
+}
+
+impl<T> EngineRequestHandler for EngineApiRequestHandler<T>
+where
+    T: EngineApiTreeHandler,
+{
+    type Event = EngineApiEvent;
+    type Request = BeaconEngineMessage<T::Engine>;
+
+    fn on_event(&mut self, event: FromEngine<Self::Request>) {
+        match event {
+            FromEngine::Event(ev) => {
+                self.orchestrator_state = match ev {
+                    FromOrchestrator::PipelineFinished => OrchestratorState::Idle,
+                    FromOrchestrator::PipelineStarted => OrchestratorState::PipelineActive,
+                };
+            }
+            FromEngine::Request(req) => {
+                self.on_engine_request(req);
+            }
+            FromEngine::DownloadedBlocks(blocks) => {
+                self.on_downloaded_blocks(blocks);
+            }
+        }
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
-        // advance tree tasks, trigger
-        todo!()
+        loop {
+            // drain buffered events
+            if let Some(ev) = self.buffered_events.pop_front() {
+                return Poll::Ready(RequestHandlerEvent::HandlerEvent(HandlerEvent::Event(ev)));
+            }
+
+            // TODO advance in progress requests if any
+        }
+
+        Poll::Pending
     }
 }
+
+/// Events emitted by the engine API handler.
+#[derive(Debug)]
+pub enum EngineApiEvent {}
 
 #[derive(Debug)]
 pub enum FromEngine<Req> {
@@ -227,6 +274,7 @@ impl<Req> From<FromOrchestrator> for FromEngine<Req> {
     }
 }
 
+/// Requests produced by a [`EngineRequestHandler`].
 #[derive(Debug)]
 pub enum RequestHandlerEvent<T> {
     Idle,
@@ -237,6 +285,8 @@ pub enum RequestHandlerEvent<T> {
 /// A request to download blocks from the network.
 #[derive(Debug)]
 pub enum DownloadRequest {
+    /// Download the given blocks.
     Blocks(Vec<B256>),
+    /// Download the given range of blocks.
     Range(B256, usize),
 }
