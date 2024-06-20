@@ -10,6 +10,7 @@ use proptest::{
     strategy::ValueTree,
     test_runner::{RngAlgorithm, TestRng, TestRunner},
 };
+use proptest_arbitrary_interop::arb;
 use reth_primitives::{
     constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, BlobTransactionSidecar, TxEip4844,
 };
@@ -42,13 +43,13 @@ fn validate_blob_tx(
         let mut runner = TestRunner::new_with_rng(config, rng);
 
         // generate tx and sidecar
-        let mut tx = any::<TxEip4844>().new_tree(&mut runner).unwrap().current();
+        let mut tx = arb::<TxEip4844>().new_tree(&mut runner).unwrap().current();
         let mut blob_sidecar =
-            any::<BlobTransactionSidecar>().new_tree(&mut runner).unwrap().current();
+            arb::<BlobTransactionSidecar>().new_tree(&mut runner).unwrap().current();
 
         while blob_sidecar.blobs.len() < num_blobs as usize {
             let blob_sidecar_ext =
-                any::<BlobTransactionSidecar>().new_tree(&mut runner).unwrap().current();
+                arb::<BlobTransactionSidecar>().new_tree(&mut runner).unwrap().current();
 
             // extend the sidecar with the new blobs
             blob_sidecar.blobs.extend(blob_sidecar_ext.blobs);

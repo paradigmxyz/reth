@@ -551,6 +551,7 @@ mod tests {
         BranchNodeCompact, TrieMask,
     };
     use proptest::{prelude::ProptestConfig, proptest};
+    use proptest_arbitrary_interop::arb;
     use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
@@ -649,7 +650,7 @@ mod tests {
 
     #[test]
     fn arbitrary_storage_root() {
-        proptest!(ProptestConfig::with_cases(10), |(item: (Address, std::collections::BTreeMap<B256, U256>))| {
+        proptest!(ProptestConfig::with_cases(10), |(item in arb::<(Address, std::collections::BTreeMap<B256, U256>)>())| {
             let (address, storage) = item;
 
             let hashed_address = keccak256(address);
@@ -759,7 +760,7 @@ mod tests {
     #[test]
     fn arbitrary_state_root() {
         proptest!(
-            ProptestConfig::with_cases(10), | (state: State) | {
+            ProptestConfig::with_cases(10), | (state in arb::<State>()) | {
                 test_state_root_with_state(state);
             }
         );
@@ -768,7 +769,7 @@ mod tests {
     #[test]
     fn arbitrary_state_root_with_progress() {
         proptest!(
-            ProptestConfig::with_cases(10), | (state: State) | {
+            ProptestConfig::with_cases(10), | (state in arb::<State>()) | {
                 let hashed_entries_total = state.len() +
                     state.values().map(|(_, slots)| slots.len()).sum::<usize>();
 
