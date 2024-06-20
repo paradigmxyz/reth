@@ -131,16 +131,6 @@ impl SealedHeader {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for SealedHeader {
-    type Parameters = ();
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        // map valid header strategy by sealing
-        crate::test_utils::valid_header_strategy().prop_map(|header| header.seal_slow()).boxed()
-    }
-    type Strategy = proptest::strategy::BoxedStrategy<Self>;
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(Header::arbitrary(u)?.seal_slow())
