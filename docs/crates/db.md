@@ -148,60 +148,66 @@ where
 
 The `Database` defines two associated types `TX` and `TXMut`.
 
-[File: crates/storage/db/src/abstraction/database.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/database.rs#L11)
+[File: crates/storage/db-api/src/database.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/database.rs#L54-L78)
 
 The `TX` type can be any type that implements the `DbTx` trait, which provides a set of functions to interact with read only transactions.
 
-[File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L36)
+[File: crates/storage/db-api/src/transaction.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/transaction.rs#L7-L29)
 
 ```rust ignore
 /// Read only transaction
 pub trait DbTx: Send + Sync {
     /// Cursor type for this read-only transaction
     type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
-    /// DupCursor type for this read-only transaction
+    /// `DupCursor` type for this read-only transaction
     type DupCursor<T: DupSort>: DbDupCursorRO<T> + DbCursorRO<T> + Send + Sync;
 
     /// Get value
-    fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
+    fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, DatabaseError>;
     /// Commit for read only transaction will consume and free transaction and allows
     /// freeing of memory pages
-    fn commit(self) -> Result<bool, Error>;
+    fn commit(self) -> Result<bool, DatabaseError>;
+    /// Aborts transaction
+    fn abort(self);
     /// Iterate over read only values in table.
-    fn cursor<T: Table>(&self) -> Result<Self::Cursor<T>, Error>;
+    fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<T>, DatabaseError>;
     /// Iterate over read only values in dup sorted table.
-    fn cursor_dup<T: DupSort>(&self) -> Result<Self::DupCursor<T>, Error>;
+    fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError>;
+    /// Returns number of entries in the table.
+    fn entries<T: Table>(&self) -> Result<usize, DatabaseError>;
+    /// Disables long-lived read transaction safety guarantees.
+    fn disable_long_read_transaction_safety(&mut self);
 }
 ```
 
 The `TXMut` type can be any type that implements the `DbTxMut` trait, which provides a set of functions to interact with read/write transactions and the associated cursor types.
 
-[File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L49)
+[File: crates/storage/db-api/src/transaction.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/transaction.rs#L31-L54)
 
 ```rust ignore
 /// Read write transaction that allows writing to database
 pub trait DbTxMut: Send + Sync {
     /// Read-Write Cursor type
     type CursorMut<T: Table>: DbCursorRW<T> + DbCursorRO<T> + Send + Sync;
-    /// Read-Write DupCursor type
+    /// Read-Write `DupCursor` type
     type DupCursorMut<T: DupSort>: DbDupCursorRW<T>
         + DbCursorRW<T>
         + DbDupCursorRO<T>
         + DbCursorRO<T>
         + Send
         + Sync;
+
     /// Put value to database
-    fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), Error>;
+    fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
     /// Delete value from database
-    fn delete<T: Table>(&self, key: T::Key, value: Option<T::Value>) -> Result<bool, Error>;
+    fn delete<T: Table>(&self, key: T::Key, value: Option<T::Value>)
+        -> Result<bool, DatabaseError>;
     /// Clears database.
-    fn clear<T: Table>(&self) -> Result<(), Error>;
-    /// Cursor for writing
-    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, Error>;
-    /// DupCursor for writing
-    fn cursor_dup_write<T: DupSort>(
-        &self,
-    ) -> Result<Self::DupCursorMut<T>, Error>;
+    fn clear<T: Table>(&self) -> Result<(), DatabaseError>;
+    /// Cursor mut
+    fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError>;
+    /// `DupCursor` mut.
+    fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError>;
 }
 ```
 
