@@ -108,13 +108,11 @@ impl Command {
         let executor = block_executor!(provider_factory.chain_spec());
 
         let builder = if self.offline {
-            let stages = OfflineStages::new(executor, config.stages, PruneModes::default());
-            let stages = stages.builder().disable(reth_stages::StageId::SenderRecovery).build();
-            let mut builder = Pipeline::builder();
-            for stage in stages {
-                builder = builder.add_stage(stage);
-            }
-            builder
+            Pipeline::builder().add_stages(
+                OfflineStages::new(executor, config.stages, PruneModes::default())
+                    .builder()
+                    .disable(reth_stages::StageId::SenderRecovery),
+            )
         } else {
             Pipeline::builder().with_tip_sender(tip_tx).add_stages(
                 DefaultStages::new(
