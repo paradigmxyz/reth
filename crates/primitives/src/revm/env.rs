@@ -1,6 +1,6 @@
 use crate::{
     recover_signer_unchecked,
-    revm_primitives::{BlockEnv, Env, TransactTo, TxEnv},
+    revm_primitives::{BlockEnv, Env, TxEnv},
     Address, Bytes, Header, Transaction, TransactionSignedEcRecovered, TxKind, B256, U256,
 };
 use reth_chainspec::{Chain, ChainSpec};
@@ -182,7 +182,7 @@ fn fill_tx_env_with_system_contract_call(
 ) {
     env.tx = TxEnv {
         caller,
-        transact_to: TransactTo::Call(contract),
+        transact_to: TxKind::Call(contract),
         // Explicitly set nonce to None so revm does not do any nonce checks
         nonce: None,
         gas_limit: 30_000_000,
@@ -246,8 +246,8 @@ where
             tx_env.gas_price = U256::from(tx.gas_price);
             tx_env.gas_priority_fee = None;
             tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TransactTo::Call(to),
-                TxKind::Create => TransactTo::create(),
+                TxKind::Call(to) => TxKind::Call(to),
+                TxKind::Create => TxKind::Create,
             };
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
@@ -262,8 +262,8 @@ where
             tx_env.gas_price = U256::from(tx.gas_price);
             tx_env.gas_priority_fee = None;
             tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TransactTo::Call(to),
-                TxKind::Create => TransactTo::create(),
+                TxKind::Call(to) => TxKind::Call(to),
+                TxKind::Create => TxKind::Create,
             };
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
@@ -285,8 +285,8 @@ where
             tx_env.gas_price = U256::from(tx.max_fee_per_gas);
             tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
             tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TransactTo::Call(to),
-                TxKind::Create => TransactTo::create(),
+                TxKind::Call(to) => TxKind::Call(to),
+                TxKind::Create => TxKind::Create,
             };
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
@@ -307,7 +307,7 @@ where
             tx_env.gas_limit = tx.gas_limit;
             tx_env.gas_price = U256::from(tx.max_fee_per_gas);
             tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-            tx_env.transact_to = TransactTo::Call(tx.to);
+            tx_env.transact_to = TxKind::Call(tx.to);
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = Some(tx.chain_id);
@@ -329,10 +329,7 @@ where
             tx_env.gas_limit = tx.gas_limit;
             tx_env.gas_price = U256::ZERO;
             tx_env.gas_priority_fee = None;
-            match tx.to {
-                TxKind::Call(to) => tx_env.transact_to = TransactTo::Call(to),
-                TxKind::Create => tx_env.transact_to = TransactTo::create(),
-            }
+            tx_env.transact_to = tx.to;
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = None;
