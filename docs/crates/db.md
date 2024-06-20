@@ -8,7 +8,7 @@ The database is a central component to Reth, enabling persistent storage for dat
 
 Within Reth, the database is organized via "tables". A table is any struct that implements the `Table` trait.
 
-[File: crates/storage/db/src/abstraction/table.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/storage/db/src/abstraction/table.rs#L55-L82)
+[File: crates/storage/db-api/src/table.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/table.rs#L64-L93)
 
 ```rust ignore
 pub trait Table: Send + Sync + Debug + 'static {
@@ -32,7 +32,7 @@ pub trait Value: Compress + Decompress + Serialize {}
 
 The `Table` trait has two generic values, `Key` and `Value`, which need to implement the `Key` and `Value` traits, respectively. The `Encode` trait is responsible for transforming data into bytes so it can be stored in the database, while the `Decode` trait transforms the bytes back into its original form. Similarly, the `Compress` and `Decompress` traits transform the data to and from a compressed format when storing or reading data from the database.
 
-There are many tables within the node, all used to store different types of data from `Headers` to `Transactions` and more. Below is a list of all of the tables. You can follow [this link](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/storage/db/src/tables/mod.rs#L161-L188) if you would like to see the table definitions for any of the tables below.
+There are many tables within the node, all used to store different types of data from `Headers` to `Transactions` and more. Below is a list of all of the tables. You can follow [this link](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db/src/tables/mod.rs#L274-L414) if you would like to see the table definitions for any of the tables below.
 
 - CanonicalHeaders
 - HeaderTerminalDifficulties
@@ -41,18 +41,18 @@ There are many tables within the node, all used to store different types of data
 - BlockBodyIndices
 - BlockOmmers
 - BlockWithdrawals
-- TransactionBlocks
 - Transactions
 - TransactionHashNumbers
+- TransactionBlocks
 - Receipts
+- Bytecodes
 - PlainAccountState
 - PlainStorageState
-- Bytecodes
 - AccountsHistory
 - StoragesHistory
 - AccountChangeSets
 - StorageChangeSets
-- HashedAccount
+- HashedAccounts
 - HashedStorages
 - AccountsTrie
 - StoragesTrie
@@ -60,28 +60,41 @@ There are many tables within the node, all used to store different types of data
 - StageCheckpoints
 - StageCheckpointProgresses
 - PruneCheckpoints
+- VersionHistory
+- BlockRequests
+- ChainState
 
 <br>
 
 ## Database
 
-Reth's database design revolves around it's main [Database trait](https://github.com/paradigmxyz/reth/blob/eaca2a4a7fbbdc2f5cd15eab9a8a18ede1891bda/crates/storage/db/src/abstraction/database.rs#L21), which implements the database's functionality across many types. Let's take a quick look at the `Database` trait and how it works.
+Reth's database design revolves around it's main [Database trait](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/database.rs#L8-L52), which implements the database's functionality across many types. Let's take a quick look at the `Database` trait and how it works.
 
-[File: crates/storage/db/src/abstraction/database.rs](https://github.com/paradigmxyz/reth/blob/eaca2a4a7fbbdc2f5cd15eab9a8a18ede1891bda/crates/storage/db/src/abstraction/database.rs#L21)
+[File: crates/storage/db-api/src/database.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/database.rs#L8-L52)
 
 ```rust ignore
-/// Main Database trait that spawns transactions to be executed.
-pub trait Database {
-    /// RO database transaction
-    type TX: DbTx + Send + Sync + Debug;
-    /// RW database transaction
-    type TXMut: DbTxMut + DbTx + TableImporter + Send + Sync + Debug;
+/// Main Database trait that can open read-only and read-write transactions.
+///
+/// Sealed trait which cannot be implemented by 3rd parties, exposed only for consumption.
+pub trait Database: Send + Sync {
+    /// Read-Only database transaction
+    type TX: DbTx + Send + Sync + Debug + 'static;
+    /// Read-Write database transaction
+    type TXMut: DbTxMut + DbTx + TableImporter + Send + Sync + Debug + 'static;
+
+    /// Create read only transaction.
+    #[track_caller]
+    fn tx(&self) -> Result<Self::TX, DatabaseError>;
+
+    /// Create read write transaction only possible if database is open with write access.
+    #[track_caller]
+    fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError>;
 
     /// Takes a function and passes a read-only transaction into it, making sure it's closed in the
     /// end of the execution.
-    fn view<T, F>(&self, f: F) -> Result<T, Error>
+    fn view<T, F>(&self, f: F) -> Result<T, DatabaseError>
     where
-        F: Fn(&<Self as Database>::TX) -> T,
+        F: FnOnce(&Self::TX) -> T,
     {
         let tx = self.tx()?;
 
@@ -93,9 +106,9 @@ pub trait Database {
 
     /// Takes a function and passes a write-read transaction into it, making sure it's committed in
     /// the end of the execution.
-    fn update<T, F>(&self, f: F) -> Result<T, Error>
+    fn update<T, F>(&self, f: F) -> Result<T, DatabaseError>
     where
-        F: Fn(&<Self as Database>::TXMut) -> T,
+        F: FnOnce(&Self::TXMut) -> T,
     {
         let tx = self.tx_mut()?;
 
