@@ -14,6 +14,7 @@ use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
 use once_cell::sync::Lazy;
 use reth_ethereum_forks::{
+    chains::ethereum::{GOERLI_HARDFORKS, HOLESKY_HARDFORKS, MAINNET_HARDFORKS, SEPOLIA_HARDFORKS},
     DisplayHardforks, ForkCondition, ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head,
 };
 use reth_network_peers::NodeRecord;
@@ -35,6 +36,8 @@ use crate::constants::optimism::{
     OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
 };
 pub use alloy_eips::eip1559::BaseFeeParams;
+#[cfg(feature = "optimism")]
+use reth_ethereum_forks::chains::optimism::*;
 
 #[cfg(feature = "optimism")]
 use crate::net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes};
@@ -54,31 +57,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             15537394,
             U256::from(58_750_003_716_598_352_816_469u128),
         )),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(1150000)),
-            (Hardfork::Dao, ForkCondition::Block(1920000)),
-            (Hardfork::Tangerine, ForkCondition::Block(2463000)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(2675000)),
-            (Hardfork::Byzantium, ForkCondition::Block(4370000)),
-            (Hardfork::Constantinople, ForkCondition::Block(7280000)),
-            (Hardfork::Petersburg, ForkCondition::Block(7280000)),
-            (Hardfork::Istanbul, ForkCondition::Block(9069000)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(9200000)),
-            (Hardfork::Berlin, ForkCondition::Block(12244000)),
-            (Hardfork::London, ForkCondition::Block(12965000)),
-            (Hardfork::ArrowGlacier, ForkCondition::Block(13773000)),
-            (Hardfork::GrayGlacier, ForkCondition::Block(15050000)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD {
-                    fork_block: None,
-                    total_difficulty: U256::from(58_750_000_000_000_000_000_000_u128),
-                },
-            ),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1710338135)),
-        ]),
+        hardforks: MAINNET_HARDFORKS.clone(),
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
         deposit_contract: Some(DepositContract::new(
             address!("00000000219ab540356cbb839cbe05303d7705fa"),
@@ -102,25 +81,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         // <https://goerli.etherscan.io/block/7382818>
         paris_block_and_final_difficulty: Some((7382818, U256::from(10_790_000))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Dao, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(1561651)),
-            (Hardfork::Berlin, ForkCondition::Block(4460644)),
-            (Hardfork::London, ForkCondition::Block(5062605)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(10_790_000) },
-            ),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1705473120)),
-        ]),
+        hardforks: GOERLI_HARDFORKS.clone(),
         // https://goerli.etherscan.io/tx/0xa3c07dc59bfdb1bfc2d50920fed2ef2c1c4e0a09fe2325dbc14e07702f965a78
         deposit_contract: Some(DepositContract::new(
             address!("ff50ed3d0ec03ac01d4c79aad74928bff48a7b2b"),
@@ -144,29 +105,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         // <https://sepolia.etherscan.io/block/1450409>
         paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Dao, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(0)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(0)),
-            (Hardfork::London, ForkCondition::Block(0)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD {
-                    fork_block: Some(1735371),
-                    total_difficulty: U256::from(17_000_000_000_000_000u64),
-                },
-            ),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1706655072)),
-        ]),
+        hardforks: SEPOLIA_HARDFORKS.clone(),
         // https://sepolia.etherscan.io/tx/0x025ecbf81a2f1220da6285d1701dc89fb5a956b62562ee922e1a9efd73eb4b14
         deposit_contract: Some(DepositContract::new(
             address!("7f02c3e3c98b133055b8b348b2ac625669ed295d"),
@@ -189,26 +128,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Dao, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(0)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(0)),
-            (Hardfork::London, ForkCondition::Block(0)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
-            ),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1696000704)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1707305664)),
-        ]),
+        hardforks: HOLESKY_HARDFORKS.clone(),
         deposit_contract: Some(DepositContract::new(
             address!("4242424242424242424242424242424242424242"),
             0,
@@ -279,32 +199,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(0)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(3950000)),
-            (Hardfork::London, ForkCondition::Block(105235063)),
-            (Hardfork::ArrowGlacier, ForkCondition::Block(105235063)),
-            (Hardfork::GrayGlacier, ForkCondition::Block(105235063)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD { fork_block: Some(105235063), total_difficulty: U256::from(0) },
-            ),
-            (Hardfork::Bedrock, ForkCondition::Block(105235063)),
-            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1704992401)),
-            (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1710374401)),
-            (Hardfork::Ecotone, ForkCondition::Timestamp(1710374401)),
-            (Hardfork::Fjord, ForkCondition::Timestamp(1720627201)),
-        ]),
+        hardforks: OP_MAINNET_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
                 (Hardfork::London, OP_BASE_FEE_PARAMS),
@@ -329,32 +224,7 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(0)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(0)),
-            (Hardfork::London, ForkCondition::Block(0)),
-            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
-            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
-            ),
-            (Hardfork::Bedrock, ForkCondition::Block(0)),
-            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
-            (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1708534800)),
-            (Hardfork::Ecotone, ForkCondition::Timestamp(1708534800)),
-            (Hardfork::Fjord, ForkCondition::Timestamp(1716998400)),
-        ]),
+        hardforks: OP_SEPOLIA_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
                 (Hardfork::London, OP_SEPOLIA_BASE_FEE_PARAMS),
@@ -379,32 +249,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(0)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(0)),
-            (Hardfork::London, ForkCondition::Block(0)),
-            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
-            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
-            ),
-            (Hardfork::Bedrock, ForkCondition::Block(0)),
-            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
-            (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1708534800)),
-            (Hardfork::Ecotone, ForkCondition::Timestamp(1708534800)),
-            (Hardfork::Fjord, ForkCondition::Timestamp(1716998400)),
-        ]),
+        hardforks: BASE_SEPOLIA_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
                 (Hardfork::London, BASE_SEPOLIA_BASE_FEE_PARAMS),
@@ -429,32 +274,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(0)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(0)),
-            (Hardfork::London, ForkCondition::Block(0)),
-            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
-            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
-            ),
-            (Hardfork::Bedrock, ForkCondition::Block(0)),
-            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1704992401)),
-            (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1710374401)),
-            (Hardfork::Ecotone, ForkCondition::Timestamp(1710374401)),
-            (Hardfork::Fjord, ForkCondition::Timestamp(1720627201)),
-        ]),
+        hardforks: BASE_MAINNET_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
                 (Hardfork::London, OP_BASE_FEE_PARAMS),
