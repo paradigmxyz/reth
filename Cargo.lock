@@ -6725,8 +6725,8 @@ dependencies = [
  "rand 0.8.5",
  "reth-chainspec",
  "reth-ethereum-forks",
- "reth-net-common",
  "reth-network-peers",
+ "reth-tokio-util",
  "reth-tracing",
  "schnellru",
  "secp256k1",
@@ -7213,7 +7213,6 @@ name = "reth-net-common"
 version = "1.0.0-rc.2"
 dependencies = [
  "alloy-primitives",
- "tokio",
 ]
 
 [[package]]
