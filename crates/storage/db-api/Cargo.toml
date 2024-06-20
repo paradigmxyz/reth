@@ -54,7 +54,7 @@ pprof = { workspace = true, features = [
     "criterion",
 ] }
 criterion.workspace = true
-iai-callgrind = "0.10.2"
+iai-callgrind.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true

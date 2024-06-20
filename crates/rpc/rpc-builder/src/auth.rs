@@ -298,7 +298,7 @@ impl AuthServerHandle {
     pub async fn ipc_client(&self) -> Option<jsonrpsee::async_client::Client> {
         use reth_ipc::client::IpcClientBuilder;
 
-        if let Some(ipc_endpoint) = self.ipc_endpoint.clone() {
+        if let Some(ipc_endpoint) = &self.ipc_endpoint {
             return Some(
                 IpcClientBuilder::default()
                     .build(ipc_endpoint)
