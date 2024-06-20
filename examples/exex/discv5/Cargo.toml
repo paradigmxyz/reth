@@ -1,5 +1,5 @@
 [package]
-name = "exex-discv5"
+name = "example-exex-discv5"
 version = "0.0.0"
 publish = false
 edition.workspace = true
@@ -14,6 +14,7 @@ reth.workspace = true
 reth-exex.workspace = true
 reth-node-api.workspace = true
 reth-node-ethereum.workspace = true
+reth-network-peers.workspace = true
 reth-tracing.workspace = true
 clap.workspace = true
 reth-chainspec.workspace = true

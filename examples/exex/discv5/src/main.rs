@@ -1,5 +1,5 @@
 use clap::Parser;
-use network::{cli_ext::Discv5ArgsExt, DiscV5Node};
+use network::{cli_ext::Discv5ArgsExt, DiscV5ExEx};
 use reth_node_ethereum::EthereumNode;
 
 mod network;
@@ -12,7 +12,7 @@ fn main() -> eyre::Result<()> {
         let handle = builder
             .node(EthereumNode::default())
             .install_exex("exex-discv5", move |_ctx| async move {
-                DiscV5Node::new(tcp_port, udp_port).await
+                DiscV5ExEx::new(tcp_port, udp_port).await
             })
             .launch()
             .await?;

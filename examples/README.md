@@ -31,6 +31,7 @@ to make a PR!
 | [OP Bridge](./exex/op-bridge)             | Illustrates an ExEx that decodes Optimism deposit and withdrawal receipts from L1                   |
 | [Remote](./exex/remote)                   | Illustrates an ExEx that emits notifications using a gRPC server, and a consumer that receives them |
 | [Rollup](./exex/rollup)                   | Illustrates a rollup ExEx that derives the state from L1                                            |
+| [Discv5 as ExEx](./exex/discv5)           | Illustrates an ExEx that runs discv5 discovery stack                                                |
 
 ## RPC
 

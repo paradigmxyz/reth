@@ -9,14 +9,14 @@ use std::{
     future::Future,
     net::SocketAddr,
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc;
 
 pub(crate) mod cli_ext;
 
 /// Helper struct to manage a discovery node using discv5.
-pub(crate) struct DiscV5Node {
+pub(crate) struct DiscV5ExEx {
     /// The inner discv5 instance.
     inner: Discv5,
     /// The node record of the discv5 instance.
@@ -25,9 +25,9 @@ pub(crate) struct DiscV5Node {
     events: mpsc::Receiver<discv5::Event>,
 }
 
-impl DiscV5Node {
+impl DiscV5ExEx {
     /// Starts a new discv5 node.
-    pub async fn new(udp_port: u16, tcp_port: u16) -> eyre::Result<DiscV5Node> {
+    pub async fn new(udp_port: u16, tcp_port: u16) -> eyre::Result<DiscV5ExEx> {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let discv5_addr: SocketAddr = format!("127.0.0.1:{udp_port}").parse()?;
@@ -55,38 +55,37 @@ impl DiscV5Node {
     }
 }
 
-impl Future for DiscV5Node {
+impl Future for DiscV5ExEx {
     type Output = eyre::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.as_mut();
-        while let Poll::Ready(event) = this.events.poll_recv(cx) {
-            match event {
+        loop {
+            match ready!(this.events.poll_recv(cx)) {
                 Some(evt) => {
                     if let Event::SessionEstablished(enr, socket_addr) = evt {
                         info!(?enr, ?socket_addr, "Session established with a new peer.");
                     }
-                    // more events here
                 }
                 None => return Poll::Ready(Ok(())),
             }
         }
-        Poll::Pending
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::network::DiscV5Node;
+    use crate::network::DiscV5ExEx;
     use tracing::info;
 
     #[tokio::test]
     async fn can_establish_discv5_session_with_peer() {
         reth_tracing::init_test_tracing();
-        let mut node_1 = DiscV5Node::new(30301, 30303).await.unwrap();
+        let mut node_1 = DiscV5ExEx::new(30301, 30303).await.unwrap();
         let node_1_enr = node_1.local_enr();
 
-        let mut node_2 = DiscV5Node::new(30302, 30303).await.unwrap();
+        let mut node_2 = DiscV5ExEx::new(30302, 30303).await.unwrap();
+
         let node_2_enr = node_2.local_enr();
 
         info!(?node_1_enr, ?node_2_enr, "Started discovery nodes.");
