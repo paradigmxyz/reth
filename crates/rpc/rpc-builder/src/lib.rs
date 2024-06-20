@@ -1168,6 +1168,7 @@ where
 /// Once the [`RpcModule`] is built via [`RpcModuleBuilder`] the servers can be started, See also
 /// [`ServerBuilder::build`] and [`Server::start`](jsonrpsee::server::Server::start).
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct RpcServerConfig<L = Identity>
 where
     L: tower::Layer<Identity> + Send + Sync + 'static,
@@ -1216,7 +1217,12 @@ impl<L> RpcServerConfig<L>
 where
     L: tower::Layer<Identity> + Send + Sync + 'static,
 {
-    pub fn new() -> Self {
+    /// Creates a new `RpcServerConfig` with all fields set to `None`.
+    ///
+    /// # Returns
+    ///
+    /// A new `RpcServerConfig` instance.
+    pub const fn new() -> Self {
         Self {
             http_server_config: None,
             http_cors_domains: None,
@@ -1231,11 +1237,25 @@ where
         }
     }
 
-    pub fn with_additional_middleware<M>(self, layer: L) -> RpcServerConfig<L>
+    /// Adds a middleware layer to the `RpcServerConfig`.
+    ///
+    /// # Parameters
+    ///
+    /// - `layer`: The middleware layer to add.
+    ///
+    /// # Returns
+    ///
+    /// A new `RpcServerConfig` with the added middleware layer.
+    ///
+    /// # Type Parameters
+    ///
+    /// - `M`: The type of the middleware layer, which must implement `tower::Layer<L> + Send + Sync
+    ///   + `static`.
+    pub fn with_additional_middleware<M>(self, layer: M) -> RpcServerConfig<M>
     where
         M: tower::Layer<L> + Send + Sync + 'static + tower::Layer<tower::layer::util::Identity>,
     {
-        Self {
+        RpcServerConfig {
             http_server_config: self.http_server_config,
             http_cors_domains: self.http_cors_domains,
             http_addr: self.http_addr,
@@ -1252,19 +1272,19 @@ where
     /// Creates a new config with only http set
     pub fn http(config: ServerBuilder<Identity, Identity>) -> Self {
         //Self::default().with_http(config)
-        Self { http_server_config: Some(config), ..RpcServerConfig::new() }
+        Self { http_server_config: Some(config), ..Self::new() }
     }
 
     /// Creates a new config with only ws set
     pub fn ws(config: ServerBuilder<Identity, Identity>) -> Self {
         //Self::default().with_ws(config)
-        Self { ws_server_config: Some(config), ..RpcServerConfig::new() }
+        Self { ws_server_config: Some(config), ..Self::new() }
     }
 
     /// Creates a new config with only ipc set
     pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> Self {
         //Self::default().with_ipc(config)
-        Self { ipc_server_config: Some(config), ..RpcServerConfig::new() }
+        Self { ipc_server_config: Some(config), ..Self::new() }
     }
 
     /// Configures the http server
