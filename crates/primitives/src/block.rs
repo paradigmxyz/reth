@@ -380,6 +380,43 @@ impl SealedBlock {
         }
     }
 
+    /// Transform into a [`SealedBlockWithSenders`].
+    ///
+    /// # Panics
+    ///
+    /// If the number of senders does not match the number of transactions in the block
+    /// and the signer recovery for one of the transactions fails.
+    #[track_caller]
+    pub fn with_senders_unchecked(self, senders: Vec<Address>) -> SealedBlockWithSenders {
+        self.try_with_senders_unchecked(senders).expect("stored block is valid")
+    }
+
+    /// Transform into a [`SealedBlockWithSenders`] using the given senders.
+    ///
+    /// If the number of senders does not match the number of transactions in the block, this falls
+    /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
+    /// See also [`TransactionSigned::recover_signer_unchecked`]
+    ///
+    /// Returns an error if a signature is invalid.
+    #[track_caller]
+    pub fn try_with_senders_unchecked(
+        self,
+        senders: Vec<Address>,
+    ) -> Result<SealedBlockWithSenders, Self> {
+        let senders = if self.body.len() == senders.len() {
+            senders
+        } else {
+            let Some(senders) =
+                TransactionSigned::recover_signers_unchecked(&self.body, self.body.len())
+            else {
+                return Err(self)
+            };
+            senders
+        };
+
+        Ok(SealedBlockWithSenders { block: self, senders })
+    }
+
     /// Unseal the block
     pub fn unseal(self) -> Block {
         Block {
