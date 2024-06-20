@@ -37,8 +37,6 @@ where
     handler: T,
     /// Controls pipeline sync.
     pipeline: P,
-    /// Additional hooks (e.g. pruning) that can require exclusive access to the database.
-    hooks: (),
 }
 
 impl<T, P> ChainOrchestrator<T, P>
@@ -46,6 +44,11 @@ where
     T: ChainHandler + Unpin,
     P: PipelineHandler + Unpin,
 {
+    /// Creates a new [`ChainOrchestrator`] with the given handler and pipeline.
+    pub const fn new(handler: T, pipeline: P) -> Self {
+        Self { handler, pipeline }
+    }
+
     /// Returns the handler
     pub const fn handler(&self) -> &T {
         &self.handler

@@ -29,24 +29,32 @@ use std::{
 ///
 /// The core logic is part of the [`EngineRequestHandler`], which is responsible for processing the
 /// incoming requests.
-pub struct EngineHandler<T, D>
-where
-    T: EngineRequestHandler,
-{
+#[derive(Debug)]
+pub struct EngineHandler<T, S, D> {
     /// Processes requests.
     ///
     /// This type is responsible for processing incoming requests.
     handler: T,
     /// Receiver for incoming requests that need to be processed.
-    // TODO maybe use generic?
-    incoming_requests: Fuse<Pin<Box<dyn Stream<Item = T::Request> + Send + Sync + 'static>>>,
+    incoming_requests: S,
     /// A downloader to download blocks on demand.
     downloader: D,
 }
 
-impl<T, D> ChainHandler for EngineHandler<T, D>
+impl<T, S, D> EngineHandler<T, S, D> {
+    /// Creates a new [`EngineHandler`] with the given handler and downloader.
+    pub fn new(handler: T, downloader: D, incoming_requests: S) -> Self
+    where
+        T: EngineRequestHandler,
+    {
+        Self { handler, incoming_requests, downloader }
+    }
+}
+
+impl<T, S, D> ChainHandler for EngineHandler<T, S, D>
 where
     T: EngineRequestHandler,
+    S: Stream<Item = T::Request> + Send + Sync + Unpin + 'static,
     D: BlockDownloader,
 {
     type Event = T::Event;
