@@ -239,7 +239,7 @@ impl RemoteExEx for ExExService {
                     .await
                     .expect("failed to send notification to client");
 
-                info!(?notification, "Notification sent to the gRPC client");
+                info!("Notification sent to the gRPC client");
             }
         });
 
@@ -279,7 +279,7 @@ async fn remote_exex<Node: FullNodeComponents>(
                 .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
         }
 
-        info!(?notification, "Notification sent to the gRPC server");
+        info!("Notification sent to the gRPC server");
         let _ = notifications.send(notification);
     }
 
