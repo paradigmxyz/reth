@@ -1167,8 +1167,11 @@ where
 ///
 /// Once the [`RpcModule`] is built via [`RpcModuleBuilder`] the servers can be started, See also
 /// [`ServerBuilder::build`] and [`Server::start`](jsonrpsee::server::Server::start).
-#[derive(Default, Debug)]
-pub struct RpcServerConfig {
+#[derive(Debug)]
+pub struct RpcServerConfig<L = Identity> 
+where
+    L: tower::Layer<Identity> + Send + Sync + 'static,
+{
     /// Configs for JSON-RPC Http.
     http_server_config: Option<ServerBuilder<Identity, Identity>>,
     /// Allowed CORS Domains for http
@@ -1187,24 +1190,90 @@ pub struct RpcServerConfig {
     ipc_endpoint: Option<String>,
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
+    /// Additional middleware layer.
+    additional_middleware: Option<L>,
 }
 
 // === impl RpcServerConfig ===
+impl Default for RpcServerConfig<Identity> {
+    fn default() -> Self {
+        RpcServerConfig {
+            http_server_config: None,
+            http_cors_domains: None,
+            http_addr: None,
+            ws_server_config: None,
+            ws_cors_domains: None,
+            ws_addr: None,
+            ipc_server_config: None,
+            ipc_endpoint: None,
+            jwt_secret: None,
+            additional_middleware: Some(Identity::new()),
+        }
+    }
+}
 
-impl RpcServerConfig {
+impl<L> RpcServerConfig<L> 
+where
+    L: tower::Layer<Identity> + Send + Sync + 'static,
+{
+    pub fn new() -> Self {
+        RpcServerConfig {
+            http_server_config: None,
+            http_cors_domains: None,
+            http_addr: None,
+            ws_server_config: None,
+            ws_cors_domains: None,
+            ws_addr: None,
+            ipc_server_config: None,
+            ipc_endpoint: None,
+            jwt_secret: None,
+            additional_middleware: None,
+        }
+    }
+    
+    pub fn with_additional_middleware<M>(self, layer: M) -> RpcServerConfig<M> 
+    where
+        M: tower::Layer<L> + Send + Sync + 'static + tower::Layer<tower::layer::util::Identity>,
+    {
+        RpcServerConfig {
+            http_server_config: self.http_server_config,
+            http_cors_domains: self.http_cors_domains,
+            http_addr: self.http_addr,
+            ws_server_config: self.ws_server_config,
+            ws_cors_domains: self.ws_cors_domains,
+            ws_addr: self.ws_addr,
+            ipc_server_config: self.ipc_server_config,
+            ipc_endpoint: self.ipc_endpoint,
+            jwt_secret: self.jwt_secret,
+            additional_middleware: Some(layer),
+        }
+    }
+
     /// Creates a new config with only http set
     pub fn http(config: ServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_http(config)
+        //Self::default().with_http(config)
+        RpcServerConfig {
+            http_server_config: Some(config),
+            ..RpcServerConfig::new()
+        }
     }
 
     /// Creates a new config with only ws set
     pub fn ws(config: ServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_ws(config)
+        //Self::default().with_ws(config)
+        RpcServerConfig {
+            ws_server_config: Some(config),
+            ..RpcServerConfig::new()
+        }
     }
 
     /// Creates a new config with only ipc set
     pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_ipc(config)
+        //Self::default().with_ipc(config)
+        RpcServerConfig {
+            ipc_server_config: Some(config),
+            ..RpcServerConfig::new()
+        }
     }
 
     /// Configures the http server
@@ -1705,7 +1774,10 @@ impl TransportRpcModules {
     }
 
     /// Convenience function for starting a server
-    pub async fn start_server(self, builder: RpcServerConfig) -> Result<RpcServerHandle, RpcError> {
+    pub async fn start_server<L>(self, builder: RpcServerConfig<L>) -> Result<RpcServerHandle, RpcError>
+        where
+        L: tower::Layer<Identity> + Send + Sync + 'static,
+    {
         builder.start(self).await
     }
 }

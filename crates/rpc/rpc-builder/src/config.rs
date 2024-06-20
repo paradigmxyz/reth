@@ -50,7 +50,7 @@ pub trait RethRpcServerConfig {
     fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity>;
 
     /// Creates the [`RpcServerConfig`] from cli args.
-    fn rpc_server_config(&self) -> RpcServerConfig;
+    fn rpc_server_config(&self) -> RpcServerConfig<impl tower::Layer<Identity> + Send + std::marker::Sync + 'static>;
 
     /// Creates the [`AuthServerConfig`] from cli args.
     fn auth_server_config(&self, jwt_secret: JwtSecret) -> Result<AuthServerConfig, RpcError>;
@@ -160,8 +160,8 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_connections(self.rpc_max_connections.get())
     }
 
-    fn rpc_server_config(&self) -> RpcServerConfig {
-        let mut config = RpcServerConfig::default().with_jwt_secret(self.rpc_secret_key());
+    fn rpc_server_config(&self) -> RpcServerConfig<impl tower::Layer<Identity> + Send + Sync + 'static> {
+        let mut config = RpcServerConfig::new().with_jwt_secret(self.rpc_secret_key());
 
         if self.http {
             let socket_address = SocketAddr::new(self.http_addr, self.http_port);
@@ -181,6 +181,23 @@ impl RethRpcServerConfig for RpcServerArgs {
             config =
                 config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(self.ipcpath.clone());
         }
+
+        if self.enable_logging {
+            let trace_layer = tower_http::trace::TraceLayer::new_for_http();
+            config = config.with_additional_middleware(trace_layer);
+        }
+
+        // if self.enable_auth {
+        //     config = config.with_additional_middleware(AuthMiddleware::new());
+        // }
+
+        // if self.enable_rate_limit {
+        //     config = config.with_additional_middleware(RateLimitMiddleware::new());
+        // }
+
+        // if self.enable_monitoring {
+        //     config = config.with_additional_middleware(MonitoringMiddleware::new());
+        // }
 
         config
     }

@@ -163,6 +163,22 @@ pub struct RpcServerArgs {
     /// Gas price oracle configuration.
     #[command(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
+
+    /// Enable logging middleware
+    #[arg(long, default_value_t = false)]
+    pub enable_logging: bool,
+
+    /// Enable authentication middleware
+    #[arg(long, default_value_t = false)]
+    pub enable_auth: bool,
+
+    /// Enable rate limiting middleware
+    #[arg(long, default_value_t = false)]
+    pub enable_rate_limit: bool,
+
+    /// Enable monitoring middleware
+    #[arg(long, default_value_t = false)]
+    pub enable_monitoring: bool,
 }
 
 impl RpcServerArgs {
@@ -288,6 +304,10 @@ impl Default for RpcServerArgs {
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
+            enable_logging: false,
+            enable_auth: false,
+            enable_rate_limit: false,
+            enable_monitoring: false,
         }
     }
 }
