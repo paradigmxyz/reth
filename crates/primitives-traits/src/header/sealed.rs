@@ -143,14 +143,6 @@ impl proptest::arbitrary::Arbitrary for SealedHeader {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let sealed_header = crate::test_utils::generate_valid_header(
-            u.arbitrary()?,
-            u.arbitrary()?,
-            u.arbitrary()?,
-            u.arbitrary()?,
-            u.arbitrary()?,
-        )
-        .seal_slow();
-        Ok(sealed_header)
+        Ok(Header::arbitrary(u)?.seal_slow())
     }
 }

@@ -31,7 +31,7 @@ prop_compose! {
 /// Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp, 25)]
+#[add_arbitrary_tests(rlp, 25)]
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, RlpEncodable, RlpDecodable,
 )]
@@ -168,6 +168,28 @@ impl Block {
             self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * core::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * core::mem::size_of::<Header>() +
             self.withdrawals.as_ref().map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for Block {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        // first generate up to 100 txs
+        let transactions = (0..100)
+            .map(|_| TransactionSigned::arbitrary(u))
+            .collect::<arbitrary::Result<Vec<_>>>()?;
+
+        // then generate up to 2 ommers
+        let ommers = (0..2).map(|_| Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
+
+        Ok(Self {
+            header: u.arbitrary()?,
+            body: transactions,
+            ommers,
+            // for now just generate empty requests, see HACK above
+            requests: u.arbitrary()?,
+            withdrawals: u.arbitrary()?,
+        })
     }
 }
 
@@ -567,12 +589,7 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
         let ommers = (0..2).map(|_| Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
 
         // for now just generate empty requests, see HACK above
-        Ok(Self {
-            transactions,
-            ommers,
-            requests: None,
-            withdrawals: arbitrary::Arbitrary::arbitrary(u)?,
-        })
+        Ok(Self { transactions, ommers, requests: None, withdrawals: u.arbitrary()? })
     }
 }
 
