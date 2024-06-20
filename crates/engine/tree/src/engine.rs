@@ -5,14 +5,15 @@ use crate::{
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
     tree::EngineApiTreeHandler,
 };
-use futures::{stream::Fuse, Stream, StreamExt};
-use reth_beacon_consensus::BeaconEngineMessage;
+use futures::{Stream, StreamExt};
+use reth_beacon_consensus::{BeaconEngineMessage, OnForkChoiceUpdated};
 use reth_primitives::{SealedBlockWithSenders, B256};
 use std::{
     collections::VecDeque,
-    pin::Pin,
     task::{Context, Poll},
 };
+use tracing::trace;
+use reth_rpc_types::engine::{PayloadStatus, PayloadStatusEnum};
 
 /// Advances the chain based on incoming requests.
 ///
@@ -73,15 +74,15 @@ where
                         match ev {
                             RequestHandlerEvent::Idle => break,
                             RequestHandlerEvent::HandlerEvent(ev) => {
-                                match ev {
+                                return match ev {
                                     HandlerEvent::Pipeline(target) => {
                                         // bubble up pipeline request
-                                        // TODO: clear downloads in progress
-                                        return Poll::Ready(HandlerEvent::Pipeline(target))
+                                        self.downloader.on_action(DownloadAction::Clear);
+                                        Poll::Ready(HandlerEvent::Pipeline(target))
                                     }
                                     HandlerEvent::Event(ev) => {
                                         // bubble up the event
-                                        return Poll::Ready(HandlerEvent::Event(ev));
+                                        Poll::Ready(HandlerEvent::Event(ev))
                                     }
                                 }
                             }
@@ -154,13 +155,9 @@ where
 {
     /// The state of the top level orchestrator.
     orchestrator_state: OrchestratorState,
-    /// Currently in progress payload requests.
-    pending_payloads: Vec<()>,
-    /// Currently in progress fork choice updates.
-    pending_fcu: Option<()>,
-    /// Next FCU to process
-    next_fcu: VecDeque<()>,
-    /// Manages the tree
+    /// Pending payload requests.
+    pending_requests: VecDeque<BeaconEngineMessage<T::Engine>>,
+    /// Manages execution tree.
     tree_handler: T,
     /// Events to yield.
     buffered_events: VecDeque<EngineApiEvent>,
@@ -172,13 +169,22 @@ where
 {
     /// Invoked when we receive a request to advance the chain.
     fn on_engine_request(&mut self, req: BeaconEngineMessage<T::Engine>) {
-        if self.orchestrator_state.is_pipeline_active() {
-            // pipeline sync is running
-        }
-
         match req {
-            BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {}
-            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {}
+            BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
+                if self.orchestrator_state.is_pipeline_active() {
+                    // pipeline sync is running
+                    trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
+                    let _ = tx.send(Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing)));
+                }
+
+            }
+            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                if self.orchestrator_state.is_pipeline_active() {
+                    // pipeline sync is running
+                    trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
+                    let _ = tx.send(Ok(OnForkChoiceUpdated::syncing()));
+                }
+            }
             BeaconEngineMessage::TransitionConfigurationExchanged => {}
         }
 
