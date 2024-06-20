@@ -16,10 +16,10 @@ fn main() -> eyre::Result<()> {
             .node(EthereumNode::default())
             .install_exex("exex-discv5", move |ctx| async move {
                 // start Discv5 task
-                DiscV5ExEx::new(tcp_port, udp_port).await?;
+                let disc_v5 = DiscV5ExEx::new(tcp_port, udp_port).await?;
 
-                // start exex task
-                Ok(ExEx::run(ctx))
+                // start exex task with discv5
+                Ok(ExEx::new(ctx, disc_v5))
             })
             .launch()
             .await?;
