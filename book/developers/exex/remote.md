@@ -102,7 +102,7 @@ message ExExNotification {
 ```
 
 To instruct Tonic to generate the Rust code using this `.proto`, add the following lines to your `lib.rs` file:
-```rust
+```rust,norun,noplayground,ignore
 pub mod proto {
     tonic::include_proto!("exex");
 }
@@ -117,7 +117,7 @@ We will now create the ExEx and the gRPC server in our `src/exex.rs` file.
 Let's create a minimal gRPC server that listens on the port `:10000`, and spawn it using
 the [NodeBuilder](https://reth.rs/docs/reth/builder/struct.NodeBuilder.html)'s [task executor](https://reth.rs/docs/reth/tasks/struct.TaskExecutor.html).
 
-```rust
+```rust,norun,noplayground,ignore
 use remote_exex::proto::{
     self,
     remote_ex_ex_server::{RemoteExEx, RemoteExExServer},
@@ -173,7 +173,7 @@ to send new `ExExNotification` on it.
 Let's create this channel in the `main` function where we will have both gRPC server and ExEx initiated,
 and save the sender part (that way we will be able to create new receivers) of this channel in our gRPC server.
 
-```rust
+```rust,norun,noplayground,ignore
 // ...
 use reth_exex::{ExExNotification};
 
@@ -216,7 +216,7 @@ and send back to the client.
 For each incoming request, we spawn a separate tokio task that will run in the background,
 and then return the stream receiver to the client.
 
-```rust
+```rust,norun,noplayground,ignore
 // ...
 
 #[tonic::async_trait]
@@ -265,7 +265,7 @@ Don't forget to emit `ExExEvent::FinishedHeight`
 
 </div>
 
-```rust
+```rust,norun,noplayground,ignore
 // ...
 use reth_exex::{ExExContext, ExExEvent};
 
@@ -292,7 +292,7 @@ async fn remote_exex<Node: FullNodeComponents>(
 All that's left is to connect all pieces together: install our ExEx in the node and pass the sender part
 of communication channel to it.
 
-```rust
+```rust,norun,noplayground,ignore
 // ...
 
 fn main() -> eyre::Result<()> {
@@ -330,7 +330,7 @@ fn main() -> eyre::Result<()> {
 <details>
 <summary>Click to expand</summary>
   
-```rust
+```rust,norun,noplayground,ignore
 use remote_exex::proto::{
     self,
     remote_ex_ex_server::{RemoteExEx, RemoteExExServer},
@@ -436,7 +436,7 @@ because notifications can get very heavy
 
 </div>
 
-```rust
+```rust,norun,noplayground,ignore
 use remote_exex::proto::{remote_ex_ex_client::RemoteExExClient, SubscribeRequest};
 use reth_exex::ExExNotification;
 use reth_tracing::{tracing::info, RethTracer, Tracer};
