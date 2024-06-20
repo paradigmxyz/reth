@@ -7,8 +7,6 @@ use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
 use derive_more::{AsRef, Deref};
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::prelude::*;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
