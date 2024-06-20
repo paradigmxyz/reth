@@ -6762,6 +6762,7 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives",
  "reth-provider",
+ "reth-storage-api",
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
