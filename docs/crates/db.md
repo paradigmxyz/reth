@@ -211,126 +211,120 @@ pub trait DbTxMut: Send + Sync {
 }
 ```
 
-Lets take a look at the `DbTx` and `DbTxMut` traits in action. Revisiting the `Transaction` struct as an example, the `Transaction::get_block_hash()` method uses the `DbTx::get()` function to get a block header hash in the form of `self.get::<tables::CanonicalHeaders>(number)`.
+Let's take a look at the `DbTx` and `DbTxMut` traits in action.
 
-[File: crates/storage/provider/src/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/provider/src/transaction.rs#L106)
+Revisiting the `DatabaseProvider<Tx>` struct as an exampl, the `DatabaseProvider<Tx>::header_by_number()` function uses the `DbTx::get()` function to get a header from the `Headers` table.
+
+[File: crates/storage/provider/src/providers/database/provider.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/provider/src/providers/database/provider.rs#L1319-L1336)
 
 ```rust ignore
-
-impl<'this, DB> Transaction<'this, DB>
-where
-    DB: Database,
-{
+impl<TX: DbTx> HeaderProvider for DatabaseProvider<TX> {
    //--snip--
 
-    /// Query [tables::CanonicalHeaders] table for block hash by block number
-    pub(crate) fn get_block_hash(&self, number: BlockNumber) -> Result<BlockHash, StageError> {
-        let hash = self
-            .get::<tables::CanonicalHeaders>(number)?
-            .ok_or(ProviderError::CanonicalHash { number })?;
-        Ok(hash)
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::Headers,
+            num,
+            |static_file| static_file.header_by_number(num),
+            || Ok(self.tx.get::<tables::Headers>(num)?),
+        )
     }
-   //--snip--
-}
 
-//--snip--
-impl<'a, DB: Database> Deref for Transaction<'a, DB> {
-    type Target = <DB as Database>::TXMut;
-    fn deref(&self) -> &Self::Target {
-        self.tx.as_ref().expect("Tried getting a reference to a non-existent transaction")
-    }
+   //--snip--
 }
 ```
 
-The `Transaction` struct implements the `Deref` trait, which returns a reference to its `tx` field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `Database` trait, which is defined as `type TXMut: DbTxMut + DbTx + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
-
 Notice that the function uses a [turbofish](https://techblog.tonsser.com/posts/what-is-rusts-turbofish) to define which table to use when passing in the `key` to the `DbTx::get()` function. Taking a quick look at the function definition, a generic `T` is defined that implements the `Table` trait mentioned at the beginning of this chapter.
 
-[File: crates/storage/db/src/abstraction/transaction.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db/src/abstraction/transaction.rs#L38)
+[File: crates/storage/db-api/src/transaction.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/transaction.rs#L15)
 
 ```rust ignore
-fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, Error>;
+fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, DatabaseError>;
 ```
 
 This design pattern is very powerful and allows Reth to use the methods available to the `DbTx` and `DbTxMut` traits without having to define implementation blocks for each table within the database.
 
-Lets take a look at a couple examples before moving on. In the snippet below, the `DbTxMut::put()` method is used to insert values into the `CanonicalHeaders`, `Headers` and `HeaderNumbers` tables.
+Let's take a look at a couple examples before moving on. In the snippet below, the `DbTxMut::put()` method is used to insert values into the `CanonicalHeaders`, `Headers` and `HeaderNumbers` tables.
 
-[File: crates/storage/provider/src/block.rs](https://github.com/paradigmxyz/reth/blob/main/crates/storage/provider/src/block.rs#L121-L125)
+[File: crates/storage/provider/src/providers/database/provider.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/provider/src/providers/database/provider.rs#L2606-L2745)
 
 ```rust ignore
-    tx.put::<tables::CanonicalHeaders>(block.number, block.hash())?;
-    // Put header with canonical hashes.
-    tx.put::<tables::Headers>(block.number, block.header.as_ref().clone())?;
-    tx.put::<tables::HeaderNumbers>(block.hash(), block.number)?;
+self.tx.put::<tables::CanonicalHeaders>(block_number, block.hash())?;
+self.tx.put::<tables::Headers>(block_number, block.header.as_ref().clone())?;
+self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
 ```
+
+Let's take a look at the `DatabaseProviderRW<DB: Database>` struct, which is used to create a mutable transaction to interact with the database.
+The `DatabaseProviderRW<DB: Database>` struct implements the `Deref` and `DerefMut` trait, which returns a reference to its first field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `Database` trait, which is defined as `type TXMut: DbTxMut + DbTx + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
 
 This next example uses the `DbTx::cursor()` method to get a `Cursor`. The `Cursor` type provides a way to traverse through rows in a database table, one row at a time. A cursor enables the program to perform an operation (updating, deleting, etc) on each row in the table individually. The following code snippet gets a cursor for a few different tables in the database.
 
-[File: crates/stages/src/stages/execution.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/execution.rs#L93-L101)
+[File: crates/static-file/static-file/src/segments/headers.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/static-file/static-file/src/segments/headers.rs#L22-L58)
 
 ```rust ignore
-// Get next canonical block hashes to execute.
-    let mut canonicals = db_tx.cursor_read::<tables::CanonicalHeaders>()?;
-    // Get header with canonical hashes.
-    let mut headers = db_tx.cursor_read::<tables::Headers>()?;
-    // Get bodies (to get tx index) with canonical hashes.
-    let mut cumulative_tx_count = db_tx.cursor_read::<tables::CumulativeTxCount>()?;
-    // Get transaction of the block that we are executing.
-    let mut tx = db_tx.cursor_read::<tables::Transactions>()?;
-    // Skip sender recovery and load signer from database.
-    let mut tx_sender = db_tx.cursor_read::<tables::TxSenders>()?;
-
+# Get a cursor for the Headers table
+let mut headers_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
+# Then we can walk the cursor to get the headers for a specific block range
+let headers_walker = headers_cursor.walk_range(block_range.clone())?;
 ```
 
 Lets look at an examples of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline.
 
-[File: crates/stages/src/stages/bodies.rs](https://github.com/paradigmxyz/reth/blob/main/crates/stages/src/stages/bodies.rs#L205-L238)
+[File: crates/stages/stages/src/stages/bodies.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/stages/stages/src/stages/bodies.rs#L267-L345)
 
 ```rust ignore
- /// Unwind the stage.
-    async fn unwind(
-        &mut self,
-        db: &mut Transaction<'_, DB>,
-        input: UnwindInput,
-    ) -> Result<UnwindOutput, Box<dyn std::error::Error + Send + Sync>> {
-        let mut tx_count_cursor = db.cursor_write::<tables::CumulativeTxCount>()?;
-        let mut block_ommers_cursor = db.cursor_write::<tables::BlockOmmers>()?;
-        let mut transaction_cursor = db.cursor_write::<tables::Transactions>()?;
+/// Unwind the stage.
+fn unwind(&mut self, provider: &DatabaseProviderRW<DB>, input: UnwindInput) {
+    self.buffer.take();
 
-        let mut entry = tx_count_cursor.last()?;
-        while let Some((key, count)) = entry {
-            if key.number() <= input.unwind_to {
-                break
-            }
+    let static_file_provider = provider.static_file_provider();
+    let tx = provider.tx_ref();
+    // Cursors to unwind bodies, ommers
+    let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
+    let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
+    let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
+    let mut requests_cursor = tx.cursor_write::<tables::BlockRequests>()?;
+    // Cursors to unwind transitions
+    let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
 
-            tx_count_cursor.delete_current()?;
-            entry = tx_count_cursor.prev()?;
-
-            if block_ommers_cursor.seek_exact(key)?.is_some() {
-                block_ommers_cursor.delete_current()?;
-            }
-
-            let prev_count = entry.map(|(_, v)| v).unwrap_or_default();
-            for tx_id in prev_count..count {
-                if transaction_cursor.seek_exact(tx_id)?.is_some() {
-                    transaction_cursor.delete_current()?;
-                }
-            }
+    let mut rev_walker = body_cursor.walk_back(None)?;
+    while let Some((number, block_meta)) = rev_walker.next().transpose()? {
+        if number <= input.unwind_to {
+            break
         }
 
-    //--snip--
-    }
+        // Delete the ommers entry if any
+        if ommers_cursor.seek_exact(number)?.is_some() {
+            ommers_cursor.delete_current()?;
+        }
 
+        // Delete the withdrawals entry if any
+        if withdrawals_cursor.seek_exact(number)?.is_some() {
+            withdrawals_cursor.delete_current()?;
+        }
+
+        // Delete the requests entry if any
+        if requests_cursor.seek_exact(number)?.is_some() {
+            requests_cursor.delete_current()?;
+        }
+
+        // Delete all transaction to block values.
+        if !block_meta.is_empty() &&
+            tx_block_cursor.seek_exact(block_meta.last_tx_num())?.is_some()
+        {
+            tx_block_cursor.delete_current()?;
+        }
+
+        // Delete the current body value
+        rev_walker.delete_current()?;
+    }
+    //--snip--
+}
 ```
 
-This function first grabs a mutable cursor for the `CumulativeTxCount`, `BlockOmmers` and `Transactions` tables.
+This function first grabs a mutable cursor for the `BlockBodyIndices`, `BlockOmmers`, `BlockWithdrawals`, `BlockRequests`, `TransactionBlocks` tables.
 
-The `tx_count_cursor` is used to get the last key value pair written to the `CumulativeTxCount` table and delete key value pair where the cursor is currently pointing.
-
-The `block_ommers_cursor` is used to get the block ommers from the `BlockOmmers` table at the specified key, and delete the entry where the cursor is currently pointing.
-
-Finally, the `transaction_cursor` is used to get delete each transaction from the last `TXNumber` written to the database, to the current tx count.
+Then it gets a walker of the block body cursor, and then walk backwards through the cursor to delete the block body entries from the last block number to the block number specified in the `UnwindInput` struct.
 
 While this is a brief look at how cursors work in the context of database tables, the chapter on the `libmdbx` crate will go into further detail on how cursors communicate with the database and what is actually happening under the hood.
 
