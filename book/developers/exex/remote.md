@@ -21,7 +21,7 @@ $ cargo new --lib exex-remote
 $ cd exex-remote
 ```
 
-We will also need a bunch of dependencies. Some of them you know from the [Hello World](../hello-world.md) chapter,
+We will also need a bunch of dependencies. Some of them you know from the [Hello World](./hello-world.md) chapter,
 but some of specific to what we need now.
 
 ```toml
