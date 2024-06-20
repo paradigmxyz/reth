@@ -339,15 +339,15 @@ reth-trie-common = { path = "crates/trie/common" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "9.0.0", features = [
+revm = { version = "10.0.0", features = [
     "std",
     "secp256k1",
     "blst",
 ], default-features = false }
-revm-primitives = { version = "4.0.0", features = [
+revm-primitives = { version = "5.0.0", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "4fe17f0" }
+revm-inspectors = "0.1"
 
 # eth
 alloy-chains = "0.1.15"
@@ -495,9 +495,3 @@ serial_test = "3"
 similar-asserts = "1.5.0"
 test-fuzz = "5"
 iai-callgrind = "0.11"
-
-[patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm.git", rev = "41e2f7f" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm.git", rev = "41e2f7f" }
-revm-precompile = { git = "https://github.com/bluealloy/revm.git", rev = "41e2f7f" }
-revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "41e2f7f" }
