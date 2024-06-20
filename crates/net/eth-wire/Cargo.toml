@@ -39,8 +39,6 @@ snap = "1.0.5"
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
-proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-net-common.workspace = true
@@ -58,6 +56,7 @@ secp256k1 = { workspace = true, features = [
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
 proptest-derive.workspace = true
 async-stream.workspace = true
 
@@ -66,8 +65,6 @@ default = ["serde"]
 arbitrary = [
     "reth-primitives/arbitrary",
     "dep:arbitrary",
-    "dep:proptest",
-    "dep:proptest-derive",
 ]
 optimism = ["reth-primitives/optimism"]
 serde = ["dep:serde"]

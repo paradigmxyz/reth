@@ -1,6 +1,7 @@
 #![allow(missing_docs, unreachable_pub)]
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
+use proptest_arbitrary_interop::arb;
 use rayon::ThreadPoolBuilder;
 use reth_primitives::{Account, B256, U256};
 use reth_provider::{
@@ -82,7 +83,7 @@ fn generate_test_data(size: usize) -> (HashedPostState, HashedPostState) {
     let db_state = hash_map(
         any::<B256>(),
         (
-            any::<Account>().prop_filter("non empty account", |a| !a.is_empty()),
+            arb::<Account>().prop_filter("non empty account", |a| !a.is_empty()),
             hash_map(
                 any::<B256>(),
                 any::<U256>().prop_filter("non zero value", |v| !v.is_zero()),

@@ -18,6 +18,7 @@ mod tests {
     use alloy_primitives::{Address, Bytes, Log as AlloyLog, B256};
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::proptest;
+    use proptest_arbitrary_interop::arb;
     use reth_codecs::{main_codec, Compact};
 
     /// This type is kept for compatibility tests after the codec support was added to
@@ -28,12 +29,6 @@ mod tests {
         /// Contract that emitted this log.
         address: Address,
         /// Topics of the log. The number of logs depend on what `LOG` opcode is used.
-        #[cfg_attr(
-            any(test, feature = "arbitrary"),
-            proptest(
-                strategy = "proptest::collection::vec(proptest::arbitrary::any::<B256>(), 0..=5)"
-            )
-        )]
         topics: Vec<B256>,
         /// Arbitrary length data.
         data: Bytes,
@@ -57,7 +52,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn test_roundtrip_conversion_between_log_and_alloy_log(log: Log) {
+        fn test_roundtrip_conversion_between_log_and_alloy_log(log in arb::<Log>()) {
             // Convert log to buffer and then create alloy_log from buffer and compare
             let mut compacted_log = Vec::<u8>::new();
             let len = log.clone().to_compact(&mut compacted_log);
