@@ -40,6 +40,9 @@ metrics = { workspace = true, optional = true }
 # `test-utils` feature
 triehash = { version = "0.8", optional = true }
 
+# `serde` feature
+serde = { workspace = true, optional = true }
+
 [dev-dependencies]
 # reth
 reth-chainspec.workspace = true
@@ -67,6 +70,7 @@ criterion.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
+serde = ["dep:serde"]
 test-utils = ["triehash", "reth-trie-common/test-utils"]
 
 [[bench]]

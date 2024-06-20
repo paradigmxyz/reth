@@ -67,9 +67,9 @@ serde_json.workspace = true
 
 [features]
 default = ["serde"]
+arbitrary = ["proptest", "reth-primitives/arbitrary"]
 serde = ["dep:serde"]
 test-utils = ["rand", "paste", "serde"]
-arbitrary = ["proptest", "reth-primitives/arbitrary"]
 
 [[bench]]
 name = "truncate"
