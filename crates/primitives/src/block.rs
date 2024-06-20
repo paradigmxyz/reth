@@ -9,7 +9,7 @@ use alloy_rlp::{RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::prop_compose;
-use reth_codecs::derive_arbitrary;
+use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
 use reth_primitives_traits::Requests;
@@ -480,7 +480,7 @@ impl SealedBlockWithSenders {
 /// A response to `GetBlockBodies`, containing bodies if any bodies were found.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp, 10)]
+#[add_arbitrary_tests(rlp, 10)]
 #[derive(
     Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
@@ -552,6 +552,27 @@ impl From<Block> for BlockBody {
             withdrawals: block.withdrawals,
             requests: block.requests,
         }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        // first generate up to 100 txs
+        let transactions = (0..100)
+            .map(|_| TransactionSigned::arbitrary(u))
+            .collect::<arbitrary::Result<Vec<_>>>()?;
+
+        // then generate up to 2 ommers
+        let ommers = (0..2).map(|_| Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
+
+        // for now just generate empty requests, see HACK above
+        Ok(Self {
+            transactions,
+            ommers,
+            requests: None,
+            withdrawals: arbitrary::Arbitrary::arbitrary(u)?,
+        })
     }
 }
 
