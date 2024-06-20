@@ -1192,7 +1192,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "shlex",
  "syn 2.0.66",
  "which",
@@ -1320,7 +1320,7 @@ dependencies = [
  "boa_macros",
  "indexmap 2.2.6",
  "num-bigint",
- "rustc-hash",
+ "rustc-hash 1.1.0",
 ]
 
 [[package]]
@@ -1356,7 +1356,7 @@ dependencies = [
  "portable-atomic",
  "rand 0.8.5",
  "regress",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "ryu-js",
  "serde",
  "serde_json",
@@ -1392,7 +1392,7 @@ dependencies = [
  "indexmap 2.2.6",
  "once_cell",
  "phf",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "static_assertions",
 ]
 
@@ -1424,7 +1424,7 @@ dependencies = [
  "num-bigint",
  "num-traits",
  "regress",
- "rustc-hash",
+ "rustc-hash 1.1.0",
 ]
 
 [[package]]
@@ -4402,7 +4402,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "pin-project",
  "rand 0.8.5",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "serde",
  "serde_json",
  "thiserror",
@@ -4826,9 +4826,9 @@ checksum = "643cb0b8d4fcc284004d5fd0d67ccf61dfffadb7f75e1e71bc420f4688a3a704"
 
 [[package]]
 name = "llvm-sys"
-version = "170.0.1"
+version = "170.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eed90f72df5504c0af2e3a08ee7762a4a3e42ec2605811fc19f64879de40c50a"
+checksum = "bb8b6d5671d471fec5010c24daa7c031e172bfaab1c48497ef6185c75eed88a5"
 dependencies = [
  "anyhow",
  "cc",
@@ -5983,7 +5983,7 @@ dependencies = [
  "pin-project-lite",
  "quinn-proto",
  "quinn-udp",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "rustls",
  "thiserror",
  "tokio",
@@ -5999,7 +5999,7 @@ dependencies = [
  "bytes",
  "rand 0.8.5",
  "ring",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "rustls",
  "slab",
  "thiserror",
@@ -6741,7 +6741,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-tracing",
  "reth-trie-common",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "serde",
  "serde_json",
  "strum",
@@ -7158,7 +7158,7 @@ dependencies = [
  "revm",
  "revmc",
  "revmc-build",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "serde",
  "serde_json",
  "similar-asserts",
@@ -8454,7 +8454,7 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "revm",
- "rustc-hash",
+ "rustc-hash 1.1.0",
  "schnellru",
  "serde",
  "serde_json",
@@ -8641,7 +8641,7 @@ dependencies = [
  "revmc-builtins",
  "revmc-context",
  "revmc-llvm",
- "rustc-hash",
+ "rustc-hash 2.0.0",
  "tracing",
 ]
 
@@ -8684,7 +8684,7 @@ version = "0.1.0"
 dependencies = [
  "inkwell",
  "revmc-backend",
- "rustc-hash",
+ "rustc-hash 2.0.0",
  "tracing",
 ]
 
@@ -8837,6 +8837,12 @@ name = "rustc-hash"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
+
+[[package]]
+name = "rustc-hash"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "583034fd73374156e66797ed8e5b0d5690409c9226b22d87cb7f19821c05d152"
 
 [[package]]
 name = "rustc-hex"
