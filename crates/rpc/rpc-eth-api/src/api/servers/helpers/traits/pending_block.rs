@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use futures::Future;
 use reth_evm::ConfigureEvm;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
     proofs::calculate_transaction_root,
@@ -18,8 +19,7 @@ use reth_primitives::{
     EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome,
-    StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,

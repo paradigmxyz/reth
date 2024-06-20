@@ -31,6 +31,7 @@ reth-trie.workspace = true
 reth-transaction-pool.workspace = true
 reth-evm-optimism = { workspace = true, optional = true }
 reth-chainspec.workspace = true
+reth-execution-types.workspace = true
 
 # ethereum
 alloy-dyn-abi = { workspace = true, features = ["eip712"] }

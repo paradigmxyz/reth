@@ -16,6 +16,7 @@ use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
 use reth_provider::{
     ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
+    StaticFileWriter,
 };
 use reth_stages::{
     stages::{
@@ -253,7 +254,12 @@ impl Command {
                 }
 
                 if self.commit {
+                    // For unwinding it makes more sense to commit the database first, since if
+                    // this function is interrupted before the static files commit, we can just
+                    // truncate the static files according to the
+                    // checkpoints on the next start-up.
                     provider_rw.commit()?;
+                    provider_factory.static_file_provider().commit()?;
                     provider_rw = provider_factory.provider_rw()?;
                 }
             }
@@ -276,6 +282,7 @@ impl Command {
                 provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
             }
             if self.commit {
+                provider_factory.static_file_provider().commit()?;
                 provider_rw.commit()?;
                 provider_rw = provider_factory.provider_rw()?;
             }

@@ -1,5 +1,5 @@
-use crate::{Chain, ExecutionOutcome};
 use reth_db_api::models::StoredBlockBodyIndices;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{BlockNumber, SealedBlockWithSenders};
 use reth_prune_types::PruneModes;
 use reth_storage_api::BlockReader;

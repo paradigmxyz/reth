@@ -1,5 +1,6 @@
 //! Reth genesis initialization utility functions.
 
+use alloy_genesis::GenesisAccount;
 use reth_chainspec::ChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
@@ -7,8 +8,7 @@ use reth_db::tables;
 use reth_db_api::{database::Database, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_primitives::{
-    Account, Address, Bytecode, GenesisAccount, Receipts, StaticFileSegment, StorageEntry, B256,
-    U256,
+    Account, Address, Bytecode, Receipts, StaticFileSegment, StorageEntry, B256, U256,
 };
 use reth_provider::{
     bundle_state::{BundleStateInit, RevertsInit},
@@ -525,6 +525,7 @@ struct GenesisAccountWithAddress {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_genesis::Genesis;
     use reth_chainspec::{Chain, GOERLI, MAINNET, SEPOLIA};
     use reth_db::DatabaseEnv;
     use reth_db_api::{
@@ -533,9 +534,8 @@ mod tests {
         table::{Table, TableRow},
         transaction::DbTx,
     };
-    use reth_primitives::{
-        Genesis, IntegerList, GOERLI_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
-    };
+    use reth_primitives::{GOERLI_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
+    use reth_primitives_traits::IntegerList;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
 
     fn collect_table_entries<DB, T>(

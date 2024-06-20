@@ -1,6 +1,6 @@
 #![warn(unused_crate_dependencies)]
 
-use reth::providers::ExecutionOutcome;
+use reth_execution_types::ExecutionOutcome;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_node_ethereum::EthereumNode;
@@ -73,14 +73,11 @@ fn main() -> eyre::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::pin::pin;
-
-    use reth::{
-        providers::{Chain, ExecutionOutcome},
-        revm::db::BundleState,
-    };
+    use reth::revm::db::BundleState;
+    use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_exex_test_utils::{test_exex_context, PollOnce};
     use reth_testing_utils::generators::{self, random_block, random_receipt};
+    use std::pin::pin;
 
     #[tokio::test]
     async fn test_exex() -> eyre::Result<()> {

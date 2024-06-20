@@ -3,13 +3,13 @@
 use futures::{future::Either, Stream, StreamExt};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::ConfigureEvm;
+use reth_execution_types::Chain;
 use reth_primitives::{
     Block, BlockHashOrNumber, BlockWithSenders, Receipt, SealedBlock, SealedBlockWithSenders,
     TransactionSigned, TransactionSignedEcRecovered, B256,
 };
 use reth_provider::{
-    BlockReader, CanonStateNotification, Chain, EvmEnvProvider, StateProviderFactory,
-    TransactionVariant,
+    BlockReader, CanonStateNotification, EvmEnvProvider, StateProviderFactory, TransactionVariant,
 };
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use revm::primitives::{BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId};

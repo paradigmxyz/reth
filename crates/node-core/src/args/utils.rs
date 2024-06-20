@@ -168,9 +168,10 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_genesis::{ChainConfig, Genesis, GenesisAccount};
     use proptest::prelude::Rng;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_primitives::{hex, Address, ChainConfig, Genesis, GenesisAccount, U256};
+    use reth_primitives::{hex, Address, U256};
     use secp256k1::rand::thread_rng;
     use std::collections::HashMap;
 

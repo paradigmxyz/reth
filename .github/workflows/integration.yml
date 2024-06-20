@@ -41,7 +41,7 @@ jobs:
         run: |
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }}" \
-            --workspace --exclude examples --exclude ef-tests \
+            --workspace --exclude ef-tests \
             -E "kind(test)"
       - if: matrix.network == 'optimism'
         name: Run tests
@@ -77,6 +77,10 @@ jobs:
           cargo run --release --bin reth \
             -- db get static-file headers 100000 \
             | grep 0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4
+      - name: Run stage unwind for 100 blocks
+        run: |
+          cargo run --release --bin reth \
+            -- stage unwind num-blocks 100
 
   integration-success:
     name: integration success
