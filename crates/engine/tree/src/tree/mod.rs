@@ -1,11 +1,11 @@
 use crate::{engine::DownloadRequest, pipeline::PipelineAction};
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use reth_beacon_consensus::{ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated};
-use reth_blockchain_tree::BlockBuffer;
+use reth_blockchain_tree::{error::InsertBlockErrorKind, BlockBuffer, BlockStatus};
 use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
-use reth_errors::ProviderResult;
+use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_payload_primitives::PayloadTypes;
 use reth_payload_validator::ExecutionPayloadValidator;
@@ -181,6 +181,8 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     consensus: Arc<dyn Consensus>,
     payload_validator: ExecutionPayloadValidator,
     state: EngineApiTreeState,
+    /// (tmp) The flag indicating whether the pipeline is active.
+    is_pipeline_active: bool,
     _marker: PhantomData<T>,
 }
 
@@ -323,6 +325,46 @@ where
         Ok(Some(status))
     }
 
+    /// Validate if block is correct and satisfies all the consensus rules that concern the header
+    /// and block body itself.
+    fn validate_block(&self, block: &SealedBlockWithSenders) -> Result<(), ConsensusError> {
+        if let Err(e) = self.consensus.validate_header_with_total_difficulty(block, U256::MAX) {
+            error!(
+                ?block,
+                "Failed to validate total difficulty for block {}: {e}",
+                block.header.hash()
+            );
+            return Err(e)
+        }
+
+        if let Err(e) = self.consensus.validate_header(block) {
+            error!(?block, "Failed to validate header {}: {e}", block.header.hash());
+            return Err(e)
+        }
+
+        if let Err(e) = self.consensus.validate_block_pre_execution(block) {
+            error!(?block, "Failed to validate block {}: {e}", block.header.hash());
+            return Err(e)
+        }
+
+        Ok(())
+    }
+
+    fn buffer_block_without_senders(&self, block: SealedBlock) -> Result<(), InsertBlockError> {
+        match block.try_seal_with_senders() {
+            Ok(block) => self.buffer_block(block),
+            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
+        }
+    }
+
+    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
+        if let Err(err) = self.validate_block(&block) {
+            return Err(InsertBlockError::consensus_error(err, block.block))
+        }
+        self.state.buffer.write().insert_block(block);
+        Ok(())
+    }
+
     fn insert_block_without_senders(
         &self,
         block: SealedBlock,
@@ -337,7 +379,12 @@ where
         &self,
         block: SealedBlockWithSenders,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
-        // TODO: perform various checks
+        // TODO: check if block is known
+
+        // validate block consensus rules
+        if let Err(err) = self.validate_block(&block) {
+            return Err(InsertBlockError::consensus_error(err, block.block))
+        }
 
         let state_provider = self.state_provider(block.parent_hash).unwrap();
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
@@ -355,7 +402,7 @@ where
 
         // TODO: compute and validate state root
 
-        let _executed = ExecutedBlock {
+        let executed = ExecutedBlock {
             block: Arc::new(block.block.seal(block_hash)),
             senders: Arc::new(block.senders),
             execution_output: Arc::new(ExecutionOutcome::new(
@@ -366,6 +413,8 @@ where
             )),
             trie: Arc::new(()),
         };
+
+        self.state.tree_state.write().insert_executed(executed);
 
         todo!()
     }
@@ -454,8 +503,36 @@ where
             return Ok(TreeOutcome::new(status))
         }
 
-        // TODO:
-        let _ = self.insert_block_without_senders(block);
+        let _status = if self.is_pipeline_active {
+            self.buffer_block_without_senders(block).unwrap();
+            PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+        } else {
+            let mut latest_valid_hash = None;
+            let status = match self.insert_block_without_senders(block.clone()).unwrap() {
+                InsertPayloadOk::Inserted(BlockStatus::Valid(_)) |
+                InsertPayloadOk::AlreadySeen(BlockStatus::Valid(_)) => {
+                    latest_valid_hash = Some(block_hash);
+                    PayloadStatusEnum::Valid
+                }
+                InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
+                InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
+                    // TODO: isn't this check redundant?
+                    // check if the block's parent is already marked as invalid
+                    // if let Some(status) = self
+                    //     .check_invalid_ancestor_with_head(block.parent_hash, block.hash())
+                    //     .map_err(|error| {
+                    //         InsertBlockError::new(block, InsertBlockErrorKind::Provider(error))
+                    //     })?
+                    // {
+                    //     return Ok(status)
+                    // }
+
+                    // not known to be invalid, but we don't know anything else
+                    PayloadStatusEnum::Syncing
+                }
+            };
+            PayloadStatus::new(status, latest_valid_hash)
+        };
 
         todo!()
     }

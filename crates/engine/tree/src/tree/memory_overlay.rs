@@ -7,6 +7,7 @@ use revm::db::BundleState;
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
+#[derive(Debug)]
 pub struct MemoryOverlayStateProvider<H> {
     /// The collection of executed parent blocks.
     in_memory: Vec<ExecutedBlock>,
