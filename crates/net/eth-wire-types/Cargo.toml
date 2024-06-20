@@ -45,10 +45,11 @@ async-stream.workspace = true
 
 [features]
 default = ["serde"]
-serde = ["dep:serde"]
 arbitrary = [
     "reth-primitives/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-derive",
 ]
+serde = ["dep:serde"]
+
