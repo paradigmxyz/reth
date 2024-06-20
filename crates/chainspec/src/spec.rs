@@ -57,7 +57,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             15537394,
             U256::from(58_750_003_716_598_352_816_469u128),
         )),
-        hardforks: MAINNET_HARDFORKS.clone(),
+        hardforks: MAINNET_HARDFORKS.into(),
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
         deposit_contract: Some(DepositContract::new(
             address!("00000000219ab540356cbb839cbe05303d7705fa"),
@@ -81,7 +81,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         // <https://goerli.etherscan.io/block/7382818>
         paris_block_and_final_difficulty: Some((7382818, U256::from(10_790_000))),
-        hardforks: GOERLI_HARDFORKS.clone(),
+        hardforks: GOERLI_HARDFORKS.into(),
         // https://goerli.etherscan.io/tx/0xa3c07dc59bfdb1bfc2d50920fed2ef2c1c4e0a09fe2325dbc14e07702f965a78
         deposit_contract: Some(DepositContract::new(
             address!("ff50ed3d0ec03ac01d4c79aad74928bff48a7b2b"),
@@ -105,7 +105,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         // <https://sepolia.etherscan.io/block/1450409>
         paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
-        hardforks: SEPOLIA_HARDFORKS.clone(),
+        hardforks: SEPOLIA_HARDFORKS.into(),
         // https://sepolia.etherscan.io/tx/0x025ecbf81a2f1220da6285d1701dc89fb5a956b62562ee922e1a9efd73eb4b14
         deposit_contract: Some(DepositContract::new(
             address!("7f02c3e3c98b133055b8b348b2ac625669ed295d"),
@@ -128,7 +128,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
-        hardforks: HOLESKY_HARDFORKS.clone(),
+        hardforks: HOLESKY_HARDFORKS.into(),
         deposit_contract: Some(DepositContract::new(
             address!("4242424242424242424242424242424242424242"),
             0,
@@ -199,7 +199,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: OP_MAINNET_HARDFORKS.clone(),
+        hardforks: OP_MAINNET_HARDFORKS.into(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
                 (Hardfork::London, OP_BASE_FEE_PARAMS),
@@ -224,7 +224,7 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: OP_SEPOLIA_HARDFORKS.clone(),
+        hardforks: OP_SEPOLIA_HARDFORKS.into(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
                 (Hardfork::London, OP_SEPOLIA_BASE_FEE_PARAMS),
@@ -249,7 +249,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: BASE_SEPOLIA_HARDFORKS.clone(),
+        hardforks: BASE_SEPOLIA_HARDFORKS.into(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
                 (Hardfork::London, BASE_SEPOLIA_BASE_FEE_PARAMS),
@@ -274,7 +274,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: BASE_MAINNET_HARDFORKS.clone(),
+        hardforks: BASE_MAINNET_HARDFORKS.into(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
                 (Hardfork::London, OP_BASE_FEE_PARAMS),

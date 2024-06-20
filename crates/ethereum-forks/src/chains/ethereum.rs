@@ -1,104 +1,111 @@
 use crate::{ForkCondition, Hardfork};
 use alloy_primitives::U256;
-use once_cell::sync::Lazy;
-use std::collections::BTreeMap;
+
+const PARIS_TTD_MAINNET: U256 = U256::from_limbs([15566869308787654656, 3184, 0, 0]);
+pub(crate) const PARIS_TTD_GOERLI: U256 = U256::from_limbs([10790000, 0, 0, 0]);
+const PARIS_TTD_SEPOLIA: U256 = U256::from_limbs([17000000000000000, 0, 0, 0]);
 
 /// Ethereum mainnet hardforks
-pub static MAINNET_HARDFORKS: Lazy<BTreeMap<Hardfork, ForkCondition>> = Lazy::new(|| {
-    BTreeMap::from([
-        (Hardfork::Frontier, ForkCondition::Block(0)),
-        (Hardfork::Homestead, ForkCondition::Block(1150000)),
-        (Hardfork::Dao, ForkCondition::Block(1920000)),
-        (Hardfork::Tangerine, ForkCondition::Block(2463000)),
-        (Hardfork::SpuriousDragon, ForkCondition::Block(2675000)),
-        (Hardfork::Byzantium, ForkCondition::Block(4370000)),
-        (Hardfork::Constantinople, ForkCondition::Block(7280000)),
-        (Hardfork::Petersburg, ForkCondition::Block(7280000)),
-        (Hardfork::Istanbul, ForkCondition::Block(9069000)),
-        (Hardfork::MuirGlacier, ForkCondition::Block(9200000)),
-        (Hardfork::Berlin, ForkCondition::Block(12244000)),
-        (Hardfork::London, ForkCondition::Block(12965000)),
-        (Hardfork::ArrowGlacier, ForkCondition::Block(13773000)),
-        (Hardfork::GrayGlacier, ForkCondition::Block(15050000)),
-        (
-            Hardfork::Paris,
-            ForkCondition::TTD {
-                fork_block: None,
-                total_difficulty: U256::from(58_750_000_000_000_000_000_000_u128),
-            },
-        ),
-        (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
-        (Hardfork::Cancun, ForkCondition::Timestamp(1710338135)),
-    ])
-});
+pub const MAINNET_HARDFORKS: [(Hardfork, ForkCondition); 17] = [
+    (Hardfork::Frontier, ForkCondition::Block(0)),
+    (Hardfork::Homestead, ForkCondition::Block(1150000)),
+    (Hardfork::Dao, ForkCondition::Block(1920000)),
+    (Hardfork::Tangerine, ForkCondition::Block(2463000)),
+    (Hardfork::SpuriousDragon, ForkCondition::Block(2675000)),
+    (Hardfork::Byzantium, ForkCondition::Block(4370000)),
+    (Hardfork::Constantinople, ForkCondition::Block(7280000)),
+    (Hardfork::Petersburg, ForkCondition::Block(7280000)),
+    (Hardfork::Istanbul, ForkCondition::Block(9069000)),
+    (Hardfork::MuirGlacier, ForkCondition::Block(9200000)),
+    (Hardfork::Berlin, ForkCondition::Block(12244000)),
+    (Hardfork::London, ForkCondition::Block(12965000)),
+    (Hardfork::ArrowGlacier, ForkCondition::Block(13773000)),
+    (Hardfork::GrayGlacier, ForkCondition::Block(15050000)),
+    (Hardfork::Paris, ForkCondition::TTD { fork_block: None, total_difficulty: PARIS_TTD_MAINNET }),
+    (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
+    (Hardfork::Cancun, ForkCondition::Timestamp(1710338135)),
+];
 
 /// Ethereum Goerli hardforks
-pub static GOERLI_HARDFORKS: Lazy<BTreeMap<Hardfork, ForkCondition>> = Lazy::new(|| {
-    BTreeMap::from([
-        (Hardfork::Frontier, ForkCondition::Block(0)),
-        (Hardfork::Homestead, ForkCondition::Block(0)),
-        (Hardfork::Dao, ForkCondition::Block(0)),
-        (Hardfork::Tangerine, ForkCondition::Block(0)),
-        (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-        (Hardfork::Byzantium, ForkCondition::Block(0)),
-        (Hardfork::Constantinople, ForkCondition::Block(0)),
-        (Hardfork::Petersburg, ForkCondition::Block(0)),
-        (Hardfork::Istanbul, ForkCondition::Block(1561651)),
-        (Hardfork::Berlin, ForkCondition::Block(4460644)),
-        (Hardfork::London, ForkCondition::Block(5062605)),
-        (
-            Hardfork::Paris,
-            ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(10_790_000) },
-        ),
-        (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
-        (Hardfork::Cancun, ForkCondition::Timestamp(1705473120)),
-    ])
-});
+pub static GOERLI_HARDFORKS: [(Hardfork, ForkCondition); 14] = [
+    (Hardfork::Frontier, ForkCondition::Block(0)),
+    (Hardfork::Homestead, ForkCondition::Block(0)),
+    (Hardfork::Dao, ForkCondition::Block(0)),
+    (Hardfork::Tangerine, ForkCondition::Block(0)),
+    (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+    (Hardfork::Byzantium, ForkCondition::Block(0)),
+    (Hardfork::Constantinople, ForkCondition::Block(0)),
+    (Hardfork::Petersburg, ForkCondition::Block(0)),
+    (Hardfork::Istanbul, ForkCondition::Block(1561651)),
+    (Hardfork::Berlin, ForkCondition::Block(4460644)),
+    (Hardfork::London, ForkCondition::Block(5062605)),
+    (Hardfork::Paris, ForkCondition::TTD { fork_block: None, total_difficulty: PARIS_TTD_GOERLI }),
+    (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
+    (Hardfork::Cancun, ForkCondition::Timestamp(1705473120)),
+];
 
 /// Ethereum Sepolia hardforks
-pub static SEPOLIA_HARDFORKS: Lazy<BTreeMap<Hardfork, ForkCondition>> = Lazy::new(|| {
-    BTreeMap::from([
-        (Hardfork::Frontier, ForkCondition::Block(0)),
-        (Hardfork::Homestead, ForkCondition::Block(0)),
-        (Hardfork::Dao, ForkCondition::Block(0)),
-        (Hardfork::Tangerine, ForkCondition::Block(0)),
-        (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-        (Hardfork::Byzantium, ForkCondition::Block(0)),
-        (Hardfork::Constantinople, ForkCondition::Block(0)),
-        (Hardfork::Petersburg, ForkCondition::Block(0)),
-        (Hardfork::Istanbul, ForkCondition::Block(0)),
-        (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-        (Hardfork::Berlin, ForkCondition::Block(0)),
-        (Hardfork::London, ForkCondition::Block(0)),
-        (
-            Hardfork::Paris,
-            ForkCondition::TTD {
-                fork_block: Some(1735371),
-                total_difficulty: U256::from(17_000_000_000_000_000u64),
-            },
-        ),
-        (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
-        (Hardfork::Cancun, ForkCondition::Timestamp(1706655072)),
-    ])
-});
+pub static SEPOLIA_HARDFORKS: [(Hardfork, ForkCondition); 15] = [
+    (Hardfork::Frontier, ForkCondition::Block(0)),
+    (Hardfork::Homestead, ForkCondition::Block(0)),
+    (Hardfork::Dao, ForkCondition::Block(0)),
+    (Hardfork::Tangerine, ForkCondition::Block(0)),
+    (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+    (Hardfork::Byzantium, ForkCondition::Block(0)),
+    (Hardfork::Constantinople, ForkCondition::Block(0)),
+    (Hardfork::Petersburg, ForkCondition::Block(0)),
+    (Hardfork::Istanbul, ForkCondition::Block(0)),
+    (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+    (Hardfork::Berlin, ForkCondition::Block(0)),
+    (Hardfork::London, ForkCondition::Block(0)),
+    (
+        Hardfork::Paris,
+        ForkCondition::TTD { fork_block: Some(1735371), total_difficulty: PARIS_TTD_SEPOLIA },
+    ),
+    (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
+    (Hardfork::Cancun, ForkCondition::Timestamp(1706655072)),
+];
 
 /// Ethereum Holesky hardforks
-pub static HOLESKY_HARDFORKS: Lazy<BTreeMap<Hardfork, ForkCondition>> = Lazy::new(|| {
-    BTreeMap::from([
-        (Hardfork::Frontier, ForkCondition::Block(0)),
-        (Hardfork::Homestead, ForkCondition::Block(0)),
-        (Hardfork::Dao, ForkCondition::Block(0)),
-        (Hardfork::Tangerine, ForkCondition::Block(0)),
-        (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-        (Hardfork::Byzantium, ForkCondition::Block(0)),
-        (Hardfork::Constantinople, ForkCondition::Block(0)),
-        (Hardfork::Petersburg, ForkCondition::Block(0)),
-        (Hardfork::Istanbul, ForkCondition::Block(0)),
-        (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-        (Hardfork::Berlin, ForkCondition::Block(0)),
-        (Hardfork::London, ForkCondition::Block(0)),
-        (Hardfork::Paris, ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO }),
-        (Hardfork::Shanghai, ForkCondition::Timestamp(1696000704)),
-        (Hardfork::Cancun, ForkCondition::Timestamp(1707305664)),
-    ])
-});
+pub const HOLESKY_HARDFORKS: [(Hardfork, ForkCondition); 15] = [
+    (Hardfork::Frontier, ForkCondition::Block(0)),
+    (Hardfork::Homestead, ForkCondition::Block(0)),
+    (Hardfork::Dao, ForkCondition::Block(0)),
+    (Hardfork::Tangerine, ForkCondition::Block(0)),
+    (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
+    (Hardfork::Byzantium, ForkCondition::Block(0)),
+    (Hardfork::Constantinople, ForkCondition::Block(0)),
+    (Hardfork::Petersburg, ForkCondition::Block(0)),
+    (Hardfork::Istanbul, ForkCondition::Block(0)),
+    (Hardfork::MuirGlacier, ForkCondition::Block(0)),
+    (Hardfork::Berlin, ForkCondition::Block(0)),
+    (Hardfork::London, ForkCondition::Block(0)),
+    (Hardfork::Paris, ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO }),
+    (Hardfork::Shanghai, ForkCondition::Timestamp(1696000704)),
+    (Hardfork::Cancun, ForkCondition::Timestamp(1707305664)),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::U256;
+
+    const U_PARIS_TTD_MAINNET: u128 = 58_750_000_000_000_000_000_000;
+    const U_PARIS_TTD_GOERLI: u64 = 10_790_000;
+    const U_PARIS_TTD_SEPOLIA: u64 = 17_000_000_000_000_000;
+
+    #[test]
+    fn paris_u256() {
+        // mainnet
+        let ttd = U256::from(U_PARIS_TTD_MAINNET);
+        assert_eq!(ttd, PARIS_TTD_MAINNET);
+
+        // goerli
+        let ttd = U256::from(U_PARIS_TTD_GOERLI);
+        assert_eq!(ttd, PARIS_TTD_GOERLI);
+
+        // sepolia
+        let ttd = U256::from(U_PARIS_TTD_SEPOLIA);
+        assert_eq!(ttd, PARIS_TTD_SEPOLIA);
+    }
+}
