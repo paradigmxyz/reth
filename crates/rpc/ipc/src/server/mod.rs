@@ -92,7 +92,7 @@ where
     /// use jsonrpsee::RpcModule;
     /// use reth_ipc::server::Builder;
     /// async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    ///     let server = Builder::default().build("/tmp/my-uds");
+    ///     let server = Builder::default().build("/tmp/my-uds".into());
     ///     let mut module = RpcModule::new(());
     ///     module.register_method("say_hello", |_, _, _| "lo")?;
     ///     let handle = server.start(module).await?;
@@ -690,9 +690,9 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     /// #[tokio::main]
     /// async fn main() {
     ///     let builder = tower::ServiceBuilder::new();
-    ///
-    ///     let server =
-    ///         reth_ipc::server::Builder::default().set_http_middleware(builder).build("/tmp/my-uds");
+    ///     let server = reth_ipc::server::Builder::default()
+    ///         .set_http_middleware(builder)
+    ///         .build("/tmp/my-uds".into());
     /// }
     /// ```
     pub fn set_http_middleware<T>(
