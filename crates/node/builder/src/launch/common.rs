@@ -657,16 +657,12 @@ where
         on_component_initialized.on_event(node_adapter.clone())?;
 
         let components_container = WithComponents {
-            providers_container: WithMeteredProviders {
-                db_provider_container: self.right().db_provider_container.clone(),
-                tree_config: self.right().tree_config,
-                canon_state_notification_sender: self
-                    .right()
-                    .canon_state_notification_sender
-                    .clone(),
-                blockchain_db,
-                phantom_data: PhantomData,
+            db_provider_container: WithMeteredProvider {
+                provider_factory: self.provider_factory().clone(),
+                metrics_sender: self.sync_metrics_tx(),
             },
+            blockchain_db,
+            tree_config: self.right().tree_config,
             node_adapter,
             head,
             consensus,
@@ -689,7 +685,7 @@ where
 {
     /// Returns the configured `ProviderFactory`.
     pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
-        &self.right().providers_container.db_provider_container.provider_factory
+        &self.right().db_provider_container.provider_factory
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if
@@ -726,7 +722,7 @@ where
 
     /// Returns a reference to the `BlockchainProvider`.
     pub const fn blockchain_db(&self) -> &BlockchainProvider<DB> {
-        &self.right().providers_container.blockchain_db
+        &self.right().blockchain_db
     }
 
     /// Returns the configured `Consensus`.
@@ -736,12 +732,12 @@ where
 
     /// Returns the metrics sender.
     pub fn sync_metrics_tx(&self) -> UnboundedSender<MetricEvent> {
-        self.right().providers_container.db_provider_container.metrics_sender.clone()
+        self.right().db_provider_container.metrics_sender.clone()
     }
 
     /// Returns a reference to the `BlockchainTreeConfig`.
     pub const fn tree_config(&self) -> &BlockchainTreeConfig {
-        &self.right().providers_container.tree_config
+        &self.right().tree_config
     }
 
     /// Returns the node adapter components.
@@ -836,7 +832,9 @@ where
     T: FullNodeTypes<Provider = BlockchainProvider<DB>>,
     CB: NodeComponentsBuilder<T>,
 {
-    providers_container: WithMeteredProviders<DB, T>,
+    db_provider_container: WithMeteredProvider<DB>,
+    tree_config: BlockchainTreeConfig,
+    blockchain_db: BlockchainProvider<DB>,
     node_adapter: NodeAdapter<T, CB::Components>,
     head: Head,
     consensus: Arc<dyn Consensus>,
