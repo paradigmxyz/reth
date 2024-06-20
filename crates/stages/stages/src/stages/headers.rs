@@ -376,10 +376,9 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
     use assert_matches::assert_matches;
+    use reth_execution_types::ExecutionOutcome;
     use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders, B256};
-    use reth_provider::{
-        BlockWriter, ExecutionOutcome, ProviderFactory, StaticFileProviderFactory,
-    };
+    use reth_provider::{BlockWriter, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
     use reth_trie::{updates::TrieUpdates, HashedPostState};

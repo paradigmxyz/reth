@@ -63,7 +63,6 @@ async-stream.workspace = true
 
 [features]
 default = ["serde"]
-serde = ["dep:serde"]
 arbitrary = [
     "reth-primitives/arbitrary",
     "dep:arbitrary",
@@ -71,6 +70,7 @@ arbitrary = [
     "dep:proptest-derive",
 ]
 optimism = ["reth-primitives/optimism"]
+serde = ["dep:serde"]
 
 [[test]]
 name = "fuzz_roundtrip"

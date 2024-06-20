@@ -6,6 +6,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{Receipt, Receipts, Request, Requests};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
+use std::collections::HashSet;
 use tracing::debug;
 
 #[cfg(not(feature = "std"))]
@@ -33,9 +34,10 @@ pub struct BlockBatchRecord {
     /// guaranteed to be the same as the number of transactions.
     requests: Vec<Requests>,
     /// Memoized address pruning filter.
+    ///
     /// Empty implies that there is going to be addresses to include in the filter in a future
     /// block. None means there isn't any kind of configuration.
-    pruning_address_filter: Option<(u64, Vec<Address>)>,
+    pruning_address_filter: Option<(u64, HashSet<Address>)>,
     /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
     first_block: Option<BlockNumber>,
@@ -127,10 +129,7 @@ impl BlockBatchRecord {
         &mut self,
         receipts: &mut Vec<Option<Receipt>>,
     ) -> Result<(), PruneSegmentError> {
-        let (first_block, tip) = match self.first_block.zip(self.tip) {
-            Some((block, tip)) => (block, tip),
-            _ => return Ok(()),
-        };
+        let (Some(first_block), Some(tip)) = (self.first_block, self.tip) else { return Ok(()) };
 
         let block_number = first_block + self.receipts.len() as u64;
 
@@ -154,18 +153,18 @@ impl BlockBatchRecord {
         let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
 
         if !contract_log_pruner.is_empty() {
-            let (prev_block, filter) = self.pruning_address_filter.get_or_insert((0, Vec::new()));
+            let (prev_block, filter) =
+                self.pruning_address_filter.get_or_insert_with(|| (0, HashSet::new()));
             for (_, addresses) in contract_log_pruner.range(*prev_block..=block_number) {
                 filter.extend(addresses.iter().copied());
             }
         }
 
-        for receipt in receipts.iter_mut() {
-            let inner_receipt = receipt.as_ref().expect("receipts have not been pruned");
-
-            // If there is an address_filter, and it does not contain any of the
-            // contract addresses, then remove this receipts
-            if let Some((_, filter)) = &self.pruning_address_filter {
+        if let Some((_, filter)) = &self.pruning_address_filter {
+            for receipt in receipts.iter_mut() {
+                // If there is an address_filter, it does not contain any of the
+                // contract addresses, then remove this receipt.
+                let inner_receipt = receipt.as_ref().expect("receipts have not been pruned");
                 if !inner_receipt.logs.iter().any(|log| filter.contains(&log.address)) {
                     receipt.take();
                 }

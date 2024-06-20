@@ -30,10 +30,8 @@ mod block;
 mod compression;
 pub mod constants;
 pub mod eip4844;
-mod error;
 pub mod genesis;
 pub mod header;
-mod log;
 pub mod proofs;
 mod receipt;
 /// Helpers for working with revm
@@ -52,15 +50,14 @@ pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
     KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
-pub use error::{GotExpected, GotExpectedBoxed};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeadersDirection, SealedHeader};
-pub use log::{logs_bloom, Log};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
 pub use reth_primitives_traits::{
-    Account, Bytecode, Request, Requests, StorageEntry, Withdrawal, Withdrawals,
+    logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Log, Request, Requests,
+    StorageEntry, Withdrawal, Withdrawals,
 };
 pub use static_file::StaticFileSegment;
 

@@ -21,6 +21,7 @@ use std::{borrow::Cow, collections::BTreeMap, fmt, ops::RangeInclusive};
 ///
 /// A chain of blocks should not be empty.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Chain {
     /// All blocks in this chain.
     blocks: BTreeMap<BlockNumber, SealedBlockWithSenders>,
@@ -460,6 +461,18 @@ pub enum ChainSplitTarget {
     Hash(BlockHash),
 }
 
+impl From<BlockNumber> for ChainSplitTarget {
+    fn from(number: BlockNumber) -> Self {
+        Self::Number(number)
+    }
+}
+
+impl From<BlockHash> for ChainSplitTarget {
+    fn from(hash: BlockHash) -> Self {
+        Self::Hash(hash)
+    }
+}
+
 /// Result of a split chain.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChainSplit {
@@ -603,27 +616,21 @@ mod tests {
 
         // split in two
         assert_eq!(
-            chain.clone().split(ChainSplitTarget::Hash(block1_hash)),
+            chain.clone().split(block1_hash.into()),
             ChainSplit::Split { canonical: chain_split1, pending: chain_split2 }
         );
 
         // split at unknown block hash
         assert_eq!(
-            chain.clone().split(ChainSplitTarget::Hash(B256::new([100; 32]))),
+            chain.clone().split(B256::new([100; 32]).into()),
             ChainSplit::NoSplitPending(chain.clone())
         );
 
         // split at higher number
-        assert_eq!(
-            chain.clone().split(ChainSplitTarget::Number(10)),
-            ChainSplit::NoSplitPending(chain.clone())
-        );
+        assert_eq!(chain.clone().split(10u64.into()), ChainSplit::NoSplitPending(chain.clone()));
 
         // split at lower number
-        assert_eq!(
-            chain.clone().split(ChainSplitTarget::Number(0)),
-            ChainSplit::NoSplitPending(chain)
-        );
+        assert_eq!(chain.clone().split(0u64.into()), ChainSplit::NoSplitPending(chain));
     }
 
     #[test]

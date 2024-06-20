@@ -4,6 +4,7 @@ use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_primitives::{
     constants::gas_units::{GIGAGAS, KILOGAS, MEGAGAS},
@@ -11,9 +12,8 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, Chain, DatabaseProviderRW, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter, StatsReader,
-    TransactionVariant,
+    BlockReader, DatabaseProviderRW, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, StateWriter, StatsReader, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
