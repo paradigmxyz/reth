@@ -62,10 +62,10 @@ pub struct CompilerContract {
     #[serde(default)]
     evm_version: Option<SpecId>,
     /// The first EVM version to compile the contract with.
-    #[serde(default = "EvmVersions::first")]
+    #[serde(alias = "start_evm_version", default = "EvmVersions::first")]
     first_evm_version: SpecId,
     /// The last EVM version to compile the contract with.
-    #[serde(default = "EvmVersions::last")]
+    #[serde(alias = "end_evm_version", default = "EvmVersions::last")]
     last_evm_version: SpecId,
     /// Disables stack bound checks.
     ///
