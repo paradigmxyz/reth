@@ -485,3 +485,5 @@ And in the other, we will run our consumer:
 ```console
 cargo run --bin consumer --release
 ```
+
+<img src="./assets/remote_exex.png" />
