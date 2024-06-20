@@ -6911,7 +6911,6 @@ dependencies = [
  "alloy-genesis",
  "alloy-rlp",
  "arbitrary",
- "async-stream",
  "bytes",
  "derive_more",
  "proptest",
@@ -6920,13 +6919,9 @@ dependencies = [
  "rand 0.8.5",
  "reth-chainspec",
  "reth-codecs-derive",
- "reth-net-common",
  "reth-primitives",
- "reth-tracing",
  "serde",
- "test-fuzz",
  "thiserror",
- "tokio-util",
 ]
 
 [[package]]
