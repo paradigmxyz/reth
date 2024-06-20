@@ -34,8 +34,8 @@ use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
 use reth_network::{
-    protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
-    NetworkEvents, NetworkProtocols,
+    protocol::{ConnectionHandler, IntoRlpxSubProtocol, OnNotSupported, ProtocolHandler},
+    NetworkProtocols,
 };
 use reth_network_api::Direction;
 use reth_node_ethereum::EthereumNode;
@@ -151,7 +151,7 @@ impl Stream for CustomRlpxConnection {
         loop {
             if let Poll::Ready(Some(cmd)) = this.commands.poll_next_unpin(cx) {
                 return match cmd {
-                    Command::CustomMessage { msg, response } => {
+                    Command::CustomMessage { msg: _, response } => {
                         this.pending_pong = Some(response);
                         Poll::Ready(Some(CustomRlpxProtoMessage::ping().encoded()))
                     }
@@ -180,20 +180,20 @@ impl Stream for CustomRlpxConnection {
 }
 
 fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(|builder, args| async move {
+    reth::cli::Cli::parse_args().run(|builder, _args| async move {
         // launch the node
-        let NodeHandle { mut node, node_exit_future } =
+        let NodeHandle { node, node_exit_future } =
             builder.node(EthereumNode::default()).launch().await?;
 
         // After lauch and after launch we inject a new rlpx protocol handler via the network
         // node.network the rlpx can be similar to the test example, could even be something
         // like simple string message exchange
 
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = mpsc::unbounded_channel();
 
         let custom_rlpx_handler = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
-        // TODO implement traits
-        node.network.add_rlpx_sub_protocol(custom_rlpx_handler);
+
+        node.network.add_rlpx_sub_protocol(custom_rlpx_handler.into_rlpx_sub_protocol());
 
         // Spawn a task to handle incoming messages from the custom RLPx protocol
 
