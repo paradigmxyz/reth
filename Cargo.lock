@@ -6234,7 +6234,7 @@ dependencies = [
  "reth-execution-types",
  "reth-exex",
  "reth-fs-util",
- "reth-net-common",
+ "reth-net-banlist",
  "reth-network",
  "reth-network-api",
  "reth-network-p2p",
@@ -6686,7 +6686,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-chainspec",
  "reth-ethereum-forks",
- "reth-net-common",
+ "reth-net-banlist",
  "reth-net-nat",
  "reth-network-peers",
  "reth-tracing",
@@ -6890,7 +6890,6 @@ dependencies = [
  "reth-ecies",
  "reth-eth-wire-types",
  "reth-metrics",
- "reth-net-common",
  "reth-network-peers",
  "reth-primitives",
  "reth-tracing",
@@ -7221,7 +7220,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-net-common"
+name = "reth-net-banlist"
 version = "1.0.0-rc.2"
 dependencies = [
  "alloy-primitives",
@@ -7269,7 +7268,7 @@ dependencies = [
  "reth-ecies",
  "reth-eth-wire",
  "reth-metrics",
- "reth-net-common",
+ "reth-net-banlist",
  "reth-network",
  "reth-network-api",
  "reth-network-p2p",

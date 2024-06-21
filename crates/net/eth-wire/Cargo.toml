@@ -41,7 +41,6 @@ snap = "1.0.5"
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
-reth-net-common.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-tracing.workspace = true
 
