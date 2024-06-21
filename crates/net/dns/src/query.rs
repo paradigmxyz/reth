@@ -7,7 +7,7 @@ use crate::{
     tree::{DnsEntry, LinkEntry, TreeRootEntry},
 };
 use enr::EnrKeyUnambiguous;
-use reth_net_common::ratelimit::{Rate, RateLimit};
+use reth_tokio_util::ratelimit::{Rate, RateLimit};
 use std::{
     collections::VecDeque,
     future::Future,
