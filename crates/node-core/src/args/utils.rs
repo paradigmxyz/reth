@@ -1,6 +1,7 @@
 //! Clap parser utilities
 
-use reth_chainspec::{AllGenesisFormats, ChainSpec};
+use alloy_genesis::Genesis;
+use reth_chainspec::ChainSpec;
 use reth_fs_util as fs;
 use reth_primitives::{BlockHashOrNumber, B256};
 use std::{
@@ -105,7 +106,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
             };
 
             // both serialized Genesis and ChainSpec structs supported
-            let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;
+            let genesis: Genesis = serde_json::from_str(&raw)?;
 
             Arc::new(genesis.into())
         }

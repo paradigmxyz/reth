@@ -1102,43 +1102,6 @@ impl From<Genesis> for ChainSpec {
     }
 }
 
-/// A helper type for compatibility with geth's config
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum AllGenesisFormats {
-    /// The reth genesis format
-    Reth(ChainSpec),
-    /// The geth genesis format
-    Geth(Genesis),
-}
-
-impl From<Genesis> for AllGenesisFormats {
-    fn from(genesis: Genesis) -> Self {
-        Self::Geth(genesis)
-    }
-}
-
-impl From<ChainSpec> for AllGenesisFormats {
-    fn from(genesis: ChainSpec) -> Self {
-        Self::Reth(genesis)
-    }
-}
-
-impl From<Arc<ChainSpec>> for AllGenesisFormats {
-    fn from(genesis: Arc<ChainSpec>) -> Self {
-        Arc::try_unwrap(genesis).unwrap_or_else(|arc| (*arc).clone()).into()
-    }
-}
-
-impl From<AllGenesisFormats> for ChainSpec {
-    fn from(genesis: AllGenesisFormats) -> Self {
-        match genesis {
-            AllGenesisFormats::Geth(genesis) => genesis.into(),
-            AllGenesisFormats::Reth(genesis) => genesis,
-        }
-    }
-}
-
 /// A helper to build custom chain specs
 #[derive(Debug, Default, Clone)]
 pub struct ChainSpecBuilder {
@@ -2653,8 +2616,7 @@ Post-merge hard forks (timestamp based):
         }
         "#;
 
-        let _genesis = serde_json::from_str::<Genesis>(hive_json).unwrap();
-        let genesis = serde_json::from_str::<AllGenesisFormats>(hive_json).unwrap();
+        let genesis = serde_json::from_str::<Genesis>(hive_json).unwrap();
         let chainspec: ChainSpec = genesis.into();
         assert_eq!(chainspec.genesis_hash, None);
         assert_eq!(chainspec.chain, Chain::from_named(NamedChain::Optimism));
@@ -2839,13 +2801,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn test_parse_prague_genesis_all_formats() {
         let s = r#"{"config":{"ethash":{},"chainId":1337,"homesteadBlock":0,"eip150Block":0,"eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"berlinBlock":0,"londonBlock":0,"terminalTotalDifficulty":0,"terminalTotalDifficultyPassed":true,"shanghaiTime":0,"cancunTime":4661, "pragueTime": 4662},"nonce":"0x0","timestamp":"0x0","extraData":"0x","gasLimit":"0x4c4b40","difficulty":"0x1","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","coinbase":"0x0000000000000000000000000000000000000000","alloc":{"658bdf435d810c91414ec09147daa6db62406379":{"balance":"0x487a9a304539440000"},"aa00000000000000000000000000000000000000":{"code":"0x6042","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x1","nonce":"0x1"},"bb00000000000000000000000000000000000000":{"code":"0x600154600354","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x2","nonce":"0x1"}},"number":"0x0","gasUsed":"0x0","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000000","baseFeePerGas":"0x3b9aca00"}"#;
-        let genesis: AllGenesisFormats = serde_json::from_str(s).unwrap();
-
-        // this should be the genesis format
-        let genesis = match genesis {
-            AllGenesisFormats::Geth(genesis) => genesis,
-            _ => panic!("expected geth genesis format"),
-        };
+        let genesis: Genesis = serde_json::from_str(s).unwrap();
 
         // assert that the alloc was picked up
         let acc = genesis
@@ -2862,13 +2818,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn test_parse_cancun_genesis_all_formats() {
         let s = r#"{"config":{"ethash":{},"chainId":1337,"homesteadBlock":0,"eip150Block":0,"eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"berlinBlock":0,"londonBlock":0,"terminalTotalDifficulty":0,"terminalTotalDifficultyPassed":true,"shanghaiTime":0,"cancunTime":4661},"nonce":"0x0","timestamp":"0x0","extraData":"0x","gasLimit":"0x4c4b40","difficulty":"0x1","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","coinbase":"0x0000000000000000000000000000000000000000","alloc":{"658bdf435d810c91414ec09147daa6db62406379":{"balance":"0x487a9a304539440000"},"aa00000000000000000000000000000000000000":{"code":"0x6042","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x1","nonce":"0x1"},"bb00000000000000000000000000000000000000":{"code":"0x600154600354","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x2","nonce":"0x1"}},"number":"0x0","gasUsed":"0x0","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000000","baseFeePerGas":"0x3b9aca00"}"#;
-        let genesis: AllGenesisFormats = serde_json::from_str(s).unwrap();
-
-        // this should be the genesis format
-        let genesis = match genesis {
-            AllGenesisFormats::Geth(genesis) => genesis,
-            _ => panic!("expected geth genesis format"),
-        };
+        let genesis: Genesis = serde_json::from_str(s).unwrap();
 
         // assert that the alloc was picked up
         let acc = genesis
@@ -2935,7 +2885,7 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn test_all_genesis_formats_deserialization() {
+    fn test_genesis_format_deserialization() {
         // custom genesis with chain config
         let config = ChainConfig {
             chain_id: 2600,
@@ -2973,22 +2923,9 @@ Post-merge hard forks (timestamp based):
 
         // ensure genesis is deserialized correctly
         let serialized_genesis = serde_json::to_string(&genesis).unwrap();
-        let deserialized_genesis: AllGenesisFormats =
-            serde_json::from_str(&serialized_genesis).unwrap();
-        assert!(matches!(deserialized_genesis, AllGenesisFormats::Geth(_)));
+        let deserialized_genesis: Genesis = serde_json::from_str(&serialized_genesis).unwrap();
 
-        // build chain
-        let chain_spec = ChainSpecBuilder::default()
-            .chain(2600.into())
-            .genesis(genesis)
-            .cancun_activated()
-            .build();
-
-        // ensure chain spec is deserialized correctly
-        let serialized_chain_spec = serde_json::to_string(&chain_spec).unwrap();
-        let deserialized_chain_spec: AllGenesisFormats =
-            serde_json::from_str(&serialized_chain_spec).unwrap();
-        assert!(matches!(deserialized_chain_spec, AllGenesisFormats::Reth(_)))
+        assert_eq!(genesis, deserialized_genesis);
     }
 
     #[test]
