@@ -3,17 +3,19 @@
 use crate::{
     chain::{ChainHandler, FromOrchestrator, HandlerEvent, OrchestratorState},
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
-    tree::EngineApiTreeHandler,
+    tree::{EngineApiTreeHandler, TreeEvent},
 };
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::{BeaconEngineMessage, OnForkChoiceUpdated};
+use reth_engine_primitives::EngineTypes;
 use reth_primitives::{SealedBlockWithSenders, B256};
+use reth_rpc_types::engine::{PayloadStatus, PayloadStatusEnum};
 use std::{
     collections::VecDeque,
     task::{Context, Poll},
 };
+use tokio::sync::mpsc;
 use tracing::trace;
-use reth_rpc_types::engine::{PayloadStatus, PayloadStatusEnum};
 
 /// Advances the chain based on incoming requests.
 ///
@@ -130,12 +132,16 @@ pub trait EngineRequestHandler: Send + Sync {
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>>;
 }
 
-/// An [`EngineRequestHandler`] that processes engine API requests.
+/// An [`EngineRequestHandler`] that processes engine API requests by delegating to an execution
+/// task.
 ///
 /// This type is responsible for advancing the chain during live sync (following the tip of the
 /// chain).
 ///
-/// It advances the chain based on received engine API requests:
+/// It advances the chain based on received engine API requests by delegating them to the tree
+/// executor.
+///
+/// There are two types of requests that can be processed:
 ///
 /// - `on_new_payload`: Executes the payload and inserts it into the tree. These are allowed to be
 ///   processed concurrently.
@@ -143,123 +149,33 @@ pub trait EngineRequestHandler: Send + Sync {
 ///   access to the database and are skipped if the handler can't acquire exclusive access to the
 ///   database.
 ///
-/// The [`EngineApiTreeHandler`] is used to execute the incoming payloads, storing them in a tree
-/// structure and committing new chains to the database on fork choice updates.
-///
 /// In case required blocks are missing, the handler will request them from the network, by emitting
 /// a download request upstream.
 #[derive(Debug)]
-pub struct EngineApiRequestHandler<T>
-where
-    T: EngineApiTreeHandler,
-{
-    /// The state of the top level orchestrator.
-    orchestrator_state: OrchestratorState,
-    /// Pending payload requests.
-    pending_requests: VecDeque<BeaconEngineMessage<T::Engine>>,
-    /// Manages execution tree.
-    tree_handler: T,
-    /// Events to yield.
-    buffered_events: VecDeque<EngineApiEvent>,
+pub struct EngineApiRequestHandler<T: EngineTypes> {
+    /// channel to send messages to the tree to execute the payload.
+    to_tree: std::sync::mpsc::Sender<FromEngine<BeaconEngineMessage<T>>>,
+    /// channel to receive messages from the tree.
+    from_tree: mpsc::UnboundedReceiver<EngineApiEvent>,
+    // TODO add db controller
 }
 
-impl<T> EngineApiRequestHandler<T>
-where
-    T: EngineApiTreeHandler,
-{
-    /// Invoked when we receive a request to advance the chain.
-    fn on_engine_request(&mut self, req: BeaconEngineMessage<T::Engine>) {
-        match req {
-            BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
-                if self.orchestrator_state.is_pipeline_active() {
-                    // pipeline sync is running
-                    trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
-                    let _ = tx.send(Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing)));
-                }
-
-            }
-            BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
-                if self.orchestrator_state.is_pipeline_active() {
-                    // pipeline sync is running
-                    trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
-                    let _ = tx.send(Ok(OnForkChoiceUpdated::syncing()));
-                }
-            }
-            BeaconEngineMessage::TransitionConfigurationExchanged => {}
-        }
-
-        // TODO check if we're currently syncing, or mutable access is currently held by the
-        // orchestrator then we respond with SYNCING or delay forkchoice updates.  otherwise
-        // we tell the tree to handle the requests, but we likely still need to tell the handler
-        // about the stuff while write access is unavailable.
-
-        // TODO: should this type spawn the jobs and have access to tree internals or should this be
-        // entirely handled by the tree handler? basically
-
-        /*
-           let (tx, req) = event;
-           let handler = self.tree_handler.clone();
-           spawn(move {
-               let resp = handler.on_new_payload(req);
-               tx.send(resp).unwrap();
-           });
-        */
-        // here the handler must contain shareable state internally
-
-        // or
-
-        /*
-         let fut = handler.handle(event);
-         self.pending.push(fut);
-        */
-
-        // the latter would give the handler more control over the execution of the requests, with
-        // this model the logic of this type and the tree handler is very similar
-    }
-
-    /// Invoked when we receive downloaded blocks.
-    fn on_downloaded_blocks(&mut self, blocks: Vec<SealedBlockWithSenders>) {
-        if self.orchestrator_state.is_pipeline_active() {
-            // pipeline sync is running, buffer the blocks
-        }
-    }
-}
+impl<T> EngineApiRequestHandler<T> where T: EngineTypes {}
 
 impl<T> EngineRequestHandler for EngineApiRequestHandler<T>
 where
-    T: EngineApiTreeHandler,
+    T: EngineTypes,
 {
     type Event = EngineApiEvent;
-    type Request = BeaconEngineMessage<T::Engine>;
+    type Request = BeaconEngineMessage<T>;
 
     fn on_event(&mut self, event: FromEngine<Self::Request>) {
-        match event {
-            FromEngine::Event(ev) => {
-                self.orchestrator_state = match ev {
-                    FromOrchestrator::PipelineFinished => OrchestratorState::Idle,
-                    FromOrchestrator::PipelineStarted => OrchestratorState::PipelineActive,
-                };
-            }
-            FromEngine::Request(req) => {
-                self.on_engine_request(req);
-            }
-            FromEngine::DownloadedBlocks(blocks) => {
-                self.on_downloaded_blocks(blocks);
-            }
-        }
+        // delegate to the tree
+        let _ = self.to_tree.send(event);
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
-        loop {
-            // drain buffered events
-            if let Some(ev) = self.buffered_events.pop_front() {
-                return Poll::Ready(RequestHandlerEvent::HandlerEvent(HandlerEvent::Event(ev)));
-            }
-
-            // TODO advance in progress requests if any
-        }
-
-        Poll::Pending
+        todo!("poll tree and handle db")
     }
 }
 
