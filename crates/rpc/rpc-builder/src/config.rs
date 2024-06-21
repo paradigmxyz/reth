@@ -192,9 +192,12 @@ impl RethRpcServerConfig for RpcServerArgs {
             config = config.with_additional_middleware(service_builder);
         }
 
-        // if self.enable_auth {
-        //     config = config.with_additional_middleware(AuthMiddleware::new());
-        // }
+        // Conditionally add authentication middleware
+        if self.enable_auth {
+            let auth_layer = tower_http::auth::AddAuthorizationLayer::basic("username", "password");
+            let service_builder = tower::ServiceBuilder::new().layer(auth_layer);
+            config = config.with_additional_middleware(service_builder);
+        }
 
         // if self.enable_rate_limit {
         //     config = config.with_additional_middleware(RateLimitMiddleware::new());
