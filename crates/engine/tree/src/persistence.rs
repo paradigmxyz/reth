@@ -1,15 +1,10 @@
 use crate::tree::ExecutedBlock;
-use futures::{ready, FutureExt};
+use reth_db::database::Database;
+use reth_errors::ProviderResult;
 use reth_primitives::B256;
 use reth_provider::ProviderFactory;
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
-};
-use tokio::{
-    sync::{mpsc::Receiver, oneshot},
-    task::{spawn_blocking, JoinHandle},
-};
+use std::sync::mpsc::Receiver;
+use tokio::sync::oneshot;
 
 /// Writes parts of reth's in memory tree state to the database.
 ///
@@ -22,10 +17,11 @@ pub struct Persistence<DB> {
     incoming: Receiver<PersistenceAction>,
 }
 
-impl<Writer> Persistence<Writer> {
+impl<DB: Database> Persistence<DB> {
     // TODO: initialization
     /// Writes the cloned tree state to the database
-    fn write(&mut self, blocks: Vec<ExecutedBlock>) {
+    fn write(&mut self, blocks: Vec<ExecutedBlock>) -> ProviderResult<()> {
+        let mut rw = self.provider.provider_rw()?;
         todo!("implement this")
     }
 
@@ -35,19 +31,19 @@ impl<Writer> Persistence<Writer> {
     }
 }
 
-impl<Writer> Persistence<Writer>
+impl<DB> Persistence<DB>
 where
-    Writer: Unpin,
+    DB: Database,
 {
     /// This is the main loop, that will listen to persistence events and perform the requested
     /// database actions
-    async fn run(&mut self) {
-        // TODO: sync or async receiver?
-        while let Some(action) = self.incoming.recv().await {
+    fn run(&mut self) {
+        // TODO: err handling?
+        while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove((new_tip_num, sender)) => {
                     // spawn blocking so we can poll the thread later
-                    let output = this.remove_blocks_above(new_tip_num);
+                    let output = self.remove_blocks_above(new_tip_num);
                     sender.send(output).unwrap();
                 }
                 PersistenceAction::SaveFinalizedBlocks((blocks, sender)) => {
@@ -55,7 +51,7 @@ where
                         todo!("return error or something");
                     }
                     let last_block_hash = blocks.last().unwrap().block().hash();
-                    this.write(blocks);
+                    self.write(blocks).unwrap();
                 }
             }
         }
