@@ -1,5 +1,5 @@
 use crate::{ForkCondition, Hardfork};
-use alloy_primitives::U256;
+use alloy_primitives::uint;
 
 /// Dev hardforks
 pub const DEV_HARDFORKS: [(Hardfork, ForkCondition); 14] = [
@@ -16,10 +16,7 @@ pub const DEV_HARDFORKS: [(Hardfork, ForkCondition); 14] = [
     (Hardfork::London, ForkCondition::Block(5062605)),
     (
         Hardfork::Paris,
-        ForkCondition::TTD {
-            fork_block: None,
-            total_difficulty: U256::from_limbs([10790000, 0, 0, 0]),
-        },
+        ForkCondition::TTD { fork_block: None, total_difficulty: uint!(10_790_000_U256) },
     ),
     (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
     (Hardfork::Cancun, ForkCondition::Timestamp(1705473120)),

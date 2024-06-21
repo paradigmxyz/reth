@@ -1,9 +1,5 @@
 use crate::{ForkCondition, Hardfork};
-use alloy_primitives::U256;
-
-const PARIS_TTD_MAINNET: U256 = U256::from_limbs([15566869308787654656, 3184, 0, 0]);
-const PARIS_TTD_GOERLI: U256 = U256::from_limbs([10790000, 0, 0, 0]);
-const PARIS_TTD_SEPOLIA: U256 = U256::from_limbs([17000000000000000, 0, 0, 0]);
+use alloy_primitives::{uint, U256};
 
 /// Ethereum mainnet hardforks
 pub const MAINNET_HARDFORKS: [(Hardfork, ForkCondition); 17] = [
@@ -21,7 +17,13 @@ pub const MAINNET_HARDFORKS: [(Hardfork, ForkCondition); 17] = [
     (Hardfork::London, ForkCondition::Block(12965000)),
     (Hardfork::ArrowGlacier, ForkCondition::Block(13773000)),
     (Hardfork::GrayGlacier, ForkCondition::Block(15050000)),
-    (Hardfork::Paris, ForkCondition::TTD { fork_block: None, total_difficulty: PARIS_TTD_MAINNET }),
+    (
+        Hardfork::Paris,
+        ForkCondition::TTD {
+            fork_block: None,
+            total_difficulty: uint!(58_750_000_000_000_000_000_000_U256),
+        },
+    ),
     (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
     (Hardfork::Cancun, ForkCondition::Timestamp(1710338135)),
 ];
@@ -39,7 +41,10 @@ pub const GOERLI_HARDFORKS: [(Hardfork, ForkCondition); 14] = [
     (Hardfork::Istanbul, ForkCondition::Block(1561651)),
     (Hardfork::Berlin, ForkCondition::Block(4460644)),
     (Hardfork::London, ForkCondition::Block(5062605)),
-    (Hardfork::Paris, ForkCondition::TTD { fork_block: None, total_difficulty: PARIS_TTD_GOERLI }),
+    (
+        Hardfork::Paris,
+        ForkCondition::TTD { fork_block: None, total_difficulty: uint!(10_790_000_U256) },
+    ),
     (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
     (Hardfork::Cancun, ForkCondition::Timestamp(1705473120)),
 ];
@@ -60,7 +65,10 @@ pub const SEPOLIA_HARDFORKS: [(Hardfork, ForkCondition); 15] = [
     (Hardfork::London, ForkCondition::Block(0)),
     (
         Hardfork::Paris,
-        ForkCondition::TTD { fork_block: Some(1735371), total_difficulty: PARIS_TTD_SEPOLIA },
+        ForkCondition::TTD {
+            fork_block: Some(1735371),
+            total_difficulty: uint!(17_000_000_000_000_000_U256),
+        },
     ),
     (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
     (Hardfork::Cancun, ForkCondition::Timestamp(1706655072)),
@@ -84,28 +92,3 @@ pub const HOLESKY_HARDFORKS: [(Hardfork, ForkCondition); 15] = [
     (Hardfork::Shanghai, ForkCondition::Timestamp(1696000704)),
     (Hardfork::Cancun, ForkCondition::Timestamp(1707305664)),
 ];
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy_primitives::U256;
-
-    const U_PARIS_TTD_MAINNET: u128 = 58_750_000_000_000_000_000_000;
-    const U_PARIS_TTD_GOERLI: u64 = 10_790_000;
-    const U_PARIS_TTD_SEPOLIA: u64 = 17_000_000_000_000_000;
-
-    #[test]
-    fn paris_u256() {
-        // mainnet
-        let ttd = U256::from(U_PARIS_TTD_MAINNET);
-        assert_eq!(ttd, PARIS_TTD_MAINNET);
-
-        // goerli
-        let ttd = U256::from(U_PARIS_TTD_GOERLI);
-        assert_eq!(ttd, PARIS_TTD_GOERLI);
-
-        // sepolia
-        let ttd = U256::from(U_PARIS_TTD_SEPOLIA);
-        assert_eq!(ttd, PARIS_TTD_SEPOLIA);
-    }
-}
