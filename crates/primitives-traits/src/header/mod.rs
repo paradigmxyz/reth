@@ -16,11 +16,12 @@ use alloy_primitives::{keccak256, Address, BlockNumber, Bloom, Bytes, B256, B64,
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
 
 /// Block header
-#[main_codec]
+#[main_codec(no_arbitrary)]
+#[add_arbitrary_tests(rlp, 25)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Header {
     /// The Keccak 256-bit hash of the parent
@@ -485,5 +486,44 @@ impl Decodable for Header {
             })
         }
         Ok(this)
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for Header {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        // Generate an arbitrary header, passing it to the generate_valid_header function to make
+        // sure it is valid _with respect to hardforks only_.
+        let base = Self {
+            parent_hash: u.arbitrary()?,
+            ommers_hash: u.arbitrary()?,
+            beneficiary: u.arbitrary()?,
+            state_root: u.arbitrary()?,
+            transactions_root: u.arbitrary()?,
+            receipts_root: u.arbitrary()?,
+            logs_bloom: u.arbitrary()?,
+            difficulty: u.arbitrary()?,
+            number: u.arbitrary()?,
+            gas_limit: u.arbitrary()?,
+            gas_used: u.arbitrary()?,
+            timestamp: u.arbitrary()?,
+            extra_data: u.arbitrary()?,
+            mix_hash: u.arbitrary()?,
+            nonce: u.arbitrary()?,
+            base_fee_per_gas: u.arbitrary()?,
+            blob_gas_used: u.arbitrary()?,
+            excess_blob_gas: u.arbitrary()?,
+            parent_beacon_block_root: u.arbitrary()?,
+            requests_root: u.arbitrary()?,
+            withdrawals_root: u.arbitrary()?,
+        };
+
+        Ok(test_utils::generate_valid_header(
+            base,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+        ))
     }
 }

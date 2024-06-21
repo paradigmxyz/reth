@@ -87,12 +87,13 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
             #[cfg(test)]
             mod #mod_tests {
                 #(#traits)*
+                use proptest_arbitrary_interop::arb;
 
                 #[test]
                 fn proptest() {
                     let mut config = proptest::prelude::ProptestConfig::with_cases(#default_cases as u32);
 
-                    proptest::proptest!(config, |(field: super::#type_ident)| {
+                    proptest::proptest!(config, |(field in arb::<super::#type_ident>())| {
                         #(#roundtrips)*
                     });
                 }

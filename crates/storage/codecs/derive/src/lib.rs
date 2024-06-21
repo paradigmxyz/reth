@@ -69,7 +69,7 @@ pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
     derive_arbitrary(TokenStream::from_iter(args), compact)
 }
 
-/// Adds `Arbitrary` and `proptest::Arbitrary` imports into scope and derives the struct/enum.
+/// Adds `Arbitrary` imports into scope and derives the struct/enum.
 ///
 /// If `compact` or `rlp` is passed to `derive_arbitrary`, there will be proptest roundtrip tests
 /// generated. An integer value passed will limit the number of proptest cases generated (default:
@@ -89,17 +89,13 @@ pub fn derive_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {
     let tests = arbitrary::maybe_generate_tests(args, &ast);
 
     // Avoid duplicate names
-    let prop_import = format_ident!("{}PropTestArbitrary", ast.ident);
     let arb_import = format_ident!("{}Arbitrary", ast.ident);
 
     quote! {
         #[cfg(any(test, feature = "arbitrary"))]
-        use proptest_derive::Arbitrary as #prop_import;
-
-        #[cfg(any(test, feature = "arbitrary"))]
         use arbitrary::Arbitrary as #arb_import;
 
-        #[cfg_attr(any(test, feature = "arbitrary"), derive(#prop_import, #arb_import))]
+        #[cfg_attr(any(test, feature = "arbitrary"), derive(#arb_import))]
         #ast
 
         #tests

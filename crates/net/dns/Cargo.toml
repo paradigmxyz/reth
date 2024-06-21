@@ -14,8 +14,8 @@ workspace = true
 [dependencies]
 # reth
 reth-ethereum-forks.workspace = true
-reth-net-common.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
+reth-tokio-util = { workspace = true, features = ["time"] }
 
 # ethereum
 alloy-primitives.workspace = true

@@ -714,8 +714,8 @@ pub trait Call: LoadState + SpawnBlocking {
             }
             ExecutionResult::Halt { reason, .. } => {
                 match reason {
-                    HaltReason::OutOfGas(_) | HaltReason::InvalidFEOpcode => {
-                        // Both `OutOfGas` and `InvalidFEOpcode` can occur dynamically if the gas
+                    HaltReason::OutOfGas(_) | HaltReason::InvalidEFOpcode => {
+                        // Both `OutOfGas` and `InvalidEFOpcode` can occur dynamically if the gas
                         // left is too low. Treat this as an out of gas
                         // condition, knowing that the call succeeds with a
                         // higher gas limit.

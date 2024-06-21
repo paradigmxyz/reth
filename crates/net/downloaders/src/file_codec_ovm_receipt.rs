@@ -22,7 +22,7 @@ use crate::{file_client::FileClientError, receipt_file_client::ReceiptWithBlockN
 ///
 /// It's recommended to use [`with_capacity`](tokio_util::codec::FramedRead::with_capacity) to set
 /// the capacity of the framed reader to the size of the file.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct HackReceiptFileCodec;
 
 impl Decoder for HackReceiptFileCodec {
