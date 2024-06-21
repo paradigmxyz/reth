@@ -27,7 +27,7 @@ pub const MAINNET_HARDFORKS: [(Hardfork, ForkCondition); 17] = [
 ];
 
 /// Ethereum Goerli hardforks
-pub static GOERLI_HARDFORKS: [(Hardfork, ForkCondition); 14] = [
+pub const GOERLI_HARDFORKS: [(Hardfork, ForkCondition); 14] = [
     (Hardfork::Frontier, ForkCondition::Block(0)),
     (Hardfork::Homestead, ForkCondition::Block(0)),
     (Hardfork::Dao, ForkCondition::Block(0)),
@@ -45,7 +45,7 @@ pub static GOERLI_HARDFORKS: [(Hardfork, ForkCondition); 14] = [
 ];
 
 /// Ethereum Sepolia hardforks
-pub static SEPOLIA_HARDFORKS: [(Hardfork, ForkCondition); 15] = [
+pub const SEPOLIA_HARDFORKS: [(Hardfork, ForkCondition); 15] = [
     (Hardfork::Frontier, ForkCondition::Block(0)),
     (Hardfork::Homestead, ForkCondition::Block(0)),
     (Hardfork::Dao, ForkCondition::Block(0)),
