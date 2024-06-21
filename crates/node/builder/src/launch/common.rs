@@ -546,6 +546,7 @@ where
             blockchain_db,
             tree_config,
             canon_state_notification_sender,
+            // we store here a reference to T.
             phantom_data: PhantomData,
         };
 
@@ -822,6 +823,8 @@ pub struct WithMeteredProviders<DB, T> {
     blockchain_db: BlockchainProvider<DB>,
     canon_state_notification_sender: CanonStateNotificationSender,
     tree_config: BlockchainTreeConfig,
+    // this field is used to store a reference to the FullNodeTypes so that we
+    // can build the components in `with_components` method.
     phantom_data: PhantomData<T>,
 }
 

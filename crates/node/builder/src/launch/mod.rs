@@ -126,6 +126,8 @@ where
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
             })
             .with_metrics()
+            // passing FullNodeTypes as type parameter here so that we can build
+            // later the components.
             .with_blockchain_db::<T>().await?
             .with_components(components_builder, on_component_initialized).await?;
 
