@@ -355,6 +355,18 @@ Gas Price Oracle:
 
           [default: 60]
 
+      --enable-logging
+          Enable logging middleware
+
+      --enable-auth
+          Enable authentication middleware
+
+      --enable-rate-limit
+          Enable rate limiting middleware
+
+      --enable-monitoring
+          Enable monitoring middleware
+
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
           Max number of transaction in the pending sub-pool

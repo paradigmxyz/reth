@@ -17,6 +17,7 @@ use reth::{
         providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
     },
+    rpc::builder::Identity,
     utils::db::open_db_read_only,
 };
 use reth_chainspec::ChainSpecBuilder;
@@ -78,7 +79,7 @@ async fn main() -> eyre::Result<()> {
     server.merge_configured(custom_rpc.into_rpc())?;
 
     // Start the server & keep it alive
-    let server_args =
+    let server_args: reth::rpc::builder::RpcServerConfig<Identity> =
         RpcServerConfig::http(Default::default()).with_http_address("0.0.0.0:8545".parse()?);
     let _handle = server_args.start(server).await?;
     futures::future::pending::<()>().await;
