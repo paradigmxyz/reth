@@ -18,7 +18,6 @@ use crate::{
     PoolConfig, PoolResult, PoolTransaction, PriceBumpConfig, TransactionOrdering,
     ValidPoolTransaction, U256,
 };
-use itertools::Itertools;
 use reth_primitives::{
     constants::{
         eip4844::BLOB_TX_MIN_BLOB_GASPRICE, ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE,
@@ -1797,35 +1796,6 @@ pub(crate) struct UpdateOutcome<T: PoolTransaction> {
 impl<T: PoolTransaction> Default for UpdateOutcome<T> {
     fn default() -> Self {
         Self { promoted: vec![], discarded: vec![] }
-    }
-}
-
-/// Represents the outcome of a prune
-pub struct PruneResult<T: PoolTransaction> {
-    /// A list of added transactions that a pruned marker satisfied
-    pub promoted: Vec<AddedTransaction<T>>,
-    /// all transactions that failed to be promoted and now are discarded
-    pub failed: Vec<TxHash>,
-    /// all transactions that were pruned from the ready pool
-    pub pruned: Vec<Arc<ValidPoolTransaction<T>>>,
-}
-
-impl<T: PoolTransaction> fmt::Debug for PruneResult<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PruneResult")
-            .field(
-                "promoted",
-                &format_args!("[{}]", self.promoted.iter().map(|tx| tx.hash()).format(", ")),
-            )
-            .field("failed", &self.failed)
-            .field(
-                "pruned",
-                &format_args!(
-                    "[{}]",
-                    self.pruned.iter().map(|tx| tx.transaction.hash()).format(", ")
-                ),
-            )
-            .finish()
     }
 }
 

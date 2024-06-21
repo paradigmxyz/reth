@@ -45,7 +45,6 @@ serde = { workspace = true, features = ["derive", "rc"], optional = true }
 bitflags.workspace = true
 auto_impl.workspace = true
 smallvec.workspace = true
-itertools.workspace = true
 
 # testing
 rand = { workspace = true, optional = true }
