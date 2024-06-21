@@ -32,3 +32,8 @@ tokio-util.workspace = true
 ## misc
 eyre.workspace = true
 metrics.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde", "reth-provider/serde"]

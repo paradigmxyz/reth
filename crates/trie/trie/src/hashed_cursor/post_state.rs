@@ -374,6 +374,7 @@ mod tests {
     use super::*;
     use crate::{HashedPostState, HashedStorage};
     use proptest::prelude::*;
+    use proptest_arbitrary_interop::arb;
     use reth_db::{tables, test_utils::create_test_rw_db};
     use reth_db_api::{database::Database, transaction::DbTxMut};
     use reth_primitives::StorageEntry;
@@ -537,7 +538,7 @@ mod tests {
 
     #[test]
     fn fuzz_hashed_account_cursor() {
-        proptest!(ProptestConfig::with_cases(10), |(db_accounts: BTreeMap<B256, Account>, post_state_accounts: BTreeMap<B256, Option<Account>>)| {
+        proptest!(ProptestConfig::with_cases(10), |(db_accounts in arb::<BTreeMap<B256, Account>>(), post_state_accounts in arb::<BTreeMap<B256, Option<Account>>>())| {
                 let db = create_test_rw_db();
                 db.update(|tx| {
                     for (key, account) in &db_accounts {

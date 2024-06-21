@@ -15,7 +15,7 @@ workspace = true
 reth-codecs-derive = { path = "./derive", default-features = false }
 
 # eth
-alloy-consensus = { workspace = true, optional = true }
+alloy-consensus = { workspace = true, optional = true, features = ["arbitrary"] }
 alloy-eips = { workspace = true, optional = true }
 alloy-genesis = { workspace = true, optional = true }
 alloy-primitives.workspace = true
@@ -37,6 +37,7 @@ serde_json.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
+proptest-arbitrary-interop.workspace = true
 
 [features]
 default = ["std", "alloy"]

@@ -39,7 +39,7 @@ reth-rpc-types-compat.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
-reth-net-common.workspace = true
+reth-net-banlist.workspace = true
 reth-network-api.workspace = true
 reth-downloaders.workspace = true
 reth-tracing.workspace = true
@@ -86,6 +86,8 @@ metrics-process.workspace = true
 
 # test vectors generation
 proptest.workspace = true
+arbitrary.workspace = true
+proptest-arbitrary-interop.workspace = true
 rand.workspace = true
 
 # tui

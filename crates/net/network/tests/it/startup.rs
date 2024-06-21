@@ -91,6 +91,7 @@ async fn test_tcp_port_node_record_discovery() {
     let config = NetworkConfigBuilder::new(secret_key)
         .listener_port(0)
         .discovery_port(0)
+        .disable_dns_discovery()
         .build_with_noop_provider();
     let network = NetworkManager::new(config).await.unwrap();
 

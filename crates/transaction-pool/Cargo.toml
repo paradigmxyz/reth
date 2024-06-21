@@ -51,6 +51,7 @@ itertools.workspace = true
 rand = { workspace = true, optional = true }
 paste = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
+proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
@@ -59,6 +60,7 @@ reth-tracing.workspace = true
 paste.workspace = true
 rand.workspace = true
 proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
 criterion.workspace = true
 pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 assert_matches.workspace = true
@@ -69,7 +71,7 @@ serde_json.workspace = true
 default = ["serde"]
 serde = ["dep:serde"]
 test-utils = ["rand", "paste", "serde"]
-arbitrary = ["proptest", "reth-primitives/arbitrary"]
+arbitrary = ["proptest", "reth-primitives/arbitrary", "proptest-arbitrary-interop"]
 
 [[bench]]
 name = "truncate"
