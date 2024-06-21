@@ -12,7 +12,6 @@
 #[allow(hidden_glob_reexports)]
 mod eth;
 mod mev;
-mod net;
 mod peer;
 mod rpc;
 
@@ -53,6 +52,5 @@ pub use eth::{
 };
 
 pub use mev::*;
-pub use net::*;
 pub use peer::*;
 pub use rpc::*;

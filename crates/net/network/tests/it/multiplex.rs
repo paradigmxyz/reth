@@ -10,10 +10,9 @@ use reth_network::{
     protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
     test_utils::Testnet,
 };
-use reth_network_api::Direction;
+use reth_network_api::{Direction, PeerId};
 use reth_primitives::BytesMut;
 use reth_provider::test_utils::MockEthProvider;
-use reth_rpc_types::PeerId;
 use std::{
     net::SocketAddr,
     pin::Pin,
