@@ -1232,18 +1232,23 @@ impl<L> RpcServerConfig<L> {
     }
 
     ///
+    /// Adds a middleware layer using `tower::ServiceBuilder`.
+    ///
     /// # Parameters
     ///
-    /// - `layer`: The ServiceBuilder to add.
+    /// - `layer`: The `tower::ServiceBuilder` instance to add as middleware.
     ///
     /// # Returns
     ///
-    /// A new `RpcServerConfig` with the added ServiceBuilder.
+    /// A new `RpcServerConfig` with the added middleware.
     ///
     /// # Type Parameters
     ///
-    /// - `T`: The type of the ServiceBuilder, which must implement `tower::ServiceBuilder + Send + Sync + 'static`.
-    pub fn with_additional_middleware<T>(self, layer: tower::ServiceBuilder<T>) -> RpcServerConfig<T> {
+    /// - `T`: The type of the middleware, which must implement `Send`, `Sync`, and `'static`.
+    pub fn with_additional_middleware<T>(
+        self,
+        layer: tower::ServiceBuilder<T>,
+    ) -> RpcServerConfig<T> {
         RpcServerConfig {
             http_server_config: self.http_server_config,
             http_cors_domains: self.http_cors_domains,

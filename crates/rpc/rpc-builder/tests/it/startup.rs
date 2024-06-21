@@ -26,7 +26,7 @@ async fn test_http_addr_in_use() {
     let builder = test_rpc_builder();
     let server = builder.build(TransportRpcModuleConfig::set_http(vec![RethRpcModule::Admin]));
     let result = server
-        .start_server(RpcServerConfig::http(Default::default()).with_http_address(addr))
+        .start_server(RpcServerConfig::<reth_rpc_builder::Identity>::http(Default::default()).with_http_address(addr))
         .await;
     let err = result.unwrap_err();
     assert!(is_addr_in_use_kind(&err, ServerKind::Http(addr)), "{err}");
@@ -39,7 +39,7 @@ async fn test_ws_addr_in_use() {
     let builder = test_rpc_builder();
     let server = builder.build(TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Admin]));
     let result =
-        server.start_server(RpcServerConfig::ws(Default::default()).with_ws_address(addr)).await;
+        server.start_server(RpcServerConfig::<reth_rpc_builder::Identity>::ws(Default::default()).with_ws_address(addr)).await;
     let err = result.unwrap_err();
     assert!(is_addr_in_use_kind(&err, ServerKind::WS(addr)), "{err}");
 }
@@ -62,7 +62,7 @@ async fn test_launch_same_port_different_modules() {
     let addr = test_address();
     let res = server
         .start_server(
-            RpcServerConfig::ws(Default::default())
+            RpcServerConfig::<reth_rpc_builder::Identity>::ws(Default::default())
                 .with_ws_address(addr)
                 .with_http(Default::default())
                 .with_http_address(addr),
@@ -85,7 +85,7 @@ async fn test_launch_same_port_same_cors() {
     let addr = test_address();
     let res = server
         .start_server(
-            RpcServerConfig::ws(Default::default())
+            RpcServerConfig::<reth_rpc_builder::Identity>::ws(Default::default())
                 .with_ws_address(addr)
                 .with_http(Default::default())
                 .with_cors(Some("*".to_string()))
@@ -106,7 +106,7 @@ async fn test_launch_same_port_different_cors() {
     let addr = test_address();
     let res = server
         .start_server(
-            RpcServerConfig::ws(Default::default())
+            RpcServerConfig::<reth_rpc_builder::Identity>::ws(Default::default())
                 .with_ws_address(addr)
                 .with_http(Default::default())
                 .with_cors(Some("*".to_string()))

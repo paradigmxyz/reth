@@ -53,7 +53,9 @@ pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHan
     let builder = test_rpc_builder();
     let server = builder.build(TransportRpcModuleConfig::set_http(modules));
     server
-        .start_server(RpcServerConfig::http(Default::default()).with_http_address(test_address()))
+        .start_server(
+            RpcServerConfig::<L>::http(Default::default()).with_http_address(test_address()),
+        )
         .await
         .unwrap()
 }
@@ -63,7 +65,7 @@ pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandl
     let builder = test_rpc_builder();
     let server = builder.build(TransportRpcModuleConfig::set_ws(modules));
     server
-        .start_server(RpcServerConfig::ws(Default::default()).with_ws_address(test_address()))
+        .start_server(RpcServerConfig::<L>::ws(Default::default()).with_ws_address(test_address()))
         .await
         .unwrap()
 }
