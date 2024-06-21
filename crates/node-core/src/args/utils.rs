@@ -169,12 +169,8 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
 #[cfg(test)]
 mod tests {
     use super::*;
-    
     use proptest::prelude::Rng;
-    
-    
     use secp256k1::rand::thread_rng;
-    
 
     #[test]
     fn parse_known_chain_spec() {
