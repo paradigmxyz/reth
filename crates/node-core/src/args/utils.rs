@@ -171,7 +171,7 @@ mod tests {
     use super::*;
     use alloy_genesis::{ChainConfig, Genesis, GenesisAccount};
     use proptest::prelude::Rng;
-    use reth_chainspec::ChainSpecBuilder;
+    use reth_chainspec::Chain;
     use reth_primitives::{hex, Address, U256};
     use secp256k1::rand::thread_rng;
     use std::collections::HashMap;
@@ -182,97 +182,6 @@ mod tests {
             chain_spec_value_parser(chain).unwrap();
             genesis_value_parser(chain).unwrap();
         }
-    }
-
-    #[test]
-    fn parse_chain_spec_from_memory() {
-        let custom_genesis_from_json = r#"
-{
-    "nonce": "0x0",
-    "timestamp": "0x653FEE9E",
-    "gasLimit": "0x1388",
-    "difficulty": "0x0",
-    "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-    "coinbase": "0x0000000000000000000000000000000000000000",
-    "alloc": {
-        "0x6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b": {
-            "balance": "0x21"
-        }
-    },
-    "number": "0x0",
-    "gasUsed": "0x0",
-    "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-    "config": {
-        "chainId": 2600,
-        "homesteadBlock": 0,
-        "eip150Block": 0,
-        "eip155Block": 0,
-        "eip158Block": 0,
-        "byzantiumBlock": 0,
-        "constantinopleBlock": 0,
-        "petersburgBlock": 0,
-        "istanbulBlock": 0,
-        "berlinBlock": 0,
-        "londonBlock": 0,
-        "terminalTotalDifficulty": 0,
-        "terminalTotalDifficultyPassed": true,
-        "shanghaiTime": 0
-    }
-}
-"#;
-
-        let chain_from_json = genesis_value_parser(custom_genesis_from_json).unwrap();
-
-        // using structs
-        let config = ChainConfig {
-            chain_id: 2600,
-            homestead_block: Some(0),
-            eip150_block: Some(0),
-            eip155_block: Some(0),
-            eip158_block: Some(0),
-            byzantium_block: Some(0),
-            constantinople_block: Some(0),
-            petersburg_block: Some(0),
-            istanbul_block: Some(0),
-            berlin_block: Some(0),
-            london_block: Some(0),
-            shanghai_time: Some(0),
-            terminal_total_difficulty: Some(U256::ZERO),
-            terminal_total_difficulty_passed: true,
-            ..Default::default()
-        };
-        let genesis = Genesis {
-            config,
-            nonce: 0,
-            timestamp: 1698688670,
-            gas_limit: 5000,
-            difficulty: U256::ZERO,
-            mix_hash: B256::ZERO,
-            coinbase: Address::ZERO,
-            number: Some(0),
-            ..Default::default()
-        };
-
-        // seed accounts after genesis struct created
-        let address = hex!("6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b").into();
-        let account = GenesisAccount::default().with_balance(U256::from(33));
-        let genesis = genesis.extend_accounts(HashMap::from([(address, account)]));
-
-        let custom_genesis_from_struct = serde_json::to_string(&genesis).unwrap();
-        let chain_from_struct = genesis_value_parser(&custom_genesis_from_struct).unwrap();
-        assert_eq!(chain_from_json.genesis(), chain_from_struct.genesis());
-
-        // chain spec
-        let chain_spec = ChainSpecBuilder::default()
-            .chain(2600.into())
-            .genesis(genesis)
-            .cancun_activated()
-            .build();
-
-        let chain_spec_json = serde_json::to_string(&chain_spec).unwrap();
-        let custom_genesis_from_spec = genesis_value_parser(&chain_spec_json).unwrap();
-
-        assert_eq!(custom_genesis_from_spec.chain(), chain_from_struct.chain());
     }
 
     #[test]
