@@ -8293,7 +8293,6 @@ dependencies = [
  "bitflags 2.5.0",
  "criterion",
  "futures-util",
- "itertools 0.13.0",
  "metrics",
  "parking_lot 0.12.3",
  "paste",
