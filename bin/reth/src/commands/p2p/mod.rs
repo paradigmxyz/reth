@@ -3,7 +3,7 @@
 use crate::{
     args::{
         get_secret_key,
-        utils::{chain_help, chain_spec_value_parser, hash_or_num_value_parser, SUPPORTED_CHAINS},
+        utils::{chain_help, chain_value_parser, hash_or_num_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, DiscoveryArgs, NetworkArgs,
     },
     utils::get_single_header,
@@ -40,7 +40,7 @@ pub struct Command {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = SUPPORTED_CHAINS[0],
-        value_parser = chain_spec_value_parser
+        value_parser = chain_value_parser
     )]
     chain: Arc<ChainSpec>,
 
