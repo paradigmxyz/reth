@@ -35,5 +35,8 @@ pub use head::Head;
 pub use display::DisplayHardforks;
 pub use forkcondition::ForkCondition;
 
+/// Chains hardforks
+pub mod chains;
+
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;

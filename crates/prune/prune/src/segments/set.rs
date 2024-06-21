@@ -48,6 +48,10 @@ impl<DB: Database> SegmentSet<DB> {
         } = prune_modes;
 
         Self::default()
+            // Account history
+            .segment_opt(account_history.map(AccountHistory::new))
+            // Storage history
+            .segment_opt(storage_history.map(StorageHistory::new))
             // Receipts
             .segment_opt(receipts.map(Receipts::new))
             // Receipts by logs
@@ -59,10 +63,6 @@ impl<DB: Database> SegmentSet<DB> {
             .segment_opt(transaction_lookup.map(TransactionLookup::new))
             // Sender recovery
             .segment_opt(sender_recovery.map(SenderRecovery::new))
-            // Account history
-            .segment_opt(account_history.map(AccountHistory::new))
-            // Storage history
-            .segment_opt(storage_history.map(StorageHistory::new))
     }
 }
 

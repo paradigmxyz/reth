@@ -7,8 +7,6 @@ use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
 use derive_more::{AsRef, Deref};
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::prelude::*;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
@@ -131,26 +129,8 @@ impl SealedHeader {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for SealedHeader {
-    type Parameters = ();
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        // map valid header strategy by sealing
-        crate::test_utils::valid_header_strategy().prop_map(|header| header.seal_slow()).boxed()
-    }
-    type Strategy = proptest::strategy::BoxedStrategy<Self>;
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for SealedHeader {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let sealed_header = crate::test_utils::generate_valid_header(
-            u.arbitrary()?,
-            u.arbitrary()?,
-            u.arbitrary()?,
-            u.arbitrary()?,
-            u.arbitrary()?,
-        )
-        .seal_slow();
-        Ok(sealed_header)
+        Ok(Header::arbitrary(u)?.seal_slow())
     }
 }

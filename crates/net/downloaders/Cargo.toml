@@ -13,13 +13,13 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
-reth-network-p2p.workspace = true
-reth-tasks.workspace = true
-reth-provider.workspace = true
 reth-config.workspace = true
 reth-consensus.workspace = true
+reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
+reth-primitives.workspace = true
+reth-storage-api.workspace = true
+reth-tasks.workspace = true
 
 # optional deps for the test-utils feature
 reth-db = { workspace = true, optional = true }

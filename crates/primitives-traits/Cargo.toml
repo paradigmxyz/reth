@@ -19,7 +19,7 @@ alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-alloy-rpc-types-eth = { workspace = true, optional = true } 
+alloy-rpc-types-eth = { workspace = true, optional = true }
 
 derive_more.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
@@ -37,11 +37,12 @@ serde.workspace = true
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
+proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
 proptest-derive.workspace = true
 test-fuzz.workspace = true
 rand.workspace = true
@@ -55,6 +56,6 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
-    "dep:proptest-derive"
+    "dep:proptest-arbitrary-interop",
 ]
 alloy-compat = ["alloy-rpc-types-eth"]

@@ -57,6 +57,7 @@ triehash = "0.8"
 
 # misc
 proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
 tokio = { workspace = true, default-features = false, features = [
     "sync",
     "rt",

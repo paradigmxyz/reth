@@ -9,7 +9,7 @@ use alloy_rlp::{RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 use proptest::prelude::prop_compose;
-use reth_codecs::derive_arbitrary;
+use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
 use reth_primitives_traits::Requests;
@@ -31,38 +31,22 @@ prop_compose! {
 /// Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp, 25)]
+#[add_arbitrary_tests(rlp, 25)]
 #[derive(
     Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, RlpEncodable, RlpDecodable,
 )]
 #[rlp(trailing)]
 pub struct Block {
     /// Block header.
-    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "valid_header_strategy()"))]
     #[deref]
     pub header: Header,
     /// Transactions in this block.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
-        )
-    )]
     pub body: Vec<TransactionSigned>,
     /// Ommers/uncles header.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(valid_header_strategy(), 0..=2)")
-    )]
     pub ommers: Vec<Header>,
     /// Block withdrawals.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
-    )]
     pub withdrawals: Option<Withdrawals>,
     /// Block requests.
-    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
     pub requests: Option<Requests>,
 }
 
@@ -187,6 +171,28 @@ impl Block {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for Block {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        // first generate up to 100 txs
+        let transactions = (0..100)
+            .map(|_| TransactionSigned::arbitrary(u))
+            .collect::<arbitrary::Result<Vec<_>>>()?;
+
+        // then generate up to 2 ommers
+        let ommers = (0..2).map(|_| Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
+
+        Ok(Self {
+            header: u.arbitrary()?,
+            body: transactions,
+            ommers,
+            // for now just generate empty requests, see HACK above
+            requests: u.arbitrary()?,
+            withdrawals: u.arbitrary()?,
+        })
+    }
+}
+
 /// Sealed block with senders recovered from transactions.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut)]
 pub struct BlockWithSenders {
@@ -278,27 +284,12 @@ pub struct SealedBlock {
     #[deref_mut]
     pub header: SealedHeader,
     /// Transactions with signatures.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
-        )
-    )]
     pub body: Vec<TransactionSigned>,
     /// Ommer/uncle headers
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(valid_header_strategy(), 0..=2)")
-    )]
     pub ommers: Vec<Header>,
     /// Block withdrawals.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
-    )]
     pub withdrawals: Option<Withdrawals>,
     /// Block requests.
-    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
     pub requests: Option<Requests>,
 }
 
@@ -378,6 +369,43 @@ impl SealedBlock {
             Some(senders) => Ok(SealedBlockWithSenders { block: self, senders }),
             None => Err(self),
         }
+    }
+
+    /// Transform into a [`SealedBlockWithSenders`].
+    ///
+    /// # Panics
+    ///
+    /// If the number of senders does not match the number of transactions in the block
+    /// and the signer recovery for one of the transactions fails.
+    #[track_caller]
+    pub fn with_senders_unchecked(self, senders: Vec<Address>) -> SealedBlockWithSenders {
+        self.try_with_senders_unchecked(senders).expect("stored block is valid")
+    }
+
+    /// Transform into a [`SealedBlockWithSenders`] using the given senders.
+    ///
+    /// If the number of senders does not match the number of transactions in the block, this falls
+    /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
+    /// See also [`TransactionSigned::recover_signer_unchecked`]
+    ///
+    /// Returns an error if a signature is invalid.
+    #[track_caller]
+    pub fn try_with_senders_unchecked(
+        self,
+        senders: Vec<Address>,
+    ) -> Result<SealedBlockWithSenders, Self> {
+        let senders = if self.body.len() == senders.len() {
+            senders
+        } else {
+            let Some(senders) =
+                TransactionSigned::recover_signers_unchecked(&self.body, self.body.len())
+            else {
+                return Err(self)
+            };
+            senders
+        };
+
+        Ok(SealedBlockWithSenders { block: self, senders })
     }
 
     /// Unseal the block
@@ -511,30 +539,19 @@ impl SealedBlockWithSenders {
 /// A response to `GetBlockBodies`, containing bodies if any bodies were found.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp, 10)]
+#[add_arbitrary_tests(rlp, 10)]
 #[derive(
     Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
 #[rlp(trailing)]
 pub struct BlockBody {
     /// Transactions in the block
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
-        )
-    )]
     pub transactions: Vec<TransactionSigned>,
     /// Uncle headers for the given block
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(valid_header_strategy(), 0..=2)")
-    )]
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
     pub withdrawals: Option<Withdrawals>,
     /// Requests in the block.
-    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
     pub requests: Option<Requests>,
 }
 
@@ -594,6 +611,22 @@ impl From<Block> for BlockBody {
             withdrawals: block.withdrawals,
             requests: block.requests,
         }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        // first generate up to 100 txs
+        let transactions = (0..100)
+            .map(|_| TransactionSigned::arbitrary(u))
+            .collect::<arbitrary::Result<Vec<_>>>()?;
+
+        // then generate up to 2 ommers
+        let ommers = (0..2).map(|_| Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
+
+        // for now just generate empty requests, see HACK above
+        Ok(Self { transactions, ommers, requests: None, withdrawals: u.arbitrary()? })
     }
 }
 

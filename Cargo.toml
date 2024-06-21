@@ -341,15 +341,15 @@ reth-trie-common = { path = "crates/trie/common" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "9.0.0", features = [
+revm = { version = "10.0.0", features = [
     "std",
     "secp256k1",
     "blst",
 ], default-features = false }
-revm-primitives = { version = "4.0.0", features = [
+revm-primitives = { version = "5.0.0", features = [
     "std",
 ], default-features = false }
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "4fe17f0" }
+revm-inspectors = "0.1"
 
 # compiler
 revmc = { path = "../revmc/crates/revmc" }
@@ -435,10 +435,10 @@ url = "2.3"
 backon = "0.4"
 
 # metrics
-metrics = "0.22.0"
-metrics-exporter-prometheus = { version = "0.14.0", default-features = false }
-metrics-util = "0.16.0"
-metrics-process = "2.0.0"
+metrics = "0.23.0"
+metrics-exporter-prometheus = { version = "0.15.0", default-features = false }
+metrics-util = "0.17.0"
+metrics-process = "2.1.0"
 
 # proc-macros
 proc-macro2 = "1.0"
@@ -476,6 +476,7 @@ jsonrpsee-http-client = "0.23"
 http = "1.0"
 http-body = "1.0"
 jsonwebtoken = "9"
+proptest-arbitrary-interop = "0.1.0"
 
 # crypto
 secp256k1 = { version = "0.29", default-features = false, features = [
@@ -504,9 +505,3 @@ tempfile = "3.8"
 test-fuzz = "5"
 walkdir = "2.5"
 iai-callgrind = "0.11"
-
-[patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm.git", rev = "41e2f7f" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm.git", rev = "41e2f7f" }
-revm-precompile = { git = "https://github.com/bluealloy/revm.git", rev = "41e2f7f" }
-revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "41e2f7f" }
