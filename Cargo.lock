@@ -7273,7 +7273,6 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives",
  "reth-provider",
- "reth-rpc-types",
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
@@ -7298,10 +7297,10 @@ name = "reth-network-api"
 version = "1.0.0-rc.2"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types-admin",
  "enr",
  "reth-eth-wire",
  "reth-network-peers",
- "reth-rpc-types",
  "serde",
  "thiserror",
  "tokio",
