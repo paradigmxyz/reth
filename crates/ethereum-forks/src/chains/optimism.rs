@@ -2,7 +2,7 @@ use crate::{ForkCondition, Hardfork};
 use alloy_primitives::U256;
 
 /// Optimism mainnet hardforks
-pub static OP_MAINNET_HARDFORKS: [(Hardfork, ForkCondition); 21] = [
+pub const OP_MAINNET_HARDFORKS: [(Hardfork, ForkCondition); 21] = [
     (Hardfork::Frontier, ForkCondition::Block(0)),
     (Hardfork::Homestead, ForkCondition::Block(0)),
     (Hardfork::Tangerine, ForkCondition::Block(0)),
@@ -30,7 +30,7 @@ pub static OP_MAINNET_HARDFORKS: [(Hardfork, ForkCondition); 21] = [
 ];
 
 /// Optimism Sepolia hardforks
-pub static OP_SEPOLIA_HARDFORKS: [(Hardfork, ForkCondition); 21] = [
+pub const OP_SEPOLIA_HARDFORKS: [(Hardfork, ForkCondition); 21] = [
     (Hardfork::Frontier, ForkCondition::Block(0)),
     (Hardfork::Homestead, ForkCondition::Block(0)),
     (Hardfork::Tangerine, ForkCondition::Block(0)),
@@ -55,7 +55,7 @@ pub static OP_SEPOLIA_HARDFORKS: [(Hardfork, ForkCondition); 21] = [
 ];
 
 /// Base Sepolia hardforks
-pub static BASE_SEPOLIA_HARDFORKS: [(Hardfork, ForkCondition); 21] = [
+pub const BASE_SEPOLIA_HARDFORKS: [(Hardfork, ForkCondition); 21] = [
     (Hardfork::Frontier, ForkCondition::Block(0)),
     (Hardfork::Homestead, ForkCondition::Block(0)),
     (Hardfork::Tangerine, ForkCondition::Block(0)),
@@ -80,7 +80,7 @@ pub static BASE_SEPOLIA_HARDFORKS: [(Hardfork, ForkCondition); 21] = [
 ];
 
 /// Base Mainnet hardforks
-pub static BASE_MAINNET_HARDFORKS: [(Hardfork, ForkCondition); 21] = [
+pub const BASE_MAINNET_HARDFORKS: [(Hardfork, ForkCondition); 21] = [
     (Hardfork::Frontier, ForkCondition::Block(0)),
     (Hardfork::Homestead, ForkCondition::Block(0)),
     (Hardfork::Tangerine, ForkCondition::Block(0)),

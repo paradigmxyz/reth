@@ -2,7 +2,7 @@ use crate::{ForkCondition, Hardfork};
 use alloy_primitives::U256;
 
 const PARIS_TTD_MAINNET: U256 = U256::from_limbs([15566869308787654656, 3184, 0, 0]);
-pub(crate) const PARIS_TTD_GOERLI: U256 = U256::from_limbs([10790000, 0, 0, 0]);
+const PARIS_TTD_GOERLI: U256 = U256::from_limbs([10790000, 0, 0, 0]);
 const PARIS_TTD_SEPOLIA: U256 = U256::from_limbs([17000000000000000, 0, 0, 0]);
 
 /// Ethereum mainnet hardforks

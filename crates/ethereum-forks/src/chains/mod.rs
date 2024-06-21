@@ -6,9 +6,10 @@ pub mod ethereum;
 pub mod optimism;
 
 use crate::{ForkCondition, Hardfork};
+use alloy_primitives::U256;
 
 /// Dev hardforks
-pub static DEV_HARDFORKS: [(Hardfork, ForkCondition); 14] = [
+pub const DEV_HARDFORKS: [(Hardfork, ForkCondition); 14] = [
     (Hardfork::Frontier, ForkCondition::Block(0)),
     (Hardfork::Homestead, ForkCondition::Block(0)),
     (Hardfork::Dao, ForkCondition::Block(0)),
@@ -22,7 +23,10 @@ pub static DEV_HARDFORKS: [(Hardfork, ForkCondition); 14] = [
     (Hardfork::London, ForkCondition::Block(5062605)),
     (
         Hardfork::Paris,
-        ForkCondition::TTD { fork_block: None, total_difficulty: ethereum::PARIS_TTD_GOERLI },
+        ForkCondition::TTD {
+            fork_block: None,
+            total_difficulty: U256::from_limbs([10790000, 0, 0, 0]),
+        },
     ),
     (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
     (Hardfork::Cancun, ForkCondition::Timestamp(1705473120)),
