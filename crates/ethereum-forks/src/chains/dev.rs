@@ -5,22 +5,22 @@ use once_cell::sync::Lazy;
 /// Dev hardforks
 pub const DEV_HARDFORKS: Lazy<EthereumForks> = Lazy::new(|| {
     EthereumForks(vec![
-        (Box::new(Hardfork::Frontier), ForkCondition::Block(0)),
-        (Box::new(Hardfork::Homestead), ForkCondition::Block(0)),
-        (Box::new(Hardfork::Dao), ForkCondition::Block(0)),
-        (Box::new(Hardfork::Tangerine), ForkCondition::Block(0)),
-        (Box::new(Hardfork::SpuriousDragon), ForkCondition::Block(0)),
-        (Box::new(Hardfork::Byzantium), ForkCondition::Block(0)),
-        (Box::new(Hardfork::Constantinople), ForkCondition::Block(0)),
-        (Box::new(Hardfork::Petersburg), ForkCondition::Block(0)),
-        (Box::new(Hardfork::Istanbul), ForkCondition::Block(1561651)),
-        (Box::new(Hardfork::Berlin), ForkCondition::Block(4460644)),
-        (Box::new(Hardfork::London), ForkCondition::Block(5062605)),
+        (Hardfork::Frontier.boxed(), ForkCondition::Block(0)),
+        (Hardfork::Homestead.boxed(), ForkCondition::Block(0)),
+        (Hardfork::Dao.boxed(), ForkCondition::Block(0)),
+        (Hardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+        (Hardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (Hardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+        (Hardfork::Constantinople.boxed(), ForkCondition::Block(0)),
+        (Hardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (Hardfork::Istanbul.boxed(), ForkCondition::Block(1561651)),
+        (Hardfork::Berlin.boxed(), ForkCondition::Block(4460644)),
+        (Hardfork::London.boxed(), ForkCondition::Block(5062605)),
         (
-            Box::new(Hardfork::Paris),
+            Hardfork::Paris.boxed(),
             ForkCondition::TTD { fork_block: None, total_difficulty: uint!(10_790_000_U256) },
         ),
-        (Box::new(Hardfork::Shanghai), ForkCondition::Timestamp(1678832736)),
-        (Box::new(Hardfork::Cancun), ForkCondition::Timestamp(1705473120)),
+        (Hardfork::Shanghai.boxed(), ForkCondition::Timestamp(1678832736)),
+        (Hardfork::Cancun.boxed(), ForkCondition::Timestamp(1705473120)),
     ])
 });

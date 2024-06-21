@@ -21,11 +21,9 @@ impl HardforkTrait for Box<dyn HardforkTrait> {
     }
 }
 
-
 impl core::fmt::Debug for dyn HardforkTrait + 'static {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct(stringify!(self.name()))
-            .finish()
+        f.debug_struct(stringify!(self.name())).finish()
     }
 }
 
@@ -78,6 +76,11 @@ macro_rules! define_hardfork_enum {
                 match self {
                     $( $enum::$variant => stringify!($variant), )*
                 }
+            }
+
+            /// Boxes `self` and returns it as `Box<dyn HardforkTrait>`.
+            pub fn boxed(self) -> Box<dyn HardforkTrait> {
+                Box::new(self)
             }
         }
 

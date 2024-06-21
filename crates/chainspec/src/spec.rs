@@ -185,8 +185,8 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
         hardforks: OP_MAINNET_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                ((Box::new(Hardfork::London) as Box<dyn HardforkTrait>), OP_BASE_FEE_PARAMS),
-                ((Box::new(OptimismHardfork::Canyon) as Box<dyn HardforkTrait>), OP_CANYON_BASE_FEE_PARAMS),
+                (Hardfork::London.boxed(), OP_BASE_FEE_PARAMS),
+                (OptimismHardfork::Canyon.boxed(), OP_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
         ),
@@ -210,8 +210,8 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
         hardforks: OP_SEPOLIA_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                ((Box::new(Hardfork::London) as Box<dyn HardforkTrait>), OP_SEPOLIA_BASE_FEE_PARAMS),
-                ((Box::new(OptimismHardfork::Canyon) as Box<dyn HardforkTrait>), OP_SEPOLIA_CANYON_BASE_FEE_PARAMS),
+                (Hardfork::London.boxed(), OP_SEPOLIA_BASE_FEE_PARAMS),
+                (OptimismHardfork::Canyon.boxed(), OP_SEPOLIA_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
         ),
@@ -235,8 +235,8 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
         hardforks: BASE_SEPOLIA_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                ((Box::new(Hardfork::London) as Box<dyn HardforkTrait>), BASE_SEPOLIA_BASE_FEE_PARAMS),
-                ((Box::new(OptimismHardfork::Canyon) as Box<dyn HardforkTrait>), BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS),
+                (Hardfork::London.boxed(), BASE_SEPOLIA_BASE_FEE_PARAMS),
+                (OptimismHardfork::Canyon.boxed(), BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
         ),
@@ -260,8 +260,8 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
         hardforks: BASE_MAINNET_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                ((Box::new(Hardfork::London) as Box<dyn HardforkTrait>), OP_BASE_FEE_PARAMS),
-                ((Box::new(OptimismHardfork::Canyon) as Box<dyn HardforkTrait>), OP_CANYON_BASE_FEE_PARAMS),
+                (Hardfork::London.boxed(), OP_BASE_FEE_PARAMS),
+                (OptimismHardfork::Canyon.boxed(), OP_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
         ),
@@ -751,22 +751,22 @@ impl From<Genesis> for ChainSpec {
         let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
 
         // Block-based hardforks
-        let hardfork_opts:  = [
-            (Box::new(Hardfork::Homestead) as Box<dyn HardforkTrait>, genesis.config.homestead_block),
-            (Box::new(Hardfork::Dao) as Box<dyn HardforkTrait>, genesis.config.dao_fork_block),
-            (Box::new(Hardfork::Tangerine) as Box<dyn HardforkTrait>, genesis.config.eip150_block),
-            (Box::new(Hardfork::SpuriousDragon) as Box<dyn HardforkTrait>, genesis.config.eip155_block),
-            (Box::new(Hardfork::Byzantium) as Box<dyn HardforkTrait>, genesis.config.byzantium_block),
-            (Box::new(Hardfork::Constantinople) as Box<dyn HardforkTrait>, genesis.config.constantinople_block),
-            (Box::new(Hardfork::Petersburg) as Box<dyn HardforkTrait>, genesis.config.petersburg_block),
-            (Box::new(Hardfork::Istanbul) as Box<dyn HardforkTrait>, genesis.config.istanbul_block),
-            (Box::new(Hardfork::MuirGlacier) as Box<dyn HardforkTrait>, genesis.config.muir_glacier_block),
-            (Box::new(Hardfork::Berlin) as Box<dyn HardforkTrait>, genesis.config.berlin_block),
-            (Box::new(Hardfork::London) as Box<dyn HardforkTrait>, genesis.config.london_block),
-            (Box::new(Hardfork::ArrowGlacier) as Box<dyn HardforkTrait>, genesis.config.arrow_glacier_block),
-            (Box::new(Hardfork::GrayGlacier) as Box<dyn HardforkTrait>, genesis.config.gray_glacier_block),
+        let hardfork_opts = [
+            (Hardfork::Homestead.boxed(), genesis.config.homestead_block),
+            (Hardfork::Dao.boxed(), genesis.config.dao_fork_block),
+            (Hardfork::Tangerine.boxed(), genesis.config.eip150_block),
+            (Hardfork::SpuriousDragon.boxed(), genesis.config.eip155_block),
+            (Hardfork::Byzantium.boxed(), genesis.config.byzantium_block),
+            (Hardfork::Constantinople.boxed(), genesis.config.constantinople_block),
+            (Hardfork::Petersburg.boxed(), genesis.config.petersburg_block),
+            (Hardfork::Istanbul.boxed(), genesis.config.istanbul_block),
+            (Hardfork::MuirGlacier.boxed(), genesis.config.muir_glacier_block),
+            (Hardfork::Berlin.boxed(), genesis.config.berlin_block),
+            (Hardfork::London.boxed(), genesis.config.london_block),
+            (Hardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
+            (Hardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
             #[cfg(feature = "optimism)")]
-            (Box::new(OptimismHardfork::Bedrock) as Box<dyn HardforkTrait>, optimism_genesis_info.bedrock_block),
+            (OptimismHardfork::Bedrock.boxed(), optimism_genesis_info.bedrock_block),
         ];
         let mut hardforks = hardfork_opts
             .iter()
@@ -777,7 +777,7 @@ impl From<Genesis> for ChainSpec {
         let paris_block_and_final_difficulty =
             if let Some(ttd) = genesis.config.terminal_total_difficulty {
                 hardforks.insert(
-                    Hardfork::Paris,
+                    Hardfork::Paris.boxed(),
                     ForkCondition::TTD {
                         total_difficulty: ttd,
                         fork_block: genesis.config.merge_netsplit_block,
@@ -791,17 +791,17 @@ impl From<Genesis> for ChainSpec {
 
         // Time-based hardforks
         let time_hardfork_opts = [
-            (Hardfork::Shanghai, genesis.config.shanghai_time),
-            (Hardfork::Cancun, genesis.config.cancun_time),
-            (Hardfork::Prague, genesis.config.prague_time),
+            (Hardfork::Shanghai.boxed(), genesis.config.shanghai_time),
+            (Hardfork::Cancun.boxed(), genesis.config.cancun_time),
+            (Hardfork::Prague.boxed(), genesis.config.prague_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Regolith, optimism_genesis_info.regolith_time),
+            (OptimismHardfork::Regolith.boxed(), optimism_genesis_info.regolith_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Canyon, optimism_genesis_info.canyon_time),
+            (OptimismHardfork::Canyon.boxed(), optimism_genesis_info.canyon_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Ecotone, optimism_genesis_info.ecotone_time),
+            (OptimismHardfork::Ecotone.boxed(), optimism_genesis_info.ecotone_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Fjord, optimism_genesis_info.fjord_time),
+            (OptimismHardfork::Fjord.boxed(), optimism_genesis_info.fjord_time),
         ];
 
         let time_hardforks = time_hardfork_opts
@@ -825,11 +825,7 @@ impl From<Genesis> for ChainSpec {
             chain: genesis.config.chain_id.into(),
             genesis,
             genesis_hash: None,
-            hardforks: hardforks
-                .into_iter()
-                .map(|(f, c)| (Box::new(f) as Box<dyn HardforkTrait>, c))
-                .collect::<Vec<_>>()
-                .into(),
+            hardforks: hardforks.into_iter().collect::<Vec<_>>().into(),
             paris_block_and_final_difficulty,
             deposit_contract,
             #[cfg(feature = "optimism")]
@@ -1120,11 +1116,11 @@ impl OptimismGenesisInfo {
                 BaseFeeParamsKind::Variable(
                     vec![
                         (
-                            Box::new(Hardfork::London) as Box<dyn HardforkTrait>,
+                            Hardfork::London.boxed(),
                             BaseFeeParams::new(denominator as u128, elasticity as u128),
                         ),
                         (
-                            Box::new(OptimismHardfork::Canyon)  as Box<dyn HardforkTrait>,
+                            OptimismHardfork::Canyon.boxed(),
                             BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
                         ),
                     ]
