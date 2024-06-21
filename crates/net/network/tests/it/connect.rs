@@ -6,7 +6,7 @@ use futures::StreamExt;
 use reth_chainspec::net::mainnet_nodes;
 use reth_discv4::Discv4Config;
 use reth_eth_wire::DisconnectReason;
-use reth_net_common::ban_list::BanList;
+use reth_net_banlist::BanList;
 use reth_network::{
     test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
     NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkManager, PeersConfig,
