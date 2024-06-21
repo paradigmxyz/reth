@@ -1169,10 +1169,7 @@ where
 /// [`ServerBuilder::build`] and [`Server::start`](jsonrpsee::server::Server::start).
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct RpcServerConfig<L = Identity>
-where
-    L: tower::Layer<Identity> + Send + Sync + 'static,
-{
+pub struct RpcServerConfig<L = Identity> {
     /// Configs for JSON-RPC Http.
     http_server_config: Option<ServerBuilder<Identity, Identity>>,
     /// Allowed CORS Domains for http
@@ -1192,7 +1189,7 @@ where
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
     /// Additional middleware layer.
-    additional_middleware: Option<L>,
+    additional_middleware: Option<tower::ServiceBuilder<L>>,
 }
 
 // === impl RpcServerConfig ===
@@ -1208,15 +1205,12 @@ impl Default for RpcServerConfig<Identity> {
             ipc_server_config: None,
             ipc_endpoint: None,
             jwt_secret: None,
-            additional_middleware: Some(Identity::new()),
+            additional_middleware: None,
         }
     }
 }
 
-impl<L> RpcServerConfig<L>
-where
-    L: tower::Layer<Identity> + Send + Sync + 'static,
-{
+impl<L> RpcServerConfig<L> {
     /// Creates a new `RpcServerConfig` with all fields set to `None`.
     ///
     /// # Returns
@@ -1237,24 +1231,19 @@ where
         }
     }
 
-    /// Adds a middleware layer to the `RpcServerConfig`.
     ///
     /// # Parameters
     ///
-    /// - `layer`: The middleware layer to add.
+    /// - `layer`: The ServiceBuilder to add.
     ///
     /// # Returns
     ///
-    /// A new `RpcServerConfig` with the added middleware layer.
+    /// A new `RpcServerConfig` with the added ServiceBuilder.
     ///
     /// # Type Parameters
     ///
-    /// - `M`: The type of the middleware layer, which must implement `tower::Layer<L> + Send + Sync
-    ///   + `static`.
-    pub fn with_additional_middleware<M>(self, layer: M) -> RpcServerConfig<M>
-    where
-        M: tower::Layer<L> + Send + Sync + 'static + tower::Layer<tower::layer::util::Identity>,
-    {
+    /// - `T`: The type of the ServiceBuilder, which must implement `tower::ServiceBuilder + Send + Sync + 'static`.
+    pub fn with_additional_middleware<T>(self, layer: tower::ServiceBuilder<T>) -> RpcServerConfig<T> {
         RpcServerConfig {
             http_server_config: self.http_server_config,
             http_cors_domains: self.http_cors_domains,

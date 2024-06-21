@@ -188,7 +188,8 @@ impl RethRpcServerConfig for RpcServerArgs {
 
         if self.enable_logging {
             let trace_layer = tower_http::trace::TraceLayer::new_for_http();
-            config = config.with_additional_middleware(trace_layer);
+            let service_builder = tower::ServiceBuilder::new().layer(trace_layer);
+            config = config.with_additional_middleware(service_builder);
         }
 
         // if self.enable_auth {
