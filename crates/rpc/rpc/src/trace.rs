@@ -6,6 +6,7 @@ use crate::eth::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
+use reth_chainspec::chains::ethereum::EthereumHardforksTrait;
 use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };

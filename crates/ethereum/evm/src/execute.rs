@@ -4,7 +4,9 @@ use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     EthEvmConfig,
 };
-use reth_chainspec::{ChainSpec, MAINNET};
+use reth_chainspec::{
+    chains::ethereum::EthereumHardforksTrait, ChainSpec, HardforksTrait, MAINNET,
+};
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{

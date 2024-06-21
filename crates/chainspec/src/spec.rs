@@ -14,8 +14,15 @@ use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
 use once_cell::sync::Lazy;
 use reth_ethereum_forks::{
-    chains::ethereum::{GOERLI_HARDFORKS, HOLESKY_HARDFORKS, MAINNET_HARDFORKS, SEPOLIA_HARDFORKS},
-    DisplayHardforks, ForkCondition, ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head,
+    chains::{
+        dev::DEV_HARDFORKS,
+        ethereum::{
+            EthereumForks, EthereumHardforksTrait, GOERLI_HARDFORKS, HOLESKY_HARDFORKS,
+            MAINNET_HARDFORKS, SEPOLIA_HARDFORKS,
+        },
+    },
+    DisplayHardforks, ForkCondition, ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork,
+    HardforkTrait, HardforksTrait, Head,
 };
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::{
@@ -37,6 +44,8 @@ use crate::constants::optimism::{
 pub use alloy_eips::eip1559::BaseFeeParams;
 #[cfg(feature = "optimism")]
 use reth_ethereum_forks::chains::optimism::*;
+#[cfg(feature = "optimism")]
+use reth_ethereum_forks::OptimismHardfork;
 
 #[cfg(feature = "optimism")]
 use crate::net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes};
@@ -56,7 +65,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             15537394,
             U256::from(58_750_003_716_598_352_816_469u128),
         )),
-        hardforks: MAINNET_HARDFORKS.into(),
+        hardforks: MAINNET_HARDFORKS.clone(),
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
         deposit_contract: Some(DepositContract::new(
             address!("00000000219ab540356cbb839cbe05303d7705fa"),
@@ -80,7 +89,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         // <https://goerli.etherscan.io/block/7382818>
         paris_block_and_final_difficulty: Some((7382818, U256::from(10_790_000))),
-        hardforks: GOERLI_HARDFORKS.into(),
+        hardforks: GOERLI_HARDFORKS.clone(),
         // https://goerli.etherscan.io/tx/0xa3c07dc59bfdb1bfc2d50920fed2ef2c1c4e0a09fe2325dbc14e07702f965a78
         deposit_contract: Some(DepositContract::new(
             address!("ff50ed3d0ec03ac01d4c79aad74928bff48a7b2b"),
@@ -104,7 +113,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         // <https://sepolia.etherscan.io/block/1450409>
         paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
-        hardforks: SEPOLIA_HARDFORKS.into(),
+        hardforks: SEPOLIA_HARDFORKS.clone(),
         // https://sepolia.etherscan.io/tx/0x025ecbf81a2f1220da6285d1701dc89fb5a956b62562ee922e1a9efd73eb4b14
         deposit_contract: Some(DepositContract::new(
             address!("7f02c3e3c98b133055b8b348b2ac625669ed295d"),
@@ -127,7 +136,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
-        hardforks: HOLESKY_HARDFORKS.into(),
+        hardforks: HOLESKY_HARDFORKS.clone(),
         deposit_contract: Some(DepositContract::new(
             address!("4242424242424242424242424242424242424242"),
             0,
@@ -152,32 +161,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Dao, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(0)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(0)),
-            (Hardfork::London, ForkCondition::Block(0)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
-            ),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(0)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(0)),
-            #[cfg(feature = "optimism")]
-            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
-            #[cfg(feature = "optimism")]
-            (Hardfork::Bedrock, ForkCondition::Block(0)),
-            #[cfg(feature = "optimism")]
-            (Hardfork::Ecotone, ForkCondition::Timestamp(0)),
-        ]),
+        hardforks: DEV_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         deposit_contract: None, // TODO: do we even have?
         ..Default::default()
@@ -187,7 +171,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The Optimism Mainnet spec
 #[cfg(feature = "optimism")]
-pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static OP_MAINNET: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::optimism_mainnet(),
         // genesis contains empty alloc field because state at first bedrock block is imported
@@ -198,11 +182,11 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: OP_MAINNET_HARDFORKS.into(),
+        hardforks: OP_MAINNET_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London, OP_BASE_FEE_PARAMS),
-                (Hardfork::Canyon, OP_CANYON_BASE_FEE_PARAMS),
+                ((Box::new(Hardfork::London) as Box<dyn HardforkTrait>), OP_BASE_FEE_PARAMS),
+                ((Box::new(OptimismHardfork::Canyon) as Box<dyn HardforkTrait>), OP_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
         ),
@@ -214,7 +198,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The OP Sepolia spec
 #[cfg(feature = "optimism")]
-pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static OP_SEPOLIA: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::from_named(NamedChain::OptimismSepolia),
         genesis: serde_json::from_str(include_str!("../res/genesis/sepolia_op.json"))
@@ -223,11 +207,11 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: OP_SEPOLIA_HARDFORKS.into(),
+        hardforks: OP_SEPOLIA_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London, OP_SEPOLIA_BASE_FEE_PARAMS),
-                (Hardfork::Canyon, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS),
+                ((Box::new(Hardfork::London) as Box<dyn HardforkTrait>), OP_SEPOLIA_BASE_FEE_PARAMS),
+                ((Box::new(OptimismHardfork::Canyon) as Box<dyn HardforkTrait>), OP_SEPOLIA_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
         ),
@@ -239,7 +223,7 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The Base Sepolia spec
 #[cfg(feature = "optimism")]
-pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::base_sepolia(),
         genesis: serde_json::from_str(include_str!("../res/genesis/sepolia_base.json"))
@@ -248,11 +232,11 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: BASE_SEPOLIA_HARDFORKS.into(),
+        hardforks: BASE_SEPOLIA_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London, BASE_SEPOLIA_BASE_FEE_PARAMS),
-                (Hardfork::Canyon, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS),
+                ((Box::new(Hardfork::London) as Box<dyn HardforkTrait>), BASE_SEPOLIA_BASE_FEE_PARAMS),
+                ((Box::new(OptimismHardfork::Canyon) as Box<dyn HardforkTrait>), BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
         ),
@@ -264,7 +248,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The Base mainnet spec
 #[cfg(feature = "optimism")]
-pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
+pub static BASE_MAINNET: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::base_mainnet(),
         genesis: serde_json::from_str(include_str!("../res/genesis/base.json"))
@@ -273,11 +257,11 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: BASE_MAINNET_HARDFORKS.into(),
+        hardforks: BASE_MAINNET_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London, OP_BASE_FEE_PARAMS),
-                (Hardfork::Canyon, OP_CANYON_BASE_FEE_PARAMS),
+                ((Box::new(Hardfork::London) as Box<dyn HardforkTrait>), OP_BASE_FEE_PARAMS),
+                ((Box::new(OptimismHardfork::Canyon) as Box<dyn HardforkTrait>), OP_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
         ),
@@ -313,7 +297,15 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 /// A type alias to a vector of tuples of [Hardfork] and [`BaseFeeParams`], sorted by [Hardfork]
 /// activation order. This is used to specify dynamic EIP-1559 parameters for chains like Optimism.
 #[derive(Clone, Debug, PartialEq, Eq, From)]
-pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
+pub struct ForkBaseFeeParams(Vec<(Box<dyn HardforkTrait>, BaseFeeParams)>);
+
+impl<H> std::ops::Deref for ChainSpec<H> {
+    type Target = H;
+
+    fn deref(&self) -> &Self::Target {
+        &self.hardforks
+    }
+}
 
 /// An Ethereum chain specification.
 ///
@@ -323,7 +315,7 @@ pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
 /// - The genesis block of the chain ([`Genesis`])
 /// - What hardforks are activated, and under which conditions
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChainSpec {
+pub struct ChainSpec<H = EthereumForks> {
     /// The chain ID
     pub chain: Chain,
 
@@ -341,7 +333,7 @@ pub struct ChainSpec {
     pub paris_block_and_final_difficulty: Option<(u64, U256)>,
 
     /// The active hard forks and their activation conditions
-    pub hardforks: BTreeMap<Hardfork, ForkCondition>,
+    pub hardforks: H, //BTreeMap<Hardfork, ForkCondition>,
 
     /// The deposit contract deployed for `PoS`
     pub deposit_contract: Option<DepositContract>,
@@ -355,7 +347,7 @@ pub struct ChainSpec {
     pub prune_delete_limit: usize,
 }
 
-impl Default for ChainSpec {
+impl<H: Default> Default for ChainSpec<H> {
     fn default() -> Self {
         Self {
             chain: Default::default(),
@@ -398,7 +390,7 @@ impl ChainSpec {
     #[inline]
     #[cfg(feature = "optimism")]
     pub fn is_optimism(&self) -> bool {
-        self.chain.is_optimism() || self.hardforks.contains_key(&Hardfork::Bedrock)
+        self.chain.is_optimism() || self.hardforks.get(OptimismHardfork::Bedrock).is_some()
     }
 
     /// Returns `true` if this chain contains Optimism configuration.
@@ -490,7 +482,7 @@ impl ChainSpec {
             self.genesis.base_fee_per_gas.map(|fee| fee as u64).unwrap_or(EIP1559_INITIAL_BASE_FEE);
 
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
-        self.fork(Hardfork::London).active_at_block(0).then_some(genesis_base_fee)
+        self.hardforks.fork(Hardfork::London).active_at_block(0).then_some(genesis_base_fee)
     }
 
     /// Get the [`BaseFeeParams`] for the chain at the given timestamp.
@@ -502,7 +494,7 @@ impl ChainSpec {
                 // first one that corresponds to a hardfork that is active at the
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
-                    if self.is_fork_active_at_timestamp(*fork, timestamp) {
+                    if self.hardforks.is_fork_active_at_timestamp(fork.clone(), timestamp) {
                         return *params
                     }
                 }
@@ -521,7 +513,7 @@ impl ChainSpec {
                 // first one that corresponds to a hardfork that is active at the
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
-                    if self.is_fork_active_at_block(*fork, block_number) {
+                    if self.hardforks.is_fork_active_at_block(fork.clone(), block_number) {
                         return *params
                     }
                 }
@@ -558,32 +550,32 @@ impl ChainSpec {
     }
 
     /// Get the fork filter for the given hardfork
-    pub fn hardfork_fork_filter(&self, fork: Hardfork) -> Option<ForkFilter> {
-        match self.fork(fork) {
+    pub fn hardfork_fork_filter<H: HardforkTrait>(&self, fork: H) -> Option<ForkFilter> {
+        match self.hardforks.fork(fork.clone_box()) {
             ForkCondition::Never => None,
-            _ => Some(self.fork_filter(self.satisfy(self.fork(fork)))),
+            _ => Some(self.fork_filter(self.satisfy(self.hardforks.fork(fork)))),
         }
     }
 
-    /// Returns the forks in this specification and their activation conditions.
-    pub const fn hardforks(&self) -> &BTreeMap<Hardfork, ForkCondition> {
-        &self.hardforks
-    }
+    // /// Returns the forks in this specification and their activation conditions.
+    // pub const fn hardforks(&self) -> &BTreeMap<Hardfork, ForkCondition> {
+    //     &self.hardforks
+    // }
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
         DisplayHardforks::new(
-            self.hardforks(),
+            &self.hardforks,
             self.paris_block_and_final_difficulty.map(|(block, _)| block),
         )
     }
 
     /// Get the fork id for the given hardfork.
     #[inline]
-    pub fn hardfork_fork_id(&self, fork: Hardfork) -> Option<ForkId> {
-        match self.fork(fork) {
+    pub fn hardfork_fork_id<H: HardforkTrait>(&self, fork: H) -> Option<ForkId> {
+        match self.hardforks.fork(fork.clone_box()) {
             ForkCondition::Never => None,
-            _ => Some(self.fork_id(&self.satisfy(self.fork(fork)))),
+            _ => Some(self.fork_id(&self.satisfy(self.hardforks.fork(fork)))),
         }
     }
 
@@ -603,85 +595,12 @@ impl ChainSpec {
     /// hardforks.
     #[inline]
     pub fn latest_fork_id(&self) -> ForkId {
-        self.hardfork_fork_id(*self.hardforks().last_key_value().unwrap().0).unwrap()
-    }
-
-    /// Get the fork condition for the given fork.
-    pub fn fork(&self, fork: Hardfork) -> ForkCondition {
-        self.hardforks.get(&fork).copied().unwrap_or(ForkCondition::Never)
-    }
-
-    /// Get an iterator of all hardforks with their respective activation conditions.
-    pub fn forks_iter(&self) -> impl Iterator<Item = (Hardfork, ForkCondition)> + '_ {
-        self.hardforks.iter().map(|(f, b)| (*f, *b))
-    }
-
-    /// Convenience method to check if a fork is active at a given timestamp.
-    #[inline]
-    pub fn is_fork_active_at_timestamp(&self, fork: Hardfork, timestamp: u64) -> bool {
-        self.fork(fork).active_at_timestamp(timestamp)
-    }
-
-    /// Convenience method to check if a fork is active at a given block number
-    #[inline]
-    pub fn is_fork_active_at_block(&self, fork: Hardfork, block_number: u64) -> bool {
-        self.fork(fork).active_at_block(block_number)
-    }
-
-    /// Convenience method to check if [`Hardfork::Shanghai`] is active at a given timestamp.
-    #[inline]
-    pub fn is_shanghai_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.is_fork_active_at_timestamp(Hardfork::Shanghai, timestamp)
-    }
-
-    /// Convenience method to check if [`Hardfork::Cancun`] is active at a given timestamp.
-    #[inline]
-    pub fn is_cancun_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.is_fork_active_at_timestamp(Hardfork::Cancun, timestamp)
-    }
-
-    /// Convenience method to check if [`Hardfork::Prague`] is active at a given timestamp.
-    #[inline]
-    pub fn is_prague_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.is_fork_active_at_timestamp(Hardfork::Prague, timestamp)
-    }
-
-    /// Convenience method to check if [`Hardfork::Byzantium`] is active at a given block number.
-    #[inline]
-    pub fn is_byzantium_active_at_block(&self, block_number: u64) -> bool {
-        self.fork(Hardfork::Byzantium).active_at_block(block_number)
-    }
-
-    /// Convenience method to check if [`Hardfork::SpuriousDragon`] is active at a given block
-    /// number.
-    #[inline]
-    pub fn is_spurious_dragon_active_at_block(&self, block_number: u64) -> bool {
-        self.fork(Hardfork::SpuriousDragon).active_at_block(block_number)
-    }
-
-    /// Convenience method to check if [`Hardfork::Homestead`] is active at a given block number.
-    #[inline]
-    pub fn is_homestead_active_at_block(&self, block_number: u64) -> bool {
-        self.fork(Hardfork::Homestead).active_at_block(block_number)
-    }
-
-    /// The Paris hardfork (merge) is activated via block number. If we have knowledge of the block,
-    /// this function will return true if the block number is greater than or equal to the Paris
-    /// (merge) block.
-    pub fn is_paris_active_at_block(&self, block_number: u64) -> Option<bool> {
-        self.paris_block_and_final_difficulty.map(|(paris_block, _)| block_number >= paris_block)
-    }
-
-    /// Convenience method to check if [`Hardfork::Bedrock`] is active at a given block number.
-    #[cfg(feature = "optimism")]
-    #[inline]
-    pub fn is_bedrock_active_at_block(&self, block_number: u64) -> bool {
-        self.fork(Hardfork::Bedrock).active_at_block(block_number)
+        self.hardfork_fork_id(self.hardforks.forks_iter().last().unwrap().0.clone()).unwrap()
     }
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
-        let forks = self.forks_iter().filter_map(|(_, condition)| {
+        let forks = self.hardforks.forks_iter().filter_map(|(_, condition)| {
             // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
             // fork filter.
             Some(match condition {
@@ -701,7 +620,7 @@ impl ChainSpec {
         let mut current_applied = 0;
 
         // handle all block forks before handling timestamp based forks. see: https://eips.ethereum.org/EIPS/eip-6122
-        for (_, cond) in self.forks_iter() {
+        for (_, cond) in self.hardforks.forks_iter() {
             // handle block based forks and the sepolia merge netsplit block edge case (TTD
             // ForkCondition with Some(block))
             if let ForkCondition::Block(block) |
@@ -723,7 +642,7 @@ impl ChainSpec {
         // timestamp are ALWAYS applied after the merge.
         //
         // this filter ensures that no block-based forks are returned
-        for timestamp in self.forks_iter().filter_map(|(_, cond)| {
+        for timestamp in self.hardforks.forks_iter().filter_map(|(_, cond)| {
             cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
         }) {
             let cond = ForkCondition::Timestamp(timestamp);
@@ -767,7 +686,7 @@ impl ChainSpec {
     ///
     /// Note: this returns None if the `ChainSpec` is not configured with a TTD/Timestamp fork.
     pub(crate) fn last_block_fork_before_merge_or_timestamp(&self) -> Option<u64> {
-        let mut hardforks_iter = self.forks_iter().peekable();
+        let mut hardforks_iter = self.hardforks.forks_iter().peekable();
         while let Some((_, curr_cond)) = hardforks_iter.next() {
             if let Some((_, next_cond)) = hardforks_iter.peek() {
                 // peek and find the first occurrence of ForkCondition::TTD (merge) , or in
@@ -832,22 +751,22 @@ impl From<Genesis> for ChainSpec {
         let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
 
         // Block-based hardforks
-        let hardfork_opts = [
-            (Hardfork::Homestead, genesis.config.homestead_block),
-            (Hardfork::Dao, genesis.config.dao_fork_block),
-            (Hardfork::Tangerine, genesis.config.eip150_block),
-            (Hardfork::SpuriousDragon, genesis.config.eip155_block),
-            (Hardfork::Byzantium, genesis.config.byzantium_block),
-            (Hardfork::Constantinople, genesis.config.constantinople_block),
-            (Hardfork::Petersburg, genesis.config.petersburg_block),
-            (Hardfork::Istanbul, genesis.config.istanbul_block),
-            (Hardfork::MuirGlacier, genesis.config.muir_glacier_block),
-            (Hardfork::Berlin, genesis.config.berlin_block),
-            (Hardfork::London, genesis.config.london_block),
-            (Hardfork::ArrowGlacier, genesis.config.arrow_glacier_block),
-            (Hardfork::GrayGlacier, genesis.config.gray_glacier_block),
-            #[cfg(feature = "optimism")]
-            (Hardfork::Bedrock, optimism_genesis_info.bedrock_block),
+        let hardfork_opts:  = [
+            (Box::new(Hardfork::Homestead) as Box<dyn HardforkTrait>, genesis.config.homestead_block),
+            (Box::new(Hardfork::Dao) as Box<dyn HardforkTrait>, genesis.config.dao_fork_block),
+            (Box::new(Hardfork::Tangerine) as Box<dyn HardforkTrait>, genesis.config.eip150_block),
+            (Box::new(Hardfork::SpuriousDragon) as Box<dyn HardforkTrait>, genesis.config.eip155_block),
+            (Box::new(Hardfork::Byzantium) as Box<dyn HardforkTrait>, genesis.config.byzantium_block),
+            (Box::new(Hardfork::Constantinople) as Box<dyn HardforkTrait>, genesis.config.constantinople_block),
+            (Box::new(Hardfork::Petersburg) as Box<dyn HardforkTrait>, genesis.config.petersburg_block),
+            (Box::new(Hardfork::Istanbul) as Box<dyn HardforkTrait>, genesis.config.istanbul_block),
+            (Box::new(Hardfork::MuirGlacier) as Box<dyn HardforkTrait>, genesis.config.muir_glacier_block),
+            (Box::new(Hardfork::Berlin) as Box<dyn HardforkTrait>, genesis.config.berlin_block),
+            (Box::new(Hardfork::London) as Box<dyn HardforkTrait>, genesis.config.london_block),
+            (Box::new(Hardfork::ArrowGlacier) as Box<dyn HardforkTrait>, genesis.config.arrow_glacier_block),
+            (Box::new(Hardfork::GrayGlacier) as Box<dyn HardforkTrait>, genesis.config.gray_glacier_block),
+            #[cfg(feature = "optimism)")]
+            (Box::new(OptimismHardfork::Bedrock) as Box<dyn HardforkTrait>, optimism_genesis_info.bedrock_block),
         ];
         let mut hardforks = hardfork_opts
             .iter()
@@ -876,13 +795,13 @@ impl From<Genesis> for ChainSpec {
             (Hardfork::Cancun, genesis.config.cancun_time),
             (Hardfork::Prague, genesis.config.prague_time),
             #[cfg(feature = "optimism")]
-            (Hardfork::Regolith, optimism_genesis_info.regolith_time),
+            (OptimismHardfork::Regolith, optimism_genesis_info.regolith_time),
             #[cfg(feature = "optimism")]
-            (Hardfork::Canyon, optimism_genesis_info.canyon_time),
+            (OptimismHardfork::Canyon, optimism_genesis_info.canyon_time),
             #[cfg(feature = "optimism")]
-            (Hardfork::Ecotone, optimism_genesis_info.ecotone_time),
+            (OptimismHardfork::Ecotone, optimism_genesis_info.ecotone_time),
             #[cfg(feature = "optimism")]
-            (Hardfork::Fjord, optimism_genesis_info.fjord_time),
+            (OptimismHardfork::Fjord, optimism_genesis_info.fjord_time),
         ];
 
         let time_hardforks = time_hardfork_opts
@@ -906,7 +825,11 @@ impl From<Genesis> for ChainSpec {
             chain: genesis.config.chain_id.into(),
             genesis,
             genesis_hash: None,
-            hardforks,
+            hardforks: hardforks
+                .into_iter()
+                .map(|(f, c)| (Box::new(f) as Box<dyn HardforkTrait>, c))
+                .collect::<Vec<_>>()
+                .into(),
             paris_block_and_final_difficulty,
             deposit_contract,
             #[cfg(feature = "optimism")]
@@ -918,10 +841,10 @@ impl From<Genesis> for ChainSpec {
 
 /// A helper to build custom chain specs
 #[derive(Debug, Default, Clone)]
-pub struct ChainSpecBuilder {
+pub struct ChainSpecBuilder<H = EthereumForks> {
     chain: Option<Chain>,
     genesis: Option<Genesis>,
-    hardforks: BTreeMap<Hardfork, ForkCondition>,
+    hardforks: H,
 }
 
 impl ChainSpecBuilder {
@@ -933,7 +856,9 @@ impl ChainSpecBuilder {
             hardforks: MAINNET.hardforks.clone(),
         }
     }
+}
 
+impl<H: HardforksTrait> ChainSpecBuilder<H> {
     /// Set the chain ID
     pub const fn chain(mut self, chain: Chain) -> Self {
         self.chain = Some(chain);
@@ -954,7 +879,7 @@ impl ChainSpecBuilder {
 
     /// Remove the given fork from the spec.
     pub fn without_fork(mut self, fork: Hardfork) -> Self {
-        self.hardforks.remove(&fork);
+        self.hardforks.remove(fork);
         self
     }
 
@@ -1065,7 +990,7 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn bedrock_activated(mut self) -> Self {
         self = self.paris_activated();
-        self.hardforks.insert(Hardfork::Bedrock, ForkCondition::Block(0));
+        self.hardforks.insert(OptimismHardfork::Bedrock, ForkCondition::Block(0));
         self
     }
 
@@ -1073,7 +998,7 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn regolith_activated(mut self) -> Self {
         self = self.bedrock_activated();
-        self.hardforks.insert(Hardfork::Regolith, ForkCondition::Timestamp(0));
+        self.hardforks.insert(OptimismHardfork::Regolith, ForkCondition::Timestamp(0));
         self
     }
 
@@ -1083,7 +1008,7 @@ impl ChainSpecBuilder {
         self = self.regolith_activated();
         // Canyon also activates changes from L1's Shanghai hardfork
         self.hardforks.insert(Hardfork::Shanghai, ForkCondition::Timestamp(0));
-        self.hardforks.insert(Hardfork::Canyon, ForkCondition::Timestamp(0));
+        self.hardforks.insert(OptimismHardfork::Canyon, ForkCondition::Timestamp(0));
         self
     }
 
@@ -1092,7 +1017,7 @@ impl ChainSpecBuilder {
     pub fn ecotone_activated(mut self) -> Self {
         self = self.canyon_activated();
         self.hardforks.insert(Hardfork::Cancun, ForkCondition::Timestamp(0));
-        self.hardforks.insert(Hardfork::Ecotone, ForkCondition::Timestamp(0));
+        self.hardforks.insert(OptimismHardfork::Ecotone, ForkCondition::Timestamp(0));
         self
     }
 
@@ -1100,7 +1025,7 @@ impl ChainSpecBuilder {
     #[cfg(feature = "optimism")]
     pub fn fjord_activated(mut self) -> Self {
         self = self.ecotone_activated();
-        self.hardforks.insert(Hardfork::Fjord, ForkCondition::Timestamp(0));
+        self.hardforks.insert(OptimismHardfork::Fjord, ForkCondition::Timestamp(0));
         self
     }
 
@@ -1110,21 +1035,21 @@ impl ChainSpecBuilder {
     ///
     /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
     /// [`Self::genesis`])
-    pub fn build(self) -> ChainSpec {
+    pub fn build(self) -> ChainSpec<H> {
         let paris_block_and_final_difficulty = {
-            self.hardforks.get(&Hardfork::Paris).and_then(|cond| {
+            self.hardforks.get(Hardfork::Paris).and_then(|cond| {
                 if let ForkCondition::TTD { fork_block, total_difficulty } = cond {
-                    fork_block.map(|fork_block| (fork_block, *total_difficulty))
+                    fork_block.map(|fork_block| (fork_block, total_difficulty))
                 } else {
                     None
                 }
             })
         };
-        ChainSpec {
+        ChainSpec::<H> {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
             genesis_hash: None,
-            hardforks: self.hardforks,
+            hardforks: self.hardforks.clone(),
             paris_block_and_final_difficulty,
             deposit_contract: None,
             ..Default::default()
@@ -1132,15 +1057,15 @@ impl ChainSpecBuilder {
     }
 }
 
-impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
-    fn from(value: &Arc<ChainSpec>) -> Self {
-        Self {
-            chain: Some(value.chain),
-            genesis: Some(value.genesis.clone()),
-            hardforks: value.hardforks.clone(),
-        }
-    }
-}
+// impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
+//     fn from(value: &Arc<ChainSpec>) -> Self {
+//         Self {
+//             chain: Some(value.chain),
+//             genesis: Some(value.genesis.clone()),
+//             hardforks: value.hardforks.forks_iter().map(|(fork, cond)|collect(),
+//         }
+//     }
+// }
 
 /// `PoS` deposit contract details.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1195,11 +1120,11 @@ impl OptimismGenesisInfo {
                 BaseFeeParamsKind::Variable(
                     vec![
                         (
-                            Hardfork::London,
+                            Box::new(Hardfork::London) as Box<dyn HardforkTrait>,
                             BaseFeeParams::new(denominator as u128, elasticity as u128),
                         ),
                         (
-                            Hardfork::Canyon,
+                            Box::new(OptimismHardfork::Canyon)  as Box<dyn HardforkTrait>,
                             BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
                         ),
                     ]
@@ -2889,13 +2814,13 @@ Post-merge hard forks (timestamp based):
 
         assert!(!chain_spec.is_fork_active_at_block(Hardfork::Bedrock, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, 0));
 
         assert!(chain_spec.is_fork_active_at_block(Hardfork::Bedrock, 10));
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, 20));
-        assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, 30));
+        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, 40));
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, 50));
     }
@@ -2949,7 +2874,7 @@ Post-merge hard forks (timestamp based):
             BaseFeeParamsKind::Variable(
                 vec![
                     (Hardfork::London, BaseFeeParams::new(70, 60)),
-                    (Hardfork::Canyon, BaseFeeParams::new(80, 60)),
+                    (OptimismHardfork::Canyon, BaseFeeParams::new(80, 60)),
                 ]
                 .into()
             )
@@ -2957,13 +2882,13 @@ Post-merge hard forks (timestamp based):
 
         assert!(!chain_spec.is_fork_active_at_block(Hardfork::Bedrock, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, 0));
 
         assert!(chain_spec.is_fork_active_at_block(Hardfork::Bedrock, 10));
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, 20));
-        assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, 30));
+        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, 40));
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, 50));
     }

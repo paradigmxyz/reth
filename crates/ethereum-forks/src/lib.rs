@@ -24,6 +24,7 @@ mod display;
 mod forkcondition;
 mod forkid;
 mod hardfork;
+mod hardforks;
 mod head;
 
 pub use forkid::{
@@ -32,8 +33,16 @@ pub use forkid::{
 pub use hardfork::Hardfork;
 pub use head::Head;
 
+pub use chains::ethereum::*;
 pub use display::DisplayHardforks;
 pub use forkcondition::ForkCondition;
+pub use hardfork::HardforkTrait;
+pub use hardforks::{HardforksBaseType, HardforksTrait};
+
+#[cfg(feature = "optimism")]
+pub use chains::optimism::*;
+#[cfg(feature = "optimism")]
+pub use hardfork::optimism::*;
 
 /// Chains hardforks
 pub mod chains;

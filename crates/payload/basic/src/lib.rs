@@ -11,7 +11,7 @@
 use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{chains::ethereum::EthereumHardforksTrait, ChainSpec};
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
     PayloadJobGenerator,

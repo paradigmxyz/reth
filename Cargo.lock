@@ -6960,6 +6960,7 @@ dependencies = [
  "alloy-rlp",
  "arbitrary",
  "crc",
+ "once_cell",
  "proptest",
  "proptest-derive",
  "serde",

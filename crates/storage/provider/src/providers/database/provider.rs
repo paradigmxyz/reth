@@ -14,7 +14,7 @@ use crate::{
     WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
-use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_chainspec::{chains::ethereum::EthereumHardforksTrait, ChainInfo, ChainSpec};
 use reth_db::{tables, BlockNumberList};
 use reth_db_api::{
     common::KeyValue,
