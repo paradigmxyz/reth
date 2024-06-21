@@ -159,6 +159,7 @@ pub struct NetworkConfigBuilder {
     /// How to configure the sessions manager
     sessions_config: Option<SessionsConfig>,
     /// The network's chain spec
+    #[serde(skip)]
     chain_spec: Arc<ChainSpec>,
     /// The default mode of the network.
     network_mode: NetworkMode,

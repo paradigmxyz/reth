@@ -1,5 +1,5 @@
 //! Command that dumps genesis block JSON configuration to stdout
-use crate::args::utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS};
+use crate::args::utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS};
 use clap::Parser;
 use reth_chainspec::ChainSpec;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ pub struct DumpGenesisCommand {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
+        value_parser = chain_value_parser
     )]
     chain: Arc<ChainSpec>,
 }

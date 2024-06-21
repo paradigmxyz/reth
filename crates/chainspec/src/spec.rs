@@ -26,7 +26,6 @@ use reth_primitives_traits::{
     Header, SealedHeader,
 };
 use reth_trie_common::root::state_root_ref_unhashed;
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "std")]
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -290,8 +289,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// A wrapper around [`BaseFeeParams`] that allows for specifying constant or dynamic EIP-1559
 /// parameters based on the active [Hardfork].
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(untagged)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BaseFeeParamsKind {
     /// Constant [`BaseFeeParams`]; used for chains that don't have dynamic EIP-1559 parameters
     Constant(BaseFeeParams),
@@ -314,7 +312,7 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 
 /// A type alias to a vector of tuples of [Hardfork] and [`BaseFeeParams`], sorted by [Hardfork]
 /// activation order. This is used to specify dynamic EIP-1559 parameters for chains like Optimism.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, From)]
+#[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
 
 /// An Ethereum chain specification.
@@ -324,7 +322,7 @@ pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
 /// - Meta-information about the chain (the chain ID)
 /// - The genesis block of the chain ([`Genesis`])
 /// - What hardforks are activated, and under which conditions
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChainSpec {
     /// The chain ID
     pub chain: Chain,
@@ -333,7 +331,6 @@ pub struct ChainSpec {
     ///
     /// This acts as a small cache for known chains. If the chain is known, then the genesis hash
     /// is also known ahead of time, and this will be `Some`.
-    #[serde(skip, default)]
     pub genesis_hash: Option<B256>,
 
     /// The genesis block
@@ -341,14 +338,12 @@ pub struct ChainSpec {
 
     /// The block at which [`Hardfork::Paris`] was activated and the final difficulty at this
     /// block.
-    #[serde(skip, default)]
     pub paris_block_and_final_difficulty: Option<(u64, U256)>,
 
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
 
     /// The deposit contract deployed for `PoS`
-    #[serde(skip, default)]
     pub deposit_contract: Option<DepositContract>,
 
     /// The parameters that configure how a block's base fee is computed
@@ -357,7 +352,6 @@ pub struct ChainSpec {
     /// The delete limit for pruner, per block. In the actual pruner run it will be multiplied by
     /// the amount of blocks between pruner runs to account for the difference in amount of new
     /// data coming in.
-    #[serde(default)]
     pub prune_delete_limit: usize,
 }
 

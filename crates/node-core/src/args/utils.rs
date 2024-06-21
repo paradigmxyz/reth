@@ -41,9 +41,8 @@ pub fn chain_help() -> String {
 /// Clap value parser for [`ChainSpec`]s.
 ///
 /// The value parser matches either a known chain, the path
-/// to a json file, or a json formatted string in-memory. The json can be either
-/// a serialized [`ChainSpec`] or Genesis struct.
-pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
+/// to a json file, or a json formatted string in-memory. The json needs to be a Genesis struct.
+pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
         #[cfg(not(feature = "optimism"))]
         "mainnet" => MAINNET.clone(),
@@ -146,7 +145,7 @@ mod tests {
     #[test]
     fn parse_known_chain_spec() {
         for chain in SUPPORTED_CHAINS {
-            genesis_value_parser(chain).unwrap();
+            chain_value_parser(chain).unwrap();
         }
     }
 
