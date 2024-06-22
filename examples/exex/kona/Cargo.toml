@@ -29,7 +29,7 @@ alloy-provider.workspace = true
 alloy-rpc-client.workspace = true
 alloy-rpc-types.workspace = true
 alloy-transport-http.workspace = true
-alloy-transport = { workspace = true, default-features = false }
+alloy-transport.workspace = true
 alloy-consensus = { workspace = true, default-features = false, features = ["kzg"] }
 
 # other
