@@ -5,6 +5,7 @@ use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
+use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
@@ -24,6 +25,25 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     type Primitives: NodePrimitives;
     /// The node's engine types, defining the interaction with the consensus engine.
     type Engine: EngineTypes;
+}
+
+/// A [`NodeTypes`] type builder
+#[derive(Debug)]
+pub struct AnyNodeTypes<P = (), E = ()>(PhantomData<P>, PhantomData<E>);
+
+/// An [`AnyNodeTypes`] configured for Ethereum
+pub const fn ethereum_node_type() -> AnyNodeTypes<(), EthEngineTypes> {
+    AnyNodeTypes(PhantomData::<()>, PhantomData::<EthEngineTypes>)
+}
+
+impl<
+        P: NodePrimitives + Send + Sync + Unpin + 'static,
+        E: EngineTypes + Send + Sync + Unpin + 'static,
+    > NodeTypes for AnyNodeTypes<P, E>
+{
+    type Primitives = P;
+
+    type Engine = E;
 }
 
 /// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful components to the
