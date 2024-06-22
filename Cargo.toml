@@ -41,7 +41,7 @@ members = [
     "crates/exex/types/",
     "crates/metrics/",
     "crates/metrics/metrics-derive/",
-    "crates/net/common/",
+    "crates/net/banlist/",
     "crates/net/discv4/",
     "crates/net/discv5/",
     "crates/net/dns/",
@@ -290,7 +290,7 @@ reth-libmdbx = { path = "crates/storage/libmdbx-rs" }
 reth-mdbx-sys = { path = "crates/storage/libmdbx-rs/mdbx-sys" }
 reth-metrics = { path = "crates/metrics" }
 reth-metrics-derive = { path = "crates/metrics/metrics-derive" }
-reth-net-common = { path = "crates/net/common" }
+reth-net-banlist = { path = "crates/net/banlist" }
 reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }

@@ -6280,7 +6280,7 @@ dependencies = [
  "reth-execution-types",
  "reth-exex",
  "reth-fs-util",
- "reth-net-common",
+ "reth-net-banlist",
  "reth-network",
  "reth-network-api",
  "reth-network-p2p",
@@ -6526,7 +6526,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-rpc-types",
  "reth-trie-common",
- "serde",
  "serde_json",
 ]
 
@@ -6733,7 +6732,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-chainspec",
  "reth-ethereum-forks",
- "reth-net-common",
+ "reth-net-banlist",
  "reth-net-nat",
  "reth-network-peers",
  "reth-tracing",
@@ -6937,7 +6936,6 @@ dependencies = [
  "reth-ecies",
  "reth-eth-wire-types",
  "reth-metrics",
- "reth-net-common",
  "reth-network-peers",
  "reth-primitives",
  "reth-tracing",
@@ -7293,7 +7291,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-net-common"
+name = "reth-net-banlist"
 version = "1.0.0-rc.2"
 dependencies = [
  "alloy-primitives",
@@ -7324,7 +7322,6 @@ dependencies = [
  "derive_more",
  "discv5",
  "enr",
- "fnv",
  "futures",
  "humantime-serde",
  "itertools 0.13.0",
@@ -7341,18 +7338,18 @@ dependencies = [
  "reth-ecies",
  "reth-eth-wire",
  "reth-metrics",
- "reth-net-common",
+ "reth-net-banlist",
  "reth-network",
  "reth-network-api",
  "reth-network-p2p",
  "reth-network-peers",
  "reth-primitives",
  "reth-provider",
- "reth-rpc-types",
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
+ "rustc-hash 2.0.0",
  "schnellru",
  "secp256k1",
  "serde",
@@ -7372,10 +7369,10 @@ name = "reth-network-api"
 version = "1.0.0-rc.2"
 dependencies = [
  "alloy-primitives",
+ "alloy-rpc-types-admin",
  "enr",
  "reth-eth-wire",
  "reth-network-peers",
- "reth-rpc-types",
  "serde",
  "thiserror",
  "tokio",
@@ -8366,7 +8363,6 @@ dependencies = [
  "bitflags 2.5.0",
  "criterion",
  "futures-util",
- "itertools 0.13.0",
  "metrics",
  "parking_lot 0.12.3",
  "paste",

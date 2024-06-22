@@ -137,7 +137,6 @@ where
 
 /// Builder for [`NetworkConfig`](struct.NetworkConfig.html).
 #[derive(Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NetworkConfigBuilder {
     /// The node's secret key, from which the node's identity is derived.
     secret_key: SecretKey,
@@ -146,7 +145,6 @@ pub struct NetworkConfigBuilder {
     /// How to set up discovery version 4.
     discovery_v4_builder: Option<Discv4ConfigBuilder>,
     /// How to set up discovery version 5.
-    #[serde(skip)]
     discovery_v5_builder: Option<reth_discv5::ConfigBuilder>,
     /// All boot nodes to start network discovery with.
     boot_nodes: HashSet<TrustedPeer>,
@@ -163,19 +161,16 @@ pub struct NetworkConfigBuilder {
     /// The default mode of the network.
     network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
-    #[serde(skip)]
     executor: Option<Box<dyn TaskSpawner>>,
     /// Sets the hello message for the p2p handshake in `RLPx`
     hello_message: Option<HelloMessageWithProtocols>,
     /// The executor to use for spawning tasks.
-    #[serde(skip)]
     extra_protocols: RlpxSubProtocols,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
     /// Whether tx gossip is disabled
     tx_gossip_disabled: bool,
     /// The block importer type
-    #[serde(skip)]
     block_import: Option<Box<dyn BlockImport>>,
     /// How to instantiate transactions manager.
     transactions_manager_config: TransactionsManagerConfig,

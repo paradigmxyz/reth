@@ -13,13 +13,13 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_eth_wire::{capability::Capabilities, DisconnectReason, EthVersion, Status};
-use reth_rpc_types::NetworkStatus;
-use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
-
+pub use alloy_rpc_types_admin::EthProtocolInfo;
 pub use error::NetworkError;
 pub use reputation::{Reputation, ReputationChangeKind};
+use reth_eth_wire::{capability::Capabilities, DisconnectReason, EthVersion, Status};
 use reth_network_peers::NodeRecord;
+use serde::{Deserialize, Serialize};
+use std::{future::Future, net::SocketAddr, sync::Arc, time::Instant};
 
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;
@@ -214,4 +214,15 @@ impl std::fmt::Display for Direction {
             Self::Outgoing(_) => write!(f, "outgoing"),
         }
     }
+}
+
+/// The status of the network being ran by the local node.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NetworkStatus {
+    /// The local node client version.
+    pub client_version: String,
+    /// The current ethereum protocol version
+    pub protocol_version: u64,
+    /// Information about the Ethereum Wire Protocol.
+    pub eth_protocol_info: EthProtocolInfo,
 }
