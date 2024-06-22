@@ -26,6 +26,8 @@ use reth_primitives_traits::{
     Header, SealedHeader,
 };
 use reth_trie_common::root::state_root_ref_unhashed;
+#[cfg(feature = "optimism")]
+use serde::Deserialize;
 #[cfg(feature = "std")]
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -296,6 +298,12 @@ pub enum BaseFeeParamsKind {
     /// Variable [`BaseFeeParams`]; used for chains that have dynamic EIP-1559 parameters like
     /// Optimism
     Variable(ForkBaseFeeParams),
+}
+
+impl Default for BaseFeeParamsKind {
+    fn default() -> Self {
+        BaseFeeParams::ethereum().into()
+    }
 }
 
 impl From<BaseFeeParams> for BaseFeeParamsKind {
@@ -1160,86 +1168,72 @@ impl DepositContract {
     }
 }
 
+/// Genesis info for Optimism.
 #[cfg(feature = "optimism")]
+#[derive(Default, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct OptimismGenesisInfo {
     bedrock_block: Option<u64>,
     regolith_time: Option<u64>,
     canyon_time: Option<u64>,
     ecotone_time: Option<u64>,
     fjord_time: Option<u64>,
+    #[serde(skip)]
     base_fee_params: BaseFeeParamsKind,
+}
+
+#[cfg(feature = "optimism")]
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OptimismBaseFeeInfo {
+    eip1559_elasticity: Option<u64>,
+    eip1559_denominator: Option<u64>,
+    eip1559_denominator_canyon: Option<u64>,
 }
 
 #[cfg(feature = "optimism")]
 impl OptimismGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
-        let optimism_config =
-            genesis.config.extra_fields.get("optimism").and_then(|value| value.as_object());
+        let mut optimism_genesis_info: Self =
+            genesis.config.extra_fields.deserialize_as().unwrap_or_default();
 
-        let eip1559_elasticity = optimism_config
-            .and_then(|config| config.get("eip1559Elasticity"))
-            .and_then(|value| value.as_u64());
+        if let Some(optimism_object) = genesis.config.extra_fields.get("optimism") {
+            if let Ok(optimism_base_fee_info) =
+                serde_json::from_value::<OptimismBaseFeeInfo>(optimism_object.clone())
+            {
+                if let (Some(elasticity), Some(denominator)) = (
+                    optimism_base_fee_info.eip1559_elasticity,
+                    optimism_base_fee_info.eip1559_denominator,
+                ) {
+                    let base_fee_params = if let Some(canyon_denominator) =
+                        optimism_base_fee_info.eip1559_denominator_canyon
+                    {
+                        BaseFeeParamsKind::Variable(
+                            vec![
+                                (
+                                    Hardfork::London,
+                                    BaseFeeParams::new(denominator as u128, elasticity as u128),
+                                ),
+                                (
+                                    Hardfork::Canyon,
+                                    BaseFeeParams::new(
+                                        canyon_denominator as u128,
+                                        elasticity as u128,
+                                    ),
+                                ),
+                            ]
+                            .into(),
+                        )
+                    } else {
+                        BaseFeeParams::new(denominator as u128, elasticity as u128).into()
+                    };
 
-        let eip1559_denominator = optimism_config
-            .and_then(|config| config.get("eip1559Denominator"))
-            .and_then(|value| value.as_u64());
-
-        let eip1559_denominator_canyon = optimism_config
-            .and_then(|config| config.get("eip1559DenominatorCanyon"))
-            .and_then(|value| value.as_u64());
-
-        let base_fee_params = if let (Some(elasticity), Some(denominator)) =
-            (eip1559_elasticity, eip1559_denominator)
-        {
-            if let Some(canyon_denominator) = eip1559_denominator_canyon {
-                BaseFeeParamsKind::Variable(
-                    vec![
-                        (
-                            Hardfork::London,
-                            BaseFeeParams::new(denominator as u128, elasticity as u128),
-                        ),
-                        (
-                            Hardfork::Canyon,
-                            BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
-                        ),
-                    ]
-                    .into(),
-                )
-            } else {
-                BaseFeeParams::new(denominator as u128, elasticity as u128).into()
+                    optimism_genesis_info.base_fee_params = base_fee_params;
+                }
             }
-        } else {
-            BaseFeeParams::ethereum().into()
-        };
-
-        Self {
-            bedrock_block: genesis
-                .config
-                .extra_fields
-                .get("bedrockBlock")
-                .and_then(|value| value.as_u64()),
-            regolith_time: genesis
-                .config
-                .extra_fields
-                .get("regolithTime")
-                .and_then(|value| value.as_u64()),
-            canyon_time: genesis
-                .config
-                .extra_fields
-                .get("canyonTime")
-                .and_then(|value| value.as_u64()),
-            ecotone_time: genesis
-                .config
-                .extra_fields
-                .get("ecotoneTime")
-                .and_then(|value| value.as_u64()),
-            fjord_time: genesis
-                .config
-                .extra_fields
-                .get("fjordTime")
-                .and_then(|value| value.as_u64()),
-            base_fee_params,
         }
+
+        optimism_genesis_info
     }
 }
 
