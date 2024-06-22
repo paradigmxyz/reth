@@ -8310,13 +8310,13 @@
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
-          "legendFormat": "Eth Headers Requests",
+          "legendFormat": "Headers Requests",
           "range": true,
           "refId": "A",
           "useBackend": false
         }
       ],
-      "title": "Eth Headers Requests Received",
+      "title": "Headers Requests Received",
       "type": "timeseries"
     },
     {
@@ -8438,13 +8438,13 @@
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
-          "legendFormat": "Eth Receipts Requests",
+          "legendFormat": "Receipts Requests",
           "range": true,
           "refId": "A",
           "useBackend": false
         }
       ],
-      "title": "Eth Receipts Requests Received",
+      "title": "Receipts Requests Received",
       "type": "timeseries"
     },
     {
@@ -8565,13 +8565,13 @@
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
-          "legendFormat": "Eth Bodies Requests",
+          "legendFormat": "Bodies Requests",
           "range": true,
           "refId": "A",
           "useBackend": false
         }
       ],
-      "title": "Eth Bodies Requests Received",
+      "title": "Bodies Requests Received",
       "type": "timeseries"
     },
     {
@@ -8692,13 +8692,13 @@
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
-          "legendFormat": "Eth Node Data Requests",
+          "legendFormat": "Node Data Requests",
           "range": true,
           "refId": "A",
           "useBackend": false
         }
       ],
-      "title": "Eth Node Data Requests Received",
+      "title": "Node Data Requests Received",
       "type": "timeseries"
     }
   ],
