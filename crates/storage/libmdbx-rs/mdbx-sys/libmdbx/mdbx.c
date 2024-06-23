@@ -3928,12 +3928,12 @@ typedef struct MDBX_node {
 #error "Oops, some flags overlapped or wrong"
 #endif
 
-/* Max length of iov-vector passed to writev() call, used for auxiliary writes */
-#define MDBX_AUXILIARY_IOV_MAX 64
-#if defined(IOV_MAX) && IOV_MAX < MDBX_AUXILIARY_IOV_MAX
-#undef MDBX_AUXILIARY_IOV_MAX
-#define MDBX_AUXILIARY_IOV_MAX IOV_MAX
-#endif /* MDBX_AUXILIARY_IOV_MAX */
+/* Max length of iov-vector passed to writev() call, used for auxilary writes */
+#define MDBX_AUXILARY_IOV_MAX 64
+#if defined(IOV_MAX) && IOV_MAX < MDBX_AUXILARY_IOV_MAX
+#undef MDBX_AUXILARY_IOV_MAX
+#define MDBX_AUXILARY_IOV_MAX IOV_MAX
+#endif /* MDBX_AUXILARY_IOV_MAX */
 
 /*
  *                /
@@ -8231,15 +8231,15 @@ __cold static void kill_page(MDBX_txn *txn, MDBX_page *mp, pgno_t pgno,
     if ((txn->mt_flags & MDBX_WRITEMAP) == 0)
       osal_pwrite(env->me_lazy_fd, mp, bytes, pgno2bytes(env, pgno));
   } else {
-    struct iovec iov[MDBX_AUXILIARY_IOV_MAX];
+    struct iovec iov[MDBX_AUXILARY_IOV_MAX];
     iov[0].iov_len = env->me_psize;
     iov[0].iov_base = ptr_disp(env->me_pbuf, env->me_psize);
     size_t iov_off = pgno2bytes(env, pgno), n = 1;
     while (--npages) {
       iov[n] = iov[0];
-      if (++n == MDBX_AUXILIARY_IOV_MAX) {
-        osal_pwritev(env->me_lazy_fd, iov, MDBX_AUXILIARY_IOV_MAX, iov_off);
-        iov_off += pgno2bytes(env, MDBX_AUXILIARY_IOV_MAX);
+      if (++n == MDBX_AUXILARY_IOV_MAX) {
+        osal_pwritev(env->me_lazy_fd, iov, MDBX_AUXILARY_IOV_MAX, iov_off);
+        iov_off += pgno2bytes(env, MDBX_AUXILARY_IOV_MAX);
         n = 0;
       }
     }
@@ -11238,20 +11238,20 @@ static __inline pgr_t page_alloc_finalize(MDBX_env *const env,
           need_clean = false;
         }
       } else {
-        struct iovec iov[MDBX_AUXILIARY_IOV_MAX];
+        struct iovec iov[MDBX_AUXILARY_IOV_MAX];
         size_t n = 0, cleared = 0;
         for (size_t i = 0; i < num; ++i) {
           if (!mincore_probe(env, pgno + (pgno_t)i)) {
             ++cleared;
             iov[n].iov_len = env->me_psize;
             iov[n].iov_base = pattern;
-            if (unlikely(++n == MDBX_AUXILIARY_IOV_MAX)) {
-              osal_pwritev(env->me_lazy_fd, iov, MDBX_AUXILIARY_IOV_MAX,
+            if (unlikely(++n == MDBX_AUXILARY_IOV_MAX)) {
+              osal_pwritev(env->me_lazy_fd, iov, MDBX_AUXILARY_IOV_MAX,
                            file_offset);
 #if MDBX_ENABLE_PGOP_STAT
               env->me_lck->mti_pgop_stat.prefault.weak += 1;
 #endif /* MDBX_ENABLE_PGOP_STAT */
-              file_offset += pgno2bytes(env, MDBX_AUXILIARY_IOV_MAX);
+              file_offset += pgno2bytes(env, MDBX_AUXILARY_IOV_MAX);
               n = 0;
             }
           }
@@ -29481,10 +29481,10 @@ __cold int mdbx_env_warmup(const MDBX_env *env, const MDBX_txn *txn,
       if (unlikely(null_fd < 0))
         rc = errno;
       else {
-        struct iovec iov[MDBX_AUXILIARY_IOV_MAX];
+        struct iovec iov[MDBX_AUXILARY_IOV_MAX];
         for (;;) {
           unsigned i;
-          for (i = 0; i < MDBX_AUXILIARY_IOV_MAX && offset < used_range; ++i) {
+          for (i = 0; i < MDBX_AUXILARY_IOV_MAX && offset < used_range; ++i) {
             iov[i].iov_base = (void *)(ptr + offset);
             iov[i].iov_len = 1;
             offset += env->me_os_psize;
