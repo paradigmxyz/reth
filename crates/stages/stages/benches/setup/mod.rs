@@ -17,7 +17,7 @@ use reth_testing_utils::{
         random_eoa_accounts,
     },
 };
-use reth_trie::StateRoot;
+use reth_trie::{updates::StorageWriter, StateRoot};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 use tokio::runtime::Handle;
 
@@ -139,7 +139,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         let offset = transitions.len() as u64;
 
         db.insert_changesets(transitions, None).unwrap();
-        db.commit(|tx| Ok(updates.flush(tx)?)).unwrap();
+        db.commit(|tx| Ok(updates.flush(&StorageWriter, tx)?)).unwrap();
 
         let (transitions, final_state) = random_changeset_range(
             &mut rng,

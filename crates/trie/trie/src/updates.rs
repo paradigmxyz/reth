@@ -3,7 +3,7 @@ use crate::{
     StoredBranchNode, StoredNibbles, StoredNibblesSubKey,
 };
 use derive_more::Deref;
-use reth_db::tables;
+use reth_db::{tables, DatabaseError};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     transaction::{DbTx, DbTxMut},
@@ -37,6 +37,79 @@ impl TrieOp {
     /// Returns `true` if the operation is an update.
     pub const fn is_update(&self) -> bool {
         matches!(self, Self::Update(..))
+    }
+}
+
+/// `StorageWriter` is responsible for writing trie updates to the database.
+///
+/// This struct encapsulates the logic required to flush trie operations to the appropriate
+/// database tables.
+#[derive(Debug, Default)]
+pub struct StorageWriter;
+
+impl StorageWriter {
+    /// Writes the given `TrieUpdates` to the database.
+    ///
+    /// This method processes the trie operations contained within `TrieUpdates` and applies
+    /// them to the database using the provided transaction.
+    pub fn write_trie_updates(
+        &self,
+        trie_updates: TrieUpdates,
+        tx: &(impl DbTx + DbTxMut),
+    ) -> Result<(), DatabaseError> {
+        if trie_updates.trie_operations.is_empty() {
+            return Ok(());
+        }
+
+        let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
+        let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
+
+        let mut trie_operations = Vec::from_iter(trie_updates.trie_operations);
+        trie_operations.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        for (key, operation) in trie_operations {
+            match key {
+                TrieKey::AccountNode(nibbles) => match operation {
+                    TrieOp::Delete => {
+                        if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                            account_trie_cursor.delete_current()?;
+                        }
+                    }
+                    TrieOp::Update(node) => {
+                        if !nibbles.0.is_empty() {
+                            account_trie_cursor.upsert(nibbles, StoredBranchNode(node))?;
+                        }
+                    }
+                },
+                TrieKey::StorageTrie(hashed_address) => match operation {
+                    TrieOp::Delete => {
+                        if storage_trie_cursor.seek_exact(hashed_address)?.is_some() {
+                            storage_trie_cursor.delete_current_duplicates()?;
+                        }
+                    }
+                    TrieOp::Update(..) => unreachable!("Cannot update full storage trie."),
+                },
+                TrieKey::StorageNode(hashed_address, nibbles) => {
+                    if !nibbles.is_empty() {
+                        // Delete the old entry if it exists.
+                        if storage_trie_cursor
+                            .seek_by_key_subkey(hashed_address, nibbles.clone())?
+                            .filter(|e| e.nibbles == nibbles)
+                            .is_some()
+                        {
+                            storage_trie_cursor.delete_current()?;
+                        }
+
+                        // The operation is an update, insert new entry.
+                        if let TrieOp::Update(node) = operation {
+                            storage_trie_cursor
+                                .upsert(hashed_address, StorageTrieEntry { nibbles, node })?;
+                        }
+                    }
+                }
+            };
+        }
+
+        Ok(())
     }
 }
 
@@ -129,59 +202,11 @@ impl TrieUpdates {
     }
 
     /// Flush updates all aggregated updates to the database.
-    pub fn flush(self, tx: &(impl DbTx + DbTxMut)) -> Result<(), reth_db::DatabaseError> {
-        if self.trie_operations.is_empty() {
-            return Ok(())
-        }
-
-        let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
-        let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
-
-        let mut trie_operations = Vec::from_iter(self.trie_operations);
-        trie_operations.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        for (key, operation) in trie_operations {
-            match key {
-                TrieKey::AccountNode(nibbles) => match operation {
-                    TrieOp::Delete => {
-                        if account_trie_cursor.seek_exact(nibbles)?.is_some() {
-                            account_trie_cursor.delete_current()?;
-                        }
-                    }
-                    TrieOp::Update(node) => {
-                        if !nibbles.0.is_empty() {
-                            account_trie_cursor.upsert(nibbles, StoredBranchNode(node))?;
-                        }
-                    }
-                },
-                TrieKey::StorageTrie(hashed_address) => match operation {
-                    TrieOp::Delete => {
-                        if storage_trie_cursor.seek_exact(hashed_address)?.is_some() {
-                            storage_trie_cursor.delete_current_duplicates()?;
-                        }
-                    }
-                    TrieOp::Update(..) => unreachable!("Cannot update full storage trie."),
-                },
-                TrieKey::StorageNode(hashed_address, nibbles) => {
-                    if !nibbles.is_empty() {
-                        // Delete the old entry if it exists.
-                        if storage_trie_cursor
-                            .seek_by_key_subkey(hashed_address, nibbles.clone())?
-                            .filter(|e| e.nibbles == nibbles)
-                            .is_some()
-                        {
-                            storage_trie_cursor.delete_current()?;
-                        }
-
-                        // The operation is an update, insert new entry.
-                        if let TrieOp::Update(node) = operation {
-                            storage_trie_cursor
-                                .upsert(hashed_address, StorageTrieEntry { nibbles, node })?;
-                        }
-                    }
-                }
-            };
-        }
-
-        Ok(())
+    pub fn flush(
+        self,
+        writer: &StorageWriter,
+        tx: &(impl DbTx + DbTxMut),
+    ) -> Result<(), DatabaseError> {
+        writer.write_trie_updates(self, tx)
     }
 }

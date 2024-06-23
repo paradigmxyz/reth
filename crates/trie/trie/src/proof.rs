@@ -162,7 +162,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::StateRoot;
+    use crate::{updates::StorageWriter, StateRoot};
     use once_cell::sync::Lazy;
     use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
     use reth_db_api::database::Database;
@@ -226,7 +226,7 @@ mod tests {
         let (root, updates) = StateRoot::from_tx(provider.tx_ref())
             .root_with_updates()
             .map_err(Into::<reth_db::DatabaseError>::into)?;
-        updates.flush(provider.tx_mut())?;
+        updates.flush(&StorageWriter, provider.tx_mut())?;
 
         provider.commit()?;
 

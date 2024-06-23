@@ -45,7 +45,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
-    updates::TrieUpdates,
+    updates::{StorageWriter, TrieUpdates},
     HashedPostState, Nibbles, StateRoot,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
@@ -2381,7 +2381,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     block_hash: end_block_hash,
                 })))
             }
-            trie_updates.flush(&self.tx)?;
+            trie_updates.flush(&StorageWriter, &self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertMerkleTree);
 
@@ -2577,7 +2577,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                     block_hash: parent_hash,
                 })))
             }
-            trie_updates.flush(&self.tx)?;
+            trie_updates.flush(&StorageWriter, &self.tx)?;
         }
 
         // get blocks
@@ -2778,7 +2778,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         // insert hashes and intermediate merkle nodes
         {
             HashedStateChanges(hashed_state).write_to_db(&self.tx)?;
-            trie_updates.flush(&self.tx)?;
+            trie_updates.flush(&StorageWriter, &self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 

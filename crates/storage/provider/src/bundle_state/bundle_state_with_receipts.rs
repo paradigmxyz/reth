@@ -78,7 +78,7 @@ mod tests {
     use reth_primitives::{
         keccak256, Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
     };
-    use reth_trie::{test_utils::state_root, StateRoot};
+    use reth_trie::{test_utils::state_root, updates::StorageWriter, StateRoot};
     use revm::{
         db::{
             states::{
@@ -892,7 +892,7 @@ mod tests {
             }
 
             let (_, updates) = StateRoot::from_tx(tx).root_with_updates().unwrap();
-            updates.flush(tx).unwrap();
+            updates.flush(&StorageWriter, tx).unwrap();
         })
         .unwrap();
 

@@ -10,7 +10,8 @@ use reth_provider::{
 };
 use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
+    hashed_cursor::HashedPostStateCursorFactory, updates::StorageWriter, HashedPostState,
+    HashedStorage, StateRoot,
 };
 use reth_trie_parallel::{async_root::AsyncStateRoot, parallel_root::ParallelStateRoot};
 use std::collections::HashMap;
@@ -30,7 +31,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
             HashedStateChanges(db_state).write_to_db(provider_rw.tx_ref()).unwrap();
             let (_, updates) =
                 StateRoot::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
-            updates.flush(provider_rw.tx_ref()).unwrap();
+            updates.flush(&StorageWriter, provider_rw.tx_ref()).unwrap();
             provider_rw.commit().unwrap();
         }
 
