@@ -5,7 +5,6 @@ use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
-use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
@@ -28,18 +27,25 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
 }
 
 /// A [`NodeTypes`] type builder
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct AnyNodeTypes<P = (), E = ()>(PhantomData<P>, PhantomData<E>);
 
-/// An [`AnyNodeTypes`] configured for Ethereum
-pub const fn ethereum_node_type() -> AnyNodeTypes<(), EthEngineTypes> {
-    AnyNodeTypes(PhantomData::<()>, PhantomData::<EthEngineTypes>)
+impl<P, E> AnyNodeTypes<P, E> {
+    /// Sets the `Primitives` associated type.
+    pub const fn primitives<T>(self) -> AnyNodeTypes<T, E> {
+        AnyNodeTypes::<T, E>(PhantomData::<T>, PhantomData::<E>)
+    }
+
+    /// Sets the `Engine` associated type.
+    pub const fn engine<T>(self) -> AnyNodeTypes<P, T> {
+        AnyNodeTypes::<P, T>(PhantomData::<P>, PhantomData::<T>)
+    }
 }
 
-impl<
-        P: NodePrimitives + Send + Sync + Unpin + 'static,
-        E: EngineTypes + Send + Sync + Unpin + 'static,
-    > NodeTypes for AnyNodeTypes<P, E>
+impl<P, E> NodeTypes for AnyNodeTypes<P, E>
+where
+    P: NodePrimitives + Send + Sync + Unpin + 'static,
+    E: EngineTypes + Send + Sync + Unpin + 'static,
 {
     type Primitives = P;
 

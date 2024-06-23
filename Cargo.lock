@@ -7367,7 +7367,6 @@ version = "1.0.0-rc.2"
 dependencies = [
  "reth-db-api",
  "reth-engine-primitives",
- "reth-ethereum-engine-primitives",
  "reth-evm",
  "reth-network",
  "reth-payload-builder",
