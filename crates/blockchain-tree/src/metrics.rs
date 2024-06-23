@@ -89,7 +89,7 @@ pub(crate) enum MakeCanonicalAction {
     /// Inserting an old canonical chain.
     InsertOldCanonicalChain,
     /// Clearing trie updates of other children chains after fork choice update.
-    ClearTrieUpdatesForOtherChilds,
+    ClearTrieUpdatesForOtherChildren,
 }
 
 /// Canonicalization metrics
@@ -118,7 +118,7 @@ struct MakeCanonicalMetrics {
     insert_old_canonical_chain: Histogram,
     /// Duration of the clear trie updates of other children chains after fork choice update
     /// action.
-    clear_trie_updates_for_other_childs: Histogram,
+    clear_trie_updates_for_other_children: Histogram,
 }
 
 impl MakeCanonicalMetrics {
@@ -145,8 +145,8 @@ impl MakeCanonicalMetrics {
             MakeCanonicalAction::InsertOldCanonicalChain => {
                 self.insert_old_canonical_chain.record(duration)
             }
-            MakeCanonicalAction::ClearTrieUpdatesForOtherChilds => {
-                self.clear_trie_updates_for_other_childs.record(duration)
+            MakeCanonicalAction::ClearTrieUpdatesForOtherChildren => {
+                self.clear_trie_updates_for_other_children.record(duration)
             }
         }
     }
