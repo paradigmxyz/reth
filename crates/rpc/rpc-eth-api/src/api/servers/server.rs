@@ -15,23 +15,14 @@ use tracing::trace;
 
 use crate::{
     result::internal_rpc_err,
-    servers::{
-        EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadReceipt, Trace,
-    },
+    servers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthServer},
     EthApiError, EthApiServer, ToRpcResult,
 };
 
 #[async_trait::async_trait]
 impl<T> EthApiServer for T
 where
-    Self: EthApiSpec
-        + EthTransactions
-        + EthBlocks
-        + EthState
-        + EthCall
-        + EthFees
-        + Trace
-        + LoadReceipt,
+    Self: FullEthServer,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> Result<U64> {

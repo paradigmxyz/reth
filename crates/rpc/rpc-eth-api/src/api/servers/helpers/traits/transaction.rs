@@ -649,3 +649,11 @@ pub trait RawTransactionForwarder: fmt::Debug + Send + Sync + 'static {
     /// Forwards raw transaction bytes for `eth_sendRawTransaction`
     async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()>;
 }
+
+/// Configure server's forwarder for `eth_sendRawTransaction`, at runtime.
+pub trait UpdateRawTxForwarder {
+    /// Sets a forwarder for `eth_sendRawTransaction`
+    ///
+    /// Note: this might be removed in the future in favor of a more generic approach.
+    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>);
+}

@@ -7,11 +7,11 @@
 //!
 //! Traits with `Eth` prefix, compose specific data needed to serve RPC requests in the `eth`
 //! namespace. They use `Load` traits as building blocks.
-//! [`EthTransactions`](crate::servers::EthTransactions) also writes data (submits transactions).
+//! [`EthTransactions` also writes data (submits transactions).
 //! Based on the `eth_` request method semantics, request methods are divided into:
-//! [`EthTransactions`](crate::servers::EthTransactions), [`EthBlocks`](crate::servers::EthBlocks),
-//! [`EthFees`](crate::servers::EthFees), [`EthState`](crate::servers::EthState) and
-//! [`EthCall`](crate::servers::EthCall). Default implementation of the `Eth` traits, is done w.r.t.
+//! [`EthTransactions`], [`EthBlocks`],
+//! [`EthFees`], [`EthState`] and
+//! [`EthCall`]. Default implementation of the `Eth` traits, is done w.r.t.
 //! L1.
 //!
 //! [`EthApiServer`](crate::EthApiServer), is implemented for any type that implements
@@ -38,3 +38,29 @@ use trace::Trace;
 pub trait TraceExt: LoadPendingBlock + SpawnBlocking + Trace + Call {}
 
 impl<T> TraceExt for T where T: LoadPendingBlock + Trace + Call {}
+
+use block::EthBlocks;
+use call::EthCall;
+use fee::EthFees;
+use receipt::LoadReceipt;
+use spec::EthApiSpec;
+use state::EthState;
+use transaction::EthTransactions;
+
+/// Helper trait to unify all `eth` rpc server building block traits, for simplicity.
+pub trait FullEthServer:
+    EthApiSpec + EthTransactions + EthBlocks + EthState + EthCall + EthFees + Trace + LoadReceipt
+{
+}
+
+impl<T> FullEthServer for T where
+    T: EthApiSpec
+        + EthTransactions
+        + EthBlocks
+        + EthState
+        + EthCall
+        + EthFees
+        + Trace
+        + LoadReceipt
+{
+}

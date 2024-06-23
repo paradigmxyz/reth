@@ -6987,6 +6987,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-ethereum-rpc"
+version = "1.0.0-rc.2"
+dependencies = [
+ "reth-evm",
+ "reth-network-api",
+ "reth-provider",
+ "reth-rpc-builder",
+ "reth-rpc-eth-api",
+ "reth-tasks",
+ "reth-transaction-pool",
+]
+
+[[package]]
 name = "reth-etl"
 version = "1.0.0-rc.2"
 dependencies = [
@@ -7402,6 +7415,7 @@ dependencies = [
  "reth-db-api",
  "reth-db-common",
  "reth-downloaders",
+ "reth-ethereum-rpc",
  "reth-evm",
  "reth-exex",
  "reth-network",
@@ -7936,6 +7950,7 @@ name = "reth-rpc-builder"
 version = "1.0.0-rc.2"
 dependencies = [
  "clap",
+ "derive_more",
  "http 1.1.0",
  "jsonrpsee",
  "metrics",

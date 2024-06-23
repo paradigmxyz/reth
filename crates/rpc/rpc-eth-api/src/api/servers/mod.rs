@@ -1,8 +1,9 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
+use derive_more::Deref;
 use reth_primitives::{BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider};
 
@@ -26,8 +27,10 @@ pub use helpers::{
         spec::EthApiSpec,
         state::{EthState, LoadState},
         trace::Trace,
-        transaction::{EthTransactions, LoadTransaction, RawTransactionForwarder},
-        TraceExt,
+        transaction::{
+            EthTransactions, LoadTransaction, RawTransactionForwarder, UpdateRawTxForwarder,
+        },
+        FullEthServer, TraceExt,
     },
 };
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
@@ -43,18 +46,10 @@ use crate::{EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock
 /// [`EthApiServer`](crate::EthApiServer)) are implemented separately in submodules. The rpc handler
 /// implementation can then delegate to the main impls. This way [`EthApi`] is not limited to
 /// [`jsonrpsee`] and can be used standalone or in other network handlers (for example ipc).
+#[derive(Deref)]
 pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
     inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
-}
-
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
-    /// Sets a forwarder for `eth_sendRawTransaction`
-    ///
-    /// Note: this might be removed in the future in favor of a more generic approach.
-    pub fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
-        self.inner.raw_transaction_forwarder.write().replace(forwarder);
-    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
@@ -319,5 +314,22 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     #[inline]
     pub const fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
         &self.signers
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> UpdateRawTxForwarder
+    for EthApiInner<Provider, Pool, Network, EvmConfig>
+{
+    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
+        self.raw_transaction_forwarder.write().replace(forwarder);
+    }
+}
+
+impl<T, Provider, Pool, Network, EvmConfig> UpdateRawTxForwarder for T
+where
+    T: Deref<Target = Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>>,
+{
+    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
+        self.deref().deref().set_eth_raw_transaction_forwarder(forwarder);
     }
 }

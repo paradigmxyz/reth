@@ -1,5 +1,10 @@
 //! Builder support for rpc components.
 
+use std::{
+    fmt,
+    ops::{Deref, DerefMut},
+};
+
 use futures::TryFutureExt;
 use reth_network::NetworkHandle;
 use reth_node_api::FullNodeComponents;
@@ -13,10 +18,6 @@ use reth_rpc_builder::{
 use reth_rpc_layer::JwtSecret;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
-use std::{
-    fmt,
-    ops::{Deref, DerefMut},
-};
 
 /// Contains the handles to the spawned RPC servers.
 ///
@@ -155,6 +156,7 @@ pub struct RpcRegistry<Node: FullNodeComponents> {
         TaskExecutor,
         Node::Provider,
         Node::Evm,
+        reth_ethereum_rpc::ServerBuilder,
     >,
 }
 
@@ -166,6 +168,7 @@ impl<Node: FullNodeComponents> Deref for RpcRegistry<Node> {
         TaskExecutor,
         Node::Provider,
         Node::Evm,
+        reth_ethereum_rpc::ServerBuilder,
     >;
 
     fn deref(&self) -> &Self::Target {
@@ -272,7 +275,7 @@ where
         .with_events(node.provider().clone())
         .with_executor(node.task_executor().clone())
         .with_evm_config(node.evm_config().clone())
-        .build_with_auth_server(module_config, engine_api);
+        .build_with_auth_server(module_config, engine_api, reth_ethereum_rpc::ServerBuilder);
 
     let mut registry = RpcRegistry { registry };
     let ctx = RpcContext {

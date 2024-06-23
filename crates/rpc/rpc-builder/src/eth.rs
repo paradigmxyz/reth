@@ -1,26 +1,32 @@
+use std::sync::Arc;
+
+use derive_more::Constructor;
+use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc::eth::{
-    EthApi, EthFilter, EthFilterConfig, EthPubSub, EthStateCache, EthStateCacheConfig,
-    FeeHistoryCacheConfig, GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
+    servers::{FullEthServer, UpdateRawTxForwarder},
+    EthApiServer, EthFilter, EthFilterConfig, EthPubSub, EthStateCache, EthStateCacheConfig,
+    FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle, GasPriceOracleConfig,
+    RPC_DEFAULT_GAS_CAP,
 };
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE,
 };
-use reth_tasks::pool::BlockingTaskPool;
+use reth_tasks::TaskSpawner;
 use serde::{Deserialize, Serialize};
+
+use crate::{fee_history_cache_new_blocks_task, RawTransactionForwarder};
 
 /// All handlers for the `eth` namespace
 #[derive(Debug, Clone)]
-pub struct EthHandlers<Provider, Pool, Network, Events, EvmConfig> {
+pub struct EthHandlers<Provider, Pool, Network, Events, EthApi> {
     /// Main `eth_` request handler
-    pub api: EthApi<Provider, Pool, Network, EvmConfig>,
+    pub api: EthApi,
     /// The async caching layer used by the eth handlers
     pub cache: EthStateCache,
     /// Polling based filter handler available on all transports
     pub filter: EthFilter<Provider, Pool>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
     pub pubsub: EthPubSub<Provider, Pool, Events, Network>,
-    /// The configured tracing call pool
-    pub blocking_task_pool: BlockingTaskPool,
 }
 
 /// Additional config values for the eth namespace.
@@ -110,5 +116,89 @@ impl EthConfig {
     pub const fn rpc_gas_cap(mut self, rpc_gas_cap: u64) -> Self {
         self.rpc_gas_cap = rpc_gas_cap;
         self
+    }
+}
+
+/// Context for building the `eth` namespace server.
+#[derive(Debug, Constructor)]
+pub struct EthServerBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Events> {
+    /// Database handle.
+    pub provider: Provider,
+    /// Mempool handle.
+    pub pool: Pool,
+    /// Network handle.
+    pub network: Network,
+    /// EVM configuration.
+    pub evm_config: EvmConfig,
+    /// RPC config for `eth` namespace.
+    pub config: &'a EthConfig,
+    /// Runtime handle.
+    pub executor: Box<Tasks>,
+    /// Events handle.
+    pub events: Events,
+    /// RPC cache handle.
+    pub cache: EthStateCache,
+    /// Transaction forwarder used by `eth_sendRawTransaction` method.
+    pub raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+}
+
+/// Builds RPC server for `eth` namespace.
+pub trait EthServerBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>:
+    Clone + Copy
+{
+    /// `eth` namespace RPC server type.
+    type Server: EthApiServer + UpdateRawTxForwarder + Clone + FullEthServer;
+
+    /// Builds the [`EthApiServer`]
+    fn build(
+        self,
+        ctx: EthServerBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    ) -> Self::Server;
+}
+
+/// Builds eth server component gas price oracle, for given context.
+#[derive(Debug)]
+pub struct GasPriceOracleBuilder;
+
+impl GasPriceOracleBuilder {
+    /// Builds a gas price oracle, for given context.
+    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
+        ctx: &EthServerBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    ) -> GasPriceOracle<Provider>
+    where
+        Provider: BlockReaderIdExt + Clone,
+    {
+        GasPriceOracle::new(ctx.provider.clone(), ctx.config.gas_oracle.clone(), ctx.cache.clone())
+    }
+}
+
+/// Builds eth server component fee history cache, for given context.
+#[derive(Debug)]
+pub struct FeeHistoryCacheBuilder;
+
+impl FeeHistoryCacheBuilder {
+    /// Builds a fee history cache, for given context.
+    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
+        ctx: &EthServerBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    ) -> FeeHistoryCache
+    where
+        Provider: ChainSpecProvider + BlockReaderIdExt + Clone + 'static,
+        Tasks: TaskSpawner,
+        Events: CanonStateSubscriptions,
+    {
+        let fee_history_cache =
+            FeeHistoryCache::new(ctx.cache.clone(), ctx.config.fee_history_cache.clone());
+
+        let new_canonical_blocks = ctx.events.canonical_state_stream();
+        let fhc = fee_history_cache.clone();
+        let provider = ctx.provider.clone();
+        ctx.executor.spawn_critical(
+            "cache canonical blocks for fee history task",
+            Box::pin(async move {
+                fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider).await;
+            }),
+        );
+
+        fee_history_cache
     }
 }
