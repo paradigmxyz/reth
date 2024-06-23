@@ -90,23 +90,6 @@ pub trait BatchExecutor<DB> {
     fn size_hint(&self) -> Option<usize>;
 }
 
-/// The output of an ethereum block.
-///
-/// Contains the state changes, transaction receipts, and total gas used in the block.
-///
-/// TODO(mattsse): combine with `ExecutionOutcome`
-#[derive(Debug)]
-pub struct BlockExecutionOutput<T> {
-    /// The changed state of the block after execution.
-    pub state: BundleState,
-    /// All the receipts of the transactions in the block.
-    pub receipts: Vec<T>,
-    /// All the EIP-7685 requests of the transactions in the block.
-    pub requests: Vec<Request>,
-    /// The total gas used by the block.
-    pub gas_used: u64,
-}
-
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.
 #[derive(Debug)]
 pub struct BlockExecutionInput<'a, Block> {

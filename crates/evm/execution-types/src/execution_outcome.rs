@@ -1,6 +1,6 @@
 use reth_primitives::{
-    logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests,
-    StorageEntry, B256, U256,
+    logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Request,
+    Requests, StorageEntry, B256, U256,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -9,30 +9,40 @@ use revm::{
 };
 use std::collections::HashMap;
 
+/// The execution outcome of a single block.
+type SingleBlockExecutionOutcome = ExecutionOutcome<Vec<Receipt>, Vec<Request>, u64>;
+
+/// The execution outcome of multiple blocks aggregated together.
+///
+/// Outer receipt vector stores receipts for each block sequentially.
+/// The inner vector stores receipts ordered by transaction number.
+///
+/// Outer requests vector stores requests for each block sequentially.
+/// The inner vector stores requests ordered by transaction number.
+type MultiBlockExecutionOutcome = ExecutionOutcome<Receipts, Requests, Vec<u64>>;
+
 /// Represents the outcome of block execution, including post-execution changes and reverts.
 ///
 /// The `ExecutionOutcome` structure aggregates the state changes over an arbitrary number of
 /// blocks, capturing the resulting state, receipts, and requests following the execution.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ExecutionOutcome {
+pub struct ExecutionOutcome<Receipts, Requests, Gas> {
     /// Bundle state with reverts.
     pub bundle: BundleState,
     /// The collection of receipts.
-    /// Outer vector stores receipts for each block sequentially.
-    /// The inner vector stores receipts ordered by transaction number.
     ///
     /// If receipt is None it means it is pruned.
     pub receipts: Receipts,
     /// First block of bundle state.
     pub first_block: BlockNumber,
     /// The collection of EIP-7685 requests.
-    /// Outer vector stores requests for each block sequentially.
-    /// The inner vector stores requests ordered by transaction number.
     ///
     /// A transaction may have zero or more requests, so the length of the inner vector is not
     /// guaranteed to be the same as the number of transactions.
-    pub requests: Vec<Requests>,
+    pub requests: Requests,
+    /// The gas used for the execution.
+    pub gas_used: Gas,
 }
 
 /// Type used to initialize revms bundle state.
@@ -45,7 +55,7 @@ pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 /// Type used to initialize revms reverts.
 pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
 
-impl ExecutionOutcome {
+impl<Receipts, Requests, Gas> ExecutionOutcome<Receipts, Requests, Gas> {
     /// Creates a new `ExecutionOutcome`.
     ///
     /// This constructor initializes a new `ExecutionOutcome` instance with the provided
@@ -54,9 +64,10 @@ impl ExecutionOutcome {
         bundle: BundleState,
         receipts: Receipts,
         first_block: BlockNumber,
-        requests: Vec<Requests>,
+        requests: Requests,
+        gas_used: Gas,
     ) -> Self {
-        Self { bundle, receipts, first_block, requests }
+        Self { bundle, receipts, first_block, requests, gas_used }
     }
 
     /// Creates a new `ExecutionOutcome` from initialization parameters.
@@ -69,7 +80,8 @@ impl ExecutionOutcome {
         contracts_init: Vec<(B256, Bytecode)>,
         receipts: Receipts,
         first_block: BlockNumber,
-        requests: Vec<Requests>,
+        requests: Requests,
+        gas_used: Gas,
     ) -> Self {
         // sort reverts by block number
         let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
@@ -98,7 +110,7 @@ impl ExecutionOutcome {
             contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
         );
 
-        Self { bundle, receipts, first_block, requests }
+        Self { bundle, receipts, first_block, requests, gas_used }
     }
 
     /// Return revm bundle state.
@@ -149,6 +161,61 @@ impl ExecutionOutcome {
         HashedPostState::from_bundle_state(&self.bundle.state)
     }
 
+    /// Returns the receipt root for all recorded receipts.
+    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
+    /// of receipt. This is a expensive operation.
+    pub fn receipts_root_slow(&self, _block_number: BlockNumber) -> Option<B256> {
+        #[cfg(feature = "optimism")]
+        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
+        #[cfg(not(feature = "optimism"))]
+        self.receipts.root_slow(self.block_number_to_index(_block_number)?)
+    }
+
+    /// Returns reference to receipts.
+    pub const fn receipts(&self) -> &Receipts {
+        &self.receipts
+    }
+
+    /// Returns mutable reference to receipts.
+    pub fn receipts_mut(&mut self) -> &mut Receipts {
+        &mut self.receipts
+    }
+
+    /// Return first block of the execution outcome
+    pub const fn first_block(&self) -> BlockNumber {
+        self.first_block
+    }
+
+    /// Prepends present the state with the given `BundleState`.
+    /// It adds changes from the given state but does not override any existing changes.
+    ///
+    /// Reverts  and receipts are not updated.
+    pub fn prepend_state(&mut self, mut other: BundleState) {
+        let other_len = other.reverts.len();
+        // take this bundle
+        let this_bundle = std::mem::take(&mut self.bundle);
+        // extend other bundle with this
+        other.extend(this_bundle);
+        // discard other reverts
+        other.take_n_reverts(other_len);
+        // swap bundles
+        std::mem::swap(&mut self.bundle, &mut other)
+    }
+
+    /// Create a new instance with updated receipts.
+    pub fn with_receipts(mut self, receipts: Receipts) -> Self {
+        self.receipts = receipts;
+        self
+    }
+
+    /// Create a new instance with updated requests.
+    pub fn with_requests(mut self, requests: Requests) -> Self {
+        self.requests = requests;
+        self
+    }
+}
+
+impl MultiBlockExecutionOutcome {
     /// Transform block number to the index of block.
     fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
@@ -175,16 +242,6 @@ impl ExecutionOutcome {
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
-    pub fn receipts_root_slow(&self, _block_number: BlockNumber) -> Option<B256> {
-        #[cfg(feature = "optimism")]
-        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
-        #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(self.block_number_to_index(_block_number)?)
-    }
-
-    /// Returns the receipt root for all recorded receipts.
-    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
-    /// of receipt. This is a expensive operation.
     #[cfg(feature = "optimism")]
     pub fn optimism_receipts_root_slow(
         &self,
@@ -199,25 +256,10 @@ impl ExecutionOutcome {
         )
     }
 
-    /// Returns reference to receipts.
-    pub const fn receipts(&self) -> &Receipts {
-        &self.receipts
-    }
-
-    /// Returns mutable reference to receipts.
-    pub fn receipts_mut(&mut self) -> &mut Receipts {
-        &mut self.receipts
-    }
-
     /// Return all block receipts
     pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[Option<Receipt>] {
         let Some(index) = self.block_number_to_index(block_number) else { return &[] };
         &self.receipts[index]
-    }
-
-    /// Is execution outcome empty.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 
     /// Number of blocks in the execution outcome.
@@ -225,9 +267,9 @@ impl ExecutionOutcome {
         self.receipts.len()
     }
 
-    /// Return first block of the execution outcome
-    pub const fn first_block(&self) -> BlockNumber {
-        self.first_block
+    /// Is execution outcome empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Revert the state to the given block number.
@@ -278,7 +320,7 @@ impl ExecutionOutcome {
         // Ensure that there are enough requests to truncate.
         // Sometimes we just have receipts and no requests.
         if at_idx < higher_state.requests.len() {
-            higher_state.requests = higher_state.requests.split_off(at_idx);
+            higher_state.requests = higher_state.requests.split_off(at_idx).into();
         }
         higher_state.bundle.take_n_reverts(at_idx);
         higher_state.first_block = at;
@@ -295,34 +337,6 @@ impl ExecutionOutcome {
         self.bundle.extend(other.bundle);
         self.receipts.extend(other.receipts.receipt_vec);
         self.requests.extend(other.requests);
-    }
-
-    /// Prepends present the state with the given `BundleState`.
-    /// It adds changes from the given state but does not override any existing changes.
-    ///
-    /// Reverts  and receipts are not updated.
-    pub fn prepend_state(&mut self, mut other: BundleState) {
-        let other_len = other.reverts.len();
-        // take this bundle
-        let this_bundle = std::mem::take(&mut self.bundle);
-        // extend other bundle with this
-        other.extend(this_bundle);
-        // discard other reverts
-        other.take_n_reverts(other_len);
-        // swap bundles
-        std::mem::swap(&mut self.bundle, &mut other)
-    }
-
-    /// Create a new instance with updated receipts.
-    pub fn with_receipts(mut self, receipts: Receipts) -> Self {
-        self.receipts = receipts;
-        self
-    }
-
-    /// Create a new instance with updated requests.
-    pub fn with_requests(mut self, requests: Vec<Requests>) -> Self {
-        self.requests = requests;
-        self
     }
 }
 
