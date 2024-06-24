@@ -14,29 +14,13 @@ pub trait OptimismHardforks: EthereumHardforks {
     fn is_bedrock_active_at_block(&self, block_number: u64) -> bool {
         self.fork(OptimismHardfork::Bedrock).active_at_block(block_number)
     }
+}
 
-    /// Internal helper method.
-    fn resolve<H, HF, OHF>(
-        &self,
-        fork: H,
-        hardfork_fn: HF,
-        optimism_hardfork_fn: OHF,
-    ) -> Option<u64>
-    where
-        H: Hardfork,
-        HF: Fn(&EthereumHardfork) -> Option<u64>,
-        OHF: Fn(&OptimismHardfork) -> Option<u64>,
-    {
-        let fork: &dyn Any = &fork;
-        if let Some(fork) = fork.downcast_ref::<EthereumHardfork>() {
-            return hardfork_fn(fork)
-        }
-        fork.downcast_ref::<OptimismHardfork>().and_then(|fork| optimism_hardfork_fn(fork))
-    }
-
+/// Trait that implements fork activation information helpers for [`ChainHardforks`].
+pub trait OptimismActivations {
     /// Retrieves the activation block for the specified hardfork on the Base Sepolia testnet.
     fn base_sepolia_activation_block<H: Hardfork>(&self, fork: H) -> Option<u64> {
-        self.resolve(
+        self.match_hardfork(
             fork,
             |fork| {
                 #[allow(unreachable_patterns)]
@@ -76,7 +60,7 @@ pub trait OptimismHardforks: EthereumHardforks {
 
     /// Retrieves the activation block for the specified hardfork on the Base mainnet.
     fn base_mainnet_activation_block<H: Hardfork>(&self, fork: H) -> Option<u64> {
-        self.resolve(
+        self.match_hardfork(
             fork,
             |fork| {
                 #[allow(unreachable_patterns)]
@@ -115,7 +99,7 @@ pub trait OptimismHardforks: EthereumHardforks {
 
     /// Retrieves the activation timestamp for the specified hardfork on the Base Sepolia testnet.
     fn base_sepolia_activation_timestamp<H: Hardfork>(&self, fork: H) -> Option<u64> {
-        self.resolve(
+        self.match_hardfork(
             fork,
             |fork| {
                 #[allow(unreachable_patterns)]
@@ -155,7 +139,7 @@ pub trait OptimismHardforks: EthereumHardforks {
 
     /// Retrieves the activation timestamp for the specified hardfork on the Base mainnet.
     fn base_mainnet_activation_timestamp<H: Hardfork>(&self, fork: H) -> Option<u64> {
-        self.resolve(
+        self.match_hardfork(
             fork,
             |fork| {
                 #[allow(unreachable_patterns)]
@@ -192,9 +176,29 @@ pub trait OptimismHardforks: EthereumHardforks {
             },
         )
     }
+
+    /// Match helper method since it's not possible to match on `dyn Hardfork`
+    fn match_hardfork<H, HF, OHF>(
+        &self,
+        fork: H,
+        hardfork_fn: HF,
+        optimism_hardfork_fn: OHF,
+    ) -> Option<u64>
+    where
+        H: Hardfork,
+        HF: Fn(&EthereumHardfork) -> Option<u64>,
+        OHF: Fn(&OptimismHardfork) -> Option<u64>,
+    {
+        let fork: &dyn Any = &fork;
+        if let Some(fork) = fork.downcast_ref::<EthereumHardfork>() {
+            return hardfork_fn(fork)
+        }
+        fork.downcast_ref::<OptimismHardfork>().and_then(|fork| optimism_hardfork_fn(fork))
+    }
 }
 
 impl OptimismHardforks for ChainHardforks {}
+impl OptimismActivations for ChainHardforks {}
 
 /// Optimism mainnet hardforks
 pub static OP_MAINNET_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
