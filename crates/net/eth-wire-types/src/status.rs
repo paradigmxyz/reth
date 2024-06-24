@@ -152,7 +152,7 @@ impl Default for Status {
 ///
 /// # Example
 /// ```
-/// use reth_chainspec::{Chain, Hardfork, MAINNET};
+/// use reth_chainspec::{Chain, EthereumHardfork, MAINNET};
 /// use reth_eth_wire_types::{EthVersion, Status};
 /// use reth_primitives::{B256, MAINNET_GENESIS_HASH, U256};
 ///
@@ -163,7 +163,7 @@ impl Default for Status {
 ///     .total_difficulty(U256::from(100))
 ///     .blockhash(B256::from(MAINNET_GENESIS_HASH))
 ///     .genesis(B256::from(MAINNET_GENESIS_HASH))
-///     .forkid(MAINNET.hardfork_fork_id(Hardfork::Paris).unwrap())
+///     .forkid(MAINNET.hardfork_fork_id(EthereumHardfork::Paris).unwrap())
 ///     .build();
 ///
 /// assert_eq!(
@@ -174,7 +174,7 @@ impl Default for Status {
 ///         total_difficulty: U256::from(100),
 ///         blockhash: B256::from(MAINNET_GENESIS_HASH),
 ///         genesis: B256::from(MAINNET_GENESIS_HASH),
-///         forkid: MAINNET.hardfork_fork_id(Hardfork::Paris).unwrap(),
+///         forkid: MAINNET.hardfork_fork_id(EthereumHardfork::Paris).unwrap(),
 ///     }
 /// );
 /// ```
