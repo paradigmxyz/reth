@@ -17,7 +17,7 @@
 //! Configure only an http server with a selection of [`RethRpcModule`]s
 //!
 //! ```
-//! use reth_ethereum_rpc::ApiBuilder;
+//! use reth_ethereum_rpc::EthApiBuild;
 //! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
@@ -69,7 +69,7 @@
 //!
 //! ```
 //! use reth_engine_primitives::EngineTypes;
-//! use reth_ethereum_rpc::ApiBuilder;
+//! use reth_ethereum_rpc::EthApiBuild;
 //! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
@@ -462,7 +462,7 @@ where
     /// # Example
     ///
     /// ```no_run
-    /// use reth_ethereum_rpc::ApiBuilder;
+    /// use reth_ethereum_rpc::EthApiBuild;
     /// use reth_evm::ConfigureEvm;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};

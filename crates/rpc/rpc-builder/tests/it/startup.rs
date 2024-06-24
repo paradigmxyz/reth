@@ -26,7 +26,7 @@ async fn test_http_addr_in_use() {
     let builder = test_rpc_builder();
     let server = builder.build(
         TransportRpcModuleConfig::set_http(vec![RethRpcModule::Admin]),
-        reth_ethereum_rpc::ApiBuilder,
+        reth_ethereum_rpc::EthApiBuild,
     );
     let result = server
         .start_server(RpcServerConfig::http(Default::default()).with_http_address(addr))
@@ -42,7 +42,7 @@ async fn test_ws_addr_in_use() {
     let builder = test_rpc_builder();
     let server = builder.build(
         TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Admin]),
-        reth_ethereum_rpc::ApiBuilder,
+        reth_ethereum_rpc::EthApiBuild,
     );
     let result =
         server.start_server(RpcServerConfig::ws(Default::default()).with_ws_address(addr)).await;
@@ -64,7 +64,7 @@ async fn test_launch_same_port_different_modules() {
     let server = builder.build(
         TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Admin])
             .with_http(vec![RethRpcModule::Eth]),
-        reth_ethereum_rpc::ApiBuilder,
+        reth_ethereum_rpc::EthApiBuild,
     );
     let addr = test_address();
     let res = server
@@ -88,7 +88,7 @@ async fn test_launch_same_port_same_cors() {
     let server = builder.build(
         TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Eth])
             .with_http(vec![RethRpcModule::Eth]),
-        reth_ethereum_rpc::ApiBuilder,
+        reth_ethereum_rpc::EthApiBuild,
     );
     let addr = test_address();
     let res = server
@@ -110,7 +110,7 @@ async fn test_launch_same_port_different_cors() {
     let server = builder.build(
         TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Eth])
             .with_http(vec![RethRpcModule::Eth]),
-        reth_ethereum_rpc::ApiBuilder,
+        reth_ethereum_rpc::EthApiBuild,
     );
     let addr = test_address();
     let res = server

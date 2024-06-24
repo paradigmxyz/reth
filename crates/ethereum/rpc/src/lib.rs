@@ -11,4 +11,4 @@
 
 mod api_builder;
 
-pub use api_builder::ApiBuilder;
+pub use api_builder::EthApiBuild;
