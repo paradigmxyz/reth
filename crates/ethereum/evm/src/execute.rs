@@ -188,6 +188,7 @@ where
                     EVMError::Header(e) => EVMError::Header(e),
                     EVMError::Database(e) => EVMError::Database(e.into()),
                     EVMError::Custom(e) => EVMError::Custom(e),
+                    EVMError::Precompile(e) => EVMError::Precompile(e),
                 };
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {

@@ -1,16 +1,11 @@
 //! Traits for execution.
 
-<<<<<<< HEAD
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Request, U256};
-=======
-use std::fmt::Display;
-
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Receipts, Request, Requests, U256};
->>>>>>> 0c5e8f0a0 (trait bounding Display as well)
 use reth_prune_types::PruneModes;
 use revm::db::BundleState;
 use revm_primitives::db::Database;
+use std::fmt::Display;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
