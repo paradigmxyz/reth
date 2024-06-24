@@ -76,7 +76,7 @@ impl ForkchoiceStateTracker {
     }
 
     /// Returns the last received `ForkchoiceState` to which we need to sync.
-    pub(crate) const fn sync_target_state(&self) -> Option<ForkchoiceState> {
+    pub const fn sync_target_state(&self) -> Option<ForkchoiceState> {
         self.last_syncing
     }
 
