@@ -73,7 +73,7 @@ paste.workspace = true
 assert_matches.workspace = true
 
 [features]
-default = ["mdbx"]
+default = []
 test-utils = ["tempfile", "arbitrary"]
 mdbx = ["reth-libmdbx"]
 bench = []
