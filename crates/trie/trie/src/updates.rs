@@ -23,6 +23,36 @@ pub enum TrieKey {
     StorageTrie(B256),
 }
 
+impl From<StoredNibbles> for TrieKey {
+    fn from(value: StoredNibbles) -> Self {
+        Self::AccountNode(value)
+    }
+}
+
+impl From<Nibbles> for TrieKey {
+    fn from(value: Nibbles) -> Self {
+        Self::AccountNode(value.into())
+    }
+}
+
+impl From<(B256, StoredNibblesSubKey)> for TrieKey {
+    fn from(value: (B256, StoredNibblesSubKey)) -> Self {
+        Self::StorageNode(value.0, value.1)
+    }
+}
+
+impl From<(B256, Nibbles)> for TrieKey {
+    fn from(value: (B256, Nibbles)) -> Self {
+        Self::StorageNode(value.0, value.1.into())
+    }
+}
+
+impl From<B256> for TrieKey {
+    fn from(value: B256) -> Self {
+        Self::StorageTrie(value)
+    }
+}
+
 /// The operation to perform on the trie.
 #[derive(PartialEq, Eq, Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -31,6 +61,12 @@ pub enum TrieOp {
     Delete,
     /// Update the node entry with the provided value.
     Update(BranchNodeCompact),
+}
+
+impl From<BranchNodeCompact> for TrieOp {
+    fn from(node: BranchNodeCompact) -> Self {
+        Self::Update(node)
+    }
 }
 
 impl TrieOp {
@@ -49,7 +85,7 @@ pub struct TrieUpdates {
 
 impl<const N: usize> From<[(TrieKey, TrieOp); N]> for TrieUpdates {
     fn from(value: [(TrieKey, TrieOp); N]) -> Self {
-        Self { trie_operations: HashMap::from(value) }
+        Self { trie_operations: value.into() }
     }
 }
 
@@ -82,11 +118,7 @@ impl TrieUpdates {
 
     /// Extend the updates with account trie updates.
     pub fn extend_with_account_updates(&mut self, updates: HashMap<Nibbles, BranchNodeCompact>) {
-        self.extend(
-            updates.into_iter().map(|(nibbles, node)| {
-                (TrieKey::AccountNode(nibbles.into()), TrieOp::Update(node))
-            }),
-        );
+        self.extend(updates.into_iter().map(|(nibbles, node)| (nibbles.into(), node.into())));
     }
 
     /// Finalize state trie updates.
@@ -105,9 +137,7 @@ impl TrieUpdates {
         self.extend_with_account_updates(hash_builder_updates);
 
         // Add deleted storage tries for destroyed accounts.
-        self.extend(
-            destroyed_accounts.into_iter().map(|key| (TrieKey::StorageTrie(key), TrieOp::Delete)),
-        );
+        self.extend(destroyed_accounts.into_iter().map(|key| (key.into(), TrieOp::Delete)));
     }
 
     /// Finalize storage trie updates for a given address.
@@ -123,9 +153,11 @@ impl TrieUpdates {
 
         // Add storage node updates from hash builder.
         let (_, hash_builder_updates) = hash_builder.split();
-        self.extend(hash_builder_updates.into_iter().map(|(nibbles, node)| {
-            (TrieKey::StorageNode(hashed_address, nibbles.into()), TrieOp::Update(node))
-        }));
+        self.extend(
+            hash_builder_updates
+                .into_iter()
+                .map(|(nibbles, node)| ((hashed_address, nibbles).into(), node.into())),
+        );
     }
 
     /// Flush updates all aggregated updates to the database.

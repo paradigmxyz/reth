@@ -5,7 +5,7 @@ use crate::{
     progress::{IntermediateStateRootState, StateRootProgress},
     stats::TrieTracker,
     trie_cursor::TrieCursorFactory,
-    updates::{TrieKey, TrieOp, TrieUpdates},
+    updates::{TrieOp, TrieUpdates},
     walker::TrieWalker,
     HashBuilder, Nibbles, TrieAccount,
 };
@@ -486,7 +486,7 @@ where
             return Ok((
                 EMPTY_ROOT_HASH,
                 0,
-                TrieUpdates::from([(TrieKey::StorageTrie(self.hashed_address), TrieOp::Delete)]),
+                TrieUpdates::from([(self.hashed_address.into(), TrieOp::Delete)]),
             ))
         }
 
@@ -548,6 +548,7 @@ mod tests {
     use crate::{
         prefix_set::PrefixSetMut,
         test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
+        updates::TrieKey,
         BranchNodeCompact, TrieMask,
     };
     use proptest::{prelude::ProptestConfig, proptest};
