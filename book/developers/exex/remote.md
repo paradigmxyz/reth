@@ -62,7 +62,7 @@ name = "consumer"
 path = "src/consumer.rs"
 ```
 
-As you can see, we also added a build dependency for Tonic. We will use it to generate the Rust code for our
+We also added a build dependency for Tonic. We will use it to generate the Rust code for our
 Protobuf definitions at compile time.
 
 Also, we now have two separate binaries:
