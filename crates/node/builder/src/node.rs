@@ -11,7 +11,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::ChainSpecProvider;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 // re-export the node api types
 use crate::components::NodeComponentsBuilder;
@@ -26,6 +26,44 @@ pub trait Node<N: FullNodeTypes>: NodeTypes + Clone {
 
     /// Returns a [`NodeComponentsBuilder`] for the node.
     fn components_builder(self) -> Self::ComponentsBuilder;
+}
+
+/// A [`Node`] type builder
+#[derive(Clone, Default, Debug)]
+pub struct AnyNode<N = (), C = ()>(PhantomData<N>, C);
+
+impl<N, C> AnyNode<N, C> {
+    /// Configures the types of the node.
+    pub fn types<T>(self) -> AnyNode<T, C> {
+        AnyNode::<T, C>(PhantomData::<T>, self.1)
+    }
+
+    /// Sets the node components builder.
+    pub fn components_builder<T>(self, value: T) -> AnyNode<N, T> {
+        AnyNode::<N, T>(PhantomData::<N>, value)
+    }
+}
+
+impl<N, C> NodeTypes for AnyNode<N, C>
+where
+    N: FullNodeTypes,
+    C: NodeComponentsBuilder<N> + Sync + Unpin + 'static,
+{
+    type Primitives = N::Primitives;
+
+    type Engine = N::Engine;
+}
+
+impl<N, C> Node<N> for AnyNode<N, C>
+where
+    N: FullNodeTypes + Clone,
+    C: NodeComponentsBuilder<N> + Clone + Sync + Unpin + 'static,
+{
+    type ComponentsBuilder = C;
+
+    fn components_builder(self) -> Self::ComponentsBuilder {
+        self.1
+    }
 }
 
 /// The launched node with all components including RPC handlers.
