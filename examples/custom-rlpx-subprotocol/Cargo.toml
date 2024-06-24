@@ -1,5 +1,5 @@
 [package]
-name = "custom-rlpx-subprotocol"
+name = "example-custom-rlpx-subprotocol"
 version = "0.1.0"
 edition = "2021"
 

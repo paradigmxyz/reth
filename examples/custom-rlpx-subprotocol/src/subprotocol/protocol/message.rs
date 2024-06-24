@@ -1,24 +1,23 @@
 use reth_eth_wire::{protocol::Protocol, Capability};
-use reth_network::protocol::{ConnectionHandler, ProtocolHandler};
 use reth_primitives::{Buf, BufMut, BytesMut};
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CustomRlpxProtoMessageId {
+pub(crate) enum CustomRlpxProtoMessageId {
     Ping = 0x00,
     Pong = 0x01,
     CustomMessage = 0x02,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CustomRlpxProtoMessageKind {
+pub(crate) enum CustomRlpxProtoMessageKind {
     Ping,
     Pong,
     CustomMessage(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CustomRlpxProtoMessage {
+pub(crate) struct CustomRlpxProtoMessage {
     pub message_type: CustomRlpxProtoMessageId,
     pub message: CustomRlpxProtoMessageKind,
 }
