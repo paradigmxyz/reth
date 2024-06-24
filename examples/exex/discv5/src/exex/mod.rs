@@ -27,17 +27,18 @@ impl<Node: FullNodeComponents> Future for ExEx<Node> {
     type Output = Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Continuously poll the Discv5 future
-        while let Poll::Ready(result) = Pin::new(&mut self.disc_v5).poll(cx) {
-            match result {
-                Ok(()) => {
-                    info!("Discv5 task completed successfully");
-                    break;
-                }
-                Err(e) => {
-                    info!(error = ?e, "Discv5 task encountered an error");
-                    return Poll::Ready(Err(e));
-                }
+        // Poll the Discv5 future
+        match Pin::new(&mut self.disc_v5).poll(cx) {
+            Poll::Ready(Ok(())) => {
+                info!("Discv5 task completed successfully");
+            }
+            Poll::Ready(Err(e)) => {
+                info!(error = ?e, "Discv5 task encountered an error");
+                return Poll::Ready(Err(e));
+            }
+            Poll::Pending => {
+                // If the future is still pending, we yield control back to the executor
+                return Poll::Pending;
             }
         }
 
