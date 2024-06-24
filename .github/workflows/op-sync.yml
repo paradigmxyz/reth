@@ -33,11 +33,12 @@ jobs:
         with:
           cache-on-failure: true
       - name: Run sync
+        # `--debug.tip` == https://basescan.org/block/10000
         run: |
           cargo run --release --features asm-keccak,jemalloc,min-error-logs,optimism --bin op-reth \
             -- node \
             --chain base \
-            --debug.tip 0xbb9b85352c7ebca6ba8efc63bd66cecd038c92ec8ebd02e153a3e0b197e672b7 \ # https://basescan.org/block/10000
+            --debug.tip 0xbb9b85352c7ebca6ba8efc63bd66cecd038c92ec8ebd02e153a3e0b197e672b7 \
             --debug.max-block 10000 \
             --debug.terminate
       - name: Verify the target block hash
