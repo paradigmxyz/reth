@@ -1,16 +1,16 @@
 use crate::{engine::DownloadRequest, pipeline::PipelineAction};
 use reth_beacon_consensus::{ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated};
-use reth_blockchain_tree::{error::InsertBlockErrorKind, BlockBuffer, BlockStatus};
+use reth_blockchain_tree::{BlockBuffer, BlockStatus};
 use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_primitives::PayloadTypes;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Address, Block, BlockNumber, Receipt, Receipts, Requests, SealedBlock, SealedBlockWithSenders,
-    B256, U256,
+    Address, Block, BlockNumber, Receipts, Requests, SealedBlock, SealedBlockWithSenders, B256,
+    U256,
 };
 use reth_provider::{BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
@@ -341,18 +341,18 @@ where
         Ok(())
     }
 
-    fn buffer_block_without_senders(&self, block: SealedBlock) -> Result<(), InsertBlockError> {
+    fn buffer_block_without_senders(&mut self, block: SealedBlock) -> Result<(), InsertBlockError> {
         match block.try_seal_with_senders() {
             Ok(block) => self.buffer_block(block),
             Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
         }
     }
 
-    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
+    fn buffer_block(&mut self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         if let Err(err) = self.validate_block(&block) {
             return Err(InsertBlockError::consensus_error(err, block.block))
         }
-        self.state.buffer.write().insert_block(block);
+        self.state.buffer.insert_block(block);
         Ok(())
     }
 
@@ -406,8 +406,6 @@ where
             trie: Arc::new(trie_output),
         };
         self.state.tree_state.insert_executed(executed);
-
-        self.state.tree_state.write().insert_executed(executed);
 
         todo!()
     }
