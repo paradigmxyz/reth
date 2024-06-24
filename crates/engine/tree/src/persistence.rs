@@ -1,8 +1,10 @@
 use crate::tree::ExecutedBlock;
+use reth_execution_types::ExecutionOutcome;
 use reth_db::database::Database;
 use reth_errors::ProviderResult;
-use reth_primitives::B256;
-use reth_provider::ProviderFactory;
+use reth_primitives::{SealedBlockWithSenders, B256};
+use reth_provider::{BlockWriter, ProviderFactory};
+use reth_trie::updates::TrieUpdates;
 use std::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
 
@@ -21,8 +23,28 @@ impl<DB: Database> Persistence<DB> {
     // TODO: initialization
     /// Writes the cloned tree state to the database
     fn write(&mut self, blocks: Vec<ExecutedBlock>) -> ProviderResult<()> {
+        // assumptions
+        debug_assert!(!blocks.is_empty());
+
         let mut rw = self.provider.provider_rw()?;
-        todo!("implement this")
+        let mut sealed_blocks = vec![];
+        let mut final_outcome = ExecutionOutcome::default();
+        let mut updates = TrieUpdates::default();
+        for block in blocks {
+            // TODO: make this conversion better, with an into_components or something on
+            // ExecutedBlock so we can do this without clones
+            let sealed_block = block.block().clone().with_senders_unchecked(block.senders().clone());
+            sealed_blocks.push(sealed_block);
+            final_outcome.extend(block.outcome().clone());
+
+            // need to check if this is safe / the intended way to accumulate trie updates
+            updates.extend(block.updates().clone());
+        }
+
+        let hashed_state = final_outcome.hash_state_slow();
+        // TODO: pruning
+        rw.append_blocks_with_state(sealed_blocks, final_outcome, hashed_state, updates, None)?;
+        Ok(())
     }
 
     /// Removes the blocks above the give block number from the database, returning them.

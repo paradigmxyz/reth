@@ -226,8 +226,41 @@ impl AppendableChain {
             let (state_root, trie_updates) = if block_attachment.is_canonical() {
                 let mut execution_outcome =
                     provider.block_execution_data_provider.execution_outcome().clone();
+
+                tracing::debug!(
+                    target: "blockchain_tree::chain",
+                    number = block.number,
+                    hash = %block_hash,
+                    elapsed = ?start.elapsed(),
+                    prev_len = execution_outcome.len(),
+                    "Cloned execution outcome",
+                );
+
+                let extend_time = Instant::now();
                 execution_outcome.extend(initial_execution_outcome.clone());
+
+                tracing::debug!(
+                    target: "blockchain_tree::chain",
+                    number = block.number,
+                    hash = %block_hash,
+                    elapsed = ?extend_time.elapsed(),
+                    initial_len = initial_execution_outcome.len(),
+                    new_len = execution_outcome.len(),
+                    "Extended execution outcome",
+                );
+
+                let hashed_time = Instant::now();
                 let hashed_state = execution_outcome.hash_state_slow();
+
+                tracing::debug!(
+                    target: "blockchain_tree::chain",
+                    number = block.number,
+                    hash = %block_hash,
+                    outcome_len = execution_outcome.len(),
+                    elapsed = ?hashed_time.elapsed(),
+                    "Hashed state",
+                );
+
                 ParallelStateRoot::new(consistent_view, hashed_state)
                     .incremental_root_with_updates()
                     .map(|(root, updates)| (root, Some(updates)))
