@@ -73,5 +73,7 @@ assert_matches.workspace = true
 rand.workspace = true
 
 [features]
+default = ["not-zkvm"]
 test-utils = ["alloy-rlp", "reth-db/test-utils", "reth-nippy-jar/test-utils"]
 optimism = ["reth-primitives/optimism", "reth-execution-types/optimism"]
+not-zkvm = []

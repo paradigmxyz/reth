@@ -13,11 +13,15 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /// Various provider traits.
+#[cfg(feature = "not-zkvm")]
 mod traits;
+#[cfg(feature = "not-zkvm")]
 pub use traits::*;
 
 /// Provider trait implementations.
+#[cfg(feature = "not-zkvm")]
 pub mod providers;
+#[cfg(feature = "not-zkvm")]
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
     HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
@@ -34,7 +38,8 @@ pub use reth_storage_errors::provider::{ProviderError, ProviderResult};
 pub use reth_execution_types::*;
 
 pub mod bundle_state;
-pub use bundle_state::{OriginalValuesKnown, StateChanges, StateReverts};
+pub use bundle_state::{StateChanges, StateReverts};
+pub use revm::db::states::OriginalValuesKnown;
 
 pub(crate) fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {
     let start = match bounds.start_bound() {

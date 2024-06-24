@@ -5,6 +5,7 @@ use reth_db_api::{
     transaction::DbTx,
 };
 
+#[cfg(feature = "not-zkvm")]
 use reth_nippy_jar::{ColumnResult, NippyJar, NippyJarHeader, PHFKey};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_tracing::tracing::*;

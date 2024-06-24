@@ -4,7 +4,10 @@ use std::path::Path;
 
 /// Returns the default page size that can be used in this OS.
 pub(crate) fn default_page_size() -> usize {
+    #[cfg(feature = "not-zkvm")]
     let os_page_size = page_size::get();
+    #[cfg(not(feature = "not-zkvm"))]
+    let os_page_size = 4096;
 
     // source: https://gitflic.ru/project/erthink/libmdbx/blob?file=mdbx.h#line-num-821
     let libmdbx_max_page_size = 0x10000;

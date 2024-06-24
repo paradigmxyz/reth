@@ -493,12 +493,6 @@ secp256k1 = { version = "0.29", default-features = false, features = [
     "global-context",
     "recovery",
 ] }
-#secp256k1 = { git = "https://github.com/CeciliaZ030/rust-secp256k1", branch = "sp1-patch", default-features = false, features = [
-#    "alloc",
-#    "recovery",
-#    "rand",
-#    "global-context",
-#] }
 # TODO: Remove `k256` feature: https://github.com/sigp/enr/pull/74
 #enr = { version = "0.12.0", default-features = false, features = [
 #    "k256",
@@ -531,26 +525,16 @@ raiko-lib = { git = "https://github.com/taikoxyz/raiko.git", branch = "reth-supp
 raiko-primitives = { git = "https://github.com/taikoxyz/raiko.git", branch = "reth-support" }
 anyhow = "1.0"
 
-# TODO(Brecht)
-# used in revm-inspector
-#[patch."https://github.com/alloy-rs/alloy"]
-#alloy-rpc-types = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
-#alloy-rpc-types-trace = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
-
 [patch.crates-io]
-revm = { git = "https://github.com/bluealloy/revm.git", rev = "41e2f7f" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm.git", rev = "41e2f7f" }
-revm-precompile = { git = "https://github.com/bluealloy/revm.git", rev = "41e2f7f" }
-revm-primitives = { git = "https://github.com/bluealloy/revm.git", rev = "41e2f7f" }
-
-# TODO(Brecht)
-# revm = { git = "https://github.com/taikoxyz/revm.git", branch = "v35_taiko_v2", default-features = false, features = [
-#     "std",
-#     "serde",
-#     "taiko",
-# ]}
-# revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v35_taiko_v2", default-features = false, features = [
-#     "std",
-#     "serde",
-#     "taiko",
-# ]}
+revm = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko", default-features = false, features = [
+    "std",
+    "serde",
+    "taiko",
+]}
+revm-interpreter = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko" }
+revm-precompile = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko" }
+revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko", default-features = false, features = [
+    "std",
+    "serde",
+    "taiko",
+]}

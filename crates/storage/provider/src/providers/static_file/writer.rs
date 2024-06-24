@@ -6,6 +6,7 @@ use super::{
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
 use reth_db_api::models::CompactU256;
+#[cfg(feature = "not-zkvm")]
 use reth_nippy_jar::{ConsistencyFailStrategy, NippyJar, NippyJarError, NippyJarWriter};
 use reth_primitives::{
     static_file::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},

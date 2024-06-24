@@ -18,6 +18,7 @@
 mod implementation;
 pub mod lockfile;
 mod metrics;
+#[cfg(feature = "not-zkvm")]
 pub mod static_file;
 pub mod tables;
 mod utils;

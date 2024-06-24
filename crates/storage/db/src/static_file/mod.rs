@@ -13,6 +13,7 @@ pub use cursor::StaticFileCursor;
 
 mod mask;
 pub use mask::*;
+#[cfg(feature = "not-zkvm")]
 use reth_nippy_jar::{NippyJar, NippyJarError};
 use reth_primitives::{
     static_file::{SegmentHeader, SegmentRangeInclusive},
