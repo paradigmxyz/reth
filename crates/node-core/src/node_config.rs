@@ -267,7 +267,7 @@ impl NodeConfig {
     }
 
     /// Loads '`EnvKzgSettings::Default`'
-    pub fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
+    pub const fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
         Ok(EnvKzgSettings::Default)
     }
 

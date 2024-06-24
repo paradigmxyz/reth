@@ -368,7 +368,7 @@ where
                 }
                 EthBlobTransactionSidecar::Present(blob) => {
                     // validate the blob
-                    if let Err(err) = transaction.validate_blob(&blob, &self.kzg_settings.get()) {
+                    if let Err(err) = transaction.validate_blob(&blob, self.kzg_settings.get()) {
                         return TransactionValidationOutcome::Invalid(
                             transaction,
                             InvalidPoolTransactionError::Eip4844(
@@ -537,7 +537,7 @@ impl EthTransactionValidatorBuilder {
         self
     }
 
-    /// Sets the [`KzgSettings`] to use for validating KZG proofs.
+    /// Sets the [`EnvKzgSettings`] to use for validating KZG proofs.
     pub fn kzg_settings(mut self, kzg_settings: EnvKzgSettings) -> Self {
         self.kzg_settings = kzg_settings;
         self
