@@ -1245,10 +1245,41 @@ impl<L> RpcServerConfig<L> {
     /// # Type Parameters
     ///
     /// - `T`: The type of the middleware, which must implement `Send`, `Sync`, and `'static`.
+    #[allow(clippy::type_complexity)]
     pub fn with_additional_middleware<T>(
         self,
-        layer: tower::ServiceBuilder<Stack<tower::util::Either<tower_http::auth::AddAuthorizationLayer, Identity>, Stack<tower::util::Either<tower_http::trace::TraceLayer<tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>>, Identity>, Identity>>>,
-    ) -> RpcServerConfig<Stack<tower::util::Either<tower_http::auth::AddAuthorizationLayer, Identity>, Stack<tower::util::Either<tower_http::trace::TraceLayer<tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>>, Identity>, Identity>>> {
+        layer: tower::ServiceBuilder<
+            Stack<
+                tower::util::Either<tower_http::auth::AddAuthorizationLayer, Identity>,
+                Stack<
+                    tower::util::Either<
+                        tower_http::trace::TraceLayer<
+                            tower_http::classify::SharedClassifier<
+                                tower_http::classify::ServerErrorsAsFailures,
+                            >,
+                        >,
+                        Identity,
+                    >,
+                    Identity,
+                >,
+            >,
+        >,
+    ) -> RpcServerConfig<
+        Stack<
+            tower::util::Either<tower_http::auth::AddAuthorizationLayer, Identity>,
+            Stack<
+                tower::util::Either<
+                    tower_http::trace::TraceLayer<
+                        tower_http::classify::SharedClassifier<
+                            tower_http::classify::ServerErrorsAsFailures,
+                        >,
+                    >,
+                    Identity,
+                >,
+                Identity,
+            >,
+        >,
+    > {
         RpcServerConfig {
             http_server_config: self.http_server_config,
             http_cors_domains: self.http_cors_domains,

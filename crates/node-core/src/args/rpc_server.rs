@@ -172,13 +172,13 @@ pub struct RpcServerArgs {
     #[arg(long, default_value_t = false)]
     pub enable_auth: bool,
 
-    /// Enable rate limiting middleware
-    #[arg(long, default_value_t = false)]
-    pub enable_rate_limit: bool,
+    /// Username for authentication
+    #[arg(long, required_if_eq("enable_auth", "true"))]
+    pub auth_username: Option<String>,
 
-    /// Enable monitoring middleware
-    #[arg(long, default_value_t = false)]
-    pub enable_monitoring: bool,
+    /// Password for authentication
+    #[arg(long, required_if_eq("enable_auth", "true"))]
+    pub auth_password: Option<String>,
 }
 
 impl RpcServerArgs {
@@ -306,8 +306,8 @@ impl Default for RpcServerArgs {
             rpc_state_cache: RpcStateCacheArgs::default(),
             enable_logging: false,
             enable_auth: false,
-            enable_rate_limit: false,
-            enable_monitoring: false,
+            auth_username: None,
+            auth_password: None,
         }
     }
 }
