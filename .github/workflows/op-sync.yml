@@ -32,21 +32,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - name: Build op-reth
+        run: |
+          cargo install --features asm-keccak,jemalloc,optimism --bin op-reth --path bin/reth
       - name: Run sync
         # https://basescan.org/block/10000
         run: |
-          cargo run --release --features asm-keccak,jemalloc,min-error-logs,optimism --bin op-reth \
-            -- node \
+          op-reth node \
             --chain base \
             --debug.tip 0xbb9b85352c7ebca6ba8efc63bd66cecd038c92ec8ebd02e153a3e0b197e672b7 \
             --debug.max-block 10000 \
             --debug.terminate
       - name: Verify the target block hash
         run: |
-          cargo run --release --bin reth \
-            -- db get static-file headers 10000 \
+          op-reth db --chain base get static-file headers 100000 \
             | grep 0xbb9b85352c7ebca6ba8efc63bd66cecd038c92ec8ebd02e153a3e0b197e672b7
       - name: Run stage unwind for 100 blocks
         run: |
-          cargo run --release --bin reth \
-            -- stage unwind num-blocks 100
+          op-reth stage --chain base unwind num-blocks 100
