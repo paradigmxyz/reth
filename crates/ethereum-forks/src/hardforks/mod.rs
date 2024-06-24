@@ -1,6 +1,6 @@
 /// Ethereum helper methods
 mod ethereum;
-pub use ethereum::EthereumHardforks;
+pub use ethereum::{EthereumActivations, EthereumHardforks};
 
 /// Optimism helper methods
 #[cfg(feature = "optimism")]
