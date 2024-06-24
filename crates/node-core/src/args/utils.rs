@@ -1,6 +1,8 @@
 //! Clap parser utilities
 
-use reth_primitives::{fs, AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256};
+use reth_chainspec::{AllGenesisFormats, ChainSpec};
+use reth_fs_util as fs;
+use reth_primitives::{BlockHashOrNumber, B256};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
@@ -9,17 +11,17 @@ use std::{
     time::Duration,
 };
 
-use reth_primitives::DEV;
+use reth_chainspec::DEV;
 
 #[cfg(feature = "optimism")]
-use reth_primitives::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
+use reth_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
 #[cfg(not(feature = "optimism"))]
-use reth_primitives::{GOERLI, HOLESKY, MAINNET, SEPOLIA};
+use reth_chainspec::{GOERLI, HOLESKY, MAINNET, SEPOLIA};
 
 #[cfg(feature = "optimism")]
 /// Chains supported by op-reth. First value should be used as the default.
-pub const SUPPORTED_CHAINS: &[&str] = &["base", "base-sepolia", "optimism", "optimism-sepolia"];
+pub const SUPPORTED_CHAINS: &[&str] = &["optimism", "optimism-sepolia", "base", "base-sepolia"];
 #[cfg(not(feature = "optimism"))]
 /// Chains supported by reth. First value should be used as the default.
 pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "goerli", "holesky", "dev"];
@@ -30,7 +32,7 @@ pub fn parse_duration_from_secs(arg: &str) -> eyre::Result<Duration, std::num::P
     Ok(Duration::from_secs(seconds))
 }
 
-/// Clap value parser for [ChainSpec]s that takes either a built-in chainspec or the path
+/// Clap value parser for [`ChainSpec`]s that takes either a built-in chainspec or the path
 /// to a custom one.
 pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
@@ -64,11 +66,11 @@ pub fn chain_help() -> String {
     format!("The chain this node is running.\nPossible values are either a built-in chain or the path to a chain specification file.\n\nBuilt-in chains:\n    {}", SUPPORTED_CHAINS.join(", "))
 }
 
-/// Clap value parser for [ChainSpec]s.
+/// Clap value parser for [`ChainSpec`]s.
 ///
 /// The value parser matches either a known chain, the path
 /// to a json file, or a json formatted string in-memory. The json can be either
-/// a serialized [ChainSpec] or Genesis struct.
+/// a serialized [`ChainSpec`] or Genesis struct.
 pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
         #[cfg(not(feature = "optimism"))]
@@ -110,7 +112,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
     })
 }
 
-/// Parse [BlockHashOrNumber]
+/// Parse [`BlockHashOrNumber`]
 pub fn hash_or_num_value_parser(value: &str) -> eyre::Result<BlockHashOrNumber, eyre::Error> {
     match B256::from_str(value) {
         Ok(hash) => Ok(BlockHashOrNumber::Hash(hash)),
@@ -135,12 +137,12 @@ pub enum SocketAddressParsingError {
     Port(#[from] std::num::ParseIntError),
 }
 
-/// Parse a [SocketAddr] from a `str`.
+/// Parse a [`SocketAddr`] from a `str`.
 ///
 /// The following formats are checked:
 ///
 /// - If the value can be parsed as a `u16` or starts with `:` it is considered a port, and the
-/// hostname is set to `localhost`.
+///   hostname is set to `localhost`.
 /// - If the value contains `:` it is assumed to be the format `<host>:<port>`
 /// - Otherwise it is assumed to be a hostname
 ///
@@ -167,9 +169,8 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
 mod tests {
     use super::*;
     use proptest::prelude::Rng;
-    use reth_primitives::{
-        hex, Address, ChainConfig, ChainSpecBuilder, Genesis, GenesisAccount, U256,
-    };
+    use reth_chainspec::ChainSpecBuilder;
+    use reth_primitives::{hex, Address, ChainConfig, Genesis, GenesisAccount, U256};
     use secp256k1::rand::thread_rng;
     use std::collections::HashMap;
 

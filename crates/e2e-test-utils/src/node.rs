@@ -5,16 +5,17 @@ use crate::{
 
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
-
 use futures_util::Future;
 use reth::{
     api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
     builder::FullNode,
+    payload::PayloadTypes,
     providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
     rpc::types::engine::PayloadStatusEnum,
 };
 use reth_node_builder::NodeTypes;
-use reth_primitives::{stage::StageId, BlockHash, BlockNumber, Bytes, B256};
+use reth_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use reth_stages_types::StageId;
 use std::{marker::PhantomData, pin::Pin};
 use tokio_stream::StreamExt;
 
@@ -65,17 +66,17 @@ where
         &mut self,
         length: u64,
         tx_generator: impl Fn(u64) -> Pin<Box<dyn Future<Output = Bytes>>>,
-        attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes
+        attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes
             + Copy,
     ) -> eyre::Result<
         Vec<(
-            <Node::Engine as EngineTypes>::BuiltPayload,
-            <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
+            <Node::Engine as PayloadTypes>::BuiltPayload,
+            <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
         )>,
     >
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
-            From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
+            From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {
@@ -96,14 +97,14 @@ where
     /// It triggers the resolve payload via engine api and expects the built payload event.
     pub async fn new_payload(
         &mut self,
-        attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
+        attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
     ) -> eyre::Result<(
-        <<Node as NodeTypes>::Engine as EngineTypes>::BuiltPayload,
-        <<Node as NodeTypes>::Engine as EngineTypes>::PayloadBuilderAttributes,
+        <<Node as NodeTypes>::Engine as PayloadTypes>::BuiltPayload,
+        <<Node as NodeTypes>::Engine as PayloadTypes>::PayloadBuilderAttributes,
     )>
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
-            From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
+            From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
         // trigger new payload building draining the pool
         let eth_attr = self.payload.new_payload(attributes_generator).await.unwrap();
@@ -112,7 +113,7 @@ where
         // wait for the payload builder to have finished building
         self.payload.wait_for_built_payload(eth_attr.payload_id()).await;
         // trigger resolve payload via engine api
-        self.engine_api.get_payload_v3(eth_attr.payload_id()).await?;
+        self.engine_api.get_payload_v3_value(eth_attr.payload_id()).await?;
         // ensure we're also receiving the built payload as event
         Ok((self.payload.expect_built_payload().await?, eth_attr))
     }
@@ -121,14 +122,14 @@ where
     pub async fn advance_block(
         &mut self,
         versioned_hashes: Vec<B256>,
-        attributes_generator: impl Fn(u64) -> <Node::Engine as EngineTypes>::PayloadBuilderAttributes,
+        attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
     ) -> eyre::Result<(
-        <Node::Engine as EngineTypes>::BuiltPayload,
-        <<Node as NodeTypes>::Engine as EngineTypes>::PayloadBuilderAttributes,
+        <Node::Engine as PayloadTypes>::BuiltPayload,
+        <<Node as NodeTypes>::Engine as PayloadTypes>::PayloadBuilderAttributes,
     )>
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
-            From<<Node::Engine as EngineTypes>::BuiltPayload> + PayloadEnvelopeExt,
+            From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
         let (payload, eth_attr) = self.new_payload(attributes_generator).await?;
 
@@ -171,10 +172,7 @@ where
 
             if check {
                 if let Some(latest_block) = self.inner.provider.block_by_number(number)? {
-                    if latest_block.hash_slow() != expected_block_hash {
-                        // TODO: only if its awaiting a reorg
-                        continue
-                    }
+                    assert_eq!(latest_block.hash_slow(), expected_block_hash);
                     break
                 }
                 if wait_finish_checkpoint {
@@ -185,8 +183,22 @@ where
         Ok(())
     }
 
+    pub async fn wait_unwind(&self, number: BlockNumber) -> eyre::Result<()> {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            if let Some(checkpoint) = self.inner.provider.get_stage_checkpoint(StageId::Headers)? {
+                if checkpoint.block_number == number {
+                    break
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Asserts that a new block has been added to the blockchain
-    /// and the tx has been included in the block
+    /// and the tx has been included in the block.
+    ///
+    /// Does NOT work for pipeline since there's no stream notification!
     pub async fn assert_new_block(
         &mut self,
         tip_tx_hash: B256,

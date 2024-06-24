@@ -1,8 +1,8 @@
 use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
 use alloy_rlp::{length_of_length, Encodable, Header};
 use bytes::BytesMut;
+use core::mem;
 use reth_codecs::{main_codec, Compact};
-use std::mem;
 
 /// Legacy transaction.
 #[main_codec]
@@ -43,7 +43,7 @@ pub struct TxLegacy {
 }
 
 impl TxLegacy {
-    /// Calculates a heuristic for the in-memory size of the [TxLegacy] transaction.
+    /// Calculates a heuristic for the in-memory size of the [`TxLegacy`] transaction.
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<Option<ChainId>>() + // chain_id
@@ -102,7 +102,7 @@ impl TxLegacy {
     }
 
     /// Get transaction type
-    pub(crate) fn tx_type(&self) -> TxType {
+    pub(crate) const fn tx_type(&self) -> TxType {
         TxType::Legacy
     }
 
@@ -161,7 +161,7 @@ impl TxLegacy {
     /// Outputs the signature hash of the transaction by first encoding without a signature, then
     /// hashing.
     ///
-    /// See [Self::encode_for_signing] for more information on the encoding format.
+    /// See [`Self::encode_for_signing`] for more information on the encoding format.
     pub(crate) fn signature_hash(&self) -> B256 {
         let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
         self.encode_for_signing(&mut buf);
@@ -190,7 +190,7 @@ mod tests {
             nonce: 0x18,
             gas_price: 0xfa56ea00,
             gas_limit: 119902,
-            to: TxKind::Call( hex!("06012c8cf97bead5deae237070f9587f8e7a266d").into()),
+            to: TxKind::Call(hex!("06012c8cf97bead5deae237070f9587f8e7a266d").into()),
             value: U256::from(0x1c6bf526340000u64),
             input:  hex!("f7d8c88300000000000000000000000000000000000000000000000000000000000cee6100000000000000000000000000000000000000000000000000000000000ac3e1").into(),
         });

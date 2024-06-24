@@ -1,21 +1,23 @@
 //! Connection tests
 
 use alloy_node_bindings::Geth;
-use alloy_provider::{admin::AdminApi, ProviderBuilder};
+use alloy_provider::{ext::AdminApi, ProviderBuilder};
 use futures::StreamExt;
+use reth_chainspec::net::mainnet_nodes;
 use reth_discv4::Discv4Config;
 use reth_eth_wire::DisconnectReason;
-use reth_interfaces::{
-    p2p::headers::client::{HeadersClient, HeadersRequest},
-    sync::{NetworkSyncUpdater, SyncState},
-};
 use reth_net_common::ban_list::BanList;
 use reth_network::{
     test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
     NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkManager, PeersConfig,
 };
 use reth_network_api::{NetworkInfo, Peers, PeersInfo};
-use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord};
+use reth_network_p2p::{
+    headers::client::{HeadersClient, HeadersRequest},
+    sync::{NetworkSyncUpdater, SyncState},
+};
+use reth_network_peers::NodeRecord;
+use reth_primitives::HeadersDirection;
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
@@ -54,7 +56,7 @@ async fn test_establish_connections() {
         let mut established = listener0.take(4);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionClosed { .. } => {
+                NetworkEvent::SessionClosed { .. } | NetworkEvent::PeerRemoved(_) => {
                     panic!("unexpected event")
                 }
                 NetworkEvent::SessionEstablished { peer_id, .. } => {
@@ -62,9 +64,6 @@ async fn test_establish_connections() {
                 }
                 NetworkEvent::PeerAdded(peer_id) => {
                     assert!(expected_peers.remove(&peer_id))
-                }
-                NetworkEvent::PeerRemoved(_) => {
-                    panic!("unexpected event")
                 }
             }
         }
@@ -320,9 +319,8 @@ async fn test_incoming_node_id_blacklist() {
         let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
 
-        let provider = ProviderBuilder::new()
-            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
-            .unwrap();
+        let provider =
+            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
@@ -375,9 +373,8 @@ async fn test_incoming_connect_with_single_geth() {
         let temp_dir = tempfile::tempdir().unwrap().into_path();
         let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
-        let provider = ProviderBuilder::new()
-            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
-            .unwrap();
+        let provider =
+            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
@@ -438,9 +435,8 @@ async fn test_outgoing_connect_with_single_geth() {
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
 
-        let provider = ProviderBuilder::new()
-            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
-            .unwrap();
+        let provider =
+            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
@@ -485,9 +481,8 @@ async fn test_geth_disconnect() {
         let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
         let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
 
-        let provider = ProviderBuilder::new()
-            .on_http(format!("http://{geth_endpoint}").parse().unwrap())
-            .unwrap();
+        let provider =
+            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;

@@ -85,23 +85,16 @@ criterion_group! {
 }
 criterion_main!(benches);
 
-/// Implementation from https://github.com/paradigmxyz/reth/blob/cda5d4e7c53ccc898b7725eb5d3b46c35e4da7f8/crates/primitives/src/integer_list.rs
+/// Implementation from <https://github.com/paradigmxyz/reth/blob/cda5d4e7c53ccc898b7725eb5d3b46c35e4da7f8/crates/primitives/src/integer_list.rs>
 /// adapted to work with `sucds = "0.8.1"`
 #[allow(unused, unreachable_pub)]
 mod elias_fano {
+    use derive_more::Deref;
     use std::{fmt, ops::Deref};
     use sucds::{mii_sequences::EliasFano, Serializable};
 
-    #[derive(Clone, PartialEq, Eq, Default)]
+    #[derive(Clone, PartialEq, Eq, Default, Deref)]
     pub struct IntegerList(pub EliasFano);
-
-    impl Deref for IntegerList {
-        type Target = EliasFano;
-
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
 
     impl fmt::Debug for IntegerList {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -111,7 +104,7 @@ mod elias_fano {
     }
 
     impl IntegerList {
-        /// Creates an IntegerList from a list of integers. `usize` is safe to use since
+        /// Creates an `IntegerList` from a list of integers. `usize` is safe to use since
         /// [`sucds::EliasFano`] restricts its compilation to 64bits.
         ///
         /// # Returns
@@ -212,7 +205,7 @@ mod elias_fano {
     }
 
     impl<'de> Deserialize<'de> for IntegerList {
-        fn deserialize<D>(deserializer: D) -> Result<IntegerList, D::Error>
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
             D: Deserializer<'de>,
         {
@@ -239,7 +232,7 @@ mod elias_fano {
     }
 
     /// Primitives error type.
-    #[derive(Debug, thiserror::Error)]
+    #[derive(Debug, thiserror_no_std::Error)]
     pub enum EliasFanoError {
         /// The provided input is invalid.
         #[error("{0}")]

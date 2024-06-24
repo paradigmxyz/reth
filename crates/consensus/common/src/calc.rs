@@ -1,4 +1,6 @@
-use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, Chain, ChainSpec, Hardfork, U256};
+use reth_chainspec::{Chain, ChainSpec, Hardfork};
+use reth_primitives::{constants::ETH_TO_WEI, BlockNumber, U256};
+
 /// Calculates the base block reward.
 ///
 /// The base block reward is defined as:
@@ -24,16 +26,25 @@ pub fn base_block_reward(
     block_difficulty: U256,
     total_difficulty: U256,
 ) -> Option<u128> {
-    if chain_spec.chain == Chain::goerli() ||
-        chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, block_difficulty)
+    if chain_spec.fork(Hardfork::Paris).active_at_ttd(total_difficulty, block_difficulty) ||
+        chain_spec.chain == Chain::goerli()
     {
         None
-    } else if chain_spec.fork(Hardfork::Constantinople).active_at_block(block_number) {
-        Some(ETH_TO_WEI * 2)
-    } else if chain_spec.fork(Hardfork::Byzantium).active_at_block(block_number) {
-        Some(ETH_TO_WEI * 3)
     } else {
-        Some(ETH_TO_WEI * 5)
+        Some(base_block_reward_pre_merge(chain_spec, block_number))
+    }
+}
+
+/// Calculates the base block reward __before__ the merge (Paris hardfork).
+///
+/// Caution: The caller must ensure that the block number is before the merge.
+pub fn base_block_reward_pre_merge(chain_spec: &ChainSpec, block_number: BlockNumber) -> u128 {
+    if chain_spec.fork(Hardfork::Constantinople).active_at_block(block_number) {
+        ETH_TO_WEI * 2
+    } else if chain_spec.fork(Hardfork::Byzantium).active_at_block(block_number) {
+        ETH_TO_WEI * 3
+    } else {
+        ETH_TO_WEI * 5
     }
 }
 
@@ -45,9 +56,10 @@ pub fn base_block_reward(
 /// # Examples
 ///
 /// ```
+/// # use reth_chainspec::MAINNET;
 /// # use reth_consensus_common::calc::{base_block_reward, block_reward};
 /// # use reth_primitives::constants::ETH_TO_WEI;
-/// # use reth_primitives::{MAINNET, U256};
+/// # use reth_primitives::U256;
 /// #
 /// // This is block 126 on mainnet.
 /// let block_number = 126;
@@ -67,7 +79,7 @@ pub fn base_block_reward(
 /// - Definition: [Yellow Paper][yp] (page 15, 11.3)
 ///
 /// [yp]: https://ethereum.github.io/yellowpaper/paper.pdf
-pub fn block_reward(base_block_reward: u128, ommers: usize) -> u128 {
+pub const fn block_reward(base_block_reward: u128, ommers: usize) -> u128 {
     base_block_reward + (base_block_reward >> 5) * ommers as u128
 }
 
@@ -91,7 +103,7 @@ pub fn block_reward(base_block_reward: u128, ommers: usize) -> u128 {
 ///
 /// [oe]: https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/crates/ethcore/src/ethereum/ethash.rs#L319-L333
 /// [yp]: https://ethereum.github.io/yellowpaper/paper.pdf
-pub fn ommer_reward(
+pub const fn ommer_reward(
     base_block_reward: u128,
     block_number: BlockNumber,
     ommer_block_number: BlockNumber,
@@ -102,7 +114,7 @@ pub fn ommer_reward(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::MAINNET;
+    use reth_chainspec::MAINNET;
 
     #[test]
     fn calc_base_block_reward() {

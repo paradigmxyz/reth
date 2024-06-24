@@ -2,18 +2,18 @@
 //! blocks from the network.
 
 use eyre::Result;
-use reth_consensus_common::validation::validate_block_standalone;
-use reth_interfaces::p2p::{
+use reth_chainspec::ChainSpec;
+use reth_consensus_common::validation::validate_block_pre_execution;
+use reth_fs_util as fs;
+use reth_network::NetworkManager;
+use reth_network_p2p::{
     bodies::client::BodiesClient,
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
-use reth_network::NetworkManager;
-use reth_primitives::{
-    fs, BlockHashOrNumber, ChainSpec, HeadersDirection, SealedBlock, SealedHeader,
-};
+use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedBlock, SealedHeader};
 use reth_provider::BlockReader;
-use reth_rpc::{JwtError, JwtSecret};
+use reth_rpc_types::engine::{JwtError, JwtSecret};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
@@ -34,12 +34,12 @@ pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtE
         JwtSecret::from_file(path)
     } else {
         info!(target: "reth::cli", ?path, "Creating JWT auth secret file");
-        JwtSecret::try_create(path)
+        JwtSecret::try_create_random(path)
     }
 }
 
-/// Collect the peers from the [NetworkManager] and write them to the given `persistent_peers_file`,
-/// if configured.
+/// Collect the peers from the [`NetworkManager`] and write them to the given
+/// `persistent_peers_file`, if configured.
 pub fn write_peers_to_file<C>(network: &NetworkManager<C>, persistent_peers_file: Option<PathBuf>)
 where
     C: BlockReader + Unpin,
@@ -120,9 +120,10 @@ where
         body: block.transactions,
         ommers: block.ommers,
         withdrawals: block.withdrawals,
+        requests: block.requests,
     };
 
-    validate_block_standalone(&block, &chain_spec)?;
+    validate_block_pre_execution(&block, &chain_spec)?;
 
     Ok(block)
 }

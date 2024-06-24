@@ -1,32 +1,37 @@
 //! Support for building a pending block via local txpool.
 
 use crate::eth::error::{EthApiError, EthResult};
+use reth_chainspec::ChainSpec;
+use reth_errors::ProviderError;
 use reth_primitives::{
-    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE},
+    constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
     proofs,
     revm::env::tx_env_with_recovered,
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, InvalidTransaction, ResultAndState, SpecId,
     },
-    Block, BlockId, BlockNumberOrTag, ChainSpec, Header, IntoRecoveredTransaction, Receipt,
-    Receipts, SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
+    Block, BlockId, BlockNumberOrTag, Header, IntoRecoveredTransaction, Receipt, Requests,
+    SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
-use reth_provider::{BundleStateWithReceipts, ChainSpecProvider, StateProviderFactory};
+use reth_provider::{ChainSpecProvider, ExecutionOutcome, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
-    state_change::{apply_beacon_root_contract_call, post_block_withdrawals_balance_increments},
+    state_change::{
+        apply_beacon_root_contract_call, apply_blockhashes_update,
+        post_block_withdrawals_balance_increments,
+    },
 };
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, Database, DatabaseCommit, State};
 use revm_primitives::EnvWithHandlerCfg;
 use std::time::Instant;
 
-/// Configured [BlockEnv] and [CfgEnvWithHandlerCfg] for a pending block
+/// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block
 #[derive(Debug, Clone)]
 pub(crate) struct PendingBlockEnv {
-    /// Configured [CfgEnvWithHandlerCfg] for the pending block.
+    /// Configured [`CfgEnvWithHandlerCfg`] for the pending block.
     pub(crate) cfg: CfgEnvWithHandlerCfg,
-    /// Configured [BlockEnv] for the pending block.
+    /// Configured [`BlockEnv`] for the pending block.
     pub(crate) block_env: BlockEnv,
     /// Origin block for the config
     pub(crate) origin: PendingBlockEnvOrigin,
@@ -52,8 +57,8 @@ impl PendingBlockEnv {
 
         let parent_hash = origin.build_target_hash();
         let state_provider = client.history_by_block_hash(parent_hash)?;
-        let state = StateProviderDatabase::new(&state_provider);
-        let mut db = State::builder().with_database(Box::new(state)).with_bundle_update().build();
+        let state = StateProviderDatabase::new(state_provider);
+        let mut db = State::builder().with_database(state).with_bundle_update().build();
 
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
@@ -92,6 +97,13 @@ impl PendingBlockEnv {
         } else {
             None
         };
+        pre_block_blockhashes_update(
+            &mut db,
+            chain_spec.as_ref(),
+            &block_env,
+            block_number,
+            parent_hash,
+        )?;
 
         let mut receipts = Vec::new();
 
@@ -209,14 +221,15 @@ impl PendingBlockEnv {
         // merge all transitions into bundle state.
         db.merge_transitions(BundleRetention::PlainState);
 
-        let bundle = BundleStateWithReceipts::new(
+        let execution_outcome = ExecutionOutcome::new(
             db.take_bundle(),
-            Receipts::from_vec(vec![receipts]),
+            vec![receipts].into(),
             block_number,
+            Vec::new(),
         );
 
         #[cfg(feature = "optimism")]
-        let receipts_root = bundle
+        let receipts_root = execution_outcome
             .optimism_receipts_root_slow(
                 block_number,
                 chain_spec.as_ref(),
@@ -225,12 +238,15 @@ impl PendingBlockEnv {
             .expect("Block is present");
 
         #[cfg(not(feature = "optimism"))]
-        let receipts_root = bundle.receipts_root_slow(block_number).expect("Block is present");
+        let receipts_root =
+            execution_outcome.receipts_root_slow(block_number).expect("Block is present");
 
-        let logs_bloom = bundle.block_logs_bloom(block_number).expect("Block is present");
+        let logs_bloom =
+            execution_outcome.block_logs_bloom(block_number).expect("Block is present");
 
         // calculate the state root
-        let state_root = state_provider.state_root(bundle.state())?;
+        let state_provider = &db.database;
+        let state_root = state_provider.state_root(execution_outcome.state())?;
 
         // create the block header
         let transactions_root = proofs::calculate_transaction_root(&executed_txs);
@@ -238,6 +254,15 @@ impl PendingBlockEnv {
         // check if cancun is activated to set eip4844 header fields correctly
         let blob_gas_used =
             if cfg.handler_cfg.spec_id >= SpecId::CANCUN { Some(sum_blob_gas_used) } else { None };
+
+        // note(onbjerg): the rpc spec has not been changed to include requests, so for now we just
+        // set these to empty
+        let (requests, requests_root) =
+            if chain_spec.is_prague_active_at_timestamp(block_env.timestamp.to::<u64>()) {
+                (Some(Requests::default()), Some(EMPTY_ROOT_HASH))
+            } else {
+                (None, None)
+            };
 
         let header = Header {
             parent_hash,
@@ -260,20 +285,21 @@ impl PendingBlockEnv {
             excess_blob_gas: block_env.get_blob_excess_gas(),
             extra_data: Default::default(),
             parent_beacon_block_root,
+            requests_root,
         };
 
         // seal the block
-        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+        let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests };
         Ok(SealedBlockWithSenders { block: block.seal_slow(), senders })
     }
 }
 
 /// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
 ///
-/// This constructs a new [Evm](revm::Evm) with the given DB, and environment [CfgEnvWithHandlerCfg]
-/// and [BlockEnv]) to execute the pre block contract call.
+/// This constructs a new [Evm](revm::Evm) with the given DB, and environment
+/// [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] to execute the pre block contract call.
 ///
-/// This uses [apply_beacon_root_contract_call] to ultimately apply the beacon root contract state
+/// This uses [`apply_beacon_root_contract_call`] to ultimately apply the beacon root contract state
 /// change.
 fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
     db: &mut DB,
@@ -307,7 +333,33 @@ where
     .map_err(|err| EthApiError::Internal(err.into()))
 }
 
-/// The origin for a configured [PendingBlockEnv]
+/// Apply the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) pre block state transitions.
+///
+/// This constructs a new [Evm](revm::Evm) with the given DB, and environment
+/// [`CfgEnvWithHandlerCfg`] and [`BlockEnv`].
+///
+/// This uses [`apply_blockhashes_update`].
+fn pre_block_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCommit>(
+    db: &mut DB,
+    chain_spec: &ChainSpec,
+    initialized_block_env: &BlockEnv,
+    block_number: u64,
+    parent_block_hash: B256,
+) -> EthResult<()>
+where
+    DB::Error: std::fmt::Display,
+{
+    apply_blockhashes_update(
+        db,
+        chain_spec,
+        initialized_block_env.timestamp.to::<u64>(),
+        block_number,
+        parent_block_hash,
+    )
+    .map_err(|err| EthApiError::Internal(err.into()))
+}
+
+/// The origin for a configured [`PendingBlockEnv`]
 #[derive(Clone, Debug)]
 pub(crate) enum PendingBlockEnvOrigin {
     /// The pending block as received from the CL.
@@ -323,45 +375,46 @@ pub(crate) enum PendingBlockEnvOrigin {
 
 impl PendingBlockEnvOrigin {
     /// Returns true if the origin is the actual pending block as received from the CL.
-    pub(crate) fn is_actual_pending(&self) -> bool {
-        matches!(self, PendingBlockEnvOrigin::ActualPending(_))
+    pub(crate) const fn is_actual_pending(&self) -> bool {
+        matches!(self, Self::ActualPending(_))
     }
 
     /// Consumes the type and returns the actual pending block.
     pub(crate) fn into_actual_pending(self) -> Option<SealedBlockWithSenders> {
         match self {
-            PendingBlockEnvOrigin::ActualPending(block) => Some(block),
+            Self::ActualPending(block) => Some(block),
             _ => None,
         }
     }
 
-    /// Returns the [BlockId] that represents the state of the block.
+    /// Returns the [`BlockId`] that represents the state of the block.
     ///
     /// If this is the actual pending block, the state is the "Pending" tag, otherwise we can safely
     /// identify the block by its hash (latest block).
     pub(crate) fn state_block_id(&self) -> BlockId {
         match self {
-            PendingBlockEnvOrigin::ActualPending(_) => BlockNumberOrTag::Pending.into(),
-            PendingBlockEnvOrigin::DerivedFromLatest(header) => BlockId::Hash(header.hash().into()),
+            Self::ActualPending(_) => BlockNumberOrTag::Pending.into(),
+            Self::DerivedFromLatest(header) => BlockId::Hash(header.hash().into()),
         }
     }
 
     /// Returns the hash of the block the pending block should be built on.
     ///
-    /// For the [PendingBlockEnvOrigin::ActualPending] this is the parent hash of the block.
-    /// For the [PendingBlockEnvOrigin::DerivedFromLatest] this is the hash of the _latest_ header.
+    /// For the [`PendingBlockEnvOrigin::ActualPending`] this is the parent hash of the block.
+    /// For the [`PendingBlockEnvOrigin::DerivedFromLatest`] this is the hash of the _latest_
+    /// header.
     fn build_target_hash(&self) -> B256 {
         match self {
-            PendingBlockEnvOrigin::ActualPending(block) => block.parent_hash,
-            PendingBlockEnvOrigin::DerivedFromLatest(header) => header.hash(),
+            Self::ActualPending(block) => block.parent_hash,
+            Self::DerivedFromLatest(header) => header.hash(),
         }
     }
 
     /// Returns the header this pending block is based on.
     pub(crate) fn header(&self) -> &SealedHeader {
         match self {
-            PendingBlockEnvOrigin::ActualPending(block) => &block.header,
-            PendingBlockEnvOrigin::DerivedFromLatest(header) => header,
+            Self::ActualPending(block) => &block.header,
+            Self::DerivedFromLatest(header) => header,
         }
     }
 }

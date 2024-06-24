@@ -12,8 +12,8 @@ use reth_discv5::{DiscoveredPeer, Discv5};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
-use reth_network_types::PeerId;
-use reth_primitives::{EnrForkIdEntry, ForkId, NodeRecord};
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_primitives::{EnrForkIdEntry, ForkId};
 use secp256k1::SecretKey;
 use std::{
     collections::VecDeque,
@@ -71,14 +71,17 @@ impl Discovery {
     /// This will spawn the [`reth_discv4::Discv4Service`] onto a new task and establish a listener
     /// channel to receive all discovered nodes.
     pub async fn new(
+        tcp_addr: SocketAddr,
         discovery_v4_addr: SocketAddr,
         sk: SecretKey,
         discv4_config: Option<Discv4Config>,
         discv5_config: Option<reth_discv5::Config>, // contains discv5 listen address
         dns_discovery_config: Option<DnsDiscoveryConfig>,
     ) -> Result<Self, NetworkError> {
-        // setup discv4
-        let local_enr = NodeRecord::from_secret_key(discovery_v4_addr, &sk);
+        // setup discv4 with the discovery address and tcp port
+        let local_enr =
+            NodeRecord::from_secret_key(discovery_v4_addr, &sk).with_tcp_port(tcp_addr.port());
+
         let discv4_future = async {
             let Some(disc_config) = discv4_config else { return Ok((None, None, None)) };
             let (discv4, mut discv4_service) =
@@ -133,7 +136,7 @@ impl Discovery {
         })
     }
 
-    /// Registers a listener for receiving [DiscoveryEvent] updates.
+    /// Registers a listener for receiving [`DiscoveryEvent`] updates.
     pub(crate) fn add_listener(&mut self, tx: mpsc::UnboundedSender<DiscoveryEvent>) {
         self.discovery_listeners.push(tx);
     }
@@ -148,7 +151,7 @@ impl Discovery {
     pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
         if let Some(discv4) = &self.discv4 {
             // use forward-compatible forkid entry
-            discv4.set_eip868_rlp("eth".as_bytes().to_vec(), EnrForkIdEntry::from(fork_id))
+            discv4.set_eip868_rlp(b"eth".to_vec(), EnrForkIdEntry::from(fork_id))
         }
         // todo: update discv5 enr
     }
@@ -179,7 +182,7 @@ impl Discovery {
     }
 
     /// Returns the id with which the local node identifies itself in the network
-    pub(crate) fn local_id(&self) -> PeerId {
+    pub(crate) const fn local_id(&self) -> PeerId {
         self.local_enr.id // local discv4 and discv5 have same id, since signed with same secret key
     }
 
@@ -199,7 +202,7 @@ impl Discovery {
         Ok(())
     }
 
-    /// Processes an incoming [NodeRecord] update from a discovery service
+    /// Processes an incoming [`NodeRecord`] update from a discovery service
     fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
         let id = record.id;
         let addr = record.tcp_addr();
@@ -215,7 +218,7 @@ impl Discovery {
 
     fn on_discv4_update(&mut self, update: DiscoveryUpdate) {
         match update {
-            DiscoveryUpdate::Added(record) => {
+            DiscoveryUpdate::Added(record) | DiscoveryUpdate::DiscoveredAtCapacity(record) => {
                 self.on_node_record_update(record, None);
             }
             DiscoveryUpdate::EnrForkId(node, fork_id) => {
@@ -228,9 +231,6 @@ impl Discovery {
                 for update in updates {
                     self.on_discv4_update(update);
                 }
-            }
-            DiscoveryUpdate::DiscoveredAtCapacity(record) => {
-                self.on_node_record_update(record, None);
             }
         }
     }
@@ -346,6 +346,7 @@ mod tests {
         let discovery_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
         let _discovery = Discovery::new(
             discovery_addr,
+            discovery_addr,
             secret_key,
             Default::default(),
             None,
@@ -369,13 +370,20 @@ mod tests {
         let discv4_config = Discv4ConfigBuilder::default().external_ip_resolver(None).build();
 
         let discv5_listen_config = discv5::ListenConfig::from(discv5_addr);
-        let discv5_config = reth_discv5::Config::builder(0)
+        let discv5_config = reth_discv5::Config::builder(discv5_addr)
             .discv5_config(discv5::ConfigBuilder::new(discv5_listen_config).build())
             .build();
 
-        Discovery::new(discv4_addr, secret_key, Some(discv4_config), Some(discv5_config), None)
-            .await
-            .expect("should build discv5 with discv4 downgrade")
+        Discovery::new(
+            discv4_addr,
+            discv4_addr,
+            secret_key,
+            Some(discv4_config),
+            Some(discv5_config),
+            None,
+        )
+        .await
+        .expect("should build discv5 with discv4 downgrade")
     }
 
     #[tokio::test(flavor = "multi_thread")]

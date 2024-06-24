@@ -22,8 +22,8 @@ use crate::{
 pub use config::DnsDiscoveryConfig;
 use enr::Enr;
 use error::ParseDnsEntryError;
-use reth_network_types::pk2id;
-use reth_primitives::{EnrForkIdEntry, ForkId, NodeRecord};
+use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
+use reth_network_peers::{pk2id, NodeRecord};
 use schnellru::{ByLength, LruMap};
 use secp256k1::SecretKey;
 use std::{
@@ -56,7 +56,7 @@ pub mod resolver;
 mod sync;
 pub mod tree;
 
-/// [DnsDiscoveryService] front-end.
+/// [`DnsDiscoveryService`] front-end.
 #[derive(Clone, Debug)]
 pub struct DnsDiscoveryHandle {
     /// Channel for sending commands to the service.
@@ -67,13 +67,13 @@ pub struct DnsDiscoveryHandle {
 
 impl DnsDiscoveryHandle {
     /// Starts syncing the given link to a tree.
-    pub fn sync_tree(&mut self, link: &str) -> Result<(), ParseDnsEntryError> {
+    pub fn sync_tree(&self, link: &str) -> Result<(), ParseDnsEntryError> {
         self.sync_tree_with_link(link.parse()?);
         Ok(())
     }
 
     /// Starts syncing the given link to a tree.
-    pub fn sync_tree_with_link(&mut self, link: LinkEntry) {
+    pub fn sync_tree_with_link(&self, link: LinkEntry) {
         let _ = self.to_service.send(DnsDiscoveryCommand::SyncTree(link));
     }
 
@@ -96,7 +96,7 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     command_tx: UnboundedSender<DnsDiscoveryCommand>,
     /// Receiver half of the command channel.
     command_rx: UnboundedReceiverStream<DnsDiscoveryCommand>,
-    /// All subscribers for resolved [NodeRecord]s.
+    /// All subscribers for resolved [`NodeRecord`]s.
     node_record_listeners: Vec<mpsc::Sender<DnsNodeRecordUpdate>>,
     /// All the trees that can be synced.
     trees: HashMap<LinkEntry, SyncTree>,
@@ -115,7 +115,7 @@ pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
 // === impl DnsDiscoveryService ===
 
 impl<R: Resolver> DnsDiscoveryService<R> {
-    /// Creates a new instance of the [DnsDiscoveryService] using the given settings.
+    /// Creates a new instance of the [`DnsDiscoveryService`] using the given settings.
     ///
     /// ```
     /// use reth_dns_discovery::{DnsDiscoveryService, DnsResolver};
@@ -170,7 +170,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
         }
     }
 
-    /// Same as [DnsDiscoveryService::new] but also returns a new handle that's connected to the
+    /// Same as [`DnsDiscoveryService::new`] but also returns a new handle that's connected to the
     /// service
     pub fn new_pair(resolver: Arc<R>, config: DnsDiscoveryConfig) -> (Self, DnsDiscoveryHandle) {
         let service = Self::new(resolver, config);
@@ -377,7 +377,7 @@ pub struct DnsNodeRecordUpdate {
     pub enr: Enr<SecretKey>,
 }
 
-/// Commands sent from [DnsDiscoveryHandle] to [DnsDiscoveryService]
+/// Commands sent from [`DnsDiscoveryHandle`] to [`DnsDiscoveryService`]
 enum DnsDiscoveryCommand {
     /// Sync a tree
     SyncTree(LinkEntry),
@@ -391,7 +391,7 @@ pub enum DnsDiscoveryEvent {
     Enr(Enr<SecretKey>),
 }
 
-/// Converts an [Enr] into a [NodeRecord]
+/// Converts an [Enr] into a [`NodeRecord`]
 fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> {
     let node_record = NodeRecord {
         address: enr.ip4().map(IpAddr::from).or_else(|| enr.ip6().map(IpAddr::from))?,
@@ -411,9 +411,11 @@ fn convert_enr_node_record(enr: &Enr<SecretKey>) -> Option<DnsNodeRecordUpdate> 
 mod tests {
     use super::*;
     use crate::tree::TreeRootEntry;
+    use alloy_chains::Chain;
     use alloy_rlp::{Decodable, Encodable};
     use enr::EnrKey;
-    use reth_primitives::{Chain, ForkHash, Hardfork, MAINNET};
+    use reth_chainspec::MAINNET;
+    use reth_ethereum_forks::{ForkHash, Hardfork};
     use secp256k1::rand::thread_rng;
     use std::{future::poll_fn, net::Ipv4Addr};
 

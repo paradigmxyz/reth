@@ -13,11 +13,12 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
+reth-ethereum-forks.workspace = true
 reth-net-common.workspace = true
-reth-network-types.workspace = true
+reth-network-peers = { workspace = true, features = ["secp256k1"] }
 
 # ethereum
+alloy-primitives.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery", "serde"] }
 enr.workspace = true
 
@@ -30,16 +31,18 @@ trust-dns-resolver = "0.23"
 
 # misc
 data-encoding = "2"
-linked_hash_set = "0.1"
+linked_hash_set.workspace = true
 schnellru.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 parking_lot.workspace = true
 serde = { workspace = true, optional = true }
-serde_with = { version = "3.3.0", optional = true }
+serde_with = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-chainspec.workspace = true
 alloy-rlp.workspace = true
+alloy-chains.workspace = true
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 reth-tracing.workspace = true
 rand.workspace = true

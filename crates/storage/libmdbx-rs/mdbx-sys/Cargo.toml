@@ -1,18 +1,12 @@
 [package]
 name = "reth-mdbx-sys"
+description = "Raw bindings for libmdbx"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license = "Apache-2.0"
-description = "Rust bindings for libmdbx with good licence."
 homepage.workspace = true
 repository.workspace = true
-
-[lib]
-name = "reth_mdbx_sys"
-
-[dependencies]
-libc = "0.2"
 
 [build-dependencies]
 cc = "1.0"

@@ -4,23 +4,9 @@ Start the node
 
 ```bash
 $ reth node --help
-
-Start the node
-
 Usage: reth node [OPTIONS]
 
 Options:
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-
-          Defaults to the OS-specific data directory:
-
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-
-          [default: default]
-
       --config <FILE>
           The path to the configuration file to use.
 
@@ -40,7 +26,7 @@ Options:
 
           Max number of instances is 200. It is chosen in a way so that it's not possible to have port numbers that conflict with each other.
 
-          Changes to the following port numbers: - DISCOVERY_PORT: default + `instance` - 1 - AUTH_PORT: default + `instance` * 100 - 100 - HTTP_RPC_PORT: default - `instance` + 1 - WS_RPC_PORT: default + `instance` * 2 - 2
+          Changes to the following port numbers: - `DISCOVERY_PORT`: default + `instance` - 1 - `AUTH_PORT`: default + `instance` * 100 - 100 - `HTTP_RPC_PORT`: default - `instance` + 1 - `WS_RPC_PORT`: default + `instance` * 2 - 2
 
           [default: 1]
 
@@ -57,6 +43,21 @@ Metrics:
           Enable Prometheus metrics.
 
           The metrics will be served at the given interface and port.
+
+Datadir:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+
+          Defaults to the OS-specific data directory:
+
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+
+          [default: default]
+
+      --datadir.static_files <PATH>
+          The absolute path to store static files in.
 
 Networking:
   -d, --disable-discovery
@@ -82,14 +83,35 @@ Networking:
           [default: 30303]
 
       --discovery.v5.addr <DISCOVERY_V5_ADDR>
-          The UDP address to use for devp2p peer discovery version 5
+          The UDP IPv4 address to use for devp2p peer discovery version 5. Overwritten by `RLPx` address, if it's also IPv4
 
-          [default: 0.0.0.0]
+      --discovery.v5.addr.ipv6 <DISCOVERY_V5_ADDR_IPV6>
+          The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by `RLPx` address, if it's also IPv6
 
       --discovery.v5.port <DISCOVERY_V5_PORT>
-          The UDP port to use for devp2p peer discovery version 5
+          The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discv5.addr` is set
 
           [default: 9000]
+
+      --discovery.v5.port.ipv6 <DISCOVERY_V5_PORT_IPV6>
+          The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discv5.addr.ipv6` is set
+
+          [default: 9000]
+
+      --discovery.v5.lookup-interval <DISCOVERY_V5_LOOKUP_INTERVAL>
+          The interval in seconds at which to carry out periodic lookup queries, for the whole run of the program
+
+          [default: 60]
+
+      --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_bootstrap_lookup_interval>
+          The interval in seconds at which to carry out boost lookup queries, for a fixed number of times, at bootstrap
+
+          [default: 5]
+
+      --discovery.v5.bootstrap.lookup-countdown <DISCOVERY_V5_bootstrap_lookup_countdown>
+          The number of times to carry out boost lookup queries at bootstrap
+
+          [default: 100]
 
       --trusted-peers <TRUSTED_PEERS>
           Comma separated enode URLs of trusted peers for P2P connections.
@@ -97,12 +119,17 @@ Networking:
           --trusted-peers enode://abcd@192.168.0.1:30303
 
       --trusted-only
-          Connect only to trusted peers
+          Connect to or accept from trusted peers only
 
       --bootnodes <BOOTNODES>
           Comma separated enode URLs for P2P discovery bootstrap.
 
           Will fall back to a network-specific default if not specified.
+
+      --dns-retries <DNS_RETRIES>
+          Amount of DNS resolution requests retries to perform when peering
+
+          [default: 0]
 
       --peers-file <FILE>
           The path to the known peers file. Connected peers are dumped to this file on nodes
@@ -111,7 +138,7 @@ Networking:
       --identity <IDENTITY>
           Custom node identity
 
-          [default: reth/<VERSION>-<SHA>/<ARCH>-gnu]
+          [default: reth/<VERSION>-<SHA>/<ARCH>]
 
       --p2p-secret-key <PATH>
           Secret key to use for this node.
@@ -143,14 +170,24 @@ Networking:
           Maximum number of inbound requests. default: 30
 
       --pooled-tx-response-soft-limit <BYTES>
-          Soft limit for the byte size of a `PooledTransactions` response on assembling a `GetPooledTransactions` request. Spec'd at 2 MiB.
-
-          <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#protocol-messages>.
+          Experimental, for usage in research. Sets the max accumulated byte size of transactions
+          to pack in one response.
+          Spec'd at 2MiB.
 
           [default: 2097152]
 
       --pooled-tx-pack-soft-limit <BYTES>
-          Default soft limit for the byte size of a `PooledTransactions` response on assembling a `GetPooledTransactions` request. This defaults to less than the [`SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE`], at 2 MiB, used when assembling a `PooledTransactions` response. Default is 128 KiB
+          Experimental, for usage in research. Sets the max accumulated byte size of transactions to
+          request in one request.
+
+          Since `RLPx` protocol version 68, the byte size of a transaction is shared as metadata in a
+          transaction announcement (see `RLPx` specs). This allows a node to request a specific size
+          response.
+
+          By default, nodes request only 128 KiB worth of transactions, but should a peer request
+          more, up to 2 MiB, a node will answer with more than 128 KiB.
+
+          Default is 128 KiB.
 
           [default: 131072]
 
@@ -190,7 +227,7 @@ RPC:
           [default: 8546]
 
       --ws.origins <ws.origins>
-          Origins from which to accept WebSocket requests
+          Origins from which to accept `WebSocket` requests
 
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
@@ -203,7 +240,7 @@ RPC:
       --ipcpath <IPCPATH>
           Filename for IPC socket/pipe within the datadir
 
-          [default: /tmp/reth.ipc]
+          [default: <CACHE_DIR>.ipc]
 
       --authrpc.addr <AUTH_ADDR>
           Auth server address to listen on
@@ -223,12 +260,12 @@ RPC:
           If no path is provided, a secret will be generated and stored in the datadir under `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
 
       --auth-ipc
-          Enable auth engine api over IPC
+          Enable auth engine API over IPC
 
       --auth-ipc.path <AUTH_IPC_PATH>
           Filename for auth IPC socket/pipe within the datadir
 
-          [default: /tmp/reth_engine_api.ipc]
+          [default: <CACHE_DIR>_engine_api.ipc]
 
       --rpc.jwtsecret <HEX>
           Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and `--ws.api`.
@@ -259,7 +296,7 @@ RPC:
       --rpc.max-tracing-requests <COUNT>
           Maximum number of concurrent tracing requests
 
-          [default: 14]
+          [default: <NUM CPU CORES-2>]
 
       --rpc.max-blocks-per-filter <COUNT>
           Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
@@ -410,11 +447,6 @@ Builder:
           [default: 3]
 
 Debug:
-      --debug.continuous
-          Prompt the downloader to download blocks one at a time.
-
-          NOTE: This is for testing purposes only.
-
       --debug.terminate
           Flag indicating whether the node should be terminated after the pipeline sync
 
@@ -426,17 +458,17 @@ Debug:
       --debug.max-block <MAX_BLOCK>
           Runs the sync only up to the specified block
 
-      --debug.print-inspector
-          Print opcode level traces directly to console during execution
+      --debug.etherscan [<ETHERSCAN_API_URL>]
+          Runs a fake consensus client that advances the chain using recent block hashes on Etherscan. If specified, requires an `ETHERSCAN_API_KEY` environment variable
 
-      --debug.hook-block <HOOK_BLOCK>
-          Hook on a specific block during execution
+      --debug.rpc-consensus-ws <RPC_CONSENSUS_WS>
+          Runs a fake consensus client using blocks fetched from an RPC `WebSocket` endpoint
 
-      --debug.hook-transaction <HOOK_TRANSACTION>
-          Hook on a specific transaction during execution
+      --debug.skip-fcu <SKIP_FCU>
+          If provided, the engine will skip `n` consecutive FCUs
 
-      --debug.hook-all
-          Hook on every transaction in a block
+      --debug.skip-new-payload <SKIP_NEW_PAYLOAD>
+          If provided, the engine will skip `n` consecutive new payloads
 
       --debug.engine-api-store <PATH>
           The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
@@ -476,7 +508,7 @@ Dev testnet:
       --dev.block-time <BLOCK_TIME>
           Interval between blocks.
 
-          Parses strings using [humantime::parse_duration]
+          Parses strings using [`humantime::parse_duration`]
           --dev.block-time 12s
 
 Pruning:

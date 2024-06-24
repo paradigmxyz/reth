@@ -1,5 +1,5 @@
 mod manager;
-pub use manager::{StaticFileProvider, StaticFileWriter};
+pub use manager::{StaticFileAccess, StaticFileProvider, StaticFileWriter};
 
 mod jar;
 pub use jar::StaticFileJarProvider;
@@ -9,9 +9,9 @@ pub use writer::{StaticFileProviderRW, StaticFileProviderRWRefMut};
 
 mod metrics;
 
-use reth_interfaces::provider::{ProviderError, ProviderResult};
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{static_file::SegmentHeader, StaticFileSegment};
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{ops::Deref, sync::Arc};
 
 const BLOCKS_PER_STATIC_FILE: u64 = 500_000;
@@ -42,7 +42,7 @@ impl LoadedJar {
         self.mmap_handle.clone()
     }
 
-    fn segment(&self) -> StaticFileSegment {
+    const fn segment(&self) -> StaticFileSegment {
         self.jar.user_header().segment()
     }
 }
@@ -60,13 +60,15 @@ mod tests {
     use crate::{test_utils::create_test_provider_factory, HeaderProvider};
     use rand::seq::SliceRandom;
     use reth_db::{
-        cursor::DbCursorRO,
-        static_file::create_static_file_T1_T2_T3,
-        transaction::{DbTx, DbTxMut},
-        CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers, RawTable,
+        static_file::create_static_file_T1_T2_T3, CanonicalHeaders, HeaderNumbers,
+        HeaderTerminalDifficulties, Headers, RawTable,
     };
-    use reth_interfaces::test_utils::generators::{self, random_header_range};
+    use reth_db_api::{
+        cursor::DbCursorRO,
+        transaction::{DbTx, DbTxMut},
+    };
     use reth_primitives::{static_file::find_fixed_range, BlockNumber, B256, U256};
+    use reth_testing_utils::generators::{self, random_header_range};
 
     #[test]
     fn test_snap() {
@@ -150,7 +152,8 @@ mod tests {
         // Use providers to query Header data and compare if it matches
         {
             let db_provider = factory.provider().unwrap();
-            let manager = StaticFileProvider::new(static_files_path.path()).unwrap().with_filters();
+            let manager =
+                StaticFileProvider::read_write(static_files_path.path()).unwrap().with_filters();
             let jar_provider = manager
                 .get_segment_provider_from_block(StaticFileSegment::Headers, 0, Some(&static_file))
                 .unwrap();

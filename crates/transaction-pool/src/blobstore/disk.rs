@@ -8,13 +8,13 @@ use schnellru::{ByLength, LruMap};
 use std::{collections::HashSet, fmt, fs, io, path::PathBuf, sync::Arc};
 use tracing::{debug, trace};
 
-/// How many [BlobTransactionSidecar] to cache in memory.
+/// How many [`BlobTransactionSidecar`] to cache in memory.
 pub const DEFAULT_MAX_CACHED_BLOBS: u32 = 100;
 
 /// A blob store that stores blob data on disk.
 ///
 /// The type uses deferred deletion, meaning that blobs are not immediately deleted from disk, but
-/// it's expected that the maintenance task will call [BlobStore::cleanup] to remove the deleted
+/// it's expected that the maintenance task will call [`BlobStore::cleanup`] to remove the deleted
 /// blobs from disk.
 #[derive(Clone, Debug)]
 pub struct DiskFileBlobStore {
@@ -385,7 +385,7 @@ impl fmt::Debug for DiskFileBlobStoreInner {
 /// Errors that can occur when interacting with a disk file blob store.
 #[derive(Debug, thiserror::Error)]
 pub enum DiskFileBlobStoreError {
-    /// Thrown during [DiskFileBlobStore::open] if the blob store directory cannot be opened.
+    /// Thrown during [`DiskFileBlobStore::open`] if the blob store directory cannot be opened.
     #[error("failed to open blobstore at {0}: {1}")]
     /// Indicates a failure to open the blob store directory.
     Open(PathBuf, io::Error),
@@ -405,7 +405,7 @@ pub enum DiskFileBlobStoreError {
 
 impl From<DiskFileBlobStoreError> for BlobStoreError {
     fn from(value: DiskFileBlobStoreError) -> Self {
-        BlobStoreError::Other(Box::new(value))
+        Self::Other(Box::new(value))
     }
 }
 
@@ -445,7 +445,6 @@ pub enum OpenDiskFileBlobStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
     use std::sync::atomic::Ordering;
 
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {
@@ -455,11 +454,15 @@ mod tests {
     }
 
     fn rng_blobs(num: usize) -> Vec<(TxHash, BlobTransactionSidecar)> {
-        let mut runner = TestRunner::new(Default::default());
-        prop::collection::vec(any::<(TxHash, BlobTransactionSidecar)>(), num)
-            .new_tree(&mut runner)
-            .unwrap()
-            .current()
+        let mut rng = rand::thread_rng();
+        (0..num)
+            .map(|_| {
+                let tx = TxHash::random_with(&mut rng);
+                let blob =
+                    BlobTransactionSidecar { blobs: vec![], commitments: vec![], proofs: vec![] };
+                (tx, blob)
+            })
+            .collect()
     }
 
     #[test]

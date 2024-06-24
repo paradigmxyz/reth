@@ -1,5 +1,6 @@
 use parking_lot::RwLock;
-use reth_primitives::{BlockNumHash, BlockNumber, ChainInfo, SealedHeader};
+use reth_chainspec::ChainInfo;
+use reth_primitives::{BlockNumHash, BlockNumber, SealedHeader};
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -29,7 +30,7 @@ impl ChainInfoTracker {
         }
     }
 
-    /// Returns the [ChainInfo] for the canonical head.
+    /// Returns the [`ChainInfo`] for the canonical head.
     pub(crate) fn chain_info(&self) -> ChainInfo {
         let inner = self.inner.canonical_head.read();
         ChainInfo { best_hash: inner.hash(), best_number: inner.number }

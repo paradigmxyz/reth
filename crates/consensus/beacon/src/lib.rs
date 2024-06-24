@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub use reth_beacon_consensus_core::BeaconConsensus;
+pub use reth_ethereum_consensus::EthBeaconConsensus;
 
 mod engine;
 pub use engine::*;

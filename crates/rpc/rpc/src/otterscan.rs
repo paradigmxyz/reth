@@ -1,7 +1,6 @@
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use revm::inspectors::NoOpInspector;
 use revm_inspectors::transfer::{TransferInspector, TransferKind};
 use revm_primitives::ExecutionResult;
 
@@ -27,7 +26,7 @@ pub struct OtterscanApi<Eth> {
 
 impl<Eth> OtterscanApi<Eth> {
     /// Creates a new instance of `Otterscan`.
-    pub fn new(eth: Eth) -> Self {
+    pub const fn new(eth: Eth) -> Self {
         Self { eth }
     }
 }
@@ -81,14 +80,10 @@ where
     async fn get_transaction_error(&self, tx_hash: TxHash) -> RpcResult<Option<Bytes>> {
         let maybe_revert = self
             .eth
-            .spawn_trace_transaction_in_block_with_inspector(
-                tx_hash,
-                NoOpInspector,
-                |_tx_info, _inspector, res, _| match res.result {
-                    ExecutionResult::Revert { output, .. } => Ok(Some(output)),
-                    _ => Ok(None),
-                },
-            )
+            .spawn_replay_transaction(tx_hash, |_tx_info, res, _| match res.result {
+                ExecutionResult::Revert { output, .. } => Ok(Some(output)),
+                _ => Ok(None),
+            })
             .await
             .map(Option::flatten)?;
         Ok(maybe_revert)
@@ -134,7 +129,7 @@ where
         if tx_len != receipts.len() {
             return Err(internal_rpc_err(
                 "the number of transactions does not match the number of receipts",
-            ));
+            ))
         }
 
         // make sure the block is full
@@ -163,7 +158,12 @@ where
             .drain(page_start..page_end)
             .map(|receipt| {
                 let receipt = receipt.inner.map_inner(|receipt| OtsReceipt {
-                    status: receipt.inner.receipt.status,
+                    status: receipt
+                        .inner
+                        .receipt
+                        .status
+                        .as_eip658()
+                        .expect("ETH API returned pre-EIP-658 status"),
                     cumulative_gas_used: receipt.inner.receipt.cumulative_gas_used as u64,
                     logs: None,
                     logs_bloom: None,

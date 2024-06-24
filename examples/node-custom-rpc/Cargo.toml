@@ -12,7 +12,6 @@ reth-node-ethereum.workspace = true
 
 clap = { workspace = true, features = ["derive"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
-eyre.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

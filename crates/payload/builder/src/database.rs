@@ -12,7 +12,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
 };
 
-/// A container type that caches reads from an underlying [DatabaseRef].
+/// A container type that caches reads from an underlying [`DatabaseRef`].
 ///
 /// This is intended to be used in conjunction with `revm::db::State`
 /// during payload building which repeatedly accesses the same data.
@@ -41,7 +41,7 @@ pub struct CachedReads {
 // === impl CachedReads ===
 
 impl CachedReads {
-    /// Gets a [DatabaseRef] that will cache reads from the given database.
+    /// Gets a [`DatabaseRef`] that will cache reads from the given database.
     pub fn as_db<DB>(&mut self, db: DB) -> CachedReadsDBRef<'_, DB> {
         CachedReadsDBRef { inner: RefCell::new(self.as_db_mut(db)) }
     }
@@ -61,10 +61,13 @@ impl CachedReads {
     }
 }
 
+/// A [Database] that caches reads inside [`CachedReads`].
 #[derive(Debug)]
-struct CachedReadsDbMut<'a, DB> {
-    cached: &'a mut CachedReads,
-    db: DB,
+pub struct CachedReadsDbMut<'a, DB> {
+    /// The cache of reads.
+    pub cached: &'a mut CachedReads,
+    /// The underlying database.
+    pub db: DB,
 }
 
 impl<'a, DB: DatabaseRef> Database for CachedReadsDbMut<'a, DB> {
@@ -120,13 +123,14 @@ impl<'a, DB: DatabaseRef> Database for CachedReadsDbMut<'a, DB> {
     }
 }
 
-/// A [DatabaseRef] that caches reads inside [CachedReads].
+/// A [`DatabaseRef`] that caches reads inside [`CachedReads`].
 ///
-/// This is intended to be used as the [DatabaseRef] for
+/// This is intended to be used as the [`DatabaseRef`] for
 /// `revm::db::State` for repeated payload build jobs.
 #[derive(Debug)]
 pub struct CachedReadsDBRef<'a, DB> {
-    inner: RefCell<CachedReadsDbMut<'a, DB>>,
+    /// The inner cache reads db mut.
+    pub inner: RefCell<CachedReadsDbMut<'a, DB>>,
 }
 
 impl<'a, DB: DatabaseRef> DatabaseRef for CachedReadsDBRef<'a, DB> {

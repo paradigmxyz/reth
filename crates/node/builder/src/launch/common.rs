@@ -1,28 +1,32 @@
 //! Helper types that can be used by launchers.
 
-use std::{cmp::max, sync::Arc, thread::available_parallelism};
-
+use backon::{ConstantBuilder, Retryable};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
-use tokio::sync::mpsc::Receiver;
-
 use reth_auto_seal_consensus::MiningMode;
+use reth_beacon_consensus::EthBeaconConsensus;
+use reth_chainspec::{Chain, ChainSpec};
 use reth_config::{config::EtlConfig, PruneConfig};
-use reth_db::{database::Database, database_metrics::DatabaseMetrics};
-use reth_interfaces::p2p::headers::client::HeadersClient;
+use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
+use reth_db_common::init::{init_genesis, InitDatabaseError};
+use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
+use reth_evm::noop::NoopBlockExecutorProvider;
+use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_core::{
-    cli::config::RethRpcConfig,
     dirs::{ChainPath, DataDirPath},
-    init::{init_genesis, InitDatabaseError},
     node_config::NodeConfig,
 };
-use reth_primitives::{BlockNumber, Chain, ChainSpec, Head, PruneModes, B256};
-use reth_provider::{providers::StaticFileProvider, ProviderFactory};
-use reth_prune::PrunerBuilder;
-use reth_rpc::JwtSecret;
+use reth_primitives::{BlockNumber, Head, B256};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
+use reth_prune::{PruneModes, PrunerBuilder};
+use reth_rpc_builder::config::RethRpcServerConfig;
+use reth_rpc_layer::JwtSecret;
+use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{error, info};
+use reth_tracing::tracing::{debug, error, info, warn};
+use std::{sync::Arc, thread::available_parallelism};
+use tokio::sync::{mpsc::Receiver, oneshot, watch};
 
 /// Reusable setup for launching a node.
 ///
@@ -42,7 +46,7 @@ impl LaunchContext {
     }
 
     /// Attaches a database to the launch context.
-    pub fn with<DB>(self, database: DB) -> LaunchContextWith<DB> {
+    pub const fn with<DB>(self, database: DB) -> LaunchContextWith<DB> {
         LaunchContextWith { inner: self, attachment: database }
     }
 
@@ -50,38 +54,53 @@ impl LaunchContext {
     /// `config`.
     ///
     /// Attaches both the `NodeConfig` and the loaded `reth.toml` config to the launch context.
-    pub fn with_loaded_toml_config(
+    pub async fn with_loaded_toml_config(
         self,
         config: NodeConfig,
     ) -> eyre::Result<LaunchContextWith<WithConfigs>> {
-        let toml_config = self.load_toml_config(&config)?;
+        let toml_config = self.load_toml_config(&config).await?;
         Ok(self.with(WithConfigs { config, toml_config }))
     }
 
     /// Loads the reth config with the configured `data_dir` and overrides settings according to the
     /// `config`.
-    pub fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
-        let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config_path());
+    ///
+    /// This is async because the trusted peers may have to be resolved.
+    pub async fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
+        let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
 
         let mut toml_config = confy::load_path::<reth_config::Config>(&config_path)
             .wrap_err_with(|| format!("Could not load config file {config_path:?}"))?;
+
+        Self::save_pruning_config_if_full_node(&mut toml_config, config, &config_path)?;
 
         info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
         // Update the config with the command line arguments
         toml_config.peers.trusted_nodes_only = config.network.trusted_only;
 
-        if !config.network.trusted_peers.is_empty() {
-            info!(target: "reth::cli", "Adding trusted nodes");
-            config.network.trusted_peers.iter().for_each(|peer| {
-                toml_config.peers.trusted_nodes.insert(*peer);
-            });
-        }
-
         Ok(toml_config)
     }
 
-    /// Convenience function to [Self::configure_globals]
+    /// Save prune config to the toml file if node is a full node.
+    fn save_pruning_config_if_full_node(
+        reth_config: &mut reth_config::Config,
+        config: &NodeConfig,
+        config_path: impl AsRef<std::path::Path>,
+    ) -> eyre::Result<()> {
+        if reth_config.prune.is_none() {
+            if let Some(prune_config) = config.prune_config() {
+                reth_config.update_prune_confing(prune_config);
+                info!(target: "reth::cli", "Saving prune config to toml file");
+                reth_config.save(config_path.as_ref())?;
+            }
+        } else if config.prune_config().is_none() {
+            warn!(target: "reth::cli", "Prune configs present in config file but --full not provided. Running as a Full node");
+        }
+        Ok(())
+    }
+
+    /// Convenience function to [`Self::configure_globals`]
     pub fn with_configured_globals(self) -> Self {
         self.configure_globals();
         self
@@ -94,19 +113,28 @@ impl LaunchContext {
     pub fn configure_globals(&self) {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
-        let _ = fdlimit::raise_fd_limit();
+        match fdlimit::raise_fd_limit() {
+            Ok(fdlimit::Outcome::LimitRaised { from, to }) => {
+                debug!(from, to, "Raised file descriptor limit");
+            }
+            Ok(fdlimit::Outcome::Unsupported) => {}
+            Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
+        }
 
         // Limit the global rayon thread pool, reserving 2 cores for the rest of the system
-        let _ = ThreadPoolBuilder::new()
-            .num_threads(
-                available_parallelism().map_or(25, |cpus| max(cpus.get().saturating_sub(2), 2)),
-            )
+        let num_threads =
+            available_parallelism().map_or(0, |num| num.get().saturating_sub(2).max(2));
+        if let Err(err) = ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("reth-rayon-{i}"))
             .build_global()
-            .map_err(|e| error!("Failed to build global thread pool: {:?}", e));
+        {
+            error!(%err, "Failed to build global thread pool")
+        }
     }
 }
 
-/// A [LaunchContext] along with an additional value.
+/// A [`LaunchContext`] along with an additional value.
 ///
 /// This can be used to sequentially attach additional values to the type during the launch process.
 ///
@@ -129,12 +157,12 @@ impl<T> LaunchContextWith<T> {
     }
 
     /// Returns the data directory.
-    pub fn data_dir(&self) -> &ChainPath<DataDirPath> {
+    pub const fn data_dir(&self) -> &ChainPath<DataDirPath> {
         &self.inner.data_dir
     }
 
     /// Returns the task executor.
-    pub fn task_executor(&self) -> &TaskExecutor {
+    pub const fn task_executor(&self) -> &TaskExecutor {
         &self.inner.task_executor
     }
 
@@ -154,6 +182,27 @@ impl<T> LaunchContextWith<T> {
     {
         f(&self);
         self
+    }
+}
+
+impl LaunchContextWith<WithConfigs> {
+    /// Resolves the trusted peers and adds them to the toml config.
+    pub async fn with_resolved_peers(mut self) -> eyre::Result<Self> {
+        if !self.attachment.config.network.trusted_peers.is_empty() {
+            info!(target: "reth::cli", "Adding trusted nodes");
+
+            // resolve trusted peers if they use a domain instead of dns
+            for peer in &self.attachment.config.network.trusted_peers {
+                let backoff = ConstantBuilder::default()
+                    .with_max_times(self.attachment.config.network.dns_retries);
+                let resolved = (move || { peer.resolve() })
+                .retry(&backoff)
+                .notify(|err, _| warn!(target: "reth::cli", "Error resolving peer domain: {err}. Retrying..."))
+                .await?;
+                self.attachment.toml_config.peers.trusted_nodes.insert(resolved);
+            }
+        }
+        Ok(self)
     }
 }
 
@@ -192,7 +241,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     pub fn ensure_etl_datadir(mut self) -> Self {
         if self.toml_config_mut().stages.etl.dir.is_none() {
             self.toml_config_mut().stages.etl.dir =
-                Some(EtlConfig::from_datadir(&self.data_dir().data_dir_path()))
+                Some(EtlConfig::from_datadir(self.data_dir().data_dir()))
         }
 
         self
@@ -204,22 +253,27 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
         self
     }
 
-    /// Returns the attached [NodeConfig].
+    /// Returns the container for all config types
+    pub const fn configs(&self) -> &WithConfigs {
+        self.attachment.left()
+    }
+
+    /// Returns the attached [`NodeConfig`].
     pub const fn node_config(&self) -> &NodeConfig {
         &self.left().config
     }
 
-    /// Returns the attached [NodeConfig].
+    /// Returns the attached [`NodeConfig`].
     pub fn node_config_mut(&mut self) -> &mut NodeConfig {
         &mut self.left_mut().config
     }
 
-    /// Returns the attached toml config [reth_config::Config].
+    /// Returns the attached toml config [`reth_config::Config`].
     pub const fn toml_config(&self) -> &reth_config::Config {
         &self.left().toml_config
     }
 
-    /// Returns the attached toml config [reth_config::Config].
+    /// Returns the attached toml config [`reth_config::Config`].
     pub fn toml_config_mut(&mut self) -> &mut reth_config::Config {
         &mut self.left_mut().toml_config
     }
@@ -240,45 +294,35 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     }
 
     /// Returns true if the node is configured as --dev
-    pub fn is_dev(&self) -> bool {
+    pub const fn is_dev(&self) -> bool {
         self.node_config().dev.dev
     }
 
-    /// Returns the configured [PruneConfig]
+    /// Returns the configured [`PruneConfig`]
     pub fn prune_config(&self) -> Option<PruneConfig> {
-        self.node_config().prune_config().or_else(|| self.toml_config().prune.clone())
+        self.toml_config().prune.clone().or_else(|| self.node_config().prune_config())
     }
 
-    /// Returns the configured [PruneModes]
+    /// Returns the configured [`PruneModes`]
     pub fn prune_modes(&self) -> Option<PruneModes> {
         self.prune_config().map(|config| config.segments)
     }
 
-    /// Returns an initialized [PrunerBuilder] based on the configured [PruneConfig]
+    /// Returns an initialized [`PrunerBuilder`] based on the configured [`PruneConfig`]
     pub fn pruner_builder(&self) -> PrunerBuilder {
         PrunerBuilder::new(self.prune_config().unwrap_or_default())
             .prune_delete_limit(self.chain_spec().prune_delete_limit)
             .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
     }
 
-    /// Returns the initial pipeline target, based on whether or not the node is running in
-    /// `debug.tip` mode, `debug.continuous` mode, or neither.
-    ///
-    /// If running in `debug.tip` mode, the configured tip is returned.
-    /// Otherwise, if running in `debug.continuous` mode, the genesis hash is returned.
-    /// Otherwise, `None` is returned. This is what the node will do by default.
-    pub fn initial_pipeline_target(&self) -> Option<B256> {
-        self.node_config().initial_pipeline_target(self.genesis_hash())
-    }
-
     /// Loads the JWT secret for the engine API
     pub fn auth_jwt_secret(&self) -> eyre::Result<JwtSecret> {
-        let default_jwt_path = self.data_dir().jwt_path();
+        let default_jwt_path = self.data_dir().jwt();
         let secret = self.node_config().rpc.auth_jwt_secret(default_jwt_path)?;
         Ok(secret)
     }
 
-    /// Returns the [MiningMode] intended for --dev mode.
+    /// Returns the [`MiningMode`] intended for --dev mode.
     pub fn dev_mining_mode(&self, pending_transactions_listener: Receiver<B256>) -> MiningMode {
         if let Some(interval) = self.node_config().dev.block_time {
             MiningMode::interval(interval)
@@ -292,25 +336,80 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
 
 impl<DB> LaunchContextWith<Attached<WithConfigs, DB>>
 where
-    DB: Clone,
+    DB: Database + Clone + 'static,
 {
-    /// Returns the [ProviderFactory] for the attached database.
-    pub fn create_provider_factory(&self) -> eyre::Result<ProviderFactory<DB>> {
+    /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
+    /// between the database and static files. **It may execute a pipeline unwind if it fails this
+    /// check.**
+    pub async fn create_provider_factory(&self) -> eyre::Result<ProviderFactory<DB>> {
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
-            self.data_dir().static_files_path(),
-        )?
+            StaticFileProvider::read_write(self.data_dir().static_files())?,
+        )
         .with_static_files_metrics();
+
+        let has_receipt_pruning =
+            self.toml_config().prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
+
+        info!(target: "reth::cli", "Verifying storage consistency.");
+
+        // Check for consistency between database and static files. If it fails, it unwinds to
+        // the first block that's consistent between database and static files.
+        if let Some(unwind_target) = factory
+            .static_file_provider()
+            .check_consistency(&factory.provider()?, has_receipt_pruning)?
+        {
+            // Highly unlikely to happen, and given its destructive nature, it's better to panic
+            // instead.
+            assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
+
+            info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
+
+            let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
+
+            // Builds an unwind-only pipeline
+            let pipeline = Pipeline::builder()
+                .add_stages(DefaultStages::new(
+                    factory.clone(),
+                    tip_rx,
+                    Arc::new(EthBeaconConsensus::new(self.chain_spec())),
+                    NoopHeaderDownloader::default(),
+                    NoopBodiesDownloader::default(),
+                    NoopBlockExecutorProvider::default(),
+                    self.toml_config().stages.clone(),
+                    self.prune_modes().unwrap_or_default(),
+                ))
+                .build(
+                    factory.clone(),
+                    StaticFileProducer::new(
+                        factory.clone(),
+                        self.prune_modes().unwrap_or_default(),
+                    ),
+                );
+
+            // Unwinds to block
+            let (tx, rx) = oneshot::channel();
+
+            // Pipeline should be run as blocking and panic if it fails.
+            self.task_executor().spawn_critical_blocking(
+                "pipeline task",
+                Box::pin(async move {
+                    let (_, result) = pipeline.run_as_fut(Some(unwind_target)).await;
+                    let _ = tx.send(result);
+                }),
+            );
+            rx.await??;
+        }
 
         Ok(factory)
     }
 
-    /// Creates a new [ProviderFactory] and attaches it to the launch context.
-    pub fn with_provider_factory(
+    /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
+    pub async fn with_provider_factory(
         self,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, ProviderFactory<DB>>>> {
-        let factory = self.create_provider_factory()?;
+        let factory = self.create_provider_factory().await?;
         let ctx = LaunchContextWith {
             inner: self.inner,
             attachment: self.attachment.map_right(|_| factory),
@@ -329,8 +428,8 @@ where
         self.right().db_ref()
     }
 
-    /// Returns the configured ProviderFactory.
-    pub fn provider_factory(&self) -> &ProviderFactory<DB> {
+    /// Returns the configured `ProviderFactory`.
+    pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
         self.right()
     }
 
@@ -339,16 +438,15 @@ where
         self.right().static_file_provider()
     }
 
-    /// Creates a new [StaticFileProducer] with the attached database.
+    /// Creates a new [`StaticFileProducer`] with the attached database.
     pub fn static_file_producer(&self) -> StaticFileProducer<DB> {
         StaticFileProducer::new(
             self.provider_factory().clone(),
-            self.static_file_provider(),
             self.prune_modes().unwrap_or_default(),
         )
     }
 
-    /// Convenience function to [Self::init_genesis]
+    /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitDatabaseError> {
         init_genesis(self.provider_factory().clone())?;
         Ok(self)
@@ -368,7 +466,7 @@ where
         self.node_config().max_block(client, self.provider_factory().clone()).await
     }
 
-    /// Convenience function to [Self::start_prometheus_endpoint]
+    /// Convenience function to [`Self::start_prometheus_endpoint`]
     pub async fn with_prometheus(self) -> eyre::Result<Self> {
         self.start_prometheus_endpoint().await?;
         Ok(self)
@@ -447,7 +545,7 @@ impl<L, R> Attached<L, R> {
     }
 }
 
-/// Helper container type to bundle the initial [NodeConfig] and the loaded settings from the
+/// Helper container type to bundle the initial [`NodeConfig`] and the loaded settings from the
 /// reth.toml config
 #[derive(Debug, Clone)]
 pub struct WithConfigs {
@@ -455,4 +553,43 @@ pub struct WithConfigs {
     pub config: NodeConfig,
     /// The loaded reth.toml config.
     pub toml_config: reth_config::Config,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LaunchContext, NodeConfig};
+    use reth_config::Config;
+    use reth_node_core::args::PruningArgs;
+
+    const EXTENSION: &str = "toml";
+
+    fn with_tempdir(filename: &str, proc: fn(&std::path::Path)) {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join(filename).with_extension(EXTENSION);
+        proc(&config_path);
+        temp_dir.close().unwrap()
+    }
+
+    #[test]
+    fn test_save_prune_config() {
+        with_tempdir("prune-store-test", |config_path| {
+            let mut reth_config = Config::default();
+            let node_config =
+                NodeConfig { pruning: PruningArgs { full: true }, ..NodeConfig::test() };
+            LaunchContext::save_pruning_config_if_full_node(
+                &mut reth_config,
+                &node_config,
+                config_path,
+            )
+            .unwrap();
+
+            assert_eq!(
+                reth_config.prune.as_ref().map(|p| p.block_interval),
+                node_config.prune_config().map(|p| p.block_interval)
+            );
+
+            let loaded_config: Config = confy::load_path(config_path).unwrap();
+            assert_eq!(reth_config, loaded_config);
+        })
+    }
 }

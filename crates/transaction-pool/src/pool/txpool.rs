@@ -41,7 +41,7 @@ use tracing::trace;
 ///
 /// This pool maintains the state of all transactions and stores them accordingly.
 ///
-/// include_mmd!("docs/mermaid/txpool.mmd")
+/// `include_mmd!("docs/mermaid/txpool.mmd`")
 pub struct TxPool<T: TransactionOrdering> {
     /// Contains the currently known information about the senders.
     sender_info: FxHashMap<SenderId, SenderInfo>,
@@ -413,7 +413,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.all_transactions.set_block_info(block_info);
 
         // Remove all transaction that were included in the block
-        for tx_hash in mined_transactions.iter() {
+        for tx_hash in &mined_transactions {
             if self.prune_transaction_by_hash(tx_hash).is_some() {
                 // Update removed transactions metric
                 self.metrics.removed_transactions.increment(1);
@@ -428,7 +428,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     }
 
     /// Update sub-pools size metrics.
-    pub(crate) fn update_size_metrics(&mut self) {
+    pub(crate) fn update_size_metrics(&self) {
         let stats = self.size();
         self.metrics.pending_pool_transactions.set(stats.pending as f64);
         self.metrics.pending_pool_size_bytes.set(stats.pending_size as f64);
@@ -647,7 +647,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// subpool.
     ///
     /// This is intended to be used when a transaction is included in a block,
-    /// [Self::on_canonical_state_change]
+    /// [`Self::on_canonical_state_change`]
     fn prune_transaction_by_hash(
         &mut self,
         tx_hash: &B256,
@@ -912,7 +912,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     pending_fees: PendingFees,
     /// Configured price bump settings for replacements
     price_bumps: PriceBumpConfig,
-    /// How to handle [TransactionOrigin::Local](crate::TransactionOrigin) transactions.
+    /// How to handle [`TransactionOrigin::Local`](crate::TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
     /// All Transactions metrics
     metrics: AllTransactionsMetrics,
@@ -990,7 +990,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Updates the size metrics
-    pub(crate) fn update_size_metrics(&mut self) {
+    pub(crate) fn update_size_metrics(&self) {
         self.metrics.all_transactions_by_hash.set(self.by_hash.len() as f64);
         self.metrics.all_transactions_by_id.set(self.txs.len() as f64);
     }
@@ -1002,6 +1002,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// For all transactions:
     ///   - decreased basefee: promotes from `basefee` to `pending` sub-pool.
     ///   - increased basefee: demotes from `pending` to `basefee` sub-pool.
+    ///
     /// Individually:
     ///   - decreased sender allowance: demote from (`basefee`|`pending`) to `queued`.
     ///   - increased sender allowance: promote from `queued` to
@@ -1271,7 +1272,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Checks if the given transaction's type conflicts with an existing transaction.
     ///
-    /// See also [ValidPoolTransaction::tx_type_conflicts_with].
+    /// See also [`ValidPoolTransaction::tx_type_conflicts_with`].
     ///
     /// Caution: This assumes that mutually exclusive invariant is always true for the same sender.
     #[inline]
@@ -1703,7 +1704,7 @@ pub(crate) struct PendingFees {
 
 impl Default for PendingFees {
     fn default() -> Self {
-        PendingFees { base_fee: Default::default(), blob_fee: BLOB_TX_MIN_BLOB_GASPRICE }
+        Self { base_fee: Default::default(), blob_fee: BLOB_TX_MIN_BLOB_GASPRICE }
     }
 }
 
@@ -2172,7 +2173,7 @@ mod tests {
         // dedup the test cases
         let expected_promotions = expected_promotions.into_iter().collect::<HashSet<_>>();
 
-        for promotion_test in expected_promotions.iter() {
+        for promotion_test in &expected_promotions {
             let mut pool = TxPool::new(MockOrdering::default(), Default::default());
 
             // set block info so the tx is initially underpriced w.r.t. blob fee

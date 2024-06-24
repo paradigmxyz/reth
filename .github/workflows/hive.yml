@@ -27,7 +27,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build and export reth image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           tags: ghcr.io/paradigmxyz/reth:latest
@@ -66,7 +66,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sim: [ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
+        # TODO: enable etherem/sync once resolved:
+        # https://github.com/paradigmxyz/reth/issues/8579
+        # TODO: enable ethereum/rpc once resolved:
+        # https://github.com/ethereum/hive/pull/1117
+        # sim: [ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
+        sim: [smoke/genesis, smoke/network]
         include:
           - sim: devp2p
             limit: discv4
@@ -93,17 +98,26 @@ jobs:
               - TestBlobViolations
           - sim: ethereum/engine
             limit: engine-exchange-capabilities
-          - sim: ethereum/engine
-            limit: engine-withdrawals
+          # TODO: enable engine-withdrawals once resolved:
+          # https://github.com/paradigmxyz/reth/issues/8732
+          # - sim: ethereum/engine
+          #   limit: engine-withdrawals
           - sim: ethereum/engine
             limit: engine-auth
           - sim: ethereum/engine
             limit: engine-transition
-          - sim: ethereum/engine
-            limit: engine-api
-          - sim: ethereum/engine
-            limit: cancun
-            # eth_ rpc methods
+          # TODO: enable engine-api once resolved:
+          # https://github.com/paradigmxyz/reth/issues/6217
+          # https://github.com/paradigmxyz/reth/issues/8305
+          # - sim: ethereum/engine
+          #   limit: engine-api
+          # TODO: enable cancun once resolved:
+          # https://github.com/paradigmxyz/reth/issues/6217
+          # https://github.com/paradigmxyz/reth/issues/8306
+          # https://github.com/paradigmxyz/reth/issues/7144
+          # - sim: ethereum/engine
+          #   limit: cancun
+          # eth_ rpc methods
           - sim: ethereum/rpc-compat
             include:
               - eth_blockNumber
@@ -123,9 +137,12 @@ jobs:
               - eth_getTransactionReceipt
               - eth_sendRawTransaction
               - eth_syncing
-            # debug_ rpc methods
-          - sim: ethereum/rpc-compat
-            include: [debug_]
+          # TODO: enable debug_ rpc-compat once resolved:
+          # https://github.com/paradigmxyz/reth/issues/7015
+          # https://github.com/paradigmxyz/reth/issues/6332
+          # debug_ rpc methods
+          # - sim: ethereum/rpc-compat
+          # include: [debug_]
           # Pyspec cancun jobs
           - sim: pyspec
             include: [cancun/eip4844]

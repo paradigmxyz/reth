@@ -3,41 +3,45 @@ use crate::{
     to_range,
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
-    EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HeaderSyncMode,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, ProviderError,
+    PruneCheckpointReader, RequestsProvider, StageCheckpointReader, StateProviderBox,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use reth_db::{database::Database, init_db, models::StoredBlockBodyIndices, DatabaseEnv};
+use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
+use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
+use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
-use reth_interfaces::{provider::ProviderResult, RethError, RethResult};
 use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
-    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo,
-    ChainSpec, Header, PruneCheckpoint, PruneSegment, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StaticFileSegment, TransactionMeta, TransactionSigned, TransactionSignedNoHash,
-    TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
+    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Header, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
+    TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
+    U256,
 };
+use reth_prune_types::{PruneCheckpoint, PruneSegment};
+use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     ops::{RangeBounds, RangeInclusive},
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
 };
+use tokio::sync::watch;
 use tracing::trace;
 
 mod metrics;
 mod provider;
 
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
-use reth_db::mdbx::DatabaseArguments;
 
 /// A common provider that fetches data from a database or static file.
 ///
 /// This provider implements most provider or provider factory traits.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProviderFactory<DB> {
     /// Database
-    db: DB,
+    db: Arc<DB>,
     /// Chain spec
     chain_spec: Arc<ChainSpec>,
     /// Static File Provider
@@ -49,13 +53,9 @@ impl<DB> ProviderFactory<DB> {
     pub fn new(
         db: DB,
         chain_spec: Arc<ChainSpec>,
-        static_files_path: PathBuf,
-    ) -> RethResult<ProviderFactory<DB>> {
-        Ok(Self {
-            db,
-            chain_spec,
-            static_file_provider: StaticFileProvider::new(static_files_path)?,
-        })
+        static_file_provider: StaticFileProvider,
+    ) -> Self {
+        Self { db: Arc::new(db), chain_spec, static_file_provider }
     }
 
     /// Enables metrics on the static file provider.
@@ -69,14 +69,9 @@ impl<DB> ProviderFactory<DB> {
         &self.db
     }
 
-    /// Returns static file provider
-    pub fn static_file_provider(&self) -> StaticFileProvider {
-        self.static_file_provider.clone()
-    }
-
     #[cfg(any(test, feature = "test-utils"))]
     /// Consumes Self and returns DB
-    pub fn into_db(self) -> DB {
+    pub fn into_db(self) -> Arc<DB> {
         self.db
     }
 }
@@ -88,12 +83,12 @@ impl ProviderFactory<DatabaseEnv> {
         path: P,
         chain_spec: Arc<ChainSpec>,
         args: DatabaseArguments,
-        static_files_path: PathBuf,
+        static_file_provider: StaticFileProvider,
     ) -> RethResult<Self> {
-        Ok(ProviderFactory::<DatabaseEnv> {
-            db: init_db(path, args).map_err(|e| RethError::Custom(e.to_string()))?,
+        Ok(Self {
+            db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
-            static_file_provider: StaticFileProvider::new(static_files_path)?,
+            static_file_provider,
         })
     }
 }
@@ -161,13 +156,20 @@ impl<DB: Database> DatabaseProviderFactory<DB> for ProviderFactory<DB> {
     }
 }
 
+impl<DB> StaticFileProviderFactory for ProviderFactory<DB> {
+    /// Returns static file provider
+    fn static_file_provider(&self) -> StaticFileProvider {
+        self.static_file_provider.clone()
+    }
+}
+
 impl<DB: Database> HeaderSyncGapProvider for ProviderFactory<DB> {
     fn sync_gap(
         &self,
-        mode: HeaderSyncMode,
+        tip: watch::Receiver<B256>,
         highest_uninterrupted_block: BlockNumber,
-    ) -> RethResult<HeaderSyncGap> {
-        self.provider()?.sync_gap(mode, highest_uninterrupted_block)
+    ) -> ProviderResult<HeaderSyncGap> {
+        self.provider()?.sync_gap(tip, highest_uninterrupted_block)
     }
 }
 
@@ -338,6 +340,13 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
     ) -> ProviderResult<Vec<BlockWithSenders>> {
         self.provider()?.block_with_senders_range(range)
     }
+
+    fn sealed_block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+        self.provider()?.sealed_block_with_senders_range(range)
+    }
 }
 
 impl<DB: Database> TransactionsProvider for ProviderFactory<DB> {
@@ -460,6 +469,19 @@ impl<DB: Database> WithdrawalsProvider for ProviderFactory<DB> {
     }
 }
 
+impl<DB> RequestsProvider for ProviderFactory<DB>
+where
+    DB: Database,
+{
+    fn requests_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        timestamp: u64,
+    ) -> ProviderResult<Option<reth_primitives::Requests>> {
+        self.provider()?.requests_by_block(id, timestamp)
+    }
+}
+
 impl<DB: Database> StageCheckpointReader for ProviderFactory<DB> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.provider()?.get_stage_checkpoint(id)
@@ -556,32 +578,38 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
     }
 }
 
+impl<DB> Clone for ProviderFactory<DB> {
+    fn clone(&self) -> Self {
+        Self {
+            db: Arc::clone(&self.db),
+            chain_spec: self.chain_spec.clone(),
+            static_file_provider: self.static_file_provider.clone(),
+        }
+    }
+}
 #[cfg(test)]
 mod tests {
-    use super::ProviderFactory;
+    use super::*;
     use crate::{
-        providers::StaticFileWriter, test_utils::create_test_provider_factory, BlockHashReader,
-        BlockNumReader, BlockWriter, HeaderSyncGapProvider, HeaderSyncMode, TransactionsProvider,
+        providers::{StaticFileProvider, StaticFileWriter},
+        test_utils::create_test_provider_factory,
+        BlockHashReader, BlockNumReader, BlockWriter, HeaderSyncGapProvider, TransactionsProvider,
     };
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use rand::Rng;
+    use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
         mdbx::DatabaseArguments,
         tables,
         test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_interfaces::{
-        provider::ProviderError,
-        test_utils::{
-            generators,
-            generators::{random_block, random_header},
-        },
-        RethError,
-    };
-    use reth_primitives::{
-        hex_literal::hex, ChainSpecBuilder, PruneMode, PruneModes, SealedBlock, StaticFileSegment,
-        TxNumber, B256, U256,
+    use reth_primitives::{hex_literal::hex, SealedBlock, StaticFileSegment, TxNumber, B256, U256};
+    use reth_prune_types::{PruneMode, PruneModes};
+    use reth_storage_errors::provider::ProviderError;
+    use reth_testing_utils::{
+        generators,
+        generators::{random_block, random_header},
     };
     use std::{ops::RangeInclusive, sync::Arc};
     use tokio::sync::watch;
@@ -620,7 +648,7 @@ mod tests {
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
-            static_dir_path,
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
         )
         .unwrap();
 
@@ -719,7 +747,6 @@ mod tests {
         let mut rng = generators::rng();
         let consensus_tip = rng.gen();
         let (_tip_tx, tip_rx) = watch::channel(consensus_tip);
-        let mode = HeaderSyncMode::Tip(tip_rx);
 
         // Genesis
         let checkpoint = 0;
@@ -727,8 +754,8 @@ mod tests {
 
         // Empty database
         assert_matches!(
-            provider.sync_gap(mode.clone(), checkpoint),
-            Err(RethError::Provider(ProviderError::HeaderNotFound(block_number)))
+            provider.sync_gap(tip_rx.clone(), checkpoint),
+            Err(ProviderError::HeaderNotFound(block_number))
                 if block_number.as_number().unwrap() == checkpoint
         );
 
@@ -739,7 +766,7 @@ mod tests {
         static_file_writer.commit().unwrap();
         drop(static_file_writer);
 
-        let gap = provider.sync_gap(mode, checkpoint).unwrap();
+        let gap = provider.sync_gap(tip_rx, checkpoint).unwrap();
         assert_eq!(gap.local_head, head);
         assert_eq!(gap.target.tip(), consensus_tip.into());
     }

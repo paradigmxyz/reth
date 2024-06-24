@@ -36,6 +36,7 @@ async fn exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::Res
             ctx.events.send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
         }
     }
+
     Ok(())
 }
 
@@ -49,4 +50,44 @@ fn main() -> eyre::Result<()> {
 
         handle.wait_for_node_exit().await
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use reth::providers::{Chain, ExecutionOutcome};
+    use reth_exex_test_utils::{test_exex_context, PollOnce};
+    use std::pin::pin;
+
+    #[tokio::test]
+    async fn test_exex() -> eyre::Result<()> {
+        // Initialize a test Execution Extension context with all dependencies
+        let (ctx, mut handle) = test_exex_context().await?;
+
+        // Save the current head of the chain to check the finished height against it later
+        let head = ctx.head;
+
+        // Send a notification to the Execution Extension that the chain has been committed
+        handle
+            .send_notification_chain_committed(Chain::from_block(
+                handle.genesis.clone(),
+                ExecutionOutcome::default(),
+                None,
+            ))
+            .await?;
+
+        // Initialize the Execution Extension
+        let mut exex = pin!(super::exex_init(ctx).await?);
+
+        // Check that the Execution Extension did not emit any events until we polled it
+        handle.assert_events_empty();
+
+        // Poll the Execution Extension once to process incoming notifications
+        exex.poll_once().await?;
+
+        // Check that the Execution Extension emitted a `FinishedHeight` event with the correct
+        // height
+        handle.assert_event_finished_height(head.number)?;
+
+        Ok(())
+    }
 }

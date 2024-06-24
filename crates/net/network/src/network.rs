@@ -7,15 +7,15 @@ use enr::Enr;
 use parking_lot::Mutex;
 use reth_discv4::Discv4;
 use reth_eth_wire::{DisconnectReason, NewBlock, NewPooledTransactionHashes, SharedTransactions};
-use reth_interfaces::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
-use reth_net_common::bandwidth_meter::BandwidthMeter;
 use reth_network_api::{
     NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
     ReputationChangeKind,
 };
-use reth_network_types::PeerId;
-use reth_primitives::{Head, NodeRecord, TransactionSigned, B256};
+use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState, SyncStateProvider};
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_primitives::{Head, TransactionSigned, B256};
 use reth_rpc_types::NetworkStatus;
+use reth_tokio_util::{EventSender, EventStream};
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
@@ -24,7 +24,10 @@ use std::{
         Arc,
     },
 };
-use tokio::sync::{mpsc, mpsc::UnboundedSender, oneshot};
+use tokio::sync::{
+    mpsc::{self, UnboundedSender},
+    oneshot,
+};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A _shareable_ network frontend. Used to interact with the network.
@@ -49,10 +52,10 @@ impl NetworkHandle {
         local_peer_id: PeerId,
         peers: PeersHandle,
         network_mode: NetworkMode,
-        bandwidth_meter: BandwidthMeter,
         chain_id: Arc<AtomicU64>,
         tx_gossip_disabled: bool,
         discv4: Option<Discv4>,
+        event_sender: EventSender<NetworkEvent>,
     ) -> Self {
         let inner = NetworkInner {
             num_active_peers,
@@ -62,12 +65,12 @@ impl NetworkHandle {
             local_peer_id,
             peers,
             network_mode,
-            bandwidth_meter,
             is_syncing: Arc::new(AtomicBool::new(false)),
             initial_sync_done: Arc::new(AtomicBool::new(false)),
             chain_id,
             tx_gossip_disabled,
             discv4,
+            event_sender,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -114,7 +117,7 @@ impl NetworkHandle {
 
     /// Announce a block over devp2p
     ///
-    /// Caution: in PoS this is a noop because new blocks are no longer announced over devp2p.
+    /// Caution: in `PoS` this is a noop because new blocks are no longer announced over devp2p.
     /// Instead they are sent to the node by CL and can be requested over devp2p.
     /// Broadcasting new blocks is considered a protocol violation.
     pub fn announce_block(&self, block: NewBlock, hash: B256) {
@@ -146,11 +149,6 @@ impl NetworkHandle {
         let (tx, rx) = oneshot::channel();
         let _ = self.manager().send(NetworkHandleMessage::GetTransactionsHandle(tx));
         rx.await.unwrap()
-    }
-
-    /// Provides a shareable reference to the [`BandwidthMeter`] stored on the `NetworkInner`.
-    pub fn bandwidth_meter(&self) -> &BandwidthMeter {
-        &self.inner.bandwidth_meter
     }
 
     /// Send message to gracefully shutdown node.
@@ -196,10 +194,8 @@ impl NetworkHandle {
 // === API Implementations ===
 
 impl NetworkEvents for NetworkHandle {
-    fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let _ = self.manager().send(NetworkHandleMessage::EventListener(tx));
-        UnboundedReceiverStream::new(rx)
+    fn event_listener(&self) -> EventStream<NetworkEvent> {
+        self.inner.event_sender.new_listener()
     }
 
     fn discovery_listener(&self) -> UnboundedReceiverStream<DiscoveryEvent> {
@@ -389,8 +385,6 @@ struct NetworkInner {
     peers: PeersHandle,
     /// The mode of the network
     network_mode: NetworkMode,
-    /// Used to measure inbound & outbound bandwidth across network streams (currently unused)
-    bandwidth_meter: BandwidthMeter,
     /// Represents if the network is currently syncing.
     is_syncing: Arc<AtomicBool>,
     /// Used to differentiate between an initial pipeline sync or a live sync
@@ -401,12 +395,14 @@ struct NetworkInner {
     tx_gossip_disabled: bool,
     /// The instance of the discv4 service
     discv4: Option<Discv4>,
+    /// Sender for high level network events.
+    event_sender: EventSender<NetworkEvent>,
 }
 
 /// Provides event subscription for the network.
 pub trait NetworkEvents: Send + Sync {
     /// Creates a new [`NetworkEvent`] listener channel.
-    fn event_listener(&self) -> UnboundedReceiverStream<NetworkEvent>;
+    fn event_listener(&self) -> EventStream<NetworkEvent>;
     /// Returns a new [`DiscoveryEvent`] stream.
     ///
     /// This stream yields [`DiscoveryEvent`]s for each peer that is discovered.
@@ -415,7 +411,7 @@ pub trait NetworkEvents: Send + Sync {
 
 /// Provides access to modify the network's additional protocol handlers.
 pub trait NetworkProtocols: Send + Sync {
-    /// Adds an additional protocol handler to the RLPx sub-protocol list.
+    /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
     fn add_rlpx_sub_protocol(&self, protocol: RlpxSubProtocol);
 }
 
@@ -430,8 +426,6 @@ pub(crate) enum NetworkHandleMessage {
     RemovePeer(PeerId, PeerKind),
     /// Disconnects a connection to a peer if it exists, optionally providing a disconnect reason.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
-    /// Adds a new listener for `NetworkEvent`.
-    EventListener(UnboundedSender<NetworkEvent>),
     /// Broadcasts an event to announce a new block to all nodes.
     AnnounceBlock(NewBlock, B256),
     /// Sends a list of transactions to the given peer.

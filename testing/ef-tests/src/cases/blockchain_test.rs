@@ -53,6 +53,16 @@ use std::{
     path::Path,
     sync::Arc,
 };
+use alloy_rlp::Decodable;
+use rayon::iter::{ParallelBridge, ParallelIterator};
+use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
+use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
+use reth_provider::{
+    providers::{StaticFileProvider, StaticFileWriter},
+    HashingWriter, ProviderFactory,
+};
+use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
+use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 /// A handler for the blockchain test suite.
 #[derive(Debug)]
@@ -62,7 +72,7 @@ pub struct BlockchainTests {
 
 impl BlockchainTests {
     /// Create a new handler for a subset of the blockchain test suite.
-    pub fn new(suite: String) -> Self {
+    pub const fn new(suite: String) -> Self {
         Self { suite }
     }
 }
@@ -421,7 +431,7 @@ impl BlockDataProvider for RethBlockDataProvider {
 
 impl CaseAsync for BlockchainTestCase {
     fn load(path: &Path) -> Result<Self, Error> {
-        Ok(BlockchainTestCase {
+        Ok(Self {
             name: path.to_str().unwrap().to_string(),
             tests: {
                 let s = fs::read_to_string(path)
@@ -461,6 +471,7 @@ impl CaseAsync for BlockchainTestCase {
                                                             * name.starts_with("
                                                             * create2InitCodeSizeLimit")) */
             })
+<<<<<<< HEAD
             .collect::<Vec<_>>();
 
         for (name, case) in tests.iter() {
@@ -544,10 +555,62 @@ impl CaseAsync for BlockchainTestCase {
                             checkpoint: progress.map(StageCheckpoint::new),
                         },
                     )
+=======
+            .par_bridge()
+            .try_for_each(|case| {
+                // Create a new test database and initialize a provider for the test case.
+                let db = create_test_rw_db();
+                let (_static_files_dir, static_files_dir_path) = create_test_static_files_dir();
+                let provider = ProviderFactory::new(
+                    db.as_ref(),
+                    Arc::new(case.network.clone().into()),
+                    StaticFileProvider::read_write(static_files_dir_path).unwrap(),
+                )
+                .provider_rw()
+                .unwrap();
+
+                // Insert initial test state into the provider.
+                provider.insert_historical_block(
+                    SealedBlock::new(
+                        case.genesis_block_header.clone().into(),
+                        BlockBody::default(),
+                    )
+                    .try_seal_with_senders()
+                    .unwrap(),
+                    None,
+                )?;
+                case.pre.write_to_db(provider.tx_ref())?;
+
+                // Initialize receipts static file with genesis
+                {
+                    let mut receipts_writer = provider
+                        .static_file_provider()
+                        .latest_writer(StaticFileSegment::Receipts)
+                        .unwrap();
+                    receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+                    receipts_writer.commit_without_sync_all().unwrap();
+                }
+
+                // Decode and insert blocks, creating a chain of blocks for the test case.
+                let last_block = case.blocks.iter().try_fold(None, |_, block| {
+                    let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
+                    provider.insert_historical_block(
+                        decoded.clone().try_seal_with_senders().unwrap(),
+                        None,
+                    )?;
+                    Ok::<Option<SealedBlock>, Error>(Some(decoded))
+                })?;
+                provider
+                    .static_file_provider()
+                    .latest_writer(StaticFileSegment::Headers)
+                    .unwrap()
+                    .commit_without_sync_all()
+>>>>>>> v1.0.0-rc.2
                     .unwrap();
                 account_hashing_done = output.done;
             }
 
+<<<<<<< HEAD
             let mut storage_hashing_done = false;
             while !storage_hashing_done {
                 let output = storage_hashing_stage
@@ -769,6 +832,36 @@ impl CaseAsync for BlockchainTestCase {
                     }
                     GuestOutput::Failure => {
                         todo!()
+=======
+                // Execute the execution stage using the EVM processor factory for the test case
+                // network.
+                let _ = ExecutionStage::new_with_executor(
+                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(Arc::new(
+                        case.network.clone().into(),
+                    )),
+                )
+                .execute(
+                    &provider,
+                    ExecInput { target: last_block.as_ref().map(|b| b.number), checkpoint: None },
+                );
+
+                // Validate the post-state for the test case.
+                match (&case.post_state, &case.post_state_hash) {
+                    (Some(state), None) => {
+                        // Validate accounts in the state against the provider's database.
+                        for (&address, account) in state {
+                            account.assert_db(address, provider.tx_ref())?;
+                        }
+                    }
+                    (None, Some(expected_state_root)) => {
+                        // Insert state hashes into the provider based on the expected state root.
+                        let last_block = last_block.unwrap_or_default();
+                        provider.insert_hashes(
+                            0..=last_block.number,
+                            last_block.hash(),
+                            *expected_state_root,
+                        )?;
+>>>>>>> v1.0.0-rc.2
                     }
                 };
             }

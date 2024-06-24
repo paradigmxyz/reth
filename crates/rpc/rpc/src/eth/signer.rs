@@ -50,14 +50,14 @@ pub(crate) struct DevSigner {
 
 #[allow(dead_code)]
 impl DevSigner {
-    /// Generates a random dev signer which satisfies [EthSigner] trait
+    /// Generates a random dev signer which satisfies [`EthSigner`] trait
     pub(crate) fn random() -> Box<dyn EthSigner> {
         let mut signers = Self::random_signers(1);
         signers.pop().expect("expect to generate at least one signer")
     }
 
     /// Generates provided number of random dev signers
-    /// which satisfy [EthSigner] trait
+    /// which satisfy [`EthSigner`] trait
     pub(crate) fn random_signers(num: u32) -> Vec<Box<dyn EthSigner + 'static>> {
         let mut signers = Vec::new();
         for _ in 0..num {
@@ -66,7 +66,7 @@ impl DevSigner {
             let address = reth_primitives::public_key_to_address(pk);
             let addresses = vec![address];
             let accounts = HashMap::from([(address, sk)]);
-            signers.push(Box::new(DevSigner { addresses, accounts }) as Box<dyn EthSigner>);
+            signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner>);
         }
         signers
     }
@@ -115,7 +115,6 @@ impl EthSigner for DevSigner {
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {
         let encoded = payload.eip712_signing_hash().map_err(|_| SignError::InvalidTypedData)?;
-        // let b256 = encoded;
         self.sign_hash(encoded, address)
     }
 }
@@ -136,8 +135,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sign_type_data() {
-        let eip_712_example = serde_json::json!(
-            r#"{
+        let eip_712_example = r#"{
             "types": {
             "EIP712Domain": [
                 {
@@ -200,9 +198,8 @@ mod tests {
             },
             "contents": "Hello, Bob!"
         }
-        }"#
-        );
-        let data: TypedData = serde_json::from_value(eip_712_example).unwrap();
+        }"#;
+        let data: TypedData = serde_json::from_str(eip_712_example).unwrap();
         let signer = build_signer();
         let sig = signer.sign_typed_data(Address::default(), &data).unwrap();
         let expected = Signature {

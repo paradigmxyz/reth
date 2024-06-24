@@ -25,18 +25,17 @@ mod masks;
 type SortedStaticFiles =
     HashMap<StaticFileSegment, Vec<(SegmentRangeInclusive, Option<SegmentRangeInclusive>)>>;
 
-/// Given the static_files directory path, it returns a list over the existing static_files
+/// Given the `static_files` directory path, it returns a list over the existing `static_files`
 /// organized by [`StaticFileSegment`]. Each segment has a sorted list of block ranges and
 /// transaction ranges as presented in the file configuration.
 pub fn iter_static_files(path: impl AsRef<Path>) -> Result<SortedStaticFiles, NippyJarError> {
     let path = path.as_ref();
     if !path.exists() {
-        reth_primitives::fs::create_dir_all(path)
-            .map_err(|err| NippyJarError::Custom(err.to_string()))?;
+        reth_fs_util::create_dir_all(path).map_err(|err| NippyJarError::Custom(err.to_string()))?;
     }
 
     let mut static_files = SortedStaticFiles::default();
-    let entries = reth_primitives::fs::read_dir(path)
+    let entries = reth_fs_util::read_dir(path)
         .map_err(|err| NippyJarError::Custom(err.to_string()))?
         .filter_map(Result::ok)
         .collect::<Vec<_>>();
@@ -67,7 +66,7 @@ pub fn iter_static_files(path: impl AsRef<Path>) -> Result<SortedStaticFiles, Ni
         }
     }
 
-    for (_, range_list) in static_files.iter_mut() {
+    for range_list in static_files.values_mut() {
         // Sort by block end range.
         range_list.sort_by(|a, b| a.0.end().cmp(&b.0.end()));
     }

@@ -20,12 +20,12 @@ First, ensure that you have Reth installed by following the [installation instru
 Now, to start the archive node, run:
 
 ```bash
-RUST_LOG=info reth node
+reth node
 ```
 
 And to start the full node, run:
 ```bash
-RUST_LOG=info reth node --full
+reth node --full
 ```
 
 On differences between archive and full nodes, see [Pruning & Full Node](./pruning.md#basic-concepts) section.
@@ -39,7 +39,7 @@ You can override this path using the `--authrpc.jwtsecret` option. You MUST use 
 So one might do:
 
 ```bash
-RUST_LOG=info reth node \
+reth node \
     --authrpc.jwtsecret /path/to/secret \
     --authrpc.addr 127.0.0.1 \
     --authrpc.port 8551
@@ -54,7 +54,7 @@ First, make sure you have Lighthouse installed. Sigma Prime provides excellent [
 Assuming you have done that, run:
 
 ```bash
-RUST_LOG=info lighthouse bn \
+lighthouse bn \
     --checkpoint-sync-url https://mainnet.checkpoint.sigp.io \
     --execution-endpoint http://localhost:8551 \
     --execution-jwt /path/to/secret

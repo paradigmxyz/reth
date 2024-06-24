@@ -8,14 +8,24 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use reth_chainspec::ChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_tx_env},
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Address, ChainSpec, Head, Header, Transaction, U256,
+    Address, Head, Header, TransactionSigned, U256,
 };
+use reth_revm::{Database, EvmBuilder};
+use reth_revm::taiko::handler_register;
+
 pub mod execute;
 pub mod taiko;
+
+/// Ethereum DAO hardfork state change data.
+pub mod dao_fork;
+
+/// [EIP-6110](https://eips.ethereum.org/EIPS/eip-6110) handling.
+pub mod eip6110;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone, Copy, Default)]
@@ -23,12 +33,7 @@ pub mod taiko;
 pub struct EthEvmConfig;
 
 impl ConfigureEvmEnv for EthEvmConfig {
-    type TxMeta = ();
-
-    fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address, _meta: ())
-    where
-        T: AsRef<Transaction>,
-    {
+    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         fill_tx_env(tx_env, transaction, sender)
     }
 
@@ -57,7 +62,22 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
-impl ConfigureEvm for EthEvmConfig {}
+impl ConfigureEvm for EthEvmConfig {
+    type DefaultExternalContext<'a> = ();
+
+    fn evm<'a, DB: Database + 'a>(
+        &self,
+        db: DB,
+        is_taiko: bool,
+    ) -> reth_revm::Evm<'a, Self::DefaultExternalContext<'a>, DB> {
+        let builder = EvmBuilder::default().with_db(db);
+        if is_taiko {
+            builder.append_handler_register(handler_register::taiko_handle_register).build()
+        } else {
+            builder.build()
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

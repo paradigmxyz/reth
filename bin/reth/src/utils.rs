@@ -2,15 +2,17 @@
 
 use boyer_moore_magiclen::BMByte;
 use eyre::Result;
-use reth_db::{
+use reth_chainspec::ChainSpec;
+use reth_db::{RawTable, TableRawRow};
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
     table::{Decode, Decompress, DupSort, Table, TableRow},
     transaction::{DbTx, DbTxMut},
-    DatabaseError, RawTable, TableRawRow,
+    DatabaseError,
 };
-use reth_primitives::{fs, ChainSpec};
-use reth_provider::ProviderFactory;
+use reth_fs_util as fs;
+use reth_provider::{ChainSpecProvider, ProviderFactory};
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
 
@@ -28,14 +30,20 @@ pub use reth_node_core::utils::*;
 pub struct DbTool<DB: Database> {
     /// The provider factory that the db tool will use.
     pub provider_factory: ProviderFactory<DB>,
-    /// The [ChainSpec] that the db tool will use.
-    pub chain: Arc<ChainSpec>,
 }
 
 impl<DB: Database> DbTool<DB> {
     /// Takes a DB where the tables have already been created.
-    pub fn new(provider_factory: ProviderFactory<DB>, chain: Arc<ChainSpec>) -> eyre::Result<Self> {
-        Ok(Self { provider_factory, chain })
+    pub fn new(provider_factory: ProviderFactory<DB>) -> eyre::Result<Self> {
+        // Disable timeout because we are entering a TUI which might read for a long time. We
+        // disable on the [`DbTool`] level since it's only used in the CLI.
+        provider_factory.provider()?.disable_long_read_transaction_safety();
+        Ok(Self { provider_factory })
+    }
+
+    /// Get an [`Arc`] to the [`ChainSpec`].
+    pub fn chain(&self) -> Arc<ChainSpec> {
+        self.provider_factory.chain_spec()
     }
 
     /// Grabs the contents of the table within a certain index range and places the
@@ -122,7 +130,7 @@ impl<DB: Database> DbTool<DB> {
         self.provider_factory.db_ref().view(|tx| tx.get::<T>(key))?.map_err(|e| eyre::eyre!(e))
     }
 
-    /// Grabs the content of the DupSort table for the given key and subkey
+    /// Grabs the content of the `DupSort` table for the given key and subkey
     pub fn get_dup<T: DupSort>(&self, key: T::Key, subkey: T::SubKey) -> Result<Option<T::Value>> {
         self.provider_factory
             .db_ref()
@@ -132,7 +140,7 @@ impl<DB: Database> DbTool<DB> {
 
     /// Drops the database and the static files at the given path.
     pub fn drop(
-        &mut self,
+        &self,
         db_path: impl AsRef<Path>,
         static_files_path: impl AsRef<Path>,
     ) -> Result<()> {
@@ -149,7 +157,7 @@ impl<DB: Database> DbTool<DB> {
     }
 
     /// Drops the provided table from the database.
-    pub fn drop_table<T: Table>(&mut self) -> Result<()> {
+    pub fn drop_table<T: Table>(&self) -> Result<()> {
         self.provider_factory.db_ref().update(|tx| tx.clear::<T>())??;
         Ok(())
     }

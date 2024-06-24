@@ -72,9 +72,9 @@ where
     pub fn get(&mut self, key: &K) -> Option<&mut V> {
         let entry = self.cache.get(key);
         if entry.is_some() {
-            self.metrics.hits.increment(1);
+            self.metrics.hits_total.increment(1);
         } else {
-            self.metrics.misses.increment(1);
+            self.metrics.misses_total.increment(1);
         }
         entry
     }
@@ -83,7 +83,7 @@ where
     ///
     /// Can fail if the element is rejected by the limiter or if we fail to grow an empty map.
     ///
-    /// See [Schnellru::insert](LruMap::insert) for more info.
+    /// See [`Schnellru::insert`](LruMap::insert) for more info.
     pub fn insert<'a>(&mut self, key: L::KeyToInsert<'a>, value: V) -> bool
     where
         L::KeyToInsert<'a>: Hash + PartialEq<K>,

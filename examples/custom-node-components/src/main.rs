@@ -19,7 +19,7 @@ fn main() {
         .run(|builder, _| async move {
             let handle = builder
                 // use the default ethereum node types
-                .with_types(EthereumNode::default())
+                .with_types::<EthereumNode>()
                 // Configure the components of the node
                 // use default ethereum components but use our custom pool
                 .with_components(EthereumNode::components().pool(CustomPoolBuilder::default()))
@@ -49,7 +49,7 @@ where
     type Pool = EthTransactionPool<Node::Provider, InMemoryBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
-        let data_dir = ctx.data_dir();
+        let data_dir = ctx.config().datadir();
         let blob_store = InMemoryBlobStore::default();
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
             .with_head_timestamp(ctx.head().timestamp)
@@ -64,7 +64,7 @@ where
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, self.pool_config);
         info!(target: "reth::cli", "Transaction pool initialized");
-        let transactions_path = data_dir.txpool_transactions_path();
+        let transactions_path = data_dir.txpool_transactions();
 
         // spawn txpool maintenance task
         {

@@ -9,7 +9,9 @@ license.workspace = true
 futures.workspace = true
 jsonrpsee.workspace = true
 reth.workspace = true
+reth-chainspec.workspace = true
 reth-db.workspace = true
+reth-db-api.workspace = true
 reth-node-ethereum.workspace = true
 tokio = { workspace = true, features = ["full"] }
 eyre.workspace = true

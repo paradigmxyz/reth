@@ -1,4 +1,4 @@
-use reth_engine_primitives::EngineTypes;
+use reth_payload_primitives::PayloadTypes;
 use tokio::sync::broadcast;
 use tokio_stream::{
     wrappers::{errors::BroadcastStreamRecvError, BroadcastStream},
@@ -7,7 +7,7 @@ use tokio_stream::{
 
 /// Payload builder events.
 #[derive(Clone, Debug)]
-pub enum Events<Engine: EngineTypes> {
+pub enum Events<Engine: PayloadTypes> {
     /// The payload attributes as
     /// they are received from the CL through the engine api.
     Attributes(Engine::PayloadBuilderAttributes),
@@ -19,11 +19,11 @@ pub enum Events<Engine: EngineTypes> {
 
 /// Represents a receiver for various payload events.
 #[derive(Debug)]
-pub struct PayloadEvents<Engine: EngineTypes> {
+pub struct PayloadEvents<Engine: PayloadTypes> {
     pub receiver: broadcast::Receiver<Events<Engine>>,
 }
 
-impl<Engine: EngineTypes + 'static> PayloadEvents<Engine> {
+impl<Engine: PayloadTypes + 'static> PayloadEvents<Engine> {
     // Convert this receiver into a stream of PayloadEvents.
     pub fn into_stream(self) -> BroadcastStream<Events<Engine>> {
         BroadcastStream::new(self.receiver)

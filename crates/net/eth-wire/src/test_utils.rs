@@ -3,9 +3,10 @@
 use crate::{
     EthVersion, HelloMessageWithProtocols, P2PStream, ProtocolVersion, Status, UnauthedP2PStream,
 };
+use reth_chainspec::Chain;
 use reth_discv4::DEFAULT_DISCOVERY_PORT;
-use reth_network_types::pk2id;
-use reth_primitives::{Chain, ForkFilter, Head, B256, U256};
+use reth_network_peers::pk2id;
+use reth_primitives::{ForkFilter, Head, B256, U256};
 use secp256k1::{SecretKey, SECP256K1};
 use std::net::SocketAddr;
 use tokio::net::TcpStream;
@@ -93,22 +94,22 @@ pub mod proto {
 
     impl TestProtoMessage {
         /// Returns the capability for the `test` protocol.
-        pub fn capability() -> Capability {
+        pub const fn capability() -> Capability {
             Capability::new_static("test", 1)
         }
 
         /// Returns the protocol for the `test` protocol.
-        pub fn protocol() -> Protocol {
+        pub const fn protocol() -> Protocol {
             Protocol::new(Self::capability(), 3)
         }
 
         /// Creates a ping message
-        pub fn ping() -> Self {
+        pub const fn ping() -> Self {
             Self { message_type: TestProtoMessageId::Ping, message: TestProtoMessageKind::Ping }
         }
 
         /// Creates a pong message
-        pub fn pong() -> Self {
+        pub const fn pong() -> Self {
             Self { message_type: TestProtoMessageId::Pong, message: TestProtoMessageKind::Pong }
         }
 
@@ -125,8 +126,7 @@ pub mod proto {
             let mut buf = BytesMut::new();
             buf.put_u8(self.message_type as u8);
             match &self.message {
-                TestProtoMessageKind::Ping => {}
-                TestProtoMessageKind::Pong => {}
+                TestProtoMessageKind::Ping | TestProtoMessageKind::Pong => {}
                 TestProtoMessageKind::Message(msg) => {
                     buf.put(msg.as_bytes());
                 }

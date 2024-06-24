@@ -13,17 +13,17 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-codecs.workspace = true
 reth-primitives.workspace = true
 reth-ecies.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
 reth-discv4.workspace = true
 reth-eth-wire-types.workspace = true
-reth-network-types.workspace = true
+reth-network-peers.workspace = true
 
 # metrics
 reth-metrics.workspace = true
-metrics.workspace = true
 
 bytes.workspace = true
 derive_more.workspace = true
