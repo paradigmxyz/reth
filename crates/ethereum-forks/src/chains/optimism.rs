@@ -2,20 +2,20 @@ use core::any::Any;
 
 use super::ethereum::EthereumHardforks;
 use crate::{
-    hardfork::optimism::OptimismHardfork,
-    hardforks::{ChainHardforks, Hardforks},
-    EthereumHardfork, ForkCondition, Hardfork,
+    hardfork::optimism::OptimismHardfork, hardforks::ChainHardforks, EthereumHardfork,
+    ForkCondition, Hardfork,
 };
 use alloy_primitives::U256;
 use once_cell::sync::Lazy;
 
-/// Extends [`EthereumHardforksTrait`] with optimism helper methods.
-trait OptimismHardforks: EthereumHardforks {
+/// Extends [`EthereumHardforks`] with optimism helper methods.
+pub trait OptimismHardforks: EthereumHardforks {
     /// Convenience method to check if [`Hardfork::Bedrock`] is active at a given block number.
     fn is_bedrock_active_at_block(&self, block_number: u64) -> bool {
         self.fork(OptimismHardfork::Bedrock).active_at_block(block_number)
     }
 
+    /// Internal helper method.
     fn resolve<H, HF, OHF>(
         &self,
         fork: H,

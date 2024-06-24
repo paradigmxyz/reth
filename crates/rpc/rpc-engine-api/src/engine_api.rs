@@ -2,7 +2,7 @@ use crate::{metrics::EngineApiMetrics, EngineApiError, EngineApiResult};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
-use reth_chainspec::{ChainSpec, Hardforks};
+use reth_chainspec::ChainSpec;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::provider::EvmEnvProvider;
 use reth_payload_builder::PayloadStore;

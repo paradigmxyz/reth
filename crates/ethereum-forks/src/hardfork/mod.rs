@@ -10,9 +10,28 @@ pub use ethereum::EthereumHardfork;
 pub(crate) mod optimism;
 
 /// Generic hardfork trait.
-pub trait Hardfork: Any + HardforkClone + Send + Sync + 'static {
+pub trait Hardfork: Any + CloneHardfork + Send + Sync + 'static {
     /// Fork name.
     fn name(&self) -> &'static str;
+}
+
+impl Clone for Box<dyn Hardfork> {
+    fn clone(&self) -> Self {
+        (**self).clone_box()
+    }
+}
+
+pub trait CloneHardfork {
+    fn clone_box(&self) -> Box<dyn Hardfork>;
+}
+
+impl<T> CloneHardfork for T
+where
+    T: 'static + Hardfork + Clone,
+{
+    fn clone_box(&self) -> Box<dyn Hardfork> {
+        Box::new(self.clone())
+    }
 }
 
 impl Hardfork for Box<dyn Hardfork> {
@@ -36,28 +55,6 @@ impl PartialEq for dyn Hardfork + 'static {
 
 impl Eq for dyn Hardfork + 'static {}
 
-// Define a cloning trait
-pub trait HardforkClone {
-    fn clone_box(&self) -> Box<dyn Hardfork>;
-}
-
-// Implement the cloning trait for any type implementing HardforkTrait and Clone
-impl<T> HardforkClone for T
-where
-    T: 'static + Hardfork + Clone,
-{
-    fn clone_box(&self) -> Box<dyn Hardfork> {
-        Box::new(self.clone())
-    }
-}
-
-// Implement Clone for Box<dyn HardforkTrait>
-impl Clone for Box<dyn Hardfork> {
-    fn clone(&self) -> Self {
-        self.clone_box()
-    }
-}
-
 /// Macro that defines different variants of a chain specific enum. See [`crate::Hardfork`] as an
 /// example.
 #[macro_export]
@@ -79,7 +76,7 @@ macro_rules! define_hardfork_enum {
                 }
             }
 
-            /// Boxes `self` and returns it as `Box<dyn HardforkTrait>`.
+            /// Boxes `self` and returns it as `Box<dyn Hardfork>`.
             pub fn boxed(self) -> Box<dyn Hardfork> {
                 Box::new(self)
             }

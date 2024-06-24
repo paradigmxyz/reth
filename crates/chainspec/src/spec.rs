@@ -22,7 +22,7 @@ use reth_ethereum_forks::{
         },
     },
     ChainHardforks, DisplayHardforks, EthereumHardfork, ForkCondition, ForkFilter, ForkFilterKey,
-    ForkHash, ForkId, Hardfork, Hardforks, Head,
+    ForkHash, ForkId, Hardfork, Head,
 };
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::{
@@ -550,8 +550,8 @@ impl ChainSpec {
     }
 
     /// Get the fork filter for the given hardfork
-    pub fn hardfork_fork_filter<H: Hardfork>(&self, fork: H) -> Option<ForkFilter> {
-        match self.hardforks.fork(fork.clone_box()) {
+    pub fn hardfork_fork_filter<H: Hardfork + Clone>(&self, fork: H) -> Option<ForkFilter> {
+        match self.hardforks.fork(fork.clone()) {
             ForkCondition::Never => None,
             _ => Some(self.fork_filter(self.satisfy(self.hardforks.fork(fork)))),
         }
@@ -1053,7 +1053,7 @@ impl ChainSpecBuilder {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
             genesis_hash: None,
-            hardforks: self.hardforks.clone(),
+            hardforks: self.hardforks,
             paris_block_and_final_difficulty,
             deposit_contract: None,
             ..Default::default()
@@ -1061,15 +1061,17 @@ impl ChainSpecBuilder {
     }
 }
 
-// impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
-//     fn from(value: &Arc<ChainSpec>) -> Self {
-//         Self {
-//             chain: Some(value.chain),
-//             genesis: Some(value.genesis.clone()),
-//             hardforks: value.hardforks.forks_iter().map(|(fork, cond)|collect(),
-//         }
-//     }
-// }
+impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
+    fn from(value: &Arc<ChainSpec>) -> Self {
+        Self {
+            chain: Some(value.chain),
+            genesis: Some(value.genesis.clone()),
+            hardforks: ChainHardforks(
+                value.hardforks.forks_iter().map(|(fork, cond)| (fork.clone(), cond)).collect(),
+            ),
+        }
+    }
+}
 
 /// `PoS` deposit contract details.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1181,6 +1183,7 @@ mod tests {
 
     use super::*;
     use alloy_primitives::{b256, hex};
+    use core::ops::Deref;
     use std::{collections::HashMap, str::FromStr};
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
@@ -1277,7 +1280,7 @@ Post-merge hard forks (timestamp based):
             .with_fork(EthereumHardfork::GrayGlacier, ForkCondition::Block(0))
             .build();
 
-        assert_eq!(spec.hardforks().len(), 12, "12 forks should be active.");
+        assert_eq!(spec.deref().len(), 12, "12 forks should be active.");
         assert_eq!(
             spec.fork_id(&Head { number: 1, ..Default::default() }),
             ForkId { hash: ForkHash::from(spec.genesis_hash()), next: 0 },
@@ -2235,64 +2238,64 @@ Post-merge hard forks (timestamp based):
 
         // assert a bunch of hardforks that should be set
         assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::Homestead).unwrap(),
-            &ForkCondition::Block(0)
+            chainspec.hardforks.get(EthereumHardfork::Homestead).unwrap(),
+            ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::Tangerine).unwrap(),
-            &ForkCondition::Block(0)
+            chainspec.hardforks.get(EthereumHardfork::Tangerine).unwrap(),
+            ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::SpuriousDragon).unwrap(),
-            &ForkCondition::Block(0)
+            chainspec.hardforks.get(EthereumHardfork::SpuriousDragon).unwrap(),
+            ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::Byzantium).unwrap(),
-            &ForkCondition::Block(0)
+            chainspec.hardforks.get(EthereumHardfork::Byzantium).unwrap(),
+            ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::Constantinople).unwrap(),
-            &ForkCondition::Block(0)
+            chainspec.hardforks.get(EthereumHardfork::Constantinople).unwrap(),
+            ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::Petersburg).unwrap(),
-            &ForkCondition::Block(0)
+            chainspec.hardforks.get(EthereumHardfork::Petersburg).unwrap(),
+            ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::Istanbul).unwrap(),
-            &ForkCondition::Block(0)
+            chainspec.hardforks.get(EthereumHardfork::Istanbul).unwrap(),
+            ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::MuirGlacier).unwrap(),
-            &ForkCondition::Block(0)
+            chainspec.hardforks.get(EthereumHardfork::MuirGlacier).unwrap(),
+            ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::Berlin).unwrap(),
-            &ForkCondition::Block(0)
+            chainspec.hardforks.get(EthereumHardfork::Berlin).unwrap(),
+            ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::London).unwrap(),
-            &ForkCondition::Block(0)
+            chainspec.hardforks.get(EthereumHardfork::London).unwrap(),
+            ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::ArrowGlacier).unwrap(),
-            &ForkCondition::Block(0)
+            chainspec.hardforks.get(EthereumHardfork::ArrowGlacier).unwrap(),
+            ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::GrayGlacier).unwrap(),
-            &ForkCondition::Block(0)
-        );
-
-        // including time based hardforks
-        assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::Shanghai).unwrap(),
-            &ForkCondition::Timestamp(0)
+            chainspec.hardforks.get(EthereumHardfork::GrayGlacier).unwrap(),
+            ForkCondition::Block(0)
         );
 
         // including time based hardforks
         assert_eq!(
-            chainspec.hardforks.get(&EthereumHardfork::Cancun).unwrap(),
-            &ForkCondition::Timestamp(1)
+            chainspec.hardforks.get(EthereumHardfork::Shanghai).unwrap(),
+            ForkCondition::Timestamp(0)
+        );
+
+        // including time based hardforks
+        assert_eq!(
+            chainspec.hardforks.get(EthereumHardfork::Cancun).unwrap(),
+            ForkCondition::Timestamp(1)
         );
 
         // alloc key -> expected rlp mapping
@@ -2394,8 +2397,8 @@ Post-merge hard forks (timestamp based):
             EthereumHardfork::Petersburg,
             EthereumHardfork::Constantinople,
         ];
-        for ref fork in hard_forks {
-            assert_eq!(chainspec.hardforks.get(fork).unwrap(), &ForkCondition::Block(0));
+        for fork in hard_forks {
+            assert_eq!(chainspec.hardforks.get(fork).unwrap(), ForkCondition::Block(0));
         }
 
         let expected_hash: B256 =
@@ -2698,7 +2701,10 @@ Post-merge hard forks (timestamp based):
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
             genesis_hash: None,
-            hardforks: BTreeMap::from([(EthereumHardfork::Frontier, ForkCondition::Never)]),
+            hardforks: ChainHardforks(vec![(
+                EthereumHardfork::Frontier.boxed(),
+                ForkCondition::Never,
+            )]),
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
             ..Default::default()
@@ -2713,7 +2719,10 @@ Post-merge hard forks (timestamp based):
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
             genesis_hash: None,
-            hardforks: BTreeMap::from([(EthereumHardfork::Shanghai, ForkCondition::Never)]),
+            hardforks: ChainHardforks(vec![(
+                EthereumHardfork::Shanghai.boxed(),
+                ForkCondition::Never,
+            )]),
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
             ..Default::default()
@@ -2837,17 +2846,17 @@ Post-merge hard forks (timestamp based):
             BaseFeeParamsKind::Constant(BaseFeeParams::new(70, 60))
         );
 
-        assert!(!chain_spec.is_fork_active_at_block(EthereumHardfork::Bedrock, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Regolith, 0));
+        assert!(!chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Ecotone, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Fjord, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 0));
 
-        assert!(chain_spec.is_fork_active_at_block(EthereumHardfork::Bedrock, 10));
-        assert!(chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Regolith, 20));
+        assert!(chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 10));
+        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
-        assert!(chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Ecotone, 40));
-        assert!(chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Fjord, 50));
+        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 40));
+        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 50));
     }
 
     #[cfg(feature = "optimism")]
@@ -2898,23 +2907,23 @@ Post-merge hard forks (timestamp based):
             chain_spec.base_fee_params,
             BaseFeeParamsKind::Variable(
                 vec![
-                    (EthereumHardfork::London, BaseFeeParams::new(70, 60)),
-                    (OptimismHardfork::Canyon, BaseFeeParams::new(80, 60)),
+                    (EthereumHardfork::London.boxed(), BaseFeeParams::new(70, 60)),
+                    (OptimismHardfork::Canyon.boxed(), BaseFeeParams::new(80, 60)),
                 ]
                 .into()
             )
         );
 
-        assert!(!chain_spec.is_fork_active_at_block(EthereumHardfork::Bedrock, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Regolith, 0));
+        assert!(!chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Ecotone, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Fjord, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 0));
 
-        assert!(chain_spec.is_fork_active_at_block(EthereumHardfork::Bedrock, 10));
-        assert!(chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Regolith, 20));
+        assert!(chain_spec.is_fork_active_at_block(OptimismHardfork::Bedrock, 10));
+        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, 20));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
-        assert!(chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Ecotone, 40));
-        assert!(chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Fjord, 50));
+        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, 40));
+        assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, 50));
     }
 }

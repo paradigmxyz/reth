@@ -8,9 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_chainspec::{
-    chains::ethereum::EthereumHardforks, Chain, ChainSpec, EthereumHardfork, Hardforks,
-};
+use reth_chainspec::{chains::ethereum::EthereumHardforks, Chain, ChainSpec, EthereumHardfork};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,

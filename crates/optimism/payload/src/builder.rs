@@ -5,7 +5,7 @@ use crate::{
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
 use reth_basic_payload_builder::*;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardforks, Hardforks, OptimismHardfork};
 use reth_evm::ConfigureEvm;
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
@@ -282,7 +282,7 @@ where
     let block_number = initialized_block_env.number.to::<u64>();
 
     let is_regolith = chain_spec.is_fork_active_at_timestamp(
-        EthereumHardfork::Regolith,
+        OptimismHardfork::Regolith,
         attributes.payload_attributes.timestamp,
     );
 
@@ -395,7 +395,7 @@ where
             // ensures this is only set for post-Canyon deposit transactions.
             deposit_receipt_version: chain_spec
                 .is_fork_active_at_timestamp(
-                    EthereumHardfork::Canyon,
+                    OptimismHardfork::Canyon,
                     attributes.payload_attributes.timestamp,
                 )
                 .then_some(1),

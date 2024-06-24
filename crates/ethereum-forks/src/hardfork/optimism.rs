@@ -1,5 +1,4 @@
-use crate::{define_hardfork_enum, hardfork::ethereum::EthereumHardfork, Hardfork};
-use alloy_chains::Chain;
+use crate::{define_hardfork_enum, Hardfork};
 use core::{
     fmt,
     fmt::{Display, Formatter},

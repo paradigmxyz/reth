@@ -585,7 +585,6 @@ mod tests {
     use reth_dns_discovery::tree::LinkEntry;
     use reth_primitives::ForkHash;
     use reth_provider::test_utils::NoopProvider;
-    use std::collections::BTreeMap;
 
     fn builder() -> NetworkConfigBuilder {
         let secret_key = SecretKey::new(&mut thread_rng());
@@ -609,7 +608,7 @@ mod tests {
         let mut chain_spec = Arc::clone(&MAINNET);
 
         // remove any `next` fields we would have by removing all hardforks
-        Arc::make_mut(&mut chain_spec).hardforks = BTreeMap::new();
+        Arc::make_mut(&mut chain_spec).hardforks = Default::default();
 
         // check that the forkid is initialized with the genesis and no other forks
         let genesis_fork_hash = ForkHash::from(chain_spec.genesis_hash());
