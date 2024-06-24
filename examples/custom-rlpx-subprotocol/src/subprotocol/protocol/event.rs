@@ -3,7 +3,7 @@ use reth_network::Direction;
 use reth_network_api::PeerId;
 use tokio::sync::mpsc;
 
-/// The event that can be emitted by our custom protocol.
+/// The events that can be emitted by our custom protocol.
 #[derive(Debug)]
 pub(crate) enum ProtocolEvent {
     Established {

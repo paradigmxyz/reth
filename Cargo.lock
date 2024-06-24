@@ -2868,6 +2868,7 @@ version = "0.1.0"
 dependencies = [
  "eyre",
  "futures",
+ "rand 0.8.5",
  "reth",
  "reth-eth-wire",
  "reth-network",
