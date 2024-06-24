@@ -1,6 +1,6 @@
 use std::{
     pin::Pin,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 
 use eyre::Result;
