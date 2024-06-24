@@ -34,7 +34,7 @@ pub struct AnyNode<N = (), C = ()>(PhantomData<N>, C);
 
 impl<N, C> AnyNode<N, C> {
     /// Configures the types of the node.
-    pub fn full_node_types<T>(self) -> AnyNode<T, C> {
+    pub fn types<T>(self) -> AnyNode<T, C> {
         AnyNode::<T, C>(PhantomData::<T>, self.1)
     }
 
