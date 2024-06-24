@@ -236,8 +236,12 @@ codegen-units = 16
 # e.g. `cargo build --profile profiling`
 [profile.profiling]
 inherits = "release"
-debug = 1
+debug = 2
 strip = false
+
+# Make sure debug symbols are in the bench profile
+[profile.bench]
+inherits = "profiling"
 
 [profile.maxperf]
 inherits = "release"
