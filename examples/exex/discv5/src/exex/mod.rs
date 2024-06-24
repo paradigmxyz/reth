@@ -27,43 +27,42 @@ impl<Node: FullNodeComponents> Future for ExEx<Node> {
     type Output = Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Poll the Discv5 future
-        match ready!(Pin::new(&mut self.disc_v5).poll(cx)) {
-            Ok(()) => {
-                info!("Discv5 task completed successfully");
-            }
-            Err(e) => {
-                info!(error = ?e, "Discv5 task encountered an error");
-                return Poll::Ready(Err(e));
-            }
-        }
-
-        // Poll the ExExContext notifications
-        match ready!(Pin::new(&mut self.exex.notifications).poll_recv(cx)) {
-            Some(notification) => {
-                match &notification {
-                    ExExNotification::ChainCommitted { new } => {
-                        info!(committed_chain = ?new.range(), "Received commit");
-                    }
-                    ExExNotification::ChainReorged { old, new } => {
-                        info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
-                    }
-                    ExExNotification::ChainReverted { old } => {
-                        info!(reverted_chain = ?old.range(), "Received revert");
-                    }
-                };
-
-                if let Some(committed_chain) = notification.committed_chain() {
-                    self.exex
-                        .events
-                        .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+        // Continuously poll the Discv5 future
+        while let Poll::Ready(result) = Pin::new(&mut self.disc_v5).poll(cx) {
+            match result {
+                Ok(()) => {
+                    info!("Discv5 task completed successfully");
+                    break;
                 }
-
-                // Return Poll::Pending to yield control back to the executor
-                Poll::Pending
+                Err(e) => {
+                    info!(error = ?e, "Discv5 task encountered an error");
+                    return Poll::Ready(Err(e));
+                }
             }
-            // No more notifications
-            None => Poll::Ready(Ok(())),
         }
+
+        // Continuously poll the ExExContext notifications
+        while let Poll::Ready(Some(notification)) =
+            Pin::new(&mut self.exex.notifications).poll_recv(cx)
+        {
+            match &notification {
+                ExExNotification::ChainCommitted { new } => {
+                    info!(committed_chain = ?new.range(), "Received commit");
+                }
+                ExExNotification::ChainReorged { old, new } => {
+                    info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
+                }
+                ExExNotification::ChainReverted { old } => {
+                    info!(reverted_chain = ?old.range(), "Received revert");
+                }
+            }
+
+            if let Some(committed_chain) = notification.committed_chain() {
+                self.exex.events.send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+            }
+        }
+
+        // If there are no more notifications and disc_v5 is not yet ready, return Poll::Pending
+        Poll::Pending
     }
 }
