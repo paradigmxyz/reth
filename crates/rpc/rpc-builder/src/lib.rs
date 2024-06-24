@@ -55,7 +55,7 @@
 //!         events,
 //!         evm_config,
 //!     )
-//!     .build(transports, ApiBuilder);
+//!     .build(transports, EthApiBuild);
 //!     let handle = RpcServerConfig::default()
 //!         .with_http(ServerBuilder::default())
 //!         .start(transport_modules)
@@ -116,7 +116,7 @@
 //!
 //!     // configure the server modules
 //!     let (modules, auth_module, _registry) =
-//!         builder.build_with_auth_server(transports, engine_api, ApiBuilder);
+//!         builder.build_with_auth_server(transports, engine_api, EthApiBuild);
 //!
 //!     // start the servers
 //!     let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
@@ -478,7 +478,7 @@ where
     ///         .with_executor(TokioTaskExecutor::default())
     ///         .with_events(TestCanonStateSubscriptions::default())
     ///         .with_evm_config(evm)
-    ///         .into_registry(Default::default(), ApiBuilder);
+    ///         .into_registry(Default::default(), EthApiBuild);
     ///
     ///     let eth_api = registry.eth_api();
     /// }
