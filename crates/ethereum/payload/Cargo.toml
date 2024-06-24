@@ -1,0 +1,31 @@
+[package]
+name = "reth-ethereum-payload-builder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "A basic ethereum payload builder for reth that uses the txpool API to build payloads."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives.workspace = true
+reth-revm.workspace = true
+reth-transaction-pool.workspace = true
+reth-provider.workspace = true
+reth-payload-builder.workspace = true
+reth-execution-types.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-evm.workspace = true
+reth-evm-ethereum.workspace = true
+reth-errors.workspace = true
+
+# ethereum
+revm.workspace = true
+
+# misc
+tracing.workspace = true

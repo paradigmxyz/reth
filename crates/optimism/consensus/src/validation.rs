@@ -1,7 +1,8 @@
+use reth_chainspec::ChainSpec;
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     gas_spent_by_transactions, proofs::calculate_receipt_root_optimism, BlockWithSenders, Bloom,
-    ChainSpec, GotExpected, Receipt, B256,
+    GotExpected, Receipt, B256,
 };
 
 /// Validate a block with regard to execution results:
@@ -18,13 +19,16 @@ pub fn validate_block_post_execution(
     // transaction This was replaced with is_success flag.
     // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
     if chain_spec.is_byzantium_active_at_block(block.header.number) {
-        verify_receipts(
+        if let Err(error) = verify_receipts(
             block.header.receipts_root,
             block.header.logs_bloom,
             receipts,
             chain_spec,
             block.timestamp,
-        )?;
+        ) {
+            tracing::debug!(%error, ?receipts, "receipts verification failed");
+            return Err(error)
+        }
     }
 
     // Check if gas used matches the value set in header.

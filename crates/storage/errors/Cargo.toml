@@ -14,6 +14,8 @@ workspace = true
 reth-primitives.workspace = true
 reth-fs-util.workspace = true
 
-thiserror.workspace = true
+thiserror-no-std = { workspace = true, default-features = false }
 
-    
+[features]
+default = ["std"]
+std = ["thiserror-no-std/std"]

@@ -18,7 +18,7 @@ reth-rpc-types.workspace = true
 reth-transaction-pool.workspace = true
 reth-errors.workspace = true
 reth-provider.workspace = true
-reth-engine-primitives.workspace = true
+reth-payload-primitives.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 
 # async

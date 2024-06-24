@@ -5,19 +5,16 @@ use reth_db_api::{
     database::Database,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{
-    stage::{EntitiesCheckpoint, MerkleCheckpoint, StageCheckpoint, StageId},
-    trie::StoredSubNode,
-    BlockNumber, GotExpected, SealedHeader, B256,
-};
+use reth_primitives::{BlockNumber, GotExpected, SealedHeader, B256};
 use reth_provider::{
     DatabaseProviderRW, HeaderProvider, ProviderError, StageCheckpointReader,
     StageCheckpointWriter, StatsReader,
 };
 use reth_stages_api::{
-    BlockErrorKind, ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput,
+    BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
+    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
-use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress};
+use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
 use std::fmt::Debug;
 use tracing::*;
 
@@ -26,13 +23,13 @@ use tracing::*;
 /// they should include in a bug report, since true state root errors can be impossible to debug
 /// with just basic logs.
 pub const INVALID_STATE_ROOT_ERROR_MESSAGE: &str = r#"
-Invalid state root error on new payload!
+Invalid state root error on stage verification!
 This is an error that likely requires a report to the reth team with additional information.
 Please include the following information in your report:
  * This error message
  * The state root of the block that was rejected
  * The output of `reth db stats --checksum` from the database that was being used. This will take a long time to run!
- * 50-100 lines of logs before and after the first occurrence of this log message. Please search your log output for the first observed occurrence of MAGIC_STATE_ROOT.
+ * 50-100 lines of logs before and after the first occurrence of the log message with the state root of the block that was rejected.
  * The debug logs from __the same time period__. To find the default location for these logs, run:
    `reth --help | grep -A 4 'log.file.directory'`
 
@@ -368,10 +365,9 @@ mod tests {
     };
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
-    use reth_primitives::{
-        keccak256, stage::StageUnitCheckpoint, SealedBlock, StaticFileSegment, StorageEntry, U256,
-    };
+    use reth_primitives::{keccak256, SealedBlock, StaticFileSegment, StorageEntry, U256};
     use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+    use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::{
         generators,
         generators::{

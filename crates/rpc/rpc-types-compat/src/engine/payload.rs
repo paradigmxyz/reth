@@ -2,7 +2,7 @@
 //! Ethereum's Engine
 
 use reth_primitives::{
-    constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE, MIN_PROTOCOL_BASE_FEE_U256},
+    constants::{EMPTY_OMMER_ROOT_HASH, MAXIMUM_EXTRA_DATA_SIZE},
     proofs::{self},
     Block, Header, Request, SealedBlock, TransactionSigned, UintTryTo, Withdrawals, B256, U256,
 };
@@ -18,7 +18,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         return Err(PayloadError::ExtraData(payload.extra_data))
     }
 
-    if payload.base_fee_per_gas < MIN_PROTOCOL_BASE_FEE_U256 {
+    if payload.base_fee_per_gas.is_zero() {
         return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
     }
 
@@ -43,7 +43,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         timestamp: payload.timestamp,
         mix_hash: payload.prev_randao,
         // WARNING: It’s allowed for a base fee in EIP1559 to increase unbounded. We assume that
-        // it will fit in an u64. This is not always necessarily true, although it is extremelly
+        // it will fit in an u64. This is not always necessarily true, although it is extremely
         // unlikely not to be the case, a u64 maximum would have 2^64 which equates to 18 ETH per
         // gas.
         base_fee_per_gas: Some(
@@ -251,6 +251,23 @@ pub fn convert_payload_field_v2_to_payload(value: ExecutionPayloadFieldV2) -> Ex
     match value {
         ExecutionPayloadFieldV2::V1(payload) => ExecutionPayload::V1(payload),
         ExecutionPayloadFieldV2::V2(payload) => ExecutionPayload::V2(payload),
+    }
+}
+
+/// Converts [`ExecutionPayloadV2`] to [`ExecutionPayloadInputV2`].
+///
+/// An [`ExecutionPayloadInputV2`] should have a [`Some`] withdrawals field if shanghai is active,
+/// otherwise the withdrawals field should be [`None`], so the `is_shanghai_active` argument is
+/// provided which will either:
+/// - include the withdrawals field as [`Some`] if true
+/// - set the withdrawals field to [`None`] if false
+pub fn convert_payload_v2_to_payload_input_v2(
+    value: ExecutionPayloadV2,
+    is_shanghai_active: bool,
+) -> ExecutionPayloadInputV2 {
+    ExecutionPayloadInputV2 {
+        execution_payload: value.payload_inner,
+        withdrawals: is_shanghai_active.then_some(value.withdrawals),
     }
 }
 

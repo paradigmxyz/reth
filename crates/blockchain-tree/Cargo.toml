@@ -21,6 +21,8 @@ reth-db-api.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace = true
 reth-provider.workspace = true
+reth-execution-types.workspace = true
+reth-prune-types.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-parallel = { workspace = true, features = ["parallel"] }
@@ -38,18 +40,21 @@ metrics.workspace = true
 
 # misc
 aquamarine.workspace = true
-linked_hash_set = "0.1.4"
+linked_hash_set.workspace = true
 
 [dev-dependencies]
+reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm = { workspace = true, features = ["test-utils"] }
+reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-revm.workspace = true
 reth-evm-ethereum.workspace = true
 parking_lot.workspace = true
 assert_matches.workspace = true
+alloy-genesis.workspace = true
 
 [features]
 test-utils = []

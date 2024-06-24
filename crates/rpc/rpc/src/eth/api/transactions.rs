@@ -3,7 +3,7 @@ use crate::{
     eth::{
         api::pending_block::PendingBlockEnv,
         error::{EthApiError, EthResult, RpcInvalidTransactionError, SignError},
-        revm_utils::{prepare_call_env, EvmOverrides},
+        revm_utils::prepare_call_env,
         utils::recover_raw_transaction,
     },
     EthApi, EthApiSpec,
@@ -26,12 +26,13 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
+    state::EvmOverrides,
     transaction::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
     AnyReceiptEnvelope, AnyTransactionReceipt, Index, Log, ReceiptWithBloom, Transaction,
-    TransactionInfo, TransactionReceipt, TransactionRequest, TypedTransactionRequest,
+    TransactionInfo, TransactionReceipt, TransactionRequest,
     WithOtherFields,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
@@ -46,6 +47,7 @@ use revm::{
 };
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::future::Future;
+use alloy_consensus::TxEnvelope;
 
 use crate::eth::revm_utils::FillableTransaction;
 #[cfg(feature = "optimism")]
@@ -851,7 +853,8 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<B256> {
         // On optimism, transactions are forwarded directly to the sequencer to be included in
         // blocks that it builds.
-        if let Some(client) = self.inner.raw_transaction_forwarder.as_ref() {
+        let maybe_forwarder = self.inner.raw_transaction_forwarder.read().clone();
+        if let Some(client) = maybe_forwarder {
             tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
             client.forward_raw_transaction(&tx).await?;
         }
@@ -1464,7 +1467,7 @@ where
     pub(crate) fn sign_request(
         &self,
         from: &Address,
-        request: TypedTransactionRequest,
+        request: TxEnvelope,
     ) -> EthResult<TransactionSigned> {
         for signer in self.inner.signers.read().iter() {
             if signer.is_signer_for(from) {
@@ -1753,7 +1756,7 @@ pub(crate) fn build_transaction_receipt_with_block_receipts(
     }
 
     let rpc_receipt = reth_rpc_types::Receipt {
-        status: receipt.success,
+        status: receipt.success.into(),
         cumulative_gas_used: receipt.cumulative_gas_used as u128,
         logs,
     };

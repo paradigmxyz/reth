@@ -1,7 +1,7 @@
 //! Utility functions for hashing and encoding.
 
+use alloy_primitives::B256;
 use hmac::{Hmac, Mac};
-use reth_primitives::B256;
 use sha2::{Digest, Sha256};
 
 /// Hashes the input data with SHA256.

@@ -1,7 +1,7 @@
 use alloy_primitives::{BlockNumber, B256, U256};
+use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 /// Describes the current head block.
 ///

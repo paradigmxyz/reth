@@ -1,4 +1,5 @@
-use reth_primitives::{trie::Nibbles, B256};
+use crate::Nibbles;
+use reth_primitives::B256;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -37,8 +38,7 @@ pub struct TriePrefixSets {
 /// # Examples
 ///
 /// ```
-/// use reth_primitives::trie::Nibbles;
-/// use reth_trie::prefix_set::PrefixSetMut;
+/// use reth_trie::{prefix_set::PrefixSetMut, Nibbles};
 ///
 /// let mut prefix_set = PrefixSetMut::default();
 /// prefix_set.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb]));

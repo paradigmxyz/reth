@@ -1,8 +1,8 @@
-use crate::stage::{ExecOutput, UnwindInput, UnwindOutput};
-use reth_primitives::{
-    stage::{StageCheckpoint, StageId},
-    BlockNumber,
+use crate::{
+    stage::{ExecOutput, UnwindInput, UnwindOutput},
+    StageCheckpoint, StageId,
 };
+use alloy_primitives::BlockNumber;
 use std::fmt::{Display, Formatter};
 
 /// An event emitted by a [Pipeline][crate::Pipeline].

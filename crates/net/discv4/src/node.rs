@@ -1,6 +1,6 @@
+use alloy_primitives::keccak256;
 use generic_array::GenericArray;
-use reth_network_types::PeerId;
-use reth_primitives::{keccak256, NodeRecord};
+use reth_network_peers::{NodeRecord, PeerId};
 
 /// The key type for the table.
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

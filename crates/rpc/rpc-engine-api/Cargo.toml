@@ -13,12 +13,14 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-types.workspace = true
 reth-storage-api.workspace = true
 reth-beacon-consensus.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-engine-primitives.workspace = true
@@ -33,11 +35,11 @@ metrics.workspace = true
 
 # misc
 async-trait.workspace = true
-thiserror.workspace = true
-jsonrpsee-types.workspace = true
 jsonrpsee-core.workspace = true
-tracing.workspace = true
+jsonrpsee-types.workspace = true
 serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 reth-ethereum-engine-primitives.workspace = true

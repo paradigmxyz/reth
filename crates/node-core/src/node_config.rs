@@ -2,36 +2,30 @@
 
 use crate::{
     args::{
-        get_secret_key, DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, DiscoveryArgs, NetworkArgs,
-        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
+        PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
     metrics::prometheus_exporter,
     utils::get_single_header,
 };
-use discv5::ListenConfig;
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
-use reth_config::{config::PruneConfig, Config};
+use reth_chainspec::{ChainSpec, MAINNET};
+use reth_config::config::PruneConfig;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_network::{NetworkBuilder, NetworkConfig, NetworkManager};
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives::{
-    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,
-    BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, B256, MAINNET,
+    revm_primitives::EnvKzgSettings, BlockHashOrNumber, BlockNumber, Head, SealedHeader, B256,
 };
 use reth_provider::{
-    providers::StaticFileProvider, BlockHashReader, BlockNumReader, HeaderProvider,
-    ProviderFactory, StageCheckpointReader,
+    providers::StaticFileProvider, BlockHashReader, HeaderProvider, ProviderFactory,
+    StageCheckpointReader,
 };
+use reth_stages_types::StageId;
 use reth_storage_errors::provider::ProviderResult;
 use reth_tasks::TaskExecutor;
-use secp256k1::SecretKey;
-use std::{
-    net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
 
 /// The default prometheus recorder handle. We use a global static to ensure that it is only
@@ -49,7 +43,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
 /// # };
-/// # use reth_rpc_builder::RpcModuleSelection;
+/// # use reth_rpc_server_types::RpcModuleSelection;
 /// # use tokio::runtime::Handle;
 ///
 /// async fn t() {
@@ -77,7 +71,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
 /// # };
-/// # use reth_rpc_builder::RpcModuleSelection;
+/// # use reth_rpc_server_types::RpcModuleSelection;
 /// # use tokio::runtime::Handle;
 ///
 /// async fn t() {
@@ -245,36 +239,6 @@ impl NodeConfig {
         self
     }
 
-    /// Get the network secret from the given data dir
-    pub fn network_secret(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<SecretKey> {
-        let network_secret_path =
-            self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
-        debug!(target: "reth::cli", ?network_secret_path, "Loading p2p key file");
-        let secret_key = get_secret_key(&network_secret_path)?;
-        Ok(secret_key)
-    }
-
-    /// Returns the initial pipeline target, based on whether or not the node is running in
-    /// `debug.tip` mode, `debug.continuous` mode, or neither.
-    ///
-    /// If running in `debug.tip` mode, the configured tip is returned.
-    /// Otherwise, if running in `debug.continuous` mode, the genesis hash is returned.
-    /// Otherwise, `None` is returned. This is what the node will do by default.
-    pub fn initial_pipeline_target(&self, genesis_hash: B256) -> Option<B256> {
-        if let Some(tip) = self.debug.tip {
-            // Set the provided tip as the initial pipeline target.
-            debug!(target: "reth::cli", %tip, "Tip manually set");
-            Some(tip)
-        } else if self.debug.continuous {
-            // Set genesis as the initial pipeline target.
-            // This will allow the downloader to start
-            debug!(target: "reth::cli", "Continuous sync mode enabled");
-            Some(genesis_hash)
-        } else {
-            None
-        }
-    }
-
     /// Returns pruning configuration.
     pub fn prune_config(&self) -> Option<PruneConfig> {
         self.pruning.prune_config(&self.chain)
@@ -302,43 +266,9 @@ impl NodeConfig {
         Ok(max_block)
     }
 
-    /// Create the [`NetworkConfig`] for the node
-    pub fn network_config<C>(
-        &self,
-        config: &Config,
-        client: C,
-        executor: TaskExecutor,
-        head: Head,
-        data_dir: ChainPath<DataDirPath>,
-    ) -> eyre::Result<NetworkConfig<C>> {
-        info!(target: "reth::cli", "Connecting to P2P network");
-        let secret_key = self.network_secret(&data_dir)?;
-        let default_peers_path = data_dir.known_peers();
-        Ok(self.load_network_config(config, client, executor, head, secret_key, default_peers_path))
-    }
-
-    /// Create the [`NetworkBuilder`].
-    ///
-    /// This only configures it and does not spawn it.
-    pub async fn build_network<C>(
-        &self,
-        config: &Config,
-        client: C,
-        executor: TaskExecutor,
-        head: Head,
-        data_dir: ChainPath<DataDirPath>,
-    ) -> eyre::Result<NetworkBuilder<C, (), ()>>
-    where
-        C: BlockNumReader,
-    {
-        let network_config = self.network_config(config, client, executor, head, data_dir)?;
-        let builder = NetworkManager::builder(network_config).await?;
-        Ok(builder)
-    }
-
-    /// Loads '`MAINNET_KZG_TRUSTED_SETUP`'
-    pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
-        Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
+    /// Loads '`EnvKzgSettings::Default`'
+    pub const fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
+        Ok(EnvKzgSettings::Default)
     }
 
     /// Installs the prometheus recorder.
@@ -454,65 +384,6 @@ impl NodeConfig {
                 }
             }
         }
-    }
-
-    /// Builds the [`NetworkConfig`] with the given [`ProviderFactory`].
-    pub fn load_network_config<C>(
-        &self,
-        config: &Config,
-        client: C,
-        executor: TaskExecutor,
-        head: Head,
-        secret_key: SecretKey,
-        default_peers_path: PathBuf,
-    ) -> NetworkConfig<C> {
-        self.network
-            .network_config(config, self.chain.clone(), secret_key, default_peers_path)
-            .with_task_executor(Box::new(executor))
-            .set_head(head)
-            .listener_addr(SocketAddr::new(
-                self.network.addr,
-                // set discovery port based on instance number
-                self.network.port + self.instance - 1,
-            ))
-            .disable_discv4_discovery_if(self.chain.chain.is_optimism())
-            .discovery_addr(SocketAddr::new(
-                self.network.discovery.addr,
-                // set discovery port based on instance number
-                self.network.discovery.port + self.instance - 1,
-            ))
-            .map_discv5_config_builder(|builder| {
-                let DiscoveryArgs {
-                    discv5_addr,
-                    discv5_addr_ipv6,
-                    discv5_port,
-                    discv5_port_ipv6,
-                    ..
-                } = self.network.discovery;
-
-                // Use rlpx address if none given
-                let discv5_addr_ipv4 = discv5_addr.or(match self.network.addr {
-                    IpAddr::V4(ip) => Some(ip),
-                    IpAddr::V6(_) => None,
-                });
-                let discv5_addr_ipv6 = discv5_addr_ipv6.or(match self.network.addr {
-                    IpAddr::V4(_) => None,
-                    IpAddr::V6(ip) => Some(ip),
-                });
-
-                let discv5_port_ipv4 = discv5_port + self.instance - 1;
-                let discv5_port_ipv6 = discv5_port_ipv6 + self.instance - 1;
-
-                builder.discv5_config(
-                    discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
-                        discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port_ipv4)),
-                        discv5_addr_ipv6
-                            .map(|addr| SocketAddrV6::new(addr, discv5_port_ipv6, 0, 0)),
-                    ))
-                    .build(),
-                )
-            })
-            .build(client)
     }
 
     /// Change rpc port numbers based on the instance number, using the inner

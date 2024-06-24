@@ -1,5 +1,5 @@
 [package]
-name = "network"
+name = "example-network"
 version = "0.0.0"
 publish = false
 edition.workspace = true

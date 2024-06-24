@@ -8,11 +8,12 @@ use reth_db_api::database::Database;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_exex::ExExManagerHandle;
 use reth_node_core::args::NetworkArgs;
-use reth_primitives::{BlockHashOrNumber, PruneModes, B256};
+use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
-    BlockExecutionWriter, BlockNumReader, ChainSpecProvider, HeaderSyncMode, ProviderFactory,
-    StaticFileProviderFactory,
+    BlockExecutionWriter, BlockNumReader, ChainSpecProvider, FinalizedBlockReader,
+    FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
 };
+use reth_prune_types::PruneModes;
 use reth_stages::{
     sets::DefaultStages,
     stages::{ExecutionStage, ExecutionStageThresholds},
@@ -75,6 +76,14 @@ impl Command {
                 .take_block_and_execution_range(range.clone())
                 .map_err(|err| eyre::eyre!("Transaction error on unwind: {err}"))?;
 
+            // update finalized block if needed
+            let last_saved_finalized_block_number = provider.last_finalized_block_number()?;
+            let range_min =
+                range.clone().min().ok_or(eyre::eyre!("Could not fetch lower range end"))?;
+            if range_min < last_saved_finalized_block_number {
+                provider.save_finalized_block_number(BlockNumber::from(range_min))?;
+            }
+
             provider.commit()?;
         }
 
@@ -96,13 +105,12 @@ impl Command {
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let executor = block_executor!(provider_factory.chain_spec());
 
-        let header_mode = HeaderSyncMode::Tip(tip_rx);
         let pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             .add_stages(
                 DefaultStages::new(
                     provider_factory.clone(),
-                    header_mode,
+                    tip_rx,
                     Arc::clone(&consensus),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),

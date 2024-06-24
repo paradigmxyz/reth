@@ -2,11 +2,12 @@
 
 use crate::{
     components::{
-        Components, ExecutorBuilder, NetworkBuilder, NodeComponents, PayloadServiceBuilder,
-        PoolBuilder,
+        Components, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, NodeComponents,
+        PayloadServiceBuilder, PoolBuilder,
     },
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
+use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_transaction_pool::TransactionPool;
 use std::{future::Future, marker::PhantomData};
@@ -31,19 +32,22 @@ use std::{future::Future, marker::PhantomData};
 /// All component builders are captured in the builder state and will be consumed once the node is
 /// launched.
 #[derive(Debug)]
-pub struct ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB> {
+pub struct ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB> {
     pool_builder: PoolB,
     payload_builder: PayloadB,
     network_builder: NetworkB,
     executor_builder: ExecB,
+    consensus_builder: ConsB,
     _marker: PhantomData<Node>,
 }
 
-impl<Node, PoolB, PayloadB, NetworkB, ExecB>
-    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB>
+impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
+    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 {
     /// Configures the node types.
-    pub fn node_types<Types>(self) -> ComponentsBuilder<Types, PoolB, PayloadB, NetworkB, ExecB>
+    pub fn node_types<Types>(
+        self,
+    ) -> ComponentsBuilder<Types, PoolB, PayloadB, NetworkB, ExecB, ConsB>
     where
         Types: FullNodeTypes,
     {
@@ -52,6 +56,7 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB>
             payload_builder,
             network_builder,
             executor_builder: evm_builder,
+            consensus_builder,
             _marker,
         } = self;
         ComponentsBuilder {
@@ -59,6 +64,7 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB>
             pool_builder,
             payload_builder,
             network_builder,
+            consensus_builder,
             _marker: Default::default(),
         }
     }
@@ -70,6 +76,7 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB>
             payload_builder: self.payload_builder,
             network_builder: self.network_builder,
             executor_builder: self.executor_builder,
+            consensus_builder: self.consensus_builder,
             _marker: self._marker,
         }
     }
@@ -81,6 +88,7 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB>
             payload_builder: f(self.payload_builder),
             network_builder: self.network_builder,
             executor_builder: self.executor_builder,
+            consensus_builder: self.consensus_builder,
             _marker: self._marker,
         }
     }
@@ -92,6 +100,7 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB>
             payload_builder: self.payload_builder,
             network_builder: f(self.network_builder),
             executor_builder: self.executor_builder,
+            consensus_builder: self.consensus_builder,
             _marker: self._marker,
         }
     }
@@ -103,13 +112,26 @@ impl<Node, PoolB, PayloadB, NetworkB, ExecB>
             payload_builder: self.payload_builder,
             network_builder: self.network_builder,
             executor_builder: f(self.executor_builder),
+            consensus_builder: self.consensus_builder,
+            _marker: self._marker,
+        }
+    }
+
+    /// Apply a function to the consensus builder.
+    pub fn map_consensus(self, f: impl FnOnce(ConsB) -> ConsB) -> Self {
+        Self {
+            pool_builder: self.pool_builder,
+            payload_builder: self.payload_builder,
+            network_builder: self.network_builder,
+            executor_builder: self.executor_builder,
+            consensus_builder: f(self.consensus_builder),
             _marker: self._marker,
         }
     }
 }
 
-impl<Node, PoolB, PayloadB, NetworkB, ExecB>
-    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB>
+impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
+    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 where
     Node: FullNodeTypes,
 {
@@ -120,7 +142,7 @@ where
     pub fn pool<PB>(
         self,
         pool_builder: PB,
-    ) -> ComponentsBuilder<Node, PB, PayloadB, NetworkB, ExecB>
+    ) -> ComponentsBuilder<Node, PB, PayloadB, NetworkB, ExecB, ConsB>
     where
         PB: PoolBuilder<Node>,
     {
@@ -129,6 +151,7 @@ where
             payload_builder,
             network_builder,
             executor_builder: evm_builder,
+            consensus_builder,
             _marker,
         } = self;
         ComponentsBuilder {
@@ -136,13 +159,14 @@ where
             payload_builder,
             network_builder,
             executor_builder: evm_builder,
+            consensus_builder,
             _marker,
         }
     }
 }
 
-impl<Node, PoolB, PayloadB, NetworkB, ExecB>
-    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB>
+impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
+    ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 where
     Node: FullNodeTypes,
     PoolB: PoolBuilder<Node>,
@@ -154,7 +178,7 @@ where
     pub fn network<NB>(
         self,
         network_builder: NB,
-    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NB, ExecB>
+    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NB, ExecB, ConsB>
     where
         NB: NetworkBuilder<Node, PoolB::Pool>,
     {
@@ -163,6 +187,7 @@ where
             payload_builder,
             network_builder: _,
             executor_builder: evm_builder,
+            consensus_builder,
             _marker,
         } = self;
         ComponentsBuilder {
@@ -170,6 +195,7 @@ where
             payload_builder,
             network_builder,
             executor_builder: evm_builder,
+            consensus_builder,
             _marker,
         }
     }
@@ -181,7 +207,7 @@ where
     pub fn payload<PB>(
         self,
         payload_builder: PB,
-    ) -> ComponentsBuilder<Node, PoolB, PB, NetworkB, ExecB>
+    ) -> ComponentsBuilder<Node, PoolB, PB, NetworkB, ExecB, ConsB>
     where
         PB: PayloadServiceBuilder<Node, PoolB::Pool>,
     {
@@ -190,6 +216,7 @@ where
             payload_builder: _,
             network_builder,
             executor_builder: evm_builder,
+            consensus_builder,
             _marker,
         } = self;
         ComponentsBuilder {
@@ -197,6 +224,7 @@ where
             payload_builder,
             network_builder,
             executor_builder: evm_builder,
+            consensus_builder,
             _marker,
         }
     }
@@ -208,32 +236,69 @@ where
     pub fn executor<EB>(
         self,
         executor_builder: EB,
-    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, EB>
+    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, EB, ConsB>
     where
         EB: ExecutorBuilder<Node>,
     {
-        let Self { pool_builder, payload_builder, network_builder, executor_builder: _, _marker } =
-            self;
+        let Self {
+            pool_builder,
+            payload_builder,
+            network_builder,
+            executor_builder: _,
+            consensus_builder,
+            _marker,
+        } = self;
         ComponentsBuilder {
             pool_builder,
             payload_builder,
             network_builder,
             executor_builder,
+            consensus_builder,
+            _marker,
+        }
+    }
+
+    /// Configures the consensus builder.
+    ///
+    /// This accepts a [`ConsensusBuilder`] instance that will be used to create the node's
+    /// components for consensus.
+    pub fn consensus<CB>(
+        self,
+        consensus_builder: CB,
+    ) -> ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, CB>
+    where
+        CB: ConsensusBuilder<Node>,
+    {
+        let Self {
+            pool_builder,
+            payload_builder,
+            network_builder,
+            executor_builder,
+            consensus_builder: _,
+            _marker,
+        } = self;
+        ComponentsBuilder {
+            pool_builder,
+            payload_builder,
+            network_builder,
+            executor_builder,
+            consensus_builder,
             _marker,
         }
     }
 }
 
-impl<Node, PoolB, PayloadB, NetworkB, ExecB> NodeComponentsBuilder<Node>
-    for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB>
+impl<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB> NodeComponentsBuilder<Node>
+    for ComponentsBuilder<Node, PoolB, PayloadB, NetworkB, ExecB, ConsB>
 where
     Node: FullNodeTypes,
     PoolB: PoolBuilder<Node>,
     NetworkB: NetworkBuilder<Node, PoolB::Pool>,
     PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
     ExecB: ExecutorBuilder<Node>,
+    ConsB: ConsensusBuilder<Node>,
 {
-    type Components = Components<Node, PoolB::Pool, ExecB::EVM, ExecB::Executor>;
+    type Components = Components<Node, PoolB::Pool, ExecB::EVM, ExecB::Executor, ConsB::Consensus>;
 
     async fn build_components(
         self,
@@ -244,6 +309,7 @@ where
             payload_builder,
             network_builder,
             executor_builder: evm_builder,
+            consensus_builder,
             _marker,
         } = self;
 
@@ -251,18 +317,27 @@ where
         let pool = pool_builder.build_pool(context).await?;
         let network = network_builder.build_network(context, pool.clone()).await?;
         let payload_builder = payload_builder.spawn_payload_service(context, pool.clone()).await?;
+        let consensus = consensus_builder.build_consensus(context).await?;
 
-        Ok(Components { transaction_pool: pool, evm_config, network, payload_builder, executor })
+        Ok(Components {
+            transaction_pool: pool,
+            evm_config,
+            network,
+            payload_builder,
+            executor,
+            consensus,
+        })
     }
 }
 
-impl Default for ComponentsBuilder<(), (), (), (), ()> {
+impl Default for ComponentsBuilder<(), (), (), (), (), ()> {
     fn default() -> Self {
         Self {
             pool_builder: (),
             payload_builder: (),
             network_builder: (),
             executor_builder: (),
+            consensus_builder: (),
             _marker: Default::default(),
         }
     }
@@ -281,23 +356,24 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
     /// The components for the node with the given types
     type Components: NodeComponents<Node>;
 
-    /// Consumes the type and returns the crated components.
+    /// Consumes the type and returns the created components.
     fn build_components(
         self,
         ctx: &BuilderContext<Node>,
     ) -> impl Future<Output = eyre::Result<Self::Components>> + Send;
 }
 
-impl<Node, F, Fut, Pool, EVM, Executor> NodeComponentsBuilder<Node> for F
+impl<Node, F, Fut, Pool, EVM, Executor, Cons> NodeComponentsBuilder<Node> for F
 where
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
-    Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM, Executor>>> + Send,
+    Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM, Executor, Cons>>> + Send,
     Pool: TransactionPool + Unpin + 'static,
     EVM: ConfigureEvm,
     Executor: BlockExecutorProvider,
+    Cons: Consensus + Clone + Unpin + 'static,
 {
-    type Components = Components<Node, Pool, EVM, Executor>;
+    type Components = Components<Node, Pool, EVM, Executor, Cons>;
 
     fn build_components(
         self,

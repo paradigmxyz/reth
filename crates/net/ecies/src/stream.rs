@@ -3,12 +3,11 @@
 use crate::{
     codec::ECIESCodec, error::ECIESErrorImpl, ECIESError, EgressECIESValue, IngressECIESValue,
 };
-use futures::{ready, Sink, SinkExt};
-use reth_net_common::stream::HasRemoteAddr;
-use reth_primitives::{
+use alloy_primitives::{
     bytes::{Bytes, BytesMut},
     B512 as PeerId,
 };
+use futures::{ready, Sink, SinkExt};
 use secp256k1::SecretKey;
 use std::{
     fmt::Debug,
@@ -38,10 +37,10 @@ pub struct ECIESStream<Io> {
 
 impl<Io> ECIESStream<Io>
 where
-    Io: AsyncRead + AsyncWrite + Unpin + HasRemoteAddr,
+    Io: AsyncRead + AsyncWrite + Unpin,
 {
     /// Connect to an `ECIES` server
-    #[instrument(skip(transport, secret_key), fields(peer=&*format!("{:?}", transport.remote_addr())))]
+    #[instrument(skip(transport, secret_key))]
     pub async fn connect(
         transport: Io,
         secret_key: SecretKey,
@@ -98,7 +97,6 @@ where
     }
 
     /// Listen on a just connected ECIES client
-    #[instrument(skip_all, fields(peer=&*format!("{:?}", transport.remote_addr())))]
     pub async fn incoming(transport: Io, secret_key: SecretKey) -> Result<Self, ECIESError> {
         let ecies = ECIESCodec::new_server(secret_key)?;
 
@@ -175,7 +173,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_network_types::pk2id;
+    use reth_network_peers::pk2id;
     use secp256k1::SECP256K1;
     use tokio::net::{TcpListener, TcpStream};
 

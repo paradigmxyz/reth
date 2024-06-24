@@ -13,11 +13,13 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
+reth-chainspec.workspace = true
+reth-ethereum-forks.workspace = true
 reth-metrics.workspace = true
-reth-network-types.workspace = true
+reth-network-peers = { workspace = true, features = ["secp256k1"] }
 
 # ethereum
+alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 discv5 = { workspace = true, features = ["libp2p"] }
 enr.workspace = true

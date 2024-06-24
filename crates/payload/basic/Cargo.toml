@@ -13,13 +13,14 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-revm.workspace = true
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
-reth-engine-primitives.workspace = true
 
 # ethereum
 alloy-rlp.workspace = true
@@ -27,7 +28,7 @@ revm.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync", "time"] }
-futures-core = "0.3"
+futures-core.workspace = true
 futures-util.workspace = true
 
 # metrics

@@ -7,16 +7,12 @@ use crate::{
     trie_cursor::TrieCursorFactory,
     updates::{TrieKey, TrieOp, TrieUpdates},
     walker::TrieWalker,
+    HashBuilder, Nibbles, TrieAccount,
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{StateRootError, StorageRootError};
-use reth_primitives::{
-    constants::EMPTY_ROOT_HASH,
-    keccak256,
-    trie::{HashBuilder, Nibbles, TrieAccount},
-    Address, BlockNumber, B256,
-};
+use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, BlockNumber, B256};
 use std::ops::RangeInclusive;
 use tracing::{debug, trace};
 
@@ -552,20 +548,18 @@ mod tests {
     use crate::{
         prefix_set::PrefixSetMut,
         test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
+        BranchNodeCompact, TrieMask,
     };
     use proptest::{prelude::ProptestConfig, proptest};
+    use proptest_arbitrary_interop::arb;
     use reth_db::{tables, test_utils::TempDatabase, DatabaseEnv};
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         transaction::DbTxMut,
     };
-    use reth_primitives::{
-        hex_literal::hex,
-        proofs::triehash::KeccakHasher,
-        trie::{BranchNodeCompact, TrieMask},
-        Account, StorageEntry, U256,
-    };
+    use reth_primitives::{hex_literal::hex, Account, StorageEntry, U256};
     use reth_provider::{test_utils::create_test_provider_factory, DatabaseProviderRW};
+    use reth_trie_common::triehash::KeccakHasher;
     use std::{
         collections::{BTreeMap, HashMap},
         ops::Mul,
@@ -656,7 +650,7 @@ mod tests {
 
     #[test]
     fn arbitrary_storage_root() {
-        proptest!(ProptestConfig::with_cases(10), |(item: (Address, std::collections::BTreeMap<B256, U256>))| {
+        proptest!(ProptestConfig::with_cases(10), |(item in arb::<(Address, std::collections::BTreeMap<B256, U256>)>())| {
             let (address, storage) = item;
 
             let hashed_address = keccak256(address);
@@ -766,7 +760,7 @@ mod tests {
     #[test]
     fn arbitrary_state_root() {
         proptest!(
-            ProptestConfig::with_cases(10), | (state: State) | {
+            ProptestConfig::with_cases(10), | (state in arb::<State>()) | {
                 test_state_root_with_state(state);
             }
         );
@@ -775,7 +769,7 @@ mod tests {
     #[test]
     fn arbitrary_state_root_with_progress() {
         proptest!(
-            ProptestConfig::with_cases(10), | (state: State) | {
+            ProptestConfig::with_cases(10), | (state in arb::<State>()) | {
                 let hashed_entries_total = state.len() +
                     state.values().map(|(_, slots)| slots.len()).sum::<usize>();
 

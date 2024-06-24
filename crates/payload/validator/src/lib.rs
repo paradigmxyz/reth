@@ -8,7 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_primitives::{ChainSpec, SealedBlock};
+use reth_chainspec::ChainSpec;
+use reth_primitives::SealedBlock;
 use reth_rpc_types::{engine::MaybeCancunPayloadFields, ExecutionPayload, PayloadError};
 use reth_rpc_types_compat::engine::payload::try_into_block;
 use std::sync::Arc;
@@ -22,7 +23,7 @@ pub struct ExecutionPayloadValidator {
 
 impl ExecutionPayloadValidator {
     /// Create a new validator.
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
 

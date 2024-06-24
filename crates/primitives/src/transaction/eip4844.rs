@@ -4,11 +4,14 @@ use crate::{
     B256, U256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
+use core::mem;
 use reth_codecs::{main_codec, Compact, CompactPlaceholder};
-use std::mem;
 
 #[cfg(feature = "c-kzg")]
 use crate::kzg::KzgSettings;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
 ///
@@ -145,20 +148,28 @@ impl TxEip4844 {
     /// - `max_fee_per_blob_gas`
     /// - `blob_versioned_hashes`
     pub fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(Self {
+        let mut tx = Self {
             chain_id: Decodable::decode(buf)?,
             nonce: Decodable::decode(buf)?,
             max_priority_fee_per_gas: Decodable::decode(buf)?,
             max_fee_per_gas: Decodable::decode(buf)?,
             gas_limit: Decodable::decode(buf)?,
-            placeholder: Some(()),
+            placeholder: None,
             to: Decodable::decode(buf)?,
             value: Decodable::decode(buf)?,
             input: Decodable::decode(buf)?,
             access_list: Decodable::decode(buf)?,
             max_fee_per_blob_gas: Decodable::decode(buf)?,
             blob_versioned_hashes: Decodable::decode(buf)?,
-        })
+        };
+
+        // HACK: our arbitrary implementation sets the placeholder this way for backwards
+        // compatibility, and should be removed once `placeholder` can be removed
+        if tx.to != Address::default() {
+            tx.placeholder = Some(())
+        }
+
+        Ok(tx)
     }
 
     /// Outputs the length of the transaction's fields, without a RLP header.

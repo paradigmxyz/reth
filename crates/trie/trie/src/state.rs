@@ -2,7 +2,7 @@ use crate::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::{PrefixSetMut, TriePrefixSets},
     updates::TrieUpdates,
-    StateRoot,
+    Nibbles, StateRoot,
 };
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_db::{tables, DatabaseError};
@@ -12,10 +12,7 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_execution_errors::StateRootError;
-use reth_primitives::{
-    keccak256, revm::compat::into_reth_acc, trie::Nibbles, Account, Address, BlockNumber, B256,
-    U256,
-};
+use reth_primitives::{keccak256, Account, Address, BlockNumber, B256, U256};
 use revm::db::BundleAccount;
 use std::{
     collections::{hash_map, HashMap, HashSet},
@@ -42,7 +39,7 @@ impl HashedPostState {
             .into_par_iter()
             .map(|(address, account)| {
                 let hashed_address = keccak256(address);
-                let hashed_account = account.info.clone().map(into_reth_acc);
+                let hashed_account = account.info.clone().map(Into::into);
                 let hashed_storage = HashedStorage::from_iter(
                     account.status.was_destroyed(),
                     account.storage.iter().map(|(key, value)| {

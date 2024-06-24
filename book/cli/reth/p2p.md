@@ -110,6 +110,11 @@ Networking:
 
           Will fall back to a network-specific default if not specified.
 
+      --dns-retries <DNS_RETRIES>
+          Amount of DNS resolution requests retries to perform when peering
+
+          [default: 0]
+
       --peers-file <FILE>
           The path to the known peers file. Connected peers are dumped to this file on nodes
           shutdown, and read on startup. Cannot be used with `--no-persist-peers`.

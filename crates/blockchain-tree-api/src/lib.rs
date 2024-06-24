@@ -13,7 +13,7 @@ use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
 };
-use reth_storage_errors::provider::ProviderError;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::collections::BTreeMap;
 
 pub mod error;
@@ -69,7 +69,7 @@ pub trait BlockchainTreeEngine: BlockchainTreeViewer + Send + Sync {
     ) -> Result<InsertPayloadOk, InsertBlockError>;
 
     /// Finalize blocks up until and including `finalized_block`, and remove them from the tree.
-    fn finalize_block(&self, finalized_block: BlockNumber);
+    fn finalize_block(&self, finalized_block: BlockNumber) -> ProviderResult<()>;
 
     /// Reads the last `N` canonical hashes from the database and updates the block indices of the
     /// tree by attempting to connect the buffered blocks to canonical hashes.

@@ -2,13 +2,15 @@ use crate::{metrics::EngineApiMetrics, EngineApiError, EngineApiResult};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
-use reth_engine_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, EngineTypes, PayloadAttributes,
-    PayloadBuilderAttributes, PayloadOrAttributes,
-};
+use reth_chainspec::ChainSpec;
+use reth_engine_primitives::EngineTypes;
 use reth_evm::provider::EvmEnvProvider;
 use reth_payload_builder::PayloadStore;
-use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
+use reth_payload_primitives::{
+    validate_payload_timestamp, EngineApiMessageVersion, PayloadAttributes,
+    PayloadBuilderAttributes, PayloadOrAttributes,
+};
+use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, Hardfork, B256, U64};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
@@ -601,6 +603,8 @@ where
         Ok(res?)
     }
 
+    /// Handler for `engine_newPayloadV4`
+    /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/prague.md#engine_newpayloadv4>
     async fn new_payload_v4(
         &self,
         payload: ExecutionPayloadV4,
@@ -801,6 +805,7 @@ where
         self.inner.metrics.latency.exchange_transition_configuration.record(start.elapsed());
         Ok(res?)
     }
+
     /// Handler for `engine_getClientVersionV1`
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md>
@@ -838,8 +843,9 @@ mod tests {
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_testing_utils::generators::random_block;
 
+    use reth_chainspec::MAINNET;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_primitives::{SealedBlock, B256, MAINNET};
+    use reth_primitives::{SealedBlock, B256};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;

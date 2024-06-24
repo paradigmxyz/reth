@@ -54,6 +54,7 @@ tokio = { workspace = true, default-features = false, features = ["sync", "rt", 
 rayon.workspace = true
 criterion = { workspace = true, features = ["async_tokio"] }
 proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
 
 [features]
 default = ["metrics", "async", "parallel"]

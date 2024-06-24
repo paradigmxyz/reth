@@ -1,9 +1,10 @@
 use crate::EthPooledTransaction;
 use rand::Rng;
+use reth_chainspec::MAINNET;
 use reth_primitives::{
     constants::MIN_PROTOCOL_BASE_FEE, sign_message, AccessList, Address, Bytes, Transaction,
     TransactionSigned, TryFromRecoveredTransaction, TxEip1559, TxEip4844, TxKind, TxLegacy, B256,
-    MAINNET, U256,
+    U256,
 };
 
 /// A generator for transactions for testing purposes.
@@ -225,13 +226,13 @@ impl TransactionBuilder {
     }
 
     /// Increments the nonce value of the transaction builder by 1.
-    pub fn inc_nonce(mut self) -> Self {
+    pub const fn inc_nonce(mut self) -> Self {
         self.nonce += 1;
         self
     }
 
     /// Decrements the nonce value of the transaction builder by 1, avoiding underflow.
-    pub fn decr_nonce(mut self) -> Self {
+    pub const fn decr_nonce(mut self) -> Self {
         self.nonce = self.nonce.saturating_sub(1);
         self
     }

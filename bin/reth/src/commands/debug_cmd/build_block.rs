@@ -19,23 +19,22 @@ use reth_consensus::Consensus;
 use reth_db::DatabaseEnv;
 use reth_errors::RethResult;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
-    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    revm_primitives::KzgSettings,
-    stage::StageId,
-    Address, BlobTransaction, BlobTransactionSidecar, Bytes, PooledTransactionsElement, Receipts,
-    SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
+    constants::eip4844::LoadKzgSettingsError, revm_primitives::KzgSettings, Address,
+    BlobTransaction, BlobTransactionSidecar, Bytes, PooledTransactionsElement, SealedBlock,
+    SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter,
-    BundleStateWithReceipts, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
-    StateProviderFactory,
+    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
+    ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, primitives::EnvKzgSettings};
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
+use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
     TransactionPool, TransactionValidationTaskExecutor,
@@ -103,14 +102,14 @@ impl Command {
     }
 
     /// Loads the trusted setup params from a given file path or falls back to
-    /// `MAINNET_KZG_TRUSTED_SETUP`.
-    fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
+    /// `EnvKzgSettings::Default`.
+    fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
         if let Some(ref trusted_setup_file) = self.trusted_setup_file {
             let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
                 .map_err(LoadKzgSettingsError::KzgError)?;
-            Ok(Arc::new(trusted_setup))
+            Ok(EnvKzgSettings::Custom(Arc::new(trusted_setup)))
         } else {
-            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
+            Ok(EnvKzgSettings::Default)
         }
     }
 
@@ -271,17 +270,19 @@ impl Command {
                 let db = StateProviderDatabase::new(blockchain_db.latest()?);
                 let executor = block_executor!(provider_factory.chain_spec()).executor(db);
 
-                let BlockExecutionOutput { state, receipts, .. } =
+                let BlockExecutionOutput { state, receipts, requests, .. } =
                     executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
-                let state = BundleStateWithReceipts::new(
+                let execution_outcome = ExecutionOutcome::new(
                     state,
-                    Receipts::from_block_receipt(receipts),
+                    receipts.into(),
                     block.number,
+                    vec![requests.into()],
                 );
-                debug!(target: "reth::cli", ?state, "Executed block");
 
-                let hashed_state = state.hash_state_slow();
-                let (state_root, trie_updates) = state
+                debug!(target: "reth::cli", ?execution_outcome, "Executed block");
+
+                let hashed_post_state = execution_outcome.hash_state_slow();
+                let (state_root, trie_updates) = execution_outcome
                     .hash_state_slow()
                     .state_root_with_updates(provider_factory.provider()?.tx_ref())?;
 
@@ -297,8 +298,8 @@ impl Command {
                 let provider_rw = provider_factory.provider_rw()?;
                 provider_rw.append_blocks_with_state(
                     Vec::from([block_with_senders]),
-                    state,
-                    hashed_state,
+                    execution_outcome,
+                    hashed_post_state,
                     trie_updates,
                     None,
                 )?;

@@ -36,7 +36,7 @@ pub struct Cursor<K: TransactionKind, T: Table> {
 }
 
 impl<K: TransactionKind, T: Table> Cursor<K, T> {
-    pub(crate) fn new_with_metrics(
+    pub(crate) const fn new_with_metrics(
         inner: reth_libmdbx::Cursor<K>,
         metrics: Option<Arc<DatabaseEnvMetrics>>,
     ) -> Self {

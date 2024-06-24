@@ -1,21 +1,19 @@
-use crate::walker::TrieWalker;
+use crate::{
+    walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles, StorageTrieEntry,
+    StoredBranchNode, StoredNibbles, StoredNibblesSubKey,
+};
 use derive_more::Deref;
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{
-    trie::{
-        BranchNodeCompact, HashBuilder, Nibbles, StorageTrieEntry, StoredBranchNode, StoredNibbles,
-        StoredNibblesSubKey,
-    },
-    B256,
-};
+use reth_primitives::B256;
 use std::collections::{hash_map::IntoIter, HashMap, HashSet};
 
 /// The key of a trie node.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TrieKey {
     /// A node in the account trie.
     AccountNode(StoredNibbles),
@@ -27,6 +25,7 @@ pub enum TrieKey {
 
 /// The operation to perform on the trie.
 #[derive(PartialEq, Eq, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TrieOp {
     /// Delete the node entry.
     Delete,
@@ -43,6 +42,7 @@ impl TrieOp {
 
 /// The aggregation of trie updates.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Deref)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TrieUpdates {
     trie_operations: HashMap<TrieKey, TrieOp>,
 }
