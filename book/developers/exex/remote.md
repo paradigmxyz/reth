@@ -82,7 +82,7 @@ This method streams notifications to the client.
 A proper way to represent the notification would be to define all fields in the schema, but it goes beyond the scope
 of this chapter.
 
-For an example of a full schema, see the [Remote ExEx](TODO) example in our repo.
+For an example of a full schema, see the [Remote ExEx](https://github.com/paradigmxyz/reth/blob/81b5fbf57307b6eefe708c71d7d59e713dc70101/examples/exex/remote/proto/exex.proto) example in our repo.
 
 </div>
 
