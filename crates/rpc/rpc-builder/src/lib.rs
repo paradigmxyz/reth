@@ -81,10 +81,7 @@
 //! use reth_engine_primitives::EngineTypes;
 //! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{
-//!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-//!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
-//! };
+//! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc_api::EngineApiServer;
 //! use reth_rpc_builder::{
 //!     auth::AuthServerConfig, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
@@ -102,15 +99,7 @@
 //!     engine_api: EngineApi,
 //!     evm_config: EvmConfig,
 //! ) where
-//!     Provider: AccountReader
-//!         + BlockReaderIdExt
-//!         + ChainSpecProvider
-//!         + ChangeSetReader
-//!         + StateProviderFactory
-//!         + EvmEnvProvider
-//!         + Clone
-//!         + Unpin
-//!         + 'static,
+//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader + Clone + Unpin + 'static,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
@@ -176,8 +165,8 @@ use reth_evm::ConfigureEvm;
 use reth_ipc::server::IpcServer;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_provider::{
-    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    ChangeSetReader, EvmEnvProvider, StateProviderFactory,
+    AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    EvmEnvProvider, FullRpcProvider, StateProviderFactory,
 };
 use reth_rpc::{
     eth::{
@@ -246,15 +235,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>(
     eth: EthApi,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Provider: BlockReaderIdExt
-        + AccountReader
-        + StateProviderFactory
-        + EvmEnvProvider
-        + ChainSpecProvider
-        + ChangeSetReader
-        + Clone
-        + Unpin
-        + 'static,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -438,15 +419,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig>
 where
-    Provider: BlockReaderIdExt
-        + AccountReader
-        + StateProviderFactory
-        + EvmEnvProvider
-        + ChainSpecProvider
-        + ChangeSetReader
-        + Clone
-        + Unpin
-        + 'static,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -794,15 +767,7 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
     RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
 where
-    Provider: BlockReaderIdExt
-        + AccountReader
-        + StateProviderFactory
-        + EvmEnvProvider
-        + ChainSpecProvider
-        + ChangeSetReader
-        + Clone
-        + Unpin
-        + 'static,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader + Clone + Unpin + 'static,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,

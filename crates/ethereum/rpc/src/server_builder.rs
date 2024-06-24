@@ -1,9 +1,6 @@
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
-use reth_provider::{
-    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
-};
+use reth_provider::{CanonStateSubscriptions, FullRpcProvider};
 use reth_rpc_builder::{
     EthServerBuilder, EthServerBuilderCtx, FeeHistoryCacheBuilder, GasPriceOracleBuilder,
 };
@@ -18,18 +15,7 @@ pub struct ServerBuilder;
 impl<Provider, Pool, EvmConfig, Network, Tasks, Events>
     EthServerBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events> for ServerBuilder
 where
-    Provider: StaticFileProviderFactory
-        + BlockReaderIdExt
-        + AccountReader
-        + StateProviderFactory
-        + EvmEnvProvider
-        + ChainSpecProvider
-        + ChangeSetReader
-        + CanonStateSubscriptions
-        + StageCheckpointReader
-        + Clone
-        + Unpin
-        + 'static,
+    Provider: FullRpcProvider,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + 'static,
     Tasks: TaskSpawner + 'static,
