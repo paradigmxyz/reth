@@ -6695,7 +6695,7 @@ dependencies = [
 
 [[package]]
 name = "reth-cli-commands"
-version = "1.0.0-rc.2"
+version = "1.0.0"
 
 [[package]]
 name = "reth-cli-runner"
