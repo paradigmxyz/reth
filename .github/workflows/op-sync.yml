@@ -45,7 +45,7 @@ jobs:
             --debug.terminate
       - name: Verify the target block hash
         run: |
-          op-reth db --chain base get static-file headers 100000 \
+          op-reth db --chain base get static-file headers 10000 \
             | grep 0xbb9b85352c7ebca6ba8efc63bd66cecd038c92ec8ebd02e153a3e0b197e672b7
       - name: Run stage unwind for 100 blocks
         run: |
