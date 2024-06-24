@@ -325,8 +325,8 @@ pub struct ChainSpec {
     /// The genesis block
     pub genesis: Genesis,
 
-    /// The block at which [`EthereumHardfork::Paris`] was activated and the final difficulty at this
-    /// block.
+    /// The block at which [`EthereumHardfork::Paris`] was activated and the final difficulty at
+    /// this block.
     pub paris_block_and_final_difficulty: Option<(u64, U256)>,
 
     /// The active hard forks and their activation conditions
@@ -571,13 +571,15 @@ impl ChainSpec {
         }
     }
 
-    /// Convenience method to get the fork id for [`EthereumHardfork::Shanghai`] from a given chainspec.
+    /// Convenience method to get the fork id for [`EthereumHardfork::Shanghai`] from a given
+    /// chainspec.
     #[inline]
     pub fn shanghai_fork_id(&self) -> Option<ForkId> {
         self.hardfork_fork_id(EthereumHardfork::Shanghai)
     }
 
-    /// Convenience method to get the fork id for [`EthereumHardfork::Cancun`] from a given chainspec.
+    /// Convenience method to get the fork id for [`EthereumHardfork::Cancun`] from a given
+    /// chainspec.
     #[inline]
     pub fn cancun_fork_id(&self) -> Option<ForkId> {
         self.hardfork_fork_id(EthereumHardfork::Cancun)

@@ -6,7 +6,8 @@ use alloy_chains::Chain;
 
 /// Helper methods for Ethereum forks.
 pub trait EthereumHardforks: Hardforks {
-    /// Convenience method to check if [`EthereumHardfork::Shanghai`] is active at a given timestamp.
+    /// Convenience method to check if [`EthereumHardfork::Shanghai`] is active at a given
+    /// timestamp.
     fn is_shanghai_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.is_fork_active_at_timestamp(EthereumHardfork::Shanghai, timestamp)
     }
@@ -21,18 +22,20 @@ pub trait EthereumHardforks: Hardforks {
         self.is_fork_active_at_timestamp(EthereumHardfork::Prague, timestamp)
     }
 
-    /// Convenience method to check if [`EthereumHardfork::Byzantium`] is active at a given block number.
+    /// Convenience method to check if [`EthereumHardfork::Byzantium`] is active at a given block
+    /// number.
     fn is_byzantium_active_at_block(&self, block_number: u64) -> bool {
         self.fork(EthereumHardfork::Byzantium).active_at_block(block_number)
     }
 
-    /// Convenience method to check if [`EthereumHardfork::SpuriousDragon`] is active at a given block
-    /// number.
+    /// Convenience method to check if [`EthereumHardfork::SpuriousDragon`] is active at a given
+    /// block number.
     fn is_spurious_dragon_active_at_block(&self, block_number: u64) -> bool {
         self.fork(EthereumHardfork::SpuriousDragon).active_at_block(block_number)
     }
 
-    /// Convenience method to check if [`EthereumHardfork::Homestead`] is active at a given block number.
+    /// Convenience method to check if [`EthereumHardfork::Homestead`] is active at a given block
+    /// number.
     fn is_homestead_active_at_block(&self, block_number: u64) -> bool {
         self.fork(EthereumHardfork::Homestead).active_at_block(block_number)
     }
