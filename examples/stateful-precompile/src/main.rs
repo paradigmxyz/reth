@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_genesis::Genesis;
 use parking_lot::RwLock;
 use reth::{
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
@@ -23,7 +24,7 @@ use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
 use reth_primitives::{
     revm_primitives::{SpecId, StatefulPrecompileMut},
-    Genesis, Header, TransactionSigned,
+    Header, TransactionSigned,
 };
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};

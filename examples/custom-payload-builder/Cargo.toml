@@ -1,5 +1,5 @@
 [package]
-name = "custom-payload-builder"
+name = "example-custom-payload-builder"
 version = "0.0.0"
 publish = false
 edition.workspace = true

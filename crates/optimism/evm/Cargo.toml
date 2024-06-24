@@ -17,7 +17,7 @@ reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-revm.workspace = true
 reth-execution-errors.workspace = true
-reth-provider.workspace = true
+reth-execution-types.workspace = true
 reth-prune-types.workspace = true
 reth-consensus-common.workspace = true
 
@@ -38,7 +38,7 @@ reth-revm = { workspace = true, features = ["test-utils"] }
 [features]
 optimism = [
     "reth-primitives/optimism",
-    "reth-provider/optimism",
+    "reth-execution-types/optimism",
     "reth-optimism-consensus/optimism",
     "reth-revm/optimism",
 ]

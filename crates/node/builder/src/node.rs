@@ -31,7 +31,7 @@ pub trait Node<N: FullNodeTypes>: NodeTypes + Clone {
 /// The launched node with all components including RPC handlers.
 ///
 /// This can be used to interact with the launched node.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FullNode<Node: FullNodeComponents> {
     /// The evm configuration.
     pub evm_config: Node::Evm,
@@ -93,23 +93,5 @@ impl<Node: FullNodeComponents> FullNode<Node> {
     #[cfg(unix)]
     pub async fn engine_ipc_client(&self) -> Option<impl EngineApiClient<Node::Engine>> {
         self.auth_server_handle().ipc_client().await
-    }
-}
-
-impl<Node: FullNodeComponents> Clone for FullNode<Node> {
-    fn clone(&self) -> Self {
-        Self {
-            evm_config: self.evm_config.clone(),
-            block_executor: self.block_executor.clone(),
-            pool: self.pool.clone(),
-            network: self.network.clone(),
-            provider: self.provider.clone(),
-            payload_builder: self.payload_builder.clone(),
-            task_executor: self.task_executor.clone(),
-            rpc_server_handles: self.rpc_server_handles.clone(),
-            rpc_registry: self.rpc_registry.clone(),
-            config: self.config.clone(),
-            data_dir: self.data_dir.clone(),
-        }
     }
 }

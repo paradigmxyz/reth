@@ -1537,7 +1537,7 @@ impl Discv4Service {
     ///  - timestamp is expired (lower than current local UNIX timestamp)
     fn ensure_not_expired(&self, timestamp: u64) -> Result<(), ()> {
         // ensure the timestamp is a valid UNIX timestamp
-        let _ = i64::try_from(timestamp).map_err(|_| ())?;
+        let _ = i64::try_from(timestamp).map_err(drop)?;
 
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         if self.config.enforce_expiration_timestamps && timestamp < now {

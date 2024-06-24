@@ -1,7 +1,7 @@
 //! Main node command for launching a node
 
 use crate::args::{
-    utils::{chain_help, genesis_value_parser, parse_socket_address, SUPPORTED_CHAINS},
+    utils::{chain_help, chain_value_parser, parse_socket_address, SUPPORTED_CHAINS},
     DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
     RpcServerArgs, TxPoolArgs,
 };
@@ -29,7 +29,7 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
         long_help = chain_help(),
         default_value = SUPPORTED_CHAINS[0],
         default_value_if("dev", "true", "dev"),
-        value_parser = genesis_value_parser,
+        value_parser = chain_value_parser,
         required = false,
     )]
     pub chain: Arc<ChainSpec>,

@@ -1,7 +1,7 @@
 #![allow(missing_docs, unreachable_pub)]
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
-use reth_primitives::{keccak256, revm::compat::into_reth_acc, Address, B256, U256};
+use reth_primitives::{keccak256, Address, B256, U256};
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::db::{states::BundleBuilder, BundleAccount};
 use std::collections::HashMap;
@@ -30,7 +30,7 @@ fn from_bundle_state_seq(state: &HashMap<Address, BundleAccount>) -> HashedPostS
 
     for (address, account) in state {
         let hashed_address = keccak256(address);
-        this.accounts.insert(hashed_address, account.info.clone().map(into_reth_acc));
+        this.accounts.insert(hashed_address, account.info.clone().map(Into::into));
 
         let hashed_storage = HashedStorage::from_iter(
             account.status.was_destroyed(),

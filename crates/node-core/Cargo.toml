@@ -41,6 +41,7 @@ reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 
 # ethereum
+alloy-genesis.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 # async
