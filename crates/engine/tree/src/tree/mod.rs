@@ -22,6 +22,7 @@ use reth_rpc_types::{
     },
     ExecutionPayload,
 };
+use reth_trie::updates::TrieUpdates;
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
@@ -38,7 +39,7 @@ pub struct ExecutedBlock {
     block: Arc<SealedBlock>,
     senders: Arc<Vec<Address>>,
     execution_output: Arc<ExecutionOutcome>,
-    trie: Arc<()>,
+    trie: Arc<TrieUpdates>,
 }
 
 /// Keeps track of the state of the tree.
@@ -354,6 +355,7 @@ where
             .unwrap();
 
         // TODO: compute and validate state root
+        let trie_output = TrieUpdates::default();
 
         let _executed = ExecutedBlock {
             block: Arc::new(block.block.seal(block_hash)),
@@ -364,7 +366,7 @@ where
                 block_number,
                 vec![Requests::from(output.requests)],
             )),
-            trie: Arc::new(()),
+            trie: Arc::new(trie_output),
         };
 
         todo!()
