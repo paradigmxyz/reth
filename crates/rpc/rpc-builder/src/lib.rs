@@ -1821,7 +1821,7 @@ pub struct RpcServerHandle {
     http: Option<ServerHandle>,
     ws: Option<ServerHandle>,
     ipc_endpoint: Option<String>,
-    ipc: Option<reth_ipc::server::ServerHandle>,
+    ipc: Option<jsonrpsee::server::ServerHandle>,
     jwt_secret: Option<JwtSecret>,
 }
 
