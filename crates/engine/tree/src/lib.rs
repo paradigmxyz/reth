@@ -18,6 +18,8 @@ pub mod chain;
 pub mod download;
 /// Engine Api chain handler support.
 pub mod engine;
+/// The background writer task for batch db writes.
+pub mod persistence;
 /// Support for managing the pipeline.
 pub mod pipeline;
 /// Support for interacting with the blockchain tree.
