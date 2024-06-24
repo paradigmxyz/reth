@@ -26,8 +26,6 @@ use reth_primitives_traits::{
     Header, SealedHeader,
 };
 use reth_trie_common::root::state_root_ref_unhashed;
-#[cfg(feature = "optimism")]
-use serde::Deserialize;
 #[cfg(feature = "std")]
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -1170,7 +1168,7 @@ impl DepositContract {
 
 /// Genesis info for Optimism.
 #[cfg(feature = "optimism")]
-#[derive(Default, Debug, Deserialize)]
+#[derive(Default, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OptimismGenesisInfo {
     bedrock_block: Option<u64>,
@@ -1183,7 +1181,7 @@ struct OptimismGenesisInfo {
 }
 
 #[cfg(feature = "optimism")]
-#[derive(Deserialize)]
+#[derive(Debug, Eq, PartialEq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OptimismBaseFeeInfo {
     eip1559_elasticity: Option<u64>,
@@ -2960,5 +2958,77 @@ Post-merge hard forks (timestamp based):
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, 30));
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, 40));
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, 50));
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn parse_genesis_optimism_with_variable_base_fee_params() {
+        let geth_genesis = r#"
+    {
+      "config": {
+        "chainId": 8453,
+        "homesteadBlock": 0,
+        "eip150Block": 0,
+        "eip155Block": 0,
+        "eip158Block": 0,
+        "byzantiumBlock": 0,
+        "constantinopleBlock": 0,
+        "petersburgBlock": 0,
+        "istanbulBlock": 0,
+        "muirGlacierBlock": 0,
+        "berlinBlock": 0,
+        "londonBlock": 0,
+        "arrowGlacierBlock": 0,
+        "grayGlacierBlock": 0,
+        "mergeNetsplitBlock": 0,
+        "bedrockBlock": 0,
+        "regolithTime": 15,
+        "terminalTotalDifficulty": 0,
+        "terminalTotalDifficultyPassed": true,
+        "optimism": {
+          "eip1559Elasticity": 6,
+          "eip1559Denominator": 50
+        }
+      }
+    }
+    "#;
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
+        let chainspec = ChainSpec::from(genesis.clone());
+
+        let actual_chain_id = genesis.config.chain_id;
+        assert_eq!(actual_chain_id, 8453);
+
+        assert_eq!(chainspec.hardforks.get(&Hardfork::Istanbul), Some(&ForkCondition::Block(0)));
+
+        let actual_bedrock_block = genesis.config.extra_fields.get("bedrockBlock");
+        assert_eq!(actual_bedrock_block, Some(serde_json::Value::from(0)).as_ref());
+        let actual_canyon_timestamp = genesis.config.extra_fields.get("canyonTime");
+        assert_eq!(actual_canyon_timestamp, None);
+
+        assert!(genesis.config.terminal_total_difficulty_passed);
+
+        let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
+        let optimism_base_fee_info =
+            serde_json::from_value::<OptimismBaseFeeInfo>(optimism_object.clone()).unwrap();
+
+        assert_eq!(
+            optimism_base_fee_info,
+            OptimismBaseFeeInfo {
+                eip1559_elasticity: Some(6),
+                eip1559_denominator: Some(50),
+                eip1559_denominator_canyon: None,
+            }
+        );
+        assert_eq!(
+            chainspec.base_fee_params,
+            BaseFeeParamsKind::Constant(BaseFeeParams {
+                max_change_denominator: 50,
+                elasticity_multiplier: 6,
+            })
+        );
+
+        assert!(chainspec.is_fork_active_at_block(Hardfork::Bedrock, 0));
+
+        assert!(chainspec.is_fork_active_at_timestamp(Hardfork::Regolith, 20));
     }
 }
