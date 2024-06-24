@@ -292,6 +292,18 @@ where
                 }
 
                 builder
+            })
+            // ensure we configure discv5
+            .map_discv5_config_builder(|builder| {
+                builder
+                    .add_unsigned_boot_nodes(ctx.chain_spec().bootnodes().unwrap_or_default())
+                    .lookup_interval(ctx.config().network.discovery.discv5_lookup_interval)
+                    .bootstrap_lookup_interval(
+                        ctx.config().network.discovery.discv5_bootstrap_lookup_interval,
+                    )
+                    .bootstrap_lookup_countdown(
+                        ctx.config().network.discovery.discv5_bootstrap_lookup_countdown,
+                    )
             });
 
         let mut network_config = ctx.build_network_config(network_builder);
