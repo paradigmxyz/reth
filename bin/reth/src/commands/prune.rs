@@ -5,6 +5,7 @@ use clap::Parser;
 use reth_provider::BlockNumReader;
 use reth_prune::PrunerBuilder;
 
+/// Prunes according to the configuration without any limits
 #[derive(Debug, Parser)]
 pub struct PruneCommand {
     #[command(flatten)]
