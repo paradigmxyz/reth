@@ -1,4 +1,4 @@
-use crate::{ChainHardforks, EthereumHardfork, ForkCondition, OptimismHardfork};
+use crate::{ChainHardforks, EthereumHardfork, ForkCondition};
 use alloy_primitives::U256;
 use once_cell::sync::Lazy;
 
