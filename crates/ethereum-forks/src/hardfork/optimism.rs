@@ -1,4 +1,4 @@
-use crate::{define_hardfork_enum, hardfork::ethereum::Hardfork, HardforkTrait};
+use crate::{define_hardfork_enum, hardfork::ethereum::EthereumHardfork, Hardfork};
 use alloy_chains::Chain;
 use core::{
     fmt,

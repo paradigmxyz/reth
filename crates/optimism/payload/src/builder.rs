@@ -14,7 +14,7 @@ use reth_primitives::{
     eip4844::calculate_excess_blob_gas,
     proofs,
     revm::env::tx_env_with_recovered,
-    Block, Hardfork, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
+    Block, EthereumHardfork, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
     U256,
 };
 use reth_provider::StateProviderFactory;
@@ -282,7 +282,7 @@ where
     let block_number = initialized_block_env.number.to::<u64>();
 
     let is_regolith = chain_spec
-        .is_fork_active_at_timestamp(Hardfork::Regolith, attributes.payload_attributes.timestamp);
+        .is_fork_active_at_timestamp(EthereumHardfork::Regolith, attributes.payload_attributes.timestamp);
 
     // apply eip-4788 pre block contract call
     pre_block_beacon_root_contract_call(
@@ -393,7 +393,7 @@ where
             // ensures this is only set for post-Canyon deposit transactions.
             deposit_receipt_version: chain_spec
                 .is_fork_active_at_timestamp(
-                    Hardfork::Canyon,
+                    EthereumHardfork::Canyon,
                     attributes.payload_attributes.timestamp,
                 )
                 .then_some(1),

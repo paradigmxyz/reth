@@ -770,7 +770,7 @@ mod tests {
         UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_network_peers::pk2id;
-    use reth_primitives::{ForkFilter, Hardfork};
+    use reth_primitives::{ForkFilter, EthereumHardfork};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::{
         net::{TcpListener, TcpStream},
@@ -920,7 +920,7 @@ mod tests {
                 local_peer_id,
                 status: StatusBuilder::default().build(),
                 fork_filter: MAINNET
-                    .hardfork_fork_filter(Hardfork::Frontier)
+                    .hardfork_fork_filter(EthereumHardfork::Frontier)
                     .expect("The Frontier fork filter should exist on mainnet"),
             }
         }

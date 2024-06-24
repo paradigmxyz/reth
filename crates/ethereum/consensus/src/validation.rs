@@ -1,4 +1,4 @@
-use reth_chainspec::{chains::ethereum::EthereumHardforksTrait, ChainSpec};
+use reth_chainspec::{chains::ethereum::EthereumHardforks, ChainSpec};
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     gas_spent_by_transactions, BlockWithSenders, Bloom, GotExpected, Receipt, Request, B256,

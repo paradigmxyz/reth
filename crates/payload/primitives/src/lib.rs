@@ -20,7 +20,7 @@ pub use traits::{BuiltPayload, PayloadAttributes, PayloadBuilderAttributes};
 mod payload;
 pub use payload::PayloadOrAttributes;
 
-use reth_chainspec::{chains::ethereum::EthereumHardforksTrait, ChainSpec};
+use reth_chainspec::{chains::ethereum::EthereumHardforks, ChainSpec};
 /// The types that are used by the engine API.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone {
     /// The built payload type.

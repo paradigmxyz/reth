@@ -4,54 +4,55 @@ use core::any::Any;
 use alloc::{format, string::String};
 
 pub(crate) mod ethereum;
-pub use ethereum::Hardfork;
+pub use ethereum::EthereumHardfork;
 
 #[cfg(feature = "optimism")]
 pub(crate) mod optimism;
 
 /// Generic hardfork trait.
-pub trait HardforkTrait: Any + HardforkTraitClone + Send + Sync + 'static {
+pub trait Hardfork: Any + HardforkTraitClone + Send + Sync + 'static {
+    /// Fork name.
     fn name(&self) -> &'static str;
 }
 
-impl HardforkTrait for Box<dyn HardforkTrait> {
+impl Hardfork for Box<dyn Hardfork> {
     /// Name of an hardfork.
     fn name(&self) -> &'static str {
         (**self).name()
     }
 }
 
-impl core::fmt::Debug for dyn HardforkTrait + 'static {
+impl core::fmt::Debug for dyn Hardfork + 'static {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct(stringify!(self.name())).finish()
     }
 }
 
-impl PartialEq for dyn HardforkTrait + 'static {
+impl PartialEq for dyn Hardfork + 'static {
     fn eq(&self, other: &Self) -> bool {
         self.name() == other.name()
     }
 }
 
-impl Eq for dyn HardforkTrait + 'static {}
+impl Eq for dyn Hardfork + 'static {}
 
 // Define a cloning trait
 pub trait HardforkTraitClone {
-    fn clone_box(&self) -> Box<dyn HardforkTrait>;
+    fn clone_box(&self) -> Box<dyn Hardfork>;
 }
 
 // Implement the cloning trait for any type implementing HardforkTrait and Clone
 impl<T> HardforkTraitClone for T
 where
-    T: 'static + HardforkTrait + Clone,
+    T: 'static + Hardfork + Clone,
 {
-    fn clone_box(&self) -> Box<dyn HardforkTrait> {
+    fn clone_box(&self) -> Box<dyn Hardfork> {
         Box::new(self.clone())
     }
 }
 
 // Implement Clone for Box<dyn HardforkTrait>
-impl Clone for Box<dyn HardforkTrait> {
+impl Clone for Box<dyn Hardfork> {
     fn clone(&self) -> Self {
         self.clone_box()
     }
@@ -79,7 +80,7 @@ macro_rules! define_hardfork_enum {
             }
 
             /// Boxes `self` and returns it as `Box<dyn HardforkTrait>`.
-            pub fn boxed(self) -> Box<dyn HardforkTrait> {
+            pub fn boxed(self) -> Box<dyn Hardfork> {
                 Box::new(self)
             }
         }
@@ -95,7 +96,7 @@ macro_rules! define_hardfork_enum {
             }
         }
 
-        impl HardforkTrait for $enum {
+        impl Hardfork for $enum {
             fn name(&self) -> &'static str {
                 self.name()
             }
@@ -140,28 +141,28 @@ mod tests {
             "PrAguE",
         ];
         let expected_hardforks = [
-            Hardfork::Frontier,
-            Hardfork::Homestead,
-            Hardfork::Dao,
-            Hardfork::Tangerine,
-            Hardfork::SpuriousDragon,
-            Hardfork::Byzantium,
-            Hardfork::Constantinople,
-            Hardfork::Petersburg,
-            Hardfork::Istanbul,
-            Hardfork::MuirGlacier,
-            Hardfork::Berlin,
-            Hardfork::London,
-            Hardfork::ArrowGlacier,
-            Hardfork::GrayGlacier,
-            Hardfork::Paris,
-            Hardfork::Shanghai,
-            Hardfork::Cancun,
-            Hardfork::Prague,
+            EthereumHardfork::Frontier,
+            EthereumHardfork::Homestead,
+            EthereumHardfork::Dao,
+            EthereumHardfork::Tangerine,
+            EthereumHardfork::SpuriousDragon,
+            EthereumHardfork::Byzantium,
+            EthereumHardfork::Constantinople,
+            EthereumHardfork::Petersburg,
+            EthereumHardfork::Istanbul,
+            EthereumHardfork::MuirGlacier,
+            EthereumHardfork::Berlin,
+            EthereumHardfork::London,
+            EthereumHardfork::ArrowGlacier,
+            EthereumHardfork::GrayGlacier,
+            EthereumHardfork::Paris,
+            EthereumHardfork::Shanghai,
+            EthereumHardfork::Cancun,
+            EthereumHardfork::Prague,
         ];
 
-        let hardforks: Vec<Hardfork> =
-            hardfork_str.iter().map(|h| Hardfork::from_str(h).unwrap()).collect();
+        let hardforks: Vec<EthereumHardfork> =
+            hardfork_str.iter().map(|h| EthereumHardfork::from_str(h).unwrap()).collect();
 
         assert_eq!(hardforks, expected_hardforks);
     }
@@ -186,6 +187,6 @@ mod tests {
 
     #[test]
     fn check_nonexistent_hardfork_from_str() {
-        assert!(Hardfork::from_str("not a hardfork").is_err());
+        assert!(EthereumHardfork::from_str("not a hardfork").is_err());
     }
 }

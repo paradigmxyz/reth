@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_chainspec::{
-    chains::ethereum::EthereumHardforksTrait, Chain, ChainSpec, Hardfork, HardforksTrait,
+    chains::ethereum::EthereumHardforks, Chain, ChainSpec, EthereumHardfork, Hardforks,
 };
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
@@ -53,7 +53,7 @@ impl EthBeaconConsensus {
     ) -> Result<(), ConsensusError> {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
         let parent_gas_limit =
-            if self.chain_spec.fork(Hardfork::London).transitions_at_block(header.number) {
+            if self.chain_spec.fork(EthereumHardfork::London).transitions_at_block(header.number) {
                 parent.gas_limit *
                     self.chain_spec
                         .base_fee_params_at_timestamp(header.timestamp)
@@ -155,7 +155,7 @@ impl Consensus for EthBeaconConsensus {
     ) -> Result<(), ConsensusError> {
         let is_post_merge = self
             .chain_spec
-            .fork(Hardfork::Paris)
+            .fork(EthereumHardfork::Paris)
             .active_at_ttd(total_difficulty, header.difficulty);
 
         if is_post_merge {

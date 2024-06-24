@@ -1,32 +1,21 @@
 use core::any::Any;
 
-use super::ethereum::EthereumHardforksTrait;
+use super::ethereum::EthereumHardforks;
 use crate::{
-    generate_forks_type,
     hardfork::optimism::OptimismHardfork,
-    hardforks::{HardforksBaseType, HardforksTrait},
-    EthereumForks, ForkCondition, Hardfork, HardforkTrait,
+    hardforks::{ChainHardforks, Hardforks},
+    ForkCondition, EthereumHardfork, Hardfork,
 };
 use alloy_primitives::U256;
 use once_cell::sync::Lazy;
 
 /// Extends [`EthereumHardforksTrait`] with optimism helper methods.
-trait OptimismHardforksTrait: EthereumHardforksTrait {
+trait OptimismHardforks: EthereumHardforks {
     /// Convenience method to check if [`Hardfork::Bedrock`] is active at a given block number.
     fn is_bedrock_active_at_block(&self, block_number: u64) -> bool {
         self.fork(OptimismHardfork::Bedrock).active_at_block(block_number)
     }
-}
 
-generate_forks_type!(
-    /// Wrapper type over a list of Optimism forks.
-    OptimismForks
-);
-
-impl EthereumHardforksTrait for OptimismForks {}
-impl OptimismHardforksTrait for OptimismForks {}
-
-impl OptimismForks {
     fn resolve<H, HF, OHF>(
         &self,
         fork: H,
@@ -34,41 +23,41 @@ impl OptimismForks {
         optimism_hardfork_fn: OHF,
     ) -> Option<u64>
     where
-        H: HardforkTrait,
-        HF: Fn(&Hardfork) -> Option<u64>,
+        H: Hardfork,
+        HF: Fn(&EthereumHardfork) -> Option<u64>,
         OHF: Fn(&OptimismHardfork) -> Option<u64>,
     {
         let fork: &dyn Any = &fork;
-        if let Some(fork) = fork.downcast_ref::<Hardfork>() {
+        if let Some(fork) = fork.downcast_ref::<EthereumHardfork>() {
             return hardfork_fn(fork)
         }
         fork.downcast_ref::<OptimismHardfork>().and_then(|fork| optimism_hardfork_fn(fork))
     }
 
     /// Retrieves the activation block for the specified hardfork on the Base Sepolia testnet.
-    fn base_sepolia_activation_block<H: HardforkTrait>(&self, fork: H) -> Option<u64> {
+    fn base_sepolia_activation_block<H: Hardfork>(&self, fork: H) -> Option<u64> {
         self.resolve(
             fork,
             |fork| {
                 #[allow(unreachable_patterns)]
                 match fork {
-                    Hardfork::Frontier |
-                    Hardfork::Homestead |
-                    Hardfork::Dao |
-                    Hardfork::Tangerine |
-                    Hardfork::SpuriousDragon |
-                    Hardfork::Byzantium |
-                    Hardfork::Constantinople |
-                    Hardfork::Petersburg |
-                    Hardfork::Istanbul |
-                    Hardfork::MuirGlacier |
-                    Hardfork::Berlin |
-                    Hardfork::London |
-                    Hardfork::ArrowGlacier |
-                    Hardfork::GrayGlacier |
-                    Hardfork::Paris |
-                    Hardfork::Shanghai => Some(2106456),
-                    Hardfork::Cancun => Some(6383256),
+                    EthereumHardfork::Frontier |
+                    EthereumHardfork::Homestead |
+                    EthereumHardfork::Dao |
+                    EthereumHardfork::Tangerine |
+                    EthereumHardfork::SpuriousDragon |
+                    EthereumHardfork::Byzantium |
+                    EthereumHardfork::Constantinople |
+                    EthereumHardfork::Petersburg |
+                    EthereumHardfork::Istanbul |
+                    EthereumHardfork::MuirGlacier |
+                    EthereumHardfork::Berlin |
+                    EthereumHardfork::London |
+                    EthereumHardfork::ArrowGlacier |
+                    EthereumHardfork::GrayGlacier |
+                    EthereumHardfork::Paris |
+                    EthereumHardfork::Shanghai => Some(2106456),
+                    EthereumHardfork::Cancun => Some(6383256),
                     _ => None,
                 }
             },
@@ -86,29 +75,29 @@ impl OptimismForks {
     }
 
     /// Retrieves the activation block for the specified hardfork on the Base mainnet.
-    fn base_mainnet_activation_block<H: HardforkTrait>(&self, fork: H) -> Option<u64> {
+    fn base_mainnet_activation_block<H: Hardfork>(&self, fork: H) -> Option<u64> {
         self.resolve(
             fork,
             |fork| {
                 #[allow(unreachable_patterns)]
                 match fork {
-                    Hardfork::Frontier |
-                    Hardfork::Homestead |
-                    Hardfork::Dao |
-                    Hardfork::Tangerine |
-                    Hardfork::SpuriousDragon |
-                    Hardfork::Byzantium |
-                    Hardfork::Constantinople |
-                    Hardfork::Petersburg |
-                    Hardfork::Istanbul |
-                    Hardfork::MuirGlacier |
-                    Hardfork::Berlin |
-                    Hardfork::London |
-                    Hardfork::ArrowGlacier |
-                    Hardfork::GrayGlacier |
-                    Hardfork::Paris |
-                    Hardfork::Shanghai => Some(9101527),
-                    Hardfork::Cancun => Some(11188936),
+                    EthereumHardfork::Frontier |
+                    EthereumHardfork::Homestead |
+                    EthereumHardfork::Dao |
+                    EthereumHardfork::Tangerine |
+                    EthereumHardfork::SpuriousDragon |
+                    EthereumHardfork::Byzantium |
+                    EthereumHardfork::Constantinople |
+                    EthereumHardfork::Petersburg |
+                    EthereumHardfork::Istanbul |
+                    EthereumHardfork::MuirGlacier |
+                    EthereumHardfork::Berlin |
+                    EthereumHardfork::London |
+                    EthereumHardfork::ArrowGlacier |
+                    EthereumHardfork::GrayGlacier |
+                    EthereumHardfork::Paris |
+                    EthereumHardfork::Shanghai => Some(9101527),
+                    EthereumHardfork::Cancun => Some(11188936),
                     _ => None,
                 }
             },
@@ -125,29 +114,29 @@ impl OptimismForks {
     }
 
     /// Retrieves the activation timestamp for the specified hardfork on the Base Sepolia testnet.
-    fn base_sepolia_activation_timestamp<H: HardforkTrait>(&self, fork: H) -> Option<u64> {
+    fn base_sepolia_activation_timestamp<H: Hardfork>(&self, fork: H) -> Option<u64> {
         self.resolve(
             fork,
             |fork| {
                 #[allow(unreachable_patterns)]
                 match fork {
-                    Hardfork::Frontier |
-                    Hardfork::Homestead |
-                    Hardfork::Dao |
-                    Hardfork::Tangerine |
-                    Hardfork::SpuriousDragon |
-                    Hardfork::Byzantium |
-                    Hardfork::Constantinople |
-                    Hardfork::Petersburg |
-                    Hardfork::Istanbul |
-                    Hardfork::MuirGlacier |
-                    Hardfork::Berlin |
-                    Hardfork::London |
-                    Hardfork::ArrowGlacier |
-                    Hardfork::GrayGlacier |
-                    Hardfork::Paris |
-                    Hardfork::Shanghai => Some(1699981200),
-                    Hardfork::Cancun => Some(1708534800),
+                    EthereumHardfork::Frontier |
+                    EthereumHardfork::Homestead |
+                    EthereumHardfork::Dao |
+                    EthereumHardfork::Tangerine |
+                    EthereumHardfork::SpuriousDragon |
+                    EthereumHardfork::Byzantium |
+                    EthereumHardfork::Constantinople |
+                    EthereumHardfork::Petersburg |
+                    EthereumHardfork::Istanbul |
+                    EthereumHardfork::MuirGlacier |
+                    EthereumHardfork::Berlin |
+                    EthereumHardfork::London |
+                    EthereumHardfork::ArrowGlacier |
+                    EthereumHardfork::GrayGlacier |
+                    EthereumHardfork::Paris |
+                    EthereumHardfork::Shanghai => Some(1699981200),
+                    EthereumHardfork::Cancun => Some(1708534800),
                     _ => None,
                 }
             },
@@ -165,29 +154,29 @@ impl OptimismForks {
     }
 
     /// Retrieves the activation timestamp for the specified hardfork on the Base mainnet.
-    fn base_mainnet_activation_timestamp<H: HardforkTrait>(&self, fork: H) -> Option<u64> {
+    fn base_mainnet_activation_timestamp<H: Hardfork>(&self, fork: H) -> Option<u64> {
         self.resolve(
             fork,
             |fork| {
                 #[allow(unreachable_patterns)]
                 match fork {
-                    Hardfork::Frontier |
-                    Hardfork::Homestead |
-                    Hardfork::Dao |
-                    Hardfork::Tangerine |
-                    Hardfork::SpuriousDragon |
-                    Hardfork::Byzantium |
-                    Hardfork::Constantinople |
-                    Hardfork::Petersburg |
-                    Hardfork::Istanbul |
-                    Hardfork::MuirGlacier |
-                    Hardfork::Berlin |
-                    Hardfork::London |
-                    Hardfork::ArrowGlacier |
-                    Hardfork::GrayGlacier |
-                    Hardfork::Paris |
-                    Hardfork::Shanghai => Some(1704992401),
-                    Hardfork::Cancun => Some(1710374401),
+                    EthereumHardfork::Frontier |
+                    EthereumHardfork::Homestead |
+                    EthereumHardfork::Dao |
+                    EthereumHardfork::Tangerine |
+                    EthereumHardfork::SpuriousDragon |
+                    EthereumHardfork::Byzantium |
+                    EthereumHardfork::Constantinople |
+                    EthereumHardfork::Petersburg |
+                    EthereumHardfork::Istanbul |
+                    EthereumHardfork::MuirGlacier |
+                    EthereumHardfork::Berlin |
+                    EthereumHardfork::London |
+                    EthereumHardfork::ArrowGlacier |
+                    EthereumHardfork::GrayGlacier |
+                    EthereumHardfork::Paris |
+                    EthereumHardfork::Shanghai => Some(1704992401),
+                    EthereumHardfork::Cancun => Some(1710374401),
                     _ => None,
                 }
             },
@@ -205,121 +194,123 @@ impl OptimismForks {
     }
 }
 
+impl OptimismHardforks for ChainHardforks {}
+
 /// Optimism mainnet hardforks
-pub static OP_MAINNET_HARDFORKS: Lazy<OptimismForks> = Lazy::new(|| {
-    OptimismForks(vec![
-        (Hardfork::Frontier.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Homestead.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-        (Hardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Petersburg.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-        (Hardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Berlin.boxed(), ForkCondition::Block(3950000)),
-        (Hardfork::London.boxed(), ForkCondition::Block(105235063)),
-        (Hardfork::ArrowGlacier.boxed(), ForkCondition::Block(105235063)),
-        (Hardfork::GrayGlacier.boxed(), ForkCondition::Block(105235063)),
+pub static OP_MAINNET_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
+    ChainHardforks(vec![
+        (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(3950000)),
+        (EthereumHardfork::London.boxed(), ForkCondition::Block(105235063)),
+        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(105235063)),
+        (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(105235063)),
         (
-            Hardfork::Paris.boxed(),
+            EthereumHardfork::Paris.boxed(),
             ForkCondition::TTD { fork_block: Some(105235063), total_difficulty: U256::ZERO },
         ),
         (OptimismHardfork::Bedrock.boxed(), ForkCondition::Block(105235063)),
         (OptimismHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        (Hardfork::Shanghai.boxed(), ForkCondition::Timestamp(1704992401)),
+        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1704992401)),
         (OptimismHardfork::Canyon.boxed(), ForkCondition::Timestamp(1704992401)),
-        (Hardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
+        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
         (OptimismHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
         (OptimismHardfork::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
     ])
 });
 
 /// Optimism Sepolia hardforks
-pub static OP_SEPOLIA_HARDFORKS: Lazy<OptimismForks> = Lazy::new(|| {
-    OptimismForks(vec![
-        (Hardfork::Frontier.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Homestead.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-        (Hardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Petersburg.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-        (Hardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Berlin.boxed(), ForkCondition::Block(0)),
-        (Hardfork::London.boxed(), ForkCondition::Block(0)),
-        (Hardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
-        (Hardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
+pub static OP_SEPOLIA_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
+    ChainHardforks(vec![
+        (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
         (
-            Hardfork::Paris.boxed(),
+            EthereumHardfork::Paris.boxed(),
             ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
         ),
         (OptimismHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
         (OptimismHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        (Hardfork::Shanghai.boxed(), ForkCondition::Timestamp(1699981200)),
+        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1699981200)),
         (OptimismHardfork::Canyon.boxed(), ForkCondition::Timestamp(1699981200)),
-        (Hardfork::Cancun.boxed(), ForkCondition::Timestamp(1708534800)),
+        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1708534800)),
         (OptimismHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
         (OptimismHardfork::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
     ])
 });
 
 /// Base Sepolia hardforks
-pub static BASE_SEPOLIA_HARDFORKS: Lazy<OptimismForks> = Lazy::new(|| {
-    OptimismForks(vec![
-        (Hardfork::Frontier.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Homestead.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-        (Hardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Petersburg.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-        (Hardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Berlin.boxed(), ForkCondition::Block(0)),
-        (Hardfork::London.boxed(), ForkCondition::Block(0)),
-        (Hardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
-        (Hardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
+pub static BASE_SEPOLIA_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
+    ChainHardforks(vec![
+        (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
         (
-            Hardfork::Paris.boxed(),
+            EthereumHardfork::Paris.boxed(),
             ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
         ),
         (OptimismHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
         (OptimismHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        (Hardfork::Shanghai.boxed(), ForkCondition::Timestamp(1699981200)),
+        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1699981200)),
         (OptimismHardfork::Canyon.boxed(), ForkCondition::Timestamp(1699981200)),
-        (Hardfork::Cancun.boxed(), ForkCondition::Timestamp(1708534800)),
+        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1708534800)),
         (OptimismHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1708534800)),
         (OptimismHardfork::Fjord.boxed(), ForkCondition::Timestamp(1716998400)),
     ])
 });
 
 /// Base Mainnet hardforks
-pub static BASE_MAINNET_HARDFORKS: Lazy<OptimismForks> = Lazy::new(|| {
-    OptimismForks(vec![
-        (Hardfork::Frontier.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Homestead.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-        (Hardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Petersburg.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-        (Hardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
-        (Hardfork::Berlin.boxed(), ForkCondition::Block(0)),
-        (Hardfork::London.boxed(), ForkCondition::Block(0)),
-        (Hardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
-        (Hardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
+pub static BASE_MAINNET_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
+    ChainHardforks(vec![
+        (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
         (
-            Hardfork::Paris.boxed(),
+            EthereumHardfork::Paris.boxed(),
             ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
         ),
         (OptimismHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
         (OptimismHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-        (Hardfork::Shanghai.boxed(), ForkCondition::Timestamp(1704992401)),
+        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1704992401)),
         (OptimismHardfork::Canyon.boxed(), ForkCondition::Timestamp(1704992401)),
-        (Hardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
+        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1710374401)),
         (OptimismHardfork::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
         (OptimismHardfork::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
     ])

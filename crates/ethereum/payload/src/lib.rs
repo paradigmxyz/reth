@@ -22,7 +22,7 @@ use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
 };
 use reth_primitives::{
-    chains::ethereum::EthereumHardforksTrait,
+    chains::ethereum::EthereumHardforks,
     constants::{
         eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
     },

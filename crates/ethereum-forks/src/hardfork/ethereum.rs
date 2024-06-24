@@ -1,4 +1,4 @@
-use crate::{define_hardfork_enum, HardforkTrait};
+use crate::{define_hardfork_enum, Hardfork};
 use alloy_chains::Chain;
 use core::{
     fmt,
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 define_hardfork_enum!(
     /// The name of an Ethereum hardfork.
-    Hardfork {
+    EthereumHardfork {
         /// Frontier: <https://blog.ethereum.org/2015/03/03/ethereum-launch-process>.
         Frontier,
         /// Homestead: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/homestead.md>.
@@ -51,7 +51,7 @@ define_hardfork_enum!(
     }
 );
 
-impl Hardfork {
+impl EthereumHardfork {
     /// Retrieves the activation block for the specified hardfork on the given chain.
     pub fn activation_block(&self, chain: Chain) -> Option<u64> {
         if chain == Chain::mainnet() {

@@ -1,7 +1,7 @@
 //! Optimism block executor.
 
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
-use reth_chainspec::{ChainSpec, Hardfork};
+use reth_chainspec::{ChainSpec, EthereumHardfork};
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
@@ -131,7 +131,7 @@ where
 
         // execute transactions
         let is_regolith =
-            self.chain_spec.fork(Hardfork::Regolith).active_at_timestamp(block.timestamp);
+            self.chain_spec.fork(EthereumHardfork::Regolith).active_at_timestamp(block.timestamp);
 
         // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
         // blocks will always have at least a single transaction in them (the L1 info transaction),
@@ -211,7 +211,7 @@ where
                 // this is only set for post-Canyon deposit transactions.
                 deposit_receipt_version: (transaction.is_deposit() &&
                     self.chain_spec
-                        .is_fork_active_at_timestamp(Hardfork::Canyon, block.timestamp))
+                        .is_fork_active_at_timestamp(EthereumHardfork::Canyon, block.timestamp))
                 .then_some(1),
             });
         }

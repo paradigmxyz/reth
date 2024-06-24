@@ -16,7 +16,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
-use reth_chainspec::{chains::ethereum::EthereumHardforksTrait, ChainSpec};
+use reth_chainspec::{chains::ethereum::EthereumHardforks, ChainSpec};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};

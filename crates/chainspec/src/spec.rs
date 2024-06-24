@@ -17,12 +17,12 @@ use reth_ethereum_forks::{
     chains::{
         dev::DEV_HARDFORKS,
         ethereum::{
-            EthereumForks, EthereumHardforksTrait, GOERLI_HARDFORKS, HOLESKY_HARDFORKS,
-            MAINNET_HARDFORKS, SEPOLIA_HARDFORKS,
+            EthereumHardforks, GOERLI_HARDFORKS, HOLESKY_HARDFORKS, MAINNET_HARDFORKS,
+            SEPOLIA_HARDFORKS,
         },
     },
-    DisplayHardforks, ForkCondition, ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork,
-    HardforkTrait, HardforksTrait, Head,
+    DisplayHardforks, ForkCondition, ForkFilter, ForkFilterKey, ForkHash, ForkId, EthereumHardfork,
+    Hardfork, ChainHardforks, Hardforks, Head,
 };
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::{
@@ -171,7 +171,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// The Optimism Mainnet spec
 #[cfg(feature = "optimism")]
-pub static OP_MAINNET: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
+pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::optimism_mainnet(),
         // genesis contains empty alloc field because state at first bedrock block is imported
@@ -185,7 +185,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
         hardforks: OP_MAINNET_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London.boxed(), OP_BASE_FEE_PARAMS),
+                (EthereumHardfork::London.boxed(), OP_BASE_FEE_PARAMS),
                 (OptimismHardfork::Canyon.boxed(), OP_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
@@ -198,7 +198,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
 
 /// The OP Sepolia spec
 #[cfg(feature = "optimism")]
-pub static OP_SEPOLIA: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
+pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::from_named(NamedChain::OptimismSepolia),
         genesis: serde_json::from_str(include_str!("../res/genesis/sepolia_op.json"))
@@ -210,7 +210,7 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
         hardforks: OP_SEPOLIA_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London.boxed(), OP_SEPOLIA_BASE_FEE_PARAMS),
+                (EthereumHardfork::London.boxed(), OP_SEPOLIA_BASE_FEE_PARAMS),
                 (OptimismHardfork::Canyon.boxed(), OP_SEPOLIA_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
@@ -223,7 +223,7 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
 
 /// The Base Sepolia spec
 #[cfg(feature = "optimism")]
-pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
+pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::base_sepolia(),
         genesis: serde_json::from_str(include_str!("../res/genesis/sepolia_base.json"))
@@ -235,7 +235,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
         hardforks: BASE_SEPOLIA_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London.boxed(), BASE_SEPOLIA_BASE_FEE_PARAMS),
+                (EthereumHardfork::London.boxed(), BASE_SEPOLIA_BASE_FEE_PARAMS),
                 (OptimismHardfork::Canyon.boxed(), BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
@@ -248,7 +248,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
 
 /// The Base mainnet spec
 #[cfg(feature = "optimism")]
-pub static BASE_MAINNET: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
+pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: Chain::base_mainnet(),
         genesis: serde_json::from_str(include_str!("../res/genesis/base.json"))
@@ -260,7 +260,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec<OptimismForks>>> = Lazy::new(|| {
         hardforks: BASE_MAINNET_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (Hardfork::London.boxed(), OP_BASE_FEE_PARAMS),
+                (EthereumHardfork::London.boxed(), OP_BASE_FEE_PARAMS),
                 (OptimismHardfork::Canyon.boxed(), OP_CANYON_BASE_FEE_PARAMS),
             ]
             .into(),
@@ -297,10 +297,10 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 /// A type alias to a vector of tuples of [Hardfork] and [`BaseFeeParams`], sorted by [Hardfork]
 /// activation order. This is used to specify dynamic EIP-1559 parameters for chains like Optimism.
 #[derive(Clone, Debug, PartialEq, Eq, From)]
-pub struct ForkBaseFeeParams(Vec<(Box<dyn HardforkTrait>, BaseFeeParams)>);
+pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
 
-impl<H> std::ops::Deref for ChainSpec<H> {
-    type Target = H;
+impl std::ops::Deref for ChainSpec {
+    type Target = ChainHardforks;
 
     fn deref(&self) -> &Self::Target {
         &self.hardforks
@@ -315,7 +315,7 @@ impl<H> std::ops::Deref for ChainSpec<H> {
 /// - The genesis block of the chain ([`Genesis`])
 /// - What hardforks are activated, and under which conditions
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChainSpec<H = EthereumForks> {
+pub struct ChainSpec {
     /// The chain ID
     pub chain: Chain,
 
@@ -333,7 +333,7 @@ pub struct ChainSpec<H = EthereumForks> {
     pub paris_block_and_final_difficulty: Option<(u64, U256)>,
 
     /// The active hard forks and their activation conditions
-    pub hardforks: H, //BTreeMap<Hardfork, ForkCondition>,
+    pub hardforks: ChainHardforks, //BTreeMap<Hardfork, ForkCondition>,
 
     /// The deposit contract deployed for `PoS`
     pub deposit_contract: Option<DepositContract>,
@@ -347,7 +347,7 @@ pub struct ChainSpec<H = EthereumForks> {
     pub prune_delete_limit: usize,
 }
 
-impl<H: Default> Default for ChainSpec<H> {
+impl Default for ChainSpec {
     fn default() -> Self {
         Self {
             chain: Default::default(),
@@ -421,7 +421,7 @@ impl ChainSpec {
         // If shanghai is activated, initialize the header with an empty withdrawals hash, and
         // empty withdrawals list.
         let withdrawals_root = self
-            .fork(Hardfork::Shanghai)
+            .fork(EthereumHardfork::Shanghai)
             .active_at_timestamp(self.genesis.timestamp)
             .then_some(EMPTY_WITHDRAWALS);
 
@@ -482,7 +482,7 @@ impl ChainSpec {
             self.genesis.base_fee_per_gas.map(|fee| fee as u64).unwrap_or(EIP1559_INITIAL_BASE_FEE);
 
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
-        self.hardforks.fork(Hardfork::London).active_at_block(0).then_some(genesis_base_fee)
+        self.hardforks.fork(EthereumHardfork::London).active_at_block(0).then_some(genesis_base_fee)
     }
 
     /// Get the [`BaseFeeParams`] for the chain at the given timestamp.
@@ -550,17 +550,12 @@ impl ChainSpec {
     }
 
     /// Get the fork filter for the given hardfork
-    pub fn hardfork_fork_filter<H: HardforkTrait>(&self, fork: H) -> Option<ForkFilter> {
+    pub fn hardfork_fork_filter<H: Hardfork>(&self, fork: H) -> Option<ForkFilter> {
         match self.hardforks.fork(fork.clone_box()) {
             ForkCondition::Never => None,
             _ => Some(self.fork_filter(self.satisfy(self.hardforks.fork(fork)))),
         }
     }
-
-    // /// Returns the forks in this specification and their activation conditions.
-    // pub const fn hardforks(&self) -> &BTreeMap<Hardfork, ForkCondition> {
-    //     &self.hardforks
-    // }
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
@@ -572,7 +567,7 @@ impl ChainSpec {
 
     /// Get the fork id for the given hardfork.
     #[inline]
-    pub fn hardfork_fork_id<H: HardforkTrait>(&self, fork: H) -> Option<ForkId> {
+    pub fn hardfork_fork_id<H: Hardfork>(&self, fork: H) -> Option<ForkId> {
         match self.hardforks.fork(fork.clone_box()) {
             ForkCondition::Never => None,
             _ => Some(self.fork_id(&self.satisfy(self.hardforks.fork(fork)))),
@@ -582,13 +577,13 @@ impl ChainSpec {
     /// Convenience method to get the fork id for [`Hardfork::Shanghai`] from a given chainspec.
     #[inline]
     pub fn shanghai_fork_id(&self) -> Option<ForkId> {
-        self.hardfork_fork_id(Hardfork::Shanghai)
+        self.hardfork_fork_id(EthereumHardfork::Shanghai)
     }
 
     /// Convenience method to get the fork id for [`Hardfork::Cancun`] from a given chainspec.
     #[inline]
     pub fn cancun_fork_id(&self) -> Option<ForkId> {
-        self.hardfork_fork_id(Hardfork::Cancun)
+        self.hardfork_fork_id(EthereumHardfork::Cancun)
     }
 
     /// Convenience method to get the latest fork id from the chainspec. Panics if chainspec has no
@@ -752,20 +747,20 @@ impl From<Genesis> for ChainSpec {
 
         // Block-based hardforks
         let hardfork_opts = [
-            (Hardfork::Homestead.boxed(), genesis.config.homestead_block),
-            (Hardfork::Dao.boxed(), genesis.config.dao_fork_block),
-            (Hardfork::Tangerine.boxed(), genesis.config.eip150_block),
-            (Hardfork::SpuriousDragon.boxed(), genesis.config.eip155_block),
-            (Hardfork::Byzantium.boxed(), genesis.config.byzantium_block),
-            (Hardfork::Constantinople.boxed(), genesis.config.constantinople_block),
-            (Hardfork::Petersburg.boxed(), genesis.config.petersburg_block),
-            (Hardfork::Istanbul.boxed(), genesis.config.istanbul_block),
-            (Hardfork::MuirGlacier.boxed(), genesis.config.muir_glacier_block),
-            (Hardfork::Berlin.boxed(), genesis.config.berlin_block),
-            (Hardfork::London.boxed(), genesis.config.london_block),
-            (Hardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
-            (Hardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
-            #[cfg(feature = "optimism)")]
+            (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
+            (EthereumHardfork::Dao.boxed(), genesis.config.dao_fork_block),
+            (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
+            (EthereumHardfork::SpuriousDragon.boxed(), genesis.config.eip155_block),
+            (EthereumHardfork::Byzantium.boxed(), genesis.config.byzantium_block),
+            (EthereumHardfork::Constantinople.boxed(), genesis.config.constantinople_block),
+            (EthereumHardfork::Petersburg.boxed(), genesis.config.petersburg_block),
+            (EthereumHardfork::Istanbul.boxed(), genesis.config.istanbul_block),
+            (EthereumHardfork::MuirGlacier.boxed(), genesis.config.muir_glacier_block),
+            (EthereumHardfork::Berlin.boxed(), genesis.config.berlin_block),
+            (EthereumHardfork::London.boxed(), genesis.config.london_block),
+            (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
+            (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
+            #[cfg(feature = "optimism")]
             (OptimismHardfork::Bedrock.boxed(), optimism_genesis_info.bedrock_block),
         ];
         let mut hardforks = hardfork_opts
@@ -777,7 +772,7 @@ impl From<Genesis> for ChainSpec {
         let paris_block_and_final_difficulty =
             if let Some(ttd) = genesis.config.terminal_total_difficulty {
                 hardforks.insert(
-                    Hardfork::Paris.boxed(),
+                    EthereumHardfork::Paris.boxed(),
                     ForkCondition::TTD {
                         total_difficulty: ttd,
                         fork_block: genesis.config.merge_netsplit_block,
@@ -791,9 +786,9 @@ impl From<Genesis> for ChainSpec {
 
         // Time-based hardforks
         let time_hardfork_opts = [
-            (Hardfork::Shanghai.boxed(), genesis.config.shanghai_time),
-            (Hardfork::Cancun.boxed(), genesis.config.cancun_time),
-            (Hardfork::Prague.boxed(), genesis.config.prague_time),
+            (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
+            (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
+            (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
             #[cfg(feature = "optimism")]
             (OptimismHardfork::Regolith.boxed(), optimism_genesis_info.regolith_time),
             #[cfg(feature = "optimism")]
@@ -837,10 +832,10 @@ impl From<Genesis> for ChainSpec {
 
 /// A helper to build custom chain specs
 #[derive(Debug, Default, Clone)]
-pub struct ChainSpecBuilder<H = EthereumForks> {
+pub struct ChainSpecBuilder {
     chain: Option<Chain>,
     genesis: Option<Genesis>,
-    hardforks: H,
+    hardforks: ChainHardforks,
 }
 
 impl ChainSpecBuilder {
@@ -854,7 +849,7 @@ impl ChainSpecBuilder {
     }
 }
 
-impl<H: HardforksTrait> ChainSpecBuilder<H> {
+impl ChainSpecBuilder {
     /// Set the chain ID
     pub const fn chain(mut self, chain: Chain) -> Self {
         self.chain = Some(chain);
@@ -868,13 +863,13 @@ impl<H: HardforksTrait> ChainSpecBuilder<H> {
     }
 
     /// Add the given fork with the given activation condition to the spec.
-    pub fn with_fork(mut self, fork: Hardfork, condition: ForkCondition) -> Self {
+    pub fn with_fork(mut self, fork: EthereumHardfork, condition: ForkCondition) -> Self {
         self.hardforks.insert(fork, condition);
         self
     }
 
     /// Remove the given fork from the spec.
-    pub fn without_fork(mut self, fork: Hardfork) -> Self {
+    pub fn without_fork(mut self, fork: EthereumHardfork) -> Self {
         self.hardforks.remove(fork);
         self
     }
@@ -884,77 +879,77 @@ impl<H: HardforksTrait> ChainSpecBuilder<H> {
     /// Does not set the merge netsplit block.
     pub fn paris_at_ttd(self, ttd: U256) -> Self {
         self.with_fork(
-            Hardfork::Paris,
+            EthereumHardfork::Paris,
             ForkCondition::TTD { total_difficulty: ttd, fork_block: None },
         )
     }
 
     /// Enable Frontier at genesis.
     pub fn frontier_activated(mut self) -> Self {
-        self.hardforks.insert(Hardfork::Frontier, ForkCondition::Block(0));
+        self.hardforks.insert(EthereumHardfork::Frontier, ForkCondition::Block(0));
         self
     }
 
     /// Enable Homestead at genesis.
     pub fn homestead_activated(mut self) -> Self {
         self = self.frontier_activated();
-        self.hardforks.insert(Hardfork::Homestead, ForkCondition::Block(0));
+        self.hardforks.insert(EthereumHardfork::Homestead, ForkCondition::Block(0));
         self
     }
 
     /// Enable Tangerine at genesis.
     pub fn tangerine_whistle_activated(mut self) -> Self {
         self = self.homestead_activated();
-        self.hardforks.insert(Hardfork::Tangerine, ForkCondition::Block(0));
+        self.hardforks.insert(EthereumHardfork::Tangerine, ForkCondition::Block(0));
         self
     }
 
     /// Enable Spurious Dragon at genesis.
     pub fn spurious_dragon_activated(mut self) -> Self {
         self = self.tangerine_whistle_activated();
-        self.hardforks.insert(Hardfork::SpuriousDragon, ForkCondition::Block(0));
+        self.hardforks.insert(EthereumHardfork::SpuriousDragon, ForkCondition::Block(0));
         self
     }
 
     /// Enable Byzantium at genesis.
     pub fn byzantium_activated(mut self) -> Self {
         self = self.spurious_dragon_activated();
-        self.hardforks.insert(Hardfork::Byzantium, ForkCondition::Block(0));
+        self.hardforks.insert(EthereumHardfork::Byzantium, ForkCondition::Block(0));
         self
     }
 
     /// Enable Constantinople at genesis.
     pub fn constantinople_activated(mut self) -> Self {
         self = self.byzantium_activated();
-        self.hardforks.insert(Hardfork::Constantinople, ForkCondition::Block(0));
+        self.hardforks.insert(EthereumHardfork::Constantinople, ForkCondition::Block(0));
         self
     }
 
     /// Enable Petersburg at genesis.
     pub fn petersburg_activated(mut self) -> Self {
         self = self.constantinople_activated();
-        self.hardforks.insert(Hardfork::Petersburg, ForkCondition::Block(0));
+        self.hardforks.insert(EthereumHardfork::Petersburg, ForkCondition::Block(0));
         self
     }
 
     /// Enable Istanbul at genesis.
     pub fn istanbul_activated(mut self) -> Self {
         self = self.petersburg_activated();
-        self.hardforks.insert(Hardfork::Istanbul, ForkCondition::Block(0));
+        self.hardforks.insert(EthereumHardfork::Istanbul, ForkCondition::Block(0));
         self
     }
 
     /// Enable Berlin at genesis.
     pub fn berlin_activated(mut self) -> Self {
         self = self.istanbul_activated();
-        self.hardforks.insert(Hardfork::Berlin, ForkCondition::Block(0));
+        self.hardforks.insert(EthereumHardfork::Berlin, ForkCondition::Block(0));
         self
     }
 
     /// Enable London at genesis.
     pub fn london_activated(mut self) -> Self {
         self = self.berlin_activated();
-        self.hardforks.insert(Hardfork::London, ForkCondition::Block(0));
+        self.hardforks.insert(EthereumHardfork::London, ForkCondition::Block(0));
         self
     }
 
@@ -962,7 +957,7 @@ impl<H: HardforksTrait> ChainSpecBuilder<H> {
     pub fn paris_activated(mut self) -> Self {
         self = self.london_activated();
         self.hardforks.insert(
-            Hardfork::Paris,
+            EthereumHardfork::Paris,
             ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
         );
         self
@@ -971,14 +966,14 @@ impl<H: HardforksTrait> ChainSpecBuilder<H> {
     /// Enable Shanghai at genesis.
     pub fn shanghai_activated(mut self) -> Self {
         self = self.paris_activated();
-        self.hardforks.insert(Hardfork::Shanghai, ForkCondition::Timestamp(0));
+        self.hardforks.insert(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
         self
     }
 
     /// Enable Cancun at genesis.
     pub fn cancun_activated(mut self) -> Self {
         self = self.shanghai_activated();
-        self.hardforks.insert(Hardfork::Cancun, ForkCondition::Timestamp(0));
+        self.hardforks.insert(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
         self
     }
 
@@ -1003,7 +998,7 @@ impl<H: HardforksTrait> ChainSpecBuilder<H> {
     pub fn canyon_activated(mut self) -> Self {
         self = self.regolith_activated();
         // Canyon also activates changes from L1's Shanghai hardfork
-        self.hardforks.insert(Hardfork::Shanghai, ForkCondition::Timestamp(0));
+        self.hardforks.insert(EthereumHardfork::Shanghai, ForkCondition::Timestamp(0));
         self.hardforks.insert(OptimismHardfork::Canyon, ForkCondition::Timestamp(0));
         self
     }
@@ -1012,7 +1007,7 @@ impl<H: HardforksTrait> ChainSpecBuilder<H> {
     #[cfg(feature = "optimism")]
     pub fn ecotone_activated(mut self) -> Self {
         self = self.canyon_activated();
-        self.hardforks.insert(Hardfork::Cancun, ForkCondition::Timestamp(0));
+        self.hardforks.insert(EthereumHardfork::Cancun, ForkCondition::Timestamp(0));
         self.hardforks.insert(OptimismHardfork::Ecotone, ForkCondition::Timestamp(0));
         self
     }
@@ -1031,9 +1026,9 @@ impl<H: HardforksTrait> ChainSpecBuilder<H> {
     ///
     /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
     /// [`Self::genesis`])
-    pub fn build(self) -> ChainSpec<H> {
+    pub fn build(self) -> ChainSpec {
         let paris_block_and_final_difficulty = {
-            self.hardforks.get(Hardfork::Paris).and_then(|cond| {
+            self.hardforks.get(EthereumHardfork::Paris).and_then(|cond| {
                 if let ForkCondition::TTD { fork_block, total_difficulty } = cond {
                     fork_block.map(|fork_block| (fork_block, total_difficulty))
                 } else {
@@ -1041,7 +1036,7 @@ impl<H: HardforksTrait> ChainSpecBuilder<H> {
                 }
             })
         };
-        ChainSpec::<H> {
+        ChainSpec {
             chain: self.chain.expect("The chain is required"),
             genesis: self.genesis.expect("The genesis is required"),
             genesis_hash: None,
@@ -1116,7 +1111,7 @@ impl OptimismGenesisInfo {
                 BaseFeeParamsKind::Variable(
                     vec![
                         (
-                            Hardfork::London.boxed(),
+                            EthereumHardfork::London.boxed(),
                             BaseFeeParams::new(denominator as u128, elasticity as u128),
                         ),
                         (
@@ -1186,14 +1181,14 @@ mod tests {
         }
     }
 
-    fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(Hardfork, ForkId)]) {
+    fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
             if let Some(computed_id) = spec.hardfork_fork_id(*hardfork) {
                 assert_eq!(
                     expected_id, &computed_id,
                     "Expected fork ID {expected_id:?}, computed fork ID {computed_id:?} for hardfork {hardfork}"
                 );
-                if matches!(hardfork, Hardfork::Shanghai) {
+                if matches!(hardfork, EthereumHardfork::Shanghai) {
                     if let Some(shangai_id) = spec.shanghai_fork_id() {
                         assert_eq!(
                             expected_id, &shangai_id,
@@ -1239,8 +1234,8 @@ Post-merge hard forks (timestamp based):
         let spec = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(Genesis::default())
-            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
-            .with_fork(Hardfork::Shanghai, ForkCondition::Never)
+            .with_fork(EthereumHardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Never)
             .build();
         assert_eq!(
             spec.display_hardforks().to_string(),
@@ -1255,18 +1250,18 @@ Post-merge hard forks (timestamp based):
         let spec = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(Genesis::default())
-            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
-            .with_fork(Hardfork::Homestead, ForkCondition::Block(0))
-            .with_fork(Hardfork::Tangerine, ForkCondition::Block(0))
-            .with_fork(Hardfork::SpuriousDragon, ForkCondition::Block(0))
-            .with_fork(Hardfork::Byzantium, ForkCondition::Block(0))
-            .with_fork(Hardfork::Constantinople, ForkCondition::Block(0))
-            .with_fork(Hardfork::Istanbul, ForkCondition::Block(0))
-            .with_fork(Hardfork::MuirGlacier, ForkCondition::Block(0))
-            .with_fork(Hardfork::Berlin, ForkCondition::Block(0))
-            .with_fork(Hardfork::London, ForkCondition::Block(0))
-            .with_fork(Hardfork::ArrowGlacier, ForkCondition::Block(0))
-            .with_fork(Hardfork::GrayGlacier, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Homestead, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Tangerine, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::SpuriousDragon, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Byzantium, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Constantinople, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Istanbul, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::MuirGlacier, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Berlin, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::London, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::ArrowGlacier, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::GrayGlacier, ForkCondition::Block(0))
             .build();
 
         assert_eq!(spec.hardforks().len(), 12, "12 forks should be active.");
@@ -1283,16 +1278,16 @@ Post-merge hard forks (timestamp based):
         let unique_spec = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis.clone())
-            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
-            .with_fork(Hardfork::Homestead, ForkCondition::Block(1))
+            .with_fork(EthereumHardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Homestead, ForkCondition::Block(1))
             .build();
 
         let duplicate_spec = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis)
-            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
-            .with_fork(Hardfork::Homestead, ForkCondition::Block(1))
-            .with_fork(Hardfork::Tangerine, ForkCondition::Block(1))
+            .with_fork(EthereumHardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Homestead, ForkCondition::Block(1))
+            .with_fork(EthereumHardfork::Tangerine, ForkCondition::Block(1))
             .build();
 
         assert_eq!(
@@ -1309,9 +1304,9 @@ Post-merge hard forks (timestamp based):
         let happy_path_case = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis.clone())
-            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
-            .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
-            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(11313123))
+            .with_fork(EthereumHardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Homestead, ForkCondition::Block(73))
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(11313123))
             .build();
         let happy_path_head = happy_path_case.satisfy(ForkCondition::Timestamp(11313123));
         let happy_path_expected = Head { number: 73, timestamp: 11313123, ..Default::default() };
@@ -1323,10 +1318,10 @@ Post-merge hard forks (timestamp based):
         let multiple_timestamp_fork_case = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis.clone())
-            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
-            .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
-            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(11313123))
-            .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(11313398))
+            .with_fork(EthereumHardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Homestead, ForkCondition::Block(73))
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(11313123))
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(11313398))
             .build();
         let multi_timestamp_head =
             multiple_timestamp_fork_case.satisfy(ForkCondition::Timestamp(11313398));
@@ -1340,7 +1335,7 @@ Post-merge hard forks (timestamp based):
         let no_block_fork_case = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis.clone())
-            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(11313123))
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(11313123))
             .build();
         let no_block_fork_head = no_block_fork_case.satisfy(ForkCondition::Timestamp(11313123));
         let no_block_fork_expected = Head { number: 0, timestamp: 11313123, ..Default::default() };
@@ -1352,16 +1347,16 @@ Post-merge hard forks (timestamp based):
         let fork_cond_ttd_blocknum_case = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis.clone())
-            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
-            .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
+            .with_fork(EthereumHardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Homestead, ForkCondition::Block(73))
             .with_fork(
-                Hardfork::Paris,
+                EthereumHardfork::Paris,
                 ForkCondition::TTD {
                     fork_block: Some(101),
                     total_difficulty: U256::from(10_790_000),
                 },
             )
-            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(11313123))
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(11313123))
             .build();
         let fork_cond_ttd_blocknum_head =
             fork_cond_ttd_blocknum_case.satisfy(ForkCondition::Timestamp(11313123));
@@ -1378,8 +1373,8 @@ Post-merge hard forks (timestamp based):
         let fork_cond_block_only_case = ChainSpec::builder()
             .chain(Chain::mainnet())
             .genesis(empty_genesis)
-            .with_fork(Hardfork::Frontier, ForkCondition::Block(0))
-            .with_fork(Hardfork::Homestead, ForkCondition::Block(73))
+            .with_fork(EthereumHardfork::Frontier, ForkCondition::Block(0))
+            .with_fork(EthereumHardfork::Homestead, ForkCondition::Block(73))
             .build();
         let fork_cond_block_only_head = fork_cond_block_only_case.satisfy(ForkCondition::Block(73));
         let fork_cond_block_only_expected = Head { number: 73, ..Default::default() };
@@ -1407,63 +1402,63 @@ Post-merge hard forks (timestamp based):
             &MAINNET,
             &[
                 (
-                    Hardfork::Frontier,
+                    EthereumHardfork::Frontier,
                     ForkId { hash: ForkHash([0xfc, 0x64, 0xec, 0x04]), next: 1150000 },
                 ),
                 (
-                    Hardfork::Homestead,
+                    EthereumHardfork::Homestead,
                     ForkId { hash: ForkHash([0x97, 0xc2, 0xc3, 0x4c]), next: 1920000 },
                 ),
-                (Hardfork::Dao, ForkId { hash: ForkHash([0x91, 0xd1, 0xf9, 0x48]), next: 2463000 }),
+                (EthereumHardfork::Dao, ForkId { hash: ForkHash([0x91, 0xd1, 0xf9, 0x48]), next: 2463000 }),
                 (
-                    Hardfork::Tangerine,
+                    EthereumHardfork::Tangerine,
                     ForkId { hash: ForkHash([0x7a, 0x64, 0xda, 0x13]), next: 2675000 },
                 ),
                 (
-                    Hardfork::SpuriousDragon,
+                    EthereumHardfork::SpuriousDragon,
                     ForkId { hash: ForkHash([0x3e, 0xdd, 0x5b, 0x10]), next: 4370000 },
                 ),
                 (
-                    Hardfork::Byzantium,
+                    EthereumHardfork::Byzantium,
                     ForkId { hash: ForkHash([0xa0, 0x0b, 0xc3, 0x24]), next: 7280000 },
                 ),
                 (
-                    Hardfork::Constantinople,
+                    EthereumHardfork::Constantinople,
                     ForkId { hash: ForkHash([0x66, 0x8d, 0xb0, 0xaf]), next: 9069000 },
                 ),
                 (
-                    Hardfork::Petersburg,
+                    EthereumHardfork::Petersburg,
                     ForkId { hash: ForkHash([0x66, 0x8d, 0xb0, 0xaf]), next: 9069000 },
                 ),
                 (
-                    Hardfork::Istanbul,
+                    EthereumHardfork::Istanbul,
                     ForkId { hash: ForkHash([0x87, 0x9d, 0x6e, 0x30]), next: 9200000 },
                 ),
                 (
-                    Hardfork::MuirGlacier,
+                    EthereumHardfork::MuirGlacier,
                     ForkId { hash: ForkHash([0xe0, 0x29, 0xe9, 0x91]), next: 12244000 },
                 ),
                 (
-                    Hardfork::Berlin,
+                    EthereumHardfork::Berlin,
                     ForkId { hash: ForkHash([0x0e, 0xb4, 0x40, 0xf6]), next: 12965000 },
                 ),
                 (
-                    Hardfork::London,
+                    EthereumHardfork::London,
                     ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 13773000 },
                 ),
                 (
-                    Hardfork::ArrowGlacier,
+                    EthereumHardfork::ArrowGlacier,
                     ForkId { hash: ForkHash([0x20, 0xc3, 0x27, 0xfc]), next: 15050000 },
                 ),
                 (
-                    Hardfork::GrayGlacier,
+                    EthereumHardfork::GrayGlacier,
                     ForkId { hash: ForkHash([0xf0, 0xaf, 0xd0, 0xe3]), next: 1681338455 },
                 ),
                 (
-                    Hardfork::Shanghai,
+                    EthereumHardfork::Shanghai,
                     ForkId { hash: ForkHash([0xdc, 0xe9, 0x6c, 0x2d]), next: 1710338135 },
                 ),
-                (Hardfork::Cancun, ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 }),
+                (EthereumHardfork::Cancun, ForkId { hash: ForkHash([0x9f, 0x3d, 0x22, 0x54]), next: 0 }),
             ],
         );
     }
@@ -1474,50 +1469,50 @@ Post-merge hard forks (timestamp based):
             &GOERLI,
             &[
                 (
-                    Hardfork::Frontier,
+                    EthereumHardfork::Frontier,
                     ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
                 ),
                 (
-                    Hardfork::Homestead,
+                    EthereumHardfork::Homestead,
                     ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
                 ),
                 (
-                    Hardfork::Tangerine,
+                    EthereumHardfork::Tangerine,
                     ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
                 ),
                 (
-                    Hardfork::SpuriousDragon,
+                    EthereumHardfork::SpuriousDragon,
                     ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
                 ),
                 (
-                    Hardfork::Byzantium,
+                    EthereumHardfork::Byzantium,
                     ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
                 ),
                 (
-                    Hardfork::Constantinople,
+                    EthereumHardfork::Constantinople,
                     ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
                 ),
                 (
-                    Hardfork::Petersburg,
+                    EthereumHardfork::Petersburg,
                     ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
                 ),
                 (
-                    Hardfork::Istanbul,
+                    EthereumHardfork::Istanbul,
                     ForkId { hash: ForkHash([0xc2, 0x5e, 0xfa, 0x5c]), next: 4460644 },
                 ),
                 (
-                    Hardfork::Berlin,
+                    EthereumHardfork::Berlin,
                     ForkId { hash: ForkHash([0x75, 0x7a, 0x1c, 0x47]), next: 5062605 },
                 ),
                 (
-                    Hardfork::London,
+                    EthereumHardfork::London,
                     ForkId { hash: ForkHash([0xb8, 0xc6, 0x29, 0x9d]), next: 1678832736 },
                 ),
                 (
-                    Hardfork::Shanghai,
+                    EthereumHardfork::Shanghai,
                     ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 1705473120 },
                 ),
-                (Hardfork::Cancun, ForkId { hash: ForkHash([0x70, 0xcc, 0x14, 0xe2]), next: 0 }),
+                (EthereumHardfork::Cancun, ForkId { hash: ForkHash([0x70, 0xcc, 0x14, 0xe2]), next: 0 }),
             ],
         );
     }
@@ -1528,54 +1523,54 @@ Post-merge hard forks (timestamp based):
             &SEPOLIA,
             &[
                 (
-                    Hardfork::Frontier,
+                    EthereumHardfork::Frontier,
                     ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
                 ),
                 (
-                    Hardfork::Homestead,
+                    EthereumHardfork::Homestead,
                     ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
                 ),
                 (
-                    Hardfork::Tangerine,
+                    EthereumHardfork::Tangerine,
                     ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
                 ),
                 (
-                    Hardfork::SpuriousDragon,
+                    EthereumHardfork::SpuriousDragon,
                     ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
                 ),
                 (
-                    Hardfork::Byzantium,
+                    EthereumHardfork::Byzantium,
                     ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
                 ),
                 (
-                    Hardfork::Constantinople,
+                    EthereumHardfork::Constantinople,
                     ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
                 ),
                 (
-                    Hardfork::Petersburg,
+                    EthereumHardfork::Petersburg,
                     ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
                 ),
                 (
-                    Hardfork::Istanbul,
+                    EthereumHardfork::Istanbul,
                     ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
                 ),
                 (
-                    Hardfork::Berlin,
+                    EthereumHardfork::Berlin,
                     ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
                 ),
                 (
-                    Hardfork::London,
+                    EthereumHardfork::London,
                     ForkId { hash: ForkHash([0xfe, 0x33, 0x66, 0xe7]), next: 1735371 },
                 ),
                 (
-                    Hardfork::Paris,
+                    EthereumHardfork::Paris,
                     ForkId { hash: ForkHash([0xb9, 0x6c, 0xbd, 0x13]), next: 1677557088 },
                 ),
                 (
-                    Hardfork::Shanghai,
+                    EthereumHardfork::Shanghai,
                     ForkId { hash: ForkHash([0xf7, 0xf9, 0xbc, 0x08]), next: 1706655072 },
                 ),
-                (Hardfork::Cancun, ForkId { hash: ForkHash([0x88, 0xcf, 0x81, 0xd9]), next: 0 }),
+                (EthereumHardfork::Cancun, ForkId { hash: ForkHash([0x88, 0xcf, 0x81, 0xd9]), next: 0 }),
             ],
         );
     }
@@ -2076,8 +2071,8 @@ Post-merge hard forks (timestamp based):
         cancun_time: u64,
     ) -> ChainSpec {
         builder
-            .with_fork(Hardfork::Shanghai, ForkCondition::Timestamp(shanghai_time))
-            .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(cancun_time))
+            .with_fork(EthereumHardfork::Shanghai, ForkCondition::Timestamp(shanghai_time))
+            .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(cancun_time))
             .build()
     }
 
@@ -2132,14 +2127,14 @@ Post-merge hard forks (timestamp based):
         let terminal_block_ttd = U256::from(58750003716598352816469_u128);
         let terminal_block_difficulty = U256::from(11055787484078698_u128);
         assert!(!chainspec
-            .fork(Hardfork::Paris)
+            .fork(EthereumHardfork::Paris)
             .active_at_ttd(terminal_block_ttd, terminal_block_difficulty));
 
         // Check that Paris is active on first PoS block #15537394.
         let first_pos_block_ttd = U256::from(58750003716598352816469_u128);
         let first_pos_difficulty = U256::ZERO;
         assert!(chainspec
-            .fork(Hardfork::Paris)
+            .fork(EthereumHardfork::Paris)
             .active_at_ttd(first_pos_block_ttd, first_pos_difficulty));
     }
 
@@ -2215,54 +2210,54 @@ Post-merge hard forks (timestamp based):
 
         // assert a bunch of hardforks that should be set
         assert_eq!(
-            chainspec.hardforks.get(&Hardfork::Homestead).unwrap(),
+            chainspec.hardforks.get(&EthereumHardfork::Homestead).unwrap(),
             &ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&Hardfork::Tangerine).unwrap(),
+            chainspec.hardforks.get(&EthereumHardfork::Tangerine).unwrap(),
             &ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&Hardfork::SpuriousDragon).unwrap(),
+            chainspec.hardforks.get(&EthereumHardfork::SpuriousDragon).unwrap(),
             &ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&Hardfork::Byzantium).unwrap(),
+            chainspec.hardforks.get(&EthereumHardfork::Byzantium).unwrap(),
             &ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&Hardfork::Constantinople).unwrap(),
+            chainspec.hardforks.get(&EthereumHardfork::Constantinople).unwrap(),
             &ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&Hardfork::Petersburg).unwrap(),
+            chainspec.hardforks.get(&EthereumHardfork::Petersburg).unwrap(),
             &ForkCondition::Block(0)
         );
-        assert_eq!(chainspec.hardforks.get(&Hardfork::Istanbul).unwrap(), &ForkCondition::Block(0));
+        assert_eq!(chainspec.hardforks.get(&EthereumHardfork::Istanbul).unwrap(), &ForkCondition::Block(0));
         assert_eq!(
-            chainspec.hardforks.get(&Hardfork::MuirGlacier).unwrap(),
+            chainspec.hardforks.get(&EthereumHardfork::MuirGlacier).unwrap(),
             &ForkCondition::Block(0)
         );
-        assert_eq!(chainspec.hardforks.get(&Hardfork::Berlin).unwrap(), &ForkCondition::Block(0));
-        assert_eq!(chainspec.hardforks.get(&Hardfork::London).unwrap(), &ForkCondition::Block(0));
+        assert_eq!(chainspec.hardforks.get(&EthereumHardfork::Berlin).unwrap(), &ForkCondition::Block(0));
+        assert_eq!(chainspec.hardforks.get(&EthereumHardfork::London).unwrap(), &ForkCondition::Block(0));
         assert_eq!(
-            chainspec.hardforks.get(&Hardfork::ArrowGlacier).unwrap(),
+            chainspec.hardforks.get(&EthereumHardfork::ArrowGlacier).unwrap(),
             &ForkCondition::Block(0)
         );
         assert_eq!(
-            chainspec.hardforks.get(&Hardfork::GrayGlacier).unwrap(),
+            chainspec.hardforks.get(&EthereumHardfork::GrayGlacier).unwrap(),
             &ForkCondition::Block(0)
         );
 
         // including time based hardforks
         assert_eq!(
-            chainspec.hardforks.get(&Hardfork::Shanghai).unwrap(),
+            chainspec.hardforks.get(&EthereumHardfork::Shanghai).unwrap(),
             &ForkCondition::Timestamp(0)
         );
 
         // including time based hardforks
         assert_eq!(
-            chainspec.hardforks.get(&Hardfork::Cancun).unwrap(),
+            chainspec.hardforks.get(&EthereumHardfork::Cancun).unwrap(),
             &ForkCondition::Timestamp(1)
         );
 
@@ -2359,11 +2354,11 @@ Post-merge hard forks (timestamp based):
             hex!("9a6049ac535e3dc7436c189eaa81c73f35abd7f282ab67c32944ff0301d63360").into();
         assert_eq!(chainspec.genesis_header().state_root, expected_state_root);
         let hard_forks = vec![
-            Hardfork::Byzantium,
-            Hardfork::Homestead,
-            Hardfork::Istanbul,
-            Hardfork::Petersburg,
-            Hardfork::Constantinople,
+            EthereumHardfork::Byzantium,
+            EthereumHardfork::Homestead,
+            EthereumHardfork::Istanbul,
+            EthereumHardfork::Petersburg,
+            EthereumHardfork::Constantinople,
         ];
         for ref fork in hard_forks {
             assert_eq!(chainspec.hardforks.get(fork).unwrap(), &ForkCondition::Block(0));
@@ -2615,7 +2610,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn holesky_paris_activated_at_genesis() {
         assert!(HOLESKY
-            .fork(Hardfork::Paris)
+            .fork(EthereumHardfork::Paris)
             .active_at_ttd(HOLESKY.genesis.difficulty, HOLESKY.genesis.difficulty));
     }
 
@@ -2669,13 +2664,13 @@ Post-merge hard forks (timestamp based):
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
             genesis_hash: None,
-            hardforks: BTreeMap::from([(Hardfork::Frontier, ForkCondition::Never)]),
+            hardforks: BTreeMap::from([(EthereumHardfork::Frontier, ForkCondition::Never)]),
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
             ..Default::default()
         };
 
-        assert_eq!(spec.hardfork_fork_id(Hardfork::Frontier), None);
+        assert_eq!(spec.hardfork_fork_id(EthereumHardfork::Frontier), None);
     }
 
     #[test]
@@ -2684,13 +2679,13 @@ Post-merge hard forks (timestamp based):
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
             genesis_hash: None,
-            hardforks: BTreeMap::from([(Hardfork::Shanghai, ForkCondition::Never)]),
+            hardforks: BTreeMap::from([(EthereumHardfork::Shanghai, ForkCondition::Never)]),
             paris_block_and_final_difficulty: None,
             deposit_contract: None,
             ..Default::default()
         };
 
-        assert_eq!(spec.hardfork_fork_filter(Hardfork::Shanghai), None);
+        assert_eq!(spec.hardfork_fork_filter(EthereumHardfork::Shanghai), None);
     }
 
     #[test]
@@ -2808,17 +2803,17 @@ Post-merge hard forks (timestamp based):
             BaseFeeParamsKind::Constant(BaseFeeParams::new(70, 60))
         );
 
-        assert!(!chain_spec.is_fork_active_at_block(Hardfork::Bedrock, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, 0));
+        assert!(!chain_spec.is_fork_active_at_block(EthereumHardfork::Bedrock, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Regolith, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Ecotone, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Fjord, 0));
 
-        assert!(chain_spec.is_fork_active_at_block(Hardfork::Bedrock, 10));
-        assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, 20));
+        assert!(chain_spec.is_fork_active_at_block(EthereumHardfork::Bedrock, 10));
+        assert!(chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Regolith, 20));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
-        assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, 40));
-        assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, 50));
+        assert!(chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Ecotone, 40));
+        assert!(chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Fjord, 50));
     }
 
     #[cfg(feature = "optimism")]
@@ -2869,23 +2864,23 @@ Post-merge hard forks (timestamp based):
             chain_spec.base_fee_params,
             BaseFeeParamsKind::Variable(
                 vec![
-                    (Hardfork::London, BaseFeeParams::new(70, 60)),
+                    (EthereumHardfork::London, BaseFeeParams::new(70, 60)),
                     (OptimismHardfork::Canyon, BaseFeeParams::new(80, 60)),
                 ]
                 .into()
             )
         );
 
-        assert!(!chain_spec.is_fork_active_at_block(Hardfork::Bedrock, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, 0));
+        assert!(!chain_spec.is_fork_active_at_block(EthereumHardfork::Bedrock, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Regolith, 0));
         assert!(!chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, 0));
-        assert!(!chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Ecotone, 0));
+        assert!(!chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Fjord, 0));
 
-        assert!(chain_spec.is_fork_active_at_block(Hardfork::Bedrock, 10));
-        assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, 20));
+        assert!(chain_spec.is_fork_active_at_block(EthereumHardfork::Bedrock, 10));
+        assert!(chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Regolith, 20));
         assert!(chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, 30));
-        assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, 40));
-        assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, 50));
+        assert!(chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Ecotone, 40));
+        assert!(chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Fjord, 50));
     }
 }

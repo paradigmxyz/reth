@@ -6,7 +6,7 @@ use alloc::{
     vec::Vec,
 };
 
-use crate::{hardforks::HardforksTrait, ForkCondition};
+use crate::{hardforks::Hardforks, ForkCondition};
 
 /// A container to pretty-print a hardfork.
 ///
@@ -144,7 +144,7 @@ impl core::fmt::Display for DisplayHardforks {
 
 impl DisplayHardforks {
     /// Creates a new [`DisplayHardforks`] from an iterator of hardforks.
-    pub fn new<H: HardforksTrait>(hardforks: &H, known_paris_block: Option<u64>) -> Self {
+    pub fn new<H: Hardforks>(hardforks: &H, known_paris_block: Option<u64>) -> Self {
         let mut pre_merge = Vec::new();
         let mut with_merge = Vec::new();
         let mut post_merge = Vec::new();

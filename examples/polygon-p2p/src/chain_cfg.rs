@@ -1,4 +1,4 @@
-use reth_chainspec::{BaseFeeParams, Chain, ChainSpec, ForkCondition, Hardfork};
+use reth_chainspec::{BaseFeeParams, Chain, ChainSpec, ForkCondition, EthereumHardfork};
 use reth_discv4::NodeRecord;
 use reth_primitives::{b256, Head, B256};
 
@@ -16,12 +16,12 @@ pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
         genesis_hash: Some(GENESIS),
         paris_block_and_final_difficulty: None,
         hardforks: BTreeMap::from([
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(3395000)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(3395000)),
-            (Hardfork::Berlin, ForkCondition::Block(14750000)),
-            (Hardfork::London, ForkCondition::Block(23850000)),
-            (Hardfork::Shanghai, ForkCondition::Block(SHANGAI_BLOCK)),
+            (EthereumHardfork::Petersburg, ForkCondition::Block(0)),
+            (EthereumHardfork::Istanbul, ForkCondition::Block(3395000)),
+            (EthereumHardfork::MuirGlacier, ForkCondition::Block(3395000)),
+            (EthereumHardfork::Berlin, ForkCondition::Block(14750000)),
+            (EthereumHardfork::London, ForkCondition::Block(23850000)),
+            (EthereumHardfork::Shanghai, ForkCondition::Block(SHANGAI_BLOCK)),
         ]),
         deposit_contract: None,
         base_fee_params: reth_chainspec::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),

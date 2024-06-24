@@ -5,7 +5,7 @@ use crate::{
     EthEvmConfig,
 };
 use reth_chainspec::{
-    chains::ethereum::EthereumHardforksTrait, ChainSpec, HardforksTrait, MAINNET,
+    chains::ethereum::EthereumHardforks, ChainSpec, Hardforks, MAINNET,
 };
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
@@ -17,7 +17,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, Hardfork, Header, Receipt, Request, Withdrawals, U256,
+    BlockNumber, BlockWithSenders, EthereumHardfork, Header, Receipt, Request, Withdrawals, U256,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
@@ -336,7 +336,7 @@ where
         );
 
         // Irregular state change at Ethereum DAO hardfork
-        if self.chain_spec().fork(Hardfork::Dao).transitions_at_block(block.number) {
+        if self.chain_spec().fork(EthereumHardfork::Dao).transitions_at_block(block.number) {
             // drain balances from hardcoded addresses.
             let drained_balance: u128 = self
                 .state
@@ -533,7 +533,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1))
                 .build(),
         );
 
@@ -630,7 +630,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1))
                 .build(),
         );
 
@@ -673,7 +673,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1))
                 .build(),
         );
 
@@ -726,7 +726,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(0))
+                .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(0))
                 .build(),
         );
 
@@ -813,7 +813,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1))
                 .build(),
         );
 
@@ -883,7 +883,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Prague, ForkCondition::Never)
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Never)
                 .build(),
         );
 
@@ -936,7 +936,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(0))
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
                 .build(),
         );
 
@@ -988,7 +988,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(1))
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(1))
                 .build(),
         );
 
@@ -1051,7 +1051,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(1))
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(1))
                 .build(),
         );
 
@@ -1110,7 +1110,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(0))
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
                 .build(),
         );
 
@@ -1247,7 +1247,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(0))
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
                 .build(),
         );
 
@@ -1328,7 +1328,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Prague, ForkCondition::Timestamp(0))
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
                 .build(),
         );
 

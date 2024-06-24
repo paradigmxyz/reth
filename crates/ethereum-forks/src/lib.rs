@@ -30,14 +30,14 @@ mod head;
 pub use forkid::{
     EnrForkIdEntry, ForkFilter, ForkFilterKey, ForkHash, ForkId, ForkTransition, ValidationError,
 };
-pub use hardfork::Hardfork;
+pub use hardfork::EthereumHardfork;
 pub use head::Head;
 
 pub use chains::ethereum::*;
 pub use display::DisplayHardforks;
 pub use forkcondition::ForkCondition;
-pub use hardfork::HardforkTrait;
-pub use hardforks::{HardforksBaseType, HardforksTrait};
+pub use hardfork::Hardfork;
+pub use hardforks::{ChainHardforks, Hardforks};
 
 #[cfg(feature = "optimism")]
 pub use chains::optimism::*;
