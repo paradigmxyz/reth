@@ -33,7 +33,7 @@ use tracing::trace;
 mod metrics;
 mod provider;
 
-pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, StorageWriter};
 
 /// A common provider that fetches data from a database or static file.
 ///

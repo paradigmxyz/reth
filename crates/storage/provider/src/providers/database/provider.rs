@@ -18,7 +18,7 @@ use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db::{tables, BlockNumberList};
 use reth_db_api::{
     common::KeyValue,
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, RangeWalker},
+    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, RangeWalker},
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
@@ -45,8 +45,8 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
-    updates::{StorageWriter, TrieUpdates},
-    HashedPostState, Nibbles, StateRoot,
+    updates::{TrieKey, TrieOp, TrieUpdates},
+    HashedPostState, Nibbles, StateRoot, StorageTrieEntry, StoredBranchNode,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 use std::{
@@ -2381,7 +2381,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     block_hash: end_block_hash,
                 })))
             }
-            trie_updates.flush(&StorageWriter, &self.tx)?;
+            StorageWriter.write_trie_updates(trie_updates, &self.tx)?
         }
         durations_recorder.record_relative(metrics::Action::InsertMerkleTree);
 
@@ -2577,7 +2577,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                     block_hash: parent_hash,
                 })))
             }
-            trie_updates.flush(&StorageWriter, &self.tx)?;
+            StorageWriter.write_trie_updates(trie_updates, &self.tx)?;
         }
 
         // get blocks
@@ -2778,7 +2778,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         // insert hashes and intermediate merkle nodes
         {
             HashedStateChanges(hashed_state).write_to_db(&self.tx)?;
-            trie_updates.flush(&StorageWriter, &self.tx)?;
+            StorageWriter.write_trie_updates(trie_updates, &self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 
@@ -2848,6 +2848,79 @@ impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
         Ok(self
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, block_number)?)
+    }
+}
+
+/// `StorageWriter` is responsible for writing trie updates to the database.
+///
+/// This struct encapsulates the logic required to flush trie operations to the appropriate
+/// database tables.
+#[derive(Debug, Default)]
+pub struct StorageWriter;
+
+impl StorageWriter {
+    /// Writes the given `TrieUpdates` to the database.
+    ///
+    /// This method processes the trie operations contained within `TrieUpdates` and applies
+    /// them to the database using the provided transaction.
+    pub fn write_trie_updates(
+        &self,
+        trie_updates: TrieUpdates,
+        tx: &(impl DbTx + DbTxMut),
+    ) -> Result<(), DatabaseError> {
+        if trie_updates.is_empty() {
+            return Ok(());
+        }
+
+        let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
+        let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
+
+        let mut trie_operations = trie_updates.into_vec();
+        trie_operations.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        for (key, operation) in trie_operations {
+            match key {
+                TrieKey::AccountNode(nibbles) => match operation {
+                    TrieOp::Delete => {
+                        if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                            account_trie_cursor.delete_current()?;
+                        }
+                    }
+                    TrieOp::Update(node) => {
+                        if !nibbles.0.is_empty() {
+                            account_trie_cursor.upsert(nibbles, StoredBranchNode(node))?;
+                        }
+                    }
+                },
+                TrieKey::StorageTrie(hashed_address) => match operation {
+                    TrieOp::Delete => {
+                        if storage_trie_cursor.seek_exact(hashed_address)?.is_some() {
+                            storage_trie_cursor.delete_current_duplicates()?;
+                        }
+                    }
+                    TrieOp::Update(..) => unreachable!("Cannot update full storage trie."),
+                },
+                TrieKey::StorageNode(hashed_address, nibbles) => {
+                    if !nibbles.is_empty() {
+                        // Delete the old entry if it exists.
+                        if storage_trie_cursor
+                            .seek_by_key_subkey(hashed_address, nibbles.clone())?
+                            .filter(|e| e.nibbles == nibbles)
+                            .is_some()
+                        {
+                            storage_trie_cursor.delete_current()?;
+                        }
+
+                        // The operation is an update, insert new entry.
+                        if let TrieOp::Update(node) = operation {
+                            storage_trie_cursor
+                                .upsert(hashed_address, StorageTrieEntry { nibbles, node })?;
+                        }
+                    }
+                }
+            };
+        }
+
+        Ok(())
     }
 }
 

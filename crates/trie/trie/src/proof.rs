@@ -162,12 +162,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{updates::StorageWriter, StateRoot};
+    use crate::StateRoot;
     use once_cell::sync::Lazy;
     use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET};
     use reth_db_api::database::Database;
     use reth_primitives::{Account, Bytes, StorageEntry, U256};
-    use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, ProviderFactory};
+    use reth_provider::{
+        test_utils::create_test_provider_factory, HashingWriter, ProviderFactory, StorageWriter,
+    };
     use reth_storage_errors::provider::ProviderResult;
     use std::{str::FromStr, sync::Arc};
 
@@ -226,7 +228,7 @@ mod tests {
         let (root, updates) = StateRoot::from_tx(provider.tx_ref())
             .root_with_updates()
             .map_err(Into::<reth_db::DatabaseError>::into)?;
-        updates.flush(&StorageWriter, provider.tx_mut())?;
+        StorageWriter.write_trie_updates(updates, provider.tx_ref())?;
 
         provider.commit()?;
 

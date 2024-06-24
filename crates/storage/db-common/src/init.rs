@@ -16,13 +16,10 @@ use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockNumReader, ChainSpecProvider, DatabaseProviderRW, ExecutionOutcome,
     HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory,
-    StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
+    StageCheckpointWriter, StateWriter, StaticFileProviderFactory, StorageWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_trie::{
-    updates::StorageWriter, IntermediateStateRootState, StateRoot as StateRootComputer,
-    StateRootProgress,
-};
+use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -477,7 +474,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
                 );
 
                 intermediate_state = Some(*state);
-                updates.flush(&StorageWriter, tx)?;
+                StorageWriter.write_trie_updates(updates, tx)?;
 
                 total_flushed_updates += updates_len;
 
@@ -491,7 +488,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
             StateRootProgress::Complete(root, _, updates) => {
                 let updates_len = updates.len();
 
-                updates.flush(&StorageWriter, tx)?;
+                StorageWriter.write_trie_updates(updates, tx)?;
 
                 total_flushed_updates += updates_len;
 
