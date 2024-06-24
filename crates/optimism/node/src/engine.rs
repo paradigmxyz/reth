@@ -1,4 +1,4 @@
-use reth_chainspec::{ChainSpec, EthereumHardfork, Hardforks, OptimismHardfork};
+use reth_chainspec::{ChainSpec, OptimismHardfork};
 use reth_node_api::{
     payload::{
         validate_parent_beacon_block_root_presence, EngineApiMessageVersion,

@@ -9,7 +9,7 @@ use crate::{
     EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig, PoolTransaction,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
-use reth_chainspec::{chains::ethereum::EthereumHardforks, ChainSpec};
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{
     constants::{
         eip4844::{MAINNET_KZG_TRUSTED_SETUP, MAX_BLOBS_PER_BLOCK},

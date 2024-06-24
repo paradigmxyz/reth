@@ -1,7 +1,7 @@
 //! Optimism block executor.
 
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
-use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, Hardforks, OptimismHardfork};
+use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,

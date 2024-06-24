@@ -1,6 +1,6 @@
 #[cfg(feature = "optimism")]
 use reth_chainspec::OptimismHardfork;
-use reth_chainspec::{chains::ethereum::EthereumHardforks, ChainSpec};
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_ethereum_forks::{EthereumHardfork, Head};
 
 /// Returns the spec id at the given timestamp.

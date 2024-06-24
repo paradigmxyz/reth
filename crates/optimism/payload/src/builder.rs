@@ -5,7 +5,7 @@ use crate::{
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
 use reth_basic_payload_builder::*;
-use reth_chainspec::{ChainSpec, EthereumHardforks, Hardforks, OptimismHardfork};
+use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::ConfigureEvm;
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
@@ -14,8 +14,7 @@ use reth_primitives::{
     eip4844::calculate_excess_blob_gas,
     proofs,
     revm::env::tx_env_with_recovered,
-    Block, EthereumHardfork, Header, IntoRecoveredTransaction, Receipt, TxType,
-    EMPTY_OMMER_ROOT_HASH, U256,
+    Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;

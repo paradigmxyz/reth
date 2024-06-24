@@ -37,7 +37,7 @@ pub use chains::ethereum::*;
 pub use display::DisplayHardforks;
 pub use forkcondition::ForkCondition;
 pub use hardfork::Hardfork;
-pub use hardforks::{ChainHardforks, Hardforks};
+pub use hardforks::*;
 
 #[cfg(feature = "optimism")]
 pub use chains::optimism::*;

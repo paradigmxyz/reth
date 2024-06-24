@@ -1,7 +1,7 @@
 //! Support for building a pending block via local txpool.
 
 use crate::eth::error::{EthApiError, EthResult};
-use reth_chainspec::{chains::ethereum::EthereumHardforks, ChainSpec};
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_errors::ProviderError;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{

@@ -1,7 +1,7 @@
 //! Optimism-specific implementation and utilities for the executor
 
 use crate::OptimismBlockExecutionError;
-use reth_chainspec::{ChainSpec, EthereumHardfork, Hardforks, OptimismHardfork};
+use reth_chainspec::{ChainSpec, OptimismHardfork};
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{address, b256, hex, Address, Block, Bytes, B256, U256};
 use revm::{

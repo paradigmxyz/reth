@@ -1,6 +1,6 @@
 //! Collection of methods for block validation.
 
-use reth_chainspec::{chains::ethereum::EthereumHardforks, ChainSpec};
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     constants::{

@@ -1,6 +1,15 @@
-use core::ops::Deref;
+/// Ethereum helper methods
+mod ethereum;
+pub use ethereum::EthereumHardforks;
+
+/// Optimism helper methods
+#[cfg(feature = "optimism")]
+mod optimism;
+#[cfg(feature = "optimism")]
+pub use optimism::{OptimismActivations, OptimismHardforks};
 
 use crate::{ForkCondition, Hardfork};
+use core::ops::Deref;
 
 /// Generic trait over a set of ordered hardforks
 pub trait Hardforks: Default + Clone {

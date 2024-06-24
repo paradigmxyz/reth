@@ -16,13 +16,10 @@ use once_cell::sync::Lazy;
 use reth_ethereum_forks::{
     chains::{
         dev::DEV_HARDFORKS,
-        ethereum::{
-            EthereumHardforks, GOERLI_HARDFORKS, HOLESKY_HARDFORKS, MAINNET_HARDFORKS,
-            SEPOLIA_HARDFORKS,
-        },
+        ethereum::{GOERLI_HARDFORKS, HOLESKY_HARDFORKS, MAINNET_HARDFORKS, SEPOLIA_HARDFORKS},
     },
-    ChainHardforks, DisplayHardforks, EthereumHardfork, ForkCondition, ForkFilter, ForkFilterKey,
-    ForkHash, ForkId, Hardfork, Head,
+    ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
+    ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head,
 };
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::{
@@ -1185,6 +1182,9 @@ mod tests {
     use alloy_primitives::{b256, hex};
     use core::ops::Deref;
     use std::{collections::HashMap, str::FromStr};
+
+    #[cfg(feature = "optimism")]
+    use reth_ethereum_forks::OptimismHardforks;
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
         for (block, expected_id) in cases {
