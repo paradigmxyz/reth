@@ -770,7 +770,7 @@ mod tests {
         UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_network_peers::pk2id;
-    use reth_primitives::{ForkFilter, EthereumHardfork};
+    use reth_primitives::{EthereumHardfork, ForkFilter};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::{
         net::{TcpListener, TcpStream},

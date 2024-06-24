@@ -1036,7 +1036,11 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(EthereumHardfork::Paris).ttd().unwrap() +
+                terminal_total_difficulty: handle
+                    .chain_spec
+                    .fork(EthereumHardfork::Paris)
+                    .ttd()
+                    .unwrap() +
                     U256::from(1),
                 ..Default::default()
             };
@@ -1063,7 +1067,11 @@ mod tests {
                 random_block(&mut rng, terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(EthereumHardfork::Paris).ttd().unwrap(),
+                terminal_total_difficulty: handle
+                    .chain_spec
+                    .fork(EthereumHardfork::Paris)
+                    .ttd()
+                    .unwrap(),
                 terminal_block_hash: consensus_terminal_block.hash(),
                 terminal_block_number: U64::from(terminal_block_number),
             };
@@ -1101,7 +1109,11 @@ mod tests {
                 random_block(&mut generators::rng(), terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(EthereumHardfork::Paris).ttd().unwrap(),
+                terminal_total_difficulty: handle
+                    .chain_spec
+                    .fork(EthereumHardfork::Paris)
+                    .ttd()
+                    .unwrap(),
                 terminal_block_hash: terminal_block.hash(),
                 terminal_block_number: U64::from(terminal_block_number),
             };

@@ -1,6 +1,6 @@
 use crate::{
     hardforks::{ChainHardforks, Hardforks},
-    ForkCondition, EthereumHardfork,
+    EthereumHardfork, ForkCondition,
 };
 use alloy_primitives::{uint, U256};
 use once_cell::sync::Lazy;
@@ -156,4 +156,3 @@ pub static HOLESKY_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
         (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1707305664)),
     ])
 });
-

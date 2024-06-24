@@ -4,7 +4,7 @@ use super::ethereum::EthereumHardforks;
 use crate::{
     hardfork::optimism::OptimismHardfork,
     hardforks::{ChainHardforks, Hardforks},
-    ForkCondition, EthereumHardfork, Hardfork,
+    EthereumHardfork, ForkCondition, Hardfork,
 };
 use alloy_primitives::U256;
 use once_cell::sync::Lazy;

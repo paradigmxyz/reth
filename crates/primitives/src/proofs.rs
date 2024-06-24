@@ -51,7 +51,8 @@ pub fn calculate_receipt_root_optimism(
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
     if chain_spec.is_fork_active_at_timestamp(reth_chainspec::EthereumHardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(reth_chainspec::EthereumHardfork::Canyon, timestamp)
+        !chain_spec
+            .is_fork_active_at_timestamp(reth_chainspec::EthereumHardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()
@@ -99,7 +100,8 @@ pub fn calculate_receipt_root_no_memo_optimism(
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
     if chain_spec.is_fork_active_at_timestamp(reth_chainspec::EthereumHardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(reth_chainspec::EthereumHardfork::Canyon, timestamp)
+        !chain_spec
+            .is_fork_active_at_timestamp(reth_chainspec::EthereumHardfork::Canyon, timestamp)
     {
         let receipts = receipts
             .iter()

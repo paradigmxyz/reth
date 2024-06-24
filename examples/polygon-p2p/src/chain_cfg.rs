@@ -1,4 +1,4 @@
-use reth_chainspec::{BaseFeeParams, Chain, ChainSpec, ForkCondition, EthereumHardfork};
+use reth_chainspec::{BaseFeeParams, Chain, ChainSpec, EthereumHardfork, ForkCondition};
 use reth_discv4::NodeRecord;
 use reth_primitives::{b256, Head, B256};
 

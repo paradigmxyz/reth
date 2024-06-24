@@ -10,7 +10,7 @@ pub use ethereum::EthereumHardfork;
 pub(crate) mod optimism;
 
 /// Generic hardfork trait.
-pub trait Hardfork: Any + HardforkTraitClone + Send + Sync + 'static {
+pub trait Hardfork: Any + HardforkClone + Send + Sync + 'static {
     /// Fork name.
     fn name(&self) -> &'static str;
 }
@@ -37,12 +37,12 @@ impl PartialEq for dyn Hardfork + 'static {
 impl Eq for dyn Hardfork + 'static {}
 
 // Define a cloning trait
-pub trait HardforkTraitClone {
+pub trait HardforkClone {
     fn clone_box(&self) -> Box<dyn Hardfork>;
 }
 
 // Implement the cloning trait for any type implementing HardforkTrait and Clone
-impl<T> HardforkTraitClone for T
+impl<T> HardforkClone for T
 where
     T: 'static + Hardfork + Clone,
 {

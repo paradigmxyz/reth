@@ -191,7 +191,8 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Ok(U256::ZERO)
         }
 
-        let spec_id = if chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Fjord, timestamp) {
+        let spec_id = if chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Fjord, timestamp)
+        {
             SpecId::FJORD
         } else if chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Ecotone, timestamp) {
             SpecId::ECOTONE
@@ -214,7 +215,8 @@ impl RethL1BlockInfo for L1BlockInfo {
         timestamp: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError> {
-        let spec_id = if chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Fjord, timestamp) {
+        let spec_id = if chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Fjord, timestamp)
+        {
             SpecId::FJORD
         } else if chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Regolith, timestamp) {
             SpecId::REGOLITH
@@ -246,7 +248,8 @@ where
     // chain is an optimism chain, then we need to force-deploy the create2 deployer contract.
     if chain_spec.is_optimism() &&
         chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Canyon, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(EthereumHardfork::Canyon, timestamp.saturating_sub(2))
+        !chain_spec
+            .is_fork_active_at_timestamp(EthereumHardfork::Canyon, timestamp.saturating_sub(2))
     {
         trace!(target: "evm", "Forcing create2 deployer contract deployment on Canyon transition");
 

@@ -20,9 +20,7 @@ pub trait Hardforks: Default + Clone {
     fn insert<H: Hardfork>(&mut self, fork: H, condition: ForkCondition);
 
     /// Get an iterator of all hardforks with their respective activation conditions.
-    fn forks_iter(
-        &self,
-    ) -> impl Iterator<Item = (&Box<dyn Hardfork + 'static>, ForkCondition)>;
+    fn forks_iter(&self) -> impl Iterator<Item = (&Box<dyn Hardfork + 'static>, ForkCondition)>;
 
     /// Convenience method to check if a fork is active at a given timestamp.
     fn is_fork_active_at_timestamp<H: Hardfork>(&self, fork: H, timestamp: u64) -> bool {
@@ -35,7 +33,7 @@ pub trait Hardforks: Default + Clone {
     }
 }
 
-/// Base type over a list of hardforks that implement `HardforkTrait`.
+/// Ordered list of a chain hardforks that implement [`Hardfork`].
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct ChainHardforks(pub Vec<(Box<dyn Hardfork>, ForkCondition)>);
 
@@ -57,9 +55,7 @@ impl Hardforks for ChainHardforks {
         None
     }
 
-    fn forks_iter(
-        &self,
-    ) -> impl Iterator<Item = (&Box<dyn Hardfork + 'static>, ForkCondition)> {
+    fn forks_iter(&self) -> impl Iterator<Item = (&Box<dyn Hardfork + 'static>, ForkCondition)> {
         self.0.iter().map(|(f, b)| (f, *b))
     }
 

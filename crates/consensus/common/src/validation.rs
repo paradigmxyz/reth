@@ -8,7 +8,7 @@ use reth_primitives::{
         MAXIMUM_EXTRA_DATA_SIZE,
     },
     eip4844::calculate_excess_blob_gas,
-    GotExpected, EthereumHardfork, Header, SealedBlock, SealedHeader,
+    EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader,
 };
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
