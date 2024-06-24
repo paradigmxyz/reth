@@ -361,11 +361,11 @@ Gas Price Oracle:
       --enable-auth
           Enable authentication middleware
 
-      --enable-rate-limit
-          Enable rate limiting middleware
+      --auth-username <AUTH_USERNAME>
+          Username for authentication
 
-      --enable-monitoring
-          Enable monitoring middleware
+      --auth-password <AUTH_PASSWORD>
+          Password for authentication
 
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>

@@ -186,17 +186,17 @@ impl RethRpcServerConfig for RpcServerArgs {
                 config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(self.ipcpath.clone());
         }
 
-        let service_builder =
-        tower::ServiceBuilder::new()
-                .option_layer(
-                    self.enable_logging.then(tower_http::trace::TraceLayer::new_for_http),
-                )
-                .option_layer(self.enable_auth.then(|| {
-                    if let (Some(username), Some(password)) = (self.auth_username.as_deref(), self.auth_password.as_deref()) {
-                        tower_http::auth::AddAuthorizationLayer::basic(username, password)
-                    } else {
-                        panic!("Auth is enabled but username or password is missing in the config");
-                    }}));
+        let service_builder = tower::ServiceBuilder::new()
+            .option_layer(self.enable_logging.then(tower_http::trace::TraceLayer::new_for_http))
+            .option_layer(self.enable_auth.then(|| {
+                if let (Some(username), Some(password)) =
+                    (self.auth_username.as_deref(), self.auth_password.as_deref())
+                {
+                    tower_http::auth::AddAuthorizationLayer::basic(username, password)
+                } else {
+                    panic!("Auth is enabled but username or password is missing in the config");
+                }
+            }));
 
         config = config.with_additional_middleware::<tower::layer::util::Stack<
             tower::util::Either<tower_http::auth::AddAuthorizationLayer, Identity>,
