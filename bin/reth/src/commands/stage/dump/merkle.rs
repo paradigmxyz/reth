@@ -8,7 +8,7 @@ use reth_exex::ExExManagerHandle;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::BlockNumber;
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
-use reth_prune_types::PruneModes;
+use reth_prune::PruneModes;
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
