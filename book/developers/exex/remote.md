@@ -63,7 +63,8 @@ path = "src/consumer.rs"
 ```
 
 We also added a build dependency for Tonic. We will use it to generate the Rust code for our
-Protobuf definitions at compile time.
+Protobuf definitions at compile time. Read more about using Tonic in the
+[introductory tutorial](https://github.com/hyperium/tonic/blob/6a213e9485965db0628591e30577ed81cdaeaf2b/examples/helloworld-tutorial.md).
 
 Also, we now have two separate binaries:
 - `exex` is the server binary that will run the ExEx and the gRPC server.
