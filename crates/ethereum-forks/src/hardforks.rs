@@ -68,9 +68,15 @@ impl ChainHardforks {
         self.fork(fork).active_at_block(block_number)
     }
 
-    /// Inserts `fork` into list.
+    /// Inserts `fork` into list, updating with a new [`ForkCondition`] if it already exists.
     pub fn insert<H: Hardfork>(&mut self, fork: H, condition: ForkCondition) {
-        self.0.push((Box::new(fork), condition));
+        if let Some((_, inner_condition)) =
+            self.0.iter_mut().find(|(inner_fork, _)| inner_fork.name() == fork.name())
+        {
+            *inner_condition = condition;
+        } else {
+            self.0.push((Box::new(fork), condition));
+        }
     }
 
     /// Removes `fork` from list.
@@ -92,17 +98,7 @@ impl Hardforks for ChainHardforks {
 impl core::fmt::Debug for ChainHardforks {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ChainHardforks")
-            .field(
-                "0",
-                &self
-                    .0
-                    .iter()
-                    .map(|(hf, cond)| {
-                        // Create a tuple with references to implement Debug
-                        (hf.name(), cond)
-                    })
-                    .collect::<Vec<_>>(),
-            )
+            .field("0", &self.iter().map(|(hf, cond)| (hf.name(), cond)).collect::<Vec<_>>())
             .finish()
     }
 }
