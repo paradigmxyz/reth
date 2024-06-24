@@ -1,5 +1,4 @@
 use crate::{engine::DownloadRequest, pipeline::PipelineAction};
-use parking_lot::{Mutex, MutexGuard, RwLock};
 use reth_beacon_consensus::{ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated};
 use reth_blockchain_tree::BlockBuffer;
 use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
@@ -87,29 +86,29 @@ impl TreeState {
 /// Tracks the state of the engine api internals.
 ///
 /// This type is shareable.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct EngineApiTreeState {
     /// Tracks the state of the blockchain tree.
-    tree_state: Arc<RwLock<TreeState>>,
+    tree_state: TreeState,
     /// Tracks the received forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// Buffer of detached blocks.
-    buffer: Arc<RwLock<BlockBuffer>>,
+    buffer: BlockBuffer,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
-    invalid_headers: Arc<Mutex<InvalidHeaderCache>>,
+    invalid_headers: InvalidHeaderCache,
 }
 
 /// The type responsible for processing engine API requests.
 ///
 /// TODO: design: should the engine handler functions also accept the response channel or return the
 /// result and the caller redirects the response
-pub trait EngineApiTreeHandler: Send + Sync + Clone {
+pub trait EngineApiTreeHandler: Send + Sync {
     /// The engine type that this handler is for.
     type Engine: EngineTypes;
 
     /// Invoked when previously requested blocks were downloaded.
-    fn on_downloaded(&self, blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent>;
+    fn on_downloaded(&mut self, blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent>;
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
     /// the transactions in the block are sent to the execution layer in the form of a
@@ -124,7 +123,7 @@ pub trait EngineApiTreeHandler: Send + Sync + Clone {
     /// This returns a [`PayloadStatus`] that represents the outcome of a processed new payload and
     /// returns an error if an internal error occurred.
     fn on_new_payload(
-        &self,
+        &mut self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
     ) -> ProviderResult<TreeOutcome<PayloadStatus>>;
@@ -138,7 +137,7 @@ pub trait EngineApiTreeHandler: Send + Sync + Clone {
     ///
     /// Returns an error if an internal error occurred like a database error.
     fn on_forkchoice_updated(
-        &self,
+        &mut self,
         state: ForkchoiceState,
         attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> TreeOutcome<Result<OnForkChoiceUpdated, String>>;
@@ -175,7 +174,7 @@ pub enum TreeEvent {
     Download(DownloadRequest),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     provider: P,
     executor_provider: E,
@@ -198,8 +197,9 @@ where
         if block.is_none() {
             // Note: it's fine to return the unsealed block because the caller already has
             // the hash
-            let tree_state = self.state.tree_state.read();
-            block = tree_state
+            block = self
+                .state
+                .tree_state
                 .block_by_hash(hash)
                 // TODO: clone for compatibility. should we return an Arc here?
                 .map(|block| block.as_ref().clone().unseal());
@@ -214,8 +214,7 @@ where
     ) -> ProviderResult<MemoryOverlayStateProvider<Box<dyn StateProvider>>> {
         let mut in_memory = Vec::new();
         let mut parent_hash = hash;
-        let tree_state = self.state.tree_state.read();
-        while let Some(executed) = tree_state.blocks_by_hash.get(&parent_hash) {
+        while let Some(executed) = self.state.tree_state.blocks_by_hash.get(&parent_hash) {
             parent_hash = executed.block.parent_hash;
             in_memory.insert(0, executed.clone());
         }
@@ -233,7 +232,6 @@ where
     fn lowest_buffered_ancestor_or(&self, hash: B256) -> B256 {
         self.state
             .buffer
-            .read()
             .lowest_ancestor(&hash)
             .map(|block| block.parent_hash)
             .unwrap_or_else(|| hash)
@@ -250,8 +248,7 @@ where
     ///   - null if client software cannot determine the ancestor of the invalid payload satisfying
     ///     the above conditions.
     fn latest_valid_hash_for_invalid_payload(
-        &self,
-        invalid_headers: &mut MutexGuard<'_, InvalidHeaderCache>,
+        &mut self,
         parent_hash: B256,
     ) -> ProviderResult<Option<B256>> {
         // Check if parent exists in side chain or in canonical chain.
@@ -262,10 +259,10 @@ where
         // iterate over ancestors in the invalid cache
         // until we encounter the first valid ancestor
         let mut current_hash = parent_hash;
-        let mut current_header = invalid_headers.get(&current_hash);
+        let mut current_header = self.state.invalid_headers.get(&current_hash);
         while let Some(header) = current_header {
             current_hash = header.parent_hash;
-            current_header = invalid_headers.get(&current_hash);
+            current_header = self.state.invalid_headers.get(&current_hash);
 
             // If current_header is None, then the current_hash does not have an invalid
             // ancestor in the cache, check its presence in blockchain tree
@@ -279,11 +276,7 @@ where
     /// Prepares the invalid payload response for the given hash, checking the
     /// database for the parent hash and populating the payload status with the latest valid hash
     /// according to the engine api spec.
-    fn prepare_invalid_response(
-        &self,
-        invalid_headers: &mut MutexGuard<'_, InvalidHeaderCache>,
-        mut parent_hash: B256,
-    ) -> ProviderResult<PayloadStatus> {
+    fn prepare_invalid_response(&mut self, mut parent_hash: B256) -> ProviderResult<PayloadStatus> {
         // Edge case: the `latestValid` field is the zero hash if the parent block is the terminal
         // PoW block, which we need to identify by looking at the parent's block difficulty
         if let Some(parent) = self.block_by_hash(parent_hash)? {
@@ -292,8 +285,7 @@ where
             }
         }
 
-        let valid_parent_hash =
-            self.latest_valid_hash_for_invalid_payload(invalid_headers, parent_hash)?;
+        let valid_parent_hash = self.latest_valid_hash_for_invalid_payload(parent_hash)?;
         Ok(PayloadStatus::from_status(PayloadStatusEnum::Invalid {
             validation_error: PayloadValidationError::LinksToRejectedPayload.to_string(),
         })
@@ -306,26 +298,24 @@ where
     /// Returns a payload status response according to the engine API spec if the block is known to
     /// be invalid.
     fn check_invalid_ancestor_with_head(
-        &self,
+        &mut self,
         check: B256,
         head: B256,
     ) -> ProviderResult<Option<PayloadStatus>> {
-        let mut invalid_headers = self.state.invalid_headers.lock();
-
         // check if the check hash was previously marked as invalid
-        let Some(header) = invalid_headers.get(&check) else { return Ok(None) };
+        let Some(header) = self.state.invalid_headers.get(&check) else { return Ok(None) };
 
         // populate the latest valid hash field
-        let status = self.prepare_invalid_response(&mut invalid_headers, header.parent_hash)?;
+        let status = self.prepare_invalid_response(header.parent_hash)?;
 
         // insert the head block into the invalid header cache
-        invalid_headers.insert_with_invalid_ancestor(head, header);
+        self.state.invalid_headers.insert_with_invalid_ancestor(head, header);
 
         Ok(Some(status))
     }
 
     fn insert_block_without_senders(
-        &self,
+        &mut self,
         block: SealedBlock,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         match block.try_seal_with_senders() {
@@ -335,7 +325,7 @@ where
     }
 
     fn insert_block(
-        &self,
+        &mut self,
         block: SealedBlockWithSenders,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
         // TODO: perform various checks
@@ -357,7 +347,7 @@ where
         // TODO: compute and validate state root
         let trie_output = TrieUpdates::default();
 
-        let _executed = ExecutedBlock {
+        let executed = ExecutedBlock {
             block: Arc::new(block.block.seal(block_hash)),
             senders: Arc::new(block.senders),
             execution_output: Arc::new(ExecutionOutcome::new(
@@ -368,6 +358,7 @@ where
             )),
             trie: Arc::new(trie_output),
         };
+        self.state.tree_state.insert_executed(executed);
 
         todo!()
     }
@@ -381,12 +372,12 @@ where
 {
     type Engine = T;
 
-    fn on_downloaded(&self, blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
+    fn on_downloaded(&mut self, _blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
         todo!()
     }
 
     fn on_new_payload(
-        &self,
+        &mut self,
         payload: ExecutionPayload,
         cancun_fields: Option<CancunPayloadFields>,
     ) -> ProviderResult<TreeOutcome<PayloadStatus>> {
@@ -432,10 +423,7 @@ where
                         // > `latestValidHash: null` if the expected and the actual arrays don't match (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md?plain=1#L103>)
                         None
                     } else {
-                        self.latest_valid_hash_for_invalid_payload(
-                            &mut self.state.invalid_headers.lock(),
-                            parent_hash,
-                        )?
+                        self.latest_valid_hash_for_invalid_payload(parent_hash)?
                     };
 
                 let status = PayloadStatusEnum::from(error);
@@ -463,7 +451,7 @@ where
     }
 
     fn on_forkchoice_updated(
-        &self,
+        &mut self,
         state: ForkchoiceState,
         attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> TreeOutcome<Result<OnForkChoiceUpdated, String>> {
