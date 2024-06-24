@@ -2,7 +2,7 @@ use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory,
-    EvmEnvProvider, FullExecutionDataProvider, HeaderProvider, ProviderError,
+    EvmEnvProvider, FinalizedBlockReader, FullExecutionDataProvider, HeaderProvider, ProviderError,
     PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
@@ -93,19 +93,20 @@ impl<DB> Clone for BlockchainProvider<DB> {
 impl<DB> BlockchainProvider<DB> {
     /// Create new provider instance that wraps the database and the blockchain tree, using the
     /// provided latest header to initialize the chain info tracker.
-    pub fn with_latest(
+    pub fn with_block_information(
         database: ProviderFactory<DB>,
         tree: Arc<dyn TreeViewer>,
         // TODO: add in_memory_state
         // in_memory_state: Arc<dyn InMemoryState>,
         latest: SealedHeader,
+        finalized: SealedHeader,
     ) -> Self {
         Self {
             database,
             tree,
             // TODO: add in_memory_state
             // in_memory_state,
-            chain_info: ChainInfoTracker::new(latest),
+            chain_info: ChainInfoTracker::new(latest, finalized),
         }
     }
 
@@ -126,13 +127,22 @@ where
     pub fn new(database: ProviderFactory<DB>, tree: Arc<dyn TreeViewer>) -> ProviderResult<Self> {
         let provider = database.provider()?;
         let best: ChainInfo = provider.chain_info()?;
-        match provider.header_by_number(best.best_number)? {
-            Some(header) => {
-                drop(provider);
-                Ok(Self::with_latest(database, tree, header.seal(best.best_hash)))
-            }
-            None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
-        }
+        let latest_header = provider
+            .header_by_number(best.best_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
+
+        let finalized_block_number = provider.last_finalized_block_number()?;
+        let finalized_header = provider
+            .header_by_number(finalized_block_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(finalized_block_number.into()))?;
+
+        drop(provider);
+        Ok(Self::with_block_information(
+            database,
+            tree,
+            latest_header.seal(best.best_hash),
+            finalized_header.seal_slow(),
+        ))
     }
 }
 
