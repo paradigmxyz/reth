@@ -1,0 +1,279 @@
+syntax = "proto3";
+
+package exex;
+
+import "google/protobuf/empty.proto";
+
+service RemoteExEx {
+  rpc Subscribe(SubscribeRequest) returns (stream ExExNotification) {}
+}
+
+message SubscribeRequest {}
+
+message ExExNotification {
+  oneof notification {
+    ChainCommitted chain_committed = 1;
+    ChainReorged chain_reorged = 2;
+    ChainReverted chain_reverted = 3;
+  }
+}
+
+message ChainCommitted {
+  Chain new = 1;
+}
+
+message ChainReorged {
+  Chain old = 1;
+  Chain new = 2;
+}
+
+message ChainReverted {
+  Chain old = 1;
+}
+
+message Chain {
+  repeated Block blocks = 1;
+  ExecutionOutcome execution_outcome = 2;
+}
+
+message Block {
+  SealedHeader header = 1;
+  repeated Transaction body = 2;
+  repeated Header ommers = 3;
+  repeated bytes senders = 4;
+  // TODO: add withdrawals and requests
+}
+
+message SealedHeader {
+  bytes hash = 1;
+  Header header = 2;
+}
+
+message Header {
+  bytes parent_hash = 1;
+  bytes ommers_hash = 2;
+  bytes beneficiary = 3;
+  bytes state_root = 4;
+  bytes transactions_root = 5;
+  bytes receipts_root = 6;
+  optional bytes withdrawals_root = 7;
+  bytes logs_bloom = 8;
+  bytes difficulty = 9;
+  uint64 number = 10;
+  uint64 gas_limit = 11;
+  uint64 gas_used = 12;
+  uint64 timestamp = 13;
+  bytes mix_hash = 14;
+  uint64 nonce = 15;
+  optional uint64 base_fee_per_gas = 16;
+  optional uint64 blob_gas_used = 17;
+  optional uint64 excess_blob_gas = 18;
+  optional bytes parent_beacon_block_root = 19;
+  // TODO: add requests_root
+  bytes extra_data = 20;
+}
+
+message Transaction {
+  bytes hash = 1;
+  Signature signature = 2;
+  oneof transaction {
+    TransactionLegacy legacy = 3;
+    TransactionEip2930 eip2930 = 4;
+    TransactionEip1559 eip1559 = 5;
+    TransactionEip4844 eip4844 = 6;
+  }
+}
+
+message Signature {
+  bytes r = 1;
+  bytes s = 2;
+  bool odd_y_parity = 3;
+}
+
+message TransactionLegacy {
+  optional uint64 chain_id = 1;
+  uint64 nonce = 2;
+  bytes gas_price = 3;
+  uint64 gas_limit = 4;
+  TxKind to = 5;
+  bytes value = 6;
+  bytes input = 7;
+}
+
+message TransactionEip2930 {
+  uint64 chain_id = 1;
+  uint64 nonce = 2;
+  bytes gas_price = 3;
+  uint64 gas_limit = 4;
+  TxKind to = 5;
+  bytes value = 6;
+  repeated AccessListItem access_list = 7;
+  bytes input = 8;
+}
+
+message TransactionEip1559 {
+  uint64 chain_id = 1;
+  uint64 nonce = 2;
+  uint64 gas_limit = 3;
+  bytes max_fee_per_gas = 4;
+  bytes max_priority_fee_per_gas = 5;
+  TxKind to = 6;
+  bytes value = 7;
+  repeated AccessListItem access_list = 8;
+  bytes input = 9;
+}
+
+message TransactionEip4844 {
+  uint64 chain_id = 1;
+  uint64 nonce = 2;
+  uint64 gas_limit = 3;
+  bytes max_fee_per_gas = 4;
+  bytes max_priority_fee_per_gas = 5;
+  bytes to = 6;
+  bytes value = 7;
+  repeated AccessListItem access_list = 8;
+  repeated bytes blob_versioned_hashes = 9;
+  bytes max_fee_per_blob_gas = 10;
+  bytes input = 11;
+}
+
+message TxKind {
+  oneof kind {
+    google.protobuf.Empty create = 1;
+    bytes call = 2;
+  }
+}
+
+message AccessListItem {
+  bytes address = 1;
+  repeated bytes storage_keys = 2;
+}
+
+message ExecutionOutcome {
+  BundleState bundle = 1;
+  repeated BlockReceipts receipts = 2;
+  uint64 first_block = 3;
+  // TODO: add requests
+}
+
+message BundleState {
+  repeated BundleAccount state = 1;
+  repeated ContractBytecode contracts = 2;
+  repeated BlockReverts reverts = 3;
+  uint64 state_size = 4;
+  uint64 reverts_size = 5;
+}
+
+message BundleAccount {
+  bytes address = 1;
+  AccountInfo info = 2;
+  AccountInfo original_info = 3;
+  repeated StorageSlot storage = 4;
+  AccountStatus status = 5;
+}
+
+message AccountInfo {
+  bytes balance = 1;
+  uint64 nonce = 2;
+  bytes code_hash = 3;
+  Bytecode code = 4;
+}
+
+message StorageSlot {
+  bytes key = 1;
+  bytes previous_or_original_value = 2;
+  bytes present_value = 3;
+}
+
+enum AccountStatus {
+  LOADED_NOT_EXISTING = 0;
+  LOADED = 1;
+  LOADED_EMPTY_EIP161 = 2;
+  IN_MEMORY_CHANGE = 3;
+  CHANGED = 4;
+  DESTROYED = 5;
+  DESTROYED_CHANGED = 6;
+  DESTROYED_AGAIN = 7;
+}
+
+message ContractBytecode {
+  bytes hash = 1;
+  Bytecode bytecode = 2;
+}
+
+message Bytecode {
+  oneof bytecode {
+    bytes legacy_raw = 1;
+    LegacyAnalyzedBytecode legacy_analyzed = 2;
+    // TODO: add EOF
+  }
+}
+
+message LegacyAnalyzedBytecode {
+  bytes bytecode = 1;
+  uint64 original_len = 2;
+  repeated uint32 jump_table = 3;
+}
+
+message BlockReverts {
+  repeated Revert reverts = 1;
+}
+
+message Revert {
+  bytes address = 1;
+  AccountInfoRevert account = 2;
+  repeated RevertToSlot storage = 3;
+  AccountStatus previous_status = 4;
+  bool wipe_storage = 5;
+}
+
+message AccountInfoRevert {
+  oneof revert {
+    google.protobuf.Empty do_nothing = 1;
+    google.protobuf.Empty delete_it = 2;
+    AccountInfo revert_to = 3;
+  }
+}
+
+message RevertToSlot {
+  bytes key = 1;
+  oneof revert {
+    bytes some = 2;
+    google.protobuf.Empty destroyed = 3;
+  }
+}
+
+message BlockReceipts {
+  repeated Receipt receipts = 1;
+}
+
+message Receipt {
+  oneof receipt {
+    google.protobuf.Empty empty = 1;
+    NonEmptyReceipt non_empty = 2;
+  }
+}
+
+message NonEmptyReceipt {
+  TxType tx_type = 1;
+  bool success = 2;
+  uint64 cumulative_gas_used = 3;
+  repeated Log logs = 4;
+}
+
+enum TxType {
+  LEGACY = 0;
+  EIP2930 = 1;
+  EIP1559 = 2;
+  EIP4844 = 3;
+}
+
+message Log {
+  bytes address = 1;
+  LogData data = 2;
+}
+
+message LogData {
+  repeated bytes topics = 1;
+  bytes data = 2;
+}
