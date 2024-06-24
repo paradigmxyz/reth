@@ -1,5 +1,6 @@
 use alloy_consensus::{
-    BlobTransactionSidecar, SidecarBuilder, SimpleCoder, TxEip4844Variant, TxEnvelope,
+    BlobTransactionSidecar, EnvKzgSettings, SidecarBuilder, SimpleCoder, TxEip4844Variant,
+    TxEnvelope,
 };
 use alloy_network::{eip2718::Encodable2718, EthereumWallet, TransactionBuilder};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
@@ -7,7 +8,7 @@ use alloy_signer_local::PrivateKeySigner;
 use eyre::Ok;
 use reth_primitives::{hex, Address, Bytes, U256};
 
-use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, B256};
+use reth_primitives::B256;
 
 pub struct TransactionTestContext;
 
@@ -71,12 +72,12 @@ impl TransactionTestContext {
 
     /// Validates the sidecar of a given tx envelope and returns the versioned hashes
     pub fn validate_sidecar(tx: TxEnvelope) -> Vec<B256> {
-        let proof_setting = MAINNET_KZG_TRUSTED_SETUP.clone();
+        let proof_setting = EnvKzgSettings::Default;
 
         match tx {
             TxEnvelope::Eip4844(signed) => match signed.tx() {
                 TxEip4844Variant::TxEip4844WithSidecar(tx) => {
-                    tx.validate_blob(&proof_setting).unwrap();
+                    tx.validate_blob(proof_setting.get()).unwrap();
                     tx.sidecar.versioned_hashes().collect()
                 }
                 _ => panic!("Expected Eip4844 transaction with sidecar"),

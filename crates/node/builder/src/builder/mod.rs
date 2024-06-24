@@ -30,10 +30,10 @@ use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     node_config::NodeConfig,
-    primitives::{kzg::KzgSettings, Head},
+    primitives::Head,
     utils::write_peers_to_file,
 };
-use reth_primitives::constants::eip4844::MAINNET_KZG_TRUSTED_SETUP;
+use reth_primitives::revm_primitives::EnvKzgSettings;
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
@@ -469,9 +469,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.config().txpool.pool_config()
     }
 
-    /// Loads `MAINNET_KZG_TRUSTED_SETUP`.
-    pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
-        Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
+    /// Loads `EnvKzgSettings::Default`.
+    pub const fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
+        Ok(EnvKzgSettings::Default)
     }
 
     /// Returns the config for payload building.

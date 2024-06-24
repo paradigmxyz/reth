@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.0.0-rc.2"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.79"
 license = "MIT OR Apache-2.0"
@@ -225,20 +225,24 @@ opt-level = 3
 lto = "thin"
 
 [profile.release]
+opt-level = 3
 lto = "thin"
-strip = "debuginfo"
+debug = "line-tables-only"
+strip = true
+panic = "unwind"
+codegen-units = 16
 
-# Like release, but with full debug symbols. Useful for e.g. `perf`.
-[profile.debug-fast]
+# Use the `--profile profiling` flag to show symbols in release mode.
+# e.g. `cargo build --profile profiling`
+[profile.profiling]
 inherits = "release"
-strip = "none"
-debug = true
+debug = 1
+strip = false
 
 [profile.maxperf]
 inherits = "release"
 lto = "fat"
 codegen-units = 1
-incremental = false
 
 [workspace.dependencies]
 # reth

@@ -131,7 +131,7 @@ impl ConfigBuilder {
     }
 
     /// Adds boot nodes in the form a list of [`NodeRecord`]s, parsed enodes.
-    pub fn add_unsigned_boot_nodes(mut self, enodes: impl Iterator<Item = NodeRecord>) -> Self {
+    pub fn add_unsigned_boot_nodes(mut self, enodes: impl IntoIterator<Item = NodeRecord>) -> Self {
         for node in enodes {
             if let Ok(node) = BootNode::from_unsigned(node) {
                 self.bootstrap_nodes.insert(node);

@@ -11,17 +11,16 @@ use crate::{
 };
 use reth_chainspec::ChainSpec;
 use reth_primitives::{
-    constants::{
-        eip4844::{MAINNET_KZG_TRUSTED_SETUP, MAX_BLOBS_PER_BLOCK},
-        ETHEREUM_BLOCK_GAS_LIMIT,
-    },
-    kzg::KzgSettings,
+    constants::{eip4844::MAX_BLOBS_PER_BLOCK, ETHEREUM_BLOCK_GAS_LIMIT},
     Address, GotExpected, InvalidTransactionError, SealedBlock, TxKind, EIP1559_TX_TYPE_ID,
     EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
 };
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
-use revm::{interpreter::gas::validate_initial_tx_gas, primitives::SpecId};
+use revm::{
+    interpreter::gas::validate_initial_tx_gas,
+    primitives::{EnvKzgSettings, SpecId},
+};
 use std::{
     marker::PhantomData,
     sync::{atomic::AtomicBool, Arc},
@@ -125,7 +124,7 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     /// Minimum priority fee to enforce for acceptance into the pool.
     minimum_priority_fee: Option<u128>,
     /// Stores the setup and parameters needed for validating KZG proofs.
-    kzg_settings: Arc<KzgSettings>,
+    kzg_settings: EnvKzgSettings,
     /// How to handle [`TransactionOrigin::Local`](TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
     /// Maximum size in bytes a single transaction can have in order to be accepted into the pool.
@@ -369,7 +368,7 @@ where
                 }
                 EthBlobTransactionSidecar::Present(blob) => {
                     // validate the blob
-                    if let Err(err) = transaction.validate_blob(&blob, &self.kzg_settings) {
+                    if let Err(err) = transaction.validate_blob(&blob, self.kzg_settings.get()) {
                         return TransactionValidationOutcome::Invalid(
                             transaction,
                             InvalidPoolTransactionError::Eip4844(
@@ -435,7 +434,7 @@ pub struct EthTransactionValidatorBuilder {
     additional_tasks: usize,
 
     /// Stores the setup and parameters needed for validating KZG proofs.
-    kzg_settings: Arc<KzgSettings>,
+    kzg_settings: EnvKzgSettings,
     /// How to handle [`TransactionOrigin::Local`](TransactionOrigin) transactions.
     local_transactions_config: LocalTransactionConfig,
     /// Max size in bytes of a single transaction allowed
@@ -457,7 +456,7 @@ impl EthTransactionValidatorBuilder {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             minimum_priority_fee: None,
             additional_tasks: 1,
-            kzg_settings: Arc::clone(&MAINNET_KZG_TRUSTED_SETUP),
+            kzg_settings: EnvKzgSettings::Default,
             local_transactions_config: Default::default(),
             max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
 
@@ -538,8 +537,8 @@ impl EthTransactionValidatorBuilder {
         self
     }
 
-    /// Sets the [`KzgSettings`] to use for validating KZG proofs.
-    pub fn kzg_settings(mut self, kzg_settings: Arc<KzgSettings>) -> Self {
+    /// Sets the [`EnvKzgSettings`] to use for validating KZG proofs.
+    pub fn kzg_settings(mut self, kzg_settings: EnvKzgSettings) -> Self {
         self.kzg_settings = kzg_settings;
         self
     }
