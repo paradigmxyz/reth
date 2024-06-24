@@ -32,6 +32,18 @@ pub trait Node<N: FullNodeTypes>: NodeTypes + Clone {
 #[derive(Clone, Default, Debug)]
 pub struct AnyNode<N = (), C = ()>(PhantomData<N>, C);
 
+impl<N, C> AnyNode<N, C> {
+    /// Sets the `N: FullNodeTypes` generic type.
+    pub fn full_node_types<T>(self) -> AnyNode<T, C> {
+        AnyNode::<T, C>(PhantomData::<T>, self.1)
+    }
+
+    /// Sets the node components builder.
+    pub fn components_builder<T>(self, value: T) -> AnyNode<N, T> {
+        AnyNode::<N, T>(PhantomData::<N>, value)
+    }
+}
+
 impl<N, C> NodeTypes for AnyNode<N, C>
 where
     N: FullNodeTypes,
