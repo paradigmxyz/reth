@@ -1,4 +1,4 @@
-use crate::pipeline::{PipelineAction, PipelineEvent, PipelineHandler};
+use crate::backfill::{BackfillAction, BackfillEvent, BackfillSync};
 use futures::Stream;
 use reth_stages_api::PipelineTarget;
 use std::{
@@ -17,7 +17,7 @@ use std::{
 /// It polls the given `handler`, which is responsible for advancing the chain, how is up to the
 /// handler. However, due to database restrictions (e.g. exclusive write access), following
 /// invariants apply:
-///  - If the handler requests a pipeline run (e.g. [`PipelineAction::Start`]), the handler must
+///  - If the handler requests a backfill run (e.g. [`BackfillAction::Start`]), the handler must
 ///    ensure that while the pipeline is running, no other write access is granted.
 ///  - At any time the [`ChainOrchestrator`] can request exclusive write access to the database
 ///    (e.g. if pruning is required), but will not do so until the handler has acknowledged the
@@ -31,7 +31,7 @@ use std::{
 pub struct ChainOrchestrator<T, P>
 where
     T: ChainHandler,
-    P: PipelineHandler,
+    P: BackfillSync,
 {
     /// The handler for advancing the chain.
     handler: T,
@@ -42,7 +42,7 @@ where
 impl<T, P> ChainOrchestrator<T, P>
 where
     T: ChainHandler + Unpin,
-    P: PipelineHandler + Unpin,
+    P: BackfillSync + Unpin,
 {
     /// Creates a new [`ChainOrchestrator`] with the given handler and pipeline.
     pub const fn new(handler: T, pipeline: P) -> Self {
@@ -74,13 +74,13 @@ where
             // try to poll the pipeline to completion, if active
             match this.pipeline.poll(cx) {
                 Poll::Ready(pipeline_event) => match pipeline_event {
-                    PipelineEvent::Idle => {}
-                    PipelineEvent::Started(_) => {
+                    BackfillEvent::Idle => {}
+                    BackfillEvent::Started(_) => {
                         // notify handler that pipeline started
                         this.handler.on_event(FromOrchestrator::PipelineStarted);
                         return Poll::Ready(ChainEvent::PipelineStarted);
                     }
-                    PipelineEvent::Finished(res) => {
+                    BackfillEvent::Finished(res) => {
                         return match res {
                             Ok(event) => {
                                 tracing::debug!(?event, "pipeline finished");
@@ -106,7 +106,7 @@ where
                         match handler_event {
                             HandlerEvent::Pipeline(target) => {
                                 // trigger pipeline and start polling it
-                                this.pipeline.on_action(PipelineAction::Start(target));
+                                this.pipeline.on_action(BackfillAction::Start(target));
                                 continue 'outer
                             }
                             HandlerEvent::Event(ev) => {
@@ -130,7 +130,7 @@ where
 impl<T, P> Stream for ChainOrchestrator<T, P>
 where
     T: ChainHandler + Unpin,
-    P: PipelineHandler + Unpin,
+    P: BackfillSync + Unpin,
 {
     type Item = ChainEvent<T::Event>;
 
@@ -144,7 +144,7 @@ where
 enum SyncMode {
     #[default]
     Handler,
-    Pipeline,
+    Backfill,
 }
 
 /// Event emitted by the [`ChainOrchestrator`]

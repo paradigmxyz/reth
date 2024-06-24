@@ -12,6 +12,8 @@
 /// Re-export of the blockchain tree API.
 pub use reth_blockchain_tree_api::*;
 
+/// Support for backfill sync mode.
+pub mod backfill;
 /// The type that drives the chain forward.
 pub mod chain;
 /// Support for downloading blocks on demand for live sync.
@@ -20,7 +22,5 @@ pub mod download;
 pub mod engine;
 /// The background writer task for batch db writes.
 pub mod persistence;
-/// Support for managing the pipeline.
-pub mod pipeline;
 /// Support for interacting with the blockchain tree.
 pub mod tree;

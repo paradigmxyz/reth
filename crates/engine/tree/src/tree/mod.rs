@@ -1,4 +1,4 @@
-use crate::{engine::DownloadRequest, pipeline::PipelineAction};
+use crate::{backfill::BackfillAction, engine::DownloadRequest};
 use reth_beacon_consensus::{ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated};
 use reth_blockchain_tree::{BlockBuffer, BlockStatus};
 use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
@@ -190,8 +190,8 @@ impl<T> TreeOutcome<T> {
 /// Events that can be emitted by the [`EngineApiTreeHandler`].
 #[derive(Debug)]
 pub enum TreeEvent {
-    /// Pipeline action is needed.
-    PipelineAction(PipelineAction),
+    /// Backfill action is needed.
+    BackfillAction(BackfillAction),
     /// Block download is needed.
     Download(DownloadRequest),
 }
