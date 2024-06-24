@@ -41,12 +41,12 @@ cargo build --features jemalloc-prof
 ```
 
 When performing a longer-running or performance-sensitive task with reth, such as a sync test or load benchmark, it's usually recommended to use the `maxperf` profile. However, the `maxperf`
-profile does not enable debug symbols, which are required for tools like `perf` and `jemalloc` to produce results that a human can interpret. Reth includes a performance profile with debug symbols called `debug-fast`. To compile reth with debug symbols, jemalloc, profiling, and a performance profile:
+profile does not enable debug symbols, which are required for tools like `perf` and `jemalloc` to produce results that a human can interpret. Reth includes a performance profile with debug symbols called `profiling`. To compile reth with debug symbols, jemalloc, profiling, and a performance profile:
 ```
-cargo build --features jemalloc-prof --profile debug-fast
+cargo build --features jemalloc-prof --profile profiling
 
 # May improve performance even more
-RUSTFLAGS="-C target-cpu=native" cargo build --features jemalloc-prof --profile debug-fast
+RUSTFLAGS="-C target-cpu=native" cargo build --features jemalloc-prof --profile profiling
 ```
 
 ### Monitoring memory usage
