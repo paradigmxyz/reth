@@ -71,7 +71,7 @@ async fn main() -> eyre::Result<()> {
 
     // Pick which namespaces to expose.
     let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);
-    let mut server = rpc_builder.build(config, reth_ethereum_rpc::ServerBuilder);
+    let mut server = rpc_builder.build(config, reth_ethereum_rpc::ApiBuilder);
 
     // Add a custom rpc namespace
     let custom_rpc = MyRpcExt { provider };

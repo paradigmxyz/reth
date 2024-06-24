@@ -17,12 +17,10 @@
 //! Configure only an http server with a selection of [`RethRpcModule`]s
 //!
 //! ```
+//! use reth_ethereum_rpc::ApiBuilder;
 //! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
-//! use reth_provider::{
-//!     AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-//!     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
-//! };
+//! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc_builder::{
 //!     RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
 //! };
@@ -36,15 +34,7 @@
 //!     events: Events,
 //!     evm_config: EvmConfig,
 //! ) where
-//!     Provider: AccountReader
-//!         + BlockReaderIdExt
-//!         + ChainSpecProvider
-//!         + ChangeSetReader
-//!         + StateProviderFactory
-//!         + EvmEnvProvider
-//!         + Clone
-//!         + Unpin
-//!         + 'static,
+//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
@@ -65,7 +55,7 @@
 //!         events,
 //!         evm_config,
 //!     )
-//!     .build(transports);
+//!     .build(transports, ApiBuilder);
 //!     let handle = RpcServerConfig::default()
 //!         .with_http(ServerBuilder::default())
 //!         .start(transport_modules)
@@ -79,6 +69,7 @@
 //!
 //! ```
 //! use reth_engine_primitives::EngineTypes;
+//! use reth_ethereum_rpc::ApiBuilder;
 //! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
@@ -99,7 +90,7 @@
 //!     engine_api: EngineApi,
 //!     evm_config: EvmConfig,
 //! ) where
-//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader + Clone + Unpin + 'static,
+//!     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
@@ -125,7 +116,7 @@
 //!
 //!     // configure the server modules
 //!     let (modules, auth_module, _registry) =
-//!         builder.build_with_auth_server(transports, engine_api);
+//!         builder.build_with_auth_server(transports, engine_api, ApiBuilder);
 //!
 //!     // start the servers
 //!     let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
@@ -235,7 +226,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>(
     eth: EthApi,
 ) -> Result<RpcServerHandle, RpcError>
 where
-    Provider: FullRpcProvider + AccountReader + ChangeSetReader + Clone + Unpin + 'static,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -419,7 +410,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig>
 where
-    Provider: FullRpcProvider + AccountReader + ChangeSetReader + Clone + Unpin + 'static,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
@@ -471,6 +462,7 @@ where
     /// # Example
     ///
     /// ```no_run
+    /// use reth_ethereum_rpc::ApiBuilder;
     /// use reth_evm::ConfigureEvm;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
@@ -486,7 +478,7 @@ where
     ///         .with_executor(TokioTaskExecutor::default())
     ///         .with_events(TestCanonStateSubscriptions::default())
     ///         .with_evm_config(evm)
-    ///         .into_registry(Default::default());
+    ///         .into_registry(Default::default(), ApiBuilder);
     ///
     ///     let eth_api = registry.eth_api();
     /// }
@@ -767,7 +759,7 @@ where
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
     RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
 where
-    Provider: FullRpcProvider + AccountReader + ChangeSetReader + Clone + Unpin + 'static,
+    Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,

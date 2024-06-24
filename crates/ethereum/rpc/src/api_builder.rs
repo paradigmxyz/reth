@@ -10,10 +10,10 @@ use reth_transaction_pool::TransactionPool;
 
 /// Ethereum layer one `eth` RPC server builder.
 #[derive(Default, Debug, Clone, Copy)]
-pub struct ServerBuilder;
+pub struct ApiBuilder;
 
 impl<Provider, Pool, EvmConfig, Network, Tasks, Events>
-    EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events> for ServerBuilder
+    EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events> for ApiBuilder
 where
     Provider: FullRpcProvider,
     Pool: TransactionPool + 'static,

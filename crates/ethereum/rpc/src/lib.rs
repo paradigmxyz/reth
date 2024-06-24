@@ -9,6 +9,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
-mod server_builder;
+mod api_builder;
 
-pub use server_builder::ServerBuilder;
+pub use api_builder::ApiBuilder;

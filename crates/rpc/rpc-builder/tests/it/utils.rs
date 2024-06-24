@@ -52,8 +52,8 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
 /// Launches a new server with http only with the given modules
 pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
-    let server = builder
-        .build(TransportRpcModuleConfig::set_http(modules), reth_ethereum_rpc::ServerBuilder);
+    let server =
+        builder.build(TransportRpcModuleConfig::set_http(modules), reth_ethereum_rpc::ApiBuilder);
     server
         .start_server(RpcServerConfig::http(Default::default()).with_http_address(test_address()))
         .await
@@ -64,7 +64,7 @@ pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHan
 pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let server =
-        builder.build(TransportRpcModuleConfig::set_ws(modules), reth_ethereum_rpc::ServerBuilder);
+        builder.build(TransportRpcModuleConfig::set_ws(modules), reth_ethereum_rpc::ApiBuilder);
     server
         .start_server(RpcServerConfig::ws(Default::default()).with_ws_address(test_address()))
         .await
@@ -77,7 +77,7 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
     let modules = modules.into();
     let server = builder.build(
         TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
-        reth_ethereum_rpc::ServerBuilder,
+        reth_ethereum_rpc::ApiBuilder,
     );
     server
         .start_server(
@@ -96,7 +96,7 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
     let modules = modules.into();
     let server = builder.build(
         TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
-        reth_ethereum_rpc::ServerBuilder,
+        reth_ethereum_rpc::ApiBuilder,
     );
     let addr = test_address();
     server
