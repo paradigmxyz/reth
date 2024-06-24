@@ -165,7 +165,7 @@ impl RethRpcServerConfig for RpcServerArgs {
     fn rpc_server_config(
         &self,
     ) -> RpcServerConfig<impl tower::Layer<Identity> + Send + Sync + 'static> {
-        let mut config = RpcServerConfig::default().with_jwt_secret(self.rpc_secret_key());
+        let mut config = RpcServerConfig::new().with_jwt_secret(self.rpc_secret_key());
 
         if self.http {
             let socket_address = SocketAddr::new(self.http_addr, self.http_port);
@@ -190,7 +190,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .option_layer(self.enable_logging.then(|| tower_http::trace::TraceLayer::new_for_http()))
             .option_layer(self.enable_auth.then(|| tower_http::auth::AddAuthorizationLayer::basic("username", "password")));
 
-        config = config.with_additional_middleware(service_builder);
+        config = config.with_additional_middleware::<tower::layer::util::Stack<tower::util::Either<tower_http::auth::AddAuthorizationLayer, Identity>, tower::layer::util::Stack<tower::util::Either<tower_http::trace::TraceLayer<tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>>, Identity>, Identity>>>(service_builder);
 
         // if self.enable_rate_limit {
         //     config = config.with_additional_middleware(RateLimitMiddleware::new());
