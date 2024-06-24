@@ -46,12 +46,12 @@ use state::EthState;
 use transaction::EthTransactions;
 
 /// Helper trait to unify all `eth` rpc server building block traits, for simplicity.
-pub trait FullEthServer:
+pub trait FullEthApiServer:
     EthApiSpec + EthTransactions + EthBlocks + EthState + EthCall + EthFees + Trace + LoadReceipt
 {
 }
 
-impl<T> FullEthServer for T where
+impl<T> FullEthApiServer for T where
     T: EthApiSpec
         + EthTransactions
         + EthBlocks

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc::eth::{
-    servers::{FullEthServer, UpdateRawTxForwarder},
+    servers::{FullEthApiServer, UpdateRawTxForwarder},
     EthApiServer, EthFilter, EthFilterConfig, EthPubSub, EthStateCache, EthStateCacheConfig,
     FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle, GasPriceOracleConfig,
     RPC_DEFAULT_GAS_CAP,
@@ -174,7 +174,7 @@ impl<'a, Provider, Pool, EvmConfig, Network, Tasks, Events>
 /// Builds RPC server for `eth` namespace.
 pub trait EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>: Clone + Copy {
     /// `eth` namespace RPC server type.
-    type Server: EthApiServer + UpdateRawTxForwarder + Clone + FullEthServer;
+    type Server: EthApiServer + UpdateRawTxForwarder + Clone + FullEthApiServer;
 
     /// Builds the [`EthApiServer`]
     fn build(
