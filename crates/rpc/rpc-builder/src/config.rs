@@ -165,7 +165,7 @@ impl RethRpcServerConfig for RpcServerArgs {
     fn rpc_server_config(
         &self,
     ) -> RpcServerConfig<impl tower::Layer<Identity> + Send + Sync + 'static> {
-        let mut config = RpcServerConfig::new().with_jwt_secret(self.rpc_secret_key());
+        let mut config = RpcServerConfig::default().with_jwt_secret(self.rpc_secret_key());
 
         if self.http {
             let socket_address = SocketAddr::new(self.http_addr, self.http_port);
@@ -186,18 +186,11 @@ impl RethRpcServerConfig for RpcServerArgs {
                 config.with_ipc(self.ipc_server_builder()).with_ipc_endpoint(self.ipcpath.clone());
         }
 
-        if self.enable_logging {
-            let trace_layer = tower_http::trace::TraceLayer::new_for_http();
-            let service_builder = tower::ServiceBuilder::new().layer(trace_layer);
-            config = config.with_additional_middleware(service_builder);
-        }
+        let service_builder = tower::ServiceBuilder::new()
+            .option_layer(self.enable_logging.then(|| tower_http::trace::TraceLayer::new_for_http()))
+            .option_layer(self.enable_auth.then(|| tower_http::auth::AddAuthorizationLayer::basic("username", "password")));
 
-        // Conditionally add authentication middleware
-        if self.enable_auth {
-            let auth_layer = tower_http::auth::AddAuthorizationLayer::basic("username", "password");
-            let service_builder = tower::ServiceBuilder::new().layer(auth_layer);
-            config = config.with_additional_middleware(service_builder);
-        }
+        config = config.with_additional_middleware(service_builder);
 
         // if self.enable_rate_limit {
         //     config = config.with_additional_middleware(RateLimitMiddleware::new());
