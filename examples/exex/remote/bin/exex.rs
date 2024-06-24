@@ -13,7 +13,7 @@ use tonic::{transport::Server, Request, Response, Status};
 
 #[derive(Debug)]
 struct ExExService {
-    notifications: Arc<broadcast::Sender<ExExNotification>>,
+    notifications: broadcast::Sender<ExExNotification>,
 }
 
 #[tonic::async_trait]
@@ -41,7 +41,7 @@ impl RemoteExEx for ExExService {
 
 async fn exex<Node: FullNodeComponents>(
     mut ctx: ExExContext<Node>,
-    notifications: Arc<broadcast::Sender<ExExNotification>>,
+    notifications: broadcast::Sender<ExExNotification>,
 ) -> eyre::Result<()> {
     while let Some(notification) = ctx.notifications.recv().await {
         if let Some(committed_chain) = notification.committed_chain() {
@@ -56,7 +56,7 @@ async fn exex<Node: FullNodeComponents>(
 
 fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _| async move {
-        let notifications = Arc::new(broadcast::channel(1).0);
+        let notifications = broadcast::channel(1).0;
 
         let server = Server::builder()
             .add_service(RemoteExExServer::new(ExExService {
