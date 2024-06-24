@@ -3,12 +3,9 @@
 
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs_derive::{add_arbitrary_tests, derive_arbitrary};
+#[cfg(any(test, feature = "arbitrary"))]
+use reth_primitives::generate_valid_header;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
-
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::{collection::vec, prelude::*};
-#[cfg(any(test, feature = "arbitrary"))]
-use reth_primitives::{generate_valid_header, valid_header_strategy};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -50,18 +47,6 @@ pub struct BlockHeaders(
     /// The requested headers.
     pub Vec<Header>,
 );
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for BlockHeaders {
-    type Parameters = ();
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        let headers_strategy = vec(valid_header_strategy(), 0..10); // Adjust the range as needed
-
-        headers_strategy.prop_map(BlockHeaders).boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
@@ -111,12 +96,6 @@ impl From<Vec<B256>> for GetBlockBodies {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BlockBodies(
     /// The requested block bodies, each of which should correspond to a hash in the request.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<BlockBody>(), 0..=20)"
-        )
-    )]
     pub Vec<BlockBody>,
 );
 

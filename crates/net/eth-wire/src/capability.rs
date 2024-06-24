@@ -129,22 +129,6 @@ impl<'a> arbitrary::Arbitrary<'a> for Capability {
     }
 }
 
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for Capability {
-    type Parameters = proptest::arbitrary::ParamsFor<String>;
-    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        use proptest::strategy::Strategy;
-        proptest::arbitrary::any_with::<String>(args) // TODO: what possible values?
-            .prop_flat_map(move |name| {
-                proptest::arbitrary::any_with::<usize>(()) // TODO: What's the max?
-                    .prop_map(move |version| Self::new(name.clone(), version))
-            })
-            .boxed()
-    }
-
-    type Strategy = proptest::strategy::BoxedStrategy<Self>;
-}
-
 /// Represents all capabilities of a node.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Capabilities {

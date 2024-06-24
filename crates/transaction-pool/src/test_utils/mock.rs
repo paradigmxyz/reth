@@ -987,9 +987,10 @@ impl From<MockTransaction> for Transaction {
 impl proptest::arbitrary::Arbitrary for MockTransaction {
     type Parameters = ();
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::{any, Strategy};
+        use proptest::prelude::Strategy;
+        use proptest_arbitrary_interop::arb;
 
-        any::<(Transaction, Address, B256)>()
+        arb::<(Transaction, Address, B256)>()
             .prop_map(|(tx, sender, tx_hash)| match &tx {
                 Transaction::Legacy(TxLegacy {
                     chain_id,

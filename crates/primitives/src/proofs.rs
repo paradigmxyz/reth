@@ -135,10 +135,8 @@ pub fn calculate_ommers_root(ommers: &[Header]) -> B256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        bloom, constants::EMPTY_ROOT_HASH, hex_literal::hex, Block, GenesisAccount, Log, TxType,
-        U256,
-    };
+    use crate::{bloom, constants::EMPTY_ROOT_HASH, hex_literal::hex, Block, Log, TxType, U256};
+    use alloy_genesis::GenesisAccount;
     use alloy_primitives::{b256, Address, LogData};
     use alloy_rlp::Decodable;
     use reth_chainspec::{GOERLI, HOLESKY, MAINNET, SEPOLIA};

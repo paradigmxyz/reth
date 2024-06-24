@@ -19,6 +19,7 @@ use reth_consensus::Consensus;
 use reth_db::DatabaseEnv;
 use reth_errors::RethResult;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::database::CachedReads;
@@ -30,7 +31,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
-    ExecutionOutcome, ProviderFactory, StageCheckpointReader, StateProviderFactory,
+    ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};

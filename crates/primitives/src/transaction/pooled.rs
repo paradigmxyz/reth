@@ -615,33 +615,6 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
     }
 }
 
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for PooledTransactionsElement {
-    type Parameters = ();
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::{any, Strategy};
-
-        any::<(TransactionSigned, crate::BlobTransactionSidecar)>()
-            .prop_map(move |(transaction, sidecar)| {
-                match Self::try_from(transaction) {
-                    Ok(Self::BlobTransaction(mut tx)) => {
-                        tx.sidecar = sidecar;
-                        Self::BlobTransaction(tx)
-                    }
-                    Ok(tx) => tx,
-                    Err(_) => Self::Eip1559 {
-                        transaction: Default::default(),
-                        signature: Default::default(),
-                        hash: Default::default(),
-                    }, // Gen an Eip1559 as arbitrary for testing purpose
-                }
-            })
-            .boxed()
-    }
-
-    type Strategy = proptest::strategy::BoxedStrategy<Self>;
-}
-
 /// A signed pooled transaction with recovered signer.
 #[derive(Debug, Clone, PartialEq, Eq, AsRef, Deref)]
 pub struct PooledTransactionsElementEcRecovered {

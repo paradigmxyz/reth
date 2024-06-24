@@ -17,6 +17,7 @@ use reth_basic_payload_builder::{
 use reth_errors::RethError;
 use reth_evm::ConfigureEvm;
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
+use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
 };
@@ -29,7 +30,7 @@ use reth_primitives::{
     revm::env::tx_env_with_recovered,
     Block, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH, U256,
 };
-use reth_provider::{ExecutionOutcome, StateProviderFactory};
+use reth_provider::StateProviderFactory;
 use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{

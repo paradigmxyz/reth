@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-net-common.workspace = true
+reth-net-banlist.workspace = true
 reth-ethereum-forks.workspace = true
 reth-net-nat.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
@@ -52,5 +52,5 @@ reth-tracing.workspace = true
 
 [features]
 default = ["serde"]
-test-utils = ["dep:rand"]
 serde = ["dep:serde"]
+test-utils = ["dep:rand"]

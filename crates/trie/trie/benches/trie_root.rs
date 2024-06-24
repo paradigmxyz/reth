@@ -1,6 +1,7 @@
 #![allow(missing_docs, unreachable_pub)]
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
+use proptest_arbitrary_interop::arb;
 use reth_primitives::{ReceiptWithBloom, B256};
 use reth_trie::triehash::KeccakHasher;
 
@@ -26,7 +27,7 @@ pub fn trie_root_benchmark(c: &mut Criterion) {
 }
 
 fn generate_test_data(size: usize) -> Vec<ReceiptWithBloom> {
-    prop::collection::vec(any::<ReceiptWithBloom>(), size)
+    prop::collection::vec(arb::<ReceiptWithBloom>(), size)
         .new_tree(&mut TestRunner::new(ProptestConfig::default()))
         .unwrap()
         .current()

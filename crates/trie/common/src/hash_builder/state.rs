@@ -148,6 +148,7 @@ impl Compact for HashBuilderState {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use proptest_arbitrary_interop::arb;
 
     #[test]
     fn hash_builder_state_regression() {
@@ -161,7 +162,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn hash_builder_state_roundtrip(state: HashBuilderState) {
+        fn hash_builder_state_roundtrip(state in arb::<HashBuilderState>()) {
             let mut buf = vec![];
             let len = state.clone().to_compact(&mut buf);
             let (decoded, _) = HashBuilderState::from_compact(&buf, len);

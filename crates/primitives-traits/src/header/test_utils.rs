@@ -3,6 +3,7 @@
 use crate::Header;
 use alloy_primitives::B256;
 use proptest::{arbitrary::any, prop_compose};
+use proptest_arbitrary_interop::arb;
 
 /// Generates a header which is valid __with respect to past and future forks__. This means, for
 /// example, that if the withdrawals root is present, the base fee per gas is also present.
@@ -55,11 +56,11 @@ prop_compose! {
     ///
     /// See docs for [generate_valid_header] for more information.
     pub fn valid_header_strategy()(
-        header in any::<Header>(),
+        header in arb::<Header>(),
         eip_4844_active in any::<bool>(),
         blob_gas_used in any::<u64>(),
         excess_blob_gas in any::<u64>(),
-        parent_beacon_block_root in any::<B256>()
+        parent_beacon_block_root in arb::<B256>()
     ) -> Header {
         generate_valid_header(header, eip_4844_active, blob_gas_used, excess_blob_gas, parent_beacon_block_root)
     }

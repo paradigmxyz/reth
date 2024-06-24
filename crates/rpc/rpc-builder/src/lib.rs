@@ -156,7 +156,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{
-    auth::AuthRpcModule, cors::CorsDomainError, error::WsHttpSamePortError,
+    auth::AuthRpcModule,
+    cors::CorsDomainError,
+    error::WsHttpSamePortError,
+    eth::{EthHandlersBuilder, EthHandlersConfig},
     metrics::RpcRequestMetrics,
 };
 use error::{ConflictingModules, RpcError, ServerKind};
@@ -175,22 +178,13 @@ use reth_provider::{
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc::{
-    eth::{
-        cache::{cache_new_blocks_task, EthStateCache},
-        fee_history_cache_new_blocks_task,
-        gas_oracle::GasPriceOracle,
-        traits::RawTransactionForwarder,
-        EthBundle, FeeHistoryCache,
-    },
-    AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
+    eth::{cache::EthStateCache, traits::RawTransactionForwarder, EthBundle},
+    AdminApi, DebugApi, EngineEthApi, EthApi, EthSubscriptionIdProvider, NetApi, OtterscanApi,
+    RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
-use reth_tasks::{
-    pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskSpawner, TokioTaskExecutor,
-};
+use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -1001,7 +995,7 @@ where
     ///
     /// This will spawn the required service tasks for [`EthApi`] for:
     ///   - [`EthStateCache`]
-    ///   - [`FeeHistoryCache`]
+    ///   - [`reth_rpc::eth::FeeHistoryCache`]
     fn with_eth<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&EthHandlers<Provider, Pool, Network, Events, EvmConfig>) -> R,
@@ -1013,71 +1007,19 @@ where
     }
 
     fn init_eth(&self) -> EthHandlers<Provider, Pool, Network, Events, EvmConfig> {
-        let cache = EthStateCache::spawn_with(
-            self.provider.clone(),
-            self.config.eth.cache.clone(),
-            self.executor.clone(),
-            self.evm_config.clone(),
-        );
-        let gas_oracle = GasPriceOracle::new(
-            self.provider.clone(),
-            self.config.eth.gas_oracle.clone(),
-            cache.clone(),
-        );
-        let new_canonical_blocks = self.events.canonical_state_stream();
-        let c = cache.clone();
-
-        self.executor.spawn_critical(
-            "cache canonical blocks task",
-            Box::pin(async move {
-                cache_new_blocks_task(c, new_canonical_blocks).await;
-            }),
-        );
-
-        let fee_history_cache =
-            FeeHistoryCache::new(cache.clone(), self.config.eth.fee_history_cache.clone());
-        let new_canonical_blocks = self.events.canonical_state_stream();
-        let fhc = fee_history_cache.clone();
-        let provider_clone = self.provider.clone();
-        self.executor.spawn_critical(
-            "cache canonical blocks for fee history task",
-            Box::pin(async move {
-                fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider_clone).await;
-            }),
-        );
-
-        let executor = Box::new(self.executor.clone());
-        let blocking_task_pool = BlockingTaskPool::build().expect("failed to build tracing pool");
-        let api = EthApi::with_spawner(
-            self.provider.clone(),
-            self.pool.clone(),
-            self.network.clone(),
-            cache.clone(),
-            gas_oracle,
-            self.config.eth.rpc_gas_cap,
-            executor.clone(),
-            blocking_task_pool.clone(),
-            fee_history_cache,
-            self.evm_config.clone(),
-            self.eth_raw_transaction_forwarder.clone(),
-        );
-        let filter = EthFilter::new(
-            self.provider.clone(),
-            self.pool.clone(),
-            cache.clone(),
-            self.config.eth.filter_config(),
-            executor.clone(),
-        );
-
-        let pubsub = EthPubSub::with_spawner(
-            self.provider.clone(),
-            self.pool.clone(),
-            self.events.clone(),
-            self.network.clone(),
-            executor,
-        );
-
-        EthHandlers { api, cache, filter, pubsub, blocking_task_pool }
+        EthHandlersBuilder::new(
+            EthHandlersConfig {
+                provider: self.provider.clone(),
+                pool: self.pool.clone(),
+                network: self.network.clone(),
+                executor: self.executor.clone(),
+                events: self.events.clone(),
+                evm_config: self.evm_config.clone(),
+                eth_raw_transaction_forwarder: self.eth_raw_transaction_forwarder.clone(),
+            },
+            self.config.clone(),
+        )
+        .build()
     }
 
     /// Returns the configured [`EthHandlers`] or creates it if it does not exist yet
@@ -1879,7 +1821,7 @@ pub struct RpcServerHandle {
     http: Option<ServerHandle>,
     ws: Option<ServerHandle>,
     ipc_endpoint: Option<String>,
-    ipc: Option<reth_ipc::server::ServerHandle>,
+    ipc: Option<jsonrpsee::server::ServerHandle>,
     jwt_secret: Option<JwtSecret>,
 }
 

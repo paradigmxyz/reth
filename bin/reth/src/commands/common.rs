@@ -10,7 +10,7 @@ use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHe
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_node_core::{
     args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, DatadirArgs,
     },
     dirs::{ChainPath, DataDirPath},
@@ -42,7 +42,7 @@ pub struct EnvironmentArgs {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser
+        value_parser = chain_value_parser
     )]
     pub chain: Arc<ChainSpec>,
 

@@ -1,12 +1,10 @@
-use std::fmt::Debug;
-
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
+use crate::{ExExEvent, ExExNotification};
+use reth_node_api::FullNodeComponents;
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::Head;
 use reth_tasks::TaskExecutor;
+use std::fmt::Debug;
 use tokio::sync::mpsc::{Receiver, UnboundedSender};
-
-use crate::{ExExEvent, ExExNotification};
 
 /// Captures the context that an `ExEx` has access to.
 pub struct ExExContext<Node: FullNodeComponents> {
@@ -49,46 +47,39 @@ impl<Node: FullNodeComponents> Debug for ExExContext<Node> {
     }
 }
 
-impl<Node: FullNodeComponents> NodeTypes for ExExContext<Node> {
-    type Primitives = Node::Primitives;
-    type Engine = Node::Engine;
-}
-
-impl<Node: FullNodeComponents> FullNodeTypes for ExExContext<Node> {
-    type DB = Node::DB;
-    type Provider = Node::Provider;
-}
-
-impl<Node: FullNodeComponents> FullNodeComponents for ExExContext<Node> {
-    type Pool = Node::Pool;
-    type Evm = Node::Evm;
-    type Executor = Node::Executor;
-
-    fn pool(&self) -> &Self::Pool {
+impl<Node: FullNodeComponents> ExExContext<Node> {
+    /// Returns the transaction pool of the node.
+    pub fn pool(&self) -> &Node::Pool {
         self.components.pool()
     }
 
-    fn evm_config(&self) -> &Self::Evm {
+    /// Returns the node's evm config.
+    pub fn evm_config(&self) -> &Node::Evm {
         self.components.evm_config()
     }
 
-    fn block_executor(&self) -> &Self::Executor {
+    /// Returns the node's executor type.
+    pub fn block_executor(&self) -> &Node::Executor {
         self.components.block_executor()
     }
 
-    fn provider(&self) -> &Self::Provider {
+    /// Returns the provider of the node.
+    pub fn provider(&self) -> &Node::Provider {
         self.components.provider()
     }
 
-    fn network(&self) -> &reth_network::NetworkHandle {
+    /// Returns the handle to the network
+    pub fn network(&self) -> &reth_network::NetworkHandle {
         self.components.network()
     }
 
-    fn payload_builder(&self) -> &reth_payload_builder::PayloadBuilderHandle<Self::Engine> {
+    /// Returns the handle to the payload builder service.
+    pub fn payload_builder(&self) -> &reth_payload_builder::PayloadBuilderHandle<Node::Engine> {
         self.components.payload_builder()
     }
 
-    fn task_executor(&self) -> &TaskExecutor {
+    /// Returns the task executor.
+    pub fn task_executor(&self) -> &TaskExecutor {
         self.components.task_executor()
     }
 }
