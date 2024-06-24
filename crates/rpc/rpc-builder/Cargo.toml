@@ -41,7 +41,6 @@ metrics.workspace = true
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
 tracing.workspace = true
-derive_more.workspace = true
 
 [dev-dependencies]
 reth-chainspec.workspace = true
@@ -59,6 +58,7 @@ reth-rpc-types-compat.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-tokio-util.workspace = true
+reth-ethereum-rpc.workspace = true
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true

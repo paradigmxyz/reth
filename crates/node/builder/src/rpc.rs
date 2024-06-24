@@ -148,6 +148,7 @@ impl<Node: FullNodeComponents> ExtendRpcModules<Node> for () {
 
 /// Helper wrapper type to encapsulate the [`RethModuleRegistry`] over components trait.
 #[derive(Debug)]
+#[allow(clippy::type_complexity)]
 pub struct RpcRegistry<Node: FullNodeComponents> {
     pub(crate) registry: RethModuleRegistry<
         Node::Provider,

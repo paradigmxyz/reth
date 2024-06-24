@@ -15,3 +15,4 @@ reth-db-api.workspace = true
 reth-node-ethereum.workspace = true
 tokio = { workspace = true, features = ["full"] }
 eyre.workspace = true
+reth-ethereum-rpc.workspace = true

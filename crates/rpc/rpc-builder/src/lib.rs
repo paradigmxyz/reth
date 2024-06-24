@@ -459,6 +459,7 @@ where
     /// This behaves exactly as [`RpcModuleBuilder::build`] for the [`TransportRpcModules`], but
     /// also configures the auth (engine api) server, which exposes a subset of the `eth_`
     /// namespace.
+    #[allow(clippy::type_complexity)]
     pub fn build_with_auth_server<EngineApi, EngineT, EthApi>(
         self,
         module_config: TransportRpcModuleConfig,
@@ -683,6 +684,7 @@ where
     EthApi: EthServerBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
 {
     /// Creates a new, empty instance.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
         pool: Pool,

@@ -2992,6 +2992,7 @@ dependencies = [
  "reth-chainspec",
  "reth-db",
  "reth-db-api",
+ "reth-ethereum-rpc",
  "reth-node-ethereum",
  "tokio",
 ]
@@ -7950,7 +7951,6 @@ name = "reth-rpc-builder"
 version = "1.0.0-rc.2"
 dependencies = [
  "clap",
- "derive_more",
  "http 1.1.0",
  "jsonrpsee",
  "metrics",
@@ -7959,6 +7959,7 @@ dependencies = [
  "reth-chainspec",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
+ "reth-ethereum-rpc",
  "reth-evm",
  "reth-evm-ethereum",
  "reth-ipc",

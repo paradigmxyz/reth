@@ -9,10 +9,8 @@
 //! namespace. They use `Load` traits as building blocks.
 //! [`EthTransactions` also writes data (submits transactions).
 //! Based on the `eth_` request method semantics, request methods are divided into:
-//! [`EthTransactions`], [`EthBlocks`],
-//! [`EthFees`], [`EthState`] and
-//! [`EthCall`]. Default implementation of the `Eth` traits, is done w.r.t.
-//! L1.
+//! [`EthTransactions`], [`EthBlocks`], [`EthFees`], [`EthState`] and [`EthCall`]. Default
+//! implementation of the `Eth` traits, is done w.r.t. L1.
 //!
 //! [`EthApiServer`](crate::EthApiServer), is implemented for any type that implements
 //! all the `Eth` traits, e.g. [`EthApi`](crate::EthApi).

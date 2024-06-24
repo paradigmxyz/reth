@@ -1,3 +1,5 @@
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_chainspec::MAINNET;
 use reth_ethereum_engine_primitives::EthEngineTypes;
@@ -15,7 +17,6 @@ use reth_rpc_server_types::RpcModuleSelection;
 use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
 use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::test_utils::{TestPool, TestPoolBuilder};
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use tokio::sync::mpsc::unbounded_channel;
 
 /// Localhost with port 0 so a free port is used.
@@ -51,7 +52,8 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
 /// Launches a new server with http only with the given modules
 pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
-    let server = builder.build(TransportRpcModuleConfig::set_http(modules));
+    let server = builder
+        .build(TransportRpcModuleConfig::set_http(modules), reth_ethereum_rpc::ServerBuilder);
     server
         .start_server(RpcServerConfig::http(Default::default()).with_http_address(test_address()))
         .await
@@ -61,7 +63,8 @@ pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHan
 /// Launches a new server with ws only with the given modules
 pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
-    let server = builder.build(TransportRpcModuleConfig::set_ws(modules));
+    let server =
+        builder.build(TransportRpcModuleConfig::set_ws(modules), reth_ethereum_rpc::ServerBuilder);
     server
         .start_server(RpcServerConfig::ws(Default::default()).with_ws_address(test_address()))
         .await
@@ -72,8 +75,10 @@ pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandl
 pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let modules = modules.into();
-    let server =
-        builder.build(TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules));
+    let server = builder.build(
+        TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
+        reth_ethereum_rpc::ServerBuilder,
+    );
     server
         .start_server(
             RpcServerConfig::ws(Default::default())
@@ -89,8 +94,10 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
 pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let modules = modules.into();
-    let server =
-        builder.build(TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules));
+    let server = builder.build(
+        TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
+        reth_ethereum_rpc::ServerBuilder,
+    );
     let addr = test_address();
     server
         .start_server(

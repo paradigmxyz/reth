@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use derive_more::Constructor;
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc::eth::{
     servers::{FullEthServer, UpdateRawTxForwarder},
@@ -120,7 +119,7 @@ impl EthConfig {
 }
 
 /// Context for building the `eth` namespace server.
-#[derive(Debug, Constructor)]
+#[derive(Debug)]
 pub struct EthServerBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Events> {
     /// Database handle.
     pub provider: Provider,
@@ -140,6 +139,36 @@ pub struct EthServerBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Ev
     pub cache: EthStateCache,
     /// Transaction forwarder used by `eth_sendRawTransaction` method.
     pub raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+}
+
+impl<'a, Provider, Pool, EvmConfig, Network, Tasks, Events>
+    EthServerBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Events>
+{
+    /// Creates a new context for building the `eth` namespace server.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        provider: Provider,
+        pool: Pool,
+        network: Network,
+        evm_config: EvmConfig,
+        config: &'a EthConfig,
+        executor: Box<Tasks>,
+        events: Events,
+        cache: EthStateCache,
+        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+    ) -> Self {
+        Self {
+            provider,
+            pool,
+            network,
+            evm_config,
+            config,
+            executor,
+            events,
+            cache,
+            raw_transaction_forwarder,
+        }
+    }
 }
 
 /// Builds RPC server for `eth` namespace.
