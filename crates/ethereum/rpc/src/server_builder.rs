@@ -2,7 +2,7 @@ use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_provider::{CanonStateSubscriptions, FullRpcProvider};
 use reth_rpc_builder::{
-    EthServerBuilder, EthServerBuilderCtx, FeeHistoryCacheBuilder, GasPriceOracleBuilder,
+    EthApiBuilder, EthApiBuilderCtx, FeeHistoryCacheBuilder, GasPriceOracleBuilder,
 };
 use reth_rpc_eth_api::EthApi;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
@@ -13,7 +13,7 @@ use reth_transaction_pool::TransactionPool;
 pub struct ServerBuilder;
 
 impl<Provider, Pool, EvmConfig, Network, Tasks, Events>
-    EthServerBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events> for ServerBuilder
+    EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events> for ServerBuilder
 where
     Provider: FullRpcProvider,
     Pool: TransactionPool + 'static,
@@ -26,12 +26,12 @@ where
 
     fn build(
         self,
-        ctx: EthServerBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        ctx: EthApiBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> Self::Server {
         let gas_oracle = GasPriceOracleBuilder::build(&ctx);
         let fee_history_cache = FeeHistoryCacheBuilder::build(&ctx);
 
-        let EthServerBuilderCtx {
+        let EthApiBuilderCtx {
             provider,
             pool,
             network,

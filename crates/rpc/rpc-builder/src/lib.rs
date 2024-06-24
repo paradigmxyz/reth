@@ -214,7 +214,7 @@ pub mod error;
 /// Eth utils
 mod eth;
 pub use eth::{
-    EthConfig, EthHandlers, EthServerBuilder, EthServerBuilderCtx, FeeHistoryCacheBuilder,
+    EthApiBuilder, EthApiBuilderCtx, EthConfig, EthHandlers, FeeHistoryCacheBuilder,
     GasPriceOracleBuilder,
 };
 
@@ -241,7 +241,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EvmConfig: ConfigureEvm,
-    EthApi: EthServerBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    EthApi: EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
 {
     let module_config = module_config.into();
     let server_config = server_config.into();
@@ -446,7 +446,7 @@ where
     where
         EngineT: EngineTypes + 'static,
         EngineApi: EngineApiServer<EngineT>,
-        EthApi: EthServerBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        EthApi: EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     {
         let Self { provider, pool, network, executor, events, evm_config } = self;
 
@@ -497,7 +497,7 @@ where
         eth: EthApi,
     ) -> RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
     where
-        EthApi: EthServerBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        EthApi: EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     {
         let Self { provider, pool, network, executor, events, evm_config } = self;
         RethModuleRegistry::new(provider, pool, network, executor, events, config, evm_config, eth)
@@ -513,7 +513,7 @@ where
         eth: EthApi,
     ) -> TransportRpcModules<()>
     where
-        EthApi: EthServerBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        EthApi: EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -626,7 +626,7 @@ pub struct RethModuleRegistry<
     Tasks,
     Events,
     EvmConfig,
-    EthApi: EthServerBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    EthApi: EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
 > {
     provider: Provider,
     pool: Pool,
@@ -654,7 +654,7 @@ pub struct RethModuleRegistry<
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
     RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
 where
-    EthApi: EthServerBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    EthApi: EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
 {
     /// Creates a new, empty instance.
     #[allow(clippy::too_many_arguments)]
@@ -737,7 +737,7 @@ impl<Provider: ChainSpecProvider, Pool, Network, Tasks, Events, EvmConfig, EthAp
     RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
 where
     Network: NetworkInfo + Peers + Clone + 'static,
-    EthApi: EthServerBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    EthApi: EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
 {
     /// Instantiates `AdminApi`
     pub fn admin_api(&self) -> AdminApi<Network> {
@@ -773,7 +773,7 @@ where
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
     EvmConfig: ConfigureEvm,
-    EthApi: EthServerBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    EthApi: EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>,
 {
     /// Register Eth Namespace
     ///
@@ -1026,7 +1026,7 @@ where
 
         let executor = Box::new(self.executor.clone());
 
-        let ctx = EthServerBuilderCtx::new(
+        let ctx = EthApiBuilderCtx::new(
             self.provider.clone(),
             self.pool.clone(),
             self.network.clone(),

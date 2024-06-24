@@ -120,7 +120,7 @@ impl EthConfig {
 
 /// Context for building the `eth` namespace server.
 #[derive(Debug)]
-pub struct EthServerBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Events> {
+pub struct EthApiBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Events> {
     /// Database handle.
     pub provider: Provider,
     /// Mempool handle.
@@ -142,7 +142,7 @@ pub struct EthServerBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Ev
 }
 
 impl<'a, Provider, Pool, EvmConfig, Network, Tasks, Events>
-    EthServerBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Events>
+    EthApiBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Events>
 {
     /// Creates a new context for building the `eth` namespace server.
     #[allow(clippy::too_many_arguments)]
@@ -172,16 +172,14 @@ impl<'a, Provider, Pool, EvmConfig, Network, Tasks, Events>
 }
 
 /// Builds RPC server for `eth` namespace.
-pub trait EthServerBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>:
-    Clone + Copy
-{
+pub trait EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>: Clone + Copy {
     /// `eth` namespace RPC server type.
     type Server: EthApiServer + UpdateRawTxForwarder + Clone + FullEthServer;
 
     /// Builds the [`EthApiServer`]
     fn build(
         self,
-        ctx: EthServerBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        ctx: EthApiBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> Self::Server;
 }
 
@@ -192,7 +190,7 @@ pub struct GasPriceOracleBuilder;
 impl GasPriceOracleBuilder {
     /// Builds a gas price oracle, for given context.
     pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
-        ctx: &EthServerBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        ctx: &EthApiBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> GasPriceOracle<Provider>
     where
         Provider: BlockReaderIdExt + Clone,
@@ -208,7 +206,7 @@ pub struct FeeHistoryCacheBuilder;
 impl FeeHistoryCacheBuilder {
     /// Builds a fee history cache, for given context.
     pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
-        ctx: &EthServerBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        ctx: &EthApiBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> FeeHistoryCache
     where
         Provider: ChainSpecProvider + BlockReaderIdExt + Clone + 'static,
