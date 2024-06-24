@@ -1,10 +1,9 @@
-//! Command that initializes the node from a genesis file.
+//! Command that runs pruning without any limits.
 
 use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_provider::BlockHashReader;
+use reth_provider::BlockNumReader;
 use reth_prune::PrunerBuilder;
-use tracing::info;
 
 #[derive(Debug, Parser)]
 pub struct PruneCommand {
@@ -17,15 +16,14 @@ impl PruneCommand {
     pub async fn execute(self) -> eyre::Result<()> {
         let Environment { config, provider_factory, .. } = self.env.init(AccessRights::RW)?;
 
-        let pruner = PrunerBuilder::new(config.prune.clone().unwrap_or_default())
+        let tip_block_number = provider_factory.best_block_number()?;
+
+        let mut pruner = PrunerBuilder::new(config.prune.unwrap_or_default())
             .prune_delete_limit(usize::MAX)
             .build(provider_factory);
 
-        let hash = provider_factory
-            .block_hash(0)?
-            .ok_or_else(|| eyre::eyre!("Genesis hash not found."))?;
+        pruner.run(tip_block_number)?;
 
-        info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())
     }
 }
