@@ -87,7 +87,9 @@ macro_rules! define_hardfork_enum {
 
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 match s.to_lowercase().as_str() {
-                    $( stringify!($variant) => Ok($enum::$variant), )*
+                    $(
+                        s if s == stringify!($variant).to_lowercase() => Ok($enum::$variant),
+                    )*
                     _ => return Err(format!("Unknown hardfork: {s}")),
                 }
             }
