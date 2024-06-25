@@ -298,6 +298,12 @@ pub enum BaseFeeParamsKind {
     Variable(ForkBaseFeeParams),
 }
 
+impl Default for BaseFeeParamsKind {
+    fn default() -> Self {
+        BaseFeeParams::ethereum().into()
+    }
+}
+
 impl From<BaseFeeParams> for BaseFeeParamsKind {
     fn from(params: BaseFeeParams) -> Self {
         Self::Constant(params)
@@ -1160,98 +1166,78 @@ impl DepositContract {
     }
 }
 
+/// Genesis info for Optimism.
 #[cfg(feature = "optimism")]
+#[derive(Default, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct OptimismGenesisInfo {
     bedrock_block: Option<u64>,
     regolith_time: Option<u64>,
     canyon_time: Option<u64>,
     ecotone_time: Option<u64>,
     fjord_time: Option<u64>,
+    #[serde(skip)]
     base_fee_params: BaseFeeParamsKind,
+}
+
+#[cfg(feature = "optimism")]
+#[derive(Debug, Eq, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OptimismBaseFeeInfo {
+    eip1559_elasticity: Option<u64>,
+    eip1559_denominator: Option<u64>,
+    eip1559_denominator_canyon: Option<u64>,
 }
 
 #[cfg(feature = "optimism")]
 impl OptimismGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
-        let optimism_config =
-            genesis.config.extra_fields.get("optimism").and_then(|value| value.as_object());
+        let mut optimism_genesis_info: Self =
+            genesis.config.extra_fields.deserialize_as().unwrap_or_default();
 
-        let eip1559_elasticity = optimism_config
-            .and_then(|config| config.get("eip1559Elasticity"))
-            .and_then(|value| value.as_u64());
-
-        let eip1559_denominator = optimism_config
-            .and_then(|config| config.get("eip1559Denominator"))
-            .and_then(|value| value.as_u64());
-
-        let eip1559_denominator_canyon = optimism_config
-            .and_then(|config| config.get("eip1559DenominatorCanyon"))
-            .and_then(|value| value.as_u64());
-
-        let base_fee_params = if let (Some(elasticity), Some(denominator)) =
-            (eip1559_elasticity, eip1559_denominator)
+        if let Some(Ok(optimism_base_fee_info)) =
+            genesis.config.extra_fields.get_deserialized::<OptimismBaseFeeInfo>("optimism")
         {
-            if let Some(canyon_denominator) = eip1559_denominator_canyon {
-                BaseFeeParamsKind::Variable(
-                    vec![
-                        (
-                            Hardfork::London,
-                            BaseFeeParams::new(denominator as u128, elasticity as u128),
-                        ),
-                        (
-                            Hardfork::Canyon,
-                            BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
-                        ),
-                    ]
-                    .into(),
-                )
-            } else {
-                BaseFeeParams::new(denominator as u128, elasticity as u128).into()
-            }
-        } else {
-            BaseFeeParams::ethereum().into()
-        };
+            if let (Some(elasticity), Some(denominator)) = (
+                optimism_base_fee_info.eip1559_elasticity,
+                optimism_base_fee_info.eip1559_denominator,
+            ) {
+                let base_fee_params = if let Some(canyon_denominator) =
+                    optimism_base_fee_info.eip1559_denominator_canyon
+                {
+                    BaseFeeParamsKind::Variable(
+                        vec![
+                            (
+                                Hardfork::London,
+                                BaseFeeParams::new(denominator as u128, elasticity as u128),
+                            ),
+                            (
+                                Hardfork::Canyon,
+                                BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
+                            ),
+                        ]
+                        .into(),
+                    )
+                } else {
+                    BaseFeeParams::new(denominator as u128, elasticity as u128).into()
+                };
 
-        Self {
-            bedrock_block: genesis
-                .config
-                .extra_fields
-                .get("bedrockBlock")
-                .and_then(|value| value.as_u64()),
-            regolith_time: genesis
-                .config
-                .extra_fields
-                .get("regolithTime")
-                .and_then(|value| value.as_u64()),
-            canyon_time: genesis
-                .config
-                .extra_fields
-                .get("canyonTime")
-                .and_then(|value| value.as_u64()),
-            ecotone_time: genesis
-                .config
-                .extra_fields
-                .get("ecotoneTime")
-                .and_then(|value| value.as_u64()),
-            fjord_time: genesis
-                .config
-                .extra_fields
-                .get("fjordTime")
-                .and_then(|value| value.as_u64()),
-            base_fee_params,
+                optimism_genesis_info.base_fee_params = base_fee_params;
+            }
         }
+
+        optimism_genesis_info
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy_chains::Chain;
     use alloy_genesis::{ChainConfig, GenesisAccount};
+    use alloy_primitives::{b256, hex};
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use reth_trie_common::TrieAccount;
-
-    use super::*;
-    use alloy_primitives::{b256, hex};
     use std::{collections::HashMap, str::FromStr};
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
@@ -2966,5 +2952,77 @@ Post-merge hard forks (timestamp based):
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, 30));
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, 40));
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, 50));
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn parse_genesis_optimism_with_variable_base_fee_params() {
+        let geth_genesis = r#"
+    {
+      "config": {
+        "chainId": 8453,
+        "homesteadBlock": 0,
+        "eip150Block": 0,
+        "eip155Block": 0,
+        "eip158Block": 0,
+        "byzantiumBlock": 0,
+        "constantinopleBlock": 0,
+        "petersburgBlock": 0,
+        "istanbulBlock": 0,
+        "muirGlacierBlock": 0,
+        "berlinBlock": 0,
+        "londonBlock": 0,
+        "arrowGlacierBlock": 0,
+        "grayGlacierBlock": 0,
+        "mergeNetsplitBlock": 0,
+        "bedrockBlock": 0,
+        "regolithTime": 15,
+        "terminalTotalDifficulty": 0,
+        "terminalTotalDifficultyPassed": true,
+        "optimism": {
+          "eip1559Elasticity": 6,
+          "eip1559Denominator": 50
+        }
+      }
+    }
+    "#;
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
+        let chainspec = ChainSpec::from(genesis.clone());
+
+        let actual_chain_id = genesis.config.chain_id;
+        assert_eq!(actual_chain_id, 8453);
+
+        assert_eq!(chainspec.hardforks.get(&Hardfork::Istanbul), Some(&ForkCondition::Block(0)));
+
+        let actual_bedrock_block = genesis.config.extra_fields.get("bedrockBlock");
+        assert_eq!(actual_bedrock_block, Some(serde_json::Value::from(0)).as_ref());
+        let actual_canyon_timestamp = genesis.config.extra_fields.get("canyonTime");
+        assert_eq!(actual_canyon_timestamp, None);
+
+        assert!(genesis.config.terminal_total_difficulty_passed);
+
+        let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
+        let optimism_base_fee_info =
+            serde_json::from_value::<OptimismBaseFeeInfo>(optimism_object.clone()).unwrap();
+
+        assert_eq!(
+            optimism_base_fee_info,
+            OptimismBaseFeeInfo {
+                eip1559_elasticity: Some(6),
+                eip1559_denominator: Some(50),
+                eip1559_denominator_canyon: None,
+            }
+        );
+        assert_eq!(
+            chainspec.base_fee_params,
+            BaseFeeParamsKind::Constant(BaseFeeParams {
+                max_change_denominator: 50,
+                elasticity_multiplier: 6,
+            })
+        );
+
+        assert!(chainspec.is_fork_active_at_block(Hardfork::Bedrock, 0));
+
+        assert!(chainspec.is_fork_active_at_timestamp(Hardfork::Regolith, 20));
     }
 }

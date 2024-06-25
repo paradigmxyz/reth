@@ -6701,6 +6701,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-rpc-types",
  "reth-trie-common",
+ "serde",
  "serde_json",
 ]
 
