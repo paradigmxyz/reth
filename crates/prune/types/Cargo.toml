@@ -20,6 +20,7 @@ derive_more.workspace = true
 modular-bitfield.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+strum.workspace = true
 
 [dev-dependencies]
 arbitrary = { workspace = true, features = ["derive"] }
