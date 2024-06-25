@@ -182,7 +182,7 @@ where
 pub struct HashedPostStateStorageCursor<'a, C> {
     /// The database cursor.
     cursor: C,
-    /// The reference to the post state.
+    /// The reference to post state storage.
     post_state_storage: Option<&'a HashedStorageSorted>,
     /// The post state index where the cursor is currently at.
     post_state_storage_index: usize,
