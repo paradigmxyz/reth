@@ -6527,6 +6527,24 @@ version = "1.0.0"
 [[package]]
 name = "reth-cli-commands"
 version = "1.0.0"
+dependencies = [
+ "ahash",
+ "clap",
+ "comfy-table",
+ "crossterm",
+ "eyre",
+ "human_bytes",
+ "ratatui",
+ "reth-db",
+ "reth-db-api",
+ "reth-fs-util",
+ "reth-node-core",
+ "reth-primitives",
+ "reth-provider",
+ "serde",
+ "serde_json",
+ "tracing",
+]
 
 [[package]]
 name = "reth-cli-runner"
