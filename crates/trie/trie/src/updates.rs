@@ -32,6 +32,15 @@ impl TrieOp {
     pub const fn is_update(&self) -> bool {
         matches!(self, Self::Update(..))
     }
+
+    /// Returns reference to updated branch node if operation is [`Self::Update`].
+    pub const fn as_update(&self) -> Option<&BranchNodeCompact> {
+        if let Self::Update(node) = &self {
+            Some(node)
+        } else {
+            None
+        }
+    }
 }
 
 /// The aggregation of trie updates.

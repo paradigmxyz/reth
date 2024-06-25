@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.0.0-rc.2"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.79"
 license = "MIT OR Apache-2.0"
@@ -14,6 +14,8 @@ members = [
     "crates/blockchain-tree/",
     "crates/blockchain-tree-api/",
     "crates/chainspec/",
+    "crates/cli/cli/",
+    "crates/cli/commands/",
     "crates/cli/runner/",
     "crates/config/",
     "crates/consensus/auto-seal/",
@@ -224,20 +226,28 @@ opt-level = 3
 lto = "thin"
 
 [profile.release]
+opt-level = 3
 lto = "thin"
-strip = "debuginfo"
+debug = "line-tables-only"
+strip = true
+panic = "unwind"
+codegen-units = 16
 
-# Like release, but with full debug symbols. Useful for e.g. `perf`.
-[profile.debug-fast]
+# Use the `--profile profiling` flag to show symbols in release mode.
+# e.g. `cargo build --profile profiling`
+[profile.profiling]
 inherits = "release"
-strip = "none"
-debug = true
+debug = 2
+strip = false
+
+# Make sure debug symbols are in the bench profile
+[profile.bench]
+inherits = "profiling"
 
 [profile.maxperf]
 inherits = "release"
 lto = "fat"
 codegen-units = 1
-incremental = false
 
 [workspace.dependencies]
 # reth
@@ -249,6 +259,8 @@ reth-beacon-consensus = { path = "crates/consensus/beacon" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-blockchain-tree-api = { path = "crates/blockchain-tree-api" }
 reth-chainspec = { path = "crates/chainspec" }
+reth-cli = { path = "crates/cli/cli" }
+reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-codecs-derive = { path = "crates/storage/codecs/derive" }
@@ -491,7 +503,7 @@ tempfile = "3.8"
 criterion = "0.5"
 pprof = "0.13"
 proptest = "1.4"
-proptest-derive = "0.4"
+proptest-derive = "0.5"
 serial_test = "3"
 similar-asserts = "1.5.0"
 test-fuzz = "5"
