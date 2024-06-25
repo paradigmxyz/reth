@@ -19,8 +19,8 @@ pub struct ChainInfoTracker {
 impl ChainInfoTracker {
     /// Create a new chain info container for the given canonical head.
     pub fn new(head: SealedHeader, finalized: SealedHeader) -> Self {
-        let (finalized_block, _) = watch::channel(Some(finalized));
-        let (safe_block, _) = watch::channel(None);
+        let (finalized_block, _) = watch::channel(Some(finalized.clone()));
+        let (safe_block, _) = watch::channel(Some(finalized));
 
         Self {
             inner: Arc::new(ChainInfoInner {
