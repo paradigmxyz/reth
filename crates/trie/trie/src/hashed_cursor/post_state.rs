@@ -1,5 +1,5 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
-use crate::{state::HashedPostStateSorted, HashedStorageSorted};
+use crate::{HashedAccountsSorted, HashedPostStateSorted, HashedStorageSorted};
 use reth_primitives::{Account, B256, U256};
 
 /// The hashed cursor factory for the post state.
@@ -22,7 +22,7 @@ impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorF
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
         let cursor = self.cursor_factory.hashed_account_cursor()?;
-        Ok(HashedPostStateAccountCursor::new(cursor, self.post_state))
+        Ok(HashedPostStateAccountCursor::new(cursor, &self.post_state.accounts))
     }
 
     fn hashed_storage_cursor(
@@ -40,8 +40,8 @@ impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorF
 pub struct HashedPostStateAccountCursor<'a, C> {
     /// The database cursor.
     cursor: C,
-    /// The reference to the in-memory [`HashedPostStateSorted`].
-    post_state: &'a HashedPostStateSorted,
+    /// The reference to the in-memory [`HashedAccountsSorted`].
+    post_state_accounts: &'a HashedAccountsSorted,
     /// The post state account index where the cursor is currently at.
     post_state_account_index: usize,
     /// The last hashed account that was returned by the cursor.
@@ -51,8 +51,8 @@ pub struct HashedPostStateAccountCursor<'a, C> {
 
 impl<'a, C> HashedPostStateAccountCursor<'a, C> {
     /// Create new instance of [`HashedPostStateAccountCursor`].
-    pub const fn new(cursor: C, post_state: &'a HashedPostStateSorted) -> Self {
-        Self { cursor, post_state, last_account: None, post_state_account_index: 0 }
+    pub const fn new(cursor: C, post_state_accounts: &'a HashedAccountsSorted) -> Self {
+        Self { cursor, post_state_accounts, last_account: None, post_state_account_index: 0 }
     }
 
     /// Returns `true` if the account has been destroyed.
@@ -61,7 +61,7 @@ impl<'a, C> HashedPostStateAccountCursor<'a, C> {
     /// This function only checks the post state, not the database, because the latter does not
     /// store destroyed accounts.
     fn is_account_cleared(&self, account: &B256) -> bool {
-        self.post_state.destroyed_accounts.contains(account)
+        self.post_state_accounts.destroyed_accounts.contains(account)
     }
 
     /// Return the account with the lowest hashed account key.
@@ -107,10 +107,11 @@ where
 
         // Take the next account from the post state with the key greater than or equal to the
         // sought key.
-        let mut post_state_entry = self.post_state.accounts.get(self.post_state_account_index);
+        let mut post_state_entry =
+            self.post_state_accounts.accounts.get(self.post_state_account_index);
         while post_state_entry.map(|(k, _)| k < &key).unwrap_or_default() {
             self.post_state_account_index += 1;
-            post_state_entry = self.post_state.accounts.get(self.post_state_account_index);
+            post_state_entry = self.post_state_accounts.accounts.get(self.post_state_account_index);
         }
 
         // It's an exact match, return the account from post state without looking up in the
@@ -163,10 +164,11 @@ where
         }
 
         // Take the next account from the post state with the key greater than the last sought key.
-        let mut post_state_entry = self.post_state.accounts.get(self.post_state_account_index);
+        let mut post_state_entry =
+            self.post_state_accounts.accounts.get(self.post_state_account_index);
         while post_state_entry.map(|(k, _)| k <= last_account).unwrap_or_default() {
             self.post_state_account_index += 1;
-            post_state_entry = self.post_state.accounts.get(self.post_state_account_index);
+            post_state_entry = self.post_state_accounts.accounts.get(self.post_state_account_index);
         }
 
         // Compare two entries and return the lowest.
