@@ -6,6 +6,7 @@ use std::str::FromStr;
 use lazy_static::lazy_static;
 use anyhow::{bail, Context, Result, ensure, anyhow};
 
+/// Data required to validate a Taiko Block
 #[derive(Clone, Debug, Default)]
 pub struct TaikoData {
     /// header
@@ -20,6 +21,7 @@ pub struct TaikoData {
 pub const ANCHOR_GAS_LIMIT: u64 = 250_000;
 
 lazy_static! {
+    /// The address calling the anchor transaction
     pub static ref GOLDEN_TOUCH_ACCOUNT: Address = {
         Address::from_str("0x0000777735367b36bC9B61C50022d9D0700dB4Ec")
             .expect("invalid golden touch account")
@@ -64,13 +66,16 @@ fn check_anchor_signature(anchor: &TransactionSigned) -> Result<()> {
 
 use alloy_sol_types::{sol, SolCall};
 
-/// Anchor call solidity code
 sol! {
     /// Anchor call
     function anchor(
+        /// The L1 hash
         bytes32 l1Hash,
+        /// The L1 state root
         bytes32 l1StateRoot,
+        /// The L1 block number
         uint64 l1BlockId,
+        /// The gas used in the parent block
         uint32 parentGasUsed
     )
         external
@@ -80,7 +85,6 @@ sol! {
 /// Decode anchor tx data
 pub fn decode_anchor(bytes: &[u8]) -> Result<anchorCall> {
     anchorCall::abi_decode(bytes, true).map_err(|e| anyhow!(e))
-    // .context("Invalid anchor call")
 }
 
 /// Verifies the anchor tx correctness

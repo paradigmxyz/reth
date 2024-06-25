@@ -211,7 +211,7 @@ fn fill_tx_env_with_system_contract_call(
             // enveloped tx size.
             enveloped_tx: Some(Bytes::default()),
         },
-        //#[cfg(feature = "taiko")]
+        #[cfg(feature = "taiko")]
         taiko: revm_primitives::TaikoFields { treasury: Address::default(), is_anchor: false },
     };
 

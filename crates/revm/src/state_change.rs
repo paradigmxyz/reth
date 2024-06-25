@@ -17,7 +17,7 @@ use reth_storage_errors::provider::ProviderError;
 use revm::{
     interpreter::Host,
     primitives::{
-        Account, AccountInfo, Bytecode, StorageSlot, ExecutionResult, FixedBytes, ResultAndState,
+        Account, AccountInfo, Bytecode, StorageSlot as EvmStorageSlot, ExecutionResult, FixedBytes, ResultAndState,
     },
     Database, DatabaseCommit, Evm,
 };
@@ -121,22 +121,22 @@ where
     Ok(())
 }
 
-/// Helper function to create a [`StorageSlot`] for [EIP-2935] state transitions for a given
+/// Helper function to create a [`EvmStorageSlot`] for [EIP-2935] state transitions for a given
 /// block number.
 ///
 /// This calculates the correct storage slot in the `BLOCKHASH` history storage address, fetches the
-/// blockhash and creates a [`StorageSlot`] with appropriate previous and new values.
+/// blockhash and creates a [`EvmStorageSlot`] with appropriate previous and new values.
 fn eip2935_block_hash_slot<DB: Database<Error = ProviderError>>(
     db: &mut DB,
     block_number: u64,
     block_hash: B256,
-) -> Result<(U256, StorageSlot), BlockValidationError> {
+) -> Result<(U256, EvmStorageSlot), BlockValidationError> {
     let slot = U256::from(block_number % HISTORY_SERVE_WINDOW);
     let current_hash = db
         .storage(HISTORY_STORAGE_ADDRESS, slot)
         .map_err(BlockValidationError::BlockHashAccountLoadingFailed)?;
 
-    Ok((slot, StorageSlot::new_changed(current_hash, block_hash.into())))
+    Ok((slot, EvmStorageSlot::new_changed(current_hash, block_hash.into())))
 }
 
 /// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,

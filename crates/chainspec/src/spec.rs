@@ -125,7 +125,7 @@ pub static TAIKO_A7: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     .into()
 });
 
-/// The Taiko A7 spec
+/// The Taiko Mainnet spec
 pub static TAIKO_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
         chain: 167000.into(),
@@ -660,7 +660,7 @@ impl ChainSpec {
         self.chain.is_optimism()
     }
 
-    /// Returns `true` if this chain contains Taiko configuration.
+    /// Returns `true` if this is a Taiko chain.
     #[inline]
     pub fn is_taiko(&self) -> bool {
         let id = self.chain.id();

@@ -5,7 +5,7 @@ use crate::{
     taiko::{check_anchor_tx, TaikoData}, EthEvmConfig,
 };
 use reth_chainspec::{ChainSpec, MAINNET};
-use reth_ethereum_consensus::validate_block_post_execution;
+pub use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
@@ -26,15 +26,13 @@ use reth_revm::{
         apply_withdrawal_requests_contract_call, post_block_balance_increments,
     },
     Evm, State,
+    JournaledState,
 };
 use revm_primitives::{
-    db::{Database, DatabaseCommit}, Address, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState
+    db::{Database, DatabaseCommit}, Address, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
+    EVMError, HashSet,
 };
 use std::sync::Arc;
-use reth_revm::JournaledState;
-//use tracing::debug;
-use revm_primitives::EVMError;
-use revm_primitives::HashSet;
 use anyhow::Result;
 
 /// Provides executors to execute regular ethereum blocks
@@ -67,6 +65,7 @@ impl<EvmConfig> EthExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
+    /// Creates an Ethereum block executor
     pub fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
     where
         DB: Database<Error = ProviderError>,
@@ -170,8 +169,6 @@ where
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
         for (idx, (sender, transaction)) in block.transactions_with_sender().enumerate() {
-            //println!("tx: {:?}", tx_number);
-
             let is_anchor = is_taiko && idx == 0;
 
             // verify the anchor tx
@@ -180,7 +177,7 @@ where
                     .map_err(|e| BlockExecutionError::CanonicalRevert { inner: e.to_string() })?;
             }
 
-            // if the signature was not valid, the sender address will have been set to zero
+            // If the signature was not valid, the sender address will have been set to zero
             if *sender == Address::ZERO {
                 // Signature can be invalid if not taiko or not the anchor tx
                 if is_taiko && !is_anchor {
@@ -273,17 +270,6 @@ where
             );
         }
 
-        // if !optimistic {
-        //     // Check if gas used matches the value set in header.
-        //     if block.gas_used != cumulative_gas_used {
-        //         let receipts = Receipts::from_block_receipt(receipts);
-        //         return Err(BlockValidationError::BlockGasUsed {
-        //             gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
-        //             gas_spent_by_tx: receipts.gas_spent_by_tx()?,
-        //         }
-        //         .into())
-        //     }
-        // }
         let requests = if self.chain_spec.is_prague_active_at_timestamp(block.timestamp) {
             // Collect all EIP-6110 deposits
             let deposit_requests =
@@ -343,7 +329,7 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
 
     /// Returns mutable reference to the state that wraps the underlying database.
     #[allow(unused)]
-    pub fn state_mut(&mut self) -> &mut State<DB> {
+    fn state_mut(&mut self) -> &mut State<DB> {
         &mut self.state
     }
 }
@@ -396,19 +382,6 @@ where
         // 3. apply post execution changes
         self.post_execution(block, total_difficulty)?;
 
-        // Before Byzantium, receipts contained state root that would mean that expensive
-        // operation as hashing that is required for state root got calculated in every
-        // transaction This was replaced with is_success flag.
-        // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-        // if !self.optimistic && self.chain_spec().is_byzantium_active_at_block(block.header.number) {
-        //     if let Err(error) =
-        //         verify_receipt(block.header.receipts_root, block.header.logs_bloom, receipts.iter())
-        //     {
-        //         debug!(target: "evm", %error, ?receipts, "receipts verification failed");
-        //         return Err(error)
-        //     };
-        // }
-
         Ok(output)
     }
 
@@ -450,10 +423,9 @@ where
             // return balance to DAO beneficiary.
             *balance_increments.entry(DAO_HARDFORK_BENEFICIARY).or_default() += drained_balance;
         }
-
         // increment balances
         self.state
-            .increment_balances(balance_increments.clone())
+            .increment_balances(balance_increments)
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
 
         Ok(())

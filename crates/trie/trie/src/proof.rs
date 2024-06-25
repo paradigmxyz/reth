@@ -43,7 +43,6 @@ where
         address: Address,
         slots: &[B256],
     ) -> Result<AccountProof, StateRootError> {
-        //println!("Brecht account proof");
         let target_hashed_address = keccak256(address);
         let target_nibbles = Nibbles::unpack(target_hashed_address);
         let mut account_proof = AccountProof::new(address);
@@ -64,7 +63,6 @@ where
         let mut account_rlp = Vec::with_capacity(128);
         let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
         while let Some(account_node) = account_node_iter.try_next()? {
-            println!("loop account: {:?}", account_node);
             match account_node {
                 TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
@@ -88,9 +86,7 @@ where
             }
         }
 
-        let root = hash_builder.root();
-        println!("proof root: {:?}", root);
-        println!("{:?}", hash_builder);
+        let _ = hash_builder.root();
 
         let proofs = hash_builder.take_proofs();
         account_proof.set_proof(proofs.values().cloned().collect());

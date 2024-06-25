@@ -355,24 +355,6 @@ alloy-primitives = "0.7.2"
 alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
-
-# TODO(Brecht)
-# alloy-trie = "0.3.1"
-# alloy-rpc-types = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
-# alloy-rpc-types-anvil = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
-# alloy-rpc-types-trace = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
-# alloy-rpc-types-engine = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
-# alloy-genesis = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
-# alloy-node-bindings = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
-# alloy-provider = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e", default-features = false, features = [
-#     "reqwest",
-# ] }
-# alloy-eips = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
-# alloy-signer = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
-# alloy-signer-wallet = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
-# alloy-network = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
-# alloy-consensus = { git = "https://github.com/brechtpd/alloy", branch = "175_4e22b9e" }
-
 alloy-trie = "0.4"
 alloy-rpc-types = { version = "0.1", default-features = false, features = [
     "eth",
@@ -520,9 +502,8 @@ similar-asserts = "1.5.0"
 test-fuzz = "5"
 
 # raiko
-raiko-host = { git = "https://github.com/taikoxyz/raiko.git", branch = "reth-support" }
-raiko-lib = { git = "https://github.com/taikoxyz/raiko.git", branch = "reth-support" }
-raiko-primitives = { git = "https://github.com/taikoxyz/raiko.git", branch = "reth-support" }
+raiko-core = { git = "https://github.com/taikoxyz/raiko.git", branch = "reth-wip" }
+raiko-lib = { git = "https://github.com/taikoxyz/raiko.git", branch = "reth-wip" }
 anyhow = "1.0"
 
 [patch.crates-io]
@@ -533,8 +514,6 @@ revm = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko", def
 ]}
 revm-interpreter = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko" }
 revm-precompile = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko" }
-revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko", default-features = false, features = [
-    "std",
-    "serde",
-    "taiko",
-]}
+revm-primitives = { git = "https://github.com/taikoxyz/revm.git", branch = "v36-taiko"}
+c-kzg = { git = "https://github.com/brechtpd/c-kzg-4844", branch = "for-alpha7" }
+secp256k1 = { git = "https://github.com/CeciliaZ030/rust-secp256k1", branch = "sp1-patch" }

@@ -216,8 +216,6 @@ impl Account {
             Error::Assertion(format!("Expected account ({address}) is missing from DB: {self:?}"))
         })?;
 
-        //println!("account: {} {:?}", address, account);
-
         assert_equal(self.balance, account.balance, "Balance does not match")?;
         assert_equal(self.nonce.to(), account.nonce, "Nonce does not match")?;
 

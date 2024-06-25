@@ -23,7 +23,6 @@ reth-db-api.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-stages.workspace = true
 reth-evm-ethereum.workspace = true
-#reth-interfaces.workspace = true
 reth-revm.workspace = true
 reth-node-ethereum.workspace = true
 reth-rpc-types-compat.workspace = true
@@ -42,7 +41,6 @@ thiserror.workspace = true
 rayon.workspace = true
 
 # raiko
-raiko-host.workspace = true
+raiko-core.workspace = true
 raiko-lib.workspace = true
-raiko-primitives.workspace = true
 anyhow.workspace = true
