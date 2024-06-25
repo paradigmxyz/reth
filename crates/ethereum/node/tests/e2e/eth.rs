@@ -2,7 +2,7 @@ use crate::utils::eth_payload_attributes;
 use reth::{
     args::RpcServerArgs,
     builder::{NodeBuilder, NodeConfig, NodeHandle},
-    tasks::{TaskExecutor, TaskManager},
+    tasks::TaskManager,
 };
 use reth_e2e_test_utils::{
     node::NodeTestContext, setup, transaction::TransactionTestContext, wallet::Wallet,
@@ -51,8 +51,8 @@ async fn can_run_eth_node() -> eyre::Result<()> {
 #[cfg(unix)]
 async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let manager = TaskManager::new(tokio::runtime::Handle::current());
-    let exec = TaskExecutor::new(&manager);
+    let exec = TaskManager::current();
+    let exec = exec.executor();
 
     // Chain spec with test allocs
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
@@ -99,8 +99,8 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
 #[cfg(unix)]
 async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let manager = TaskManager::new(tokio::runtime::Handle::current());
-    let exec = TaskExecutor::new(&manager);
+    let exec = TaskManager::current();
+    let exec = exec.executor();
 
     // Chain spec with test allocs
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();

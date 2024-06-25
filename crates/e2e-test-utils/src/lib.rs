@@ -2,7 +2,7 @@ use node::NodeTestContext;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
     builder::{NodeBuilder, NodeConfig, NodeHandle},
-    tasks::{TaskExecutor, TaskManager},
+    tasks::TaskManager,
 };
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
@@ -46,8 +46,8 @@ pub async fn setup<N>(
 where
     N: Default + Node<TmpNodeAdapter<N>>,
 {
-    let tasks = TaskManager::take();
-    let exec = TaskExecutor::current();
+    let tasks = TaskManager::current();
+    let exec = tasks.executor();
 
     let network_config = NetworkArgs {
         discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },

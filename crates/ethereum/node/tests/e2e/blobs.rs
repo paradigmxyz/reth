@@ -4,7 +4,7 @@ use reth::{
     args::RpcServerArgs,
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     rpc::types::engine::PayloadStatusEnum,
-    tasks::{TaskExecutor, TaskManager},
+    tasks::TaskManager,
 };
 use reth_e2e_test_utils::{
     node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
@@ -18,8 +18,8 @@ use crate::utils::eth_payload_attributes;
 #[tokio::test]
 async fn can_handle_blobs() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let manager = TaskManager::new(tokio::runtime::Handle::current());
-    let exec = TaskExecutor::new(&manager);
+    let tasks = TaskManager::current();
+    let exec = tasks.executor();
 
     let genesis: Genesis = serde_json::from_str(include_str!("../assets/genesis.json")).unwrap();
     let chain_spec = Arc::new(

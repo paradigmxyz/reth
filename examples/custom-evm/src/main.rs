@@ -15,7 +15,7 @@ use reth::{
         precompile::{Precompile, PrecompileSpecId, Precompiles},
         Database, Evm, EvmBuilder, GetInspector,
     },
-    tasks::TaskExecutor,
+    tasks::TaskManager,
 };
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
@@ -128,6 +128,8 @@ where
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
+    let tasks = TaskManager::current();
+
     // create a custom chain spec
     let spec = ChainSpec::builder()
         .chain(Chain::mainnet())
@@ -142,7 +144,7 @@ async fn main() -> eyre::Result<()> {
         NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
 
     let handle = NodeBuilder::new(node_config)
-        .testing_node(TaskExecutor::current())
+        .testing_node(tasks.executor())
         // configure the node with regular ethereum types
         .with_types::<EthereumNode>()
         // use default ethereum components but with our executor

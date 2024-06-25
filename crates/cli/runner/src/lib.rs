@@ -127,8 +127,8 @@ impl AsyncCliRunner {
     /// asynchronously.
     fn new() -> Result<Self, std::io::Error> {
         let tokio_runtime = tokio_runtime()?;
-        let task_manager = TaskManager::take();
-        let task_executor = TaskExecutor::current();
+        let task_manager = TaskManager::new(tokio_runtime.handle().clone());
+        let task_executor = task_manager.executor();
         Ok(Self { context: CliContext { task_executor }, task_manager, tokio_runtime })
     }
 }

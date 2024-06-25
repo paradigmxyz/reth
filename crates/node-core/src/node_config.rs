@@ -38,7 +38,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 ///
 /// # Example
 /// ```rust
-/// # use reth_tasks::{TaskExecutor, TaskSpawner};
+/// # use reth_tasks::{TaskManager, TaskSpawner};
 /// # use reth_node_core::{
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
@@ -48,7 +48,8 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 ///
 /// async fn t() {
 ///     let handle = Handle::current();
-///     let executor = TaskExecutor::current();
+///     let manager = TaskManager::new(handle);
+///     let executor = manager.executor();
 ///
 ///     // create the builder
 ///     let builder = NodeConfig::default();
@@ -65,7 +66,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 ///
 /// # Example
 /// ```rust
-/// # use reth_tasks::{TaskExecutor, TaskSpawner};
+/// # use reth_tasks::{TaskManager, TaskSpawner};
 /// # use reth_node_core::{
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
@@ -75,7 +76,8 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 ///
 /// async fn t() {
 ///     let handle = Handle::current();
-///     let executor = TaskExecutor::current();
+///     let manager = TaskManager::new(handle);
+///     let executor = manager.executor();
 ///
 ///     // create the builder with a test database, using the `test` method
 ///     let builder = NodeConfig::test();

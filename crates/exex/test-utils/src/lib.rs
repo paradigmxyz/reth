@@ -35,7 +35,7 @@ use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     BlockReader, Chain, ProviderFactory,
 };
-use reth_tasks::TaskExecutor;
+use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 use std::{
     fmt::Debug,
@@ -234,7 +234,8 @@ pub async fn test_exex_context_with_chain_spec(
 
     let (_, payload_builder) = NoopPayloadBuilderService::<EthEngineTypes>::new();
 
-    let task_executor = TaskExecutor::current();
+    let tasks = TaskManager::current();
+    let task_executor = tasks.executor();
 
     let components = NodeAdapter::<FullNodeTypesAdapter<TestNode, _, _>, _> {
         components: Components {
