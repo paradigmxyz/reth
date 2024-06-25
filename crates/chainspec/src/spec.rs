@@ -1195,39 +1195,34 @@ impl OptimismGenesisInfo {
         let mut optimism_genesis_info: Self =
             genesis.config.extra_fields.deserialize_as().unwrap_or_default();
 
-        if let Some(optimism_object) = genesis.config.extra_fields.get("optimism") {
-            if let Ok(optimism_base_fee_info) =
-                serde_json::from_value::<OptimismBaseFeeInfo>(optimism_object.clone())
-            {
-                if let (Some(elasticity), Some(denominator)) = (
-                    optimism_base_fee_info.eip1559_elasticity,
-                    optimism_base_fee_info.eip1559_denominator,
-                ) {
-                    let base_fee_params = if let Some(canyon_denominator) =
-                        optimism_base_fee_info.eip1559_denominator_canyon
-                    {
-                        BaseFeeParamsKind::Variable(
-                            vec![
-                                (
-                                    Hardfork::London,
-                                    BaseFeeParams::new(denominator as u128, elasticity as u128),
-                                ),
-                                (
-                                    Hardfork::Canyon,
-                                    BaseFeeParams::new(
-                                        canyon_denominator as u128,
-                                        elasticity as u128,
-                                    ),
-                                ),
-                            ]
-                            .into(),
-                        )
-                    } else {
-                        BaseFeeParams::new(denominator as u128, elasticity as u128).into()
-                    };
+        if let Some(Ok(optimism_base_fee_info)) =
+            genesis.config.extra_fields.get_deserialized::<OptimismBaseFeeInfo>("optimism")
+        {
+            if let (Some(elasticity), Some(denominator)) = (
+                optimism_base_fee_info.eip1559_elasticity,
+                optimism_base_fee_info.eip1559_denominator,
+            ) {
+                let base_fee_params = if let Some(canyon_denominator) =
+                    optimism_base_fee_info.eip1559_denominator_canyon
+                {
+                    BaseFeeParamsKind::Variable(
+                        vec![
+                            (
+                                Hardfork::London,
+                                BaseFeeParams::new(denominator as u128, elasticity as u128),
+                            ),
+                            (
+                                Hardfork::Canyon,
+                                BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
+                            ),
+                        ]
+                        .into(),
+                    )
+                } else {
+                    BaseFeeParams::new(denominator as u128, elasticity as u128).into()
+                };
 
-                    optimism_genesis_info.base_fee_params = base_fee_params;
-                }
+                optimism_genesis_info.base_fee_params = base_fee_params;
             }
         }
 
@@ -1237,13 +1232,12 @@ impl OptimismGenesisInfo {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy_chains::Chain;
     use alloy_genesis::{ChainConfig, GenesisAccount};
+    use alloy_primitives::{b256, hex};
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use reth_trie_common::TrieAccount;
-
-    use super::*;
-    use alloy_primitives::{b256, hex};
     use std::{collections::HashMap, str::FromStr};
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
