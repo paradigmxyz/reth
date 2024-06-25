@@ -25,9 +25,7 @@ use reth_rpc_types::{
 use reth_transaction_pool::TransactionPool;
 use revm::{
     db::{CacheDB, DatabaseRef},
-    primitives::{
-        BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason, TransactTo,
-    },
+    primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason},
     DatabaseCommit,
 };
 use revm_inspectors::access_list::AccessListInspector;
@@ -219,7 +217,7 @@ where
 
         // Optimize for simple transfer transactions, potentially reducing the gas estimate.
         if env.tx.data.is_empty() {
-            if let TransactTo::Call(to) = env.tx.transact_to {
+            if let TxKind::Call(to) = env.tx.transact_to {
                 if let Ok(code) = db.db.account_code(to) {
                     let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
                     if no_code_callee {
@@ -509,7 +507,7 @@ fn update_estimated_gas_range(
         }
         ExecutionResult::Halt { reason, .. } => {
             match reason {
-                HaltReason::OutOfGas(_) | HaltReason::InvalidFEOpcode => {
+                HaltReason::OutOfGas(_) | HaltReason::InvalidEFOpcode => {
                     // Both `OutOfGas` and `InvalidFEOpcode` can occur dynamically if the gas left
                     // is too low. Treat this as an out of gas condition,
                     // knowing that the call succeeds with a higher gas limit.

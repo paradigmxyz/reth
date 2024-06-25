@@ -13,15 +13,15 @@ use reth_consensus::{Consensus, ConsensusError};
 use reth_db_api::database::Database;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, Hardfork, Receipt, SealedBlock,
     SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
-    CanonStateNotificationSender, CanonStateNotifications, Chain, ChainSpecProvider, ChainSplit,
-    ChainSplitTarget, DisplayBlocksChain, ExecutionOutcome, HeaderProvider, ProviderError,
-    StaticFileProviderFactory,
+    CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
+    ChainSplitTarget, DisplayBlocksChain, HeaderProvider, ProviderError, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -1063,9 +1063,7 @@ where
         };
 
         // we are splitting chain at the block hash that we want to make canonical
-        let Some(canonical) =
-            self.remove_and_split_chain(chain_id, ChainSplitTarget::Hash(block_hash))
-        else {
+        let Some(canonical) = self.remove_and_split_chain(chain_id, block_hash.into()) else {
             debug!(target: "blockchain_tree", ?block_hash, ?chain_id, "Chain not present");
             return Err(CanonicalError::from(BlockchainTreeError::BlockSideChainIdConsistency {
                 chain_id: chain_id.into(),
@@ -1200,7 +1198,7 @@ where
                 }
             });
 
-        durations_recorder.record_relative(MakeCanonicalAction::ClearTrieUpdatesForOtherChilds);
+        durations_recorder.record_relative(MakeCanonicalAction::ClearTrieUpdatesForOtherChildren);
 
         // Send notification about new canonical chain and return outcome of canonicalization.
         let outcome = CanonicalOutcome::Committed { head: chain_notification.tip().header.clone() };
@@ -1369,6 +1367,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_genesis::{Genesis, GenesisAccount};
     use assert_matches::assert_matches;
     use linked_hash_set::LinkedHashSet;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -1386,8 +1385,8 @@ mod tests {
         keccak256,
         proofs::calculate_transaction_root,
         revm_primitives::AccountInfo,
-        Account, Address, Genesis, GenesisAccount, Header, Signature, Transaction,
-        TransactionSigned, TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
+        Account, Address, Header, Signature, Transaction, TransactionSigned,
+        TransactionSignedEcRecovered, TxEip1559, Withdrawals, B256,
     };
     use reth_provider::{
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory_with_chain_spec},

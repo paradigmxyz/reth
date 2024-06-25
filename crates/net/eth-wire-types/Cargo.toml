@@ -17,6 +17,7 @@ reth-chainspec.workspace = true
 reth-codecs-derive.workspace = true
 reth-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
+alloy-genesis.workspace = true
 
 bytes.workspace = true
 derive_more.workspace = true
@@ -26,28 +27,24 @@ serde = { workspace = true, optional = true }
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
+proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-net-common.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-reth-tracing.workspace = true
-
-test-fuzz.workspace = true
-tokio-util = { workspace = true, features = ["io", "codec"] }
-rand.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
 proptest-derive.workspace = true
-async-stream.workspace = true
+rand.workspace = true
 
 [features]
 default = ["serde"]
-serde = ["dep:serde"]
 arbitrary = [
     "reth-primitives/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
-    "dep:proptest-derive",
+    "dep:proptest-arbitrary-interop",
 ]
+serde = ["dep:serde"]
+

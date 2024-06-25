@@ -19,6 +19,7 @@ reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-db-common.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
+reth-execution-types.workspace = true
 reth-exex.workspace = true
 reth-network.workspace = true
 reth-node-api.workspace = true

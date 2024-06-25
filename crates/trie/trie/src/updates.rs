@@ -13,6 +13,7 @@ use std::collections::{hash_map::IntoIter, HashMap, HashSet};
 
 /// The key of a trie node.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TrieKey {
     /// A node in the account trie.
     AccountNode(StoredNibbles),
@@ -24,6 +25,7 @@ pub enum TrieKey {
 
 /// The operation to perform on the trie.
 #[derive(PartialEq, Eq, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TrieOp {
     /// Delete the node entry.
     Delete,
@@ -36,10 +38,20 @@ impl TrieOp {
     pub const fn is_update(&self) -> bool {
         matches!(self, Self::Update(..))
     }
+
+    /// Returns reference to updated branch node if operation is [`Self::Update`].
+    pub const fn as_update(&self) -> Option<&BranchNodeCompact> {
+        if let Self::Update(node) = &self {
+            Some(node)
+        } else {
+            None
+        }
+    }
 }
 
 /// The aggregation of trie updates.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Deref)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TrieUpdates {
     trie_operations: HashMap<TrieKey, TrieOp>,
 }

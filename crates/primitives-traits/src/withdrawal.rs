@@ -68,9 +68,10 @@ impl Withdrawals {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Address;
+    use alloy_primitives::Address;
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::proptest;
+    use proptest_arbitrary_interop::arb;
 
     /// This type is kept for compatibility tests after the codec support was added to alloy-eips
     /// Withdrawal type natively
@@ -108,7 +109,7 @@ mod tests {
 
     proptest!(
         #[test]
-        fn test_roundtrip_withdrawal_compat(withdrawal: RethWithdrawal) {
+        fn test_roundtrip_withdrawal_compat(withdrawal in arb::<RethWithdrawal>()) {
             // Convert to buffer and then create alloy_access_list from buffer and
             // compare
             let mut compacted_reth_withdrawal = Vec::<u8>::new();

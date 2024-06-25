@@ -54,7 +54,7 @@ fn main() -> eyre::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use reth::providers::{Chain, ExecutionOutcome};
+    use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_exex_test_utils::{test_exex_context, PollOnce};
     use std::pin::pin;
 

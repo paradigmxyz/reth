@@ -26,7 +26,7 @@ alloy-trie.workspace = true
 
 # misc
 once_cell.workspace = true
-serde.workspace = true
+serde = { workspace = true, optional = true }
 serde_json.workspace = true
 derive_more.workspace = true
 
@@ -43,7 +43,8 @@ rand.workspace = true
 [features]
 default = ["std"]
 optimism = [
-    "reth-ethereum-forks/optimism"
+    "reth-ethereum-forks/optimism",
+    "serde"
 ]
 std = []
 arbitrary = [

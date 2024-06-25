@@ -3,6 +3,7 @@
 use crate::eth::error::{EthApiError, EthResult};
 use reth_chainspec::ChainSpec;
 use reth_errors::ProviderError;
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
     proofs,
@@ -13,7 +14,7 @@ use reth_primitives::{
     Block, BlockId, BlockNumberOrTag, Header, IntoRecoveredTransaction, Receipt, Requests,
     SealedBlockWithSenders, SealedHeader, B256, EMPTY_OMMER_ROOT_HASH, U256,
 };
-use reth_provider::{ChainSpecProvider, ExecutionOutcome, StateProviderFactory};
+use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     state_change::{

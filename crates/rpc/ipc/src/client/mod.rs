@@ -1,23 +1,23 @@
 //! [`jsonrpsee`] transport adapter implementation for IPC.
 
 use crate::stream_codec::StreamCodec;
-use futures::StreamExt;
-use interprocess::local_socket::tokio::{LocalSocketStream, OwnedReadHalf, OwnedWriteHalf};
+use futures::{StreamExt, TryFutureExt};
+use interprocess::local_socket::{
+    tokio::{prelude::*, RecvHalf, SendHalf},
+    GenericFilePath,
+};
 use jsonrpsee::{
     async_client::{Client, ClientBuilder},
     core::client::{ReceivedMessage, TransportReceiverT, TransportSenderT},
 };
 use std::io;
 use tokio::io::AsyncWriteExt;
-use tokio_util::{
-    codec::FramedRead,
-    compat::{Compat, FuturesAsyncReadCompatExt, FuturesAsyncWriteCompatExt},
-};
+use tokio_util::codec::FramedRead;
 
 /// Sending end of IPC transport.
 #[derive(Debug)]
 pub(crate) struct Sender {
-    inner: Compat<OwnedWriteHalf>,
+    inner: SendHalf,
 }
 
 #[async_trait::async_trait]
@@ -44,7 +44,7 @@ impl TransportSenderT for Sender {
 /// Receiving end of IPC transport.
 #[derive(Debug)]
 pub(crate) struct Receiver {
-    pub(crate) inner: FramedRead<Compat<OwnedReadHalf>, StreamCodec>,
+    pub(crate) inner: FramedRead<RecvHalf, StreamCodec>,
 }
 
 #[async_trait::async_trait]
@@ -63,20 +63,17 @@ impl TransportReceiverT for Receiver {
 pub(crate) struct IpcTransportClientBuilder;
 
 impl IpcTransportClientBuilder {
-    pub(crate) async fn build(
-        self,
-        endpoint: impl AsRef<str>,
-    ) -> Result<(Sender, Receiver), IpcError> {
-        let endpoint = endpoint.as_ref().to_string();
-        let conn = LocalSocketStream::connect(endpoint.clone())
+    pub(crate) async fn build(self, path: &str) -> Result<(Sender, Receiver), IpcError> {
+        let conn = async { path.to_fs_name::<GenericFilePath>() }
+            .and_then(LocalSocketStream::connect)
             .await
-            .map_err(|err| IpcError::FailedToConnect { path: endpoint, err })?;
+            .map_err(|err| IpcError::FailedToConnect { path: path.to_string(), err })?;
 
-        let (rhlf, whlf) = conn.into_split();
+        let (recv, send) = conn.split();
 
         Ok((
-            Sender { inner: whlf.compat_write() },
-            Receiver { inner: FramedRead::new(rhlf.compat(), StreamCodec::stream_incoming()) },
+            Sender { inner: send },
+            Receiver { inner: FramedRead::new(recv, StreamCodec::stream_incoming()) },
         ))
     }
 }
@@ -92,14 +89,14 @@ impl IpcClientBuilder {
     /// ```
     /// use jsonrpsee::{core::client::ClientT, rpc_params};
     /// use reth_ipc::client::IpcClientBuilder;
+    ///
     /// # async fn run_client() -> Result<(), Box<dyn std::error::Error +  Send + Sync>> {
     /// let client = IpcClientBuilder::default().build("/tmp/my-uds").await?;
     /// let response: String = client.request("say_hello", rpc_params![]).await?;
-    /// #   Ok(())
-    /// # }
+    /// # Ok(()) }
     /// ```
-    pub async fn build(self, path: impl AsRef<str>) -> Result<Client, IpcError> {
-        let (tx, rx) = IpcTransportClientBuilder::default().build(path).await?;
+    pub async fn build(self, name: &str) -> Result<Client, IpcError> {
+        let (tx, rx) = IpcTransportClientBuilder::default().build(name).await?;
         Ok(self.build_with_tokio(tx, rx))
     }
 
@@ -139,20 +136,24 @@ pub enum IpcError {
 
 #[cfg(test)]
 mod tests {
-    use crate::server::dummy_endpoint;
-    use interprocess::local_socket::tokio::LocalSocketListener;
+    use interprocess::local_socket::ListenerOptions;
 
     use super::*;
+    use crate::server::dummy_name;
 
     #[tokio::test]
     async fn test_connect() {
-        let endpoint = dummy_endpoint();
-        let binding = LocalSocketListener::bind(endpoint.clone()).unwrap();
+        let name = &dummy_name();
+
+        let binding = ListenerOptions::new()
+            .name(name.as_str().to_fs_name::<GenericFilePath>().unwrap())
+            .create_tokio()
+            .unwrap();
         tokio::spawn(async move {
             let _x = binding.accept().await;
         });
 
-        let (tx, rx) = IpcTransportClientBuilder::default().build(endpoint).await.unwrap();
+        let (tx, rx) = IpcTransportClientBuilder::default().build(name).await.unwrap();
         let _ = IpcClientBuilder::default().build_with_tokio(tx, rx);
     }
 }

@@ -1,5 +1,5 @@
 [package]
-name = "beacon-api-sidecar-fetcher"
+name = "example-beacon-api-sidecar-fetcher"
 version = "0.1.0"
 publish = false
 edition.workspace = true

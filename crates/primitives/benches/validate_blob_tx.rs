@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
+use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use alloy_primitives::hex;
-use c_kzg::KzgSettings;
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
@@ -10,11 +10,9 @@ use proptest::{
     strategy::ValueTree,
     test_runner::{RngAlgorithm, TestRng, TestRunner},
 };
-use reth_primitives::{
-    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, BlobTransactionSidecar, TxEip4844,
-};
+use proptest_arbitrary_interop::arb;
+use reth_primitives::{BlobTransactionSidecar, TxEip4844};
 use revm_primitives::MAX_BLOB_NUMBER_PER_BLOCK;
-use std::sync::Arc;
 
 // constant seed to use for the rng
 const SEED: [u8; 32] = hex!("1337133713371337133713371337133713371337133713371337133713371337");
@@ -22,11 +20,10 @@ const SEED: [u8; 32] = hex!("133713371337133713371337133713371337133713371337133
 /// Benchmarks EIP-48444 blob validation.
 fn blob_validation(c: &mut Criterion) {
     let mut group = c.benchmark_group("Blob Transaction KZG validation");
-    let kzg_settings = MAINNET_KZG_TRUSTED_SETUP.clone();
 
     for num_blobs in 1..=MAX_BLOB_NUMBER_PER_BLOCK {
         println!("Benchmarking validation for tx with {num_blobs} blobs");
-        validate_blob_tx(&mut group, "ValidateBlob", num_blobs, kzg_settings.clone());
+        validate_blob_tx(&mut group, "ValidateBlob", num_blobs, EnvKzgSettings::Default);
     }
 }
 
@@ -34,7 +31,7 @@ fn validate_blob_tx(
     group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
     num_blobs: u64,
-    kzg_settings: Arc<KzgSettings>,
+    kzg_settings: EnvKzgSettings,
 ) {
     let setup = || {
         let config = ProptestConfig::default();
@@ -42,13 +39,13 @@ fn validate_blob_tx(
         let mut runner = TestRunner::new_with_rng(config, rng);
 
         // generate tx and sidecar
-        let mut tx = any::<TxEip4844>().new_tree(&mut runner).unwrap().current();
+        let mut tx = arb::<TxEip4844>().new_tree(&mut runner).unwrap().current();
         let mut blob_sidecar =
-            any::<BlobTransactionSidecar>().new_tree(&mut runner).unwrap().current();
+            arb::<BlobTransactionSidecar>().new_tree(&mut runner).unwrap().current();
 
         while blob_sidecar.blobs.len() < num_blobs as usize {
             let blob_sidecar_ext =
-                any::<BlobTransactionSidecar>().new_tree(&mut runner).unwrap().current();
+                arb::<BlobTransactionSidecar>().new_tree(&mut runner).unwrap().current();
 
             // extend the sidecar with the new blobs
             blob_sidecar.blobs.extend(blob_sidecar_ext.blobs);
@@ -72,7 +69,9 @@ fn validate_blob_tx(
     // for now we just use the default SubPoolLimit
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |(tx, blob_sidecar)| {
-            if let Err(err) = std::hint::black_box(tx.validate_blob(&blob_sidecar, &kzg_settings)) {
+            if let Err(err) =
+                std::hint::black_box(tx.validate_blob(&blob_sidecar, kzg_settings.get()))
+            {
                 println!("Validation failed: {err:?}");
             }
         });

@@ -6,11 +6,10 @@ use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodab
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
 use derive_more::{Deref, DerefMut, From, IntoIterator};
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::strategy::Strategy;
 #[cfg(feature = "zstd-codec")]
 use reth_codecs::CompactZstd;
 use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
+use serde::{Deserialize, Serialize};
 
 #[cfg(not(feature = "std"))]
 use alloc::{vec, vec::Vec};
@@ -66,7 +65,19 @@ impl Receipt {
 }
 
 /// A collection of receipts organized as a two-dimensional vector.
-#[derive(Clone, Debug, PartialEq, Eq, Default, From, Deref, DerefMut, IntoIterator)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    From,
+    Deref,
+    DerefMut,
+    IntoIterator,
+)]
 pub struct Receipts {
     /// A two-dimensional vector of optional `Receipt` instances.
     pub receipt_vec: Vec<Vec<Option<Receipt>>>,
@@ -171,50 +182,6 @@ pub fn gas_spent_by_transactions<T: Deref<Target = Receipt>>(
         .enumerate()
         .map(|(id, receipt)| (id as u64, receipt.deref().cumulative_gas_used))
         .collect()
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for Receipt {
-    type Parameters = ();
-
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::{any, prop_compose};
-
-        prop_compose! {
-            fn arbitrary_receipt()(tx_type in any::<TxType>(),
-                        success in any::<bool>(),
-                        cumulative_gas_used in any::<u64>(),
-                        logs in proptest::collection::vec(proptest::arbitrary::any::<Log>(), 0..=20),
-                        _deposit_nonce in any::<Option<u64>>(),
-                        _deposit_receipt_version in any::<Option<u64>>()) -> Receipt
-            {
-                // Only receipts for deposit transactions may contain a deposit nonce
-                #[cfg(feature = "optimism")]
-                let (deposit_nonce, deposit_receipt_version) = if tx_type == TxType::Deposit {
-                    // The deposit receipt version is only present if the deposit nonce is present
-                    let deposit_receipt_version = _deposit_nonce.and(_deposit_receipt_version);
-                    (_deposit_nonce, deposit_receipt_version)
-                } else {
-                    (None, None)
-                };
-
-                Receipt { tx_type,
-                    success,
-                    cumulative_gas_used,
-                    logs,
-                    // Only receipts for deposit transactions may contain a deposit nonce
-                    #[cfg(feature = "optimism")]
-                    deposit_nonce,
-                    // Only receipts for deposit transactions may contain a deposit nonce
-                    #[cfg(feature = "optimism")]
-                    deposit_receipt_version
-                }
-            }
-        }
-        arbitrary_receipt().boxed()
-    }
-
-    type Strategy = proptest::strategy::BoxedStrategy<Self>;
 }
 
 #[cfg(any(test, feature = "arbitrary"))]

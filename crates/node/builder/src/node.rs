@@ -11,7 +11,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::ChainSpecProvider;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 // re-export the node api types
 use crate::components::NodeComponentsBuilder;
@@ -28,10 +28,48 @@ pub trait Node<N: FullNodeTypes>: NodeTypes + Clone {
     fn components_builder(self) -> Self::ComponentsBuilder;
 }
 
+/// A [`Node`] type builder
+#[derive(Clone, Default, Debug)]
+pub struct AnyNode<N = (), C = ()>(PhantomData<N>, C);
+
+impl<N, C> AnyNode<N, C> {
+    /// Configures the types of the node.
+    pub fn types<T>(self) -> AnyNode<T, C> {
+        AnyNode::<T, C>(PhantomData::<T>, self.1)
+    }
+
+    /// Sets the node components builder.
+    pub fn components_builder<T>(self, value: T) -> AnyNode<N, T> {
+        AnyNode::<N, T>(PhantomData::<N>, value)
+    }
+}
+
+impl<N, C> NodeTypes for AnyNode<N, C>
+where
+    N: FullNodeTypes,
+    C: NodeComponentsBuilder<N> + Sync + Unpin + 'static,
+{
+    type Primitives = N::Primitives;
+
+    type Engine = N::Engine;
+}
+
+impl<N, C> Node<N> for AnyNode<N, C>
+where
+    N: FullNodeTypes + Clone,
+    C: NodeComponentsBuilder<N> + Clone + Sync + Unpin + 'static,
+{
+    type ComponentsBuilder = C;
+
+    fn components_builder(self) -> Self::ComponentsBuilder {
+        self.1
+    }
+}
+
 /// The launched node with all components including RPC handlers.
 ///
 /// This can be used to interact with the launched node.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FullNode<Node: FullNodeComponents> {
     /// The evm configuration.
     pub evm_config: Node::Evm,
@@ -93,23 +131,5 @@ impl<Node: FullNodeComponents> FullNode<Node> {
     #[cfg(unix)]
     pub async fn engine_ipc_client(&self) -> Option<impl EngineApiClient<Node::Engine>> {
         self.auth_server_handle().ipc_client().await
-    }
-}
-
-impl<Node: FullNodeComponents> Clone for FullNode<Node> {
-    fn clone(&self) -> Self {
-        Self {
-            evm_config: self.evm_config.clone(),
-            block_executor: self.block_executor.clone(),
-            pool: self.pool.clone(),
-            network: self.network.clone(),
-            provider: self.provider.clone(),
-            payload_builder: self.payload_builder.clone(),
-            task_executor: self.task_executor.clone(),
-            rpc_server_handles: self.rpc_server_handles.clone(),
-            rpc_registry: self.rpc_registry.clone(),
-            config: self.config.clone(),
-            data_dir: self.data_dir.clone(),
-        }
     }
 }

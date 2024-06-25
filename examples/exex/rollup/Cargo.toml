@@ -1,5 +1,5 @@
 [package]
-name = "exex-rollup"
+name = "example-exex-rollup"
 version = "0.0.0"
 publish = false
 edition.workspace = true
@@ -14,6 +14,7 @@ reth-node-api.workspace = true
 reth-node-ethereum.workspace = true
 reth-primitives.workspace = true
 reth-execution-errors.workspace = true
+reth-execution-types.workspace = true
 reth-provider.workspace = true
 reth-revm.workspace = true
 reth-tracing.workspace = true
@@ -23,6 +24,7 @@ tokio.workspace = true
 
 # misc
 alloy-consensus = { workspace = true, features = ["kzg"] }
+alloy-genesis.workspace = true
 alloy-rlp.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
 eyre.workspace = true
