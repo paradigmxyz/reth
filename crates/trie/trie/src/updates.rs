@@ -24,8 +24,8 @@ pub enum TrieKey {
 }
 
 impl TrieKey {
-    /// Returns reference to account node key if the key is for [Self::AccountNode].
-    pub fn as_account_node_key(&self) -> Option<&StoredNibbles> {
+    /// Returns reference to account node key if the key is for [`Self::AccountNode`].
+    pub const fn as_account_node_key(&self) -> Option<&StoredNibbles> {
         if let Self::AccountNode(nibbles) = &self {
             Some(nibbles)
         } else {
@@ -33,8 +33,8 @@ impl TrieKey {
         }
     }
 
-    /// Returns reference to storage node key if the key is for [Self::StorageNode].
-    pub fn as_storage_node_key(&self) -> Option<(&B256, &StoredNibblesSubKey)> {
+    /// Returns reference to storage node key if the key is for [`Self::StorageNode`].
+    pub const fn as_storage_node_key(&self) -> Option<(&B256, &StoredNibblesSubKey)> {
         if let Self::StorageNode(key, subkey) = &self {
             Some((key, subkey))
         } else {
@@ -42,8 +42,8 @@ impl TrieKey {
         }
     }
 
-    /// Returns reference to storage trie key if the key is for [Self::StorageTrie].
-    pub fn as_storage_trie_key(&self) -> Option<&B256> {
+    /// Returns reference to storage trie key if the key is for [`Self::StorageTrie`].
+    pub const fn as_storage_trie_key(&self) -> Option<&B256> {
         if let Self::StorageTrie(key) = &self {
             Some(key)
         } else {
