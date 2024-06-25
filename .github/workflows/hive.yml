@@ -107,13 +107,13 @@ jobs:
           - sim: ethereum/engine
             limit: engine-transition
           # TODO: enable engine-api once resolved:
-          # https://github.com/paradigmxyz/reth/issues/6217
           # https://github.com/paradigmxyz/reth/issues/8305
+          # https://github.com/paradigmxyz/reth/issues/6217
           # - sim: ethereum/engine
           #   limit: engine-api
           # TODO: enable cancun once resolved:
-          # https://github.com/paradigmxyz/reth/issues/6217
           # https://github.com/paradigmxyz/reth/issues/8305
+          # https://github.com/paradigmxyz/reth/issues/6217
           # https://github.com/paradigmxyz/reth/issues/8306
           # https://github.com/paradigmxyz/reth/issues/7144
           # - sim: ethereum/engine
