@@ -389,7 +389,7 @@ impl StorageInner {
             ..
         } = executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
         let execution_outcome = ExecutionOutcome::new(
-            state.unwrap_or_default(),
+            state,
             receipts.into(),
             block.number,
             vec![block_execution_requests.into()],

@@ -273,7 +273,7 @@ impl Command {
                 let BlockExecutionOutput { state, receipts, requests, .. } =
                     executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
                 let execution_outcome = ExecutionOutcome::new(
-                    state.unwrap_or_default(),
+                    state,
                     receipts.into(),
                     block.number,
                     vec![requests.into()],

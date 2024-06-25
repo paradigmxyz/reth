@@ -367,7 +367,7 @@ where
         self.state.merge_transitions(BundleRetention::Reverts);
 
         Ok(BlockExecutionOutput {
-            state: Some(self.state.take_bundle()),
+            state: self.state.take_bundle(),
             receipts,
             requests: vec![],
             gas_used,

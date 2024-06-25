@@ -222,7 +222,12 @@ where
             vec![]
         };
 
-        Ok(BlockExecutionOutput { receipts, requests, gas_used: cumulative_gas_used, state: None })
+        Ok(BlockExecutionOutput {
+            receipts,
+            requests,
+            gas_used: cumulative_gas_used,
+            state: Default::default(),
+        })
     }
 }
 
@@ -377,7 +382,7 @@ where
         self.state.merge_transitions(BundleRetention::Reverts);
 
         // NOTE: we need to merge keep the reverts for the bundle retention
-        output.state = Some(self.state.take_bundle());
+        output.state = self.state.take_bundle();
 
         Ok(output)
     }
