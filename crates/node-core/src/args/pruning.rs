@@ -21,25 +21,27 @@ impl PruningArgs {
         if !self.full {
             return None
         }
+
+        let deposit_contract = chain_spec.deposit_contract.as_ref().map(|contract| {
+            let address = contract.address;
+            let mode = if contract.block == 0 {
+                PruneMode::Full
+            } else {
+                PruneMode::Before(contract.block)
+            };
+
+            (address, mode)
+        });
+
         Some(PruneConfig {
             block_interval: 5,
             segments: PruneModes {
                 sender_recovery: Some(PruneMode::Full),
                 transaction_lookup: None,
-                receipts: chain_spec
-                    .deposit_contract
-                    .as_ref()
-                    .map(|contract| PruneMode::Before(contract.block)),
+                receipts: deposit_contract.map(|(_, mode)| mode),
                 account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                 storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                receipts_log_filter: ReceiptsLogPruneConfig(
-                    chain_spec
-                        .deposit_contract
-                        .as_ref()
-                        .map(|contract| (contract.address, PruneMode::Before(contract.block)))
-                        .into_iter()
-                        .collect(),
-                ),
+                receipts_log_filter: ReceiptsLogPruneConfig(deposit_contract.into_iter().collect()),
             },
         })
     }
