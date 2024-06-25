@@ -1,11 +1,10 @@
-use std::sync::Arc;
+use std::fmt::Debug;
 
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc::eth::{
-    servers::{FullEthApiServer, UpdateRawTxForwarder},
-    EthApiServer, EthFilter, EthFilterConfig, EthPubSub, EthStateCache, EthStateCacheConfig,
-    FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle, GasPriceOracleConfig,
-    RPC_DEFAULT_GAS_CAP,
+    cache::cache_new_blocks_task, EthFilter, EthFilterConfig, EthPubSub, EthStateCache,
+    EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, FullEthApiServer, GasPriceOracle,
+    GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
 };
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE,
@@ -13,9 +12,9 @@ use reth_rpc_server_types::constants::{
 use reth_tasks::TaskSpawner;
 use serde::{Deserialize, Serialize};
 
-use crate::{fee_history_cache_new_blocks_task, RawTransactionForwarder};
+use crate::fee_history_cache_new_blocks_task;
 
-/// All handlers for the `eth` namespace
+/// All handlers for the core `eth` namespace API.
 #[derive(Debug, Clone)]
 pub struct EthHandlers<Provider, Pool, Network, Events, EthApi> {
     /// Main `eth_` request handler
@@ -26,6 +25,61 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi> {
     pub filter: EthFilter<Provider, Pool>,
     /// Handler for subscriptions only available for transports that support it (ws, ipc)
     pub pubsub: EthPubSub<Provider, Pool, Events, Network>,
+}
+
+impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi> {
+    pub fn new<EvmConfig, Tasks>(
+        ctx: EthApiBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        eth_server_builder: impl EthApiBuilder<
+            Provider,
+            Pool,
+            EvmConfig,
+            Network,
+            Tasks,
+            Events,
+            Server = EthApi,
+        >,
+    ) -> EthHandlers<Provider, Pool, Network, Events, EthApi>
+    where
+        Provider: Send + Sync + Clone + 'static,
+        Pool: Send + Sync + Clone + 'static,
+        EvmConfig: Clone,
+        Network: Clone,
+        Events: CanonStateSubscriptions + Clone,
+        Tasks: TaskSpawner + Clone + 'static,
+        EthApi: FullEthApiServer,
+    {
+        let new_canonical_blocks = ctx.events.canonical_state_stream();
+        let c = ctx.cache.clone();
+        ctx.executor.spawn_critical(
+            "cache canonical blocks task",
+            Box::pin(async move {
+                cache_new_blocks_task(c, new_canonical_blocks).await;
+            }),
+        );
+
+        let api = eth_server_builder.build(ctx.clone());
+
+        let filter = EthFilter::new(
+            ctx.provider.clone(),
+            ctx.pool.clone(),
+            ctx.cache.clone(),
+            ctx.config.filter_config(),
+            Box::new(ctx.executor.clone()),
+        );
+
+        let EthApiBuilderCtx { provider, pool, network, executor, events, cache, .. } = ctx;
+
+        let pubsub = EthPubSub::with_spawner(
+            provider.clone(),
+            pool.clone(),
+            events.clone(),
+            network.clone(),
+            Box::new(executor),
+        );
+
+        EthHandlers { api, cache, filter, pubsub }
+    }
 }
 
 /// Additional config values for the eth namespace.
@@ -119,7 +173,7 @@ impl EthConfig {
 }
 
 /// Context for building the `eth` namespace server.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EthApiBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Events> {
     /// Database handle.
     pub provider: Provider,
@@ -132,13 +186,11 @@ pub struct EthApiBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Event
     /// RPC config for `eth` namespace.
     pub config: &'a EthConfig,
     /// Runtime handle.
-    pub executor: Box<Tasks>,
+    pub executor: Tasks,
     /// Events handle.
     pub events: Events,
     /// RPC cache handle.
     pub cache: EthStateCache,
-    /// Transaction forwarder used by `eth_sendRawTransaction` method.
-    pub raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
 }
 
 impl<'a, Provider, Pool, EvmConfig, Network, Tasks, Events>
@@ -152,35 +204,26 @@ impl<'a, Provider, Pool, EvmConfig, Network, Tasks, Events>
         network: Network,
         evm_config: EvmConfig,
         config: &'a EthConfig,
-        executor: Box<Tasks>,
+        executor: Tasks,
         events: Events,
         cache: EthStateCache,
-        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
     ) -> Self {
-        Self {
-            provider,
-            pool,
-            network,
-            evm_config,
-            config,
-            executor,
-            events,
-            cache,
-            raw_transaction_forwarder,
-        }
+        Self { provider, pool, network, evm_config, config, executor, events, cache }
     }
 }
 
 /// Builds RPC server for `eth` namespace.
-pub trait EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>: Clone + Copy {
+pub trait EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>: Debug {
     /// `eth` namespace RPC server type.
-    type Server: EthApiServer + UpdateRawTxForwarder + Clone + FullEthApiServer;
+    type Server;
 
     /// Builds the [`EthApiServer`]
     fn build(
-        self,
+        &self,
         ctx: EthApiBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
-    ) -> Self::Server;
+    ) -> Self::Server
+    where
+        Self::Server: FullEthApiServer;
 }
 
 /// Builds eth server component gas price oracle, for given context.
