@@ -30,6 +30,7 @@ to make a PR!
 | [Minimal](./exex/minimal)                 | Illustrates how to build a simple ExEx                                                              |
 | [OP Bridge](./exex/op-bridge)             | Illustrates an ExEx that decodes Optimism deposit and withdrawal receipts from L1                   |
 | [Rollup](./exex/rollup)                   | Illustrates a rollup ExEx that derives the state from L1                                            |
+| [Discv5 as ExEx](./exex/discv5)           | Illustrates an ExEx that runs discv5 discovery stack                                                |
 
 ## RPC
 
