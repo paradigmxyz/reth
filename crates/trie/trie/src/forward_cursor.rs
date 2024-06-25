@@ -9,7 +9,7 @@ pub struct ForwardCursor<'a, K, V> {
 
 impl<'a, K, V> ForwardCursor<'a, K, V> {
     /// Create new forward cursor positioned at the beginning of the collection.
-    pub fn new(entries: &'a Vec<(K, V)>) -> Self {
+    pub const fn new(entries: &'a Vec<(K, V)>) -> Self {
         Self { entries, index: 0 }
     }
 }
