@@ -1,5 +1,5 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
-use crate::{state::HashedPostStateSorted, HashedStorageSorted};
+use crate::{HashedAccountsSorted, HashedPostStateSorted, HashedStorageSorted};
 use reth_primitives::{Account, B256, U256};
 
 /// The hashed cursor factory for the post state.
@@ -22,7 +22,7 @@ impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorF
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
         let cursor = self.cursor_factory.hashed_account_cursor()?;
-        Ok(HashedPostStateAccountCursor::new(cursor, self.post_state))
+        Ok(HashedPostStateAccountCursor::new(cursor, &self.post_state.accounts))
     }
 
     fn hashed_storage_cursor(
@@ -40,8 +40,8 @@ impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorF
 pub struct HashedPostStateAccountCursor<'a, C> {
     /// The database cursor.
     cursor: C,
-    /// The reference to the in-memory [`HashedPostStateSorted`].
-    post_state: &'a HashedPostStateSorted,
+    /// The reference to the in-memory [`HashedAccountsSorted`].
+    post_state: &'a HashedAccountsSorted,
     /// The post state account index where the cursor is currently at.
     post_state_account_index: usize,
     /// The last hashed account that was returned by the cursor.
@@ -51,7 +51,7 @@ pub struct HashedPostStateAccountCursor<'a, C> {
 
 impl<'a, C> HashedPostStateAccountCursor<'a, C> {
     /// Create new instance of [`HashedPostStateAccountCursor`].
-    pub const fn new(cursor: C, post_state: &'a HashedPostStateSorted) -> Self {
+    pub const fn new(cursor: C, post_state: &'a HashedAccountsSorted) -> Self {
         Self { cursor, post_state, last_account: None, post_state_account_index: 0 }
     }
 
