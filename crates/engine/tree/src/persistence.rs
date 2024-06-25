@@ -26,7 +26,7 @@ impl<DB: Database> Persistence<DB> {
     }
 
     /// Removes the blocks above the give block number from the database, returning them.
-    fn remove_blocks_above(&mut self, block_number: u64) -> Vec<ExecutedBlock> {
+    fn remove_blocks_above(&mut self, block_number: u64) -> ProviderResult<Vec<ExecutedBlock>> {
         todo!("implement this")
     }
 }
@@ -51,8 +51,8 @@ where
                         todo!("return error or something");
                     }
                     let last_block_hash = blocks.last().unwrap().block().hash();
-                    self.write(blocks).unwrap();
-                    sender.send(last_block_hash).unwrap();
+                    let res = self.write(blocks).map(|_| last_block_hash);
+                    sender.send(res).unwrap();
                 }
             }
         }
@@ -63,10 +63,10 @@ where
 pub enum PersistenceAction {
     /// The section of tree state that should be persisted. These blocks are expected in order of
     /// increasing block number.
-    SaveFinalizedBlocks((Vec<ExecutedBlock>, oneshot::Sender<B256>)),
+    SaveFinalizedBlocks((Vec<ExecutedBlock>, oneshot::Sender<ProviderResult<B256>>)),
 
     /// Removes the blocks above the given block number from the database.
-    RemoveBlocksAbove((u64, oneshot::Sender<Vec<ExecutedBlock>>)),
+    RemoveBlocksAbove((u64, oneshot::Sender<ProviderResult<Vec<ExecutedBlock>>>)),
 }
 
 /// A handle to the persistence task
@@ -82,7 +82,7 @@ impl PersistenceHandle {
     ///
     /// This returns the latest hash that has been saved, allowing removal of that block and any
     /// previous blocks from in-memory data structures.
-    pub async fn save_blocks(&self, blocks: Vec<ExecutedBlock>) -> B256 {
+    pub async fn save_blocks(&self, blocks: Vec<ExecutedBlock>) -> ProviderResult<B256> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(PersistenceAction::SaveFinalizedBlocks((blocks, tx)))
@@ -92,11 +92,16 @@ impl PersistenceHandle {
 
     /// Tells the persistence task to remove blocks above a certain block number. The removed blocks
     /// are returned by the task.
-    pub async fn remove_blocks_above(&self, block_num: u64) -> Vec<ExecutedBlock> {
+    pub async fn remove_blocks_above(&self, block_num: u64) -> ProviderResult<Vec<ExecutedBlock>> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(PersistenceAction::RemoveBlocksAbove((block_num, tx)))
             .expect("should be able to send");
         rx.await.expect("todo: err handling")
+    }
+
+    /// Sends a [`PersistenceAction`] to the task directly
+    pub fn send_action(&self, action: PersistenceAction) {
+        self.sender.send(action).expect("should be able to send");
     }
 }
