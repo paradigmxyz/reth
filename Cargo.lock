@@ -2823,6 +2823,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-exex-discv5"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "discv5",
+ "enr",
+ "eyre",
+ "futures",
+ "futures-util",
+ "reth",
+ "reth-chainspec",
+ "reth-discv5",
+ "reth-exex",
+ "reth-exex-test-utils",
+ "reth-network-peers",
+ "reth-node-api",
+ "reth-node-ethereum",
+ "reth-testing-utils",
+ "reth-tracing",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
 name = "example-exex-in-memory-state"
 version = "0.0.0"
 dependencies = [
