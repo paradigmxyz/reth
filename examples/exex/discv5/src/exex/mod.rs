@@ -32,7 +32,6 @@ impl<Node: FullNodeComponents> Future for ExEx<Node> {
             match self.disc_v5.poll_unpin(cx) {
                 Poll::Ready(Ok(())) => {
                     info!("Discv5 task completed successfully");
-                    continue;
                 }
                 Poll::Ready(Err(e)) => {
                     error!(?e, "Discv5 task encountered an error");
@@ -46,24 +45,26 @@ impl<Node: FullNodeComponents> Future for ExEx<Node> {
         }
 
         // Continuously poll the ExExContext notifications
-        while let Some(notification) = ready!(self.exex.notifications.poll_recv(cx)) {
-            match &notification {
-                ExExNotification::ChainCommitted { new } => {
-                    info!(committed_chain = ?new.range(), "Received commit");
+        loop {
+            if let Some(notification) = ready!(self.exex.notifications.poll_recv(cx)) {
+                match &notification {
+                    ExExNotification::ChainCommitted { new } => {
+                        info!(committed_chain = ?new.range(), "Received commit");
+                    }
+                    ExExNotification::ChainReorged { old, new } => {
+                        info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
+                    }
+                    ExExNotification::ChainReverted { old } => {
+                        info!(reverted_chain = ?old.range(), "Received revert");
+                    }
                 }
-                ExExNotification::ChainReorged { old, new } => {
-                    info!(from_chain = ?old.range(), to_chain = ?new.range(), "Received reorg");
-                }
-                ExExNotification::ChainReverted { old } => {
-                    info!(reverted_chain = ?old.range(), "Received revert");
-                }
-            }
 
-            if let Some(committed_chain) = notification.committed_chain() {
-                self.exex.events.send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+                if let Some(committed_chain) = notification.committed_chain() {
+                    self.exex
+                        .events
+                        .send(ExExEvent::FinishedHeight(committed_chain.tip().number))?;
+                }
             }
         }
-
-        Poll::Pending
     }
 }
