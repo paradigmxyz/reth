@@ -17,7 +17,7 @@
 //! Configure only an http server with a selection of [`RethRpcModule`]s
 //!
 //! ```
-//! use reth_ethereum_rpc::ApiBuilder;
+//! use reth_ethereum_rpc::EthApiBuild;
 //! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
@@ -55,7 +55,7 @@
 //!         events,
 //!         evm_config,
 //!     )
-//!     .build(transports, ApiBuilder);
+//!     .build(transports, EthApiBuild);
 //!     let handle = RpcServerConfig::default()
 //!         .with_http(ServerBuilder::default())
 //!         .start(transport_modules)
@@ -69,7 +69,7 @@
 //!
 //! ```
 //! use reth_engine_primitives::EngineTypes;
-//! use reth_ethereum_rpc::ApiBuilder;
+//! use reth_ethereum_rpc::EthApiBuild;
 //! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
@@ -116,7 +116,7 @@
 //!
 //!     // configure the server modules
 //!     let (modules, auth_module, _registry) =
-//!         builder.build_with_auth_server(transports, engine_api, ApiBuilder);
+//!         builder.build_with_auth_server(transports, engine_api, EthApiBuild);
 //!
 //!     // start the servers
 //!     let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
@@ -462,7 +462,7 @@ where
     /// # Example
     ///
     /// ```no_run
-    /// use reth_ethereum_rpc::ApiBuilder;
+    /// use reth_ethereum_rpc::EthApiBuild;
     /// use reth_evm::ConfigureEvm;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
@@ -478,7 +478,7 @@ where
     ///         .with_executor(TokioTaskExecutor::default())
     ///         .with_events(TestCanonStateSubscriptions::default())
     ///         .with_evm_config(evm)
-    ///         .into_registry(Default::default(), ApiBuilder);
+    ///         .into_registry(Default::default(), EthApiBuild);
     ///
     ///     let eth_api = registry.eth_api();
     /// }

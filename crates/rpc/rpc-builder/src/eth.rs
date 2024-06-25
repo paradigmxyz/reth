@@ -28,6 +28,7 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi> {
 }
 
 impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi> {
+    /// Returns a new instance with core handlers for `eth` namespace.
     pub fn new<EvmConfig, Tasks>(
         ctx: EthApiBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
         eth_server_builder: impl EthApiBuilder<
