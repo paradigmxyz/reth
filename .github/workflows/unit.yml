@@ -85,6 +85,8 @@ jobs:
         with:
           cache-on-failure: true
       - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Run doctests
         run: cargo test --doc --workspace --features "${{ matrix.network }}"
 
