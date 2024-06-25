@@ -41,6 +41,7 @@ pub struct Command {
     #[command(subcommand)]
     command: Subcommands,
 
+    /// If this is enabled, then _only_ the offline stages (headers, bodies) will be unwound.
     offline: bool,
 }
 
@@ -54,16 +55,30 @@ impl Command {
             eyre::bail!("Cannot unwind genesis block")
         }
 
-        // Only execute a pipeline unwind if the start of the range overlaps the existing static
-        // files. If that's the case, then copy all available data from MDBX to static files, and
-        // only then, proceed with the unwind.
-        if let Some(highest_static_block) = provider_factory
+        let highest_static_file_block = provider_factory
             .static_file_provider()
             .get_highest_static_files()
             .max()
-            .filter(|highest_static_file_block| highest_static_file_block >= range.start())
-        {
-            info!(target: "reth::cli", ?range, ?highest_static_block, "Executing a pipeline unwind.");
+            .filter(|highest_static_file_block| highest_static_file_block >= range.start());
+
+        // Execute a pipeline unwind if the start of the range overlaps the existing static
+        // files. If that's the case, then copy all available data from MDBX to static files, and
+        // only then, proceed with the unwind.
+        //
+        // We also execute a pipeline unwind if `offline` is specified, because we need to only
+        // unwind the data associated with offline stages.
+        if highest_static_file_block.is_some() || self.offline {
+            if self.offline {
+                info!(target: "reth::cli", "Performing an unwind for offline-only data!");
+            }
+
+            if let Some(highest_static_file_block) = highest_static_file_block {
+                info!(target: "reth::cli", ?range, ?highest_static_file_block, "Executing a pipeline unwind.");
+            } else {
+                info!(target: "reth::cli", ?range, "Executing a pipeline unwind.");
+            }
+
+            // This will build an offline-only pipeline if the `offline` flag is enabled
             let mut pipeline = self.build_pipeline(config, provider_factory.clone()).await?;
 
             // Move all applicable data from database to static files.
@@ -89,7 +104,7 @@ impl Command {
             provider.commit()?;
         }
 
-        println!("Unwound {} blocks", range.count());
+        info!(target: "reth::cli", range=?range.clone(), count=range.count(), "Unwound blocks");
 
         Ok(())
     }
