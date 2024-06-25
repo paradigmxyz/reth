@@ -19,7 +19,7 @@ where
     K: PartialOrd,
 {
     /// Returns the first entry from the current cursor position that's greater or equal to the
-    /// provided key. This method advance the cursor forward.
+    /// provided key. This method advances the cursor forward.
     pub fn seek(&mut self, key: &K) -> Option<&(K, V)> {
         let mut entry = self.entries.get(self.index);
         while entry.map_or(false, |(k, _)| k < key) {
@@ -30,7 +30,7 @@ where
     }
 
     /// Returns the first entry from the current cursor position that's greater than the provided
-    /// key. This method advance the cursor forward.
+    /// key. This method advances the cursor forward.
     pub fn first_after(&mut self, key: &K) -> Option<&(K, V)> {
         let mut entry = self.entries.get(self.index);
         while entry.map_or(false, |(k, _)| k <= key) {
