@@ -16,6 +16,7 @@ pub(crate) mod handler;
 pub(crate) enum CustomCommand {
     /// Sends a message to the peer
     Message {
+        #[allow(dead_code)]
         msg: String,
         /// The response will be sent to this channel.
         response: oneshot::Sender<String>,

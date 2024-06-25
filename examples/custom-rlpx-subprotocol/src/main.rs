@@ -3,32 +3,84 @@ use reth_network::{
     config::SecretKey, protocol::IntoRlpxSubProtocol, NetworkConfig, NetworkManager,
     NetworkProtocols,
 };
+use reth_network_api::NetworkInfo;
 use reth_node_ethereum::EthereumNode;
+use reth_primitives::revm_primitives::FixedBytes;
 use reth_provider::test_utils::NoopProvider;
-use subprotocol::protocol::handler::{CustomRlpxProtoHandler, ProtocolState};
-use tokio::sync::mpsc;
+use subprotocol::{
+    connection::CustomCommand,
+    protocol::{
+        event::ProtocolEvent,
+        handler::{CustomRlpxProtoHandler, ProtocolState},
+    },
+};
+use tokio::sync::{mpsc, oneshot};
 
 mod subprotocol;
 
 fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _args| async move {
+        // launch the node
         let NodeHandle { node, node_exit_future } =
             builder.node(EthereumNode::default()).launch().await?;
+        let peer_id = node.network.peer_id();
+        let peer_addr = node.network.local_addr();
 
-        let (tx, _rx) = mpsc::unbounded_channel();
-        let custom_rlpx_handler =
-            CustomRlpxProtoHandler { state: ProtocolState { events: tx.clone() } };
-
+        // add the custom network subprotocol to the launched node
+        let (tx, mut from_peer0) = mpsc::unbounded_channel();
+        let custom_rlpx_handler = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
         node.network.add_rlpx_sub_protocol(custom_rlpx_handler.into_rlpx_sub_protocol());
 
-        let custom_rlpx_handler_2 = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
+        // creates a separate network instance and adds the custom network subprotocol
         let secret_key = SecretKey::new(&mut rand::thread_rng());
+        let (tx, mut from_peer1) = mpsc::unbounded_channel();
+        let custom_rlpx_handler_2 = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
         let net_cfg = NetworkConfig::builder(secret_key)
             .add_rlpx_sub_protocol(custom_rlpx_handler_2.into_rlpx_sub_protocol())
             .build(NoopProvider::default());
-        let network = NetworkManager::new(net_cfg).await.unwrap();
 
-        tokio::spawn(network);
+        // spawn the second network instance
+        let subnetwork = NetworkManager::new(net_cfg).await?;
+        let subnetwork_peer_id = *subnetwork.peer_id();
+        let subnetwork_peer_addr = subnetwork.local_addr();
+        let subnetwork_handle = subnetwork.peers_handle();
+        node.task_executor.spawn(subnetwork);
+
+        // connect the launched node to the subnetwork
+        node.network.peers_handle().add_peer(FixedBytes(*subnetwork_peer_id), subnetwork_peer_addr);
+
+        // connect the subnetwork to the launched node
+        subnetwork_handle.add_peer(*peer_id, peer_addr);
+
+        // establish connection between peer0 and peer1
+        let peer0_to_peer1 = from_peer0.recv().await.expect("peer0 connecting to peer1");
+        let peer0_conn = match peer0_to_peer1 {
+            ProtocolEvent::Established { direction: _, peer_id, to_connection } => {
+                assert_eq!(peer_id, subnetwork_peer_id);
+                to_connection
+            }
+        };
+
+        // establish connection between peer1 and peer0
+        let peer1_to_peer0 = from_peer1.recv().await.expect("peer1 connecting to peer0");
+        let peer1_conn = match peer1_to_peer0 {
+            ProtocolEvent::Established { direction: _, peer_id: peer1_id, to_connection } => {
+                assert_eq!(peer1_id, *peer_id);
+                to_connection
+            }
+        };
+
+        // send a ping message from peer0 to peer1
+        let (tx, rx) = oneshot::channel();
+        peer0_conn.send(CustomCommand::Message { msg: "hello!".to_owned(), response: tx })?;
+        let response = rx.await?;
+        assert_eq!(response, "hello!");
+
+        // send a ping message from peer1 to peer0
+        let (tx, rx) = oneshot::channel();
+        peer1_conn.send(CustomCommand::Message { msg: "world!".to_owned(), response: tx })?;
+        let response = rx.await?;
+        assert_eq!(response, "world!");
 
         node_exit_future.await
     })

@@ -49,14 +49,6 @@ impl CustomRlpxProtoMessage {
         }
     }
 
-    /// Creates a custom message
-    pub fn custom_message(msg: impl Into<String>) -> Self {
-        Self {
-            message_type: CustomRlpxProtoMessageId::CustomMessage,
-            message: CustomRlpxProtoMessageKind::CustomMessage(msg.into()),
-        }
-    }
-
     /// Creates a new `CustomRlpxProtoMessage` with the given message ID and payload.
     pub fn encoded(&self) -> BytesMut {
         let mut buf = BytesMut::new();
