@@ -1,13 +1,13 @@
-use std::{
-    pin::Pin,
-    task::{Context, Poll},
-};
-
 use eyre::Result;
-use futures::Future;
+use futures::{Future, FutureExt};
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_node_api::FullNodeComponents;
 use reth_tracing::tracing::info;
+use std::{
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
+use tracing::error;
 
 use crate::network::DiscV5ExEx;
 
@@ -27,25 +27,26 @@ impl<Node: FullNodeComponents> Future for ExEx<Node> {
     type Output = Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Poll the Discv5 future
-        match Pin::new(&mut self.disc_v5).poll(cx) {
-            Poll::Ready(Ok(())) => {
-                info!("Discv5 task completed successfully");
-            }
-            Poll::Ready(Err(e)) => {
-                info!(error = ?e, "Discv5 task encountered an error");
-                return Poll::Ready(Err(e));
-            }
-            Poll::Pending => {
-                // If the future is still pending, we yield control back to the executor
-                return Poll::Pending;
+        // Poll the Discv5 future until its drained
+        loop {
+            match self.disc_v5.poll_unpin(cx) {
+                Poll::Ready(Ok(())) => {
+                    info!("Discv5 task completed successfully");
+                    continue;
+                }
+                Poll::Ready(Err(e)) => {
+                    error!(?e, "Discv5 task encountered an error");
+                    return Poll::Ready(Err(e));
+                }
+                Poll::Pending => {
+                    // Exit match and continue to poll notifications
+                    break;
+                }
             }
         }
 
         // Continuously poll the ExExContext notifications
-        while let Poll::Ready(Some(notification)) =
-            Pin::new(&mut self.exex.notifications).poll_recv(cx)
-        {
+        while let Some(notification) = ready!(self.exex.notifications.poll_recv(cx)) {
             match &notification {
                 ExExNotification::ChainCommitted { new } => {
                     info!(committed_chain = ?new.range(), "Received commit");
@@ -63,7 +64,6 @@ impl<Node: FullNodeComponents> Future for ExEx<Node> {
             }
         }
 
-        // If there are no more notifications and disc_v5 is not yet ready, return Poll::Pending
         Poll::Pending
     }
 }
