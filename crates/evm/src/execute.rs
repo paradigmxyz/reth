@@ -99,7 +99,7 @@ pub trait BatchExecutor<DB> {
 #[derive(Debug)]
 pub struct BlockExecutionOutput<T> {
     /// The changed state of the block after execution.
-    pub state: BundleState,
+    pub state: Option<BundleState>,
     /// All the receipts of the transactions in the block.
     pub receipts: Vec<T>,
     /// All the EIP-7685 requests of the transactions in the block.

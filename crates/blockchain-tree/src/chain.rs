@@ -215,8 +215,12 @@ impl AppendableChain {
             .consensus
             .validate_block_post_execution(&block, PostExecutionInput::new(&receipts, &requests))?;
 
-        let initial_execution_outcome =
-            ExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
+        let initial_execution_outcome = ExecutionOutcome::new(
+            state.unwrap_or_default(),
+            receipts.into(),
+            block.number,
+            vec![requests.into()],
+        );
 
         // check state root if the block extends the canonical chain __and__ if state root
         // validation was requested.
