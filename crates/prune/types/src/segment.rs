@@ -1,14 +1,11 @@
 use crate::MINIMUM_PRUNING_DISTANCE;
 use derive_more::Display;
 use reth_codecs::{main_codec, Compact};
-use strum::{EnumString, VariantNames};
 use thiserror::Error;
 
 /// Segment of the data that can be pruned.
 #[main_codec]
-#[derive(
-    Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, EnumString, VariantNames,
-)]
+#[derive(Debug, Display, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum PruneSegment {
     /// Prune segment responsible for the `TransactionSenders` table.
     SenderRecovery,

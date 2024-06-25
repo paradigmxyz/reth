@@ -1,10 +1,12 @@
 //! Command that runs pruning without any limits.
 
 use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
-use clap::{builder::TypedValueParser, Parser};
-use reth_provider::BlockNumReader;
-use reth_prune::{PruneModes, PruneSegment, PrunerBuilder};
-use strum::VariantNames;
+use clap::Parser;
+use reth_node_core::args::PruningArgs;
+use reth_provider::StageCheckpointReader;
+use reth_prune::PrunerBuilder;
+use reth_stages::StageId;
+use reth_static_file::{HighestStaticFiles, StaticFileProducer};
 
 /// Prunes according to the configuration without any limits
 #[derive(Debug, Parser)]
@@ -12,63 +14,49 @@ pub struct PruneCommand {
     #[command(flatten)]
     env: EnvironmentArgs,
 
-    #[arg(value_parser = clap::builder::PossibleValuesParser::new(PruneSegment::VARIANTS).map(|s| s.parse::<PruneSegment>().unwrap()))]
-    segment: PruneSegment,
+    #[command(flatten)]
+    pruning: PruningArgs,
 }
 
 impl PruneCommand {
     /// Execute the `prune` command
     pub async fn execute(self) -> eyre::Result<()> {
         let Environment { config, provider_factory, .. } = self.env.init(AccessRights::RW)?;
-        let mut prune_config = config.prune.unwrap_or_default();
+        let prune_config =
+            config.prune.or_else(|| self.pruning.prune_config(&self.env.chain)).unwrap_or_default();
 
-        match self.segment {
-            PruneSegment::SenderRecovery => {
-                prune_config.segments = PruneModes {
-                    sender_recovery: prune_config.segments.sender_recovery,
-                    ..Default::default()
-                }
-            }
-            PruneSegment::TransactionLookup => {
-                prune_config.segments = PruneModes {
-                    transaction_lookup: prune_config.segments.transaction_lookup,
-                    ..Default::default()
-                }
-            }
-            PruneSegment::Receipts => {
-                prune_config.segments = PruneModes {
-                    receipts: prune_config.segments.receipts,
-                    receipts_log_filter: prune_config.segments.receipts_log_filter,
-                    ..Default::default()
-                }
-            }
-            PruneSegment::ContractLogs => {
-                prune_config.segments = PruneModes {
-                    receipts_log_filter: prune_config.segments.receipts_log_filter,
-                    ..Default::default()
-                }
-            }
-            PruneSegment::AccountHistory => {
-                prune_config.segments = PruneModes {
-                    account_history: prune_config.segments.account_history,
-                    ..Default::default()
-                }
-            }
-            PruneSegment::StorageHistory => {
-                prune_config.segments = PruneModes {
-                    storage_history: prune_config.segments.storage_history,
-                    ..Default::default()
-                }
-            }
-            PruneSegment::Headers | PruneSegment::Transactions => {
-                eyre::bail!("Prune segment not supported")
-            }
+        let static_file_producer =
+            StaticFileProducer::new(provider_factory.clone(), prune_config.segments.clone());
+        let static_file_producer = static_file_producer.lock();
+
+        // Copies data from database to static files
+        let lowest_static_file_height = {
+            let provider = provider_factory.provider()?;
+            let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
+                .into_iter()
+                .map(|stage| {
+                    provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
+                headers: stages_checkpoints[0],
+                receipts: stages_checkpoints[1],
+                transactions: stages_checkpoints[2],
+            })?;
+            static_file_producer.run(targets)?;
+            stages_checkpoints.into_iter().min().expect("exists")
+        };
+
+        // Deletes data which has been copied to static files.
+        if let Some(prune_tip) = lowest_static_file_height {
+            // Run the pruner according to the configuration, and don't enforce any limits on it
+            let mut pruner = PrunerBuilder::new(prune_config)
+                .prune_delete_limit(usize::MAX)
+                .build(provider_factory);
+
+            pruner.run(prune_tip)?;
         }
-
-        let mut pruner = PrunerBuilder::new(prune_config)
-            .prune_delete_limit(usize::MAX)
-            .build(provider_factory.clone());
-        pruner.run(provider_factory.best_block_number()?)?;
 
         Ok(())
     }
