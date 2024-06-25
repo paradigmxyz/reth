@@ -1006,10 +1006,7 @@ async fn authenticate_stream(
         (eth_stream.into(), their_status)
     } else {
         // Multiplex the stream with the extra protocols
-        let (mut multiplex_stream, their_status) = RlpxProtocolMultiplexer::new(p2p_stream)
-            .into_eth_satellite_stream(status, fork_filter)
-            .await
-            .unwrap();
+        let mut multiplex_stream = RlpxProtocolMultiplexer::new(p2p_stream);
 
         // install additional handlers
         for handler in extra_handlers.into_iter() {
@@ -1021,6 +1018,9 @@ async fn authenticate_stream(
                 })
                 .ok();
         }
+
+        let (multiplex_stream, their_status) =
+            multiplex_stream.into_eth_satellite_stream(status, fork_filter).await.unwrap();
 
         (multiplex_stream.into(), their_status)
     };
