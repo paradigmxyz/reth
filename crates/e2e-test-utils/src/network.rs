@@ -23,7 +23,7 @@ impl NetworkTestContext {
 
         match self.network_events.next().await {
             Some(NetworkEvent::PeerAdded(_)) => (),
-            _ => panic!("Expected a peer added event"),
+            ev => panic!("Expected a peer added event, got: {ev:?}"),
         }
     }
 
@@ -38,7 +38,7 @@ impl NetworkTestContext {
             Some(NetworkEvent::SessionEstablished { remote_addr, .. }) => {
                 info!(?remote_addr, "Session established")
             }
-            _ => panic!("Expected session established event"),
+            ev => panic!("Expected session established event, got: {ev:?}"),
         }
     }
 }
