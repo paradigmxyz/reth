@@ -43,7 +43,7 @@ pub use api::{
         pubsub::EthPubSub,
         EthApi,
     },
-    EthApiServer,
+    EthApiServer, FullEthApiServer,
 };
 pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,

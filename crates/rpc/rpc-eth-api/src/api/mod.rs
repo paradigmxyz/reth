@@ -9,6 +9,7 @@ use reth_rpc_types::{
     FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, Transaction,
     TransactionRequest, Work,
 };
+use servers::{EthApiServerComponents, UpdateRawTxForwarder};
 
 pub mod bundle;
 pub mod filter;
@@ -315,4 +316,16 @@ pub trait EthApi {
         keys: Vec<JsonStorageKey>,
         block_number: Option<BlockId>,
     ) -> RpcResult<EIP1186AccountProofResponse>;
+}
+
+/// Helper trait, unifies functionality that must be supported to implement all RPC methods for
+/// server.
+pub trait FullEthApiServer:
+    EthApiServer + EthApiServerComponents + UpdateRawTxForwarder + Clone
+{
+}
+
+impl<T> FullEthApiServer for T where
+    T: EthApiServer + EthApiServerComponents + UpdateRawTxForwarder + Clone
+{
 }

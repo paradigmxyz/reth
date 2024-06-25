@@ -30,7 +30,7 @@ pub use helpers::{
         transaction::{
             EthTransactions, LoadTransaction, RawTransactionForwarder, UpdateRawTxForwarder,
         },
-        FullEthApiServer, TraceExt,
+        EthApiServerComponents, TraceExt,
     },
 };
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
