@@ -72,7 +72,7 @@ where
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TableRef {
     StaticFiles(StaticFileTableRef),
-    Drop(usize),
+    Other(usize),
 }
 
 impl Default for TableRef {
@@ -103,7 +103,7 @@ impl<DB> TableRing<DB> {
             _ => StaticFileTableRef::default(),
         };
 
-        if let TableRef::Drop(index) = start {
+        if let TableRef::Other(index) = start {
             if segments.is_empty() || index > segments.len() - 1 {
                 return Err("segments index out of bounds")
             }
@@ -147,17 +147,17 @@ where
                 // static files ring nested in this ring, so is one step ahead
                 let next = static_file_ring.current_table();
                 if next == *static_file_start && !segments.is_empty() {
-                    TableRef::Drop(0)
+                    TableRef::Other(0)
                 } else {
                     TableRef::StaticFiles(next)
                 }
             }
-            TableRef::Drop(index) => {
+            TableRef::Other(index) => {
                 if *index == segments.len() - 1 {
                     // start next cycle
                     TableRef::StaticFiles(StaticFileTableRef::default())
                 } else {
-                    TableRef::Drop(*index + 1)
+                    TableRef::Other(*index + 1)
                 }
             }
         }
@@ -168,7 +168,7 @@ where
 
         let segment = match current {
             TableRef::StaticFiles(_) => self.static_file_ring.next_cycle().next().flatten(),
-            TableRef::Drop(index) => Some((segments[*index].clone(), PrunePurpose::User)),
+            TableRef::Other(index) => Some((segments[*index].clone(), PrunePurpose::User)),
         };
 
         self.prev = Some(*current);
@@ -360,7 +360,7 @@ mod test {
         if start_index == 0 {
             TableRef::StaticFiles(StaticFileTableRef::Receipts)
         } else {
-            TableRef::Drop(start_index - 1)
+            TableRef::Other(start_index - 1)
         }
     }
 
@@ -379,7 +379,7 @@ mod test {
         let segments_len = segments.len();
 
         let index = rand::thread_rng().gen_range(0..segments_len);
-        let start = TableRef::Drop(index);
+        let start = TableRef::Other(index);
         let mut ring: TableRing<_> =
             TableRing::new(provider_factory.static_file_provider(), start, segments).unwrap();
 
