@@ -1,5 +1,5 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
-use crate::state::HashedPostStateSorted;
+use crate::{state::HashedPostStateSorted, HashedStorageSorted};
 use reth_primitives::{Account, B256, U256};
 
 /// The hashed cursor factory for the post state.
@@ -30,18 +30,18 @@ impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorF
         hashed_address: B256,
     ) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
         let cursor = self.cursor_factory.hashed_storage_cursor(hashed_address)?;
-        Ok(HashedPostStateStorageCursor::new(cursor, self.post_state, hashed_address))
+        Ok(HashedPostStateStorageCursor::new(cursor, self.post_state.storages.get(&hashed_address)))
     }
 }
 
 /// The cursor to iterate over post state hashed accounts and corresponding database entries.
 /// It will always give precedence to the data from the hashed post state.
 #[derive(Debug, Clone)]
-pub struct HashedPostStateAccountCursor<'b, C> {
+pub struct HashedPostStateAccountCursor<'a, C> {
     /// The database cursor.
     cursor: C,
     /// The reference to the in-memory [`HashedPostStateSorted`].
-    post_state: &'b HashedPostStateSorted,
+    post_state: &'a HashedPostStateSorted,
     /// The post state account index where the cursor is currently at.
     post_state_account_index: usize,
     /// The last hashed account that was returned by the cursor.
@@ -49,9 +49,9 @@ pub struct HashedPostStateAccountCursor<'b, C> {
     last_account: Option<B256>,
 }
 
-impl<'b, C> HashedPostStateAccountCursor<'b, C> {
+impl<'a, C> HashedPostStateAccountCursor<'a, C> {
     /// Create new instance of [`HashedPostStateAccountCursor`].
-    pub const fn new(cursor: C, post_state: &'b HashedPostStateSorted) -> Self {
+    pub const fn new(cursor: C, post_state: &'a HashedPostStateSorted) -> Self {
         Self { cursor, post_state, last_account: None, post_state_account_index: 0 }
     }
 
@@ -88,7 +88,7 @@ impl<'b, C> HashedPostStateAccountCursor<'b, C> {
     }
 }
 
-impl<'b, C> HashedCursor for HashedPostStateAccountCursor<'b, C>
+impl<'a, C> HashedCursor for HashedPostStateAccountCursor<'a, C>
 where
     C: HashedCursor<Value = Account>,
 {
@@ -179,13 +179,11 @@ where
 /// The cursor to iterate over post state hashed storages and corresponding database entries.
 /// It will always give precedence to the data from the post state.
 #[derive(Debug, Clone)]
-pub struct HashedPostStateStorageCursor<'b, C> {
+pub struct HashedPostStateStorageCursor<'a, C> {
     /// The database cursor.
     cursor: C,
-    /// The reference to the post state.
-    post_state: &'b HashedPostStateSorted,
-    /// The current hashed account key.
-    hashed_address: B256,
+    /// The reference to post state storage.
+    post_state_storage: Option<&'a HashedStorageSorted>,
     /// The post state index where the cursor is currently at.
     post_state_storage_index: usize,
     /// The last slot that has been returned by the cursor.
@@ -193,20 +191,21 @@ pub struct HashedPostStateStorageCursor<'b, C> {
     last_slot: Option<B256>,
 }
 
-impl<'b, C> HashedPostStateStorageCursor<'b, C> {
+impl<'a, C> HashedPostStateStorageCursor<'a, C> {
     /// Create new instance of [`HashedPostStateStorageCursor`] for the given hashed address.
-    pub const fn new(
-        cursor: C,
-        post_state: &'b HashedPostStateSorted,
-        hashed_address: B256,
-    ) -> Self {
-        Self { cursor, post_state, hashed_address, last_slot: None, post_state_storage_index: 0 }
+    pub const fn new(cursor: C, post_state: Option<&'a HashedStorageSorted>) -> Self {
+        Self {
+            cursor,
+            post_state_storage: post_state,
+            last_slot: None,
+            post_state_storage_index: 0,
+        }
     }
 
     /// Returns `true` if the storage for the given
     /// The database is not checked since it already has no wiped storage entries.
-    fn is_db_storage_wiped(&self) -> bool {
-        match self.post_state.storages.get(&self.hashed_address) {
+    const fn is_db_storage_wiped(&self) -> bool {
+        match self.post_state_storage {
             Some(storage) => storage.wiped,
             None => false,
         }
@@ -215,9 +214,7 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
     /// Check if the slot was zeroed out in the post state.
     /// The database is not checked since it already has no zero-valued slots.
     fn is_slot_zero_valued(&self, slot: &B256) -> bool {
-        self.post_state
-            .storages
-            .get(&self.hashed_address)
+        self.post_state_storage
             .map(|storage| storage.zero_valued_slots.contains(slot))
             .unwrap_or_default()
     }
@@ -246,7 +243,7 @@ impl<'b, C> HashedPostStateStorageCursor<'b, C> {
     }
 }
 
-impl<'b, C> HashedCursor for HashedPostStateStorageCursor<'b, C>
+impl<'a, C> HashedCursor for HashedPostStateStorageCursor<'a, C>
 where
     C: HashedStorageCursor<Value = U256>,
 {
@@ -259,7 +256,7 @@ where
     ) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError> {
         // Attempt to find the account's storage in post state.
         let mut post_state_entry = None;
-        if let Some(storage) = self.post_state.storages.get(&self.hashed_address) {
+        if let Some(storage) = self.post_state_storage {
             post_state_entry = storage.non_zero_valued_slots.get(self.post_state_storage_index);
 
             while post_state_entry.map(|(slot, _)| slot < &subkey).unwrap_or_default() {
@@ -332,7 +329,7 @@ where
 
         // Attempt to find the account's storage in post state.
         let mut post_state_entry = None;
-        if let Some(storage) = self.post_state.storages.get(&self.hashed_address) {
+        if let Some(storage) = self.post_state_storage {
             post_state_entry = storage.non_zero_valued_slots.get(self.post_state_storage_index);
             while post_state_entry.map(|(slot, _)| slot <= last_slot).unwrap_or_default() {
                 self.post_state_storage_index += 1;
@@ -347,7 +344,7 @@ where
     }
 }
 
-impl<'b, C> HashedStorageCursor for HashedPostStateStorageCursor<'b, C>
+impl<'a, C> HashedStorageCursor for HashedPostStateStorageCursor<'a, C>
 where
     C: HashedStorageCursor<Value = U256>,
 {
@@ -356,7 +353,7 @@ where
     /// This function should be called before attempting to call [`HashedCursor::seek`] or
     /// [`HashedCursor::next`].
     fn is_storage_empty(&mut self) -> Result<bool, reth_db::DatabaseError> {
-        let is_empty = match self.post_state.storages.get(&self.hashed_address) {
+        let is_empty = match self.post_state_storage {
             Some(storage) => {
                 // If the storage has been wiped at any point
                 storage.wiped &&
