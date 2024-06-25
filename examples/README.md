@@ -29,6 +29,7 @@ to make a PR!
 | [In Memory State](./exex/in-memory-state) | Illustrates an ExEx that tracks the plain state in memory                                           |
 | [Minimal](./exex/minimal)                 | Illustrates how to build a simple ExEx                                                              |
 | [OP Bridge](./exex/op-bridge)             | Illustrates an ExEx that decodes Optimism deposit and withdrawal receipts from L1                   |
+| [Remote](./exex/remote)                   | Illustrates an ExEx that emits notifications using a gRPC server, and a consumer that receives them |
 | [Rollup](./exex/rollup)                   | Illustrates a rollup ExEx that derives the state from L1                                            |
 
 ## RPC
