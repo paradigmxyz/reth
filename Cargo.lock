@@ -134,7 +134,7 @@ dependencies = [
  "arbitrary",
  "c-kzg",
  "proptest",
- "proptest-derive",
+ "proptest-derive 0.4.0",
  "serde",
 ]
 
@@ -170,7 +170,7 @@ dependencies = [
  "derive_more",
  "once_cell",
  "proptest",
- "proptest-derive",
+ "proptest-derive 0.4.0",
  "serde",
  "sha2 0.10.8",
 ]
@@ -267,7 +267,7 @@ dependencies = [
  "k256",
  "keccak-asm",
  "proptest",
- "proptest-derive",
+ "proptest-derive 0.4.0",
  "rand 0.8.5",
  "ruint",
  "serde",
@@ -459,7 +459,7 @@ dependencies = [
  "itertools 0.13.0",
  "jsonrpsee-types",
  "proptest",
- "proptest-derive",
+ "proptest-derive 0.4.0",
  "serde",
  "serde_json",
  "thiserror",
@@ -500,7 +500,7 @@ dependencies = [
  "alloy-primitives",
  "arbitrary",
  "proptest",
- "proptest-derive",
+ "proptest-derive 0.4.0",
  "serde",
  "serde_json",
 ]
@@ -693,7 +693,7 @@ dependencies = [
  "hashbrown 0.14.5",
  "nybbles",
  "proptest",
- "proptest-derive",
+ "proptest-derive 0.4.0",
  "serde",
  "smallvec",
  "tracing",
@@ -5802,6 +5802,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "proptest-derive"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ff7ff745a347b87471d859a377a9a404361e7efc2a971d73424a6d183c0fc77"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.67",
+]
+
+[[package]]
 name = "quanta"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6504,7 +6515,7 @@ dependencies = [
  "modular-bitfield",
  "proptest",
  "proptest-arbitrary-interop",
- "proptest-derive",
+ "proptest-derive 0.5.0",
  "reth-codecs-derive",
  "serde",
  "serde_json",
@@ -6634,7 +6645,7 @@ dependencies = [
  "pprof",
  "proptest",
  "proptest-arbitrary-interop",
- "proptest-derive",
+ "proptest-derive 0.5.0",
  "rand 0.8.5",
  "reth-codecs",
  "reth-primitives",
@@ -6881,7 +6892,7 @@ dependencies = [
  "pin-project",
  "proptest",
  "proptest-arbitrary-interop",
- "proptest-derive",
+ "proptest-derive 0.5.0",
  "rand 0.8.5",
  "reth-chainspec",
  "reth-codecs",
@@ -6914,7 +6925,7 @@ dependencies = [
  "derive_more",
  "proptest",
  "proptest-arbitrary-interop",
- "proptest-derive",
+ "proptest-derive 0.5.0",
  "rand 0.8.5",
  "reth-chainspec",
  "reth-codecs-derive",
@@ -6961,7 +6972,7 @@ dependencies = [
  "arbitrary",
  "crc",
  "proptest",
- "proptest-derive",
+ "proptest-derive 0.5.0",
  "serde",
  "thiserror-no-std",
 ]
@@ -7697,7 +7708,7 @@ dependencies = [
  "pprof",
  "proptest",
  "proptest-arbitrary-interop",
- "proptest-derive",
+ "proptest-derive 0.5.0",
  "rand 0.8.5",
  "rayon",
  "reth-chainspec",
@@ -7736,7 +7747,7 @@ dependencies = [
  "modular-bitfield",
  "proptest",
  "proptest-arbitrary-interop",
- "proptest-derive",
+ "proptest-derive 0.5.0",
  "rand 0.8.5",
  "reth-codecs",
  "revm-primitives",
@@ -7829,7 +7840,7 @@ dependencies = [
  "modular-bitfield",
  "proptest",
  "proptest-arbitrary-interop",
- "proptest-derive",
+ "proptest-derive 0.5.0",
  "reth-codecs",
  "serde",
  "serde_json",
@@ -8062,7 +8073,7 @@ dependencies = [
  "bytes",
  "jsonrpsee-types",
  "proptest",
- "proptest-derive",
+ "proptest-derive 0.5.0",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -8165,7 +8176,7 @@ dependencies = [
  "modular-bitfield",
  "proptest",
  "proptest-arbitrary-interop",
- "proptest-derive",
+ "proptest-derive 0.5.0",
  "rand 0.8.5",
  "reth-codecs",
  "reth-trie-common",
@@ -8372,7 +8383,7 @@ dependencies = [
  "plain_hasher",
  "proptest",
  "proptest-arbitrary-interop",
- "proptest-derive",
+ "proptest-derive 0.5.0",
  "reth-codecs",
  "reth-primitives-traits",
  "revm-primitives",
