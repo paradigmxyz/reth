@@ -175,10 +175,19 @@ impl<T> TreeOutcome<T> {
 /// Events that can be emitted by the [`EngineApiTreeHandler`].
 #[derive(Debug)]
 pub enum TreeEvent {
+    /// Tree action is needed.
+    TreeAction(TreeAction),
     /// Backfill action is needed.
     BackfillAction(BackfillAction),
     /// Block download is needed.
     Download(DownloadRequest),
+}
+
+/// The actions that can be performed on the tree.
+#[derive(Debug)]
+pub enum TreeAction {
+    /// Make target canonical.
+    MakeCanonical(B256),
 }
 
 #[derive(Debug)]
@@ -498,7 +507,7 @@ where
             return Ok(TreeOutcome::new(status))
         }
 
-        let _status = if self.is_pipeline_active {
+        let status = if self.is_pipeline_active {
             self.buffer_block_without_senders(block).unwrap();
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         } else {
@@ -529,7 +538,16 @@ where
             PayloadStatus::new(status, latest_valid_hash)
         };
 
-        todo!()
+        let mut outcome = TreeOutcome::new(status);
+        if outcome.outcome.is_valid() {
+            if let Some(target) = self.state.forkchoice_state_tracker.sync_target_state() {
+                if target.head_block_hash == block_hash {
+                    outcome = outcome
+                        .with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical(block_hash)));
+                }
+            }
+        }
+        Ok(outcome)
     }
 
     fn on_forkchoice_updated(
