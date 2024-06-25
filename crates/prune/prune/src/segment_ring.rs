@@ -7,10 +7,29 @@ use reth_static_file_types::StaticFileSegment;
 
 use crate::{segments, Segment};
 
-/// A mutable iterator over a ring of tables. Returns `None` after the first cycle.
+/// An iterator over a mutable ring of tables, that yields next segments to prune. Advancing
+/// iterator, mutates current position in ring. Returns `None` after the first cycle.
 #[derive(Debug)]
 pub struct SegmentIter<'a, T> {
     ring: &'a mut T,
+}
+
+impl<'a, T> Iterator for SegmentIter<'a, T>
+where
+    T: CycleSegments,
+{
+    type Item = Option<(Arc<dyn Segment<<T as CycleSegments>::Db>>, PrunePurpose)>;
+
+    /// Returns next prunable segment in ring, or `None` if iterator has walked one cycle.
+    fn next(&mut self) -> Option<Self::Item> {
+        // return after one cycle
+        if self.ring.prev_table().is_some() && self.ring.current_table() == self.ring.start_table()
+        {
+            return None
+        }
+
+        Some(self.ring.next_segment())
+    }
 }
 
 /// Cycles prunable segments.
@@ -47,24 +66,6 @@ pub trait CycleSegments {
         Self: Sized,
     {
         self.next_cycle().filter(|segment| segment.is_some()).flatten()
-    }
-}
-
-impl<'a, T> Iterator for SegmentIter<'a, T>
-where
-    T: CycleSegments,
-{
-    type Item = Option<(Arc<dyn Segment<<T as CycleSegments>::Db>>, PrunePurpose)>;
-
-    /// Returns next prunable segment in ring, or `None` if iterator has walked one cycle.
-    fn next(&mut self) -> Option<Self::Item> {
-        // return after one cycle
-        if self.ring.prev_table().is_some() && self.ring.current_table() == self.ring.start_table()
-        {
-            return None
-        }
-
-        Some(self.ring.next_segment())
     }
 }
 
