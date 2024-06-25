@@ -204,6 +204,9 @@ Networking:
 
           [default: 131072]
 
+      --offline
+          If this is enabled, then _only_ the offline stages (headers, bodies) will be unwound
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
