@@ -5,9 +5,10 @@ use reth::{
     transaction_pool::TransactionPool,
 };
 use reth_basic_payload_builder::{BasicPayloadJobGeneratorConfig, PayloadBuilder, PayloadConfig};
+use reth_chainspec::ChainSpec;
 use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::{error::PayloadBuilderError, PayloadJobGenerator};
-use reth_primitives::{BlockNumberOrTag, Bytes, ChainSpec};
+use reth_primitives::{BlockNumberOrTag, Bytes};
 use std::sync::Arc;
 
 /// The generator type that creates new jobs that builds empty blocks.

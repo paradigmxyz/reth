@@ -8,10 +8,10 @@ use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersFut, HeadersRequest},
     priority::Priority,
 };
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BytesMut, Header, HeadersDirection,
-    SealedHeader, B256,
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, SealedHeader,
+    B256,
 };
 use std::{collections::HashMap, io, path::Path};
 use thiserror::Error;
@@ -407,6 +407,7 @@ impl ChunkedFileReader {
         T: FromReader,
     {
         if self.file_byte_len == 0 && self.chunk.is_empty() {
+            dbg!(self.chunk.is_empty());
             // eof
             return Ok(None)
         }
@@ -418,26 +419,22 @@ impl ChunkedFileReader {
         let new_read_bytes_target_len = chunk_target_len - old_bytes_len;
 
         // read new bytes from file
-        let mut reader = BytesMut::zeroed(new_read_bytes_target_len as usize);
+        let prev_read_bytes_len = self.chunk.len();
+        self.chunk.extend(std::iter::repeat(0).take(new_read_bytes_target_len as usize));
+        let reader = &mut self.chunk[prev_read_bytes_len..];
 
         // actual bytes that have been read
-        let new_read_bytes_len = self.file.read_exact(&mut reader).await? as u64;
+        let new_read_bytes_len = self.file.read_exact(reader).await? as u64;
+        let next_chunk_byte_len = self.chunk.len();
 
         // update remaining file length
         self.file_byte_len -= new_read_bytes_len;
-
-        let prev_read_bytes_len = self.chunk.len();
-
-        // read new bytes from file into chunk
-        self.chunk.extend_from_slice(&reader[..]);
-        let next_chunk_byte_len = self.chunk.len();
 
         debug!(target: "downloaders::file",
             max_chunk_byte_len=self.chunk_byte_len,
             prev_read_bytes_len,
             new_read_bytes_target_len,
             new_read_bytes_len,
-            reader_capacity=reader.capacity(),
             next_chunk_byte_len,
             remaining_file_byte_len=self.file_byte_len,
             "new bytes were read from file"
@@ -605,8 +602,9 @@ mod tests {
         // Generate some random blocks
         let (file, headers, _) = generate_bodies_file(0..=14).await;
 
-        // calculate min for chunk byte length range
-        let chunk_byte_len = rand::thread_rng().gen_range(1..=10_000);
+        // calculate min for chunk byte length range, pick a lower bound that guarantees at least
+        // one block will be read
+        let chunk_byte_len = rand::thread_rng().gen_range(2000..=10_000);
         trace!(target: "downloaders::file::test", chunk_byte_len);
 
         // init reader
@@ -619,6 +617,7 @@ mod tests {
         // test
         while let Some(client) = reader.next_chunk::<FileClient>().await.unwrap() {
             let sync_target = client.tip_header().unwrap();
+
             let sync_target_hash = sync_target.hash();
 
             // construct headers downloader and use first header

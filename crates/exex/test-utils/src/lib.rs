@@ -10,15 +10,19 @@
 
 use futures_util::FutureExt;
 use reth_blockchain_tree::noop::NoopBlockchainTree;
+use reth_chainspec::{ChainSpec, MAINNET};
+use reth_consensus::test_utils::TestConsensus;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_evm::test_utils::MockExecutorProvider;
+use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
 use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_builder::{
     components::{
-        Components, ComponentsBuilder, ExecutorBuilder, NodeComponentsBuilder, PoolBuilder,
+        Components, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NodeComponentsBuilder,
+        PoolBuilder,
     },
     BuilderContext, Node, NodeAdapter, RethFullAdapter,
 };
@@ -28,10 +32,10 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{ChainSpec, Head, SealedBlockWithSenders, MAINNET};
+use reth_primitives::{Head, SealedBlockWithSenders};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-    BlockReader, Chain, ProviderFactory,
+    BlockReader, ProviderFactory,
 };
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
@@ -83,6 +87,22 @@ where
     }
 }
 
+/// A test [`ConsensusBuilder`] that builds a [`TestConsensus`].
+#[derive(Debug, Default, Clone, Copy)]
+#[non_exhaustive]
+pub struct TestConsensusBuilder;
+
+impl<Node> ConsensusBuilder<Node> for TestConsensusBuilder
+where
+    Node: FullNodeTypes,
+{
+    type Consensus = Arc<TestConsensus>;
+
+    async fn build_consensus(self, _ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
+        Ok(Arc::new(TestConsensus::default()))
+    }
+}
+
 /// A test [`Node`].
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
@@ -103,6 +123,7 @@ where
         EthereumPayloadBuilder,
         EthereumNetworkBuilder,
         TestExecutorBuilder,
+        TestConsensusBuilder,
     >;
 
     fn components_builder(self) -> Self::ComponentsBuilder {
@@ -112,16 +133,22 @@ where
             .payload(EthereumPayloadBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(TestExecutorBuilder::default())
+            .consensus(TestConsensusBuilder::default())
     }
 }
 
-type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
-type Adapter = NodeAdapter<
+/// A shared [`TempDatabase`] used for testing
+pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
+/// The [`NodeAdapter`] for the [`TestExExContext`]. Contains type necessary to
+/// boot the testing environment
+pub type Adapter = NodeAdapter<
     RethFullAdapter<TmpDB, TestNode>,
     <<TestNode as Node<FullNodeTypesAdapter<TestNode, TmpDB, BlockchainProvider<TmpDB>>>>::ComponentsBuilder as NodeComponentsBuilder<
         RethFullAdapter<TmpDB, TestNode>,
     >>::Components,
 >;
+/// An [`ExExContext`] using the [`Adapter`] type.
+pub type TestExExContext = ExExContext<Adapter>;
 
 /// A helper type for testing Execution Extensions.
 #[derive(Debug)]
@@ -134,6 +161,8 @@ pub struct TestExExHandle {
     pub events_rx: UnboundedReceiver<ExExEvent>,
     /// Channel for sending notifications to the Execution Extension
     pub notifications_tx: Sender<ExExNotification>,
+    /// Node task manager
+    pub tasks: TaskManager,
 }
 
 impl TestExExHandle {
@@ -141,6 +170,26 @@ impl TestExExHandle {
     pub async fn send_notification_chain_committed(&self, chain: Chain) -> eyre::Result<()> {
         self.notifications_tx
             .send(ExExNotification::ChainCommitted { new: Arc::new(chain) })
+            .await?;
+        Ok(())
+    }
+
+    /// Send a notification to the Execution Extension that the chain has been reorged
+    pub async fn send_notification_chain_reorged(
+        &self,
+        old: Chain,
+        new: Chain,
+    ) -> eyre::Result<()> {
+        self.notifications_tx
+            .send(ExExNotification::ChainReorged { old: Arc::new(old), new: Arc::new(new) })
+            .await?;
+        Ok(())
+    }
+
+    /// Send a notification to the Execution Extension that the chain has been reverted
+    pub async fn send_notification_chain_reverted(&self, chain: Chain) -> eyre::Result<()> {
+        self.notifications_tx
+            .send(ExExNotification::ChainReverted { old: Arc::new(chain) })
             .await?;
         Ok(())
     }
@@ -178,6 +227,7 @@ pub async fn test_exex_context_with_chain_spec(
     let transaction_pool = testing_pool();
     let evm_config = EthEvmConfig::default();
     let executor = MockExecutorProvider::default();
+    let consensus = Arc::new(TestConsensus::default());
 
     let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
     let genesis_hash = init_genesis(provider_factory.clone())?;
@@ -197,7 +247,14 @@ pub async fn test_exex_context_with_chain_spec(
     let task_executor = tasks.executor();
 
     let components = NodeAdapter::<FullNodeTypesAdapter<TestNode, _, _>, _> {
-        components: Components { transaction_pool, evm_config, executor, network, payload_builder },
+        components: Components {
+            transaction_pool,
+            evm_config,
+            executor,
+            consensus,
+            network,
+            payload_builder,
+        },
         task_executor,
         provider,
     };
@@ -229,7 +286,7 @@ pub async fn test_exex_context_with_chain_spec(
         components,
     };
 
-    Ok((ctx, TestExExHandle { genesis, provider_factory, events_rx, notifications_tx }))
+    Ok((ctx, TestExExHandle { genesis, provider_factory, events_rx, notifications_tx, tasks }))
 }
 
 /// Creates a new [`ExExContext`] with (mainnet)[`MAINNET`] chain spec.

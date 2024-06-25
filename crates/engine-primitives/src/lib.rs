@@ -8,36 +8,26 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use core::fmt;
-use reth_primitives::ChainSpec;
-
-use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, PayloadAttributes,
-    PayloadBuilderAttributes, PayloadOrAttributes,
+use reth_chainspec::ChainSpec;
+pub use reth_payload_primitives::{
+    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes,
+    PayloadTypes,
 };
-
 use serde::{de::DeserializeOwned, ser::Serialize};
-/// The types that are used by the engine API.
+
+/// This type defines the versioned types of the engine API.
+///
+/// This includes the execution payload types and payload attributes that are used to trigger a
+/// payload job. Hence this trait is also [`PayloadTypes`].
 pub trait EngineTypes:
-    DeserializeOwned + Serialize + fmt::Debug + Unpin + Send + Sync + Clone
+    PayloadTypes<
+        BuiltPayload: TryInto<Self::ExecutionPayloadV1>
+                          + TryInto<Self::ExecutionPayloadV2>
+                          + TryInto<Self::ExecutionPayloadV3>
+                          + TryInto<Self::ExecutionPayloadV4>,
+    > + DeserializeOwned
+    + Serialize
 {
-    /// The RPC payload attributes type the CL node emits via the engine API.
-    type PayloadAttributes: PayloadAttributes + Unpin;
-
-    /// The payload attributes type that contains information about a running payload job.
-    type PayloadBuilderAttributes: PayloadBuilderAttributes<RpcPayloadAttributes = Self::PayloadAttributes>
-        + Clone
-        + Unpin;
-
-    /// The built payload type.
-    type BuiltPayload: BuiltPayload
-        + Clone
-        + Unpin
-        + TryInto<Self::ExecutionPayloadV1>
-        + TryInto<Self::ExecutionPayloadV2>
-        + TryInto<Self::ExecutionPayloadV3>
-        + TryInto<Self::ExecutionPayloadV4>;
-
     /// Execution Payload V1 type.
     type ExecutionPayloadV1: DeserializeOwned + Serialize + Clone + Unpin + Send + Sync + 'static;
     /// Execution Payload V2 type.

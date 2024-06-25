@@ -3,7 +3,7 @@
 use crate::{
     args::{
         get_secret_key,
-        utils::{chain_help, chain_spec_value_parser, hash_or_num_value_parser, SUPPORTED_CHAINS},
+        utils::{chain_help, chain_value_parser, hash_or_num_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, DiscoveryArgs, NetworkArgs,
     },
     utils::get_single_header,
@@ -11,12 +11,13 @@ use crate::{
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use discv5::ListenConfig;
+use reth_chainspec::ChainSpec;
 use reth_config::Config;
 use reth_db::create_db;
 use reth_network::NetworkConfigBuilder;
 use reth_network_p2p::bodies::client::BodiesClient;
 use reth_node_core::args::DatadirArgs;
-use reth_primitives::{BlockHashOrNumber, ChainSpec};
+use reth_primitives::BlockHashOrNumber;
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use std::{
     net::{IpAddr, SocketAddrV4, SocketAddrV6},
@@ -39,7 +40,7 @@ pub struct Command {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = SUPPORTED_CHAINS[0],
-        value_parser = chain_spec_value_parser
+        value_parser = chain_value_parser
     )]
     chain: Arc<ChainSpec>,
 

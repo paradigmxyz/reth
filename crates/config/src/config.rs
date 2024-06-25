@@ -1,7 +1,7 @@
 //! Configuration files.
 
 use reth_network::{PeersConfig, SessionsConfig};
-use reth_primitives::PruneModes;
+use reth_prune_types::PruneModes;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     ffi::OsStr,

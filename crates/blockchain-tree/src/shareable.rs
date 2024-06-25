@@ -14,7 +14,7 @@ use reth_primitives::{
     SealedHeader,
 };
 use reth_provider::{
-    BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullBundleStateDataProvider,
+    BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullExecutionDataProvider,
     ProviderError,
 };
 use reth_storage_errors::provider::ProviderResult;
@@ -177,7 +177,7 @@ where
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn FullBundleStateDataProvider>> {
+    ) -> Option<Box<dyn FullExecutionDataProvider>> {
         trace!(target: "blockchain_tree", ?block_hash, "Finding pending state provider");
         let provider = self.tree.read().post_state_data(block_hash)?;
         Some(Box::new(provider))

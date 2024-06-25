@@ -10,16 +10,15 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use once_cell::sync::Lazy;
+use reth_chainspec::{net::mainnet_nodes, Chain, MAINNET};
 use reth_discv4::{DiscoveryUpdate, Discv4, Discv4ConfigBuilder, DEFAULT_DISCOVERY_ADDRESS};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
     EthMessage, EthStream, HelloMessage, P2PStream, Status, UnauthedEthStream, UnauthedP2PStream,
 };
 use reth_network::config::rng_secret_key;
-use reth_network_types::pk2id;
-use reth_primitives::{
-    mainnet_nodes, Chain, Hardfork, Head, NodeRecord, MAINNET, MAINNET_GENESIS_HASH,
-};
+use reth_network_peers::{pk2id, NodeRecord};
+use reth_primitives::{Hardfork, Head, MAINNET_GENESIS_HASH};
 use secp256k1::{SecretKey, SECP256K1};
 use tokio::net::TcpStream;
 

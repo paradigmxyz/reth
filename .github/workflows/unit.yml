@@ -39,7 +39,7 @@ jobs:
         run: |
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }}" \
-            --workspace --exclude examples --exclude ef-tests \
+            --workspace --exclude example-exex-remote --exclude ef-tests \
             --partition hash:${{ matrix.partition }}/2 \
             -E "!kind(test)"
 
@@ -84,6 +84,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - uses: arduino/setup-protoc@v3
       - name: Run doctests
         run: cargo test --doc --workspace --features "${{ matrix.network }}"
 

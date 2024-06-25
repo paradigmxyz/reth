@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-blockchain-tree-api.workspace = true
 reth-primitives.workspace = true
@@ -66,6 +67,9 @@ reth-evm-ethereum.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-config.workspace = true
 reth-testing-utils.workspace = true
+reth-exex-types.workspace = true
+reth-prune-types.workspace = true
+alloy-genesis.workspace = true
 
 assert_matches.workspace = true
 
@@ -74,6 +78,5 @@ optimism = [
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-blockchain-tree/optimism",
-    "reth-ethereum-consensus/optimism",
     "reth-rpc/optimism",
 ]

@@ -1,21 +1,19 @@
 mod ctrl;
 mod event;
 pub use crate::pipeline::ctrl::ControlFlow;
+use crate::{PipelineTarget, StageCheckpoint, StageId};
+use alloy_primitives::{BlockNumber, B256};
 pub use event::*;
 use futures_util::Future;
 use reth_db_api::database::Database;
-use reth_primitives::{
-    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH,
-    stage::{PipelineTarget, StageCheckpoint, StageId},
-    static_file::HighestStaticFiles,
-    BlockNumber, B256,
-};
+use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
     providers::StaticFileWriter, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
     StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
+use reth_static_file_types::HighestStaticFiles;
 use reth_tokio_util::{EventSender, EventStream};
 use std::pin::Pin;
 use tokio::sync::watch;
@@ -238,13 +236,13 @@ where
 
     /// Run [static file producer](StaticFileProducer) and [pruner](reth_prune::Pruner) to **move**
     /// all data from the database to static files for corresponding
-    /// [segments](reth_primitives::static_file::StaticFileSegment), according to their [stage
+    /// [segments](reth_static_file_types::StaticFileSegment), according to their [stage
     /// checkpoints](StageCheckpoint):
-    /// - [`StaticFileSegment::Headers`](reth_primitives::static_file::StaticFileSegment::Headers)
-    ///   -> [`StageId::Headers`]
-    /// - [`StaticFileSegment::Receipts`](reth_primitives::static_file::StaticFileSegment::Receipts)
-    ///   -> [`StageId::Execution`]
-    /// - [`StaticFileSegment::Transactions`](reth_primitives::static_file::StaticFileSegment::Transactions)
+    /// - [`StaticFileSegment::Headers`](reth_static_file_types::StaticFileSegment::Headers) ->
+    ///   [`StageId::Headers`]
+    /// - [`StaticFileSegment::Receipts`](reth_static_file_types::StaticFileSegment::Receipts) ->
+    ///   [`StageId::Execution`]
+    /// - [`StaticFileSegment::Transactions`](reth_static_file_types::StaticFileSegment::Transactions)
     ///   -> [`StageId::Bodies`]
     ///
     /// CAUTION: This method locks the static file producer Mutex, hence can block the thread if the
@@ -369,6 +367,8 @@ where
                         provider_rw.commit()?;
                         self.provider_factory.static_file_provider().commit()?;
 
+                        stage.post_unwind_commit()?;
+
                         provider_rw = self.provider_factory.provider_rw()?;
                     }
                     Err(err) => {
@@ -478,6 +478,8 @@ where
                     // start-up.
                     self.provider_factory.static_file_provider().commit()?;
                     provider_rw.commit()?;
+
+                    stage.post_execute_commit()?;
 
                     if done {
                         let block_number = checkpoint.block_number;
@@ -607,8 +609,8 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
     use reth_errors::ProviderError;
-    use reth_primitives::PruneModes;
     use reth_provider::test_utils::create_test_provider_factory;
+    use reth_prune::PruneModes;
     use reth_testing_utils::{generators, generators::random_header};
     use tokio_stream::StreamExt;
 

@@ -1,7 +1,5 @@
-use reth_primitives::{
-    trie::{nodes::CHILD_INDEX_RANGE, BranchNodeCompact, Nibbles, StoredSubNode},
-    B256,
-};
+use crate::{nodes::CHILD_INDEX_RANGE, BranchNodeCompact, Nibbles, StoredSubNode};
+use reth_primitives::B256;
 
 /// Cursor for iterating over a subtrie.
 #[derive(Clone)]

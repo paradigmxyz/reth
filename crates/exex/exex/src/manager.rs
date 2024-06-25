@@ -1,7 +1,7 @@
-use crate::{ExExEvent, ExExNotification};
+use crate::{ExExEvent, ExExNotification, FinishedExExHeight};
 use metrics::Gauge;
 use reth_metrics::{metrics::Counter, Metrics};
-use reth_primitives::{BlockNumber, FinishedExExHeight};
+use reth_primitives::BlockNumber;
 use reth_tracing::tracing::debug;
 use std::{
     collections::VecDeque,

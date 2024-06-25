@@ -352,10 +352,11 @@ mod tests {
         EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec, Status,
     };
     use futures::{SinkExt, StreamExt};
+    use reth_chainspec::NamedChain;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::stream::ECIESStream;
-    use reth_network_types::pk2id;
-    use reth_primitives::{ForkFilter, Head, NamedChain, B256, U256};
+    use reth_network_peers::pk2id;
+    use reth_primitives::{ForkFilter, Head, B256, U256};
     use secp256k1::{SecretKey, SECP256K1};
     use std::time::Duration;
     use tokio::net::{TcpListener, TcpStream};

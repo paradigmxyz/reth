@@ -11,17 +11,18 @@ use crate::{
 };
 use metrics_exporter_prometheus::PrometheusHandle;
 use once_cell::sync::Lazy;
+use reth_chainspec::{ChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives::{
-    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, stage::StageId,
-    BlockHashOrNumber, BlockNumber, ChainSpec, Head, SealedHeader, B256, MAINNET,
+    revm_primitives::EnvKzgSettings, BlockHashOrNumber, BlockNumber, Head, SealedHeader, B256,
 };
 use reth_provider::{
     providers::StaticFileProvider, BlockHashReader, HeaderProvider, ProviderFactory,
     StageCheckpointReader,
 };
+use reth_stages_types::StageId;
 use reth_storage_errors::provider::ProviderResult;
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
@@ -42,7 +43,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
 /// # };
-/// # use reth_rpc_builder::RpcModuleSelection;
+/// # use reth_rpc_server_types::RpcModuleSelection;
 /// # use tokio::runtime::Handle;
 ///
 /// async fn t() {
@@ -70,7 +71,7 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
 /// # };
-/// # use reth_rpc_builder::RpcModuleSelection;
+/// # use reth_rpc_server_types::RpcModuleSelection;
 /// # use tokio::runtime::Handle;
 ///
 /// async fn t() {
@@ -238,27 +239,6 @@ impl NodeConfig {
         self
     }
 
-    /// Returns the initial pipeline target, based on whether or not the node is running in
-    /// `debug.tip` mode, `debug.continuous` mode, or neither.
-    ///
-    /// If running in `debug.tip` mode, the configured tip is returned.
-    /// Otherwise, if running in `debug.continuous` mode, the genesis hash is returned.
-    /// Otherwise, `None` is returned. This is what the node will do by default.
-    pub fn initial_pipeline_target(&self, genesis_hash: B256) -> Option<B256> {
-        if let Some(tip) = self.debug.tip {
-            // Set the provided tip as the initial pipeline target.
-            debug!(target: "reth::cli", %tip, "Tip manually set");
-            Some(tip)
-        } else if self.debug.continuous {
-            // Set genesis as the initial pipeline target.
-            // This will allow the downloader to start
-            debug!(target: "reth::cli", "Continuous sync mode enabled");
-            Some(genesis_hash)
-        } else {
-            None
-        }
-    }
-
     /// Returns pruning configuration.
     pub fn prune_config(&self) -> Option<PruneConfig> {
         self.pruning.prune_config(&self.chain)
@@ -286,9 +266,9 @@ impl NodeConfig {
         Ok(max_block)
     }
 
-    /// Loads '`MAINNET_KZG_TRUSTED_SETUP`'
-    pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
-        Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
+    /// Loads '`EnvKzgSettings::Default`'
+    pub const fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
+        Ok(EnvKzgSettings::Default)
     }
 
     /// Installs the prometheus recorder.

@@ -1,7 +1,9 @@
 //! Clap parser utilities
 
+use alloy_genesis::Genesis;
+use reth_chainspec::ChainSpec;
 use reth_fs_util as fs;
-use reth_primitives::{AllGenesisFormats, BlockHashOrNumber, ChainSpec, B256};
+use reth_primitives::{BlockHashOrNumber, B256};
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
@@ -10,13 +12,13 @@ use std::{
     time::Duration,
 };
 
-use reth_primitives::DEV;
+use reth_chainspec::DEV;
 
 #[cfg(feature = "optimism")]
-use reth_primitives::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
+use reth_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
 #[cfg(not(feature = "optimism"))]
-use reth_primitives::{GOERLI, HOLESKY, MAINNET, SEPOLIA};
+use reth_chainspec::{GOERLI, HOLESKY, MAINNET, SEPOLIA};
 
 #[cfg(feature = "optimism")]
 /// Chains supported by op-reth. First value should be used as the default.
@@ -31,35 +33,6 @@ pub fn parse_duration_from_secs(arg: &str) -> eyre::Result<Duration, std::num::P
     Ok(Duration::from_secs(seconds))
 }
 
-/// Clap value parser for [`ChainSpec`]s that takes either a built-in chainspec or the path
-/// to a custom one.
-pub fn chain_spec_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
-    Ok(match s {
-        #[cfg(not(feature = "optimism"))]
-        "mainnet" => MAINNET.clone(),
-        #[cfg(not(feature = "optimism"))]
-        "goerli" => GOERLI.clone(),
-        #[cfg(not(feature = "optimism"))]
-        "sepolia" => SEPOLIA.clone(),
-        #[cfg(not(feature = "optimism"))]
-        "holesky" => HOLESKY.clone(),
-        #[cfg(not(feature = "optimism"))]
-        "dev" => DEV.clone(),
-        #[cfg(feature = "optimism")]
-        "optimism" => OP_MAINNET.clone(),
-        #[cfg(feature = "optimism")]
-        "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
-        #[cfg(feature = "optimism")]
-        "base" => BASE_MAINNET.clone(),
-        #[cfg(feature = "optimism")]
-        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
-        _ => {
-            let raw = fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned()))?;
-            serde_json::from_str(&raw)?
-        }
-    })
-}
-
 /// The help info for the --chain flag
 pub fn chain_help() -> String {
     format!("The chain this node is running.\nPossible values are either a built-in chain or the path to a chain specification file.\n\nBuilt-in chains:\n    {}", SUPPORTED_CHAINS.join(", "))
@@ -68,9 +41,8 @@ pub fn chain_help() -> String {
 /// Clap value parser for [`ChainSpec`]s.
 ///
 /// The value parser matches either a known chain, the path
-/// to a json file, or a json formatted string in-memory. The json can be either
-/// a serialized [`ChainSpec`] or Genesis struct.
-pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
+/// to a json file, or a json formatted string in-memory. The json needs to be a Genesis struct.
+pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
         #[cfg(not(feature = "optimism"))]
         "mainnet" => MAINNET.clone(),
@@ -104,7 +76,7 @@ pub fn genesis_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error
             };
 
             // both serialized Genesis and ChainSpec structs supported
-            let genesis: AllGenesisFormats = serde_json::from_str(&raw)?;
+            let genesis: Genesis = serde_json::from_str(&raw)?;
 
             Arc::new(genesis.into())
         }
@@ -168,109 +140,13 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
 mod tests {
     use super::*;
     use proptest::prelude::Rng;
-    use reth_primitives::{
-        hex, Address, ChainConfig, ChainSpecBuilder, Genesis, GenesisAccount, U256,
-    };
     use secp256k1::rand::thread_rng;
-    use std::collections::HashMap;
 
     #[test]
     fn parse_known_chain_spec() {
         for chain in SUPPORTED_CHAINS {
-            chain_spec_value_parser(chain).unwrap();
-            genesis_value_parser(chain).unwrap();
+            chain_value_parser(chain).unwrap();
         }
-    }
-
-    #[test]
-    fn parse_chain_spec_from_memory() {
-        let custom_genesis_from_json = r#"
-{
-    "nonce": "0x0",
-    "timestamp": "0x653FEE9E",
-    "gasLimit": "0x1388",
-    "difficulty": "0x0",
-    "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-    "coinbase": "0x0000000000000000000000000000000000000000",
-    "alloc": {
-        "0x6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b": {
-            "balance": "0x21"
-        }
-    },
-    "number": "0x0",
-    "gasUsed": "0x0",
-    "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-    "config": {
-        "chainId": 2600,
-        "homesteadBlock": 0,
-        "eip150Block": 0,
-        "eip155Block": 0,
-        "eip158Block": 0,
-        "byzantiumBlock": 0,
-        "constantinopleBlock": 0,
-        "petersburgBlock": 0,
-        "istanbulBlock": 0,
-        "berlinBlock": 0,
-        "londonBlock": 0,
-        "terminalTotalDifficulty": 0,
-        "terminalTotalDifficultyPassed": true,
-        "shanghaiTime": 0
-    }
-}
-"#;
-
-        let chain_from_json = genesis_value_parser(custom_genesis_from_json).unwrap();
-
-        // using structs
-        let config = ChainConfig {
-            chain_id: 2600,
-            homestead_block: Some(0),
-            eip150_block: Some(0),
-            eip155_block: Some(0),
-            eip158_block: Some(0),
-            byzantium_block: Some(0),
-            constantinople_block: Some(0),
-            petersburg_block: Some(0),
-            istanbul_block: Some(0),
-            berlin_block: Some(0),
-            london_block: Some(0),
-            shanghai_time: Some(0),
-            terminal_total_difficulty: Some(U256::ZERO),
-            terminal_total_difficulty_passed: true,
-            ..Default::default()
-        };
-        let genesis = Genesis {
-            config,
-            nonce: 0,
-            timestamp: 1698688670,
-            gas_limit: 5000,
-            difficulty: U256::ZERO,
-            mix_hash: B256::ZERO,
-            coinbase: Address::ZERO,
-            number: Some(0),
-            ..Default::default()
-        };
-
-        // seed accounts after genesis struct created
-        let address = hex!("6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b").into();
-        let account = GenesisAccount::default().with_balance(U256::from(33));
-        let genesis = genesis.extend_accounts(HashMap::from([(address, account)]));
-
-        let custom_genesis_from_struct = serde_json::to_string(&genesis).unwrap();
-        let chain_from_struct = genesis_value_parser(&custom_genesis_from_struct).unwrap();
-        assert_eq!(chain_from_json.genesis(), chain_from_struct.genesis());
-
-        // chain spec
-        let chain_spec = ChainSpecBuilder::default()
-            .chain(2600.into())
-            .genesis(genesis)
-            .cancun_activated()
-            .build();
-
-        let chain_spec_json = serde_json::to_string(&chain_spec).unwrap();
-        let custom_genesis_from_spec = genesis_value_parser(&chain_spec_json).unwrap();
-
-        assert_eq!(custom_genesis_from_spec.chain(), chain_from_struct.chain());
     }
 
     #[test]

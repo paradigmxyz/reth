@@ -1,3 +1,4 @@
+use alloy_dyn_abi::TypedData;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
 use reth_rpc_types::{
@@ -296,7 +297,7 @@ pub trait EthApi {
 
     /// Signs data via [EIP-712](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-712.md).
     #[method(name = "signTypedData")]
-    async fn sign_typed_data(&self, address: Address, data: serde_json::Value) -> RpcResult<Bytes>;
+    async fn sign_typed_data(&self, address: Address, data: TypedData) -> RpcResult<Bytes>;
 
     /// Returns the account and storage values of the specified account including the Merkle-proof.
     /// This call can be used to verify that the data you are pulling from is not tampered with.

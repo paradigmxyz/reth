@@ -14,19 +14,20 @@ use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
-use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
+use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
-use reth_primitives::{stage::StageCheckpoint, BlockHashOrNumber, PruneModes};
+use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    BlockNumReader, BlockWriter, BundleStateWithReceipts, ChainSpecProvider, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
+    BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
 };
+use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
     stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
-    ExecInput, Stage,
+    ExecInput, Stage, StageCheckpoint,
 };
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
@@ -160,15 +161,15 @@ impl Command {
                 PruneModes::none(),
             );
             executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
-            let BatchBlockExecutionOutput { bundle, receipts, requests: _, first_block } =
-                executor.finalize();
-            BundleStateWithReceipts::new(bundle, receipts, first_block).write_to_storage(
+            executor.finalize().write_to_storage(
                 provider_rw.tx_ref(),
                 None,
                 OriginalValuesKnown::Yes,
             )?;
 
-            let checkpoint = Some(StageCheckpoint::new(block_number - 1));
+            let checkpoint = Some(StageCheckpoint::new(
+                block_number.checked_sub(1).ok_or(eyre::eyre!("GenesisBlockHasNoParent"))?,
+            ));
 
             let mut account_hashing_done = false;
             while !account_hashing_done {

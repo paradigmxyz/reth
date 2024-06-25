@@ -1,7 +1,7 @@
 //! This module provides an abstraction over block import in the form of the `BlockImport` trait.
 
 use crate::message::NewBlockMessage;
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use std::task::{Context, Poll};
 
 /// Abstraction over block import.

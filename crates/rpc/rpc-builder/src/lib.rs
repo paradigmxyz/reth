@@ -156,12 +156,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{
-    auth::AuthRpcModule, cors::CorsDomainError, error::WsHttpSamePortError,
-    metrics::RpcRequestMetrics, RpcModuleSelection::Selection,
+    auth::AuthRpcModule,
+    cors::CorsDomainError,
+    error::WsHttpSamePortError,
+    eth::{EthHandlersBuilder, EthHandlersConfig},
+    metrics::RpcRequestMetrics,
 };
 use error::{ConflictingModules, RpcError, ServerKind};
-use hyper::{header::AUTHORIZATION, HeaderMap};
-pub use jsonrpsee::server::ServerBuilder;
+use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
     server::{AlreadyStoppedError, IdProvider, RpcServiceBuilder, Server, ServerHandle},
@@ -170,52 +172,44 @@ use jsonrpsee::{
 use reth_engine_primitives::EngineTypes;
 use reth_evm::ConfigureEvm;
 use reth_ipc::server::IpcServer;
-pub use reth_ipc::server::{
-    Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
-};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_provider::{
     AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc::{
-    eth::{
-        cache::{cache_new_blocks_task, EthStateCache},
-        fee_history_cache_new_blocks_task,
-        gas_oracle::GasPriceOracle,
-        traits::RawTransactionForwarder,
-        EthBundle, FeeHistoryCache,
-    },
-    AdminApi, DebugApi, EngineEthApi, EthApi, EthFilter, EthPubSub, EthSubscriptionIdProvider,
-    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
+    eth::{cache::EthStateCache, traits::RawTransactionForwarder, EthBundle},
+    AdminApi, DebugApi, EngineEthApi, EthApi, EthSubscriptionIdProvider, NetApi, OtterscanApi,
+    RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
-pub use reth_rpc_server_types::constants;
-use reth_tasks::{
-    pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskSpawner, TokioTaskExecutor,
-};
+use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
-use serde::{Deserialize, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
-pub use tower::layer::util::{Identity, Stack};
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
 
 // re-export for convenience
-pub use crate::eth::{EthConfig, EthHandlers};
+pub use jsonrpsee::server::ServerBuilder;
+pub use reth_ipc::server::{
+    Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
+};
+pub use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
+pub use tower::layer::util::{Identity, Stack};
 
 /// Auth server utilities.
 pub mod auth;
+
+/// RPC server utilities.
+pub mod config;
 
 /// Cors utilities.
 mod cors;
@@ -225,6 +219,7 @@ pub mod error;
 
 /// Eth utils
 mod eth;
+pub use eth::{EthConfig, EthHandlers};
 
 // Rpc server metrics
 mod metrics;
@@ -623,339 +618,6 @@ impl RpcModuleConfigBuilder {
     }
 }
 
-/// Describes the modules that should be installed.
-///
-/// # Example
-///
-/// Create a [`RpcModuleSelection`] from a selection.
-///
-/// ```
-/// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
-/// let config: RpcModuleSelection = vec![RethRpcModule::Eth].into();
-/// ```
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
-pub enum RpcModuleSelection {
-    /// Use _all_ available modules.
-    All,
-    /// The default modules `eth`, `net`, `web3`
-    #[default]
-    Standard,
-    /// Only use the configured modules.
-    Selection(HashSet<RethRpcModule>),
-}
-
-// === impl RpcModuleSelection ===
-
-impl RpcModuleSelection {
-    /// The standard modules to instantiate by default `eth`, `net`, `web3`
-    pub const STANDARD_MODULES: [RethRpcModule; 3] =
-        [RethRpcModule::Eth, RethRpcModule::Net, RethRpcModule::Web3];
-
-    /// Returns a selection of [`RethRpcModule`] with all [`RethRpcModule::all_variants`].
-    pub fn all_modules() -> HashSet<RethRpcModule> {
-        RethRpcModule::modules().into_iter().collect()
-    }
-
-    /// Returns the [`RpcModuleSelection::STANDARD_MODULES`] as a selection.
-    pub fn standard_modules() -> HashSet<RethRpcModule> {
-        HashSet::from(Self::STANDARD_MODULES)
-    }
-
-    /// All modules that are available by default on IPC.
-    ///
-    /// By default all modules are available on IPC.
-    pub fn default_ipc_modules() -> HashSet<RethRpcModule> {
-        Self::all_modules()
-    }
-
-    /// Creates a new _unique_ [`RpcModuleSelection::Selection`] from the given items.
-    ///
-    /// # Note
-    ///
-    /// This will dedupe the selection and remove duplicates while preserving the order.
-    ///
-    /// # Example
-    ///
-    /// Create a selection from the [`RethRpcModule`] string identifiers
-    ///
-    /// ```
-    /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
-    /// let selection = vec!["eth", "admin"];
-    /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
-    /// assert_eq!(config, RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]));
-    /// ```
-    ///
-    /// Create a unique selection from the [`RethRpcModule`] string identifiers
-    ///
-    /// ```
-    /// use reth_rpc_builder::{RethRpcModule, RpcModuleSelection};
-    /// let selection = vec!["eth", "admin", "eth", "admin"];
-    /// let config = RpcModuleSelection::try_from_selection(selection).unwrap();
-    /// assert_eq!(config, RpcModuleSelection::from([RethRpcModule::Eth, RethRpcModule::Admin]));
-    /// ```
-    pub fn try_from_selection<I, T>(selection: I) -> Result<Self, T::Error>
-    where
-        I: IntoIterator<Item = T>,
-        T: TryInto<RethRpcModule>,
-    {
-        selection.into_iter().map(TryInto::try_into).collect()
-    }
-
-    /// Returns the number of modules in the selection
-    pub fn len(&self) -> usize {
-        match self {
-            Self::All => RethRpcModule::variant_count(),
-            Self::Standard => Self::STANDARD_MODULES.len(),
-            Self::Selection(s) => s.len(),
-        }
-    }
-
-    /// Returns true if no selection is configured
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Self::Selection(sel) => sel.is_empty(),
-            _ => false,
-        }
-    }
-
-    /// Returns an iterator over all configured [`RethRpcModule`]
-    pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
-        match self {
-            Self::All => Box::new(RethRpcModule::modules().into_iter()),
-            Self::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
-            Self::Selection(s) => Box::new(s.iter().copied()),
-        }
-    }
-
-    /// Clones the set of configured [`RethRpcModule`].
-    pub fn to_selection(&self) -> HashSet<RethRpcModule> {
-        match self {
-            Self::All => Self::all_modules(),
-            Self::Standard => Self::standard_modules(),
-            Self::Selection(s) => s.clone(),
-        }
-    }
-
-    /// Converts the selection into a [`HashSet`].
-    pub fn into_selection(self) -> HashSet<RethRpcModule> {
-        match self {
-            Self::All => Self::all_modules(),
-            Self::Standard => Self::standard_modules(),
-            Self::Selection(s) => s,
-        }
-    }
-
-    /// Returns true if both selections are identical.
-    fn are_identical(http: Option<&Self>, ws: Option<&Self>) -> bool {
-        match (http, ws) {
-            // Shortcut for common case to avoid iterating later
-            (Some(Self::All), Some(other)) | (Some(other), Some(Self::All)) => {
-                other.len() == RethRpcModule::variant_count()
-            }
-
-            // If either side is disabled, then the other must be empty
-            (Some(some), None) | (None, Some(some)) => some.is_empty(),
-
-            (Some(http), Some(ws)) => http.to_selection() == ws.to_selection(),
-            (None, None) => true,
-        }
-    }
-}
-
-impl From<&HashSet<RethRpcModule>> for RpcModuleSelection {
-    fn from(s: &HashSet<RethRpcModule>) -> Self {
-        Self::from(s.clone())
-    }
-}
-
-impl From<HashSet<RethRpcModule>> for RpcModuleSelection {
-    fn from(s: HashSet<RethRpcModule>) -> Self {
-        Self::Selection(s)
-    }
-}
-
-impl From<&[RethRpcModule]> for RpcModuleSelection {
-    fn from(s: &[RethRpcModule]) -> Self {
-        Self::Selection(s.iter().copied().collect())
-    }
-}
-
-impl From<Vec<RethRpcModule>> for RpcModuleSelection {
-    fn from(s: Vec<RethRpcModule>) -> Self {
-        Self::Selection(s.into_iter().collect())
-    }
-}
-
-impl<const N: usize> From<[RethRpcModule; N]> for RpcModuleSelection {
-    fn from(s: [RethRpcModule; N]) -> Self {
-        Self::Selection(s.iter().copied().collect())
-    }
-}
-
-impl<'a> FromIterator<&'a RethRpcModule> for RpcModuleSelection {
-    fn from_iter<I>(iter: I) -> Self
-    where
-        I: IntoIterator<Item = &'a RethRpcModule>,
-    {
-        iter.into_iter().copied().collect()
-    }
-}
-
-impl FromIterator<RethRpcModule> for RpcModuleSelection {
-    fn from_iter<I>(iter: I) -> Self
-    where
-        I: IntoIterator<Item = RethRpcModule>,
-    {
-        Self::Selection(iter.into_iter().collect())
-    }
-}
-
-impl FromStr for RpcModuleSelection {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.is_empty() {
-            return Ok(Selection(Default::default()))
-        }
-        let mut modules = s.split(',').map(str::trim).peekable();
-        let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;
-        match first {
-            "all" | "All" => Ok(Self::All),
-            "none" | "None" => Ok(Selection(Default::default())),
-            _ => Self::try_from_selection(modules),
-        }
-    }
-}
-
-impl fmt::Display for RpcModuleSelection {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "[{}]",
-            self.iter_selection().map(|s| s.to_string()).collect::<Vec<_>>().join(", ")
-        )
-    }
-}
-
-/// Represents RPC modules that are supported by reth
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Eq,
-    PartialEq,
-    Hash,
-    AsRefStr,
-    IntoStaticStr,
-    VariantNames,
-    VariantArray,
-    EnumIter,
-    Deserialize,
-)]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "kebab-case")]
-pub enum RethRpcModule {
-    /// `admin_` module
-    Admin,
-    /// `debug_` module
-    Debug,
-    /// `eth_` module
-    Eth,
-    /// `net_` module
-    Net,
-    /// `trace_` module
-    Trace,
-    /// `txpool_` module
-    Txpool,
-    /// `web3_` module
-    Web3,
-    /// `rpc_` module
-    Rpc,
-    /// `reth_` module
-    Reth,
-    /// `ots_` module
-    Ots,
-    /// For single non-standard `eth_` namespace call `eth_callBundle`
-    ///
-    /// This is separate from [`RethRpcModule::Eth`] because it is a non standardized call that
-    /// should be opt-in.
-    EthCallBundle,
-}
-
-// === impl RethRpcModule ===
-
-impl RethRpcModule {
-    /// Returns the number of variants in the enum
-    pub const fn variant_count() -> usize {
-        <Self as VariantArray>::VARIANTS.len()
-    }
-
-    /// Returns all variant names of the enum
-    pub const fn all_variant_names() -> &'static [&'static str] {
-        <Self as VariantNames>::VARIANTS
-    }
-
-    /// Returns all variants of the enum
-    pub const fn all_variants() -> &'static [Self] {
-        <Self as VariantArray>::VARIANTS
-    }
-
-    /// Returns all variants of the enum
-    pub fn modules() -> impl IntoIterator<Item = Self> {
-        use strum::IntoEnumIterator;
-        Self::iter()
-    }
-
-    /// Returns the string representation of the module.
-    #[inline]
-    pub fn as_str(&self) -> &'static str {
-        self.into()
-    }
-}
-
-impl FromStr for RethRpcModule {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "admin" => Self::Admin,
-            "debug" => Self::Debug,
-            "eth" => Self::Eth,
-            "net" => Self::Net,
-            "trace" => Self::Trace,
-            "txpool" => Self::Txpool,
-            "web3" => Self::Web3,
-            "rpc" => Self::Rpc,
-            "reth" => Self::Reth,
-            "ots" => Self::Ots,
-            "eth-call-bundle" | "eth_callBundle" => Self::EthCallBundle,
-            _ => return Err(ParseError::VariantNotFound),
-        })
-    }
-}
-
-impl TryFrom<&str> for RethRpcModule {
-    type Error = ParseError;
-    fn try_from(s: &str) -> Result<Self, <Self as TryFrom<&str>>::Error> {
-        FromStr::from_str(s)
-    }
-}
-
-impl fmt::Display for RethRpcModule {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.pad(self.as_ref())
-    }
-}
-
-impl Serialize for RethRpcModule {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        s.serialize_str(self.as_ref())
-    }
-}
-
 /// A Helper type the holds instances of the configured modules.
 #[derive(Debug, Clone)]
 pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EvmConfig> {
@@ -1016,6 +678,10 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
         &mut self,
         forwarder: Arc<dyn RawTransactionForwarder>,
     ) {
+        if let Some(eth) = self.eth.as_ref() {
+            // in case the eth api has been created before the forwarder was set: <https://github.com/paradigmxyz/reth/issues/8661>
+            eth.api.set_eth_raw_transaction_forwarder(forwarder.clone());
+        }
         self.eth_raw_transaction_forwarder = Some(forwarder);
     }
 
@@ -1329,7 +995,7 @@ where
     ///
     /// This will spawn the required service tasks for [`EthApi`] for:
     ///   - [`EthStateCache`]
-    ///   - [`FeeHistoryCache`]
+    ///   - [`reth_rpc::eth::FeeHistoryCache`]
     fn with_eth<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&EthHandlers<Provider, Pool, Network, Events, EvmConfig>) -> R,
@@ -1341,71 +1007,19 @@ where
     }
 
     fn init_eth(&self) -> EthHandlers<Provider, Pool, Network, Events, EvmConfig> {
-        let cache = EthStateCache::spawn_with(
-            self.provider.clone(),
-            self.config.eth.cache.clone(),
-            self.executor.clone(),
-            self.evm_config.clone(),
-        );
-        let gas_oracle = GasPriceOracle::new(
-            self.provider.clone(),
-            self.config.eth.gas_oracle.clone(),
-            cache.clone(),
-        );
-        let new_canonical_blocks = self.events.canonical_state_stream();
-        let c = cache.clone();
-
-        self.executor.spawn_critical(
-            "cache canonical blocks task",
-            Box::pin(async move {
-                cache_new_blocks_task(c, new_canonical_blocks).await;
-            }),
-        );
-
-        let fee_history_cache =
-            FeeHistoryCache::new(cache.clone(), self.config.eth.fee_history_cache.clone());
-        let new_canonical_blocks = self.events.canonical_state_stream();
-        let fhc = fee_history_cache.clone();
-        let provider_clone = self.provider.clone();
-        self.executor.spawn_critical(
-            "cache canonical blocks for fee history task",
-            Box::pin(async move {
-                fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider_clone).await;
-            }),
-        );
-
-        let executor = Box::new(self.executor.clone());
-        let blocking_task_pool = BlockingTaskPool::build().expect("failed to build tracing pool");
-        let api = EthApi::with_spawner(
-            self.provider.clone(),
-            self.pool.clone(),
-            self.network.clone(),
-            cache.clone(),
-            gas_oracle,
-            self.config.eth.rpc_gas_cap,
-            executor.clone(),
-            blocking_task_pool.clone(),
-            fee_history_cache,
-            self.evm_config.clone(),
-            self.eth_raw_transaction_forwarder.clone(),
-        );
-        let filter = EthFilter::new(
-            self.provider.clone(),
-            self.pool.clone(),
-            cache.clone(),
-            self.config.eth.filter_config(),
-            executor.clone(),
-        );
-
-        let pubsub = EthPubSub::with_spawner(
-            self.provider.clone(),
-            self.pool.clone(),
-            self.events.clone(),
-            self.network.clone(),
-            executor,
-        );
-
-        EthHandlers { api, cache, filter, pubsub, blocking_task_pool }
+        EthHandlersBuilder::new(
+            EthHandlersConfig {
+                provider: self.provider.clone(),
+                pool: self.pool.clone(),
+                network: self.network.clone(),
+                executor: self.executor.clone(),
+                events: self.events.clone(),
+                evm_config: self.evm_config.clone(),
+                eth_raw_transaction_forwarder: self.eth_raw_transaction_forwarder.clone(),
+            },
+            self.config.clone(),
+        )
+        .build()
     }
 
     /// Returns the configured [`EthHandlers`] or creates it if it does not exist yet
@@ -1634,7 +1248,7 @@ impl RpcServerConfig {
 
     /// Returns true if any server is configured.
     ///
-    /// If no server is configured, no server will be be launched on [`RpcServerConfig::start`].
+    /// If no server is configured, no server will be launched on [`RpcServerConfig::start`].
     pub const fn has_server(&self) -> bool {
         self.http_server_config.is_some() ||
             self.ws_server_config.is_some() ||
@@ -2207,7 +1821,7 @@ pub struct RpcServerHandle {
     http: Option<ServerHandle>,
     ws: Option<ServerHandle>,
     ipc_endpoint: Option<String>,
-    ipc: Option<reth_ipc::server::ServerHandle>,
+    ipc: Option<jsonrpsee::server::ServerHandle>,
     jwt_secret: Option<JwtSecret>,
 }
 
@@ -2286,6 +1900,7 @@ impl RpcServerHandle {
 
         client.expect("failed to create http client").into()
     }
+
     /// Returns a ws client connected to the server.
     pub async fn ws_client(&self) -> Option<jsonrpsee::ws_client::WsClient> {
         let url = self.ws_url()?;
@@ -2339,7 +1954,7 @@ mod tests {
     #[test]
     fn parse_rpc_module_selection_none() {
         let selection = "none".parse::<RpcModuleSelection>().unwrap();
-        assert_eq!(selection, Selection(Default::default()));
+        assert_eq!(selection, RpcModuleSelection::Selection(Default::default()));
     }
 
     #[test]

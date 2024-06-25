@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true

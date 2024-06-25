@@ -11,16 +11,16 @@ use jsonrpsee::{
     rpc_params,
     types::error::ErrorCode,
 };
+use reth_chainspec::net::NodeRecord;
 use reth_primitives::{
-    hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, NodeRecord, TxHash, B256, B64,
-    U256, U64,
+    hex_literal::hex, Address, BlockId, BlockNumberOrTag, Bytes, TxHash, B256, B64, U256, U64,
 };
 use reth_rpc_api::{
     clients::{AdminApiClient, EthApiClient},
     DebugApiClient, EthFilterApiClient, NetApiClient, OtterscanClient, TraceApiClient,
     Web3ApiClient,
 };
-use reth_rpc_builder::RethRpcModule;
+use reth_rpc_server_types::RethRpcModule;
 use reth_rpc_types::{
     trace::filter::TraceFilter, FeeHistory, Filter, Index, Log, PendingTransactionFilterKind,
     RichBlock, SyncStatus, Transaction, TransactionReceipt, TransactionRequest,
@@ -159,6 +159,17 @@ where
     let transaction_request = TransactionRequest::default();
     let bytes = Bytes::default();
     let tx = Bytes::from(hex!("02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3"));
+    let typed_data = serde_json::from_str(
+        r#"{
+        "types": {
+            "EIP712Domain": []
+        },
+        "primaryType": "EIP712Domain",
+        "domain": {},
+        "message": {}
+    }"#,
+    )
+    .unwrap();
 
     // Implemented
     EthApiClient::protocol_version(client).await.unwrap();
@@ -180,9 +191,7 @@ where
     EthApiClient::uncle_by_block_hash_and_index(client, hash, index).await.unwrap();
     EthApiClient::uncle_by_block_number_and_index(client, block_number, index).await.unwrap();
     EthApiClient::sign(client, address, bytes.clone()).await.unwrap_err();
-    EthApiClient::sign_typed_data(client, address, jsonrpsee::core::JsonValue::Null)
-        .await
-        .unwrap_err();
+    EthApiClient::sign_typed_data(client, address, typed_data).await.unwrap_err();
     EthApiClient::transaction_by_hash(client, tx_hash).await.unwrap();
     EthApiClient::transaction_by_block_hash_and_index(client, hash, index).await.unwrap();
     EthApiClient::transaction_by_block_number_and_index(client, block_number, index).await.unwrap();

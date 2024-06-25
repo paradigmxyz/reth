@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-db-api.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
 reth-libmdbx = { workspace = true, optional = true, features = [
@@ -22,7 +23,10 @@ reth-libmdbx = { workspace = true, optional = true, features = [
     "read-tx-timeouts",
 ] }
 reth-nippy-jar.workspace = true
+reth-prune-types.workspace = true
+reth-stages-types.workspace = true
 reth-tracing.workspace = true
+reth-trie-common.workspace = true
 
 # codecs
 serde = { workspace = true, default-features = false }
@@ -40,7 +44,7 @@ derive_more.workspace = true
 eyre.workspace = true
 paste.workspace = true
 rustc-hash.workspace = true
-sysinfo = "0.30"
+sysinfo = { version = "0.30", default-features = false }
 
 # arbitrary utils
 strum = { workspace = true, features = ["derive"] }
@@ -60,7 +64,7 @@ pprof = { workspace = true, features = [
     "criterion",
 ] }
 criterion.workspace = true
-iai-callgrind = "0.10.2"
+iai-callgrind.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
@@ -76,6 +80,7 @@ mdbx = ["reth-libmdbx"]
 bench = []
 arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
 optimism = []
+disable-lock = []
 
 [[bench]]
 name = "hash_keys"

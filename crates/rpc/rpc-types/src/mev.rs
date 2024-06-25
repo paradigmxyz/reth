@@ -34,12 +34,12 @@ pub struct SendBundleRequest {
 #[serde(rename_all = "camelCase")]
 pub struct Inclusion {
     /// The first block the bundle is valid for.
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub block: u64,
     /// The last block the bundle is valid for.
     #[serde(
         default,
-        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        with = "alloy_rpc_types::serde_helpers::quantity::opt",
         skip_serializing_if = "Option::is_none"
     )]
     pub max_block: Option<u64>,
@@ -104,10 +104,10 @@ pub struct Validity {
 #[serde(rename_all = "camelCase")]
 pub struct Refund {
     /// The index of the transaction in the bundle.
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub body_idx: u64,
     /// The minimum percent of the bundle's earnings to redistribute.
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub percent: u64,
 }
 
@@ -119,7 +119,7 @@ pub struct RefundConfig {
     /// The address to refund.
     pub address: Address,
     /// The minimum percent of the bundle's earnings to redistribute.
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub percent: u64,
 }
 
@@ -322,7 +322,7 @@ pub struct SimBundleOverrides {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_block: Option<BlockId>,
     /// Block number used for simulation, defaults to parentBlock.number + 1
-    #[serde(default, with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint")]
+    #[serde(default, with = "alloy_rpc_types::serde_helpers::quantity::opt")]
     pub block_number: Option<u64>,
     /// Coinbase used for simulation, defaults to parentBlock.coinbase
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -330,28 +330,28 @@ pub struct SimBundleOverrides {
     /// Timestamp used for simulation, defaults to parentBlock.timestamp + 12
     #[serde(
         default,
-        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        with = "alloy_rpc_types::serde_helpers::quantity::opt",
         skip_serializing_if = "Option::is_none"
     )]
     pub timestamp: Option<u64>,
     /// Gas limit used for simulation, defaults to parentBlock.gasLimit
     #[serde(
         default,
-        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        with = "alloy_rpc_types::serde_helpers::quantity::opt",
         skip_serializing_if = "Option::is_none"
     )]
     pub gas_limit: Option<u64>,
     /// Base fee used for simulation, defaults to parentBlock.baseFeePerGas
     #[serde(
         default,
-        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        with = "alloy_rpc_types::serde_helpers::quantity::opt",
         skip_serializing_if = "Option::is_none"
     )]
     pub base_fee: Option<u64>,
     /// Timeout in seconds, defaults to 5
     #[serde(
         default,
-        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        with = "alloy_rpc_types::serde_helpers::quantity::opt",
         skip_serializing_if = "Option::is_none"
     )]
     pub timeout: Option<u64>,
@@ -367,19 +367,19 @@ pub struct SimBundleResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// The block number of the simulated block.
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub state_block: u64,
     /// The gas price of the simulated block.
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub mev_gas_price: u64,
     /// The profit of the simulated block.
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub profit: u64,
     /// The refundable value of the simulated block.
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub refundable_value: u64,
     /// The gas used by the simulated block.
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub gas_used: u64,
     /// Logs returned by `mev_simBundle`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -400,7 +400,7 @@ pub struct SimBundleLogs {
 
 impl SendBundleRequest {
     /// Create a new bundle request.
-    pub fn new(
+    pub const fn new(
         block_num: u64,
         max_block: Option<u64>,
         protocol_version: ProtocolVersion,
@@ -434,7 +434,7 @@ pub struct PrivateTransactionRequest {
     /// be included.
     #[serde(
         default,
-        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        with = "alloy_rpc_types::serde_helpers::quantity::opt",
         skip_serializing_if = "Option::is_none"
     )]
     pub max_block_number: Option<u64>,
@@ -625,19 +625,19 @@ pub struct EthSendBundle {
     /// A list of hex-encoded signed transactions
     pub txs: Vec<Bytes>,
     /// hex-encoded block number for which this bundle is valid
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub block_number: u64,
     /// unix timestamp when this bundle becomes active
     #[serde(
         default,
-        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        with = "alloy_rpc_types::serde_helpers::quantity::opt",
         skip_serializing_if = "Option::is_none"
     )]
     pub min_timestamp: Option<u64>,
     /// unix timestamp how long this bundle stays valid
     #[serde(
         default,
-        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        with = "alloy_rpc_types::serde_helpers::quantity::opt",
         skip_serializing_if = "Option::is_none"
     )]
     pub max_timestamp: Option<u64>,
@@ -666,14 +666,14 @@ pub struct EthCallBundle {
     /// A list of hex-encoded signed transactions
     pub txs: Vec<Bytes>,
     /// hex encoded block number for which this bundle is valid on
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub block_number: u64,
     /// Either a hex encoded number or a block tag for which state to base this simulation on
     pub state_block_number: BlockNumberOrTag,
     /// the timestamp to use for this bundle simulation, in seconds since the unix epoch
     #[serde(
         default,
-        with = "alloy_rpc_types::serde_helpers::num::u64_opt_via_ruint",
+        with = "alloy_rpc_types::serde_helpers::quantity::opt",
         skip_serializing_if = "Option::is_none"
     )]
     pub timestamp: Option<u64>,
@@ -700,10 +700,10 @@ pub struct EthCallBundleResponse {
     /// Results of individual transactions within the bundle
     pub results: Vec<EthCallBundleTransactionResult>,
     /// The block number used as a base for this simulation
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub state_block_number: u64,
     /// The total gas used by all transactions in the bundle
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub total_gas_used: u64,
 }
 
@@ -726,7 +726,7 @@ pub struct EthCallBundleTransactionResult {
     #[serde(with = "u256_numeric_string")]
     pub gas_price: U256,
     /// The amount of gas used by the transaction
-    #[serde(with = "alloy_rpc_types::serde_helpers::num::u64_via_ruint")]
+    #[serde(with = "alloy_rpc_types::serde_helpers::quantity")]
     pub gas_used: u64,
     /// The address to which the transaction is sent (optional)
     pub to_address: Option<Address>,

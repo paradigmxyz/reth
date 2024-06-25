@@ -1,8 +1,9 @@
 //! Optimism-specific implementation and utilities for the executor
 
 use crate::OptimismBlockExecutionError;
+use reth_chainspec::{ChainSpec, Hardfork};
 use reth_execution_errors::BlockExecutionError;
-use reth_primitives::{address, b256, hex, Address, Block, Bytes, ChainSpec, Hardfork, B256, U256};
+use reth_primitives::{address, b256, hex, Address, Block, Bytes, B256, U256};
 use revm::{
     primitives::{Bytecode, HashMap, SpecId},
     DatabaseCommit, L1BlockInfo,
