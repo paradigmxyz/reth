@@ -1,4 +1,5 @@
 use core::any::Any;
+use dyn_clone::DynClone;
 
 #[cfg(not(feature = "std"))]
 use alloc::{format, string::String};
@@ -10,29 +11,12 @@ pub use ethereum::EthereumHardfork;
 pub(crate) mod optimism;
 
 /// Generic hardfork trait.
-pub trait Hardfork: Any + CloneHardfork + Send + Sync + 'static {
+pub trait Hardfork: Any + DynClone + Send + Sync + 'static {
     /// Fork name.
     fn name(&self) -> &'static str;
 }
 
-impl Clone for Box<dyn Hardfork> {
-    fn clone(&self) -> Self {
-        (**self).clone_box()
-    }
-}
-
-pub trait CloneHardfork {
-    fn clone_box(&self) -> Box<dyn Hardfork>;
-}
-
-impl<T> CloneHardfork for T
-where
-    T: 'static + Hardfork + Clone,
-{
-    fn clone_box(&self) -> Box<dyn Hardfork> {
-        Box::new(self.clone())
-    }
-}
+dyn_clone::clone_trait_object!(Hardfork);
 
 impl Hardfork for Box<dyn Hardfork> {
     /// Name of an hardfork.
