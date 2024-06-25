@@ -67,6 +67,10 @@ Database:
 
           [possible values: true, false]
 
+Pruning:
+      --full
+          Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored. This flag takes priority over pruning configuration in reth.toml
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
