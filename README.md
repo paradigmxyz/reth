@@ -13,8 +13,6 @@
 | [Developer Docs](./docs)
 | [Crate Docs](https://reth.rs/docs)
 
-_The project is still work in progress, see the [disclaimer below](#status)._
-
 [gh-ci]: https://github.com/paradigmxyz/reth/actions/workflows/unit.yml
 [gh-deny]: https://github.com/paradigmxyz/reth/actions/workflows/deny.yml
 [tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fparadigm%5Freth
