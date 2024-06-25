@@ -406,7 +406,9 @@ where
                 &block,
                 PostExecutionInput::new(&output.receipts, &output.requests),
             )
-            .map_err(|error| InsertBlockError::new(block.block.seal(block_hash), error.into()))?;
+            .map_err(|error| {
+                InsertBlockError::new(block.block.clone().seal(block_hash), error.into())
+            })?;
 
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
