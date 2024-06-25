@@ -41,9 +41,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - run: cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
         env:
           RUSTFLAGS: -D warnings
@@ -73,7 +70,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - uses: arduino/setup-protoc@v3
       - run: cargo hack check
 
   msrv:
@@ -109,7 +105,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - uses: arduino/setup-protoc@v3
       - run: cargo docs --document-private-items
         env:
           # Keep in sync with ./book.yml:jobs.build
