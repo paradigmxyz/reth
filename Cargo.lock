@@ -7637,6 +7637,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-cli"
+version = "1.0.0"
+
+[[package]]
 name = "reth-optimism-consensus"
 version = "1.0.0"
 dependencies = [
