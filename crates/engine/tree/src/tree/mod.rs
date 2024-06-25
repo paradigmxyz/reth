@@ -21,7 +21,7 @@ use reth_rpc_types::{
     },
     ExecutionPayload,
 };
-use reth_trie::updates::TrieUpdates;
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
@@ -38,6 +38,7 @@ pub struct ExecutedBlock {
     block: Arc<SealedBlock>,
     senders: Arc<Vec<Address>>,
     execution_output: Arc<ExecutionOutcome>,
+    hashed_state: Arc<HashedPostState>,
     trie: Arc<TrieUpdates>,
 }
 
@@ -405,7 +406,11 @@ where
                 &block,
                 PostExecutionInput::new(&output.receipts, &output.requests),
             )
-            .unwrap();
+            .map_err(|error| {
+                InsertBlockError::new(block.block.clone().seal(block_hash), error.into())
+            })?;
+
+        let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
         // TODO: compute and validate state root
         let trie_output = TrieUpdates::default();
@@ -419,6 +424,7 @@ where
                 block_number,
                 vec![Requests::from(output.requests)],
             )),
+            hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
         };
         self.state.tree_state.insert_executed(executed);
