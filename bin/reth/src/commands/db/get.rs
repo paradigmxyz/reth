@@ -8,8 +8,9 @@ use reth_db_api::{
     database::Database,
     table::{Decompress, DupSort, Table},
 };
-use reth_primitives::{BlockHash, Header, StaticFileSegment};
+use reth_primitives::{BlockHash, Header};
 use reth_provider::StaticFileProviderFactory;
+use reth_static_file_types::StaticFileSegment;
 use tracing::error;
 
 /// The arguments for the `reth db get` command
