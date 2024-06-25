@@ -2,6 +2,7 @@
 
 use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
+use reth_node_core::args::PruningArgs;
 use reth_provider::StageCheckpointReader;
 use reth_prune::PrunerBuilder;
 use reth_stages::StageId;
@@ -12,13 +13,17 @@ use reth_static_file::{HighestStaticFiles, StaticFileProducer};
 pub struct PruneCommand {
     #[command(flatten)]
     env: EnvironmentArgs,
+
+    #[command(flatten)]
+    pruning: PruningArgs,
 }
 
 impl PruneCommand {
     /// Execute the `prune` command
     pub async fn execute(self) -> eyre::Result<()> {
         let Environment { config, provider_factory, .. } = self.env.init(AccessRights::RW)?;
-        let prune_config = config.prune.unwrap_or_default();
+        let prune_config =
+            config.prune.or_else(|| self.pruning.prune_config(&self.env.chain)).unwrap_or_default();
 
         let static_file_producer =
             StaticFileProducer::new(provider_factory.clone(), prune_config.segments.clone());
