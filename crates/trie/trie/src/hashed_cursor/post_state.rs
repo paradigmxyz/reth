@@ -204,7 +204,7 @@ impl<'a, C> HashedPostStateStorageCursor<'a, C> {
 
     /// Returns `true` if the storage for the given
     /// The database is not checked since it already has no wiped storage entries.
-    fn is_db_storage_wiped(&self) -> bool {
+    const fn is_db_storage_wiped(&self) -> bool {
         match self.post_state_storage {
             Some(storage) => storage.wiped,
             None => false,
