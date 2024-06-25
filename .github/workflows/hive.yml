@@ -68,9 +68,9 @@ jobs:
       matrix:
         # TODO: enable etherem/sync once resolved:
         # https://github.com/paradigmxyz/reth/issues/8579
-        # TODO: enable ethereum/rpc once resolved:
+        # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
-        # sim: [ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
+        # sim: [smoke/genesis, smoke/network, ethereum/sync]
         sim: [smoke/genesis, smoke/network]
         include:
           - sim: devp2p
