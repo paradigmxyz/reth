@@ -8189,7 +8189,6 @@ dependencies = [
  "dyn-clone",
  "futures-util",
  "metrics",
- "once_cell",
  "pin-project",
  "rayon",
  "reth-metrics",
