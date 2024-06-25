@@ -42,6 +42,7 @@ pub struct Command {
     command: Subcommands,
 
     /// If this is enabled, then _only_ the offline stages (headers, bodies) will be unwound.
+    #[arg(long)]
     offline: bool,
 }
 
