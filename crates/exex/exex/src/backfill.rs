@@ -17,6 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Factory for creating new backfill jobs.
 #[derive(Debug, Clone)]
 pub struct BackfillJobFactory<Node: FullNodeComponents> {
     components: Node,
@@ -25,10 +26,16 @@ pub struct BackfillJobFactory<Node: FullNodeComponents> {
 }
 
 impl<Node: FullNodeComponents> BackfillJobFactory<Node> {
-    pub fn new(components: Node, config: Config, thresholds: ExecutionStageThresholds) -> Self {
+    /// Creates a new backfill job factory.
+    pub const fn new(
+        components: Node,
+        config: Config,
+        thresholds: ExecutionStageThresholds,
+    ) -> Self {
         Self { components, config, thresholds }
     }
 
+    /// Creates a new backfill job for the given range.
     pub fn backfill(&self, range: RangeInclusive<BlockNumber>) -> BackfillJob<Node> {
         BackfillJob {
             components: self.components.clone(),
@@ -39,6 +46,9 @@ impl<Node: FullNodeComponents> BackfillJobFactory<Node> {
     }
 }
 
+/// Backfill job started for a specific range.
+///
+/// It implements [`Iterator`] that executes blocks in batches and yields [`ExExNotification`]s.
 #[derive(Debug)]
 pub struct BackfillJob<Node: FullNodeComponents> {
     components: Node,
