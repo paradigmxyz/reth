@@ -88,8 +88,10 @@ impl ChainHardforks {
         match self.map.entry(fork.name()) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
                 *entry.get_mut() = condition;
-                for (_, inner_condition) in &mut self.forks {
-                    *inner_condition = condition;
+                if let Some((_, inner)) =
+                    self.forks.iter_mut().find(|(inner, _)| inner.name() == fork.name())
+                {
+                    *inner = condition;
                 }
             }
             std::collections::hash_map::Entry::Vacant(entry) => {
