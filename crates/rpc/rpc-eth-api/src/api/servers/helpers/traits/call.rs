@@ -270,6 +270,11 @@ pub trait Call: LoadState + SpawnBlocking {
     /// Data access in default trait method implementations.
     fn call_gas_limit(&self) -> u64;
 
+    /// Returns a handle for reading evm config.
+    ///
+    /// Data access in default (L1) trait method implementations.
+    fn evm_config(&self) -> &impl ConfigureEvm;
+
     /// Executes the closure with the state that corresponds to the given [`BlockId`].
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
@@ -278,11 +283,6 @@ pub trait Call: LoadState + SpawnBlocking {
         let state = self.state_at_block_id(at)?;
         f(StateProviderTraitObjWrapper(&state))
     }
-
-    /// Returns a handle for reading evm config.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn evm_config(&self) -> &impl ConfigureEvm;
 
     /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
     /// changes.
