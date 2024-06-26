@@ -277,7 +277,7 @@ mod tests {
         bytes,
         constants::ETH_TO_WEI,
         keccak256, public_key_to_address,
-        revm_primitives::{AccountInfo, ExecutionResult, Output, TransactTo, TxEnv},
+        revm_primitives::{AccountInfo, ExecutionResult, Output, TxEnv},
         BlockNumber, Receipt, SealedBlockWithSenders, Transaction, TxEip2930, TxKind, U256,
     };
     use reth_revm::Evm;
@@ -383,7 +383,7 @@ mod tests {
             .with_tx_env(TxEnv {
                 caller: sender_address,
                 gas_limit: 50_000_000,
-                transact_to: TransactTo::Call(weth_address),
+                transact_to: TxKind::Call(weth_address),
                 data: WETH::balanceOfCall::new((sender_address,)).abi_encode().into(),
                 ..Default::default()
             })
@@ -408,7 +408,7 @@ mod tests {
             .with_tx_env(TxEnv {
                 caller: sender_address,
                 gas_limit: 50_000_000,
-                transact_to: TransactTo::Call(weth_address),
+                transact_to: TxKind::Call(weth_address),
                 data: WETH::balanceOfCall::new((sender_address,)).abi_encode().into(),
                 ..Default::default()
             })

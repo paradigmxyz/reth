@@ -1,11 +1,11 @@
 use crate::result::ToRpcResult;
+use alloy_genesis::ChainConfig;
 use alloy_primitives::B256;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
 use reth_network_api::{NetworkInfo, PeerKind, Peers};
 use reth_network_peers::{AnyNode, NodeRecord};
-use reth_primitives::ChainConfig;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_types::{
     admin::{EthProtocolInfo, NodeInfo, Ports, ProtocolInfo},

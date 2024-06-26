@@ -70,6 +70,13 @@ impl ForkCondition {
         matches!(self, Self::Timestamp(time) if timestamp >= *time)
     }
 
+    /// Checks if the given block is the first block that satisfies the fork condition.
+    ///
+    /// This will return false for any condition that is not timestamp based.
+    pub const fn transitions_at_timestamp(&self, timestamp: u64, parent_timestamp: u64) -> bool {
+        matches!(self, Self::Timestamp(time) if timestamp >= *time && parent_timestamp < *time)
+    }
+
     /// Checks whether the fork condition is satisfied at the given head block.
     ///
     /// This will return true if:

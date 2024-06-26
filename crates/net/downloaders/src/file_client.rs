@@ -10,8 +10,8 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BytesMut, Header, HeadersDirection,
-    SealedHeader, B256,
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, SealedHeader,
+    B256,
 };
 use std::{collections::HashMap, io, path::Path};
 use thiserror::Error;
@@ -419,26 +419,22 @@ impl ChunkedFileReader {
         let new_read_bytes_target_len = chunk_target_len - old_bytes_len;
 
         // read new bytes from file
-        let mut reader = BytesMut::zeroed(new_read_bytes_target_len as usize);
+        let prev_read_bytes_len = self.chunk.len();
+        self.chunk.extend(std::iter::repeat(0).take(new_read_bytes_target_len as usize));
+        let reader = &mut self.chunk[prev_read_bytes_len..];
 
         // actual bytes that have been read
-        let new_read_bytes_len = self.file.read_exact(&mut reader).await? as u64;
+        let new_read_bytes_len = self.file.read_exact(reader).await? as u64;
+        let next_chunk_byte_len = self.chunk.len();
 
         // update remaining file length
         self.file_byte_len -= new_read_bytes_len;
-
-        let prev_read_bytes_len = self.chunk.len();
-
-        // read new bytes from file into chunk
-        self.chunk.extend_from_slice(&reader[..]);
-        let next_chunk_byte_len = self.chunk.len();
 
         debug!(target: "downloaders::file",
             max_chunk_byte_len=self.chunk_byte_len,
             prev_read_bytes_len,
             new_read_bytes_target_len,
             new_read_bytes_len,
-            reader_capacity=reader.capacity(),
             next_chunk_byte_len,
             remaining_file_byte_len=self.file_byte_len,
             "new bytes were read from file"

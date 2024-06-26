@@ -281,14 +281,16 @@ impl BlobTransaction {
 /// Generates a [`BlobTransactionSidecar`] structure containing blobs, commitments, and proofs.
 #[cfg(all(feature = "c-kzg", any(test, feature = "arbitrary")))]
 pub fn generate_blob_sidecar(blobs: Vec<c_kzg::Blob>) -> BlobTransactionSidecar {
-    use crate::constants::eip4844::MAINNET_KZG_TRUSTED_SETUP;
+    use alloy_eips::eip4844::env_settings::EnvKzgSettings;
     use c_kzg::{KzgCommitment, KzgProof};
 
-    let kzg_settings = MAINNET_KZG_TRUSTED_SETUP.clone();
+    let kzg_settings = EnvKzgSettings::Default;
 
     let commitments: Vec<c_kzg::Bytes48> = blobs
         .iter()
-        .map(|blob| KzgCommitment::blob_to_kzg_commitment(&blob.clone(), &kzg_settings).unwrap())
+        .map(|blob| {
+            KzgCommitment::blob_to_kzg_commitment(&blob.clone(), kzg_settings.get()).unwrap()
+        })
         .map(|commitment| commitment.to_bytes())
         .collect();
 
@@ -296,7 +298,7 @@ pub fn generate_blob_sidecar(blobs: Vec<c_kzg::Blob>) -> BlobTransactionSidecar 
         .iter()
         .zip(commitments.iter())
         .map(|(blob, commitment)| {
-            KzgProof::compute_blob_kzg_proof(blob, commitment, &kzg_settings).unwrap()
+            KzgProof::compute_blob_kzg_proof(blob, commitment, kzg_settings.get()).unwrap()
         })
         .map(|proof| proof.to_bytes())
         .collect();

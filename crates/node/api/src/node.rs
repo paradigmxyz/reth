@@ -26,6 +26,32 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     type Engine: EngineTypes;
 }
 
+/// A [`NodeTypes`] type builder
+#[derive(Default, Debug)]
+pub struct AnyNodeTypes<P = (), E = ()>(PhantomData<P>, PhantomData<E>);
+
+impl<P, E> AnyNodeTypes<P, E> {
+    /// Sets the `Primitives` associated type.
+    pub const fn primitives<T>(self) -> AnyNodeTypes<T, E> {
+        AnyNodeTypes::<T, E>(PhantomData::<T>, PhantomData::<E>)
+    }
+
+    /// Sets the `Engine` associated type.
+    pub const fn engine<T>(self) -> AnyNodeTypes<P, T> {
+        AnyNodeTypes::<P, T>(PhantomData::<P>, PhantomData::<T>)
+    }
+}
+
+impl<P, E> NodeTypes for AnyNodeTypes<P, E>
+where
+    P: NodePrimitives + Send + Sync + Unpin + 'static,
+    E: EngineTypes + Send + Sync + Unpin + 'static,
+{
+    type Primitives = P;
+
+    type Engine = E;
+}
+
 /// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful components to the
 /// node.
 ///
@@ -88,7 +114,7 @@ where
 }
 
 /// Encapsulates all types and components of the node.
-pub trait FullNodeComponents: FullNodeTypes + 'static {
+pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// The transaction pool of the node.
     type Pool: TransactionPool + Unpin;
 

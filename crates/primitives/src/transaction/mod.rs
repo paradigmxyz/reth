@@ -860,10 +860,11 @@ impl Compact for TransactionSignedNoHash {
         let tx_bits = if zstd_bit {
             TRANSACTION_COMPRESSOR.with(|compressor| {
                 let mut compressor = compressor.borrow_mut();
-                let mut tmp = bytes::BytesMut::with_capacity(200);
+                let mut tmp = Vec::with_capacity(256);
                 let tx_bits = self.transaction.to_compact(&mut tmp);
 
                 buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+
                 tx_bits as u8
             })
         } else {
@@ -1464,46 +1465,17 @@ impl Decodable for TransactionSigned {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for TransactionSigned {
-    type Parameters = ();
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::{any, Strategy};
-
-        any::<(Transaction, Signature)>()
-            .prop_map(move |(mut transaction, sig)| {
-                if let Some(chain_id) = transaction.chain_id() {
-                    // Otherwise we might overflow when calculating `v` on `recalculate_hash`
-                    transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
-                }
-
-                #[cfg(feature = "optimism")]
-                let sig = transaction
-                    .is_deposit()
-                    .then(Signature::optimism_deposit_tx_signature)
-                    .unwrap_or(sig);
-
-                if let Transaction::Eip4844(ref mut tx_eip_4844) = transaction {
-                    tx_eip_4844.placeholder =
-                        if tx_eip_4844.to != Address::default() { Some(()) } else { None };
-                }
-
-                let mut tx = Self { hash: Default::default(), signature: sig, transaction };
-                tx.hash = tx.recalculate_hash();
-                tx
-            })
-            .boxed()
-    }
-
-    type Strategy = proptest::strategy::BoxedStrategy<Self>;
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let mut transaction = Transaction::arbitrary(u)?;
         if let Some(chain_id) = transaction.chain_id() {
             // Otherwise we might overflow when calculating `v` on `recalculate_hash`
             transaction.set_chain_id(chain_id % (u64::MAX / 2 - 36));
+        }
+
+        if let Transaction::Eip4844(ref mut tx_eip_4844) = transaction {
+            tx_eip_4844.placeholder =
+                if tx_eip_4844.to != Address::default() { Some(()) } else { None };
         }
 
         let signature = Signature::arbitrary(u)?;
@@ -1654,6 +1626,7 @@ mod tests {
     };
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
+    use proptest_arbitrary_interop::arb;
     use reth_codecs::Compact;
     use secp256k1::{Keypair, Secp256k1};
     use std::str::FromStr;
@@ -1929,7 +1902,7 @@ mod tests {
         #![proptest_config(proptest::prelude::ProptestConfig::with_cases(1))]
 
         #[test]
-        fn test_parallel_recovery_order(txes in proptest::collection::vec(proptest::prelude::any::<Transaction>(), *PARALLEL_SENDER_RECOVERY_THRESHOLD * 5)) {
+        fn test_parallel_recovery_order(txes in proptest::collection::vec(arb::<Transaction>(), *PARALLEL_SENDER_RECOVERY_THRESHOLD * 5)) {
             let mut rng =rand::thread_rng();
             let secp = Secp256k1::new();
             let txes: Vec<TransactionSigned> = txes.into_iter().map(|mut tx| {

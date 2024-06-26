@@ -25,6 +25,7 @@ use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
     TransactionValidationTaskExecutor,
 };
+use std::sync::Arc;
 
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
@@ -291,6 +292,18 @@ where
                 }
 
                 builder
+            })
+            // ensure we configure discv5
+            .map_discv5_config_builder(|builder| {
+                builder
+                    .add_unsigned_boot_nodes(ctx.chain_spec().bootnodes().unwrap_or_default())
+                    .lookup_interval(ctx.config().network.discovery.discv5_lookup_interval)
+                    .bootstrap_lookup_interval(
+                        ctx.config().network.discovery.discv5_bootstrap_lookup_interval,
+                    )
+                    .bootstrap_lookup_countdown(
+                        ctx.config().network.discovery.discv5_bootstrap_lookup_countdown,
+                    )
             });
 
         let mut network_config = ctx.build_network_config(network_builder);
@@ -317,9 +330,13 @@ impl<Node> ConsensusBuilder<Node> for OptimismConsensusBuilder
 where
     Node: FullNodeTypes,
 {
-    type Consensus = OptimismBeaconConsensus;
+    type Consensus = Arc<dyn reth_consensus::Consensus>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(OptimismBeaconConsensus::new(ctx.chain_spec()))
+        if ctx.is_dev() {
+            Ok(Arc::new(reth_auto_seal_consensus::AutoSealConsensus::new(ctx.chain_spec())))
+        } else {
+            Ok(Arc::new(OptimismBeaconConsensus::new(ctx.chain_spec())))
+        }
     }
 }

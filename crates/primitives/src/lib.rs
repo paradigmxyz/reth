@@ -14,15 +14,12 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
-#![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
-mod account;
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
 pub mod basefee;
@@ -31,21 +28,14 @@ mod block;
 mod compression;
 pub mod constants;
 pub mod eip4844;
-mod error;
 pub mod genesis;
 pub mod header;
-mod integer_list;
-mod log;
 pub mod proofs;
 mod receipt;
-mod request;
 /// Helpers for working with revm
 pub mod revm;
 pub use reth_static_file_types as static_file;
-mod storage;
 pub mod transaction;
-mod withdrawal;
-pub use account::{Account, Bytecode};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{
@@ -58,17 +48,16 @@ pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
     KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
-pub use error::{GotExpected, GotExpectedBoxed};
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
 pub use header::{Header, HeadersDirection, SealedHeader};
-pub use integer_list::IntegerList;
-pub use log::{logs_bloom, Log};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
-pub use request::Requests;
+pub use reth_primitives_traits::{
+    logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Log, LogData, Request, Requests,
+    StorageEntry, Withdrawal, Withdrawals,
+};
 pub use static_file::StaticFileSegment;
-pub use storage::StorageEntry;
 
 pub use transaction::{
     BlobTransaction, BlobTransactionSidecar, FromRecoveredPooledTransaction,
@@ -87,11 +76,8 @@ pub use transaction::{
     LEGACY_TX_TYPE_ID,
 };
 
-pub use withdrawal::{Withdrawal, Withdrawals};
-
 // Re-exports
 pub use self::ruint::UintTryTo;
-pub use alloy_consensus::Request;
 pub use alloy_primitives::{
     self, address, b256, bloom, bytes,
     bytes::{Buf, BufMut, BytesMut},

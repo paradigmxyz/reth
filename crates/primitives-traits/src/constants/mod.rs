@@ -3,6 +3,9 @@
 use alloy_primitives::{address, b256, Address, B256, U256};
 use core::time::Duration;
 
+/// Gas units, for example [`GIGAGAS`](gas_units::GIGAGAS).
+pub mod gas_units;
+
 /// The client version: `reth/v{major}.{minor}.{patch}`
 pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"));
 

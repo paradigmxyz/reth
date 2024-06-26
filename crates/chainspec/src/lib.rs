@@ -12,8 +12,8 @@
 pub use alloy_chains::{Chain, ChainKind, NamedChain};
 pub use info::ChainInfo;
 pub use spec::{
-    AllGenesisFormats, BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder,
-    DepositContract, ForkBaseFeeParams, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
+    ForkBaseFeeParams, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
 };
 #[cfg(feature = "optimism")]
 pub use spec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};

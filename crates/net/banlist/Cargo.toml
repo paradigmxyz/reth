@@ -1,12 +1,12 @@
 [package]
-name = "reth-net-common"
+name = "reth-net-banlist"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Types shared across network code"
+description = "Banlist for peers and IPs"
 
 [lints]
 workspace = true
@@ -14,6 +14,3 @@ workspace = true
 [dependencies]
 # ethereum
 alloy-primitives.workspace = true
-
-# async
-tokio = { workspace = true, features = ["time"] }

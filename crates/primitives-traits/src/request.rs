@@ -1,6 +1,6 @@
 //! EIP-7685 requests.
 
-use crate::Request;
+pub use alloy_consensus::Request;
 use alloy_eips::eip7685::{Decodable7685, Encodable7685};
 use alloy_rlp::{Decodable, Encodable};
 use derive_more::{Deref, DerefMut, From, IntoIterator};

@@ -13,7 +13,7 @@ use reth_network_p2p::{
     error::{DownloadError, DownloadResult},
 };
 use reth_primitives::{BlockNumber, SealedHeader};
-use reth_provider::HeaderProvider;
+use reth_storage_api::HeaderProvider;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::Ordering,

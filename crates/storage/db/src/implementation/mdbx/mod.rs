@@ -482,7 +482,8 @@ mod tests {
         table::{Encode, Table},
     };
     use reth_libmdbx::Error;
-    use reth_primitives::{Account, Address, Header, IntegerList, StorageEntry, B256, U256};
+    use reth_primitives::{Account, Address, Header, StorageEntry, B256, U256};
+    use reth_primitives_traits::IntegerList;
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
     use std::str::FromStr;
     use tempfile::TempDir;
