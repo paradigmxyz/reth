@@ -53,6 +53,11 @@ impl HighestStaticFiles {
         }
     }
 
+    /// Returns the minimum block of all segments.
+    pub fn min(&self) -> Option<u64> {
+        [self.headers, self.transactions, self.receipts].iter().filter_map(|&option| option).min()
+    }
+
     /// Returns the maximum block of all segments.
     pub fn max(&self) -> Option<u64> {
         [self.headers, self.transactions, self.receipts].iter().filter_map(|&option| option).max()
