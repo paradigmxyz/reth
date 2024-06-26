@@ -6265,6 +6265,7 @@ dependencies = [
  "reth-discv4",
  "reth-discv5",
  "reth-downloaders",
+ "reth-engine-util",
  "reth-errors",
  "reth-ethereum-payload-builder",
  "reth-evm",
@@ -6289,6 +6290,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-prune",
+ "reth-prune-types",
  "reth-revm",
  "reth-rpc",
  "reth-rpc-api",
@@ -6905,6 +6907,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-engine-util"
+version = "1.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "pin-project",
+ "reth-beacon-consensus",
+ "reth-engine-primitives",
+ "reth-fs-util",
+ "reth-rpc",
+ "reth-rpc-types",
+ "serde",
+ "serde_json",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "reth-errors"
 version = "1.0.0"
 dependencies = [
@@ -7447,6 +7467,7 @@ dependencies = [
  "reth-db-api",
  "reth-db-common",
  "reth-downloaders",
+ "reth-engine-util",
  "reth-evm",
  "reth-exex",
  "reth-network",
@@ -7494,7 +7515,6 @@ dependencies = [
  "metrics-process",
  "metrics-util",
  "once_cell",
- "pin-project",
  "procfs",
  "proptest",
  "rand 0.8.5",
@@ -7506,7 +7526,6 @@ dependencies = [
  "reth-db-api",
  "reth-discv4",
  "reth-discv5",
- "reth-engine-primitives",
  "reth-fs-util",
  "reth-metrics",
  "reth-net-nat",
@@ -7527,13 +7546,11 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1",
- "serde",
  "serde_json",
  "shellexpand",
  "thiserror",
  "tikv-jemalloc-ctl",
  "tokio",
- "tokio-util",
  "tower",
  "tracing",
  "vergen",
