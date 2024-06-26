@@ -21,6 +21,7 @@ reth-nippy-jar.workspace = true
 reth-tokio-util.workspace = true
 reth-prune-types.workspace = true
 reth-static-file-types.workspace = true
+reth-stages-types.workspace = true
 
 alloy-primitives.workspace = true
 

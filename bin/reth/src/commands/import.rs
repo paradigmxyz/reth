@@ -27,7 +27,7 @@ use reth_provider::{
     BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderError, ProviderFactory,
     StageCheckpointReader,
 };
-use reth_prune_types::PruneModes;
+use reth_prune::PruneModes;
 use reth_stages::{prelude::*, Pipeline, StageId, StageSet};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};

@@ -1,37 +1,12 @@
-# reth
+# reth prune
 
-Reth
+Prune according to the configuration without any limits
 
 ```bash
-$ reth --help
-Usage: reth [OPTIONS] <COMMAND>
-
-Commands:
-  node          Start the node
-  init          Initialize the database from a genesis file
-  init-state    Initialize the database from a state dump file
-  import        This syncs RLP encoded blocks from a file
-  dump-genesis  Dumps genesis block JSON configuration to stdout
-  db            Database debugging utilities
-  stage         Manipulate individual stages
-  p2p           P2P Debugging utilities
-  test-vectors  Generate Test Vectors
-  config        Write config to stdout
-  debug         Various debug routines
-  recover       Scripts for node recovery
-  prune         Prune according to the configuration without any limits
-  help          Print this message or the help of the given subcommand(s)
+$ reth prune --help
+Usage: reth prune [OPTIONS]
 
 Options:
-      --chain <CHAIN_OR_PATH>
-          The chain this node is running.
-          Possible values are either a built-in chain or the path to a chain specification file.
-
-          Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
-
-          [default: mainnet]
-
       --instance <INSTANCE>
           Add a new instance of a node.
 
@@ -46,8 +21,51 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 
-  -V, --version
-          Print version
+Datadir:
+      --datadir <DATA_DIR>
+          The path to the data dir for all reth files and subdirectories.
+
+          Defaults to the OS-specific data directory:
+
+          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
+          - Windows: `{FOLDERID_RoamingAppData}/reth/`
+          - macOS: `$HOME/Library/Application Support/reth/`
+
+          [default: default]
+
+      --datadir.static_files <PATH>
+          The absolute path to store static files in.
+
+      --config <FILE>
+          The path to the configuration file to use
+
+      --chain <CHAIN_OR_PATH>
+          The chain this node is running.
+          Possible values are either a built-in chain or the path to a chain specification file.
+
+          Built-in chains:
+              mainnet, sepolia, goerli, holesky, dev
+
+          [default: mainnet]
+
+Database:
+      --db.log-level <LOG_LEVEL>
+          Database logging level. Levels higher than "notice" require a debug build
+
+          Possible values:
+          - fatal:   Enables logging for critical conditions, i.e. assertion failures
+          - error:   Enables logging for error conditions
+          - warn:    Enables logging for warning conditions
+          - notice:  Enables logging for normal but significant condition
+          - verbose: Enables logging for verbose informational
+          - debug:   Enables logging for debug-level messages
+          - trace:   Enables logging for trace debug-level messages
+          - extra:   Enables logging for extra debug-level messages
+
+      --db.exclusive <EXCLUSIVE>
+          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
+
+          [possible values: true, false]
 
 Logging:
       --log.stdout.format <FORMAT>
