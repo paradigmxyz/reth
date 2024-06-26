@@ -361,25 +361,26 @@ mod tests {
     #[tokio::test]
     async fn block_downloader_range_request() {
         const TOTAL_BLOCKS: usize = 10;
-        let mut test_harness = TestHarness::new(TOTAL_BLOCKS);
-        let tip = test_harness.client.highest_block().expect("there should be blocks here");
+        let TestHarness { mut block_downloader, mut event_stream, client } =
+            TestHarness::new(TOTAL_BLOCKS);
+        let tip = client.highest_block().expect("there should be blocks here");
 
         // send block range download request
-        test_harness.block_downloader.on_action(DownloadAction::Download(
-            DownloadRequest::BlockRange(tip.hash(), tip.number),
-        ));
+        block_downloader.on_action(DownloadAction::Download(DownloadRequest::BlockRange(
+            tip.hash(),
+            tip.number,
+        )));
 
         // ensure we have one in flight range request
-        assert_eq!(test_harness.block_downloader.inflight_block_range_requests.len(), 1);
+        assert_eq!(block_downloader.inflight_block_range_requests.len(), 1);
 
         // ensure the range request is made correctly
-        let first_req =
-            test_harness.block_downloader.inflight_block_range_requests.first().unwrap();
+        let first_req = block_downloader.inflight_block_range_requests.first().unwrap();
         assert_eq!(first_req.start_hash(), tip.hash());
         assert_eq!(first_req.count(), tip.number);
 
         // ensure the BeaconConsensusEngineEvent is properly sent
-        let engine_event = test_harness.event_stream.next().await;
+        let engine_event = event_stream.next().await;
         assert_matches!(
             engine_event,
             Some(BeaconConsensusEngineEvent::LiveSyncProgress(
@@ -394,7 +395,7 @@ mod tests {
         );
 
         // poll downloader
-        let sync_future = poll_fn(|cx| test_harness.block_downloader.poll(cx));
+        let sync_future = poll_fn(|cx| block_downloader.poll(cx));
         let next_ready = sync_future.await;
 
         assert_matches!(next_ready, DownloadOutcome::Blocks(blocks) => {
@@ -411,21 +412,22 @@ mod tests {
     #[tokio::test]
     async fn block_downloader_set_request() {
         const TOTAL_BLOCKS: usize = 2;
-        let mut test_harness = TestHarness::new(TOTAL_BLOCKS);
+        let TestHarness { mut block_downloader, mut event_stream, client } =
+            TestHarness::new(TOTAL_BLOCKS);
 
-        let tip = test_harness.client.highest_block().expect("there should be blocks here");
+        let tip = client.highest_block().expect("there should be blocks here");
 
         // send block set download request
-        test_harness.block_downloader.on_action(DownloadAction::Download(
-            DownloadRequest::BlockSet(HashSet::from([tip.hash(), tip.parent_hash])),
-        ));
+        block_downloader.on_action(DownloadAction::Download(DownloadRequest::BlockSet(
+            HashSet::from([tip.hash(), tip.parent_hash]),
+        )));
 
         // ensure we have TOTAL_BLOCKS in flight full block request
-        assert_eq!(test_harness.block_downloader.inflight_full_block_requests.len(), TOTAL_BLOCKS);
+        assert_eq!(block_downloader.inflight_full_block_requests.len(), TOTAL_BLOCKS);
 
         // ensure the BeaconConsensusEngineEvent events are properly sent
         for i in 1..=TOTAL_BLOCKS {
-            let engine_event = test_harness.event_stream.next().await;
+            let engine_event = event_stream.next().await;
             assert_matches!(
                 engine_event,
                 Some(BeaconConsensusEngineEvent::LiveSyncProgress(
@@ -439,7 +441,7 @@ mod tests {
         }
 
         // poll downloader
-        let sync_future = poll_fn(|cx| test_harness.block_downloader.poll(cx));
+        let sync_future = poll_fn(|cx| block_downloader.poll(cx));
         let next_ready = sync_future.await;
 
         assert_matches!(next_ready, DownloadOutcome::Blocks(blocks) => {
@@ -456,43 +458,40 @@ mod tests {
     #[tokio::test]
     async fn block_downloader_clear_request() {
         const TOTAL_BLOCKS: usize = 10;
-        let mut test_harness = TestHarness::new(TOTAL_BLOCKS);
+        let TestHarness { mut block_downloader, event_stream, client } =
+            TestHarness::new(TOTAL_BLOCKS);
 
-        let tip = test_harness.client.highest_block().expect("there should be blocks here");
+        let tip = client.highest_block().expect("there should be blocks here");
 
         // send block range download request
-        test_harness.block_downloader.on_action(DownloadAction::Download(
-            DownloadRequest::BlockRange(tip.hash(), tip.number),
-        ));
+        block_downloader.on_action(DownloadAction::Download(DownloadRequest::BlockRange(
+            tip.hash(),
+            tip.number,
+        )));
 
         // send block set download request
         let download_set = HashSet::from([tip.hash(), tip.parent_hash]);
-        test_harness
-            .block_downloader
+        block_downloader
             .on_action(DownloadAction::Download(DownloadRequest::BlockSet(download_set.clone())));
 
         // ensure we have one in flight range request
-        assert_eq!(test_harness.block_downloader.inflight_block_range_requests.len(), 1);
+        assert_eq!(block_downloader.inflight_block_range_requests.len(), 1);
 
         // ensure the range request is made correctly
-        let first_req =
-            test_harness.block_downloader.inflight_block_range_requests.first().unwrap();
+        let first_req = block_downloader.inflight_block_range_requests.first().unwrap();
         assert_eq!(first_req.start_hash(), tip.hash());
         assert_eq!(first_req.count(), tip.number);
 
         // ensure we have download_set.len() in flight full block request
-        assert_eq!(
-            test_harness.block_downloader.inflight_full_block_requests.len(),
-            download_set.len()
-        );
+        assert_eq!(block_downloader.inflight_full_block_requests.len(), download_set.len());
 
         // send clear request
-        test_harness.block_downloader.on_action(DownloadAction::Clear);
+        block_downloader.on_action(DownloadAction::Clear);
 
         // ensure we have no in flight range request
-        assert_eq!(test_harness.block_downloader.inflight_block_range_requests.len(), 0);
+        assert_eq!(block_downloader.inflight_block_range_requests.len(), 0);
 
         // ensure we have no in flight full block request
-        assert_eq!(test_harness.block_downloader.inflight_full_block_requests.len(), 0);
+        assert_eq!(block_downloader.inflight_full_block_requests.len(), 0);
     }
 }
