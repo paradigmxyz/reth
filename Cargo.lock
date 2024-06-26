@@ -6523,6 +6523,9 @@ dependencies = [
 [[package]]
 name = "reth-cli"
 version = "1.0.0"
+dependencies = [
+ "clap",
+]
 
 [[package]]
 name = "reth-cli-commands"
