@@ -13,11 +13,11 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
-use reth_rpc_eth_api::{
+use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
+use reth_rpc_server_types::{
+    eth::{revm_utils::prepare_call_env, EthApiError, EthResult, StateCacheDb},
     result::internal_rpc_err,
-    revm_utils::prepare_call_env,
-    servers::{EthApiSpec, EthTransactions, TraceExt},
-    EthApiError, EthResult, StateCacheDb, ToRpcResult,
+    ToRpcResult,
 };
 use reth_rpc_types::{
     state::EvmOverrides,

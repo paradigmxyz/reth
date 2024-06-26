@@ -178,15 +178,13 @@ use reth_provider::{
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc::{
-    eth::{
-        servers::RawTransactionForwarder, EthApi, EthBundle, EthStateCache,
-        EthSubscriptionIdProvider,
-    },
+    eth::{EthApi, EthBundle, RawTransactionForwarder},
     AdminApi, DebugApi, EngineEthApi, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi,
     Web3Api,
 };
-use reth_rpc_api::servers::*;
+use reth_rpc_api::*;
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
+use reth_rpc_server_types::eth::{EthStateCache, EthSubscriptionIdProvider};
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};

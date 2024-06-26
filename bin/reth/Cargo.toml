@@ -67,6 +67,7 @@ reth-node-events.workspace = true
 reth-consensus.workspace = true
 reth-optimism-primitives.workspace = true
 reth-prune-types.workspace = true
+reth-rpc-server-types.workspace = true
 
 # crypto
 alloy-rlp.workspace = true

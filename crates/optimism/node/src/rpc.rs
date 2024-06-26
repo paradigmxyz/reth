@@ -2,10 +2,8 @@
 
 use jsonrpsee::types::ErrorObject;
 use reqwest::Client;
-use reth_rpc::eth::{
-    error::{EthApiError, EthResult},
-    servers::RawTransactionForwarder,
-};
+use reth_rpc_eth_api::RawTransactionForwarder;
+use reth_rpc_server_types::eth::error::{EthApiError, EthResult};
 use reth_rpc_types::ToRpcError;
 use std::sync::{atomic::AtomicUsize, Arc};
 

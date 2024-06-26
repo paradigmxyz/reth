@@ -29,8 +29,11 @@ reth-consensus-common.workspace = true
 reth-rpc-types-compat.workspace = true
 revm-inspectors = { workspace = true, features = ["js-tracer"] }
 reth-network-peers.workspace = true
+reth-evm.workspace = true
+reth-rpc-server-types.workspace = true
 
 # eth
+alloy-dyn-abi.workspace = true
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-genesis.workspace = true
@@ -40,6 +43,7 @@ revm = { workspace = true, features = [
     "optional_no_base_fee",
 ] }
 revm-primitives = { workspace = true, features = ["serde"] }
+secp256k1.workspace = true
 
 # rpc
 jsonrpsee.workspace = true
@@ -47,17 +51,24 @@ http.workspace = true
 http-body.workspace = true
 hyper.workspace = true
 jsonwebtoken.workspace = true
+serde_json.workspace = true
 
 # async
 async-trait.workspace = true
 tokio = { workspace = true, features = ["sync"] }
+tokio-stream.workspace = true
 tower.workspace = true
 pin-project.workspace = true
+parking_lot.workspace = true
 
 # misc
 tracing.workspace = true
 tracing-futures = "0.2"
 futures.workspace = true
+rand.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
 
 [dev-dependencies]
 reth-evm-ethereum.workspace = true

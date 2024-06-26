@@ -10,6 +10,10 @@
 
 /// Common RPC constants.
 pub mod constants;
+pub mod eth;
+pub mod result;
 
 mod module;
 pub use module::{RethRpcModule, RpcModuleSelection};
+
+pub use result::ToRpcResult;
