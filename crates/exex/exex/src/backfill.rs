@@ -35,7 +35,7 @@ impl<Node: FullNodeComponents> BackfillExecutor<Node> {
         let start_block = *range.start();
 
         let provider = self.components.provider();
-        let provider_ro = provider.database_provider_ro()?;
+        let provider_ro = provider.database_provider_ro()?.disable_long_read_transaction_safety();
 
         let mut executor = self.components.block_executor().batch_executor(
             StateProviderDatabase(HistoricalStateProviderRef::new(
