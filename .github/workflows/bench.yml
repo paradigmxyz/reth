@@ -51,10 +51,10 @@ jobs:
       - name: Generate test vectors
         run: cargo run --bin reth -- test-vectors tables
       - name: Save baseline
-        run: cargo bench -p reth-db --bench iai --features test-utils -- --save-baseline=$BASELINE
+        run: cargo bench -p reth-db --bench iai --profile profiling --features test-utils -- --save-baseline=$BASELINE
       - name: Checkout PR
         uses: actions/checkout@v4
         with:
           clean: false
       - name: Compare PR benchmarks
-        run: cargo bench -p reth-db --bench iai --features test-utils -- --baseline=$BASELINE
+        run: cargo bench -p reth-db --bench iai --profile profiling --features test-utils -- --baseline=$BASELINE

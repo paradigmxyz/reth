@@ -2,7 +2,7 @@
 
 use crate::{
     args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
         LogArgs,
     },
     commands::{
@@ -46,7 +46,7 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser,
+        value_parser = chain_value_parser,
         global = true,
     )]
     chain: Arc<ChainSpec>,

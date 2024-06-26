@@ -23,7 +23,7 @@ use reth_revm::{
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
+    BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ResultAndState,
 };
 use std::sync::Arc;
 use tracing::trace;
@@ -55,7 +55,7 @@ where
 {
     fn op_executor<DB>(&self, db: DB) -> OpBlockExecutor<EvmConfig, DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
     {
         OpBlockExecutor::new(
             self.chain_spec.clone(),
@@ -69,19 +69,21 @@ impl<EvmConfig> BlockExecutorProvider for OpExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
-    type Executor<DB: Database<Error = ProviderError>> = OpBlockExecutor<EvmConfig, DB>;
+    type Executor<DB: Database<Error: Into<ProviderError> + std::fmt::Display>> =
+        OpBlockExecutor<EvmConfig, DB>;
 
-    type BatchExecutor<DB: Database<Error = ProviderError>> = OpBatchExecutor<EvmConfig, DB>;
+    type BatchExecutor<DB: Database<Error: Into<ProviderError> + std::fmt::Display>> =
+        OpBatchExecutor<EvmConfig, DB>;
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
     {
         self.op_executor(db)
     }
 
     fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
     {
         let executor = self.op_executor(db);
         OpBatchExecutor {
@@ -118,7 +120,7 @@ where
         mut evm: Evm<'_, Ext, &mut State<DB>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
     {
         // apply pre execution changes
         apply_beacon_root_contract_call(
@@ -179,10 +181,17 @@ where
 
             // Execute transaction.
             let ResultAndState { result, state } = evm.transact().map_err(move |err| {
+                let new_err = match err {
+                    EVMError::Transaction(e) => EVMError::Transaction(e),
+                    EVMError::Header(e) => EVMError::Header(e),
+                    EVMError::Database(e) => EVMError::Database(e.into()),
+                    EVMError::Custom(e) => EVMError::Custom(e),
+                    EVMError::Precompile(e) => EVMError::Precompile(e),
+                };
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {
                     hash: transaction.recalculate_hash(),
-                    error: err.into(),
+                    error: Box::new(new_err),
                 }
             })?;
 
@@ -255,7 +264,7 @@ impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
     /// Configures a new evm configuration and block environment for the given block.
     ///
@@ -337,7 +346,7 @@ where
 impl<EvmConfig, DB> Executor<DB> for OpBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
@@ -394,7 +403,7 @@ impl<EvmConfig, DB> OpBatchExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> BatchExecutor<DB> for OpBatchExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = ExecutionOutcome;

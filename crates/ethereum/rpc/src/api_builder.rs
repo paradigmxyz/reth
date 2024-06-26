@@ -26,7 +26,7 @@ where
 
     fn build(
         &self,
-        ctx: EthApiBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        ctx: EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> Self::Server {
         let gas_oracle = GasPriceOracleBuilder::build(&ctx);
         let fee_history_cache = FeeHistoryCacheBuilder::build(&ctx);

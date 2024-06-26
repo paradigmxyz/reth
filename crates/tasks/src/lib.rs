@@ -465,7 +465,7 @@ impl TaskExecutor {
                 error!("{task_error}");
                 let _ = panicked_tasks_tx.send(task_error);
             })
-            .map(|_| ())
+            .map(drop)
             .in_current_span();
 
         self.handle.spawn(task)
@@ -514,7 +514,7 @@ impl TaskExecutor {
                 error!("{task_error}");
                 let _ = panicked_tasks_tx.send(task_error);
             })
-            .map(|_| ())
+            .map(drop)
             .in_current_span();
 
         self.handle.spawn(task)

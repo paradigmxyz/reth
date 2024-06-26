@@ -10,6 +10,7 @@ use reth_network::NetworkHandle;
 use reth_node_api::FullNodeComponents;
 use reth_node_core::{node_config::NodeConfig, rpc::api::EngineApiServer};
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_rpc::eth::EthApi;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
@@ -156,8 +157,7 @@ pub struct RpcRegistry<Node: FullNodeComponents> {
         NetworkHandle,
         TaskExecutor,
         Node::Provider,
-        Node::Evm,
-        reth_ethereum_rpc::EthApiBuild,
+        EthApi<Node::Provider, Node::Pool, NetworkHandle, Node::Evm>,
     >,
 }
 
@@ -168,8 +168,7 @@ impl<Node: FullNodeComponents> Deref for RpcRegistry<Node> {
         NetworkHandle,
         TaskExecutor,
         Node::Provider,
-        Node::Evm,
-        reth_ethereum_rpc::EthApiBuild,
+        EthApi<Node::Provider, Node::Pool, NetworkHandle, Node::Evm>,
     >;
 
     fn deref(&self) -> &Self::Target {

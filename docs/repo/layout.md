@@ -56,7 +56,7 @@ The networking component mainly lives in [`net/network`](../../crates/net/networ
 
 #### Common
 
-- [`net/common`](../../crates/net/common): Shared types used across multiple networking crates.
+- [`net/banlist`](../../crates/net/banlist): A simple peer banlist that can be used to ban peers or IP addresses.
   - Contains: Peer banlist.
 - [`net/network-api`](../../crates/net/network-api): Contains traits that define the networking component as a whole. Other components that interface with the network stack only need to depend on this crate for the relevant types.
 - [`net/nat`](../../crates/net/nat): A small helper crate that resolves the external IP of the running node using various methods (such as a manually provided IP, using UPnP etc.)

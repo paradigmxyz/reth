@@ -23,6 +23,35 @@ pub enum TrieKey {
     StorageTrie(B256),
 }
 
+impl TrieKey {
+    /// Returns reference to account node key if the key is for [`Self::AccountNode`].
+    pub const fn as_account_node_key(&self) -> Option<&StoredNibbles> {
+        if let Self::AccountNode(nibbles) = &self {
+            Some(nibbles)
+        } else {
+            None
+        }
+    }
+
+    /// Returns reference to storage node key if the key is for [`Self::StorageNode`].
+    pub const fn as_storage_node_key(&self) -> Option<(&B256, &StoredNibblesSubKey)> {
+        if let Self::StorageNode(key, subkey) = &self {
+            Some((key, subkey))
+        } else {
+            None
+        }
+    }
+
+    /// Returns reference to storage trie key if the key is for [`Self::StorageTrie`].
+    pub const fn as_storage_trie_key(&self) -> Option<&B256> {
+        if let Self::StorageTrie(key) = &self {
+            Some(key)
+        } else {
+            None
+        }
+    }
+}
+
 /// The operation to perform on the trie.
 #[derive(PartialEq, Eq, Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -37,6 +66,15 @@ impl TrieOp {
     /// Returns `true` if the operation is an update.
     pub const fn is_update(&self) -> bool {
         matches!(self, Self::Update(..))
+    }
+
+    /// Returns reference to updated branch node if operation is [`Self::Update`].
+    pub const fn as_update(&self) -> Option<&BranchNodeCompact> {
+        if let Self::Update(node) = &self {
+            Some(node)
+        } else {
+            None
+        }
     }
 }
 

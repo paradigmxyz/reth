@@ -5,7 +5,6 @@ use std::sync::Arc;
 use jsonrpsee::core::RpcResult;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP,
     keccak256,
     revm_primitives::db::{DatabaseCommit, DatabaseRef},
     PooledTransactionsElement, U256,
@@ -17,7 +16,7 @@ use revm::{
     db::CacheDB,
     primitives::{ResultAndState, TxEnv},
 };
-use revm_primitives::{EnvWithHandlerCfg, MAX_BLOB_GAS_PER_BLOCK};
+use revm_primitives::{EnvKzgSettings, EnvWithHandlerCfg, MAX_BLOB_GAS_PER_BLOCK};
 
 use crate::{
     servers::{Call, EthTransactions, LoadPendingBlock},
@@ -129,7 +128,7 @@ where
                     // Verify that the given blob data, commitments, and proofs are all valid for
                     // this transaction.
                     if let PooledTransactionsElement::BlobTransaction(ref tx) = tx {
-                        tx.validate(MAINNET_KZG_TRUSTED_SETUP.as_ref())
+                        tx.validate(EnvKzgSettings::Default.get())
                             .map_err(|e| EthApiError::InvalidParams(e.to_string()))?;
                     }
 
