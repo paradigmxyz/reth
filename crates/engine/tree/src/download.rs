@@ -4,6 +4,7 @@ use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
 use futures::FutureExt;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
+use reth_consensus::Consensus;
 use reth_network_p2p::{
     bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
@@ -66,12 +67,9 @@ where
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance
-    pub(crate) fn new(client: Client, chain_spec: Arc<ChainSpec>) -> Self {
+    pub(crate) fn new(client: Client, consensus: Arc<dyn Consensus>) -> Self {
         Self {
-            full_block_client: FullBlockClient::new(
-                client,
-                Arc::new(EthBeaconConsensus::new(chain_spec)),
-            ),
+            full_block_client: FullBlockClient::new(client, consensus),
             inflight_full_block_requests: Vec::new(),
             inflight_block_range_requests: Vec::new(),
             set_buffered_blocks: BinaryHeap::new(),
@@ -303,8 +301,9 @@ mod tests {
             .seal_slow();
 
             insert_headers_into_client(&client, header, 0..total_blocks);
+            let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
 
-            let block_downloader = BasicBlockDownloader::new(client.clone(), chain_spec);
+            let block_downloader = BasicBlockDownloader::new(client.clone(), consensus);
             Self { block_downloader, client }
         }
     }
