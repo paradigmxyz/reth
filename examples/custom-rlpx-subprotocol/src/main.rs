@@ -15,6 +15,7 @@ use reth_network::{
 use reth_network_api::NetworkInfo;
 use reth_node_ethereum::EthereumNode;
 use reth_provider::test_utils::NoopProvider;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use subprotocol::{
     connection::CustomCommand,
     protocol::{
@@ -45,6 +46,7 @@ fn main() -> eyre::Result<()> {
         let (tx, mut from_peer1) = mpsc::unbounded_channel();
         let custom_rlpx_handler_2 = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
         let net_cfg = NetworkConfig::builder(secret_key)
+            .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .add_rlpx_sub_protocol(custom_rlpx_handler_2.into_rlpx_sub_protocol())
             .build(NoopProvider::default());
 
@@ -78,20 +80,23 @@ fn main() -> eyre::Result<()> {
                 to_connection
             }
         };
+        info!(target:"rlpx-subprotocol", "Connection established!");
 
         // send a ping message from peer0 to peer1
         let (tx, rx) = oneshot::channel();
         peer0_conn.send(CustomCommand::Message { msg: "hello!".to_owned(), response: tx })?;
         let response = rx.await?;
         assert_eq!(response, "hello!");
+        info!(target:"rlpx-subprotocol", ?response, "New message received");
 
         // send a ping message from peer1 to peer0
         let (tx, rx) = oneshot::channel();
         peer1_conn.send(CustomCommand::Message { msg: "world!".to_owned(), response: tx })?;
         let response = rx.await?;
         assert_eq!(response, "world!");
+        info!(target:"rlpx-subprotocol", ?response, "New message received");
 
-        info!("Peers connected via custom rlpx subprotocol!");
+        info!(target:"rlpx-subprotocol", "Peers connected via custom rlpx subprotocol!");
 
         node_exit_future.await
     })
