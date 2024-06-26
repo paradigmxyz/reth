@@ -6,7 +6,10 @@ pub use ethereum::EthereumHardfork;
 #[cfg(feature = "optimism")]
 pub(crate) mod optimism;
 
-use core::any::Any;
+use core::{
+    any::Any,
+    hash::{Hash, Hasher},
+};
 use dyn_clone::DynClone;
 
 #[cfg(not(feature = "std"))]
@@ -40,6 +43,12 @@ impl PartialEq for dyn Hardfork + 'static {
 }
 
 impl Eq for dyn Hardfork + 'static {}
+
+impl Hash for dyn Hardfork + 'static {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name().hash(state)
+    }
+}
 
 #[cfg(test)]
 mod tests {
