@@ -1,11 +1,9 @@
-use crate::{
-    commands::db::get::{maybe_json_value_parser, table_key},
-    utils::DbTool,
-};
+use crate::commands::db::get::{maybe_json_value_parser, table_key};
 use ahash::RandomState;
 use clap::Parser;
 use reth_db::{DatabaseEnv, RawKey, RawTable, RawValue, TableViewer, Tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
+use reth_db_common::DbTool;
 use std::{
     hash::{BuildHasher, Hasher},
     sync::Arc,

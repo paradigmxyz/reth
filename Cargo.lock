@@ -6233,7 +6233,6 @@ dependencies = [
  "arbitrary",
  "assert_matches",
  "backon",
- "boyer-moore-magiclen",
  "clap",
  "comfy-table",
  "confy",
@@ -6700,6 +6699,7 @@ name = "reth-db-common"
 version = "1.0.0"
 dependencies = [
  "alloy-genesis",
+ "boyer-moore-magiclen",
  "eyre",
  "reth-chainspec",
  "reth-codecs",
@@ -6707,6 +6707,7 @@ dependencies = [
  "reth-db",
  "reth-db-api",
  "reth-etl",
+ "reth-fs-util",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
