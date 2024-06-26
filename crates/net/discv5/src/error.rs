@@ -18,7 +18,7 @@ pub enum Error {
     #[error("fork missing on enr, key missing")]
     ForkMissing(&'static [u8]),
     /// Failed to decode [`ForkId`](reth_ethereum_forks::ForkId) rlp value.
-    #[error("failed to decode fork id, `eth`: {0:?}")]
+    #[error("failed to decode fork id, 'eth': {0:?}")]
     ForkIdDecodeError(#[from] alloy_rlp::Error),
     /// Peer is unreachable over discovery.
     #[error("discovery socket missing")]

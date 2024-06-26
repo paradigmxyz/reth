@@ -98,7 +98,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
-        _raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -122,7 +122,7 @@ where
             blocking_task_pool,
             fee_history_cache,
             evm_config,
-            raw_transaction_forwarder: parking_lot::RwLock::new(_raw_transaction_forwarder),
+            raw_transaction_forwarder: parking_lot::RwLock::new(raw_transaction_forwarder),
         };
 
         Self { inner: Arc::new(inner) }
