@@ -41,12 +41,9 @@ pub struct ChainHardforks {
 impl ChainHardforks {
     /// Creates a new [`ChainHardforks`] from a list.
     pub fn new(forks: Vec<(Box<dyn Hardfork>, ForkCondition)>) -> Self {
-        let mut index = HashMap::default();
-        for (fork, condition) in &forks {
-            index.insert(fork.name(), *condition);
-        }
+        let map = forks.iter().map(|(fork, condition)| (fork.name(), *condition)).collect();
 
-        Self { forks, map: index }
+        Self { forks, map }
     }
 
     /// Total number of hardforks.
