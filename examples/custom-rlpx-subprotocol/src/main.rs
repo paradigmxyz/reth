@@ -3,7 +3,7 @@
 //! Run with
 //!
 //! ```not_rust
-//! cargo run -p custom-rlpx-subprotocol -- node
+//! cargo run -p example-custom-rlpx-subprotocol -- node
 //! ```
 //!
 //! This launch a regular reth node with a custom rlpx subprotocol.
@@ -47,6 +47,7 @@ fn main() -> eyre::Result<()> {
         let custom_rlpx_handler_2 = CustomRlpxProtoHandler { state: ProtocolState { events: tx } };
         let net_cfg = NetworkConfig::builder(secret_key)
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
+            .disable_discovery()
             .add_rlpx_sub_protocol(custom_rlpx_handler_2.into_rlpx_sub_protocol())
             .build(NoopProvider::default());
 
@@ -84,14 +85,14 @@ fn main() -> eyre::Result<()> {
 
         // send a ping message from peer0 to peer1
         let (tx, rx) = oneshot::channel();
-        peer0_conn.send(CustomCommand::Message { msg: "hello!".to_owned(), response: tx })?;
+        peer0_conn.send(CustomCommand::Message { msg: "hello!".to_string(), response: tx })?;
         let response = rx.await?;
         assert_eq!(response, "hello!");
         info!(target:"rlpx-subprotocol", ?response, "New message received");
 
         // send a ping message from peer1 to peer0
         let (tx, rx) = oneshot::channel();
-        peer1_conn.send(CustomCommand::Message { msg: "world!".to_owned(), response: tx })?;
+        peer1_conn.send(CustomCommand::Message { msg: "world!".to_string(), response: tx })?;
         let response = rx.await?;
         assert_eq!(response, "world!");
         info!(target:"rlpx-subprotocol", ?response, "New message received");

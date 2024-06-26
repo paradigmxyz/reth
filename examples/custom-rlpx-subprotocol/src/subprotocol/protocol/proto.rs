@@ -9,14 +9,16 @@ use reth_primitives::{Buf, BufMut, BytesMut};
 pub(crate) enum CustomRlpxProtoMessageId {
     Ping = 0x00,
     Pong = 0x01,
-    CustomMessage = 0x02,
+    PingMessage = 0x02,
+    PongMessage = 0x03,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CustomRlpxProtoMessageKind {
     Ping,
     Pong,
-    CustomMessage(String),
+    PingMessage(String),
+    PongMessage(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -33,7 +35,22 @@ impl CustomRlpxProtoMessage {
 
     /// Returns the protocol for the `custom_rlpx` protocol.
     pub fn protocol() -> Protocol {
-        Protocol::new(Self::capability(), 3)
+        Protocol::new(Self::capability(), 4)
+    }
+
+    /// Creates a ping message
+    pub fn ping_message(msg: impl Into<String>) -> Self {
+        Self {
+            message_type: CustomRlpxProtoMessageId::PingMessage,
+            message: CustomRlpxProtoMessageKind::PingMessage(msg.into()),
+        }
+    }
+    /// Creates a ping message
+    pub fn pong_message(msg: impl Into<String>) -> Self {
+        Self {
+            message_type: CustomRlpxProtoMessageId::PongMessage,
+            message: CustomRlpxProtoMessageKind::PongMessage(msg.into()),
+        }
     }
 
     /// Creates a ping message
@@ -57,9 +74,9 @@ impl CustomRlpxProtoMessage {
         let mut buf = BytesMut::new();
         buf.put_u8(self.message_type as u8);
         match &self.message {
-            CustomRlpxProtoMessageKind::Ping => {}
-            CustomRlpxProtoMessageKind::Pong => {}
-            CustomRlpxProtoMessageKind::CustomMessage(msg) => {
+            CustomRlpxProtoMessageKind::Ping | CustomRlpxProtoMessageKind::Pong => {}
+            CustomRlpxProtoMessageKind::PingMessage(msg) |
+            CustomRlpxProtoMessageKind::PongMessage(msg) => {
                 buf.put(msg.as_bytes());
             }
         }
@@ -76,16 +93,21 @@ impl CustomRlpxProtoMessage {
         let message_type = match id {
             0x00 => CustomRlpxProtoMessageId::Ping,
             0x01 => CustomRlpxProtoMessageId::Pong,
-            0x02 => CustomRlpxProtoMessageId::CustomMessage,
+            0x02 => CustomRlpxProtoMessageId::PingMessage,
+            0x03 => CustomRlpxProtoMessageId::PongMessage,
             _ => return None,
         };
         let message = match message_type {
             CustomRlpxProtoMessageId::Ping => CustomRlpxProtoMessageKind::Ping,
             CustomRlpxProtoMessageId::Pong => CustomRlpxProtoMessageKind::Pong,
-            CustomRlpxProtoMessageId::CustomMessage => CustomRlpxProtoMessageKind::CustomMessage(
+            CustomRlpxProtoMessageId::PingMessage => CustomRlpxProtoMessageKind::PingMessage(
+                String::from_utf8_lossy(&buf[..]).into_owned(),
+            ),
+            CustomRlpxProtoMessageId::PongMessage => CustomRlpxProtoMessageKind::PongMessage(
                 String::from_utf8_lossy(&buf[..]).into_owned(),
             ),
         };
+
         Some(Self { message_type, message })
     }
 }
