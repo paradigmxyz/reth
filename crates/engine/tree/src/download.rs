@@ -43,37 +43,6 @@ pub enum DownloadOutcome {
     Blocks(Vec<SealedBlockWithSenders>),
 }
 
-/// A wrapper type around [`SealedBlockWithSenders`] that implements the [Ord]
-/// trait by block number.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct OrderedSealedBlockWithSenders(SealedBlockWithSenders);
-
-impl PartialOrd for OrderedSealedBlockWithSenders {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for OrderedSealedBlockWithSenders {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.number.cmp(&other.0.number)
-    }
-}
-
-impl From<SealedBlock> for OrderedSealedBlockWithSenders {
-    fn from(block: SealedBlock) -> Self {
-        let senders = block.senders().unwrap_or_default();
-        Self(SealedBlockWithSenders { block, senders })
-    }
-}
-
-impl From<OrderedSealedBlockWithSenders> for SealedBlockWithSenders {
-    fn from(value: OrderedSealedBlockWithSenders) -> Self {
-        let senders = value.0.senders;
-        Self { block: value.0.block, senders }
-    }
-}
-
 /// Basic [BlockDownloader].
 pub struct BasicBlockDownloader<Client>
 where
@@ -254,6 +223,37 @@ where
             downloaded_blocks.push(block.0.into());
         }
         Poll::Ready(DownloadOutcome::Blocks(downloaded_blocks))
+    }
+}
+
+/// A wrapper type around [`SealedBlockWithSenders`] that implements the [Ord]
+/// trait by block number.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OrderedSealedBlockWithSenders(SealedBlockWithSenders);
+
+impl PartialOrd for OrderedSealedBlockWithSenders {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for OrderedSealedBlockWithSenders {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.number.cmp(&other.0.number)
+    }
+}
+
+impl From<SealedBlock> for OrderedSealedBlockWithSenders {
+    fn from(block: SealedBlock) -> Self {
+        let senders = block.senders().unwrap_or_default();
+        Self(SealedBlockWithSenders { block, senders })
+    }
+}
+
+impl From<OrderedSealedBlockWithSenders> for SealedBlockWithSenders {
+    fn from(value: OrderedSealedBlockWithSenders) -> Self {
+        let senders = value.0.senders;
+        Self { block: value.0.block, senders }
     }
 }
 
