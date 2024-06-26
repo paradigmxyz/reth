@@ -1,9 +1,10 @@
 use super::setup;
-use crate::{macros::block_executor, utils::DbTool};
+use crate::macros::block_executor;
 use eyre::Result;
 use reth_config::config::EtlConfig;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, table::TableImporter};
+use reth_db_common::DbTool;
 use reth_exex::ExExManagerHandle;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::BlockNumber;

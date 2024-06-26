@@ -116,7 +116,6 @@ backon.workspace = true
 similar-asserts.workspace = true
 itertools.workspace = true
 rayon.workspace = true
-boyer-moore-magiclen = "0.2.16"
 ahash = "0.8"
 
 # p2p
