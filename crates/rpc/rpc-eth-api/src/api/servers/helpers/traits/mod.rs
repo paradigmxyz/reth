@@ -29,12 +29,17 @@ pub mod state;
 pub mod trace;
 pub mod transaction;
 
+use block::LoadBlock;
 use blocking_task::SpawnBlocking;
 use call::Call;
 use pending_block::LoadPendingBlock;
 use trace::Trace;
+use transaction::LoadTransaction;
 
 /// Extension trait that bundles traits needed for tracing transactions.
-pub trait TraceExt: LoadPendingBlock + SpawnBlocking + Trace + Call {}
+pub trait TraceExt:
+    LoadTransaction + LoadBlock + LoadPendingBlock + SpawnBlocking + Trace + Call
+{
+}
 
-impl<T> TraceExt for T where T: LoadPendingBlock + Trace + Call {}
+impl<T> TraceExt for T where T: LoadTransaction + LoadBlock + LoadPendingBlock + Trace + Call {}

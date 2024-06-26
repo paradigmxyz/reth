@@ -16,7 +16,7 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     result::internal_rpc_err,
     revm_utils::prepare_call_env,
-    servers::{EthApiSpec, EthTransactions, LoadBlock, LoadTransaction, TraceExt},
+    servers::{EthApiSpec, EthTransactions, TraceExt},
     EthApiError, EthResult, StateCacheDb, ToRpcResult,
 };
 use reth_rpc_types::{
@@ -70,7 +70,7 @@ where
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,
-    Eth: LoadTransaction + LoadBlock + TraceExt + 'static,
+    Eth: TraceExt + 'static,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -636,7 +636,7 @@ where
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,
-    Eth: EthApiSpec + EthTransactions + LoadBlock + TraceExt + 'static,
+    Eth: EthApiSpec + EthTransactions + TraceExt + 'static,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
