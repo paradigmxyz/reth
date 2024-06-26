@@ -33,7 +33,6 @@ reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
 reth-network-peers.workspace = true
-reth-engine-primitives.workspace = true
 reth-tasks.workspace = true
 reth-consensus-common.workspace = true
 reth-beacon-consensus.workspace = true
@@ -46,8 +45,6 @@ alloy-rpc-types-engine.workspace = true
 
 # async
 tokio.workspace = true
-tokio-util.workspace = true
-pin-project.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -69,7 +66,7 @@ once_cell.workspace = true
 # io
 dirs-next = "2.0.0"
 shellexpand = "3.0.0"
-serde.workspace = true
+# serde.workspace = true
 serde_json.workspace = true
 
 # http/rpc

@@ -11,7 +11,6 @@
 pub mod args;
 pub mod cli;
 pub mod dirs;
-pub mod engine;
 pub mod exit;
 pub mod metrics;
 pub mod node_config;
