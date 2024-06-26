@@ -30,7 +30,6 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     node_config::NodeConfig,
     primitives::Head,
-    utils::write_peers_to_file,
 };
 use reth_primitives::revm_primitives::EnvKzgSettings;
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
@@ -39,6 +38,7 @@ use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
 pub use states::*;
 use std::sync::Arc;
+use tracing::{info, warn};
 
 mod states;
 
@@ -509,7 +509,14 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             "p2p network task",
             |shutdown| {
                 network.run_until_graceful_shutdown(shutdown, |network| {
-                    write_peers_to_file(&network, known_peers_file)
+                    match network.write_peers_to_file(known_peers_file) {
+                        Ok(_) => {
+                            info!(target: "reth::cli", "Successfully wrote network peers to file");
+                        }
+                        Err(err) => {
+                            warn!(target: "reth::cli", %err, "Failed to write network peers to file");
+                        }
+                    }
                 })
             },
         );

@@ -41,6 +41,7 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason, EthVersion, Status,
 };
+use reth_fs_util as fs;
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{EthProtocolInfo, NetworkStatus, PeerInfo, ReputationChangeKind};
 use reth_network_peers::{NodeRecord, PeerId};
@@ -51,6 +52,7 @@ use reth_tokio_util::EventSender;
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
+    path::PathBuf,
     pin::Pin,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -341,6 +343,19 @@ where
     /// The [`PeersHandle`] can be used to interact with the network's peer set.
     pub fn peers_handle(&self) -> PeersHandle {
         self.swarm.state().peers().handle()
+    }
+
+    /// Collect the peers from the [`NetworkManager`] and write them to the given
+    /// `persistent_peers_file`, if configured.
+    pub fn write_peers_to_file(&self, persistent_peers_file: Option<PathBuf>) -> eyre::Result<()> {
+        if let Some(file_path) = persistent_peers_file {
+            let known_peers = self.all_peers().collect::<Vec<_>>();
+            let known_peers = serde_json::to_string_pretty(&known_peers)?;
+            trace!(target: "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
+            file_path.parent().map(fs::create_dir_all).transpose()?;
+            fs::write(&file_path, known_peers)?;
+        }
+        Ok(())
     }
 
     /// Returns a new [`FetchClient`] that can be cloned and shared.

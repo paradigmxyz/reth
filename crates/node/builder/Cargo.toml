@@ -72,5 +72,8 @@ confy.workspace = true
 rayon.workspace = true
 backon.workspace = true
 
+# tracing
+tracing.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
