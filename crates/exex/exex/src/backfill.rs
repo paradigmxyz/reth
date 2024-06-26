@@ -1,5 +1,5 @@
 use crate::ExExNotification;
-use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+use reth_evm::execute::{BatchExecutor, BlockExecutionError, BlockExecutorProvider};
 use reth_node_api::FullNodeComponents;
 use reth_primitives::BlockNumber;
 use reth_provider::{
@@ -50,7 +50,7 @@ impl<Node: FullNodeComponents> BackfillJob<Node> {
 }
 
 impl<Node: FullNodeComponents> Iterator for BackfillJob<Node> {
-    type Item = Result<ExExNotification, eyre::Error>;
+    type Item = Result<ExExNotification, BlockExecutionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.range.is_empty() {
@@ -62,7 +62,7 @@ impl<Node: FullNodeComponents> Iterator for BackfillJob<Node> {
 }
 
 impl<Node: FullNodeComponents> BackfillJob<Node> {
-    fn execute_range(&mut self) -> Result<ExExNotification, eyre::Error> {
+    fn execute_range(&mut self) -> Result<ExExNotification, BlockExecutionError> {
         let provider = self.components.provider();
         let provider_ro = provider.database_provider_ro()?.disable_long_read_transaction_safety();
 
