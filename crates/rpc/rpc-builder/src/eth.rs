@@ -37,6 +37,7 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi> {
 }
 
 /// Configuration for `EthHandlersBuilder`
+// TODO: remove in favour of `EthApiBuilderCtx`
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) struct EthHandlersConfig<Provider, Pool, Network, Tasks, Events, EvmConfig> {
@@ -58,6 +59,8 @@ pub(crate) struct EthHandlersConfig<Provider, Pool, Network, Tasks, Events, EvmC
 
 /// Represents the builder for the `EthHandlers` struct, used to configure and create instances of
 /// `EthHandlers`.
+// TODO: incorporate
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig> {
     eth_handlers_config: EthHandlersConfig<Provider, Pool, Network, Tasks, Events, EvmConfig>,
@@ -65,6 +68,7 @@ pub(crate) struct EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, Evm
     rpc_config: RpcModuleConfig,
 }
 
+#[allow(dead_code)]
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
     EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig>
 where
