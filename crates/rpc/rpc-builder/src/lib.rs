@@ -201,7 +201,7 @@ mod cors;
 pub mod error;
 
 /// Eth utils
-mod eth;
+pub mod eth;
 pub use eth::{
     EthApiBuilder, EthApiBuilderCtx, EthConfig, EthHandlers, FeeHistoryCacheBuilder,
     GasPriceOracleBuilder,
@@ -655,15 +655,9 @@ where
     where
         EvmConfig: ConfigureEvm,
     {
-        let cache = EthStateCache::spawn_with(
-            provider.clone(),
-            config.eth.cache.clone(),
-            executor.clone(),
-            evm_config.clone(),
-        );
         let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
 
-        let ctx = EthApiBuilderCtx::new(
+        let eth = EthHandlers::builder(
             provider.clone(),
             pool.clone(),
             network.clone(),
@@ -671,10 +665,9 @@ where
             config.eth,
             executor.clone(),
             events.clone(),
-            cache,
-        );
-
-        let eth = EthHandlers::new(ctx, eth_server_builder);
+            eth_server_builder,
+        )
+        .build();
 
         Self {
             provider,

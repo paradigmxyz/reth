@@ -29,7 +29,7 @@ pub const MIN_TRANSACTION_GAS: u64 = 21_000u64;
 pub const ESTIMATE_GAS_ERROR_RATIO: f64 = 0.015;
 
 /// Settings for the [`GasPriceOracle`]
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GasPriceOracleConfig {
     /// The number of populated blocks to produce the gas price estimate

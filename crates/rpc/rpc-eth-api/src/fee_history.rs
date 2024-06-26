@@ -167,7 +167,7 @@ impl FeeHistoryCache {
 }
 
 /// Settings for the [`FeeHistoryCache`].
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeeHistoryCacheConfig {
     /// Max number of blocks in cache.
