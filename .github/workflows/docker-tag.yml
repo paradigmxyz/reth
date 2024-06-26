@@ -38,14 +38,14 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io --username ${DOCKER_USERNAME} --password-stdin
       - name: Tag reth image as "latest"
         run: |
-          docker pull ghcr.io/paradigmxyz/reth:${{ github.events.inputs.tag }}
-          docker tag ghcr.io/paradigmxyz/reth:${{ github.event.inputs.tag }} ghcr.io/paradigmxyz/reth:latest
+          docker pull ghcr.io/paradigmxyz/reth:${{ inputs.tag }}
+          docker tag ghcr.io/paradigmxyz/reth:${{ inputs.tag }} ghcr.io/paradigmxyz/reth:latest
       - name: Tag op-reth image as "latest"
         run: |
-          docker pull ghcr.io/paradigmxyz/op-reth:${{ github.events.inputs.tag }}
-          docker tag ghcr.io/paradigmxyz/op-reth:${{ github.event.inputs.tag }} ghcr.io/paradigmxyz/op-reth:latest
+          docker pull ghcr.io/paradigmxyz/op-reth:${{ inputs.tag }}
+          docker tag ghcr.io/paradigmxyz/op-reth:${{ inputs.tag }} ghcr.io/paradigmxyz/op-reth:latest
       - name: Push all tags
-        if: ${{ !github.event.inputs.dryRun }}
+        if: ${{ !inputs.dryRun }}
         run: |
           docker image push --all-tags ghcr.io/paradigmxyz/op-reth
           docker image push --all-tags ghcr.io/paradigmxyz/reth
