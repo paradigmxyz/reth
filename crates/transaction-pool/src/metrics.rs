@@ -106,4 +106,8 @@ pub struct AllTransactionsMetrics {
     pub(crate) all_transactions_by_all_senders: Gauge,
     /// Number of blob transactions nonce gaps.
     pub(crate) blob_transactions_nonce_gaps: Counter,
+    /// The current blob base fee
+    pub(crate) blob_base_fee: Gauge,
+    /// The current base fee
+    pub(crate) base_fee: Gauge,
 }
