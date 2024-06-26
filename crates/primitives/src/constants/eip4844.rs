@@ -11,19 +11,7 @@ pub use alloy_eips::eip4844::{
 #[cfg(feature = "c-kzg")]
 mod trusted_setup {
     use crate::kzg::KzgSettings;
-    use once_cell::sync::Lazy;
-    use std::{io::Write, sync::Arc};
-
-    /// KZG trusted setup
-    pub static MAINNET_KZG_TRUSTED_SETUP: Lazy<Arc<KzgSettings>> = Lazy::new(|| {
-        Arc::new(
-            c_kzg::KzgSettings::load_trusted_setup(
-                &revm_primitives::kzg::G1_POINTS.0,
-                &revm_primitives::kzg::G2_POINTS.0,
-            )
-            .expect("failed to load trusted setup"),
-        )
-    });
+    use std::io::Write;
 
     /// Loads the trusted setup parameters from the given bytes and returns the [`KzgSettings`].
     ///
@@ -47,15 +35,5 @@ mod trusted_setup {
         /// Kzg error
         #[error("KZG error: {0:?}")]
         KzgError(#[from] c_kzg::Error),
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn ensure_load_kzg_settings() {
-            let _settings = Arc::clone(&MAINNET_KZG_TRUSTED_SETUP);
-        }
     }
 }

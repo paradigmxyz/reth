@@ -41,6 +41,7 @@ reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 
 # ethereum
+alloy-genesis.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 # async
@@ -98,7 +99,6 @@ procfs = "0.16.0"
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
-alloy-genesis.workspace = true
 
 [features]
 optimism = [

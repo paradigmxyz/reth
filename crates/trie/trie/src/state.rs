@@ -149,16 +149,17 @@ impl HashedPostState {
 
     /// Converts hashed post state into [`HashedPostStateSorted`].
     pub fn into_sorted(self) -> HashedPostStateSorted {
-        let mut accounts = Vec::new();
+        let mut updated_accounts = Vec::new();
         let mut destroyed_accounts = HashSet::default();
         for (hashed_address, info) in self.accounts {
             if let Some(info) = info {
-                accounts.push((hashed_address, info));
+                updated_accounts.push((hashed_address, info));
             } else {
                 destroyed_accounts.insert(hashed_address);
             }
         }
-        accounts.sort_unstable_by_key(|(address, _)| *address);
+        updated_accounts.sort_unstable_by_key(|(address, _)| *address);
+        let accounts = HashedAccountsSorted { accounts: updated_accounts, destroyed_accounts };
 
         let storages = self
             .storages
@@ -166,7 +167,7 @@ impl HashedPostState {
             .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
             .collect();
 
-        HashedPostStateSorted { accounts, destroyed_accounts, storages }
+        HashedPostStateSorted { accounts, storages }
     }
 
     /// Construct [`TriePrefixSets`] from hashed post state.
@@ -309,12 +310,19 @@ impl HashedStorage {
 /// Sorted hashed post state optimized for iterating during state trie calculation.
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct HashedPostStateSorted {
+    /// Updated state of accounts.
+    pub(crate) accounts: HashedAccountsSorted,
+    /// Map of hashed addresses to hashed storage.
+    pub(crate) storages: HashMap<B256, HashedStorageSorted>,
+}
+
+/// Sorted account state optimized for iterating during state trie calculation.
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct HashedAccountsSorted {
     /// Sorted collection of hashed addresses and their account info.
     pub(crate) accounts: Vec<(B256, Account)>,
     /// Set of destroyed account keys.
     pub(crate) destroyed_accounts: HashSet<B256>,
-    /// Map of hashed addresses to hashed storage.
-    pub(crate) storages: HashMap<B256, HashedStorageSorted>,
 }
 
 /// Sorted hashed storage optimized for iterating during state trie calculation.

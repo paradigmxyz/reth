@@ -48,5 +48,4 @@ reth-tracing.workspace = true
 rand.workspace = true
 
 [features]
-default = ["serde"]
 serde = ["dep:serde", "dep:serde_with"]

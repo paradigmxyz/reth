@@ -14,6 +14,7 @@ use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
 use once_cell::sync::Lazy;
 use reth_ethereum_forks::{
+    chains::ethereum::{GOERLI_HARDFORKS, HOLESKY_HARDFORKS, MAINNET_HARDFORKS, SEPOLIA_HARDFORKS},
     DisplayHardforks, ForkCondition, ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head,
 };
 use reth_network_peers::NodeRecord;
@@ -25,7 +26,6 @@ use reth_primitives_traits::{
     Header, SealedHeader,
 };
 use reth_trie_common::root::state_root_ref_unhashed;
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "std")]
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -35,6 +35,8 @@ use crate::constants::optimism::{
     OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
 };
 pub use alloy_eips::eip1559::BaseFeeParams;
+#[cfg(feature = "optimism")]
+use reth_ethereum_forks::chains::optimism::*;
 
 #[cfg(feature = "optimism")]
 use crate::net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes};
@@ -54,31 +56,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             15537394,
             U256::from(58_750_003_716_598_352_816_469u128),
         )),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(1150000)),
-            (Hardfork::Dao, ForkCondition::Block(1920000)),
-            (Hardfork::Tangerine, ForkCondition::Block(2463000)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(2675000)),
-            (Hardfork::Byzantium, ForkCondition::Block(4370000)),
-            (Hardfork::Constantinople, ForkCondition::Block(7280000)),
-            (Hardfork::Petersburg, ForkCondition::Block(7280000)),
-            (Hardfork::Istanbul, ForkCondition::Block(9069000)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(9200000)),
-            (Hardfork::Berlin, ForkCondition::Block(12244000)),
-            (Hardfork::London, ForkCondition::Block(12965000)),
-            (Hardfork::ArrowGlacier, ForkCondition::Block(13773000)),
-            (Hardfork::GrayGlacier, ForkCondition::Block(15050000)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD {
-                    fork_block: None,
-                    total_difficulty: U256::from(58_750_000_000_000_000_000_000_u128),
-                },
-            ),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1681338455)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1710338135)),
-        ]),
+        hardforks: MAINNET_HARDFORKS.into(),
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
         deposit_contract: Some(DepositContract::new(
             address!("00000000219ab540356cbb839cbe05303d7705fa"),
@@ -102,25 +80,7 @@ pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         // <https://goerli.etherscan.io/block/7382818>
         paris_block_and_final_difficulty: Some((7382818, U256::from(10_790_000))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Dao, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(1561651)),
-            (Hardfork::Berlin, ForkCondition::Block(4460644)),
-            (Hardfork::London, ForkCondition::Block(5062605)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(10_790_000) },
-            ),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1678832736)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1705473120)),
-        ]),
+        hardforks: GOERLI_HARDFORKS.into(),
         // https://goerli.etherscan.io/tx/0xa3c07dc59bfdb1bfc2d50920fed2ef2c1c4e0a09fe2325dbc14e07702f965a78
         deposit_contract: Some(DepositContract::new(
             address!("ff50ed3d0ec03ac01d4c79aad74928bff48a7b2b"),
@@ -144,29 +104,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         )),
         // <https://sepolia.etherscan.io/block/1450409>
         paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Dao, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(0)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(0)),
-            (Hardfork::London, ForkCondition::Block(0)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD {
-                    fork_block: Some(1735371),
-                    total_difficulty: U256::from(17_000_000_000_000_000u64),
-                },
-            ),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1677557088)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1706655072)),
-        ]),
+        hardforks: SEPOLIA_HARDFORKS.into(),
         // https://sepolia.etherscan.io/tx/0x025ecbf81a2f1220da6285d1701dc89fb5a956b62562ee922e1a9efd73eb4b14
         deposit_contract: Some(DepositContract::new(
             address!("7f02c3e3c98b133055b8b348b2ac625669ed295d"),
@@ -189,26 +127,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Dao, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(0)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(0)),
-            (Hardfork::London, ForkCondition::Block(0)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
-            ),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1696000704)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1707305664)),
-        ]),
+        hardforks: HOLESKY_HARDFORKS.into(),
         deposit_contract: Some(DepositContract::new(
             address!("4242424242424242424242424242424242424242"),
             0,
@@ -279,32 +198,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(0)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(3950000)),
-            (Hardfork::London, ForkCondition::Block(105235063)),
-            (Hardfork::ArrowGlacier, ForkCondition::Block(105235063)),
-            (Hardfork::GrayGlacier, ForkCondition::Block(105235063)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD { fork_block: Some(105235063), total_difficulty: U256::from(0) },
-            ),
-            (Hardfork::Bedrock, ForkCondition::Block(105235063)),
-            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1704992401)),
-            (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1710374401)),
-            (Hardfork::Ecotone, ForkCondition::Timestamp(1710374401)),
-            (Hardfork::Fjord, ForkCondition::Timestamp(1720627201)),
-        ]),
+        hardforks: OP_MAINNET_HARDFORKS.into(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
                 (Hardfork::London, OP_BASE_FEE_PARAMS),
@@ -329,32 +223,7 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "102de6ffb001480cc9b8b548fd05c34cd4f46ae4aa91759393db90ea0409887d"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(0)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(0)),
-            (Hardfork::London, ForkCondition::Block(0)),
-            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
-            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
-            ),
-            (Hardfork::Bedrock, ForkCondition::Block(0)),
-            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
-            (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1708534800)),
-            (Hardfork::Ecotone, ForkCondition::Timestamp(1708534800)),
-            (Hardfork::Fjord, ForkCondition::Timestamp(1716998400)),
-        ]),
+        hardforks: OP_SEPOLIA_HARDFORKS.into(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
                 (Hardfork::London, OP_SEPOLIA_BASE_FEE_PARAMS),
@@ -379,32 +248,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "0dcc9e089e30b90ddfc55be9a37dd15bc551aeee999d2e2b51414c54eaf934e4"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(0)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(0)),
-            (Hardfork::London, ForkCondition::Block(0)),
-            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
-            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
-            ),
-            (Hardfork::Bedrock, ForkCondition::Block(0)),
-            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1699981200)),
-            (Hardfork::Canyon, ForkCondition::Timestamp(1699981200)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1708534800)),
-            (Hardfork::Ecotone, ForkCondition::Timestamp(1708534800)),
-            (Hardfork::Fjord, ForkCondition::Timestamp(1716998400)),
-        ]),
+        hardforks: BASE_SEPOLIA_HARDFORKS.into(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
                 (Hardfork::London, BASE_SEPOLIA_BASE_FEE_PARAMS),
@@ -429,32 +273,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             "f712aa9241cc24369b143cf6dce85f0902a9731e70d66818a3a5845b296c73dd"
         )),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: BTreeMap::from([
-            (Hardfork::Frontier, ForkCondition::Block(0)),
-            (Hardfork::Homestead, ForkCondition::Block(0)),
-            (Hardfork::Tangerine, ForkCondition::Block(0)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-            (Hardfork::Byzantium, ForkCondition::Block(0)),
-            (Hardfork::Constantinople, ForkCondition::Block(0)),
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(0)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(0)),
-            (Hardfork::Berlin, ForkCondition::Block(0)),
-            (Hardfork::London, ForkCondition::Block(0)),
-            (Hardfork::ArrowGlacier, ForkCondition::Block(0)),
-            (Hardfork::GrayGlacier, ForkCondition::Block(0)),
-            (
-                Hardfork::Paris,
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
-            ),
-            (Hardfork::Bedrock, ForkCondition::Block(0)),
-            (Hardfork::Regolith, ForkCondition::Timestamp(0)),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(1704992401)),
-            (Hardfork::Canyon, ForkCondition::Timestamp(1704992401)),
-            (Hardfork::Cancun, ForkCondition::Timestamp(1710374401)),
-            (Hardfork::Ecotone, ForkCondition::Timestamp(1710374401)),
-            (Hardfork::Fjord, ForkCondition::Timestamp(1720627201)),
-        ]),
+        hardforks: BASE_MAINNET_HARDFORKS.into(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
                 (Hardfork::London, OP_BASE_FEE_PARAMS),
@@ -470,14 +289,19 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
 
 /// A wrapper around [`BaseFeeParams`] that allows for specifying constant or dynamic EIP-1559
 /// parameters based on the active [Hardfork].
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(untagged)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BaseFeeParamsKind {
     /// Constant [`BaseFeeParams`]; used for chains that don't have dynamic EIP-1559 parameters
     Constant(BaseFeeParams),
     /// Variable [`BaseFeeParams`]; used for chains that have dynamic EIP-1559 parameters like
     /// Optimism
     Variable(ForkBaseFeeParams),
+}
+
+impl Default for BaseFeeParamsKind {
+    fn default() -> Self {
+        BaseFeeParams::ethereum().into()
+    }
 }
 
 impl From<BaseFeeParams> for BaseFeeParamsKind {
@@ -494,7 +318,7 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 
 /// A type alias to a vector of tuples of [Hardfork] and [`BaseFeeParams`], sorted by [Hardfork]
 /// activation order. This is used to specify dynamic EIP-1559 parameters for chains like Optimism.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, From)]
+#[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
 
 /// An Ethereum chain specification.
@@ -504,7 +328,7 @@ pub struct ForkBaseFeeParams(Vec<(Hardfork, BaseFeeParams)>);
 /// - Meta-information about the chain (the chain ID)
 /// - The genesis block of the chain ([`Genesis`])
 /// - What hardforks are activated, and under which conditions
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChainSpec {
     /// The chain ID
     pub chain: Chain,
@@ -513,7 +337,6 @@ pub struct ChainSpec {
     ///
     /// This acts as a small cache for known chains. If the chain is known, then the genesis hash
     /// is also known ahead of time, and this will be `Some`.
-    #[serde(skip, default)]
     pub genesis_hash: Option<B256>,
 
     /// The genesis block
@@ -521,14 +344,12 @@ pub struct ChainSpec {
 
     /// The block at which [`Hardfork::Paris`] was activated and the final difficulty at this
     /// block.
-    #[serde(skip, default)]
     pub paris_block_and_final_difficulty: Option<(u64, U256)>,
 
     /// The active hard forks and their activation conditions
     pub hardforks: BTreeMap<Hardfork, ForkCondition>,
 
     /// The deposit contract deployed for `PoS`
-    #[serde(skip, default)]
     pub deposit_contract: Option<DepositContract>,
 
     /// The parameters that configure how a block's base fee is computed
@@ -537,7 +358,6 @@ pub struct ChainSpec {
     /// The delete limit for pruner, per block. In the actual pruner run it will be multiplied by
     /// the amount of blocks between pruner runs to account for the difference in amount of new
     /// data coming in.
-    #[serde(default)]
     pub prune_delete_limit: usize,
 }
 
@@ -1102,43 +922,6 @@ impl From<Genesis> for ChainSpec {
     }
 }
 
-/// A helper type for compatibility with geth's config
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-pub enum AllGenesisFormats {
-    /// The reth genesis format
-    Reth(ChainSpec),
-    /// The geth genesis format
-    Geth(Genesis),
-}
-
-impl From<Genesis> for AllGenesisFormats {
-    fn from(genesis: Genesis) -> Self {
-        Self::Geth(genesis)
-    }
-}
-
-impl From<ChainSpec> for AllGenesisFormats {
-    fn from(genesis: ChainSpec) -> Self {
-        Self::Reth(genesis)
-    }
-}
-
-impl From<Arc<ChainSpec>> for AllGenesisFormats {
-    fn from(genesis: Arc<ChainSpec>) -> Self {
-        Arc::try_unwrap(genesis).unwrap_or_else(|arc| (*arc).clone()).into()
-    }
-}
-
-impl From<AllGenesisFormats> for ChainSpec {
-    fn from(genesis: AllGenesisFormats) -> Self {
-        match genesis {
-            AllGenesisFormats::Geth(genesis) => genesis.into(),
-            AllGenesisFormats::Reth(genesis) => genesis,
-        }
-    }
-}
-
 /// A helper to build custom chain specs
 #[derive(Debug, Default, Clone)]
 pub struct ChainSpecBuilder {
@@ -1383,98 +1166,78 @@ impl DepositContract {
     }
 }
 
+/// Genesis info for Optimism.
 #[cfg(feature = "optimism")]
+#[derive(Default, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct OptimismGenesisInfo {
     bedrock_block: Option<u64>,
     regolith_time: Option<u64>,
     canyon_time: Option<u64>,
     ecotone_time: Option<u64>,
     fjord_time: Option<u64>,
+    #[serde(skip)]
     base_fee_params: BaseFeeParamsKind,
+}
+
+#[cfg(feature = "optimism")]
+#[derive(Debug, Eq, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OptimismBaseFeeInfo {
+    eip1559_elasticity: Option<u64>,
+    eip1559_denominator: Option<u64>,
+    eip1559_denominator_canyon: Option<u64>,
 }
 
 #[cfg(feature = "optimism")]
 impl OptimismGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
-        let optimism_config =
-            genesis.config.extra_fields.get("optimism").and_then(|value| value.as_object());
+        let mut optimism_genesis_info: Self =
+            genesis.config.extra_fields.deserialize_as().unwrap_or_default();
 
-        let eip1559_elasticity = optimism_config
-            .and_then(|config| config.get("eip1559Elasticity"))
-            .and_then(|value| value.as_u64());
-
-        let eip1559_denominator = optimism_config
-            .and_then(|config| config.get("eip1559Denominator"))
-            .and_then(|value| value.as_u64());
-
-        let eip1559_denominator_canyon = optimism_config
-            .and_then(|config| config.get("eip1559DenominatorCanyon"))
-            .and_then(|value| value.as_u64());
-
-        let base_fee_params = if let (Some(elasticity), Some(denominator)) =
-            (eip1559_elasticity, eip1559_denominator)
+        if let Some(Ok(optimism_base_fee_info)) =
+            genesis.config.extra_fields.get_deserialized::<OptimismBaseFeeInfo>("optimism")
         {
-            if let Some(canyon_denominator) = eip1559_denominator_canyon {
-                BaseFeeParamsKind::Variable(
-                    vec![
-                        (
-                            Hardfork::London,
-                            BaseFeeParams::new(denominator as u128, elasticity as u128),
-                        ),
-                        (
-                            Hardfork::Canyon,
-                            BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
-                        ),
-                    ]
-                    .into(),
-                )
-            } else {
-                BaseFeeParams::new(denominator as u128, elasticity as u128).into()
-            }
-        } else {
-            BaseFeeParams::ethereum().into()
-        };
+            if let (Some(elasticity), Some(denominator)) = (
+                optimism_base_fee_info.eip1559_elasticity,
+                optimism_base_fee_info.eip1559_denominator,
+            ) {
+                let base_fee_params = if let Some(canyon_denominator) =
+                    optimism_base_fee_info.eip1559_denominator_canyon
+                {
+                    BaseFeeParamsKind::Variable(
+                        vec![
+                            (
+                                Hardfork::London,
+                                BaseFeeParams::new(denominator as u128, elasticity as u128),
+                            ),
+                            (
+                                Hardfork::Canyon,
+                                BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
+                            ),
+                        ]
+                        .into(),
+                    )
+                } else {
+                    BaseFeeParams::new(denominator as u128, elasticity as u128).into()
+                };
 
-        Self {
-            bedrock_block: genesis
-                .config
-                .extra_fields
-                .get("bedrockBlock")
-                .and_then(|value| value.as_u64()),
-            regolith_time: genesis
-                .config
-                .extra_fields
-                .get("regolithTime")
-                .and_then(|value| value.as_u64()),
-            canyon_time: genesis
-                .config
-                .extra_fields
-                .get("canyonTime")
-                .and_then(|value| value.as_u64()),
-            ecotone_time: genesis
-                .config
-                .extra_fields
-                .get("ecotoneTime")
-                .and_then(|value| value.as_u64()),
-            fjord_time: genesis
-                .config
-                .extra_fields
-                .get("fjordTime")
-                .and_then(|value| value.as_u64()),
-            base_fee_params,
+                optimism_genesis_info.base_fee_params = base_fee_params;
+            }
         }
+
+        optimism_genesis_info
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy_chains::Chain;
     use alloy_genesis::{ChainConfig, GenesisAccount};
+    use alloy_primitives::{b256, hex};
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use reth_trie_common::TrieAccount;
-
-    use super::*;
-    use alloy_primitives::{b256, hex};
     use std::{collections::HashMap, str::FromStr};
 
     fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
@@ -2653,8 +2416,7 @@ Post-merge hard forks (timestamp based):
         }
         "#;
 
-        let _genesis = serde_json::from_str::<Genesis>(hive_json).unwrap();
-        let genesis = serde_json::from_str::<AllGenesisFormats>(hive_json).unwrap();
+        let genesis = serde_json::from_str::<Genesis>(hive_json).unwrap();
         let chainspec: ChainSpec = genesis.into();
         assert_eq!(chainspec.genesis_hash, None);
         assert_eq!(chainspec.chain, Chain::from_named(NamedChain::Optimism));
@@ -2839,13 +2601,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn test_parse_prague_genesis_all_formats() {
         let s = r#"{"config":{"ethash":{},"chainId":1337,"homesteadBlock":0,"eip150Block":0,"eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"berlinBlock":0,"londonBlock":0,"terminalTotalDifficulty":0,"terminalTotalDifficultyPassed":true,"shanghaiTime":0,"cancunTime":4661, "pragueTime": 4662},"nonce":"0x0","timestamp":"0x0","extraData":"0x","gasLimit":"0x4c4b40","difficulty":"0x1","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","coinbase":"0x0000000000000000000000000000000000000000","alloc":{"658bdf435d810c91414ec09147daa6db62406379":{"balance":"0x487a9a304539440000"},"aa00000000000000000000000000000000000000":{"code":"0x6042","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x1","nonce":"0x1"},"bb00000000000000000000000000000000000000":{"code":"0x600154600354","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x2","nonce":"0x1"}},"number":"0x0","gasUsed":"0x0","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000000","baseFeePerGas":"0x3b9aca00"}"#;
-        let genesis: AllGenesisFormats = serde_json::from_str(s).unwrap();
-
-        // this should be the genesis format
-        let genesis = match genesis {
-            AllGenesisFormats::Geth(genesis) => genesis,
-            _ => panic!("expected geth genesis format"),
-        };
+        let genesis: Genesis = serde_json::from_str(s).unwrap();
 
         // assert that the alloc was picked up
         let acc = genesis
@@ -2862,13 +2618,7 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn test_parse_cancun_genesis_all_formats() {
         let s = r#"{"config":{"ethash":{},"chainId":1337,"homesteadBlock":0,"eip150Block":0,"eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"berlinBlock":0,"londonBlock":0,"terminalTotalDifficulty":0,"terminalTotalDifficultyPassed":true,"shanghaiTime":0,"cancunTime":4661},"nonce":"0x0","timestamp":"0x0","extraData":"0x","gasLimit":"0x4c4b40","difficulty":"0x1","mixHash":"0x0000000000000000000000000000000000000000000000000000000000000000","coinbase":"0x0000000000000000000000000000000000000000","alloc":{"658bdf435d810c91414ec09147daa6db62406379":{"balance":"0x487a9a304539440000"},"aa00000000000000000000000000000000000000":{"code":"0x6042","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x1","nonce":"0x1"},"bb00000000000000000000000000000000000000":{"code":"0x600154600354","storage":{"0x0000000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000000","0x0100000000000000000000000000000000000000000000000000000000000000":"0x0100000000000000000000000000000000000000000000000000000000000000","0x0200000000000000000000000000000000000000000000000000000000000000":"0x0200000000000000000000000000000000000000000000000000000000000000","0x0300000000000000000000000000000000000000000000000000000000000000":"0x0000000000000000000000000000000000000000000000000000000000000303"},"balance":"0x2","nonce":"0x1"}},"number":"0x0","gasUsed":"0x0","parentHash":"0x0000000000000000000000000000000000000000000000000000000000000000","baseFeePerGas":"0x3b9aca00"}"#;
-        let genesis: AllGenesisFormats = serde_json::from_str(s).unwrap();
-
-        // this should be the genesis format
-        let genesis = match genesis {
-            AllGenesisFormats::Geth(genesis) => genesis,
-            _ => panic!("expected geth genesis format"),
-        };
+        let genesis: Genesis = serde_json::from_str(s).unwrap();
 
         // assert that the alloc was picked up
         let acc = genesis
@@ -2935,7 +2685,7 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn test_all_genesis_formats_deserialization() {
+    fn test_genesis_format_deserialization() {
         // custom genesis with chain config
         let config = ChainConfig {
             chain_id: 2600,
@@ -2973,22 +2723,9 @@ Post-merge hard forks (timestamp based):
 
         // ensure genesis is deserialized correctly
         let serialized_genesis = serde_json::to_string(&genesis).unwrap();
-        let deserialized_genesis: AllGenesisFormats =
-            serde_json::from_str(&serialized_genesis).unwrap();
-        assert!(matches!(deserialized_genesis, AllGenesisFormats::Geth(_)));
+        let deserialized_genesis: Genesis = serde_json::from_str(&serialized_genesis).unwrap();
 
-        // build chain
-        let chain_spec = ChainSpecBuilder::default()
-            .chain(2600.into())
-            .genesis(genesis)
-            .cancun_activated()
-            .build();
-
-        // ensure chain spec is deserialized correctly
-        let serialized_chain_spec = serde_json::to_string(&chain_spec).unwrap();
-        let deserialized_chain_spec: AllGenesisFormats =
-            serde_json::from_str(&serialized_chain_spec).unwrap();
-        assert!(matches!(deserialized_chain_spec, AllGenesisFormats::Reth(_)))
+        assert_eq!(genesis, deserialized_genesis);
     }
 
     #[test]
@@ -3215,5 +2952,77 @@ Post-merge hard forks (timestamp based):
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, 30));
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, 40));
         assert!(chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, 50));
+    }
+
+    #[cfg(feature = "optimism")]
+    #[test]
+    fn parse_genesis_optimism_with_variable_base_fee_params() {
+        let geth_genesis = r#"
+    {
+      "config": {
+        "chainId": 8453,
+        "homesteadBlock": 0,
+        "eip150Block": 0,
+        "eip155Block": 0,
+        "eip158Block": 0,
+        "byzantiumBlock": 0,
+        "constantinopleBlock": 0,
+        "petersburgBlock": 0,
+        "istanbulBlock": 0,
+        "muirGlacierBlock": 0,
+        "berlinBlock": 0,
+        "londonBlock": 0,
+        "arrowGlacierBlock": 0,
+        "grayGlacierBlock": 0,
+        "mergeNetsplitBlock": 0,
+        "bedrockBlock": 0,
+        "regolithTime": 15,
+        "terminalTotalDifficulty": 0,
+        "terminalTotalDifficultyPassed": true,
+        "optimism": {
+          "eip1559Elasticity": 6,
+          "eip1559Denominator": 50
+        }
+      }
+    }
+    "#;
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
+        let chainspec = ChainSpec::from(genesis.clone());
+
+        let actual_chain_id = genesis.config.chain_id;
+        assert_eq!(actual_chain_id, 8453);
+
+        assert_eq!(chainspec.hardforks.get(&Hardfork::Istanbul), Some(&ForkCondition::Block(0)));
+
+        let actual_bedrock_block = genesis.config.extra_fields.get("bedrockBlock");
+        assert_eq!(actual_bedrock_block, Some(serde_json::Value::from(0)).as_ref());
+        let actual_canyon_timestamp = genesis.config.extra_fields.get("canyonTime");
+        assert_eq!(actual_canyon_timestamp, None);
+
+        assert!(genesis.config.terminal_total_difficulty_passed);
+
+        let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
+        let optimism_base_fee_info =
+            serde_json::from_value::<OptimismBaseFeeInfo>(optimism_object.clone()).unwrap();
+
+        assert_eq!(
+            optimism_base_fee_info,
+            OptimismBaseFeeInfo {
+                eip1559_elasticity: Some(6),
+                eip1559_denominator: Some(50),
+                eip1559_denominator_canyon: None,
+            }
+        );
+        assert_eq!(
+            chainspec.base_fee_params,
+            BaseFeeParamsKind::Constant(BaseFeeParams {
+                max_change_denominator: 50,
+                elasticity_multiplier: 6,
+            })
+        );
+
+        assert!(chainspec.is_fork_active_at_block(Hardfork::Bedrock, 0));
+
+        assert!(chainspec.is_fork_active_at_timestamp(Hardfork::Regolith, 20));
     }
 }

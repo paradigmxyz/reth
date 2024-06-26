@@ -23,8 +23,7 @@ As long as the data is representative of real-world load, or closer to worst-cas
 
 ## Prerequisites
 
-If you will be collecting CPU profiles, make sure `reth` is compiled with the `debug-fast` profile.
-For collecting memory profiles, make sure `reth` is also compiled with the `--features profiling` flag.
+If you will be collecting CPU profiles, make sure `reth` is compiled with the `profiling` profile.
 Otherwise, running `make maxperf` at the root of the repo should be sufficient for collecting accurate performance metrics.
 
 ## Command Usage
