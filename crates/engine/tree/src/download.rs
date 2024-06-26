@@ -2,9 +2,7 @@
 
 use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
 use futures::FutureExt;
-use reth_beacon_consensus::{
-    BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, EthBeaconConsensus,
-};
+use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_network_p2p::{
     bodies::client::BodiesClient,
@@ -12,7 +10,6 @@ use reth_network_p2p::{
     headers::client::HeadersClient,
 };
 use reth_primitives::{SealedBlock, SealedBlockWithSenders, B256};
-use reth_tokio_util::EventSender;
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap, HashSet},
@@ -88,8 +85,6 @@ where
     inflight_full_block_requests: Vec<FetchFullBlockFuture<Client>>,
     /// In-flight full block _range_ requests in progress.
     inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
-    /// Sender for engine events.
-    event_sender: EventSender<BeaconConsensusEngineEvent>,
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
     set_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlockWithSenders>>,
@@ -102,11 +97,7 @@ where
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance
-    pub(crate) fn new(
-        client: Client,
-        chain_spec: Arc<ChainSpec>,
-        event_sender: EventSender<BeaconConsensusEngineEvent>,
-    ) -> Self {
+    pub(crate) fn new(client: Client, chain_spec: Arc<ChainSpec>) -> Self {
         Self {
             full_block_client: FullBlockClient::new(
                 client,
@@ -115,7 +106,6 @@ where
             inflight_full_block_requests: Vec::new(),
             inflight_block_range_requests: Vec::new(),
             set_buffered_blocks: BinaryHeap::new(),
-            event_sender,
             metrics: BlockDownloaderMetrics::default(),
         }
     }
@@ -155,13 +145,6 @@ where
                 "start downloading full block range."
             );
 
-            // notify listeners that we're downloading a block range
-            self.event_sender.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
-                ConsensusEngineLiveSyncProgress::DownloadingBlocks {
-                    remaining_blocks: count,
-                    target: hash,
-                },
-            ));
             let request = self.full_block_client.get_full_block_range(hash, count);
             self.inflight_block_range_requests.push(request);
         }
@@ -180,14 +163,6 @@ where
             ?hash,
             "Start downloading full block"
         );
-
-        // notify listeners that we're downloading a block
-        self.event_sender.notify(BeaconConsensusEngineEvent::LiveSyncProgress(
-            ConsensusEngineLiveSyncProgress::DownloadingBlocks {
-                remaining_blocks: 1,
-                target: hash,
-            },
-        ));
 
         let request = self.full_block_client.get_full_block(hash);
         self.inflight_full_block_requests.push(request);
@@ -298,17 +273,14 @@ impl BlockDownloader for NoopBlockDownloader {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use futures::StreamExt;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, BlockBody, Header, SealedHeader};
-    use reth_tokio_util::EventStream;
     use std::{future::poll_fn, ops::Range, sync::Arc};
 
     struct TestHarness {
         block_downloader: BasicBlockDownloader<TestFullBlockClient>,
         client: TestFullBlockClient,
-        event_stream: EventStream<BeaconConsensusEngineEvent>,
     }
 
     impl TestHarness {
@@ -331,12 +303,8 @@ mod tests {
 
             insert_headers_into_client(&client, header, 0..total_blocks);
 
-            let event_sender = EventSender::default();
-            let event_stream = event_sender.new_listener();
-
-            let block_downloader =
-                BasicBlockDownloader::new(client.clone(), chain_spec, event_sender);
-            Self { block_downloader, client, event_stream }
+            let block_downloader = BasicBlockDownloader::new(client.clone(), chain_spec);
+            Self { block_downloader, client }
         }
     }
 
@@ -361,8 +329,7 @@ mod tests {
     #[tokio::test]
     async fn block_downloader_range_request() {
         const TOTAL_BLOCKS: usize = 10;
-        let TestHarness { mut block_downloader, mut event_stream, client } =
-            TestHarness::new(TOTAL_BLOCKS);
+        let TestHarness { mut block_downloader, client } = TestHarness::new(TOTAL_BLOCKS);
         let tip = client.highest_block().expect("there should be blocks here");
 
         // send block range download request
@@ -378,21 +345,6 @@ mod tests {
         let first_req = block_downloader.inflight_block_range_requests.first().unwrap();
         assert_eq!(first_req.start_hash(), tip.hash());
         assert_eq!(first_req.count(), tip.number);
-
-        // ensure the BeaconConsensusEngineEvent is properly sent
-        let engine_event = event_stream.next().await;
-        assert_matches!(
-            engine_event,
-            Some(BeaconConsensusEngineEvent::LiveSyncProgress(
-                ConsensusEngineLiveSyncProgress::DownloadingBlocks {
-                    remaining_blocks: count,
-                    target: hash,
-                },
-            )) => {
-                assert_eq!(count, TOTAL_BLOCKS as u64);
-                assert_eq!(hash, tip.hash());
-            }
-        );
 
         // poll downloader
         let sync_future = poll_fn(|cx| block_downloader.poll(cx));
@@ -412,8 +364,7 @@ mod tests {
     #[tokio::test]
     async fn block_downloader_set_request() {
         const TOTAL_BLOCKS: usize = 2;
-        let TestHarness { mut block_downloader, mut event_stream, client } =
-            TestHarness::new(TOTAL_BLOCKS);
+        let TestHarness { mut block_downloader, client } = TestHarness::new(TOTAL_BLOCKS);
 
         let tip = client.highest_block().expect("there should be blocks here");
 
@@ -424,21 +375,6 @@ mod tests {
 
         // ensure we have TOTAL_BLOCKS in flight full block request
         assert_eq!(block_downloader.inflight_full_block_requests.len(), TOTAL_BLOCKS);
-
-        // ensure the BeaconConsensusEngineEvent events are properly sent
-        for i in 1..=TOTAL_BLOCKS {
-            let engine_event = event_stream.next().await;
-            assert_matches!(
-                engine_event,
-                Some(BeaconConsensusEngineEvent::LiveSyncProgress(
-                    ConsensusEngineLiveSyncProgress::DownloadingBlocks {
-                        remaining_blocks: count,..
-                    },
-                )) => {
-                    assert_eq!(count, 1);
-                }
-            );
-        }
 
         // poll downloader
         let sync_future = poll_fn(|cx| block_downloader.poll(cx));
@@ -458,8 +394,7 @@ mod tests {
     #[tokio::test]
     async fn block_downloader_clear_request() {
         const TOTAL_BLOCKS: usize = 10;
-        let TestHarness { mut block_downloader, event_stream, client } =
-            TestHarness::new(TOTAL_BLOCKS);
+        let TestHarness { mut block_downloader, client } = TestHarness::new(TOTAL_BLOCKS);
 
         let tip = client.highest_block().expect("there should be blocks here");
 
