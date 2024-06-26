@@ -17,7 +17,7 @@ use reth_downloaders::file_client::{
 };
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_provider::StageCheckpointReader;
-use reth_prune_types::PruneModes;
+use reth_prune::PruneModes;
 use reth_stages::StageId;
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
