@@ -8,8 +8,8 @@ use reth_db::{mdbx, static_file::iter_static_files, DatabaseEnv, TableViewer, Ta
 use reth_db_api::database::Database;
 use reth_fs_util as fs;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_primitives::static_file::{find_fixed_range, SegmentRangeInclusive};
 use reth_provider::providers::StaticFileProvider;
+use reth_static_file_types::{find_fixed_range, SegmentRangeInclusive};
 use std::{sync::Arc, time::Duration};
 
 #[derive(Parser, Debug)]

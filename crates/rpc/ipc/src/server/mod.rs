@@ -1,9 +1,6 @@
 //! JSON-RPC IPC server implementation
 
-use crate::server::{
-    connection::{IpcConn, JsonRpcStream},
-    future::StopHandle,
-};
+use crate::server::connection::{IpcConn, JsonRpcStream};
 use futures::StreamExt;
 use futures_util::future::Either;
 use interprocess::local_socket::{
@@ -15,8 +12,8 @@ use jsonrpsee::{
     core::TEN_MB_SIZE_BYTES,
     server::{
         middleware::rpc::{RpcLoggerLayer, RpcServiceT},
-        AlreadyStoppedError, ConnectionGuard, ConnectionPermit, IdProvider,
-        RandomIntegerIdProvider,
+        stop_channel, ConnectionGuard, ConnectionPermit, IdProvider, RandomIntegerIdProvider,
+        ServerHandle, StopHandle,
     },
     BoundedSubscriptions, MethodSink, Methods,
 };
@@ -29,7 +26,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
-    sync::{oneshot, watch},
+    sync::oneshot,
 };
 use tower::{layer::util::Identity, Layer, Service};
 use tracing::{debug, instrument, trace, warn, Instrument};
@@ -46,7 +43,6 @@ use tokio_stream::wrappers::ReceiverStream;
 use tower::layer::{util::Stack, LayerFn};
 
 mod connection;
-mod future;
 mod ipc;
 mod rpc_service;
 
@@ -109,9 +105,8 @@ where
         methods: impl Into<Methods>,
     ) -> Result<ServerHandle, IpcServerStartError> {
         let methods = methods.into();
-        let (stop_tx, stop_rx) = watch::channel(());
 
-        let stop_handle = StopHandle::new(stop_rx);
+        let (stop_handle, server_handle) = stop_channel();
 
         // use a signal channel to wait until we're ready to accept connections
         let (tx, rx) = oneshot::channel();
@@ -122,7 +117,7 @@ where
         };
         rx.await.expect("channel is open")?;
 
-        Ok(ServerHandle::new(stop_tx))
+        Ok(server_handle)
     }
 
     async fn start_inner(
@@ -795,35 +790,6 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     }
 }
 
-/// Server handle.
-///
-/// When all [`jsonrpsee::server::StopHandle`]'s have been `dropped` or `stop` has been called
-/// the server will be stopped.
-#[derive(Debug, Clone)]
-pub struct ServerHandle(Arc<watch::Sender<()>>);
-
-impl ServerHandle {
-    /// Create a new server handle.
-    pub(crate) fn new(tx: watch::Sender<()>) -> Self {
-        Self(Arc::new(tx))
-    }
-
-    /// Tell the server to stop without waiting for the server to stop.
-    pub fn stop(&self) -> Result<(), AlreadyStoppedError> {
-        self.0.send(()).map_err(|_| AlreadyStoppedError)
-    }
-
-    /// Wait for the server to stop.
-    pub async fn stopped(self) {
-        self.0.closed().await
-    }
-
-    /// Check if the server has been stopped.
-    pub fn is_stopped(&self) -> bool {
-        self.0.is_closed()
-    }
-}
-
 #[cfg(test)]
 pub fn dummy_name() -> String {
     let num: u64 = rand::Rng::gen(&mut rand::thread_rng());
@@ -877,7 +843,7 @@ mod tests {
                     // and you might want to do something smarter if it's
                     // critical that "the most recent item" must be sent when it is produced.
                     if sink.send(notif).await.is_err() {
-                        break Ok(())
+                        break Ok(());
                     }
 
                     closed = c;

@@ -24,16 +24,15 @@ use reth_fs_util as fs;
 use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::database::CachedReads;
 use reth_primitives::{
-    constants::eip4844::{LoadKzgSettingsError, MAINNET_KZG_TRUSTED_SETUP},
-    revm_primitives::KzgSettings,
-    Address, BlobTransaction, BlobTransactionSidecar, Bytes, PooledTransactionsElement,
-    SealedBlock, SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
+    constants::eip4844::LoadKzgSettingsError, revm_primitives::KzgSettings, Address,
+    BlobTransaction, BlobTransactionSidecar, Bytes, PooledTransactionsElement, SealedBlock,
+    SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
 };
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
     ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, primitives::EnvKzgSettings};
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use reth_stages::StageId;
 use reth_transaction_pool::{
@@ -103,14 +102,14 @@ impl Command {
     }
 
     /// Loads the trusted setup params from a given file path or falls back to
-    /// `MAINNET_KZG_TRUSTED_SETUP`.
-    fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
+    /// `EnvKzgSettings::Default`.
+    fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
         if let Some(ref trusted_setup_file) = self.trusted_setup_file {
             let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
                 .map_err(LoadKzgSettingsError::KzgError)?;
-            Ok(Arc::new(trusted_setup))
+            Ok(EnvKzgSettings::Custom(Arc::new(trusted_setup)))
         } else {
-            Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
+            Ok(EnvKzgSettings::Default)
         }
     }
 

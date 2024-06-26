@@ -42,11 +42,17 @@ impl ChainHardforks {
     /// Creates a new [`ChainHardforks`] from a list.
     pub fn new(forks: Vec<(Box<dyn Hardfork>, ForkCondition)>) -> Self {
         let mut index = HashMap::default();
-        for (fork, condition) in forks.iter() {
+        for (fork, condition) in &forks {
             index.insert(fork.name(), *condition);
         }
 
-        ChainHardforks { forks, map: index }
+        Self { forks, map: index }
+    }
+
+    /// Total number of hardforks.
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.forks.len()
     }
 
     /// Retrieves [`ForkCondition`] from `fork`. If `fork` is not present, returns
@@ -82,7 +88,7 @@ impl ChainHardforks {
         match self.map.entry(fork.name()) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
                 *entry.get_mut() = condition;
-                for (_, inner_condition) in self.forks.iter_mut() {
+                for (_, inner_condition) in &mut self.forks {
                     *inner_condition = condition;
                 }
             }

@@ -68,9 +68,9 @@ jobs:
       matrix:
         # TODO: enable etherem/sync once resolved:
         # https://github.com/paradigmxyz/reth/issues/8579
-        # TODO: enable ethereum/rpc once resolved:
+        # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
-        # sim: [ethereum/rpc, smoke/genesis, smoke/network, ethereum/sync]
+        # sim: [smoke/genesis, smoke/network, ethereum/sync]
         sim: [smoke/genesis, smoke/network]
         include:
           - sim: devp2p
@@ -107,11 +107,12 @@ jobs:
           - sim: ethereum/engine
             limit: engine-transition
           # TODO: enable engine-api once resolved:
-          # https://github.com/paradigmxyz/reth/issues/6217
           # https://github.com/paradigmxyz/reth/issues/8305
+          # https://github.com/paradigmxyz/reth/issues/6217
           # - sim: ethereum/engine
           #   limit: engine-api
           # TODO: enable cancun once resolved:
+          # https://github.com/paradigmxyz/reth/issues/8305
           # https://github.com/paradigmxyz/reth/issues/6217
           # https://github.com/paradigmxyz/reth/issues/8306
           # https://github.com/paradigmxyz/reth/issues/7144

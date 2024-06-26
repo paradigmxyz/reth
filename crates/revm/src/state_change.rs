@@ -86,7 +86,7 @@ pub fn post_block_balance_increments(
 ///
 /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
 #[inline]
-pub fn apply_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCommit>(
+pub fn apply_blockhashes_update<DB: Database<Error: Into<ProviderError>> + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_timestamp: u64,
@@ -108,7 +108,7 @@ where
     // nonce of 1, so it does not get deleted.
     let mut account: Account = db
         .basic(HISTORY_STORAGE_ADDRESS)
-        .map_err(BlockValidationError::BlockHashAccountLoadingFailed)?
+        .map_err(|err| BlockValidationError::BlockHashAccountLoadingFailed(err.into()))?
         .unwrap_or_else(|| AccountInfo {
             nonce: 1,
             code: Some(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
@@ -132,7 +132,7 @@ where
 ///
 /// This calculates the correct storage slot in the `BLOCKHASH` history storage address, fetches the
 /// blockhash and creates a [`EvmStorageSlot`] with appropriate previous and new values.
-fn eip2935_block_hash_slot<DB: Database<Error = ProviderError>>(
+fn eip2935_block_hash_slot<DB: Database<Error: Into<ProviderError>>>(
     db: &mut DB,
     block_number: u64,
     block_hash: B256,
@@ -140,7 +140,7 @@ fn eip2935_block_hash_slot<DB: Database<Error = ProviderError>>(
     let slot = U256::from(block_number % BLOCKHASH_SERVE_WINDOW as u64);
     let current_hash = db
         .storage(HISTORY_STORAGE_ADDRESS, slot)
-        .map_err(BlockValidationError::BlockHashAccountLoadingFailed)?;
+        .map_err(|err| BlockValidationError::BlockHashAccountLoadingFailed(err.into()))?;
 
     Ok((slot, EvmStorageSlot::new_changed(current_hash, block_hash.into())))
 }
