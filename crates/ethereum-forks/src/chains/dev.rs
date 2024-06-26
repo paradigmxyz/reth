@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 
 /// Dev hardforks
 pub static DEV_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
-    ChainHardforks(vec![
+    ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Dao.boxed(), ForkCondition::Block(0)),

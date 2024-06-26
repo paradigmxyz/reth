@@ -9,7 +9,7 @@ mod optimism;
 pub use optimism::{OptimismActivations, OptimismHardforks};
 
 use crate::{ForkCondition, Hardfork};
-use core::ops::Deref;
+use std::collections::HashMap;
 
 /// Generic trait over a set of ordered hardforks
 pub trait Hardforks: Default + Clone {
@@ -33,17 +33,22 @@ pub trait Hardforks: Default + Clone {
 
 /// Ordered list of a chain hardforks that implement [`Hardfork`].
 #[derive(Default, Clone, PartialEq, Eq)]
-pub struct ChainHardforks(pub Vec<(Box<dyn Hardfork>, ForkCondition)>);
-
-impl Deref for ChainHardforks {
-    type Target = Vec<(Box<dyn Hardfork>, ForkCondition)>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+pub struct ChainHardforks {
+    forks: Vec<(Box<dyn Hardfork>, ForkCondition)>,
+    map: HashMap<&'static str, ForkCondition>,
 }
 
 impl ChainHardforks {
+    /// Creates a new [`ChainHardforks`] from a list.
+    pub fn new(forks: Vec<(Box<dyn Hardfork>, ForkCondition)>) -> Self {
+        let mut index = HashMap::default();
+        for (fork, condition) in forks.iter() {
+            index.insert(fork.name(), *condition);
+        }
+
+        ChainHardforks { forks, map: index }
+    }
+
     /// Retrieves [`ForkCondition`] from `fork`. If `fork` is not present, returns
     /// [`ForkCondition::Never`].
     pub fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
@@ -52,19 +57,14 @@ impl ChainHardforks {
 
     /// Retrieves [`ForkCondition`] from `fork` if it exists, otherwise `None`.
     pub fn get<H: Hardfork>(&self, fork: H) -> Option<ForkCondition> {
-        for (inner_fork, condition) in &self.0 {
-            if fork.name() == inner_fork.name() {
-                return Some(*condition)
-            }
-        }
-        None
+        self.map.get(fork.name()).copied()
     }
 
     /// Get an iterator of all hardforks with their respective activation conditions.
     pub fn forks_iter(
         &self,
     ) -> impl Iterator<Item = (&Box<dyn Hardfork + 'static>, ForkCondition)> {
-        self.0.iter().map(|(f, b)| (f, *b))
+        self.forks.iter().map(|(f, b)| (f, *b))
     }
 
     /// Convenience method to check if a fork is active at a given timestamp.
@@ -79,18 +79,24 @@ impl ChainHardforks {
 
     /// Inserts `fork` into list, updating with a new [`ForkCondition`] if it already exists.
     pub fn insert<H: Hardfork>(&mut self, fork: H, condition: ForkCondition) {
-        if let Some((_, inner_condition)) =
-            self.0.iter_mut().find(|(inner_fork, _)| inner_fork.name() == fork.name())
-        {
-            *inner_condition = condition;
-        } else {
-            self.0.push((Box::new(fork), condition));
+        match self.map.entry(fork.name()) {
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                *entry.get_mut() = condition;
+                for (_, inner_condition) in self.forks.iter_mut() {
+                    *inner_condition = condition;
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(condition);
+                self.forks.push((Box::new(fork), condition));
+            }
         }
     }
 
     /// Removes `fork` from list.
     pub fn remove<H: Hardfork>(&mut self, fork: H) {
-        self.0.retain(|(inner_fork, _)| inner_fork.name() != fork.name());
+        self.forks.retain(|(inner_fork, _)| inner_fork.name() != fork.name());
+        self.map.remove(fork.name());
     }
 }
 
@@ -107,7 +113,7 @@ impl Hardforks for ChainHardforks {
 impl core::fmt::Debug for ChainHardforks {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ChainHardforks")
-            .field("0", &self.iter().map(|(hf, cond)| (hf.name(), cond)).collect::<Vec<_>>())
+            .field("0", &self.forks_iter().map(|(hf, cond)| (hf.name(), cond)).collect::<Vec<_>>())
             .finish()
     }
 }

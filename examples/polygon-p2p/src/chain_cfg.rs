@@ -17,7 +17,7 @@ pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
         genesis: serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis"),
         genesis_hash: Some(GENESIS),
         paris_block_and_final_difficulty: None,
-        hardforks: ChainHardforks(vec![
+        hardforks: ChainHardforks::new(vec![
             (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
             (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(3395000)),
             (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(3395000)),

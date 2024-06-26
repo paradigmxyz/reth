@@ -16,7 +16,7 @@ pub(crate) fn bsc_chain_spec() -> Arc<ChainSpec> {
         genesis: serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis"),
         genesis_hash: Some(GENESIS),
         paris_block_and_final_difficulty: None,
-        hardforks: ChainHardforks(vec![(
+        hardforks: ChainHardforks::new(vec![(
             EthereumHardfork::Shanghai.boxed(),
             ForkCondition::Timestamp(SHANGHAI_TIME),
         )]),

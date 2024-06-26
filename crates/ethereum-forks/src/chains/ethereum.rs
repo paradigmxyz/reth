@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 
 /// Ethereum mainnet hardforks
 pub static MAINNET_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
-    ChainHardforks(vec![
+    ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(1150000)),
         (EthereumHardfork::Dao.boxed(), ForkCondition::Block(1920000)),
@@ -33,7 +33,7 @@ pub static MAINNET_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
 
 /// Ethereum Goerli hardforks
 pub static GOERLI_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
-    ChainHardforks(vec![
+    ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Dao.boxed(), ForkCondition::Block(0)),
@@ -56,7 +56,7 @@ pub static GOERLI_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
 
 /// Ethereum Sepolia hardforks
 pub static SEPOLIA_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
-    ChainHardforks(vec![
+    ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Dao.boxed(), ForkCondition::Block(0)),
@@ -83,7 +83,7 @@ pub static SEPOLIA_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
 
 /// Ethereum Holesky hardforks
 pub static HOLESKY_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
-    ChainHardforks(vec![
+    ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Dao.boxed(), ForkCondition::Block(0)),

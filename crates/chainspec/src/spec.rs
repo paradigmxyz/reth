@@ -832,7 +832,7 @@ impl From<Genesis> for ChainSpec {
             chain: genesis.config.chain_id.into(),
             genesis,
             genesis_hash: None,
-            hardforks: ChainHardforks(hardforks),
+            hardforks: ChainHardforks::new(hardforks),
             paris_block_and_final_difficulty,
             deposit_contract,
             #[cfg(feature = "optimism")]
@@ -1065,7 +1065,7 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
         Self {
             chain: Some(value.chain),
             genesis: Some(value.genesis.clone()),
-            hardforks: ChainHardforks(
+            hardforks: ChainHardforks::new(
                 value.hardforks.forks_iter().map(|(fork, cond)| (fork.clone(), cond)).collect(),
             ),
         }
@@ -2703,7 +2703,7 @@ Post-merge hard forks (timestamp based):
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
             genesis_hash: None,
-            hardforks: ChainHardforks(vec![(
+            hardforks: ChainHardforks::new(vec![(
                 EthereumHardfork::Frontier.boxed(),
                 ForkCondition::Never,
             )]),
@@ -2721,7 +2721,7 @@ Post-merge hard forks (timestamp based):
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
             genesis_hash: None,
-            hardforks: ChainHardforks(vec![(
+            hardforks: ChainHardforks::new(vec![(
                 EthereumHardfork::Shanghai.boxed(),
                 ForkCondition::Never,
             )]),

@@ -6,7 +6,7 @@ use once_cell::sync::Lazy;
 
 /// Optimism mainnet hardforks
 pub static OP_MAINNET_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
-    ChainHardforks(vec![
+    ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
@@ -36,7 +36,7 @@ pub static OP_MAINNET_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
 
 /// Optimism Sepolia hardforks
 pub static OP_SEPOLIA_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
-    ChainHardforks(vec![
+    ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
@@ -66,7 +66,7 @@ pub static OP_SEPOLIA_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
 
 /// Base Sepolia hardforks
 pub static BASE_SEPOLIA_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
-    ChainHardforks(vec![
+    ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
@@ -96,7 +96,7 @@ pub static BASE_SEPOLIA_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
 
 /// Base Mainnet hardforks
 pub static BASE_MAINNET_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
-    ChainHardforks(vec![
+    ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
