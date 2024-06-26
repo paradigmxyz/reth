@@ -619,7 +619,7 @@ pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EthApi> {
     network: Network,
     executor: Tasks,
     events: Events,
-    /// Holds a all 'eth_' namespace handlers
+    /// Holds a all `eth_` namespace handlers
     eth: EthHandlers<Provider, Pool, Network, Events, EthApi>,
     /// to put trace calls behind semaphore
     blocking_pool_guard: BlockingTaskGuard,

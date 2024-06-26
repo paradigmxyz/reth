@@ -69,7 +69,7 @@ pub struct Discv5 {
     discv5: Arc<discv5::Discv5>,
     /// [`IpMode`] of the `RLPx` network.
     rlpx_ip_mode: IpMode,
-    /// Key used in kv-pair to ID chain, e.g. 'opstack' or 'eth'.
+    /// Key used in kv-pair to ID chain, e.g. 'opstack' or `eth`.
     fork_key: Option<&'static [u8]>,
     /// Filter applied to a discovered peers before passing it up to app.
     discovered_peer_filter: MustNotIncludeKeys,

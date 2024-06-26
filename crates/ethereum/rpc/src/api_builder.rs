@@ -16,9 +16,9 @@ impl<Provider, Pool, EvmConfig, Network, Tasks, Events>
     EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events> for EthApiBuild
 where
     Provider: FullRpcProvider,
-    Pool: TransactionPool + 'static,
-    Network: NetworkInfo + 'static,
-    Tasks: TaskSpawner + 'static,
+    Pool: TransactionPool,
+    Network: NetworkInfo + Clone,
+    Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions,
     EvmConfig: ConfigureEvm,
 {
@@ -26,26 +26,22 @@ where
 
     fn build(
         &self,
-        ctx: EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> Self::Server {
-        let gas_oracle = GasPriceOracleBuilder::build(&ctx);
-        let fee_history_cache = FeeHistoryCacheBuilder::build(&ctx);
-
-        let EthApiBuilderCtx {
-            provider, pool, network, evm_config, executor, cache, config, ..
-        } = ctx;
+        let gas_oracle = GasPriceOracleBuilder::build(ctx);
+        let fee_history_cache = FeeHistoryCacheBuilder::build(ctx);
 
         EthApi::with_spawner(
-            provider,
-            pool,
-            network,
-            cache,
+            ctx.provider.clone(),
+            ctx.pool.clone(),
+            ctx.network.clone(),
+            ctx.cache.clone(),
             gas_oracle,
-            config.rpc_gas_cap,
-            Box::new(executor),
+            ctx.config.rpc_gas_cap,
+            Box::new(ctx.executor.clone()),
             BlockingTaskPool::build().expect("failed to build blocking task pool"),
             fee_history_cache,
-            evm_config,
+            ctx.evm_config.clone(),
             None,
         )
     }

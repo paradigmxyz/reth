@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 /// Default value for stale filter ttl
 const DEFAULT_STALE_FILTER_TTL: Duration = Duration::from_secs(5 * 60);
 
-/// All handlers for the core `eth` namespace API.
+/// Handlers for core, filter and pubsub `eth` namespace APIs.
 #[derive(Debug, Clone)]
 pub struct EthHandlers<Provider, Pool, Network, Events, EthApi> {
     /// Main `eth_` request handler
@@ -60,7 +60,7 @@ impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Networ
     }
 }
 
-/// Builds [`EthHandlers`] for given [`EthApiBuilderCtx`].
+/// Builds [`EthHandlers`] for core, filter, and pubsub `eth_` apis.
 #[derive(Debug)]
 pub struct EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi> {
     provider: Provider,
@@ -117,23 +117,11 @@ where
             cache,
         };
 
-        let api = eth_api_builder.build(ctx.clone());
+        let api = eth_api_builder.build(&ctx);
 
-        let filter = EthFilter::new(
-            ctx.provider.clone(),
-            ctx.pool.clone(),
-            ctx.cache.clone(),
-            ctx.config.filter_config(),
-            Box::new(ctx.executor.clone()),
-        );
+        let filter = EthFilterApiBuilder::build(&ctx);
 
-        let pubsub = EthPubSub::with_spawner(
-            ctx.provider,
-            ctx.pool,
-            ctx.events,
-            ctx.network,
-            Box::new(ctx.executor),
-        );
+        let pubsub = EthPubSubApiBuilder::build(&ctx);
 
         EthHandlers { api, cache: ctx.cache, filter, pubsub }
     }
@@ -226,7 +214,7 @@ impl EthConfig {
     }
 }
 
-/// Context for building the `eth` namespace server.
+/// Context for building the `eth` namespace API.
 #[derive(Debug, Clone)]
 pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events> {
     /// Database handle.
@@ -247,26 +235,76 @@ pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events> {
     pub cache: EthStateCache,
 }
 
-/// Builds RPC server for `eth` namespace.
+/// Builds [`EthApiServer`](reth_rpc::eth::EthApiServer), the core `eth` namespace API.
 pub trait EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>: Debug {
     /// `eth` namespace RPC server type.
     type Server;
 
-    /// Builds the [`EthApiServer`]
+    /// Builds the [`EthApiServer`](reth_rpc::eth::EthApiServer), for given context.
     fn build(
         &self,
-        ctx: EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> Self::Server
     where
         Self::Server: FullEthApiServer;
 }
 
-/// Builds eth server component gas price oracle, for given context.
+/// Builds the `eth_` namespace API [`EthFilterApiServer`](reth_rpc::eth::EthFilterApiServer).
+#[derive(Debug)]
+pub struct EthFilterApiBuilder;
+
+impl EthFilterApiBuilder {
+    /// Builds the [`EthFilterApiServer`](reth_rpc::eth::EthFilterApiServer), for given context.
+    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    ) -> EthFilter<Provider, Pool>
+    where
+        Provider: Send + Sync + Clone + 'static,
+        Pool: Send + Sync + Clone + 'static,
+        Tasks: TaskSpawner + Clone + 'static,
+    {
+        EthFilter::new(
+            ctx.provider.clone(),
+            ctx.pool.clone(),
+            ctx.cache.clone(),
+            ctx.config.filter_config(),
+            Box::new(ctx.executor.clone()),
+        )
+    }
+}
+
+/// Builds the `eth_` namespace API [`EthPubSubApiServer`](reth_rpc::eth::EthFilterApiServer).
+#[derive(Debug)]
+pub struct EthPubSubApiBuilder;
+
+impl EthPubSubApiBuilder {
+    /// Builds the [`EthPubSubApiServer`](reth_rpc::eth::EthPubSubApiServer), for given context.
+    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    ) -> EthPubSub<Provider, Pool, Events, Network>
+    where
+        Provider: Clone,
+        Pool: Clone,
+        Events: Clone,
+        Network: Clone,
+        Tasks: TaskSpawner + Clone + 'static,
+    {
+        EthPubSub::with_spawner(
+            ctx.provider.clone(),
+            ctx.pool.clone(),
+            ctx.events.clone(),
+            ctx.network.clone(),
+            Box::new(ctx.executor.clone()),
+        )
+    }
+}
+
+/// Builds `eth_` core api component [`GasPriceOracle`], for given context.
 #[derive(Debug)]
 pub struct GasPriceOracleBuilder;
 
 impl GasPriceOracleBuilder {
-    /// Builds a gas price oracle, for given context.
+    /// Builds a [`GasPriceOracle`], for given context.
     pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
         ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> GasPriceOracle<Provider>
@@ -277,12 +315,12 @@ impl GasPriceOracleBuilder {
     }
 }
 
-/// Builds eth server component fee history cache, for given context.
+/// Builds `eth_` core api component [`FeeHistoryCache`], for given context.
 #[derive(Debug)]
 pub struct FeeHistoryCacheBuilder;
 
 impl FeeHistoryCacheBuilder {
-    /// Builds a fee history cache, for given context.
+    /// Builds a [`FeeHistoryCache`], for given context.
     pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
         ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> FeeHistoryCache

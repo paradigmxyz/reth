@@ -42,7 +42,7 @@ impl<T, DB: Database> FullProvider<DB> for T where
 {
 }
 
-/// Helper trait to unify all provider traits required to support 'eth' RPC server behaviour, for
+/// Helper trait to unify all provider traits required to support `eth` RPC server behaviour, for
 /// simplicity.
 pub trait FullRpcProvider:
     StateProviderFactory
