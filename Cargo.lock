@@ -2811,6 +2811,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-custom-rlpx-subprotocol"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "rand 0.8.5",
+ "reth",
+ "reth-eth-wire",
+ "reth-network",
+ "reth-network-api",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "reth-provider",
+ "reth-rpc-types",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
 name = "example-db-access"
 version = "0.0.0"
 dependencies = [
