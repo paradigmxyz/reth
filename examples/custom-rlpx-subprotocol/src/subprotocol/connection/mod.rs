@@ -8,7 +8,7 @@ use std::{
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use super::protocol::message::{CustomRlpxProtoMessage, CustomRlpxProtoMessageKind};
+use super::protocol::proto::{CustomRlpxProtoMessage, CustomRlpxProtoMessageKind};
 
 pub(crate) mod handler;
 

@@ -1,3 +1,12 @@
+//! Example for how to customize the network layer by adding a custom rlpx subprotocol.
+//!
+//! Run with
+//!
+//! ```not_rust
+//! cargo run -p custom-rlpx-subprotocol -- node
+//! ```
+//!
+//! This launch a regular reth node with a custom rlpx subprotocol.
 use reth::builder::NodeHandle;
 use reth_network::{
     config::SecretKey, protocol::IntoRlpxSubProtocol, NetworkConfig, NetworkManager,
@@ -5,7 +14,6 @@ use reth_network::{
 };
 use reth_network_api::NetworkInfo;
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::revm_primitives::FixedBytes;
 use reth_provider::test_utils::NoopProvider;
 use subprotocol::{
     connection::CustomCommand,
@@ -15,6 +23,7 @@ use subprotocol::{
     },
 };
 use tokio::sync::{mpsc, oneshot};
+use tracing::info;
 
 mod subprotocol;
 
@@ -47,7 +56,7 @@ fn main() -> eyre::Result<()> {
         node.task_executor.spawn(subnetwork);
 
         // connect the launched node to the subnetwork
-        node.network.peers_handle().add_peer(FixedBytes(*subnetwork_peer_id), subnetwork_peer_addr);
+        node.network.peers_handle().add_peer(subnetwork_peer_id, subnetwork_peer_addr);
 
         // connect the subnetwork to the launched node
         subnetwork_handle.add_peer(*peer_id, peer_addr);
@@ -81,6 +90,8 @@ fn main() -> eyre::Result<()> {
         peer1_conn.send(CustomCommand::Message { msg: "world!".to_owned(), response: tx })?;
         let response = rx.await?;
         assert_eq!(response, "world!");
+
+        info!("Peers connected via custom rlpx subprotocol!");
 
         node_exit_future.await
     })

@@ -1,3 +1,3 @@
 pub(crate) mod event;
 pub(crate) mod handler;
-pub(crate) mod message;
+pub(crate) mod proto;

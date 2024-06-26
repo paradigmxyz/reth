@@ -1,3 +1,6 @@
+//! Simple RLPx Ping Pong protocol that also support sending messages,
+//! following [RLPx specs](https://github.com/ethereum/devp2p/blob/master/rlpx.md)
+
 use reth_eth_wire::{protocol::Protocol, Capability};
 use reth_primitives::{Buf, BufMut, BytesMut};
 
