@@ -24,7 +24,7 @@ pub trait EthBlocks: LoadBlock {
     /// Returns the block header for the given block id.
     fn rpc_block_header(
         &self,
-        block_id: impl Into<BlockId> + Send,
+        block_id: BlockId,
     ) -> impl Future<Output = EthResult<Option<Header>>> + Send
     where
         Self: LoadPendingBlock + SpawnBlocking,
@@ -38,7 +38,7 @@ pub trait EthBlocks: LoadBlock {
     /// only contain the transaction hashes.
     fn rpc_block(
         &self,
-        block_id: impl Into<BlockId> + Send,
+        block_id: BlockId,
         full: bool,
     ) -> impl Future<Output = EthResult<Option<RichBlock>>> + Send
     where
