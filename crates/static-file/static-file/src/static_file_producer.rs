@@ -60,7 +60,7 @@ pub struct StaticFileProducerInner<DB> {
     event_sender: EventSender<StaticFileProducerEvent>,
 }
 
-/// Static File targets, per data part, measured in [`BlockNumber`].
+/// Static File targets, per data segment, measured in [`BlockNumber`].
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StaticFileTargets {
     headers: Option<RangeInclusive<BlockNumber>>,
