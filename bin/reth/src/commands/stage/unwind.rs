@@ -16,8 +16,8 @@ use reth_provider::{
 use reth_prune_types::PruneModes;
 use reth_stages::{
     sets::{DefaultStages, OfflineStages},
-    stages::{ExecutionStage, ExecutionStageThresholds},
-    Pipeline, StageSet,
+    stages::ExecutionStage,
+    ExecutionStageThresholds, Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use std::{ops::RangeInclusive, sync::Arc};

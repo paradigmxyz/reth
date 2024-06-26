@@ -66,7 +66,9 @@ mod tests {
         StaticFileProviderFactory, StorageReader,
     };
     use reth_prune_types::{PruneMode, PruneModes};
-    use reth_stages_api::{ExecInput, PipelineTarget, Stage, StageCheckpoint, StageId};
+    use reth_stages_api::{
+        ExecInput, ExecutionStageThresholds, PipelineTarget, Stage, StageCheckpoint, StageId,
+    };
     use reth_testing_utils::generators::{self, random_block, random_block_range, random_receipt};
     use std::{io::Write, sync::Arc};
 
