@@ -25,7 +25,7 @@ members = [
     "crates/consensus/debug-client/",
     "crates/ethereum-forks/",
     "crates/e2e-test-utils/",
-    "crates/engine-primitives/",
+    "crates/engine/primitives/",
     "crates/engine/util/",
     "crates/errors/",
     "crates/ethereum-forks/",
@@ -282,7 +282,7 @@ reth-dns-discovery = { path = "crates/net/dns" }
 reth-downloaders = { path = "crates/net/downloaders" }
 reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-ecies = { path = "crates/net/ecies" }
-reth-engine-primitives = { path = "crates/engine-primitives" }
+reth-engine-primitives = { path = "crates/engine/primitives" }
 reth-engine-util = { path = "crates/engine/util" }
 reth-errors = { path = "crates/errors" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
