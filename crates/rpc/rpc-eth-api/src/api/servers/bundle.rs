@@ -1,5 +1,6 @@
 //! `Eth` bundle implementation and helpers.
 
+use futures::FutureExt;
 use std::sync::Arc;
 
 use jsonrpsee::core::RpcResult;
@@ -208,6 +209,7 @@ where
 
                 Ok(res)
             })
+            .boxed()
             .await
     }
 }

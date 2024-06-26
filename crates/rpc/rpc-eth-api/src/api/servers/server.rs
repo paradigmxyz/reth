@@ -419,6 +419,9 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::{
+        EthApi, EthApiServer, EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
+    };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
     use reth_chainspec::BaseFeeParams;
     use reth_evm_ethereum::EthEvmConfig;
@@ -435,10 +438,6 @@ mod tests {
     use reth_tasks::pool::BlockingTaskPool;
     use reth_testing_utils::{generators, generators::Rng};
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-
-    use crate::{
-        EthApi, EthApiServer, EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
-    };
 
     fn build_test_eth_api<
         P: BlockReaderIdExt

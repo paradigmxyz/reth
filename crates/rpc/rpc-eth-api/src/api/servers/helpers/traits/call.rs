@@ -1,29 +1,7 @@
 //! Loads a pending block from database. Helper trait for `eth_` transaction, call and trace RPC
 //! methods.
 
-use futures::Future;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{
-    revm::env::tx_env_with_recovered,
-    revm_primitives::{
-        BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
-        ResultAndState, TransactTo,
-    },
-    Bytes, TransactionSignedEcRecovered, TxKind, B256, U256,
-};
-use reth_provider::StateProvider;
-use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
-use reth_rpc_types::{
-    state::{EvmOverrides, StateOverride},
-    AccessListWithGasUsed, BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
-    TransactionRequest,
-};
-use revm::{Database, DatabaseCommit};
-use revm_inspectors::access_list::AccessListInspector;
-use tracing::trace;
-
 use crate::{
-    cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::ensure_success,
     revm_utils::{
         apply_state_overrides, build_call_evm_env, caller_gas_allowance,
@@ -33,6 +11,26 @@ use crate::{
     EthApiError, EthResult, RevertError, RpcInvalidTransactionError, StateCacheDb,
     ESTIMATE_GAS_ERROR_RATIO, MIN_TRANSACTION_GAS,
 };
+use futures::{Future, FutureExt};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_primitives::{
+    revm::env::tx_env_with_recovered,
+    revm_primitives::{
+        BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
+        ResultAndState, TransactTo,
+    },
+    Bytes, TransactionSignedEcRecovered, TxKind, B256, U256,
+};
+use reth_provider::{StateProvider, StateProviderBox};
+use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
+use reth_rpc_types::{
+    state::{EvmOverrides, StateOverride},
+    AccessListWithGasUsed, BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
+    TransactionRequest,
+};
+use revm::{Database, DatabaseCommit};
+use revm_inspectors::access_list::AccessListInspector;
+use tracing::trace;
 
 /// Execution related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
@@ -166,6 +164,7 @@ pub trait EthCall: Call + LoadPendingBlock {
 
                 Ok(results)
             })
+            .boxed()
             .await
         }
     }
@@ -273,10 +272,10 @@ pub trait Call: LoadState + SpawnBlocking {
     /// Executes the closure with the state that corresponds to the given [`BlockId`].
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
     where
-        F: FnOnce(StateProviderTraitObjWrapper<'_>) -> EthResult<T>,
+        F: FnOnce(StateProviderBox) -> EthResult<T>,
     {
         let state = self.state_at_block_id(at)?;
-        f(StateProviderTraitObjWrapper(&state))
+        f(state)
     }
 
     /// Returns a handle for reading evm config.
@@ -322,12 +321,12 @@ pub trait Call: LoadState + SpawnBlocking {
         f: F,
     ) -> impl Future<Output = EthResult<T>> + Send
     where
-        F: FnOnce(StateProviderTraitObjWrapper<'_>) -> EthResult<T> + Send + 'static,
+        F: FnOnce(StateProviderBox) -> EthResult<T> + Send + 'static,
         T: Send + 'static,
     {
         self.spawn_tracing(move |this| {
             let state = this.state_at_block_id(at)?;
-            f(StateProviderTraitObjWrapper(&state))
+            f(state)
         })
     }
 
@@ -345,9 +344,7 @@ pub trait Call: LoadState + SpawnBlocking {
     ) -> impl Future<Output = EthResult<R>> + Send
     where
         Self: LoadPendingBlock,
-        F: FnOnce(StateCacheDbRefMutWrapper<'_, '_>, EnvWithHandlerCfg) -> EthResult<R>
-            + Send
-            + 'static,
+        F: FnOnce(&mut StateCacheDb, EnvWithHandlerCfg) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
         async move {
@@ -355,8 +352,7 @@ pub trait Call: LoadState + SpawnBlocking {
             let this = self.clone();
             self.spawn_tracing(move |_| {
                 let state = this.state_at_block_id(at)?;
-                let mut db =
-                    CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let env = prepare_call_env(
                     cfg,
@@ -366,8 +362,7 @@ pub trait Call: LoadState + SpawnBlocking {
                     &mut db,
                     overrides,
                 )?;
-
-                f(StateCacheDbRefMutWrapper(&mut db), env)
+                f(&mut db, env)
             })
             .await
             .map_err(|_| EthApiError::InternalBlockingTaskError)
@@ -390,9 +385,7 @@ pub trait Call: LoadState + SpawnBlocking {
     ) -> impl Future<Output = EthResult<Option<R>>> + Send
     where
         Self: LoadBlock + LoadPendingBlock + LoadTransaction,
-        F: FnOnce(TransactionInfo, ResultAndState, StateCacheDb<'_>) -> EthResult<R>
-            + Send
-            + 'static,
+        F: FnOnce(TransactionInfo, ResultAndState, StateCacheDb) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
         async move {
@@ -428,6 +421,7 @@ pub trait Call: LoadState + SpawnBlocking {
                 let (res, _) = this.transact(&mut db, env)?;
                 f(tx_info, res, db)
             })
+            .boxed()
             .await
             .map(Some)
         }

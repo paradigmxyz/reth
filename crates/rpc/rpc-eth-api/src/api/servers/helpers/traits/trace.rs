@@ -1,6 +1,6 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
-use futures::Future;
+use futures::{Future, FutureExt};
 use reth_evm::ConfigureEvm;
 use reth_primitives::{revm::env::tx_env_with_recovered, B256};
 use reth_revm::database::StateProviderDatabase;
@@ -10,7 +10,6 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState};
 
 use crate::{
-    cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     servers::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction},
     EthApiError, EthResult, StateCacheDb,
 };
@@ -102,16 +101,14 @@ pub trait Trace: LoadState {
     ) -> impl Future<Output = EthResult<R>> + Send
     where
         Self: LoadPendingBlock + Call,
-        F: FnOnce(TracingInspector, ResultAndState, StateCacheDb<'_>) -> EthResult<R>
-            + Send
-            + 'static,
+        F: FnOnce(TracingInspector, ResultAndState, StateCacheDb) -> EthResult<R> + Send + 'static,
         R: Send + 'static,
     {
         let this = self.clone();
         self.spawn_with_state_at_block(at, move |state| {
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
+            let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
             f(inspector, res, db)
         })
     }
@@ -133,12 +130,7 @@ pub trait Trace: LoadState {
     ) -> impl Future<Output = EthResult<Option<R>>> + Send
     where
         Self: LoadPendingBlock + LoadTransaction + Call,
-        F: FnOnce(
-                TransactionInfo,
-                TracingInspector,
-                ResultAndState,
-                StateCacheDb<'_>,
-            ) -> EthResult<R>
+        F: FnOnce(TransactionInfo, TracingInspector, ResultAndState, StateCacheDb) -> EthResult<R>
             + Send
             + 'static,
         R: Send + 'static,
@@ -163,10 +155,10 @@ pub trait Trace: LoadState {
     ) -> impl Future<Output = EthResult<Option<R>>> + Send
     where
         Self: LoadPendingBlock + LoadTransaction + Call,
-        F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDb<'_>) -> EthResult<R>
+        F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDb) -> EthResult<R>
             + Send
             + 'static,
-        Insp: for<'a, 'b> Inspector<StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
+        Insp: for<'a> Inspector<&'a mut StateCacheDb> + Send + 'static,
         R: Send + 'static,
     {
         async move {
@@ -198,13 +190,14 @@ pub trait Trace: LoadState {
 
                 let env =
                     EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
-                let (res, _) =
-                    this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
+                let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
                 f(tx_info, inspector, res, db)
             })
+            .boxed()
             .await
             .map(Some)
         }
+        .boxed()
     }
 
     /// Executes all transactions of a block up to a given index.
@@ -227,7 +220,7 @@ pub trait Trace: LoadState {
                 TracingInspector,
                 ExecutionResult,
                 &EvmState,
-                &StateCacheDb<'_>,
+                &StateCacheDb,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -260,11 +253,11 @@ pub trait Trace: LoadState {
     ) -> impl Future<Output = EthResult<Option<Vec<R>>>> + Send
     where
         Self: LoadBlock,
-        F: Fn(TransactionInfo, Insp, ExecutionResult, &EvmState, &StateCacheDb<'_>) -> EthResult<R>
+        F: Fn(TransactionInfo, Insp, ExecutionResult, &EvmState, &StateCacheDb) -> EthResult<R>
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: for<'a, 'b> Inspector<StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
+        Insp: for<'a> Inspector<&'a mut StateCacheDb> + Send + 'static,
         R: Send + 'static,
     {
         async move {
@@ -315,16 +308,14 @@ pub trait Trace: LoadState {
 
                 // now get the state
                 let state = this.state_at_block_id(state_at.into())?;
-                let mut db =
-                    CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 while let Some((tx_info, tx)) = transactions.next() {
                     let env =
                         EnvWithHandlerCfg::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
 
                     let mut inspector = inspector_setup();
-                    let (res, _) =
-                        this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
+                    let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
                     let ResultAndState { result, state } = res;
                     results.push(f(tx_info, inspector, result, &state, &db)?);
 
@@ -367,7 +358,7 @@ pub trait Trace: LoadState {
                 TracingInspector,
                 ExecutionResult,
                 &EvmState,
-                &StateCacheDb<'_>,
+                &StateCacheDb,
             ) -> EthResult<R>
             + Send
             + 'static,
@@ -400,11 +391,11 @@ pub trait Trace: LoadState {
         Self: LoadBlock,
         // This is the callback that's invoked for each transaction with the inspector, the result,
         // state and db
-        F: Fn(TransactionInfo, Insp, ExecutionResult, &EvmState, &StateCacheDb<'_>) -> EthResult<R>
+        F: Fn(TransactionInfo, Insp, ExecutionResult, &EvmState, &StateCacheDb) -> EthResult<R>
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: for<'a, 'b> Inspector<StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
+        Insp: for<'a> Inspector<&'a mut StateCacheDb> + Send + 'static,
         R: Send + 'static,
     {
         self.trace_block_until_with_inspector(block_id, None, insp_setup, f)
