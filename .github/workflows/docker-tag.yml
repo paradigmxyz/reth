@@ -8,12 +8,11 @@ on:
       dryRun:
         description: 'Whether or not to perform a dry run'
         required: true
-        default: 'warning'
+        default: 'true'
         type: boolean
       tag:
         description: 'The tag to push as latest'
         required: true
-        default: 'warning'
         type: string
 
 env:
@@ -46,7 +45,7 @@ jobs:
           docker pull ghcr.io/paradigmxyz/op-reth:${{ github.events.inputs.tag }}
           docker tag ghcr.io/paradigmxyz/op-reth:${{ github.event.inputs.tag }} ghcr.io/paradigmxyz/op-reth:latest
       - name: Push all tags
-        if: ${{ github.event.inputs.dryRun }}
+        if: ${{ !github.event.inputs.dryRun }}
         run: |
           docker image push --all-tags ghcr.io/paradigmxyz/op-reth
           docker image push --all-tags ghcr.io/paradigmxyz/reth
