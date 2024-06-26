@@ -1,4 +1,5 @@
 use crate::ExExNotification;
+use reth_config::Config;
 use reth_evm::execute::{BatchExecutor, BlockExecutionError, BlockExecutorProvider};
 use reth_node_api::FullNodeComponents;
 use reth_primitives::BlockNumber;
@@ -19,17 +20,19 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct BackfillJobFactory<Node: FullNodeComponents> {
     components: Node,
+    config: Config,
     thresholds: ExecutionStageThresholds,
 }
 
 impl<Node: FullNodeComponents> BackfillJobFactory<Node> {
-    pub fn new(components: Node, thresholds: ExecutionStageThresholds) -> Self {
-        Self { components, thresholds }
+    pub fn new(components: Node, config: Config, thresholds: ExecutionStageThresholds) -> Self {
+        Self { components, config, thresholds }
     }
 
     pub fn backfill(&self, range: RangeInclusive<BlockNumber>) -> BackfillJob<Node> {
         BackfillJob {
             components: self.components.clone(),
+            prune_modes: self.config.prune.clone().unwrap_or_default().segments,
             range,
             thresholds: self.thresholds.clone(),
         }
@@ -39,14 +42,9 @@ impl<Node: FullNodeComponents> BackfillJobFactory<Node> {
 #[derive(Debug)]
 pub struct BackfillJob<Node: FullNodeComponents> {
     components: Node,
+    prune_modes: PruneModes,
     range: RangeInclusive<BlockNumber>,
     thresholds: ExecutionStageThresholds,
-}
-
-impl<Node: FullNodeComponents> BackfillJob<Node> {
-    pub fn new(components: Node, range: RangeInclusive<BlockNumber>) -> Self {
-        Self { components, range, thresholds: ExecutionStageThresholds::default() }
-    }
 }
 
 impl<Node: FullNodeComponents> Iterator for BackfillJob<Node> {
@@ -72,7 +70,7 @@ impl<Node: FullNodeComponents> BackfillJob<Node> {
                 *self.range.start(),
                 provider.static_file_provider(),
             )),
-            PruneModes::none(),
+            self.prune_modes.clone(),
         );
 
         let mut fetch_block_duration = Duration::default();
