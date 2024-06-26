@@ -15,32 +15,61 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::mpsc::Sender;
 
-#[derive(Debug)]
-pub struct BackfillExecutor<Node: FullNodeComponents> {
+#[derive(Debug, Clone)]
+pub struct BackfillJobFactory<Node: FullNodeComponents> {
     components: Node,
-    notifications: Sender<ExExNotification>,
     thresholds: ExecutionStageThresholds,
 }
 
-impl<Node: FullNodeComponents> BackfillExecutor<Node> {
-    pub fn new(components: Node, notifications: Sender<ExExNotification>) -> Self {
-        Self { components, notifications, thresholds: ExecutionStageThresholds::default() }
+impl<Node: FullNodeComponents> BackfillJobFactory<Node> {
+    pub fn new(components: Node, thresholds: ExecutionStageThresholds) -> Self {
+        Self { components, thresholds }
+    }
+
+    pub fn backfill(&self, range: RangeInclusive<BlockNumber>) -> BackfillJob<Node> {
+        BackfillJob {
+            components: self.components.clone(),
+            range,
+            thresholds: self.thresholds.clone(),
+        }
     }
 }
 
-impl<Node: FullNodeComponents> BackfillExecutor<Node> {
-    pub async fn backfill(&self, range: RangeInclusive<BlockNumber>) -> eyre::Result<()> {
-        let start_block = *range.start();
+#[derive(Debug)]
+pub struct BackfillJob<Node: FullNodeComponents> {
+    components: Node,
+    range: RangeInclusive<BlockNumber>,
+    thresholds: ExecutionStageThresholds,
+}
 
+impl<Node: FullNodeComponents> BackfillJob<Node> {
+    pub fn new(components: Node, range: RangeInclusive<BlockNumber>) -> Self {
+        Self { components, range, thresholds: ExecutionStageThresholds::default() }
+    }
+}
+
+impl<Node: FullNodeComponents> Iterator for BackfillJob<Node> {
+    type Item = Result<ExExNotification, eyre::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.range.is_empty() {
+            return None
+        }
+
+        Some(self.execute_range())
+    }
+}
+
+impl<Node: FullNodeComponents> BackfillJob<Node> {
+    fn execute_range(&mut self) -> Result<ExExNotification, eyre::Error> {
         let provider = self.components.provider();
         let provider_ro = provider.database_provider_ro()?.disable_long_read_transaction_safety();
 
         let mut executor = self.components.block_executor().batch_executor(
             StateProviderDatabase(HistoricalStateProviderRef::new(
                 provider_ro.tx_ref(),
-                start_block,
+                *self.range.start(),
                 provider.static_file_provider(),
             )),
             PruneModes::none(),
@@ -52,7 +81,7 @@ impl<Node: FullNodeComponents> BackfillExecutor<Node> {
         let batch_start = Instant::now();
 
         let mut blocks = Vec::new();
-        for block_number in range {
+        for block_number in self.range.clone() {
             // Fetch the block
             let fetch_block_start = Instant::now();
 
@@ -89,37 +118,31 @@ impl<Node: FullNodeComponents> BackfillExecutor<Node> {
             // Check if we should commit now
             let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
             if self.thresholds.is_end_of_batch(
-                block_number - start_block,
+                block_number - *self.range.start(),
                 bundle_size_hint,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
-                debug!(
-                    target: "exex::backfill",
-                    range = ?start_block..=block_number,
-                    block_fetch = ?fetch_block_duration,
-                    execution = ?execution_duration,
-                    // throughput = format_gas_throughput(cumulative_gas, execution_duration),
-                    "Finished executing block range"
-                );
-
-                let chain = Chain::new(blocks, executor.finalize(), None);
-                self.notifications
-                    .send(ExExNotification::ChainCommitted { new: Arc::new(chain) })
-                    .await?;
-
-                executor = self.components.block_executor().batch_executor(
-                    StateProviderDatabase(HistoricalStateProviderRef::new(
-                        provider_ro.tx_ref(),
-                        block_number + 1,
-                        provider.static_file_provider(),
-                    )),
-                    PruneModes::none(),
-                );
-                blocks = Vec::new();
+                break;
             }
         }
 
-        Ok(())
+        if let Some(last_block) = blocks.last() {
+            let last_block_number = last_block.number;
+
+            debug!(
+                target: "exex::backfill",
+                range = ?*self.range.start()..=last_block_number,
+                block_fetch = ?fetch_block_duration,
+                execution = ?execution_duration,
+                // throughput = format_gas_throughput(cumulative_gas, execution_duration),
+                "Finished executing block range"
+            );
+
+            self.range = last_block_number + 1..=*self.range.end();
+        }
+
+        let chain = Chain::new(blocks, executor.finalize(), None);
+        Ok(ExExNotification::ChainCommitted { new: Arc::new(chain) })
     }
 }
