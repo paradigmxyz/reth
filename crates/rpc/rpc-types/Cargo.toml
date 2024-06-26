@@ -42,4 +42,5 @@ proptest-derive.workspace = true
 rand.workspace = true
 similar-asserts.workspace = true
 bytes.workspace = true
+serde_json.workspace = true
 
