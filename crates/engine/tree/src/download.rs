@@ -235,6 +235,10 @@ where
 
         self.update_block_download_metrics();
 
+        if self.set_buffered_blocks.is_empty() {
+            return Poll::Pending;
+        }
+
         // drain all unique element of the block buffer if there are any
         let mut downloaded_blocks: Vec<SealedBlockWithSenders> =
             Vec::with_capacity(self.set_buffered_blocks.len());
@@ -249,10 +253,7 @@ where
             }
             downloaded_blocks.push(block.0.into());
         }
-        if downloaded_blocks.len() > 0 {
-            return Poll::Ready(DownloadOutcome::Blocks(downloaded_blocks))
-        }
-        Poll::Pending
+        Poll::Ready(DownloadOutcome::Blocks(downloaded_blocks))
     }
 }
 
