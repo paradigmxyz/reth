@@ -162,7 +162,6 @@ use reth_provider::{
 use reth_rpc::{
     eth::{
         cache::cache_new_blocks_task,
-        fee_history::fee_history_cache_new_blocks_task,
         servers::{RawTransactionForwarder, UpdateRawTxForwarder},
         EthBundle, EthFilter, EthPubSub, EthStateCache, EthSubscriptionIdProvider,
     },
@@ -1851,7 +1850,7 @@ pub struct RpcServerHandle {
     http: Option<ServerHandle>,
     ws: Option<ServerHandle>,
     ipc_endpoint: Option<String>,
-    ipc: Option<reth_ipc::server::ServerHandle>,
+    ipc: Option<jsonrpsee::server::ServerHandle>,
     jwt_secret: Option<JwtSecret>,
 }
 

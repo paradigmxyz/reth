@@ -2162,7 +2162,7 @@ mod tests {
                         b.clone().try_seal_with_senders().expect("invalid tx signature in block"),
                         None,
                     )
-                    .map(|_| ())
+                    .map(drop)
             })
             .expect("failed to insert");
         provider.commit().unwrap();

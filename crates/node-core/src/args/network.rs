@@ -185,7 +185,7 @@ impl NetworkArgs {
                 } = self.discovery;
 
                 builder
-                    .add_unsigned_boot_nodes(chain_bootnodes.into_iter())
+                    .add_unsigned_boot_nodes(chain_bootnodes)
                     .lookup_interval(discv5_lookup_interval)
                     .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
                     .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)

@@ -860,10 +860,11 @@ impl Compact for TransactionSignedNoHash {
         let tx_bits = if zstd_bit {
             TRANSACTION_COMPRESSOR.with(|compressor| {
                 let mut compressor = compressor.borrow_mut();
-                let mut tmp = bytes::BytesMut::with_capacity(200);
+                let mut tmp = Vec::with_capacity(256);
                 let tx_bits = self.transaction.to_compact(&mut tmp);
 
                 buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+
                 tx_bits as u8
             })
         } else {
