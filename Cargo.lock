@@ -6266,7 +6266,7 @@ dependencies = [
  "reth-discv4",
  "reth-discv5",
  "reth-downloaders",
- "reth-engine-utils",
+ "reth-engine-util",
  "reth-errors",
  "reth-ethereum-payload-builder",
  "reth-evm",
@@ -6905,7 +6905,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-engine-utils"
+name = "reth-engine-util"
 version = "1.0.0"
 dependencies = [
  "eyre",
@@ -7465,7 +7465,7 @@ dependencies = [
  "reth-db-api",
  "reth-db-common",
  "reth-downloaders",
- "reth-engine-utils",
+ "reth-engine-util",
  "reth-evm",
  "reth-exex",
  "reth-network",

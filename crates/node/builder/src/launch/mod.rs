@@ -13,7 +13,7 @@ use reth_beacon_consensus::{
     BeaconConsensusEngine,
 };
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
-use reth_engine_utils::EngineMessageStreamExt;
+use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::NetworkEvents;
 use reth_node_api::FullNodeTypes;

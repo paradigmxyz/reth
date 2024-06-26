@@ -14,7 +14,7 @@ use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::DatabaseEnv;
-use reth_engine_utils::engine_store::{EngineMessageStore, StoredEngineApiMessage};
+use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage};
 use reth_fs_util as fs;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
