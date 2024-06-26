@@ -14,7 +14,7 @@ use reth_rpc::eth::EthApi;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
-    RethModuleRegistry, RpcModuleBuilder, RpcServerHandle, TransportRpcModules,
+    RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_layer::JwtSecret;
 use reth_tasks::TaskExecutor;
@@ -147,11 +147,11 @@ impl<Node: FullNodeComponents> ExtendRpcModules<Node> for () {
     }
 }
 
-/// Helper wrapper type to encapsulate the [`RethModuleRegistry`] over components trait.
+/// Helper wrapper type to encapsulate the [`RpcRegistryInner`] over components trait.
 #[derive(Debug)]
 #[allow(clippy::type_complexity)]
 pub struct RpcRegistry<Node: FullNodeComponents> {
-    pub(crate) registry: RethModuleRegistry<
+    pub(crate) registry: RpcRegistryInner<
         Node::Provider,
         Node::Pool,
         NetworkHandle,
@@ -162,7 +162,7 @@ pub struct RpcRegistry<Node: FullNodeComponents> {
 }
 
 impl<Node: FullNodeComponents> Deref for RpcRegistry<Node> {
-    type Target = RethModuleRegistry<
+    type Target = RpcRegistryInner<
         Node::Provider,
         Node::Pool,
         NetworkHandle,
@@ -188,7 +188,7 @@ impl<Node: FullNodeComponents> Clone for RpcRegistry<Node> {
     }
 }
 
-/// Helper container to encapsulate [`RethModuleRegistry`], [`TransportRpcModules`] and
+/// Helper container to encapsulate [`RpcRegistryInner`], [`TransportRpcModules`] and
 /// [`AuthRpcModule`].
 ///
 /// This can be used to access installed modules, or create commonly used handlers like
@@ -205,7 +205,7 @@ pub struct RpcContext<'a, Node: FullNodeComponents> {
 
     /// A Helper type the holds instances of the configured modules.
     ///
-    /// This provides easy access to rpc handlers, such as [`RethModuleRegistry::eth_api`].
+    /// This provides easy access to rpc handlers, such as [`RpcRegistryInner::eth_api`].
     pub registry: &'a mut RpcRegistry<Node>,
     /// Holds installed modules per transport type.
     ///

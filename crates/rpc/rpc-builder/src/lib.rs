@@ -432,7 +432,7 @@ where
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
-        RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EthApi>,
+        RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>,
     )
     where
         EngineT: EngineTypes + 'static,
@@ -443,7 +443,7 @@ where
 
         let config = module_config.config.clone().unwrap_or_default();
 
-        let mut registry = RethModuleRegistry::new(
+        let mut registry = RpcRegistryInner::new(
             provider, pool, network, executor, events, config, evm_config, eth,
         );
 
@@ -454,7 +454,7 @@ where
         (modules, auth_module, registry)
     }
 
-    /// Converts the builder into a [`RethModuleRegistry`] which can be used to create all
+    /// Converts the builder into a [`RpcRegistryInner`] which can be used to create all
     /// components.
     ///
     /// This is useful for getting access to API handlers directly:
@@ -488,12 +488,12 @@ where
         config: RpcModuleConfig,
         eth: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Server = EthApi>
             + 'static,
-    ) -> RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EthApi>
+    ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
     where
         EthApi: FullEthApiServer,
     {
         let Self { provider, pool, network, executor, events, evm_config } = self;
-        RethModuleRegistry::new(provider, pool, network, executor, events, config, evm_config, eth)
+        RpcRegistryInner::new(provider, pool, network, executor, events, config, evm_config, eth)
     }
 
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
@@ -516,7 +516,7 @@ where
         if !module_config.is_empty() {
             let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
 
-            let mut registry = RethModuleRegistry::new(
+            let mut registry = RpcRegistryInner::new(
                 provider,
                 pool,
                 network,
@@ -613,7 +613,7 @@ impl RpcModuleConfigBuilder {
 
 /// A Helper type the holds instances of the configured modules.
 #[derive(Debug, Clone)]
-pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EthApi> {
+pub struct RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi> {
     provider: Provider,
     pool: Pool,
     network: Network,
@@ -627,10 +627,10 @@ pub struct RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EthApi> {
     modules: HashMap<RethRpcModule, Methods>,
 }
 
-// === impl RethModuleRegistry ===
+// === impl RpcRegistryInner ===
 
 impl<Provider, Pool, Network, Tasks, Events, EthApi>
-    RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EthApi>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
 where
     Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Pool: Send + Sync + Clone + 'static,
@@ -725,7 +725,7 @@ where
 }
 
 impl<Provider: ChainSpecProvider, Pool, Network, Tasks, Events, EthApi>
-    RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EthApi>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
 where
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: FullEthApiServer,
@@ -756,7 +756,7 @@ where
 }
 
 impl<Provider, Pool, Network, Tasks, Events, EthApi>
-    RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EthApi>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
 where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
@@ -1036,7 +1036,7 @@ where
 }
 
 impl<Provider, Pool, Network, Tasks, Events, EthApi>
-    RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EthApi>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
 {
     /// Returns a reference to the installed [`EthApi`](reth_rpc::eth::EthApi).
     pub const fn eth_api(&self) -> &EthApi {
@@ -1053,7 +1053,7 @@ impl<Provider, Pool, Network, Tasks, Events, EthApi>
 }
 
 impl<Provider, Pool, Network, Tasks, Events, EthApi>
-    RethModuleRegistry<Provider, Pool, Network, Tasks, Events, EthApi>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
 where
     Provider: Clone,
     Pool: Clone,
