@@ -27,23 +27,24 @@ pub mod state;
 pub mod trace;
 pub mod transaction;
 
+use block::{EthBlocks, LoadBlock};
 use blocking_task::SpawnBlocking;
-use call::Call;
-use pending_block::LoadPendingBlock;
-use trace::Trace;
-
-/// Extension trait that bundles traits needed for tracing transactions.
-pub trait TraceExt: LoadPendingBlock + SpawnBlocking + Trace + Call {}
-
-impl<T> TraceExt for T where T: LoadPendingBlock + Trace + Call {}
-
-use block::EthBlocks;
-use call::EthCall;
+use call::{Call, EthCall};
 use fee::EthFees;
+use pending_block::LoadPendingBlock;
 use receipt::LoadReceipt;
 use spec::EthApiSpec;
 use state::EthState;
-use transaction::EthTransactions;
+use trace::Trace;
+use transaction::{EthTransactions, LoadTransaction};
+
+/// Extension trait that bundles traits needed for tracing transactions.
+pub trait TraceExt:
+    LoadTransaction + LoadBlock + LoadPendingBlock + SpawnBlocking + Trace + Call
+{
+}
+
+impl<T> TraceExt for T where T: LoadTransaction + LoadBlock + LoadPendingBlock + Trace + Call {}
 
 /// Helper trait to unify all `eth` rpc server building block traits, for simplicity.
 pub trait FullEthApiServer:

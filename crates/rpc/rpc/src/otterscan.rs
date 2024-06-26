@@ -3,10 +3,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
-use reth_rpc_eth_api::{
-    result::internal_rpc_err,
-    servers::{LoadBlock, LoadTransaction, TraceExt},
-};
+use reth_rpc_eth_api::{result::internal_rpc_err, servers::TraceExt};
 use reth_rpc_types::{
     trace::otterscan::{
         BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
@@ -35,7 +32,7 @@ impl<Eth> OtterscanApi<Eth> {
 #[async_trait]
 impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
-    Eth: EthApiServer + LoadBlock + LoadTransaction + TraceExt + 'static,
+    Eth: EthApiServer + TraceExt + 'static,
 {
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool> {

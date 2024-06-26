@@ -12,7 +12,7 @@ use reth_rpc_api::TraceApiServer;
 use reth_rpc_eth_api::{
     error::{EthApiError, EthResult},
     revm_utils::prepare_call_env,
-    servers::{LoadBlock, LoadTransaction, TraceExt},
+    servers::TraceExt,
     utils::recover_raw_transaction,
 };
 use reth_rpc_types::{
@@ -75,7 +75,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: LoadTransaction + LoadBlock + TraceExt + 'static,
+    Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(&self, trace_request: TraceCallRequest) -> EthResult<TraceResults> {
@@ -553,7 +553,7 @@ where
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: LoadBlock + LoadTransaction + TraceExt + 'static,
+    Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     ///
