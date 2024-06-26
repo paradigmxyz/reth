@@ -1,4 +1,4 @@
-use crate::{define_hardfork_enum, Hardfork};
+use crate::{hardfork, Hardfork};
 use core::{
     fmt,
     fmt::{Display, Formatter},
@@ -8,7 +8,7 @@ use core::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-define_hardfork_enum!(
+hardfork!(
     /// The name of an optimism hardfork.
     OptimismHardfork {
         /// Bedrock: <https://blog.oplabs.co/introducing-optimism-bedrock>.
