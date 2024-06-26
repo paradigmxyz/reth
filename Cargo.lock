@@ -7318,6 +7318,7 @@ dependencies = [
  "derive_more",
  "discv5",
  "enr",
+ "eyre",
  "futures",
  "humantime-serde",
  "itertools 0.13.0",
@@ -7333,6 +7334,7 @@ dependencies = [
  "reth-dns-discovery",
  "reth-ecies",
  "reth-eth-wire",
+ "reth-fs-util",
  "reth-metrics",
  "reth-net-banlist",
  "reth-network",
@@ -7493,6 +7495,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
