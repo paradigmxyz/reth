@@ -14,6 +14,7 @@ workspace = true
 # reth
 reth-network.workspace = true
 reth-prune-types.workspace = true
+reth-stages-types.workspace = true
 
 # serde
 serde.workspace = true

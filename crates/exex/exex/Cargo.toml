@@ -24,6 +24,10 @@ reth-tasks.workspace = true
 reth-tracing.workspace = true
 reth-network.workspace = true
 reth-payload-builder.workspace = true
+reth-evm.workspace = true
+reth-prune-types.workspace = true
+reth-revm.workspace = true
+reth-stages-types.workspace = true
 
 ## async
 tokio.workspace = true

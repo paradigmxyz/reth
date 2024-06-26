@@ -19,6 +19,9 @@ pub use checkpoints::{
     StageUnitCheckpoint, StorageHashingCheckpoint,
 };
 
+mod execution;
+pub use execution::*;
+
 /// Direction and target block for pipeline operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipelineTarget {
