@@ -429,10 +429,10 @@ url = "2.3"
 backon = "0.4"
 
 # metrics
-metrics = "0.22.0"
-metrics-exporter-prometheus = { version = "0.14.0", default-features = false }
-metrics-util = "0.16.0"
-metrics-process = "2.0.0"
+metrics = "0.23.0"
+metrics-exporter-prometheus = { version = "0.15.0", default-features = false }
+metrics-util = "0.17.0"
+metrics-process = "2.1.0"
 
 # proc-macros
 proc-macro2 = "1.0"
