@@ -1,29 +1,26 @@
-use std::sync::Arc;
+use std::{fmt::Debug, time::Duration};
 
 use reth_evm::ConfigureEvm;
-use reth_network_api::{NetworkInfo, Peers};
 use reth_provider::{
-    AccountReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
+    StateProviderFactory,
 };
 use reth_rpc::eth::{
-    cache::cache_new_blocks_task,
-    fee_history::fee_history_cache_new_blocks_task,
-    servers::{FullEthApiServer, RawTransactionForwarder, UpdateRawTxForwarder},
-    EthApi, EthApiServer, EthFilter, EthFilterConfig, EthPubSub, EthStateCache,
-    EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
-    GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
+    cache::cache_new_blocks_task, fee_history::fee_history_cache_new_blocks_task, EthFilter,
+    EthFilterConfig, EthPubSub, EthStateCache, EthStateCacheConfig, FeeHistoryCache,
+    FeeHistoryCacheConfig, FullEthApiServer, GasPriceOracle, GasPriceOracleConfig,
+    RPC_DEFAULT_GAS_CAP,
 };
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE,
 };
-use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
-use reth_transaction_pool::TransactionPool;
+use reth_tasks::TaskSpawner;
 use serde::{Deserialize, Serialize};
 
-use crate::RpcModuleConfig;
+/// Default value for stale filter ttl
+const DEFAULT_STALE_FILTER_TTL: Duration = Duration::from_secs(5 * 60);
 
-/// All handlers for the `eth` namespace
+/// All handlers for the core `eth` namespace API.
 #[derive(Debug, Clone)]
 pub struct EthHandlers<Provider, Pool, Network, Events, EthApi> {
     /// Main `eth_` request handler
@@ -36,204 +33,109 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi> {
     pub pubsub: EthPubSub<Provider, Pool, Events, Network>,
 }
 
-/// Configuration for `EthHandlersBuilder`
-// TODO: remove in favour of `EthApiBuilderCtx`
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-pub(crate) struct EthHandlersConfig<Provider, Pool, Network, Tasks, Events, EvmConfig> {
-    /// The provider for blockchain data, responsible for reading blocks, accounts, state, etc.
-    pub(crate) provider: Provider,
-    /// The transaction pool for managing pending transactions.
-    pub(crate) pool: Pool,
-    /// The network information, handling peer connections and network state.
-    pub(crate) network: Network,
-    /// The task executor for spawning asynchronous tasks.
-    pub(crate) executor: Tasks,
-    /// The event subscriptions for canonical state changes.
-    pub(crate) events: Events,
-    /// The EVM configuration for Ethereum Virtual Machine settings.
-    pub(crate) evm_config: EvmConfig,
-    /// An optional forwarder for raw transactions.
-    pub(crate) eth_raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi> {
+    /// Returns a new [`EthHandlers`] builder.
+    #[allow(clippy::too_many_arguments)]
+    pub fn builder<EvmConfig, Tasks>(
+        provider: Provider,
+        pool: Pool,
+        network: Network,
+        evm_config: EvmConfig,
+        config: EthConfig,
+        executor: Tasks,
+        events: Events,
+        eth_api_builder: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Server = EthApi>
+            + 'static,
+    ) -> EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi> {
+        EthHandlersBuilder {
+            provider,
+            pool,
+            network,
+            evm_config,
+            config,
+            executor,
+            events,
+            eth_api_builder: Box::new(eth_api_builder),
+        }
+    }
 }
 
-/// Represents the builder for the `EthHandlers` struct, used to configure and create instances of
-/// `EthHandlers`.
-// TODO: incorporate
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub(crate) struct EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig> {
-    eth_handlers_config: EthHandlersConfig<Provider, Pool, Network, Tasks, Events, EvmConfig>,
-    /// Configuration for the RPC module
-    rpc_config: RpcModuleConfig,
+/// Builds [`EthHandlers`] for given [`EthApiBuilderCtx`].
+#[derive(Debug)]
+pub struct EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi> {
+    provider: Provider,
+    pool: Pool,
+    network: Network,
+    evm_config: EvmConfig,
+    config: EthConfig,
+    executor: Tasks,
+    events: Events,
+    eth_api_builder:
+        Box<dyn EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Server = EthApi>>,
 }
 
-#[allow(dead_code)]
-impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
-    EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig>
+impl<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
+    EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
 where
-    Provider: BlockReaderIdExt
-        + AccountReader
-        + StateProviderFactory
-        + EvmEnvProvider
-        + ChainSpecProvider
-        + ChangeSetReader
-        + Clone
-        + Unpin
-        + 'static,
-    Pool: TransactionPool + Clone + 'static,
-    Network: NetworkInfo + Peers + Clone + 'static,
+    Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
+    Pool: Send + Sync + Clone + 'static,
+    EvmConfig: ConfigureEvm,
+    Network: Clone,
+    Events: CanonStateSubscriptions + Clone,
     Tasks: TaskSpawner + Clone + 'static,
-    Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    EthApi: FullEthApiServer,
 {
-    /// Creates a new `EthHandlersBuilder` with the provided components.
-    pub(crate) const fn new(
-        eth_handlers_config: EthHandlersConfig<Provider, Pool, Network, Tasks, Events, EvmConfig>,
-        rpc_config: RpcModuleConfig,
-    ) -> Self {
-        Self { eth_handlers_config, rpc_config }
-    }
+    /// Returns a new instance with handlers for `eth` namespace.
+    pub fn build(self) -> EthHandlers<Provider, Pool, Network, Events, EthApi> {
+        let Self { provider, pool, network, evm_config, config, executor, events, eth_api_builder } =
+            self;
 
-    /// Builds and returns an `EthHandlers` instance.
-    pub(crate) fn build(
-        self,
-    ) -> EthHandlers<Provider, Pool, Network, Events, EthApi<Provider, Pool, Network, EvmConfig>>
-    {
-        // Initialize the cache
-        let cache = self.init_cache();
+        let cache = EthStateCache::spawn_with(
+            provider.clone(),
+            config.cache,
+            executor.clone(),
+            evm_config.clone(),
+        );
 
-        // Initialize the fee history cache
-        let fee_history_cache = self.init_fee_history_cache(&cache);
-
-        // Spawn background tasks for cache
-        self.spawn_cache_tasks(&cache, &fee_history_cache);
-
-        // Initialize the gas oracle
-        let gas_oracle = self.init_gas_oracle(&cache);
-
-        // Initialize the blocking task pool
-        let blocking_task_pool = self.init_blocking_task_pool();
-
-        // Initialize the Eth API
-        let api = self.init_api(&cache, gas_oracle, &fee_history_cache, &blocking_task_pool);
-
-        // Initialize the filter
-        let filter = self.init_filter(&cache);
-
-        // Initialize the pubsub
-        let pubsub = self.init_pubsub();
-
-        EthHandlers { api, cache, filter, pubsub }
-    }
-
-    /// Initializes the `EthStateCache`.
-    fn init_cache(&self) -> EthStateCache {
-        EthStateCache::spawn_with(
-            self.eth_handlers_config.provider.clone(),
-            self.rpc_config.eth.cache.clone(),
-            self.eth_handlers_config.executor.clone(),
-            self.eth_handlers_config.evm_config.clone(),
-        )
-    }
-
-    /// Initializes the `FeeHistoryCache`.
-    fn init_fee_history_cache(&self, cache: &EthStateCache) -> FeeHistoryCache {
-        FeeHistoryCache::new(cache.clone(), self.rpc_config.eth.fee_history_cache.clone())
-    }
-
-    /// Spawns background tasks for updating caches.
-    fn spawn_cache_tasks(&self, cache: &EthStateCache, fee_history_cache: &FeeHistoryCache) {
-        // Get the stream of new canonical blocks
-        let new_canonical_blocks = self.eth_handlers_config.events.canonical_state_stream();
-
-        // Clone the cache for the task
-        let cache_clone = cache.clone();
-
-        // Spawn a critical task to update the cache with new blocks
-        self.eth_handlers_config.executor.spawn_critical(
+        let new_canonical_blocks = events.canonical_state_stream();
+        let c = cache.clone();
+        executor.spawn_critical(
             "cache canonical blocks task",
             Box::pin(async move {
-                cache_new_blocks_task(cache_clone, new_canonical_blocks).await;
+                cache_new_blocks_task(c, new_canonical_blocks).await;
             }),
         );
 
-        // Get another stream of new canonical blocks
-        let new_canonical_blocks = self.eth_handlers_config.events.canonical_state_stream();
+        let ctx = EthApiBuilderCtx {
+            provider,
+            pool,
+            network,
+            evm_config,
+            config,
+            executor,
+            events,
+            cache,
+        };
 
-        // Clone the fee history cache for the task
-        let fhc_clone = fee_history_cache.clone();
+        let api = eth_api_builder.build(ctx.clone());
 
-        // Clone the provider for the task
-        let provider_clone = self.eth_handlers_config.provider.clone();
-
-        // Spawn a critical task to update the fee history cache with new blocks
-        self.eth_handlers_config.executor.spawn_critical(
-            "cache canonical blocks for fee history task",
-            Box::pin(async move {
-                fee_history_cache_new_blocks_task(fhc_clone, new_canonical_blocks, provider_clone)
-                    .await;
-            }),
+        let filter = EthFilter::new(
+            ctx.provider.clone(),
+            ctx.pool.clone(),
+            ctx.cache.clone(),
+            ctx.config.filter_config(),
+            Box::new(ctx.executor.clone()),
         );
-    }
 
-    /// Initializes the `GasPriceOracle`.
-    fn init_gas_oracle(&self, cache: &EthStateCache) -> GasPriceOracle<Provider> {
-        GasPriceOracle::new(
-            self.eth_handlers_config.provider.clone(),
-            self.rpc_config.eth.gas_oracle.clone(),
-            cache.clone(),
-        )
-    }
+        let pubsub = EthPubSub::with_spawner(
+            ctx.provider,
+            ctx.pool,
+            ctx.events,
+            ctx.network,
+            Box::new(ctx.executor),
+        );
 
-    /// Initializes the `BlockingTaskPool`.
-    fn init_blocking_task_pool(&self) -> BlockingTaskPool {
-        BlockingTaskPool::build().expect("failed to build tracing pool")
-    }
-
-    /// Initializes the `EthApi`.
-    fn init_api(
-        &self,
-        cache: &EthStateCache,
-        gas_oracle: GasPriceOracle<Provider>,
-        fee_history_cache: &FeeHistoryCache,
-        blocking_task_pool: &BlockingTaskPool,
-    ) -> EthApi<Provider, Pool, Network, EvmConfig> {
-        EthApi::with_spawner(
-            self.eth_handlers_config.provider.clone(),
-            self.eth_handlers_config.pool.clone(),
-            self.eth_handlers_config.network.clone(),
-            cache.clone(),
-            gas_oracle,
-            self.rpc_config.eth.rpc_gas_cap,
-            Box::new(self.eth_handlers_config.executor.clone()),
-            blocking_task_pool.clone(),
-            fee_history_cache.clone(),
-            self.eth_handlers_config.evm_config.clone(),
-            self.eth_handlers_config.eth_raw_transaction_forwarder.clone(),
-        )
-    }
-
-    /// Initializes the `EthFilter`.
-    fn init_filter(&self, cache: &EthStateCache) -> EthFilter<Provider, Pool> {
-        EthFilter::new(
-            self.eth_handlers_config.provider.clone(),
-            self.eth_handlers_config.pool.clone(),
-            cache.clone(),
-            self.rpc_config.eth.filter_config(),
-            Box::new(self.eth_handlers_config.executor.clone()),
-        )
-    }
-
-    /// Initializes the `EthPubSub`.
-    fn init_pubsub(&self) -> EthPubSub<Provider, Pool, Events, Network> {
-        EthPubSub::with_spawner(
-            self.eth_handlers_config.provider.clone(),
-            self.eth_handlers_config.pool.clone(),
-            self.eth_handlers_config.events.clone(),
-            self.eth_handlers_config.network.clone(),
-            Box::new(self.eth_handlers_config.executor.clone()),
-        )
+        EthHandlers { api, cache: ctx.cache, filter, pubsub }
     }
 }
 
@@ -256,7 +158,7 @@ pub struct EthConfig {
     pub rpc_gas_cap: u64,
     ///
     /// Sets TTL for stale filters
-    pub stale_filter_ttl: std::time::Duration,
+    pub stale_filter_ttl: Duration,
     /// Settings for the fee history cache
     pub fee_history_cache: FeeHistoryCacheConfig,
 }
@@ -270,9 +172,6 @@ impl EthConfig {
             .stale_filter_ttl(self.stale_filter_ttl)
     }
 }
-
-/// Default value for stale filter ttl
-const DEFAULT_STALE_FILTER_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 impl Default for EthConfig {
     fn default() -> Self {
@@ -328,8 +227,8 @@ impl EthConfig {
 }
 
 /// Context for building the `eth` namespace server.
-#[derive(Debug)]
-pub struct EthApiBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Events> {
+#[derive(Debug, Clone)]
+pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events> {
     /// Database handle.
     pub provider: Provider,
     /// Mempool handle.
@@ -339,57 +238,27 @@ pub struct EthApiBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Event
     /// EVM configuration.
     pub evm_config: EvmConfig,
     /// RPC config for `eth` namespace.
-    pub config: &'a EthConfig,
+    pub config: EthConfig,
     /// Runtime handle.
-    pub executor: Box<Tasks>,
+    pub executor: Tasks,
     /// Events handle.
     pub events: Events,
     /// RPC cache handle.
     pub cache: EthStateCache,
-    /// Transaction forwarder used by `eth_sendRawTransaction` method.
-    pub raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
-}
-
-impl<'a, Provider, Pool, EvmConfig, Network, Tasks, Events>
-    EthApiBuilderCtx<'a, Provider, Pool, EvmConfig, Network, Tasks, Events>
-{
-    /// Creates a new context for building the `eth` namespace server.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        provider: Provider,
-        pool: Pool,
-        network: Network,
-        evm_config: EvmConfig,
-        config: &'a EthConfig,
-        executor: Box<Tasks>,
-        events: Events,
-        cache: EthStateCache,
-        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
-    ) -> Self {
-        Self {
-            provider,
-            pool,
-            network,
-            evm_config,
-            config,
-            executor,
-            events,
-            cache,
-            raw_transaction_forwarder,
-        }
-    }
 }
 
 /// Builds RPC server for `eth` namespace.
-pub trait EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>: Clone + Copy {
+pub trait EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>: Debug {
     /// `eth` namespace RPC server type.
-    type Server: EthApiServer + UpdateRawTxForwarder + Clone + FullEthApiServer;
+    type Server;
 
     /// Builds the [`EthApiServer`]
     fn build(
-        self,
-        ctx: EthApiBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
-    ) -> Self::Server;
+        &self,
+        ctx: EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    ) -> Self::Server
+    where
+        Self::Server: FullEthApiServer;
 }
 
 /// Builds eth server component gas price oracle, for given context.
@@ -399,12 +268,12 @@ pub struct GasPriceOracleBuilder;
 impl GasPriceOracleBuilder {
     /// Builds a gas price oracle, for given context.
     pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
-        ctx: &EthApiBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> GasPriceOracle<Provider>
     where
         Provider: BlockReaderIdExt + Clone,
     {
-        GasPriceOracle::new(ctx.provider.clone(), ctx.config.gas_oracle.clone(), ctx.cache.clone())
+        GasPriceOracle::new(ctx.provider.clone(), ctx.config.gas_oracle, ctx.cache.clone())
     }
 }
 
@@ -415,7 +284,7 @@ pub struct FeeHistoryCacheBuilder;
 impl FeeHistoryCacheBuilder {
     /// Builds a fee history cache, for given context.
     pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
-        ctx: &EthApiBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> FeeHistoryCache
     where
         Provider: ChainSpecProvider + BlockReaderIdExt + Clone + 'static,
@@ -423,7 +292,7 @@ impl FeeHistoryCacheBuilder {
         Events: CanonStateSubscriptions,
     {
         let fee_history_cache =
-            FeeHistoryCache::new(ctx.cache.clone(), ctx.config.fee_history_cache.clone());
+            FeeHistoryCache::new(ctx.cache.clone(), ctx.config.fee_history_cache);
 
         let new_canonical_blocks = ctx.events.canonical_state_stream();
         let fhc = fee_history_cache.clone();

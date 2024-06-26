@@ -47,12 +47,12 @@ pub trait TraceExt:
 impl<T> TraceExt for T where T: LoadTransaction + LoadBlock + LoadPendingBlock + Trace + Call {}
 
 /// Helper trait to unify all `eth` rpc server building block traits, for simplicity.
-pub trait FullEthApiServer:
+pub trait EthApiServerComponents:
     EthApiSpec + EthTransactions + EthBlocks + EthState + EthCall + EthFees + Trace + LoadReceipt
 {
 }
 
-impl<T> FullEthApiServer for T where
+impl<T> EthApiServerComponents for T where
     T: EthApiSpec
         + EthTransactions
         + EthBlocks

@@ -309,7 +309,7 @@ where
         let jwt_secret = ctx.auth_jwt_secret()?;
 
         // Start RPC servers
-        let (rpc_server_handles, mut rpc_registry) = crate::rpc::launch_rpc_servers(
+        let (rpc_server_handles, rpc_registry) = crate::rpc::launch_rpc_servers(
             ctx.node_adapter().clone(),
             engine_api,
             ctx.node_config(),

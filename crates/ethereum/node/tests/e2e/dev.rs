@@ -17,7 +17,7 @@ async fn can_run_dev_node() -> eyre::Result<()> {
     Ok(())
 }
 
-async fn assert_chain_advances(mut node: EthNode) {
+async fn assert_chain_advances(node: EthNode) {
     let mut notifications = node.inner.provider.canonical_state_stream();
 
     // submit tx through rpc

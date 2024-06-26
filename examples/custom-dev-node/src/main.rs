@@ -26,7 +26,7 @@ async fn main() -> eyre::Result<()> {
         .with_rpc(RpcServerArgs::default().with_http())
         .with_chain(custom_chain());
 
-    let NodeHandle { mut node, node_exit_future: _ } = NodeBuilder::new(node_config)
+    let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
         .node(EthereumNode::default())
         .launch()

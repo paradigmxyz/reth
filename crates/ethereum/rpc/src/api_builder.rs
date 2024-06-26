@@ -25,22 +25,14 @@ where
     type Server = EthApi<Provider, Pool, Network, EvmConfig>;
 
     fn build(
-        self,
-        ctx: EthApiBuilderCtx<'_, Provider, Pool, EvmConfig, Network, Tasks, Events>,
+        &self,
+        ctx: EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> Self::Server {
         let gas_oracle = GasPriceOracleBuilder::build(&ctx);
         let fee_history_cache = FeeHistoryCacheBuilder::build(&ctx);
 
         let EthApiBuilderCtx {
-            provider,
-            pool,
-            network,
-            evm_config,
-            executor,
-            cache,
-            config,
-            raw_transaction_forwarder,
-            ..
+            provider, pool, network, evm_config, executor, cache, config, ..
         } = ctx;
 
         EthApi::with_spawner(
@@ -50,11 +42,11 @@ where
             cache,
             gas_oracle,
             config.rpc_gas_cap,
-            executor,
+            Box::new(executor),
             BlockingTaskPool::build().expect("failed to build blocking task pool"),
             fee_history_cache,
             evm_config,
-            raw_transaction_forwarder,
+            None,
         )
     }
 }
