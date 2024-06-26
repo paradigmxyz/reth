@@ -1,18 +1,17 @@
 //! Database debugging tool
 
 use crate::{
+    args::DatadirArgs,
     commands::common::{AccessRights, Environment, EnvironmentArgs},
     dirs::DataDirPath,
-    utils::DbTool,
 };
-
-use crate::args::DatadirArgs;
 use clap::Parser;
 use reth_db::{init_db, mdbx::DatabaseArguments, tables, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, models::ClientVersion, table::TableImporter,
     transaction::DbTx,
 };
+use reth_db_common::DbTool;
 use reth_node_core::dirs::PlatformPath;
 use std::path::PathBuf;
 use tracing::info;

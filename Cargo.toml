@@ -441,6 +441,7 @@ sha2 = { version = "0.10", default-features = false }
 paste = "1.0"
 url = "2.3"
 backon = "0.4"
+boyer-moore-magiclen = "0.2.16"
 
 # metrics
 metrics = "0.23.0"
