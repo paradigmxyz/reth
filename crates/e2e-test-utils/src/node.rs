@@ -52,11 +52,11 @@ where
         })
     }
 
+    /// Establish a connection to the node
     pub async fn connect(&mut self, node: &mut NodeTestContext<Node>) {
         self.network.add_peer(node.network.record()).await;
-        node.network.add_peer(self.network.record()).await;
-        node.network.expect_session().await;
-        self.network.expect_session().await;
+        node.network.next_session_established().await;
+        self.network.next_session_established().await;
     }
 
     /// Advances the chain `length` blocks.
