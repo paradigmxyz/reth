@@ -615,7 +615,7 @@ mod tests {
                 ]),
                 ..Default::default()
             },
-            hardforks: BTreeMap::default(),
+            hardforks: Default::default(),
             genesis_hash: None,
             paris_block_and_final_difficulty: None,
             deposit_contract: None,

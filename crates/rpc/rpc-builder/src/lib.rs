@@ -47,7 +47,7 @@
 //!     Pool: TransactionPool + Clone + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
-//!     EvmConfig: ConfigureEvm + 'static,
+//!     EvmConfig: ConfigureEvm,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -115,7 +115,7 @@
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
 //!     EngineT: EngineTypes + 'static,
-//!     EvmConfig: ConfigureEvm + 'static,
+//!     EvmConfig: ConfigureEvm,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -178,11 +178,12 @@ use reth_provider::{
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc::{
-    eth::{cache::EthStateCache, traits::RawTransactionForwarder, EthBundle},
-    AdminApi, DebugApi, EngineEthApi, EthApi, EthSubscriptionIdProvider, NetApi, OtterscanApi,
-    RPCApi, RethApi, TraceApi, TxPoolApi, Web3Api,
+    eth::{EthApi, EthBundle, RawTransactionForwarder},
+    AdminApi, DebugApi, EngineEthApi, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi,
+    Web3Api,
 };
-use reth_rpc_api::servers::*;
+use reth_rpc_api::*;
+use reth_rpc_eth_types::{EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
@@ -250,7 +251,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    EvmConfig: ConfigureEvm,
 {
     let module_config = module_config.into();
     let server_config = server_config.into();
@@ -441,7 +442,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    EvmConfig: ConfigureEvm,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
     /// be used to start the transport server(s).
@@ -766,7 +767,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    EvmConfig: ConfigureEvm,
 {
     /// Register Eth Namespace
     ///
@@ -995,7 +996,7 @@ where
     ///
     /// This will spawn the required service tasks for [`EthApi`] for:
     ///   - [`EthStateCache`]
-    ///   - [`reth_rpc::eth::FeeHistoryCache`]
+    ///   - [`FeeHistoryCache`](reth_rpc_eth_types::FeeHistoryCache)
     fn with_eth<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&EthHandlers<Provider, Pool, Network, Events, EvmConfig>) -> R,

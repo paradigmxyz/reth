@@ -72,6 +72,7 @@
       - [`reth debug replay-engine`](./cli/reth/debug/replay-engine.md)
     - [`reth recover`](./cli/reth/recover.md)
       - [`reth recover storage-tries`](./cli/reth/recover/storage-tries.md)
+    - [`reth prune`](./cli/reth/prune.md)
 - [Developers](./developers/developers.md) <!-- CLI_REFERENCE END -->
    - [Execution Extensions](./developers/exex/exex.md)
       - [How do ExExes work?](./developers/exex/how-it-works.md)

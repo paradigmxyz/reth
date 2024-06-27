@@ -13,7 +13,7 @@ impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
         Ok(Box::new(DatabaseAccountTrieCursor::new(self.cursor_read::<tables::AccountsTrie>()?)))
     }
 
-    fn storage_tries_cursor(
+    fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {

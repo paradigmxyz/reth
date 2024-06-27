@@ -390,6 +390,7 @@ impl NodeConfig {
     /// [`RpcServerArgs::adjust_instance_ports`] method.
     pub fn adjust_instance_ports(&mut self) {
         self.rpc.adjust_instance_ports(self.instance);
+        self.network.adjust_instance_ports(self.instance);
     }
 
     /// Sets networking and RPC ports to zero, causing the OS to choose random unused ports when
