@@ -11,8 +11,14 @@ pub const NAME_CLIENT: &str = "Reth";
 /// The latest version from Cargo.toml.
 pub const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// The short SHA of the latest commit.
-pub const VERGEN_GIT_SHA: &str = env!("VERGEN_GIT_SHA");
+/// The full SHA of the latest commit.
+pub const VERGEN_GIT_SHA_LONG: &str = env!("VERGEN_GIT_SHA");
+
+/// The 7 character short SHA of the latest commit.
+pub const VERGEN_GIT_SHA: &str = const_format::str_index!(VERGEN_GIT_SHA_LONG, ..7);
+
+/// The 8 character short SHA of the latest commit.
+pub const VERGEN_GIT_SHA_8_CHARS: &str = const_format::str_index!(VERGEN_GIT_SHA_LONG, ..8);
 
 /// The build timestamp.
 pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
@@ -27,11 +33,11 @@ pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
 /// ```text
 /// 0.1.0 (defa64b2)
 /// ```
-pub const SHORT_VERSION: &str = concat!(
+pub const SHORT_VERSION: &str = const_format::concatcp!(
     env!("CARGO_PKG_VERSION"),
     env!("RETH_VERSION_SUFFIX"),
     " (",
-    env!("VERGEN_GIT_SHA"),
+    VERGEN_GIT_SHA,
     ")"
 );
 
@@ -52,13 +58,13 @@ pub const SHORT_VERSION: &str = concat!(
 /// Build Features: jemalloc
 /// Build Profile: maxperf
 /// ```
-pub const LONG_VERSION: &str = const_str::concat!(
+pub const LONG_VERSION: &str = const_format::concatcp!(
     "Version: ",
     env!("CARGO_PKG_VERSION"),
     env!("RETH_VERSION_SUFFIX"),
     "\n",
     "Commit SHA: ",
-    env!("VERGEN_GIT_SHA"),
+    VERGEN_GIT_SHA_LONG,
     "\n",
     "Build Timestamp: ",
     env!("VERGEN_BUILD_TIMESTAMP"),
@@ -81,11 +87,11 @@ pub const LONG_VERSION: &str = const_str::concat!(
 /// reth/v{major}.{minor}.{patch}-{sha1}/{target}
 /// ```
 /// e.g.: `reth/v0.1.0-alpha.1-428a6dc2f/aarch64-apple-darwin`
-pub(crate) const P2P_CLIENT_VERSION: &str = concat!(
+pub(crate) const P2P_CLIENT_VERSION: &str = const_format::concatcp!(
     "reth/v",
     env!("CARGO_PKG_VERSION"),
     "-",
-    env!("VERGEN_GIT_SHA"),
+    VERGEN_GIT_SHA,
     "/",
     env!("VERGEN_CARGO_TARGET_TRIPLE")
 );
@@ -108,7 +114,7 @@ pub fn default_extradata() -> String {
 pub fn default_client_version() -> ClientVersion {
     ClientVersion {
         version: CARGO_PKG_VERSION.to_string(),
-        git_sha: VERGEN_GIT_SHA.to_string(),
+        git_sha: VERGEN_GIT_SHA_8_CHARS.to_string(),
         build_timestamp: VERGEN_BUILD_TIMESTAMP.to_string(),
     }
 }
@@ -118,9 +124,13 @@ pub(crate) const fn build_profile_name() -> &'static str {
     // We split on the path separator of the *host* machine, which may be different from
     // `std::path::MAIN_SEPARATOR_STR`.
     const OUT_DIR: &str = env!("OUT_DIR");
-    const SEP: char = if const_str::contains!(OUT_DIR, "/") { '/' } else { '\\' };
-    let parts = const_str::split!(OUT_DIR, SEP);
-    parts[parts.len() - 4]
+    let unix_parts = const_format::str_split!(OUT_DIR, '/');
+    if unix_parts.len() > 0 {
+        unix_parts[unix_parts.len() - 4]
+    } else {
+        let win_parts = const_format::str_split!(OUT_DIR, '\\');
+        win_parts[win_parts.len() - 4]
+    }
 }
 
 #[cfg(test)]
