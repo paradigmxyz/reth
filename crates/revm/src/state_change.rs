@@ -11,7 +11,7 @@ use reth_primitives::{
         fill_tx_env_with_beacon_root_contract_call,
         fill_tx_env_with_withdrawal_requests_contract_call,
     },
-    Address, BlockWithSenders, Request, Withdrawal, Withdrawals, B256, U256,
+    Address, Block,  Request, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_storage_errors::provider::ProviderError;
 use revm::{
@@ -39,7 +39,7 @@ use std::collections::HashMap;
 #[inline]
 pub fn post_block_balance_increments(
     chain_spec: &ChainSpec,
-    block: &BlockWithSenders,
+    block: &Block,
     total_difficulty: U256,
 ) -> HashMap<Address, u128> {
     let mut balance_increments = HashMap::new();
