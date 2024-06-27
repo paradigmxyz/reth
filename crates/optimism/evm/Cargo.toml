@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 # Reth
 reth-chainspec.workspace = true
+reth-ethereum-forks.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-revm.workspace = true

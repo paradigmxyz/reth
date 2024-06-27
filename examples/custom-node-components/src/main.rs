@@ -39,7 +39,7 @@ pub struct CustomPoolBuilder {
     pool_config: PoolConfig,
 }
 
-/// Implement the `PoolBuilder` trait for the custom pool builder
+/// Implement the [`PoolBuilder`] trait for the custom pool builder
 ///
 /// This will be used to build the transaction pool and its maintenance tasks during launch.
 impl<Node> PoolBuilder<Node> for CustomPoolBuilder

@@ -23,14 +23,14 @@ use reth_provider::{
     BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
 };
-use reth_prune_types::PruneModes;
+use reth_prune::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
     stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
     ExecInput, Stage, StageCheckpoint,
 };
 use reth_tasks::TaskExecutor;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tracing::*;
 
 /// `reth debug merkle` command
@@ -69,11 +69,6 @@ impl Command {
             .network
             .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::new(self.network.addr, self.network.port))
-            .discovery_addr(SocketAddr::new(
-                self.network.discovery.addr,
-                self.network.discovery.port,
-            ))
             .build(provider_factory)
             .start_network()
             .await?;

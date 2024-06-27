@@ -5,8 +5,12 @@ use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use reth_db_api::database::Database;
-use reth_provider::{providers::StaticFileWriter, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{
+    providers::StaticFileWriter, ProviderFactory, StageCheckpointReader as _,
+    StaticFileProviderFactory,
+};
 use reth_prune_types::PruneModes;
+use reth_stages_types::StageId;
 use reth_static_file_types::HighestStaticFiles;
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::{EventSender, EventStream};
@@ -56,7 +60,7 @@ pub struct StaticFileProducerInner<DB> {
     event_sender: EventSender<StaticFileProducerEvent>,
 }
 
-/// Static File targets, per data part, measured in [`BlockNumber`].
+/// Static File targets, per data segment, measured in [`BlockNumber`].
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StaticFileTargets {
     headers: Option<RangeInclusive<BlockNumber>>,
@@ -165,6 +169,28 @@ impl<DB: Database> StaticFileProducerInner<DB> {
             .notify(StaticFileProducerEvent::Finished { targets: targets.clone(), elapsed });
 
         Ok(targets)
+    }
+
+    /// Copies data from database to static files according to
+    /// [stage checkpoints](reth_stages_types::StageCheckpoint).
+    ///
+    /// Returns highest block numbers for all static file segments.
+    pub fn copy_to_static_files(&self) -> ProviderResult<HighestStaticFiles> {
+        let provider = self.provider_factory.provider()?;
+        let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
+            .into_iter()
+            .map(|stage| provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number)))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let highest_static_files = HighestStaticFiles {
+            headers: stages_checkpoints[0],
+            receipts: stages_checkpoints[1],
+            transactions: stages_checkpoints[2],
+        };
+        let targets = self.get_static_file_targets(highest_static_files)?;
+        self.run(targets)?;
+
+        Ok(highest_static_files)
     }
 
     /// Returns a static file targets at the provided finalized block numbers per segment.
