@@ -160,12 +160,11 @@ use reth_provider::{
     EvmEnvProvider, FullRpcProvider, StateProviderFactory,
 };
 use reth_rpc::{
-    eth::{EthApi, EthBundle, RawTransactionForwarder},
-    AdminApi, DebugApi, EngineEthApi, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi,
-    Web3Api,
+    AdminApi, DebugApi, EngineEthApi, EthBundle, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi,
+    TxPoolApi, Web3Api,
 };
-
-use reth_rpc_eth_api::FullEthApiServer;
+use reth_rpc_api::servers::*;
+use reth_rpc_eth_api::{helpers::UpdateRawTxForwarder, FullEthApiServer, RawTransactionForwarder};
 use reth_rpc_eth_types::{EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
@@ -679,13 +678,22 @@ where
             events,
         }
     }
+}
 
-    /// Sets a forwarder for `eth_sendRawTransaction`
+impl<Provider, Pool, Network, Tasks, Events, EthApi>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
+{
+    /// Returns a reference to the installed [`EthApi`](reth_rpc::eth::EthApi).
+    pub const fn eth_api(&self) -> &EthApi {
+        &self.eth.api
+    }
+
+    /// Returns the [`EthStateCache`] frontend
     ///
-    /// Note: this might be removed in the future in favor of a more generic approach.
-    pub fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
-        // in case the eth api has been created before the forwarder was set: <https://github.com/paradigmxyz/reth/issues/8661>
-        self.eth.api.set_eth_raw_transaction_forwarder(forwarder.clone());
+    /// This will spawn exactly one [`EthStateCache`] service if this is the first time the cache is
+    /// requested.
+    pub const fn eth_cache(&self) -> &EthStateCache {
+        &self.eth.cache
     }
 
     /// Returns a reference to the pool
@@ -720,6 +728,20 @@ where
             module.merge(methods).expect("No conflicts");
         }
         module
+    }
+}
+
+impl<Provider, Pool, Network, Tasks, Events, EthApi>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
+where
+    EthApi: UpdateRawTxForwarder,
+{
+    /// Sets a forwarder for `eth_sendRawTransaction`
+    ///
+    /// Note: this might be removed in the future in favor of a more generic approach.
+    pub fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
+        // in case the eth api has been created before the forwarder was set: <https://github.com/paradigmxyz/reth/issues/8661>
+        self.eth.api.set_eth_raw_transaction_forwarder(forwarder.clone());
     }
 }
 
@@ -975,65 +997,6 @@ where
             .collect::<Vec<_>>()
     }
 
-    /// Returns the [`EthStateCache`] frontend
-    ///
-    /// This will spawn exactly one [`EthStateCache`] service if this is the first time the cache is
-    /// requested.
-    pub fn eth_cache(&mut self) -> EthStateCache {
-        self.with_eth(|handlers| handlers.cache.clone())
-    }
-
-    /// Creates the [`EthHandlers`] type the first time this is called.
-    ///
-    /// This will spawn the required service tasks for [`EthApi`] for:
-    ///   - [`EthStateCache`]
-    ///   - [`FeeHistoryCache`](reth_rpc_eth_types::FeeHistoryCache)
-    fn with_eth<F, R>(&mut self, f: F) -> R
-    where
-        F: FnOnce(&EthHandlers<Provider, Pool, Network, Events, EvmConfig>) -> R,
-    {
-        f(match &self.eth {
-            Some(eth) => eth,
-            None => self.eth.insert(self.init_eth()),
-        })
-    }
-
-    fn init_eth(&self) -> EthHandlers<Provider, Pool, Network, Events, EvmConfig> {
-        EthHandlersBuilder::new(
-            EthHandlersConfig {
-                provider: self.provider.clone(),
-                pool: self.pool.clone(),
-                network: self.network.clone(),
-                executor: self.executor.clone(),
-                events: self.events.clone(),
-                evm_config: self.evm_config.clone(),
-                eth_raw_transaction_forwarder: self.eth_raw_transaction_forwarder.clone(),
-            },
-            self.config.clone(),
-        )
-        .build()
-    }
-
-    /// Returns the configured [`EthHandlers`] or creates it if it does not exist yet
-    ///
-    /// # Panics
-    ///
-    /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn eth_handlers(&mut self) -> EthHandlers<Provider, Pool, Network, Events, EvmConfig> {
-        self.with_eth(|handlers| handlers.clone())
-    }
-
-    /// Returns the configured [`EthApi`] or creates it if it does not exist yet
-    ///
-    /// Caution: This will spawn the necessary tasks required by the [`EthApi`]: [`EthStateCache`].
-    ///
-    /// # Panics
-    ///
-    /// If called outside of the tokio runtime.
-    pub fn eth_api(&mut self) -> EthApi<Provider, Pool, Network, EvmConfig> {
-        self.with_eth(|handlers| handlers.api.clone())
-    }
-
     /// Instantiates `TraceApi`
     ///
     /// # Panics
@@ -1090,23 +1053,6 @@ where
     /// Instantiates `RethApi`
     pub fn reth_api(&self) -> RethApi<Provider> {
         RethApi::new(self.provider.clone(), Box::new(self.executor.clone()))
-    }
-}
-
-impl<Provider, Pool, Network, Tasks, Events, EthApi>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
-{
-    /// Returns a reference to the installed [`EthApi`](reth_rpc::eth::EthApi).
-    pub const fn eth_api(&self) -> &EthApi {
-        &self.eth.api
-    }
-
-    /// Returns the [`EthStateCache`] frontend
-    ///
-    /// This will spawn exactly one [`EthStateCache`] service if this is the first time the cache is
-    /// requested.
-    pub const fn eth_cache(&self) -> &EthStateCache {
-        &self.eth.cache
     }
 }
 

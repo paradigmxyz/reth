@@ -982,9 +982,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
         } = block_info;
         self.last_seen_block_number = last_seen_block_number;
         self.last_seen_block_hash = last_seen_block_hash;
+
         self.pending_fees.base_fee = pending_basefee;
+        self.metrics.base_fee.set(pending_basefee as f64);
+
         if let Some(pending_blob_fee) = pending_blob_fee {
             self.pending_fees.blob_fee = pending_blob_fee;
+            self.metrics.blob_base_fee.set(pending_blob_fee as f64);
         }
     }
 

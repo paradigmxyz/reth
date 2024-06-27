@@ -17,7 +17,7 @@ use reth::{
         providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
     },
-    utils::db::open_db_read_only,
+    utils::open_db_read_only,
 };
 use reth_chainspec::ChainSpecBuilder;
 use reth_db::mdbx::DatabaseArguments;

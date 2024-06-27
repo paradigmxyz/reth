@@ -46,6 +46,7 @@ reth-consensus.workspace = true
 reth-consensus-debug-client.workspace = true
 reth-rpc-types.workspace = true
 reth-ethereum-rpc.workspace = true
+reth-engine-util.workspace = true
 
 ## async
 futures.workspace = true

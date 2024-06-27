@@ -1,10 +1,7 @@
 //! Support for handling peer sessions.
 
-use crate::{
-    message::PeerMessage,
-    metrics::SessionManagerMetrics,
-    session::{active::ActiveSession, config::SessionCounter},
-};
+use crate::{message::PeerMessage, metrics::SessionManagerMetrics, session::active::ActiveSession};
+use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
@@ -15,6 +12,7 @@ use reth_eth_wire::{
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_peers::PeerId;
+use reth_network_types::SessionsConfig;
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_tasks::TaskSpawner;
 use rustc_hash::FxHashMap;
@@ -37,12 +35,11 @@ use tokio_util::sync::PollSender;
 use tracing::{debug, instrument, trace};
 
 mod active;
-mod config;
 mod conn;
+mod counter;
 mod handle;
 pub use crate::message::PeerRequestSender;
 use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocolHandlers, RlpxSubProtocols};
-pub use config::{SessionLimits, SessionsConfig};
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     SessionCommand,

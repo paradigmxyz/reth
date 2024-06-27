@@ -3,10 +3,11 @@
 
 use std::sync::Arc;
 
+use derive_more::Deref;
 use reth_primitives::{BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider};
 use reth_rpc_eth_api::{
-    helpers::{EthSigner, SpawnBlocking},
+    helpers::{transaction::UpdateRawTxForwarder, EthSigner, SpawnBlocking},
     RawTransactionForwarder,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock};
@@ -24,6 +25,7 @@ use crate::eth::DevSigner;
 /// separately in submodules. The rpc handler implementation can then delegate to the main impls.
 /// This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone or in other
 /// network handlers (for example ipc).
+#[derive(Deref)]
 pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
@@ -299,6 +301,14 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     #[inline]
     pub const fn starting_block(&self) -> U256 {
         self.starting_block
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> UpdateRawTxForwarder
+    for EthApiInner<Provider, Pool, Network, EvmConfig>
+{
+    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
+        self.raw_transaction_forwarder.write().replace(forwarder);
     }
 }
 

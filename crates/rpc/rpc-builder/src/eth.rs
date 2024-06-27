@@ -5,16 +5,15 @@ use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
     StateProviderFactory,
 };
-use reth_rpc::eth::{EthApi, EthFilter, EthFilterConfig, EthPubSub, RawTransactionForwarder};
+use reth_rpc::{eth::EthFilterConfig, EthFilter, EthPubSub};
 use reth_rpc_eth_api::FullEthApiServer;
 use reth_rpc_eth_types::{
     cache::cache_new_blocks_task, fee_history::fee_history_cache_new_blocks_task, EthStateCache,
     EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
-    GasPriceOracleConfig,
+    GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
 };
 use reth_rpc_server_types::constants::{
-    default_max_tracing_requests, gas_oracle::RPC_DEFAULT_GAS_CAP, DEFAULT_MAX_BLOCKS_PER_FILTER,
-    DEFAULT_MAX_LOGS_PER_RESPONSE,
+    default_max_tracing_requests, DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE,
 };
 use reth_tasks::TaskSpawner;
 use serde::{Deserialize, Serialize};
@@ -171,7 +170,7 @@ impl Default for EthConfig {
             max_tracing_requests: default_max_tracing_requests(),
             max_blocks_per_filter: DEFAULT_MAX_BLOCKS_PER_FILTER,
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
-            rpc_gas_cap: RPC_DEFAULT_GAS_CAP,
+            rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             fee_history_cache: FeeHistoryCacheConfig::default(),
         }
@@ -237,12 +236,12 @@ pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events> {
     pub cache: EthStateCache,
 }
 
-/// Builds [`EthApiServer`](reth_rpc::eth::EthApiServer), the core `eth` namespace API.
+/// Builds [`EthApiServer`](reth_rpc_eth_api::EthApiServer), the core `eth` namespace API.
 pub trait EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>: Debug {
     /// `eth` namespace RPC server type.
     type Server;
 
-    /// Builds the [`EthApiServer`](reth_rpc::eth::EthApiServer), for given context.
+    /// Builds the [`EthApiServer`](reth_rpc_eth_api::EthApiServer), for given context.
     fn build(
         &self,
         ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
@@ -251,12 +250,12 @@ pub trait EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>: Debu
         Self::Server: FullEthApiServer;
 }
 
-/// Builds the `eth_` namespace API [`EthFilterApiServer`](reth_rpc::eth::EthFilterApiServer).
+/// Builds the `eth_` namespace API [`EthFilterApiServer`](reth_rpc_eth_api::EthFilterApiServer).
 #[derive(Debug)]
 pub struct EthFilterApiBuilder;
 
 impl EthFilterApiBuilder {
-    /// Builds the [`EthFilterApiServer`](reth_rpc::eth::EthFilterApiServer), for given context.
+    /// Builds the [`EthFilterApiServer`](reth_rpc_eth_api::EthFilterApiServer), for given context.
     pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
         ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> EthFilter<Provider, Pool>
@@ -275,12 +274,12 @@ impl EthFilterApiBuilder {
     }
 }
 
-/// Builds the `eth_` namespace API [`EthPubSubApiServer`](reth_rpc::eth::EthFilterApiServer).
+/// Builds the `eth_` namespace API [`EthPubSubApiServer`](reth_rpc_eth_api::EthFilterApiServer).
 #[derive(Debug)]
 pub struct EthPubSubApiBuilder;
 
 impl EthPubSubApiBuilder {
-    /// Builds the [`EthPubSubApiServer`](reth_rpc::eth::EthPubSubApiServer), for given context.
+    /// Builds the [`EthPubSubApiServer`](reth_rpc_eth_api::EthPubSubApiServer), for given context.
     pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
         ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
     ) -> EthPubSub<Provider, Pool, Events, Network>

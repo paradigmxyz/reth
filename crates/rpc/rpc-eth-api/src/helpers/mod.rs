@@ -36,7 +36,7 @@ pub use signer::EthSigner;
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
 pub use trace::Trace;
-pub use transaction::{EthTransactions, LoadTransaction};
+pub use transaction::{EthTransactions, LoadTransaction, UpdateRawTxForwarder};
 
 /// Extension trait that bundles traits needed for tracing transactions.
 pub trait TraceExt:

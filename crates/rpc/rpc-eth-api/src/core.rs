@@ -16,8 +16,8 @@ use reth_rpc_types::{
 use tracing::trace;
 
 use crate::helpers::{
-    EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApiServerBehaviour,
-    LoadReceipt, Trace,
+    transaction::UpdateRawTxForwarder, EthApiSpec, EthBlocks, EthCall, EthFees, EthState,
+    EthTransactions, FullEthApiServerBehaviour, LoadReceipt, Trace,
 };
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for

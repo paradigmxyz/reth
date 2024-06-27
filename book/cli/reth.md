@@ -19,6 +19,7 @@ Commands:
   config        Write config to stdout
   debug         Various debug routines
   recover       Scripts for node recovery
+  prune         Prune according to the configuration without any limits
   help          Print this message or the help of the given subcommand(s)
 
 Options:

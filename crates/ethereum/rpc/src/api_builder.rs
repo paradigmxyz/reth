@@ -1,10 +1,10 @@
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_provider::{CanonStateSubscriptions, FullRpcProvider};
+use reth_rpc::EthApi;
 use reth_rpc_builder::{
     EthApiBuilder, EthApiBuilderCtx, FeeHistoryCacheBuilder, GasPriceOracleBuilder,
 };
-use reth_rpc_eth_api::EthApi;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
 
