@@ -9,6 +9,7 @@ pub use optimism::OptimismHardfork;
 mod dev;
 pub use dev::DEV_HARDFORKS;
 
+use auto_impl;
 use core::{
     any::Any,
     hash::{Hash, Hasher},
@@ -19,19 +20,13 @@ use dyn_clone::DynClone;
 use alloc::{format, string::String};
 
 /// Generic hardfork trait.
+#[auto_impl::auto_impl(&, Box)]
 pub trait Hardfork: Any + DynClone + Send + Sync + 'static {
     /// Fork name.
     fn name(&self) -> &'static str;
 }
 
 dyn_clone::clone_trait_object!(Hardfork);
-
-impl Hardfork for Box<dyn Hardfork> {
-    /// Name of an hardfork.
-    fn name(&self) -> &'static str {
-        (**self).name()
-    }
-}
 
 impl core::fmt::Debug for dyn Hardfork + 'static {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

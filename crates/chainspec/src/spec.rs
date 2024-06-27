@@ -590,7 +590,7 @@ impl ChainSpec {
     /// hardforks.
     #[inline]
     pub fn latest_fork_id(&self) -> ForkId {
-        self.hardfork_fork_id(self.hardforks.forks_iter().last().unwrap().0.clone()).unwrap()
+        self.hardfork_fork_id(self.hardforks.last().unwrap().0).unwrap()
     }
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
@@ -820,7 +820,7 @@ impl From<Genesis> for ChainSpec {
 
         let mut ordered_hardforks = Vec::with_capacity(hardforks.len());
         for (hardfork, _) in mainnet_order {
-            if let Some(pos) = hardforks.iter().position(|(e, _)| e == hardfork) {
+            if let Some(pos) = hardforks.iter().position(|(e, _)| **e == *hardfork) {
                 ordered_hardforks.push(hardforks[pos].clone());
             }
         }

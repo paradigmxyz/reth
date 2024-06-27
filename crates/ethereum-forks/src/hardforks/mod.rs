@@ -16,7 +16,7 @@ pub trait Hardforks: Default + Clone {
     fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition;
 
     /// Get an iterator of all hardforks with their respective activation conditions.
-    fn forks_iter(&self) -> impl Iterator<Item = (&Box<dyn Hardfork + 'static>, ForkCondition)>;
+    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)>;
 
     /// Convenience method to check if a fork is active at a given timestamp.
     fn is_fork_active_at_timestamp<H: Hardfork>(&self, fork: H, timestamp: u64) -> bool {
@@ -68,10 +68,13 @@ impl ChainHardforks {
     }
 
     /// Get an iterator of all hardforks with their respective activation conditions.
-    pub fn forks_iter(
-        &self,
-    ) -> impl Iterator<Item = (&Box<dyn Hardfork + 'static>, ForkCondition)> {
-        self.forks.iter().map(|(f, b)| (f, *b))
+    pub fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
+        self.forks.iter().map(|(f, b)| (&**f, *b))
+    }
+
+    /// Get last hardfork from the list.
+    pub fn last(&self) -> Option<(Box<dyn Hardfork>, ForkCondition)> {
+        self.forks.last().map(|(f, b)| (f.clone(), *b))
     }
 
     /// Convenience method to check if a fork is active at a given timestamp.
@@ -114,7 +117,7 @@ impl Hardforks for ChainHardforks {
         self.fork(fork)
     }
 
-    fn forks_iter(&self) -> impl Iterator<Item = (&Box<dyn Hardfork + 'static>, ForkCondition)> {
+    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
         self.forks_iter()
     }
 }
