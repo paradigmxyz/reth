@@ -207,7 +207,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
     /// Returns the block object for the given block id.
     fn block(
         &self,
-        block_id: impl Into<BlockId> + Send,
+        block_id: BlockId,
     ) -> impl Future<Output = EthResult<Option<SealedBlock>>> + Send {
         async move {
             self.block_with_senders(block_id)
@@ -219,11 +219,9 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking {
     /// Returns the block object for the given block id.
     fn block_with_senders(
         &self,
-        block_id: impl Into<BlockId> + Send,
+        block_id: BlockId,
     ) -> impl Future<Output = EthResult<Option<SealedBlockWithSenders>>> + Send {
         async move {
-            let block_id = block_id.into();
-
             if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
                 let maybe_pending =

@@ -184,14 +184,14 @@ pub trait EthTransactions: LoadTransaction {
     /// Returns `Ok(None)` if the block does not exist, or index is out of range.
     fn transaction_by_block_and_tx_index(
         &self,
-        block_id: impl Into<BlockId> + Send,
+        block_id: BlockId,
         index: Index,
     ) -> impl Future<Output = EthResult<Option<Transaction>>> + Send
     where
         Self: LoadBlock,
     {
         async move {
-            if let Some(block) = self.block_with_senders(block_id.into()).await? {
+            if let Some(block) = self.block_with_senders(block_id).await? {
                 let block_hash = block.hash();
                 let block_number = block.number;
                 let base_fee_per_gas = block.base_fee_per_gas;
@@ -215,14 +215,14 @@ pub trait EthTransactions: LoadTransaction {
     /// Returns `Ok(None)` if the block does not exist, or index is out of range.
     fn raw_transaction_by_block_and_tx_index(
         &self,
-        block_id: impl Into<BlockId> + Send,
+        block_id: BlockId,
         index: Index,
     ) -> impl Future<Output = EthResult<Option<Bytes>>> + Send
     where
         Self: LoadBlock,
     {
         async move {
-            if let Some(block) = self.block_with_senders(block_id.into()).await? {
+            if let Some(block) = self.block_with_senders(block_id).await? {
                 if let Some(tx) = block.transactions().nth(index.into()) {
                     return Ok(Some(tx.envelope_encoded()))
                 }
