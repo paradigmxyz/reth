@@ -18,7 +18,7 @@ use tracing::trace;
 /// Backfill sync mode functionality.
 pub trait BackfillSync: Send + Sync {
     /// Performs a backfill action.
-    fn on_action(&mut self, event: BackfillAction);
+    fn on_action(&mut self, action: BackfillAction);
 
     /// Polls the pipeline for completion.
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<BackfillEvent>;
@@ -77,24 +77,24 @@ where
 
     /// Returns `true` if a pipeline target is queued and will be triggered on the next `poll`.
     #[allow(dead_code)]
-    pub(crate) const fn is_pipeline_sync_pending(&self) -> bool {
+    const fn is_pipeline_sync_pending(&self) -> bool {
         self.pending_pipeline_target.is_some() && self.pipeline_state.is_idle()
     }
 
     /// Returns `true` if the pipeline is idle.
-    pub(crate) const fn is_pipeline_idle(&self) -> bool {
+    const fn is_pipeline_idle(&self) -> bool {
         self.pipeline_state.is_idle()
     }
 
     /// Returns `true` if the pipeline is active.
-    pub(crate) const fn is_pipeline_active(&self) -> bool {
+    const fn is_pipeline_active(&self) -> bool {
         !self.is_pipeline_idle()
     }
 
     /// Sets a new target to sync the pipeline to.
     ///
     /// But ensures the target is not the zero hash.
-    pub(crate) fn set_pipeline_sync_target(&mut self, target: PipelineTarget) {
+    fn set_pipeline_sync_target(&mut self, target: PipelineTarget) {
         if target.sync_target().is_some_and(|target| target.is_zero()) {
             trace!(
                 target: "consensus::engine::sync",
@@ -322,7 +322,7 @@ mod tests {
         // sync target not set, pipeline not started
         assert_matches!(next_event, Poll::Pending);
 
-        pipeline_sync.set_pipeline_sync_target(tip.into());
+        pipeline_sync.on_action(BackfillAction::Start(PipelineTarget::Sync(tip)));
 
         let sync_future = poll_fn(|cx| pipeline_sync.poll(cx));
         let next_event = poll!(sync_future);
