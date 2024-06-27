@@ -133,8 +133,8 @@ impl StatefulPrecompileMut for WrappedPrecompile {
 }
 
 impl ConfigureEvmEnv for MyEvmConfig {
-    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        EthEvmConfig::fill_tx_env(tx_env, transaction, sender)
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        EthEvmConfig::default().fill_tx_env(tx_env, transaction, sender)
     }
 
     fn fill_cfg_env(

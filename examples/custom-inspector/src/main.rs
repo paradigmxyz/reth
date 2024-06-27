@@ -21,7 +21,7 @@ use reth::{
         interpreter::{Interpreter, OpCode},
         Database, Evm, EvmContext, Inspector,
     },
-    rpc::{compat::transaction::transaction_to_call_request, eth::EthTransactions},
+    rpc::{compat::transaction::transaction_to_call_request, eth::servers::Call},
     transaction_pool::TransactionPool,
 };
 use reth_node_ethereum::node::EthereumNode;

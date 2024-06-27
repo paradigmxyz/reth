@@ -10,7 +10,7 @@ use clap::{
     Arg, Args, Command,
 };
 use rand::Rng;
-use reth_rpc::eth::RPC_DEFAULT_GAS_CAP;
+use reth_rpc_eth_api::RPC_DEFAULT_GAS_CAP;
 
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
 use std::{
