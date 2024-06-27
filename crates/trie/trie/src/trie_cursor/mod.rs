@@ -25,7 +25,7 @@ pub trait TrieCursorFactory {
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError>;
 
     /// Create a storage tries cursor.
-    fn storage_tries_cursor(
+    fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor, DatabaseError>;

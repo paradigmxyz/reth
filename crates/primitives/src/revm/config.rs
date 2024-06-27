@@ -1,5 +1,7 @@
-use reth_chainspec::ChainSpec;
-use reth_ethereum_forks::{Hardfork, Head};
+#[cfg(feature = "optimism")]
+use reth_chainspec::OptimismHardfork;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_ethereum_forks::{EthereumHardfork, Head};
 
 /// Returns the spec id at the given timestamp.
 ///
@@ -11,13 +13,13 @@ pub fn revm_spec_by_timestamp_after_merge(
 ) -> revm_primitives::SpecId {
     #[cfg(feature = "optimism")]
     if chain_spec.is_optimism() {
-        return if chain_spec.fork(Hardfork::Fjord).active_at_timestamp(timestamp) {
+        return if chain_spec.fork(OptimismHardfork::Fjord).active_at_timestamp(timestamp) {
             revm_primitives::FJORD
-        } else if chain_spec.fork(Hardfork::Ecotone).active_at_timestamp(timestamp) {
+        } else if chain_spec.fork(OptimismHardfork::Ecotone).active_at_timestamp(timestamp) {
             revm_primitives::ECOTONE
-        } else if chain_spec.fork(Hardfork::Canyon).active_at_timestamp(timestamp) {
+        } else if chain_spec.fork(OptimismHardfork::Canyon).active_at_timestamp(timestamp) {
             revm_primitives::CANYON
-        } else if chain_spec.fork(Hardfork::Regolith).active_at_timestamp(timestamp) {
+        } else if chain_spec.fork(OptimismHardfork::Regolith).active_at_timestamp(timestamp) {
             revm_primitives::REGOLITH
         } else {
             revm_primitives::BEDROCK
@@ -39,44 +41,44 @@ pub fn revm_spec_by_timestamp_after_merge(
 pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId {
     #[cfg(feature = "optimism")]
     if chain_spec.is_optimism() {
-        if chain_spec.fork(Hardfork::Fjord).active_at_head(&block) {
+        if chain_spec.fork(OptimismHardfork::Fjord).active_at_head(&block) {
             return revm_primitives::FJORD
-        } else if chain_spec.fork(Hardfork::Ecotone).active_at_head(&block) {
+        } else if chain_spec.fork(OptimismHardfork::Ecotone).active_at_head(&block) {
             return revm_primitives::ECOTONE
-        } else if chain_spec.fork(Hardfork::Canyon).active_at_head(&block) {
+        } else if chain_spec.fork(OptimismHardfork::Canyon).active_at_head(&block) {
             return revm_primitives::CANYON
-        } else if chain_spec.fork(Hardfork::Regolith).active_at_head(&block) {
+        } else if chain_spec.fork(OptimismHardfork::Regolith).active_at_head(&block) {
             return revm_primitives::REGOLITH
-        } else if chain_spec.fork(Hardfork::Bedrock).active_at_head(&block) {
+        } else if chain_spec.fork(OptimismHardfork::Bedrock).active_at_head(&block) {
             return revm_primitives::BEDROCK
         }
     }
 
-    if chain_spec.fork(Hardfork::Prague).active_at_head(&block) {
+    if chain_spec.fork(EthereumHardfork::Prague).active_at_head(&block) {
         revm_primitives::PRAGUE
-    } else if chain_spec.fork(Hardfork::Cancun).active_at_head(&block) {
+    } else if chain_spec.fork(EthereumHardfork::Cancun).active_at_head(&block) {
         revm_primitives::CANCUN
-    } else if chain_spec.fork(Hardfork::Shanghai).active_at_head(&block) {
+    } else if chain_spec.fork(EthereumHardfork::Shanghai).active_at_head(&block) {
         revm_primitives::SHANGHAI
-    } else if chain_spec.fork(Hardfork::Paris).active_at_head(&block) {
+    } else if chain_spec.fork(EthereumHardfork::Paris).active_at_head(&block) {
         revm_primitives::MERGE
-    } else if chain_spec.fork(Hardfork::London).active_at_head(&block) {
+    } else if chain_spec.fork(EthereumHardfork::London).active_at_head(&block) {
         revm_primitives::LONDON
-    } else if chain_spec.fork(Hardfork::Berlin).active_at_head(&block) {
+    } else if chain_spec.fork(EthereumHardfork::Berlin).active_at_head(&block) {
         revm_primitives::BERLIN
-    } else if chain_spec.fork(Hardfork::Istanbul).active_at_head(&block) {
+    } else if chain_spec.fork(EthereumHardfork::Istanbul).active_at_head(&block) {
         revm_primitives::ISTANBUL
-    } else if chain_spec.fork(Hardfork::Petersburg).active_at_head(&block) {
+    } else if chain_spec.fork(EthereumHardfork::Petersburg).active_at_head(&block) {
         revm_primitives::PETERSBURG
-    } else if chain_spec.fork(Hardfork::Byzantium).active_at_head(&block) {
+    } else if chain_spec.fork(EthereumHardfork::Byzantium).active_at_head(&block) {
         revm_primitives::BYZANTIUM
-    } else if chain_spec.fork(Hardfork::SpuriousDragon).active_at_head(&block) {
+    } else if chain_spec.fork(EthereumHardfork::SpuriousDragon).active_at_head(&block) {
         revm_primitives::SPURIOUS_DRAGON
-    } else if chain_spec.fork(Hardfork::Tangerine).active_at_head(&block) {
+    } else if chain_spec.fork(EthereumHardfork::Tangerine).active_at_head(&block) {
         revm_primitives::TANGERINE
-    } else if chain_spec.fork(Hardfork::Homestead).active_at_head(&block) {
+    } else if chain_spec.fork(EthereumHardfork::Homestead).active_at_head(&block) {
         revm_primitives::HOMESTEAD
-    } else if chain_spec.fork(Hardfork::Frontier).active_at_head(&block) {
+    } else if chain_spec.fork(EthereumHardfork::Frontier).active_at_head(&block) {
         revm_primitives::FRONTIER
     } else {
         panic!(

@@ -29,6 +29,7 @@ reth-provider.workspace = true
 reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-network-peers.workspace = true
+reth-network-types.workspace = true
 
 # ethereum
 enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
@@ -75,6 +76,7 @@ reth-primitives = { workspace = true, features = ["test-utils"] }
 # integration tests
 reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
+reth-network-types = { workspace = true, features = ["test-utils"] }
 
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
@@ -95,8 +97,8 @@ criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 [features]
 default = ["serde"]
 geth-tests = []
-serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr/serde", "dep:serde_json"]
-test-utils = ["reth-provider/test-utils", "dep:tempfile", "reth-transaction-pool/test-utils"]
+serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr/serde", "dep:serde_json", "reth-network-types/serde"]
+test-utils = ["reth-provider/test-utils", "dep:tempfile", "reth-transaction-pool/test-utils", "reth-network-types/test-utils"]
 
 [[bench]]
 name = "bench"

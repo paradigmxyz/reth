@@ -1,4 +1,4 @@
-use reth_chainspec::{ChainSpec, Hardfork};
+use reth_chainspec::{ChainSpec, OptimismHardfork};
 use reth_node_api::{
     payload::{
         validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
@@ -69,7 +69,7 @@ pub fn validate_withdrawals_presence(
     timestamp: u64,
     has_withdrawals: bool,
 ) -> Result<(), EngineObjectValidationError> {
-    let is_shanghai = chain_spec.fork(Hardfork::Canyon).active_at_timestamp(timestamp);
+    let is_shanghai = chain_spec.fork(OptimismHardfork::Canyon).active_at_timestamp(timestamp);
 
     match version {
         EngineApiMessageVersion::V1 => {

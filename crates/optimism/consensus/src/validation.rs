@@ -1,4 +1,4 @@
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     gas_spent_by_transactions, proofs::calculate_receipt_root_optimism, BlockWithSenders, Bloom,

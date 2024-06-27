@@ -17,7 +17,7 @@ impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
         Ok(DatabaseAccountTrieCursor::new(self.cursor_read::<tables::AccountsTrie>()?))
     }
 
-    fn storage_tries_cursor(
+    fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor, DatabaseError> {
