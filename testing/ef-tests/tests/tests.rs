@@ -11,6 +11,15 @@ macro_rules! general_state_test {
     };
 }
 
+macro_rules! valid_blocks_test {
+    ($test_name:ident, $dir:ident) => {
+        #[test]
+        fn $test_name() {
+            BlockchainTests::new(format!("ValidBlocks/{}", stringify!($dir))).run();
+        }
+    };
+}
+
 mod general_state_tests {
     use super::*;
 
@@ -76,4 +85,20 @@ mod general_state_tests {
     general_state_test!(vm_tests, VMTests);
 }
 
-// TODO: Add ValidBlocks and InvalidBlocks tests
+mod valid_blocks_tests {
+    use super::*;
+
+    valid_blocks_test!(bc_block_gas_limit_test, bcBlockGasLimitTest);
+    valid_blocks_test!(bc_eip1559, bcEIP1559);
+    valid_blocks_test!(bc_eip3675, bcEIP3675);
+    valid_blocks_test!(bc_example, bcExample);
+    valid_blocks_test!(bc_exploit_test, bcExploitTest);
+    valid_blocks_test!(bc_fork_stress_test, bcForkStressTest);
+    valid_blocks_test!(bc_gas_pricer_test, bcGasPricerTest);
+    valid_blocks_test!(bc_random_blockhash_test, bcRandomBlockhashTest);
+    valid_blocks_test!(bc_state_tests, bcStateTests);
+    valid_blocks_test!(bc_valid_block_test, bcValidBlockTest);
+    valid_blocks_test!(bc_wallet_test, bcWalletTest);
+}
+
+// TODO: Add InvalidBlocks tests
