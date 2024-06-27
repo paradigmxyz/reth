@@ -43,7 +43,7 @@ pub mod rpc {
 
     /// Re-exported from `reth_rpc::rpc`.
     pub mod result {
-        pub use reth_rpc_eth_api::result::*;
+        pub use reth_rpc_server_types::result::*;
     }
 
     /// Re-exported from `reth_rpc::eth`.
