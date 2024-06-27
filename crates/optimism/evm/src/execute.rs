@@ -177,7 +177,7 @@ where
                 .transpose()
                 .map_err(|_| OptimismBlockExecutionError::AccountLoadFailed(*sender))?;
 
-            EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender);
+            self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
 
             // Execute transaction.
             let ResultAndState { result, state } = evm.transact().map_err(move |err| {
