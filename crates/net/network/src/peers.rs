@@ -1011,7 +1011,8 @@ pub struct Peer {
     kind: PeerKind,
     /// Whether the peer is currently backed off.
     backed_off: bool,
-    /// Counts number of times the peer was backed off due to a severe [`BackoffKind`].
+    /// Counts number of times the peer was backed off due to a severe
+    /// [`reth_network_types::BackoffKind`].
     severe_backoff_counter: u8,
 }
 

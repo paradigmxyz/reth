@@ -20,11 +20,11 @@ reth-net-banlist.workspace = true
 # io
 serde = { workspace = true, optional = true }
 humantime-serde = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
+serde_json = { workspace = true }
 
 # misc 
 tracing.workspace = true
 
 [features]
-serde = ["dep:serde", "dep:humantime-serde", "dep:serde_json"]
+serde = ["dep:serde", "dep:humantime-serde"]
 test-utils = []
