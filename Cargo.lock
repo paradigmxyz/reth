@@ -6579,6 +6579,7 @@ name = "reth-cli"
 version = "1.0.0"
 dependencies = [
  "clap",
+ "reth-cli-runner",
 ]
 
 [[package]]
@@ -7524,7 +7525,6 @@ dependencies = [
  "aquamarine",
  "backon",
  "confy",
- "discv5",
  "eyre",
  "fdlimit",
  "futures",
