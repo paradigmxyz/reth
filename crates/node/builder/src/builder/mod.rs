@@ -66,7 +66,7 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// components of the node that are downstream of those types, these include:
 ///
 ///  - The EVM and Executor configuration: [`ExecutorBuilder`](crate::components::ExecutorBuilder)
-///  - The transaction pool: [`PoolBuilder`]
+///  - The transaction pool: [`PoolBuilder`](crate::components::PoolBuilder)
 ///  - The network: [`NetworkBuilder`](crate::components::NetworkBuilder)
 ///  - The payload builder: [`PayloadBuilder`](crate::components::PayloadServiceBuilder)
 ///
@@ -98,11 +98,11 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 ///
 /// Once all the components are configured, the builder can be used to set hooks that are run at
 /// specific points in the node's lifecycle. This way custom services can be spawned before the node
-/// is launched [`NodeBuilder::on_component_initialized`], or once the rpc server(s) are launched
-/// [`NodeBuilder::on_rpc_started`]. The [`NodeBuilder::extend_rpc_modules`] can be used to inject
-/// custom rpc modules into the rpc server before it is launched. See also [`RpcContext`]
-/// All hooks accept a closure that is then invoked at the appropriate time in the node's launch
-/// process.
+/// is launched [`NodeBuilderWithComponents::on_component_initialized`], or once the rpc server(s)
+/// are launched [`NodeBuilderWithComponents::on_rpc_started`]. The
+/// [`NodeBuilderWithComponents::extend_rpc_modules`] can be used to inject custom rpc modules into
+/// the rpc server before it is launched. See also [`RpcContext`] All hooks accept a closure that is
+/// then invoked at the appropriate time in the node's launch process.
 ///
 /// ## Flow
 ///
@@ -110,12 +110,12 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// input: [`NodeBuilder::new`]
 ///
 /// From there the builder is configured with the node's types, components, and hooks, then launched
-/// with the [`NodeBuilder::launch`] method. On launch all the builtin internals, such as the
+/// with the [`WithLaunchContext::launch`] method. On launch all the builtin internals, such as the
 /// `Database` and its providers [`BlockchainProvider`] are initialized before the configured
 /// [`NodeComponentsBuilder`] is invoked with the [`BuilderContext`] to create the transaction pool,
 /// network, and payload builder components. When the RPC is configured, the corresponding hooks are
 /// invoked to allow for custom rpc modules to be injected into the rpc server:
-/// [`NodeBuilder::extend_rpc_modules`]
+/// [`NodeBuilderWithComponents::extend_rpc_modules`]
 ///
 /// Finally all components are created and all services are launched and a [`NodeHandle`] is
 /// returned that can be used to interact with the node: [`FullNode`]
@@ -133,10 +133,10 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// components, that depend on the database, are configured separately. In order to have a nice
 /// trait that encapsulates the entire node the [`FullNodeComponents`] trait was introduced. This
 /// trait has convenient associated types for all the components of the node. After
-/// [`NodeBuilder::launch`] the [`NodeHandle`] contains an instance of [`FullNode`] that implements
-/// the [`FullNodeComponents`] trait and has access to all the components of the node. Internally
-/// the node builder uses several generic adapter types that are then map to traits with associated
-/// types for ease of use.
+/// [`WithLaunchContext::launch`] the [`NodeHandle`] contains an instance of [`FullNode`] that
+/// implements the [`FullNodeComponents`](reth_node_api::FullNodeComponents) trait and has access to
+/// all the components of the node. Internally the node builder uses several generic adapter types
+/// that are then map to traits with associated types for ease of use.
 ///
 /// ### Limitations
 ///
