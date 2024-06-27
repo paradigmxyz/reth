@@ -9,7 +9,6 @@ use crate::{
     rpc::{RethRpcServerHandles, RpcContext},
     DefaultNodeLauncher, Node, NodeHandle,
 };
-use discv5::ListenConfig;
 use futures::Future;
 use reth_chainspec::ChainSpec;
 use reth_db::{
@@ -39,10 +38,7 @@ use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
 pub use states::*;
-use std::{
-    net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 mod states;
 
@@ -530,12 +526,20 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     pub fn network_config_builder(&self) -> eyre::Result<NetworkConfigBuilder> {
         let secret_key = self.network_secret(&self.config().datadir())?;
         let default_peers_path = self.config().datadir().known_peers();
-        Ok(self.config().network.network_config(
-            self.reth_config(),
-            self.config().chain.clone(),
-            secret_key,
-            default_peers_path,
-        ))
+        let builder = self
+            .config()
+            .network
+            .network_config(
+                self.reth_config(),
+                self.config().chain.clone(),
+                secret_key,
+                default_peers_path,
+                None,
+            )
+            .with_task_executor(Box::new(self.executor.clone()))
+            .set_head(self.head);
+
+        Ok(builder)
     }
 
     /// Get the network secret from the given data dir
@@ -551,49 +555,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         &self,
         network_builder: NetworkConfigBuilder,
     ) -> NetworkConfig<Node::Provider> {
-        network_builder
-            .with_task_executor(Box::new(self.executor.clone()))
-            .set_head(self.head)
-            .listener_addr(SocketAddr::new(
-                self.config().network.addr,
-                // set discovery port based on instance number
-                self.config().network.port + self.config().instance - 1,
-            ))
-            .discovery_addr(SocketAddr::new(
-                self.config().network.discovery.addr,
-                // set discovery port based on instance number
-                self.config().network.discovery.port + self.config().instance - 1,
-            ))
-            .map_discv5_config_builder(|builder| {
-                // Use rlpx address if none given
-                let discv5_addr_ipv4 = self.config().network.discovery.discv5_addr.or(
-                    match self.config().network.addr {
-                        IpAddr::V4(ip) => Some(ip),
-                        IpAddr::V6(_) => None,
-                    },
-                );
-                let discv5_addr_ipv6 = self.config().network.discovery.discv5_addr_ipv6.or(
-                    match self.config().network.addr {
-                        IpAddr::V4(_) => None,
-                        IpAddr::V6(ip) => Some(ip),
-                    },
-                );
-
-                let discv5_port_ipv4 =
-                    self.config().network.discovery.discv5_port + self.config().instance - 1;
-                let discv5_port_ipv6 =
-                    self.config().network.discovery.discv5_port_ipv6 + self.config().instance - 1;
-
-                builder.discv5_config(
-                    discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
-                        discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port_ipv4)),
-                        discv5_addr_ipv6
-                            .map(|addr| SocketAddrV6::new(addr, discv5_port_ipv6, 0, 0)),
-                    ))
-                    .build(),
-                )
-            })
-            .build(self.provider.clone())
+        network_builder.build(self.provider.clone())
     }
 }
 

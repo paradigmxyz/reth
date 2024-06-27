@@ -4,9 +4,9 @@ use crate::version::P2P_CLIENT_VERSION;
 use clap::Args;
 use reth_chainspec::{net::mainnet_nodes, ChainSpec};
 use reth_config::Config;
-use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
+use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
-    DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
+    discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 use reth_net_nat::NatResolver;
@@ -21,7 +21,7 @@ use reth_network::{
 use reth_network_peers::TrustedPeer;
 use secp256k1::SecretKey;
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     ops::Not,
     path::PathBuf,
     sync::Arc,
@@ -129,9 +129,12 @@ impl NetworkArgs {
         chain_spec: Arc<ChainSpec>,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
+        instance: Option<u16>,
     ) -> NetworkConfigBuilder {
         let chain_bootnodes = chain_spec.bootnodes().unwrap_or_else(mainnet_nodes);
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
+
+        let instance = instance.unwrap_or(1);
 
         // Configure peer connections
         let peers_config = config
@@ -173,23 +176,18 @@ impl NetworkArgs {
             // apply discovery settings
             .apply(|builder| {
                 let rlpx_socket = (self.addr, self.port).into();
-                self.discovery.apply_to_builder(builder, rlpx_socket)
+                self.discovery.apply_to_builder(builder, rlpx_socket, chain_bootnodes, instance)
             })
-            // modify discv5 settings if enabled in previous step
-            .map_discv5_config_builder(|builder| {
-                let DiscoveryArgs {
-                    discv5_lookup_interval,
-                    discv5_bootstrap_lookup_interval,
-                    discv5_bootstrap_lookup_countdown,
-                    ..
-                } = self.discovery;
-
-                builder
-                    .add_unsigned_boot_nodes(chain_bootnodes)
-                    .lookup_interval(discv5_lookup_interval)
-                    .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
-                    .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
-            })
+            .listener_addr(SocketAddr::new(
+                self.addr,
+                // set discovery port based on instance number
+                self.port + instance - 1,
+            ))
+            .discovery_addr(SocketAddr::new(
+                self.discovery.addr,
+                // set discovery port based on instance number
+                self.discovery.port + instance - 1,
+            ))
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
@@ -309,6 +307,8 @@ impl DiscoveryArgs {
         &self,
         mut network_config_builder: NetworkConfigBuilder,
         rlpx_tcp_socket: SocketAddr,
+        boot_nodes: impl IntoIterator<Item = NodeRecord>,
+        instance: u16,
     ) -> NetworkConfigBuilder {
         if self.disable_discovery || self.disable_dns_discovery {
             network_config_builder = network_config_builder.disable_dns_discovery();
@@ -319,11 +319,56 @@ impl DiscoveryArgs {
         }
 
         if !self.disable_discovery && self.enable_discv5_discovery {
-            network_config_builder =
-                network_config_builder.discovery_v5(reth_discv5::Config::builder(rlpx_tcp_socket));
+            network_config_builder = network_config_builder
+                .discovery_v5(self.discovery_v5_builder(rlpx_tcp_socket, boot_nodes, instance));
         }
 
         network_config_builder
+    }
+
+    /// Creates a [`reth_discv5::ConfigBuilder`] filling it with the values from this struct.
+    pub fn discovery_v5_builder(
+        &self,
+        rlpx_tcp_socket: SocketAddr,
+        boot_nodes: impl IntoIterator<Item = NodeRecord>,
+        instance: u16,
+    ) -> reth_discv5::ConfigBuilder {
+        let Self {
+            discv5_addr,
+            discv5_addr_ipv6,
+            discv5_port,
+            discv5_port_ipv6,
+            discv5_lookup_interval,
+            discv5_bootstrap_lookup_interval,
+            discv5_bootstrap_lookup_countdown,
+            ..
+        } = self;
+
+        // Use rlpx address if none given
+        let discv5_addr_ipv4 = discv5_addr.or(match rlpx_tcp_socket {
+            SocketAddr::V4(addr) => Some(*addr.ip()),
+            SocketAddr::V6(_) => None,
+        });
+        let discv5_addr_ipv6 = discv5_addr_ipv6.or(match rlpx_tcp_socket {
+            SocketAddr::V4(_) => None,
+            SocketAddr::V6(addr) => Some(*addr.ip()),
+        });
+
+        let discv5_port = discv5_port + instance - 1;
+        let discv5_port_ipv6 = discv5_port_ipv6 + instance - 1;
+
+        reth_discv5::Config::builder(rlpx_tcp_socket)
+            .discv5_config(
+                reth_discv5::discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
+                    discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port)),
+                    discv5_addr_ipv6.map(|addr| SocketAddrV6::new(addr, discv5_port_ipv6, 0, 0)),
+                ))
+                .build(),
+            )
+            .add_unsigned_boot_nodes(boot_nodes)
+            .lookup_interval(*discv5_lookup_interval)
+            .bootstrap_lookup_interval(*discv5_bootstrap_lookup_interval)
+            .bootstrap_lookup_countdown(*discv5_bootstrap_lookup_countdown)
     }
 
     /// Set the discovery port to zero, to allow the OS to assign a random unused port when
