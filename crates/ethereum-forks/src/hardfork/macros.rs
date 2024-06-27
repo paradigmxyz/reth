@@ -6,7 +6,6 @@ macro_rules! hardfork {
         $(#[$enum_meta])*
         #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
         #[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash)]
-        #[non_exhaustive]
         pub enum $enum {
             $( $(#[$meta])* $variant ),*
         }

@@ -69,7 +69,6 @@ impl EthereumHardfork {
 
     /// Retrieves the activation block for the specified hardfork on the Ethereum mainnet.
     pub const fn mainnet_activation_block(&self) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match self {
             Self::Frontier => Some(0),
             Self::Homestead => Some(1150000),
@@ -87,14 +86,12 @@ impl EthereumHardfork {
             Self::Paris => Some(15537394),
             Self::Shanghai => Some(17034870),
             Self::Cancun => Some(19426587),
-
             _ => None,
         }
     }
 
     /// Retrieves the activation block for the specified hardfork on the Sepolia testnet.
     pub const fn sepolia_activation_block(&self) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match self {
             Self::Paris => Some(1735371),
             Self::Shanghai => Some(2990908),
@@ -119,7 +116,6 @@ impl EthereumHardfork {
 
     /// Retrieves the activation block for the specified hardfork on the holesky testnet.
     const fn holesky_activation_block(&self) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match self {
             Self::Dao |
             Self::Tangerine |
@@ -142,7 +138,6 @@ impl EthereumHardfork {
 
     /// Retrieves the activation block for the specified hardfork on the Arbitrum Sepolia testnet.
     pub const fn arbitrum_sepolia_activation_block(&self) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match self {
             Self::Frontier |
             Self::Homestead |
@@ -169,7 +164,6 @@ impl EthereumHardfork {
 
     /// Retrieves the activation block for the specified hardfork on the Arbitrum One mainnet.
     pub const fn arbitrum_activation_block(&self) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match self {
             Self::Frontier |
             Self::Homestead |
@@ -211,7 +205,6 @@ impl EthereumHardfork {
 
     /// Retrieves the activation timestamp for the specified hardfork on the Ethereum mainnet.
     pub const fn mainnet_activation_timestamp(&self) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match self {
             Self::Frontier => Some(1438226773),
             Self::Homestead => Some(1457938193),
@@ -237,7 +230,6 @@ impl EthereumHardfork {
 
     /// Retrieves the activation timestamp for the specified hardfork on the Sepolia testnet.
     pub const fn sepolia_activation_timestamp(&self) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match self {
             Self::Frontier |
             Self::Homestead |
@@ -262,7 +254,6 @@ impl EthereumHardfork {
 
     /// Retrieves the activation timestamp for the specified hardfork on the Holesky testnet.
     pub const fn holesky_activation_timestamp(&self) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match self {
             Self::Shanghai => Some(1696000704),
             Self::Cancun => Some(1707305664),
@@ -288,7 +279,6 @@ impl EthereumHardfork {
     /// Retrieves the activation timestamp for the specified hardfork on the Arbitrum Sepolia
     /// testnet.
     pub const fn arbitrum_sepolia_activation_timestamp(&self) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match self {
             Self::Frontier |
             Self::Homestead |
@@ -315,7 +305,6 @@ impl EthereumHardfork {
 
     /// Retrieves the activation timestamp for the specified hardfork on the Arbitrum One mainnet.
     pub const fn arbitrum_activation_timestamp(&self) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match self {
             Self::Frontier |
             Self::Homestead |
