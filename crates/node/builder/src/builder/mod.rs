@@ -131,7 +131,8 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// provider trait implementations are currently created by the builder itself during the launch
 /// process, hence the database type is not part of the [`NodeTypes`] trait and the node's
 /// components, that depend on the database, are configured separately. In order to have a nice
-/// trait that encapsulates the entire node the [`FullNodeComponents`] trait was introduced. This
+/// trait that encapsulates the entire node the
+/// [`FullNodeComponents`](reth_node_api::FullNodeComponents) trait was introduced. This
 /// trait has convenient associated types for all the components of the node. After
 /// [`WithLaunchContext::launch`] the [`NodeHandle`] contains an instance of [`FullNode`] that
 /// implements the [`FullNodeComponents`](reth_node_api::FullNodeComponents) trait and has access to
