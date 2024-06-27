@@ -11,7 +11,7 @@ use reth_primitives::{
         fill_tx_env_with_beacon_root_contract_call,
         fill_tx_env_with_withdrawal_requests_contract_call,
     },
-    Address, Block,  Request, Withdrawal, Withdrawals, B256, U256,
+    Address, Block, Request, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_storage_errors::provider::ProviderError;
 use revm::{
