@@ -12,7 +12,7 @@ mod metrics;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{static_file::SegmentHeader, StaticFileSegment};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use std::{ops::Deref, sync::Arc};
+use std::{ops::Deref, sync::Arc, vec::IntoIter};
 
 const BLOCKS_PER_STATIC_FILE: u64 = 500_000;
 
@@ -128,9 +128,7 @@ mod tests {
             let provider = factory.provider().unwrap();
             let tx = provider.tx_ref();
 
-            // Hacky type inference. TODO fix
-            let mut none_vec = Some(vec![vec![vec![0u8]].into_iter()]);
-            let _ = none_vec.take();
+            let none_vec: Option<Vec<IntoIter<Vec<u8>>>> = None;
 
             // Generate list of hashes for filters & PHF
             let mut cursor = tx.cursor_read::<RawTable<CanonicalHeaders>>().unwrap();
