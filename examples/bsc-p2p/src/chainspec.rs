@@ -1,4 +1,5 @@
-use reth_chainspec::{net::NodeRecord, BaseFeeParams, Chain, ChainSpec, ForkCondition, Hardfork};
+use reth_chainspec::{BaseFeeParams, Chain, ChainSpec, ForkCondition, Hardfork};
+use reth_network_peers::NodeRecord;
 use reth_primitives::{b256, B256};
 
 use std::{collections::BTreeMap, sync::Arc};

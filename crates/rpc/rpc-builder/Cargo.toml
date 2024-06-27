@@ -46,6 +46,7 @@ tracing.workspace = true
 reth-chainspec.workspace = true
 reth-beacon-consensus.workspace = true
 reth-network-api.workspace = true
+reth-network-peers.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }

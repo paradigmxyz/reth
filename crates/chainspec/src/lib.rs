@@ -26,9 +26,6 @@ extern crate alloc;
 /// The chain info module.
 mod info;
 
-/// Network related constants
-pub mod net;
-
 /// The chain spec module.
 mod spec;
 
