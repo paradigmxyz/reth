@@ -30,7 +30,6 @@ use reth_rpc_eth_types::{
 };
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
-use revm_primitives::TxEnv;
 use tokio::sync::Mutex;
 use tracing::debug;
 
@@ -291,12 +290,12 @@ pub trait LoadPendingBlock {
                 }
             }
 
-            let mut tx_env = TxEnv::default();
-            let signer = tx.signer();
-            Self::evm_config(self).fill_tx_env(&mut tx_env, &tx.clone().into_signed(), signer);
-
             // Configure the environment for the block.
-            let env = Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx_env);
+            let env = Env::boxed(
+                cfg.cfg_env.clone(),
+                block_env.clone(),
+                Self::evm_config(self).tx_env(&tx),
+            );
 
             let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
 

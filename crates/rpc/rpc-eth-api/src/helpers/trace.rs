@@ -11,7 +11,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_types::{BlockId, TransactionInfo};
 use revm::{db::CacheDB, Database, DatabaseCommit, GetInspector, Inspector};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
-use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState, TxEnv};
+use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState};
 
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 
@@ -196,11 +196,11 @@ pub trait Trace: LoadState {
                     tx.hash,
                 )?;
 
-                let mut tx_env = TxEnv::default();
-                let signer = tx.signer();
-                Call::evm_config(&this).fill_tx_env(&mut tx_env, &tx.into_signed(), signer);
-
-                let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env);
+                let env = EnvWithHandlerCfg::new_with_cfg_env(
+                    cfg,
+                    block_env,
+                    Call::evm_config(&this).tx_env(&tx),
+                );
                 let (res, _) =
                     this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
                 f(tx_info, inspector, res, db)
@@ -311,13 +311,7 @@ pub trait Trace: LoadState {
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
                         };
-                        let mut tx_env = TxEnv::default();
-                        let signer = tx.signer();
-                        Trace::evm_config(&this).fill_tx_env(
-                            &mut tx_env,
-                            &tx.into_signed(),
-                            signer,
-                        );
+                        let tx_env = Trace::evm_config(&this).tx_env(&tx);
                         (tx_info, tx_env)
                     })
                     .peekable();

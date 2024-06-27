@@ -29,7 +29,6 @@ use reth_rpc_types::{
 };
 use revm::{Database, DatabaseCommit};
 use revm_inspectors::access_list::AccessListInspector;
-use revm_primitives::TxEnv;
 use tracing::trace;
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
@@ -119,13 +118,10 @@ pub trait EthCall: Call + LoadPendingBlock {
                     // to be replayed
                     let transactions = block.into_transactions_ecrecovered().take(num_txs);
                     for tx in transactions {
-                        let mut tx_env = TxEnv::default();
-                        let signer = tx.signer();
-                        Call::evm_config(&this).fill_tx_env(&mut tx_env, &tx.into_signed(), signer);
                         let env = EnvWithHandlerCfg::new_with_cfg_env(
                             cfg.clone(),
                             block_env.clone(),
-                            tx_env,
+                            Call::evm_config(&this).tx_env(&tx),
                         );
                         let (res, _) = this.transact(&mut db, env)?;
                         db.commit(res.state);
@@ -427,11 +423,11 @@ pub trait Call: LoadState + SpawnBlocking {
                     tx.hash,
                 )?;
 
-                let mut tx_env = TxEnv::default();
-                let signer = tx.signer();
-                Call::evm_config(&this).fill_tx_env(&mut tx_env, &tx.into_signed(), signer);
-
-                let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env);
+                let env = EnvWithHandlerCfg::new_with_cfg_env(
+                    cfg,
+                    block_env,
+                    Call::evm_config(&this).tx_env(&tx),
+                );
 
                 let (res, _) = this.transact(&mut db, env)?;
                 f(tx_info, res, db)

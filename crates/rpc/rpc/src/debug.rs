@@ -35,7 +35,6 @@ use revm_inspectors::tracing::{
     js::{JsInspector, TransactionContext},
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig,
 };
-use revm_primitives::TxEnv;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
@@ -102,16 +101,12 @@ where
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
 
-                    let mut tx_env = TxEnv::default();
-                    let signer = tx.signer();
-                    Call::evm_config(this.eth_api()).fill_tx_env(
-                        &mut tx_env,
-                        &tx.clone().into_signed(),
-                        signer,
-                    );
-
                     let env = EnvWithHandlerCfg {
-                        env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx_env),
+                        env: Env::boxed(
+                            cfg.cfg_env.clone(),
+                            block_env.clone(),
+                            Call::evm_config(this.eth_api()).tx_env(&tx),
+                        ),
                         handler_cfg: cfg.handler_cfg,
                     };
                     let (result, state_changes) = this.trace_transaction(
@@ -249,16 +244,12 @@ where
                     tx.hash,
                 )?;
 
-                let mut tx_env = TxEnv::default();
-                let signer = tx.signer();
-                Call::evm_config(this.eth_api()).fill_tx_env(
-                    &mut tx_env,
-                    &tx.clone().into_signed(),
-                    signer,
-                );
-
                 let env = EnvWithHandlerCfg {
-                    env: Env::boxed(cfg.cfg_env.clone(), block_env, tx_env),
+                    env: Env::boxed(
+                        cfg.cfg_env.clone(),
+                        block_env,
+                        Call::evm_config(this.eth_api()).tx_env(&tx),
+                    ),
                     handler_cfg: cfg.handler_cfg,
                 };
 
@@ -486,15 +477,12 @@ where
 
                     // Execute all transactions until index
                     for tx in transactions {
-                        let mut tx_env = TxEnv::default();
-                        let signer = tx.signer();
-                        Call::evm_config(this.eth_api()).fill_tx_env(
-                            &mut tx_env,
-                            &tx.into_signed(),
-                            signer,
-                        );
                         let env = EnvWithHandlerCfg {
-                            env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx_env),
+                            env: Env::boxed(
+                                cfg.cfg_env.clone(),
+                                block_env.clone(),
+                                Call::evm_config(this.eth_api()).tx_env(&tx),
+                            ),
                             handler_cfg: cfg.handler_cfg,
                         };
                         let (res, _) = this.inner.eth_api.transact(&mut db, env)?;

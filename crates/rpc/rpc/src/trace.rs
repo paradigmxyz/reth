@@ -36,7 +36,6 @@ use revm_inspectors::{
     opcode::OpcodeGasInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
-use revm_primitives::TxEnv;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `trace` API implementation.
@@ -116,15 +115,11 @@ where
 
         let (cfg, block, at) = self.inner.eth_api.evm_env_at(block_id.unwrap_or_default()).await?;
 
-        let mut tx_env = TxEnv::default();
-        let signer = tx.signer();
-        Call::evm_config(self.eth_api()).fill_tx_env(
-            &mut tx_env,
-            &tx.into_ecrecovered_transaction().into_signed(),
-            signer,
+        let env = EnvWithHandlerCfg::new_with_cfg_env(
+            cfg,
+            block,
+            Call::evm_config(self.eth_api()).tx_env(&tx.into_ecrecovered_transaction()),
         );
-
-        let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block, tx_env);
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
 
