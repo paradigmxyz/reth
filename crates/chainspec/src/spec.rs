@@ -36,8 +36,6 @@ use crate::constants::optimism::{
 };
 pub use alloy_eips::eip1559::BaseFeeParams;
 #[cfg(feature = "optimism")]
-use reth_ethereum_forks::chains::optimism::*;
-#[cfg(feature = "optimism")]
 use reth_ethereum_forks::OptimismHardfork;
 
 #[cfg(feature = "optimism")]
