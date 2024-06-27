@@ -519,22 +519,6 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
         self.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
     }
 
-    fn fill_block_env_at(
-        &self,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        self.provider()?.fill_block_env_at(block_env, at)
-    }
-
-    fn fill_block_env_with_header(
-        &self,
-        block_env: &mut BlockEnv,
-        header: &Header,
-    ) -> ProviderResult<()> {
-        self.provider()?.fill_block_env_with_header(block_env, header)
-    }
-
     fn fill_cfg_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
