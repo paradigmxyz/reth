@@ -6081,6 +6081,26 @@ dependencies = [
 
 [[package]]
 name = "ratatui"
+version = "0.26.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f44c9e68fd46eda15c646fbb85e1040b657a58cdc8c98db1d97a55930d991eef"
+dependencies = [
+ "bitflags 2.5.0",
+ "cassowary",
+ "compact_str",
+ "crossterm",
+ "itertools 0.12.1",
+ "lru",
+ "paste",
+ "stability",
+ "strum",
+ "unicode-segmentation",
+ "unicode-truncate",
+ "unicode-width",
+]
+
+[[package]]
+name = "ratatui"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d16546c5b5962abf8ce6e2881e722b4e0ae3b6f1a08a26ae3573c55853ca68d3"
@@ -6299,7 +6319,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
- "ratatui",
+ "ratatui 0.27.0",
  "rayon",
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
@@ -6589,7 +6609,7 @@ dependencies = [
  "crossterm",
  "eyre",
  "human_bytes",
- "ratatui",
+ "ratatui 0.26.3",
  "reth-db",
  "reth-db-api",
  "reth-fs-util",
