@@ -62,10 +62,8 @@ pub trait EthBlocks: LoadBlock {
     /// Returns `None` if the block does not exist
     fn block_transaction_count(
         &self,
-        block_id: impl Into<BlockId>,
+        block_id: BlockId,
     ) -> impl Future<Output = EthResult<Option<usize>>> + Send {
-        let block_id = block_id.into();
-
         async move {
             if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
@@ -153,11 +151,7 @@ pub trait EthBlocks: LoadBlock {
     /// Returns uncle headers of given block.
     ///
     /// Returns an empty vec if there are none.
-    fn ommers(
-        &self,
-        block_id: impl Into<BlockId>,
-    ) -> EthResult<Option<Vec<reth_primitives::Header>>> {
-        let block_id = block_id.into();
+    fn ommers(&self, block_id: BlockId) -> EthResult<Option<Vec<reth_primitives::Header>>> {
         Ok(LoadBlock::provider(self).ommers_by_id(block_id)?)
     }
 
@@ -166,11 +160,9 @@ pub trait EthBlocks: LoadBlock {
     /// Returns `None` if index out of range.
     fn ommer_by_block_and_index(
         &self,
-        block_id: impl Into<BlockId>,
+        block_id: BlockId,
         index: Index,
     ) -> impl Future<Output = EthResult<Option<RichBlock>>> + Send {
-        let block_id = block_id.into();
-
         async move {
             let uncles = if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
