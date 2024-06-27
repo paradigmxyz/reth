@@ -29,6 +29,7 @@ reth-provider.workspace = true
 reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-network-peers.workspace = true
+reth-network-types.workspace = true
 
 # ethereum
 enr = { workspace = true, features = ["serde", "rust-secp256k1"] }
@@ -75,6 +76,7 @@ reth-primitives = { workspace = true, features = ["test-utils"] }
 # integration tests
 reth-network = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
+reth-network-types = { workspace = true, features = ["test-utils"] }
 
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true

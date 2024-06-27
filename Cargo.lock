@@ -7318,6 +7318,7 @@ dependencies = [
  "reth-network-api",
  "reth-network-p2p",
  "reth-network-peers",
+ "reth-network-types",
  "reth-primitives",
  "reth-provider",
  "reth-tasks",
@@ -7385,6 +7386,19 @@ dependencies = [
  "thiserror",
  "tokio",
  "url",
+]
+
+[[package]]
+name = "reth-network-types"
+version = "1.0.0"
+dependencies = [
+ "humantime-serde",
+ "reth-net-banlist",
+ "reth-network-api",
+ "reth-network-peers",
+ "serde",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]

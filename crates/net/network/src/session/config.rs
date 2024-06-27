@@ -1,8 +1,8 @@
 //! Configuration types for [`SessionManager`](crate::session::SessionManager).
 
-use crate::{
-    peers::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND},
-    session::{Direction, ExceedsSessionLimit},
+use crate::session::{Direction, ExceedsSessionLimit};
+use reth_network_types::peers::config::{
+    DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND,
 };
 use std::time::Duration;
 

@@ -3,7 +3,7 @@
 use reth_network_api::{Reputation, ReputationChangeKind};
 
 /// The default reputation of a peer
-pub(crate) const DEFAULT_REPUTATION: Reputation = 0;
+pub const DEFAULT_REPUTATION: Reputation = 0;
 
 /// The minimal unit we're measuring reputation
 const REPUTATION_UNIT: i32 = -1024;
@@ -42,11 +42,11 @@ const BAD_ANNOUNCEMENT_REPUTATION_CHANGE: i32 = REPUTATION_UNIT;
 /// This gives a trusted peer more leeway when interacting with the node, which is useful for in
 /// custom setups. By not setting this to `0` we still allow trusted peer penalization but less than
 /// untrusted peers.
-pub(crate) const MAX_TRUSTED_PEER_REPUTATION_CHANGE: Reputation = 2 * REPUTATION_UNIT;
+pub const MAX_TRUSTED_PEER_REPUTATION_CHANGE: Reputation = 2 * REPUTATION_UNIT;
 
 /// Returns `true` if the given reputation is below the [`BANNED_REPUTATION`] threshold
 #[inline]
-pub(crate) const fn is_banned_reputation(reputation: i32) -> bool {
+pub const fn is_banned_reputation(reputation: i32) -> bool {
     reputation < BANNED_REPUTATION
 }
 
@@ -80,7 +80,7 @@ pub struct ReputationChangeWeights {
 impl ReputationChangeWeights {
     /// Returns the quantifiable [`ReputationChange`] for the given [`ReputationChangeKind`] using
     /// the configured weights
-    pub(crate) fn change(&self, kind: ReputationChangeKind) -> ReputationChange {
+    pub fn change(&self, kind: ReputationChangeKind) -> ReputationChange {
         match kind {
             ReputationChangeKind::BadMessage => self.bad_message.into(),
             ReputationChangeKind::BadBlock => self.bad_block.into(),
@@ -115,14 +115,14 @@ impl Default for ReputationChangeWeights {
 
 /// Represents a change in a peer's reputation.
 #[derive(Debug, Copy, Clone, Default)]
-pub(crate) struct ReputationChange(Reputation);
+pub struct ReputationChange(Reputation);
 
 // === impl ReputationChange ===
 
 impl ReputationChange {
     /// Helper type for easier conversion
     #[inline]
-    pub(crate) const fn as_i32(self) -> Reputation {
+    pub const fn as_i32(self) -> Reputation {
         self.0
     }
 }

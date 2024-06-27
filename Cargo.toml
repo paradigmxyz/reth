@@ -52,6 +52,7 @@ members = [
     "crates/net/eth-wire/",
     "crates/net/nat/",
     "crates/net/network-api/",
+    "crates/net/network-types/",
     "crates/net/network/",
     "crates/net/p2p/",
     "crates/net/peers/",
@@ -305,6 +306,7 @@ reth-net-banlist = { path = "crates/net/banlist" }
 reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
+reth-network-types = { path = "crates/net/network-types" }
 reth-network-peers = { path = "crates/net/peers", default-features = false }
 reth-network-p2p = { path = "crates/net/p2p" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }

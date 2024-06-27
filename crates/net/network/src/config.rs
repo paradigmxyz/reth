@@ -3,7 +3,6 @@
 use crate::{
     error::NetworkError,
     import::{BlockImport, ProofOfStakeBlockImport},
-    peers::PeersConfig,
     session::SessionsConfig,
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
@@ -17,6 +16,7 @@ use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_network_peers::{pk2id, PeerId};
+use reth_network_types::PeersConfig;
 use reth_primitives::{ForkFilter, Head};
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
