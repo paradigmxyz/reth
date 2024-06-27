@@ -15,7 +15,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, EthereumHardfork, Header, Receipt, Request, Withdrawals, U256,
+    BlockNumber, BlockWithSenders, EthereumHardfork, Header, Receipt, Request, U256,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
