@@ -67,6 +67,8 @@ reth-node-events.workspace = true
 reth-consensus.workspace = true
 reth-optimism-primitives.workspace = true
 reth-prune-types.workspace = true
+reth-engine-util.workspace = true
+reth-prune.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
@@ -116,7 +118,6 @@ backon.workspace = true
 similar-asserts.workspace = true
 itertools.workspace = true
 rayon.workspace = true
-boyer-moore-magiclen = "0.2.16"
 ahash = "0.8"
 
 # p2p

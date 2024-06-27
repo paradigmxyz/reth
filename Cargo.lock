@@ -2811,6 +2811,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-custom-rlpx-subprotocol"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "rand 0.8.5",
+ "reth",
+ "reth-eth-wire",
+ "reth-network",
+ "reth-network-api",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "reth-provider",
+ "reth-rpc-types",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
 name = "example-db-access"
 version = "0.0.0"
 dependencies = [
@@ -6233,7 +6253,6 @@ dependencies = [
  "arbitrary",
  "assert_matches",
  "backon",
- "boyer-moore-magiclen",
  "clap",
  "comfy-table",
  "confy",
@@ -6266,6 +6285,7 @@ dependencies = [
  "reth-discv4",
  "reth-discv5",
  "reth-downloaders",
+ "reth-engine-util",
  "reth-errors",
  "reth-ethereum-payload-builder",
  "reth-evm",
@@ -6289,6 +6309,7 @@ dependencies = [
  "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
+ "reth-prune",
  "reth-prune-types",
  "reth-revm",
  "reth-rpc",
@@ -6524,6 +6545,9 @@ dependencies = [
 [[package]]
 name = "reth-cli"
 version = "1.0.0"
+dependencies = [
+ "clap",
+]
 
 [[package]]
 name = "reth-cli-commands"
@@ -6575,7 +6599,7 @@ version = "1.0.0"
 dependencies = [
  "confy",
  "humantime-serde",
- "reth-network",
+ "reth-network-types",
  "reth-prune-types",
  "serde",
  "tempfile",
@@ -6700,6 +6724,7 @@ name = "reth-db-common"
 version = "1.0.0"
 dependencies = [
  "alloy-genesis",
+ "boyer-moore-magiclen",
  "eyre",
  "reth-chainspec",
  "reth-codecs",
@@ -6707,6 +6732,7 @@ dependencies = [
  "reth-db",
  "reth-db-api",
  "reth-etl",
+ "reth-fs-util",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
@@ -6901,6 +6927,24 @@ dependencies = [
  "reth-chainspec",
  "reth-payload-primitives",
  "serde",
+]
+
+[[package]]
+name = "reth-engine-util"
+version = "1.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "pin-project",
+ "reth-beacon-consensus",
+ "reth-engine-primitives",
+ "reth-fs-util",
+ "reth-rpc",
+ "reth-rpc-types",
+ "serde",
+ "serde_json",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -7320,6 +7364,7 @@ dependencies = [
  "reth-network-api",
  "reth-network-p2p",
  "reth-network-peers",
+ "reth-network-types",
  "reth-primitives",
  "reth-provider",
  "reth-tasks",
@@ -7390,6 +7435,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-network-types"
+version = "1.0.0"
+dependencies = [
+ "humantime-serde",
+ "reth-net-banlist",
+ "reth-network-api",
+ "reth-network-peers",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "reth-nippy-jar"
 version = "1.0.0"
 dependencies = [
@@ -7448,6 +7506,7 @@ dependencies = [
  "reth-db-api",
  "reth-db-common",
  "reth-downloaders",
+ "reth-engine-util",
  "reth-evm",
  "reth-exex",
  "reth-network",
@@ -7495,7 +7554,6 @@ dependencies = [
  "metrics-process",
  "metrics-util",
  "once_cell",
- "pin-project",
  "procfs",
  "proptest",
  "rand 0.8.5",
@@ -7507,7 +7565,6 @@ dependencies = [
  "reth-db-api",
  "reth-discv4",
  "reth-discv5",
- "reth-engine-primitives",
  "reth-fs-util",
  "reth-metrics",
  "reth-net-nat",
@@ -7528,13 +7585,11 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1",
- "serde",
  "serde_json",
  "shellexpand",
  "thiserror",
  "tikv-jemalloc-ctl",
  "tokio",
- "tokio-util",
  "tower",
  "tracing",
  "vergen",
@@ -8240,6 +8295,7 @@ dependencies = [
  "reth-provider",
  "reth-prune-types",
  "reth-stages",
+ "reth-stages-types",
  "reth-static-file-types",
  "reth-storage-errors",
  "reth-testing-utils",

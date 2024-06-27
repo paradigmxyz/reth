@@ -23,7 +23,7 @@ use reth_provider::{
     BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
 };
-use reth_prune_types::PruneModes;
+use reth_prune::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
     stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
