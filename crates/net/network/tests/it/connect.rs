@@ -342,7 +342,7 @@ async fn test_incoming_node_id_blacklist() {
         tokio::task::spawn(network);
 
         // make geth connect to us
-        let our_enode = NodeRecord::new(handle.local_addr(), None, *handle.peer_id());
+        let our_enode = NodeRecord::new(handle.local_addr(), *handle.peer_id());
 
         provider.add_peer(&our_enode.to_string()).await.unwrap();
 
@@ -393,7 +393,7 @@ async fn test_incoming_connect_with_single_geth() {
         let mut event_stream = NetworkEventStream::new(events);
 
         // make geth connect to us
-        let our_enode = NodeRecord::new(handle.local_addr(), None, *handle.peer_id());
+        let our_enode = NodeRecord::new(handle.local_addr(), *handle.peer_id());
 
         provider.add_peer(&our_enode.to_string()).await.unwrap();
 
@@ -599,11 +599,9 @@ async fn test_always_accept_incoming_connections_from_trusted_peers() {
     let peer2 = new_random_peer(0, HashSet::new()).await;
 
     //  setup the peer with max_inbound = 1, and add other_peer_3 as trust nodes
-    let peer = new_random_peer(
-        0,
-        HashSet::from([NodeRecord::new(peer2.local_addr(), None, *peer2.peer_id())]),
-    )
-    .await;
+    let peer =
+        new_random_peer(0, HashSet::from([NodeRecord::new(peer2.local_addr(), *peer2.peer_id())]))
+            .await;
 
     let handle = peer.handle().clone();
     let peer1_handle = peer1.handle().clone();

@@ -2541,7 +2541,7 @@ mod tests {
         let socket_addr = SocketAddr::new(ip, 8008);
 
         // add more peers than allowed
-        for _ in 0..peer_manager.connection_info.max_concurrent_outbound_dials * 2 {
+        for _ in 0..peer_manager.connection_info.config.max_concurrent_outbound_dials * 2 {
             peer_manager.add_peer(PeerId::random(), socket_addr, None, None);
         }
 
