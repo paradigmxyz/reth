@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 
 hardfork!(
     /// The name of an optimism hardfork.
+    ///
+    /// When building a list of hardforks for a chain, it's still expected to mix with [`EthereumHardfork`].
     OptimismHardfork {
         /// Bedrock: <https://blog.oplabs.co/introducing-optimism-bedrock>.
         Bedrock,
