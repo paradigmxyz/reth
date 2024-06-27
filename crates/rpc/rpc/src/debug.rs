@@ -3,6 +3,7 @@ use std::sync::Arc;
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
+use reth_chainspec::EthereumHardforks;
 use reth_primitives::{
     revm::env::tx_env_with_recovered, Address, Block, BlockId, BlockNumberOrTag, Bytes,
     TransactionSignedEcRecovered, Withdrawals, B256, U256,

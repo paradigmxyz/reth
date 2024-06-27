@@ -18,7 +18,7 @@ use reth_eth_wire::{
 };
 use reth_network::config::rng_secret_key;
 use reth_network_peers::{pk2id, NodeRecord};
-use reth_primitives::{Hardfork, Head, MAINNET_GENESIS_HASH};
+use reth_primitives::{EthereumHardfork, Head, MAINNET_GENESIS_HASH};
 use secp256k1::{SecretKey, SECP256K1};
 use tokio::net::TcpStream;
 
@@ -95,14 +95,14 @@ async fn handshake_p2p(
 // Perform a ETH Wire handshake with a peer
 async fn handshake_eth(p2p_stream: AuthedP2PStream) -> eyre::Result<(AuthedEthStream, Status)> {
     let fork_filter = MAINNET.fork_filter(Head {
-        timestamp: MAINNET.fork(Hardfork::Shanghai).as_timestamp().unwrap(),
+        timestamp: MAINNET.fork(EthereumHardfork::Shanghai).as_timestamp().unwrap(),
         ..Default::default()
     });
 
     let status = Status::builder()
         .chain(Chain::mainnet())
         .genesis(MAINNET_GENESIS_HASH)
-        .forkid(MAINNET.hardfork_fork_id(Hardfork::Shanghai).unwrap())
+        .forkid(MAINNET.hardfork_fork_id(EthereumHardfork::Shanghai).unwrap())
         .build();
 
     let status = Status { version: p2p_stream.shared_capabilities().eth()?.version(), ..status };

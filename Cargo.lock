@@ -7083,9 +7083,13 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
+ "auto_impl",
  "crc",
+ "dyn-clone",
+ "once_cell",
  "proptest",
  "proptest-derive 0.5.0",
+ "rustc-hash 2.0.0",
  "serde",
  "thiserror-no-std",
 ]

@@ -15,8 +15,8 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
-    BlockHash, BlockNumHash, BlockNumber, ForkBlock, GotExpected, Hardfork, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
+    BlockHash, BlockNumHash, BlockNumber, EthereumHardfork, ForkBlock, GotExpected, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, B256, U256,
 };
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
@@ -402,7 +402,7 @@ where
             .externals
             .provider_factory
             .chain_spec()
-            .fork(Hardfork::Paris)
+            .fork(EthereumHardfork::Paris)
             .active_at_ttd(parent_td, U256::ZERO)
         {
             return Err(BlockExecutionError::Validation(BlockValidationError::BlockPreMerge {
@@ -1043,7 +1043,7 @@ where
                 .externals
                 .provider_factory
                 .chain_spec()
-                .fork(Hardfork::Paris)
+                .fork(EthereumHardfork::Paris)
                 .active_at_ttd(td, U256::ZERO)
             {
                 return Err(CanonicalError::from(BlockValidationError::BlockPreMerge {
