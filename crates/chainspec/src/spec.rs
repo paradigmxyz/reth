@@ -565,9 +565,10 @@ impl ChainSpec {
     /// Get the fork id for the given hardfork.
     #[inline]
     pub fn hardfork_fork_id<H: Hardfork + Clone>(&self, fork: H) -> Option<ForkId> {
-        match self.hardforks.fork(fork.clone()) {
+        let condition = self.hardforks.fork(fork);
+        match condition {
             ForkCondition::Never => None,
-            _ => Some(self.fork_id(&self.satisfy(self.hardforks.fork(fork)))),
+            _ => Some(self.fork_id(&self.satisfy(condition))),
         }
     }
 
