@@ -8,6 +8,7 @@ use reth_provider::{
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
+use reth_stages_api::format_gas_throughput;
 use reth_stages_types::ExecutionStageThresholds;
 use reth_tracing::tracing::{debug, trace};
 use std::{
@@ -114,11 +115,7 @@ impl<Node: FullNodeComponents> BackfillJob<Node> {
             executor.execute_and_verify_one((&block, td).into())?;
             execution_duration += execute_start.elapsed();
 
-            // // Gas metrics
-            // if let Some(metrics_tx) = &mut self.metrics_tx {
-            //     let _ =
-            //         metrics_tx.send(MetricEvent::ExecutionStageGas { gas: block.header.gas_used
-            // }); }
+            // TODO(alexey): report gas metrics using `block.header.gas_used`
 
             blocks.push(block.seal_slow());
 
@@ -142,7 +139,7 @@ impl<Node: FullNodeComponents> BackfillJob<Node> {
                 range = ?*self.range.start()..=last_block_number,
                 block_fetch = ?fetch_block_duration,
                 execution = ?execution_duration,
-                // throughput = format_gas_throughput(cumulative_gas, execution_duration),
+                throughput = format_gas_throughput(cumulative_gas, execution_duration),
                 "Finished executing block range"
             );
 

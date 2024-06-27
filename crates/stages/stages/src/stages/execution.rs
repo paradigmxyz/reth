@@ -6,10 +6,7 @@ use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification};
-use reth_primitives::{
-    constants::gas_units::{GIGAGAS, KILOGAS, MEGAGAS},
-    BlockNumber, Header, StaticFileSegment,
-};
+use reth_primitives::{BlockNumber, Header, StaticFileSegment};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     BlockReader, DatabaseProviderRW, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
@@ -18,9 +15,9 @@ use reth_provider::{
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
-    BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
-    ExecutionCheckpoint, ExecutionStageThresholds, MetricEvent, MetricEventsSender, Stage,
-    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
+    format_gas_throughput, BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput,
+    ExecOutput, ExecutionCheckpoint, ExecutionStageThresholds, MetricEvent, MetricEventsSender,
+    Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use std::{
     cmp::Ordering,
@@ -546,23 +543,6 @@ fn calculate_gas_used_from_headers(
     Ok(gas_total)
 }
 
-/// Returns a formatted gas throughput log, showing either:
-///  * "Kgas/s", or 1,000 gas per second
-///  * "Mgas/s", or 1,000,000 gas per second
-///  * "Ggas/s", or 1,000,000,000 gas per second
-///
-/// Depending on the magnitude of the gas throughput.
-pub fn format_gas_throughput(gas: u64, execution_duration: Duration) -> String {
-    let gas_per_second = gas as f64 / execution_duration.as_secs_f64();
-    if gas_per_second < MEGAGAS as f64 {
-        format!("{:.} Kgas/second", gas_per_second / KILOGAS as f64)
-    } else if gas_per_second < GIGAGAS as f64 {
-        format!("{:.} Mgas/second", gas_per_second / MEGAGAS as f64)
-    } else {
-        format!("{:.} Ggas/second", gas_per_second / GIGAGAS as f64)
-    }
-}
-
 /// Returns a `StaticFileProviderRWRefMut` static file producer after performing a consistency
 /// check.
 ///
@@ -660,7 +640,7 @@ mod tests {
         StaticFileProviderFactory,
     };
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
-    use reth_stages_api::StageUnitCheckpoint;
+    use reth_stages_api::{format_gas_throughput, StageUnitCheckpoint};
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthExecutorProvider> {
