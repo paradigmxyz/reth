@@ -10,6 +10,7 @@ pub struct NoopTrieCursorFactory;
 impl TrieCursorFactory for NoopTrieCursorFactory {
     type AccountTrieCursor = NoopAccountTrieCursor;
     type StorageTrieCursor = NoopStorageTrieCursor;
+
     /// Generates a Noop account trie cursor.
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
         Ok(NoopAccountTrieCursor::default())

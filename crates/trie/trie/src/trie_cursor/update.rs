@@ -154,7 +154,7 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let mut trie_update_entry = self.trie_updates.trie_operations.get(self.trie_update_index);
         while trie_update_entry
-            .filter(|(k, _)| matches!(k, TrieKey::StorageNode(address, nibbles) if address == &self.hashed_address &&  &nibbles.0 < &key)).is_some()
+            .filter(|(k, _)| matches!(k, TrieKey::StorageNode(address, nibbles) if address == &self.hashed_address && nibbles.0 < key)).is_some()
         {
             self.trie_update_index += 1;
             trie_update_entry = self.trie_updates.trie_operations.get(self.trie_update_index);
