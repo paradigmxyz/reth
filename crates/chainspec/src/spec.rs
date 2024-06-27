@@ -35,11 +35,11 @@ use crate::constants::optimism::{
     OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
 };
 pub use alloy_eips::eip1559::BaseFeeParams;
+use reth_ethereum_forks::OptimismHardfork;
 use reth_network_peers::{
     base_nodes, base_testnet_nodes, goerli_nodes, holesky_nodes, mainnet_nodes, op_nodes,
     op_testnet_nodes, sepolia_nodes,
 };
-use reth_ethereum_forks::OptimismHardfork;
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -726,13 +726,9 @@ impl ChainSpec {
             C::Goerli => Some(goerli_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
-            #[cfg(feature = "optimism")]
             C::Base => Some(base_nodes()),
-            #[cfg(feature = "optimism")]
             C::Optimism => Some(op_nodes()),
-            #[cfg(feature = "optimism")]
             C::BaseGoerli | C::BaseSepolia => Some(base_testnet_nodes()),
-            #[cfg(feature = "optimism")]
             C::OptimismSepolia | C::OptimismGoerli | C::OptimismKovan => Some(op_testnet_nodes()),
             _ => None,
         }
