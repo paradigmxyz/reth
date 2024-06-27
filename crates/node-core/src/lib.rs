@@ -38,12 +38,12 @@ pub mod rpc {
     }
     /// Re-exported from `reth_rpc::eth`.
     pub mod eth {
-        pub use reth_rpc::eth::*;
+        pub use reth_rpc_eth_api::*;
     }
 
     /// Re-exported from `reth_rpc::rpc`.
     pub mod result {
-        pub use reth_rpc::result::*;
+        pub use reth_rpc_eth_api::result::*;
     }
 
     /// Re-exported from `reth_rpc::eth`.

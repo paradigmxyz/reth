@@ -1,12 +1,5 @@
-use crate::{
-    eth::{
-        error::{EthApiError, EthResult},
-        revm_utils::prepare_call_env,
-        EthTransactions,
-    },
-    result::{internal_rpc_err, ToRpcResult},
-    EthApiSpec,
-};
+use std::sync::Arc;
+
 use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -16,10 +9,17 @@ use reth_primitives::{
     TransactionSignedEcRecovered, Withdrawals, B256, U256,
 };
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderBox, TransactionVariant,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory,
+    TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
+use reth_rpc_eth_api::{
+    result::internal_rpc_err,
+    revm_utils::prepare_call_env,
+    servers::{EthApiSpec, EthTransactions, TraceExt},
+    EthApiError, EthResult, StateCacheDb, ToRpcResult,
+};
 use reth_rpc_types::{
     state::EvmOverrides,
     trace::geth::{
@@ -37,7 +37,6 @@ use revm_inspectors::tracing::{
     js::{JsInspector, TransactionContext},
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig,
 };
-use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
@@ -66,8 +65,13 @@ impl<Provider, Eth> DebugApi<Provider, Eth> {
 
 impl<Provider, Eth> DebugApi<Provider, Eth>
 where
-    Provider: BlockReaderIdExt + HeaderProvider + ChainSpecProvider + 'static,
-    Eth: EthTransactions + 'static,
+    Provider: BlockReaderIdExt
+        + HeaderProvider
+        + ChainSpecProvider
+        + StateProviderFactory
+        + EvmEnvProvider
+        + 'static,
+    Eth: TraceExt + 'static,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -75,7 +79,7 @@ where
     }
 
     /// Trace the entire block asynchronously
-    async fn trace_block_with(
+    async fn trace_block(
         &self,
         at: BlockId,
         transactions: Vec<TransactionSignedEcRecovered>,
@@ -166,7 +170,7 @@ where
                     .collect::<EthResult<Vec<_>>>()?
             };
 
-        self.trace_block_with(parent.into(), transactions, cfg, block_env, opts).await
+        self.trace_block(parent.into(), transactions, cfg, block_env, opts).await
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -183,7 +187,7 @@ where
 
         let ((cfg, block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(block_hash.into()),
-            self.inner.eth_api.block_by_id_with_senders(block_id),
+            self.inner.eth_api.block_with_senders(block_id),
         )?;
 
         let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
@@ -191,7 +195,7 @@ where
         // its parent block's state
         let state_at = block.parent_hash;
 
-        self.trace_block_with(
+        self.trace_block(
             state_at.into(),
             block.into_transactions_ecrecovered().collect(),
             cfg,
@@ -325,6 +329,10 @@ where
                             self.inner
                                 .eth_api
                                 .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                    // wrapper is hack to get around 'higher-ranked lifetime error',
+                                    // see <https://github.com/rust-lang/rust/issues/100013>
+                                    let db = db.0;
+
                                     let (res, _) =
                                         this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                                     let frame = inspector
@@ -347,6 +355,10 @@ where
                             .inner
                             .eth_api
                             .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                // wrapper is hack to get around 'higher-ranked lifetime error', see
+                                // <https://github.com/rust-lang/rust/issues/100013>
+                                let db = db.0;
+
                                 let (res, _) =
                                     this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                                 let frame = inspector.try_into_mux_frame(&res, db)?;
@@ -365,6 +377,10 @@ where
                         .inner
                         .eth_api
                         .spawn_with_call_at(call, at, overrides, move |db, env| {
+                            // wrapper is hack to get around 'higher-ranked lifetime error', see
+                            // <https://github.com/rust-lang/rust/issues/100013>
+                            let db = db.0;
+
                             let mut inspector = JsInspector::new(code, config)?;
                             let (res, _) =
                                 this.eth_api().inspect(&mut *db, env.clone(), &mut inspector)?;
@@ -416,7 +432,7 @@ where
         let target_block = block_number.unwrap_or_default();
         let ((cfg, mut block_env, _), block) = futures::try_join!(
             self.inner.eth_api.evm_env_at(target_block),
-            self.inner.eth_api.block_by_id_with_senders(target_block),
+            self.inner.eth_api.block_with_senders(target_block),
         )?;
 
         let opts = opts.unwrap_or_default();
@@ -519,7 +535,7 @@ where
         &self,
         opts: GethDebugTracingOptions,
         env: EnvWithHandlerCfg,
-        db: &mut CacheDB<StateProviderDatabase<StateProviderBox>>,
+        db: &mut StateCacheDb<'_>,
         transaction_context: Option<TransactionContext>,
     ) -> EthResult<(GethTrace, revm_primitives::EvmState)> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
@@ -615,8 +631,13 @@ where
 #[async_trait]
 impl<Provider, Eth> DebugApiServer for DebugApi<Provider, Eth>
 where
-    Provider: BlockReaderIdExt + HeaderProvider + ChainSpecProvider + 'static,
-    Eth: EthApiSpec + 'static,
+    Provider: BlockReaderIdExt
+        + HeaderProvider
+        + ChainSpecProvider
+        + StateProviderFactory
+        + EvmEnvProvider
+        + 'static,
+    Eth: EthApiSpec + EthTransactions + TraceExt + 'static,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
