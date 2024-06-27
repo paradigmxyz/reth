@@ -2,8 +2,6 @@
 
 use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
 use futures::FutureExt;
-use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::ChainSpec;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
     bodies::client::BodiesClient,
@@ -271,11 +269,13 @@ impl BlockDownloader for NoopBlockDownloader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::insert_headers_into_client;
     use assert_matches::assert_matches;
+    use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, BlockBody, Header, SealedHeader};
-    use std::{future::poll_fn, ops::Range, sync::Arc};
+    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, Header};
+    use std::{future::poll_fn, sync::Arc};
 
     struct TestHarness {
         block_downloader: BasicBlockDownloader<TestFullBlockClient>,
@@ -305,24 +305,6 @@ mod tests {
 
             let block_downloader = BasicBlockDownloader::new(client.clone(), consensus);
             Self { block_downloader, client }
-        }
-    }
-
-    fn insert_headers_into_client(
-        client: &TestFullBlockClient,
-        genesis_header: SealedHeader,
-        range: Range<usize>,
-    ) {
-        let mut sealed_header = genesis_header;
-        let body = BlockBody::default();
-        for _ in range {
-            let (mut header, hash) = sealed_header.split();
-            // update to the next header
-            header.parent_hash = hash;
-            header.number += 1;
-            header.timestamp += 1;
-            sealed_header = header.seal_slow();
-            client.insert(sealed_header.clone(), body.clone());
         }
     }
 
