@@ -6,16 +6,13 @@
 //! trait.
 //!
 //! Traits with `Eth` prefix, compose specific data needed to serve RPC requests in the `eth`
-//! namespace. They use `Load` traits as building blocks.
-//! [`EthTransactions`](crate::api::EthTransactions) also writes data (submits transactions).
-//! Based on the `eth_` request method semantics, request methods are divided into:
-//! [`EthTransactions`](crate::api::EthTransactions), [`EthBlocks`](crate::api::EthBlocks),
-//! [`EthFees`](crate::api::EthFees), [`EthState`](crate::api::EthState) and
-//! [`EthCall`](crate::api::EthCall). Default implementation of the `Eth` traits, is done w.r.t.
-//! L1.
+//! namespace. They use `Load` traits as building blocks. [`EthTransactions`] also writes data
+//! (submits transactions). Based on the `eth_` request method semantics, request methods are
+//! divided into: [`EthTransactions`], [`EthBlocks`], [`EthFees`], [`EthState`] and [`EthCall`].
+//! Default implementation of the `Eth` traits, is done w.r.t. L1.
 //!
 //! [`EthApiServer`](crate::EthApiServer), is implemented for any type that implements
-//! all the `Eth` traits, e.g. [`EthApi`](crate::EthApi).
+//! all the `Eth` traits, e.g. `reth_rpc::EthApi`.
 
 pub mod block;
 pub mod blocking_task;

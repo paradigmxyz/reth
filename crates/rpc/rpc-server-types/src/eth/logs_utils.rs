@@ -1,4 +1,4 @@
-//! Helper functions for [`EthFilterApiServer`](crate::EthFilterApiServer) implementation.
+//! Helper functions for `reth_rpc_eth_api::EthFilterApiServer` implementation.
 //!
 //! Log parsing for building filter.
 

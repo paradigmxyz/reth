@@ -1,6 +1,6 @@
 //! Helper types to workaround 'higher-ranked lifetime error'
 //! <https://github.com/rust-lang/rust/issues/100013> in default implementation of
-//! [`Call`](crate::api::Call).
+//! `reth_rpc_eth_api::helpers::Call`.
 
 use reth_primitives::{B256, U256};
 use reth_provider::StateProvider;

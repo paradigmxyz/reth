@@ -31,6 +31,7 @@ revm-inspectors = { workspace = true, features = ["js-tracer"] }
 reth-network-peers.workspace = true
 reth-evm.workspace = true
 reth-rpc-server-types.workspace = true
+reth-evm-optimism = { workspace = true, optional = true }
 
 # eth
 alloy-dyn-abi.workspace = true
@@ -52,6 +53,7 @@ http-body.workspace = true
 hyper.workspace = true
 jsonwebtoken.workspace = true
 serde_json.workspace = true
+jsonrpsee-types = { workspace = true, optional = true }
 
 # async
 async-trait.workspace = true
@@ -86,4 +88,6 @@ optimism = [
     "reth-rpc-api/optimism",
     "reth-rpc-eth-api/optimism",
     "reth-revm/optimism",
+    "jsonrpsee-types",
+    "reth-evm-optimism",
 ]

@@ -996,7 +996,7 @@ where
     ///
     /// This will spawn the required service tasks for [`EthApi`] for:
     ///   - [`EthStateCache`]
-    ///   - [`reth_rpc::eth::FeeHistoryCache`]
+    ///   - [`FeeHistoryCache`](reth_rpc_server_types::eth::FeeHistoryCache)
     fn with_eth<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&EthHandlers<Provider, Pool, Network, Events, EvmConfig>) -> R,

@@ -7,7 +7,7 @@ use crate::constants::cache::{
     DEFAULT_RECEIPT_CACHE_MAX_LEN,
 };
 
-/// Settings for the [`EthStateCache`](crate::EthStateCache).
+/// Settings for the [`EthStateCache`](super::EthStateCache).
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EthStateCacheConfig {

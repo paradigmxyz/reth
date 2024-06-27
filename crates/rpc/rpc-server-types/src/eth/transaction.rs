@@ -1,4 +1,4 @@
-//! Helper types for [`EthApiServer`](crate::EthApiServer) implementation.
+//! Helper types for `reth_rpc_eth_api::EthApiServer` implementation.
 //!
 //! Transaction wrapper that labels transaction with its origin.
 
