@@ -97,9 +97,9 @@ impl<Node: FullNodeComponents> BackfillJob<Node> {
                 .header_td_by_number(block_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
-            // we need the block's transactions but we don't need the transaction hashes
+            // we need the block's transactions along with their hashes
             let block = provider
-                .block_with_senders(block_number.into(), TransactionVariant::NoHash)?
+                .block_with_senders(block_number.into(), TransactionVariant::WithHash)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
             fetch_block_duration += fetch_block_start.elapsed();
@@ -159,20 +159,25 @@ mod tests {
     use reth_node_api::FullNodeTypesAdapter;
     use reth_node_builder::{components::Components, NodeAdapter};
     use reth_primitives::{
-        constants::ETH_TO_WEI, public_key_to_address, Block, Genesis, GenesisAccount, Header, U256,
+        b256, constants::ETH_TO_WEI, public_key_to_address, Address, Block, Genesis,
+        GenesisAccount, Header, Transaction, TxEip2930, TxKind, U256,
     };
-    use reth_provider::{BlockWriter, LatestStateProviderRef, OriginalValuesKnown, StateWriter};
+    use reth_provider::{BlockWriter, LatestStateProviderRef};
     use reth_prune_types::PruneModes;
     use reth_revm::database::StateProviderDatabase;
-    use reth_testing_utils::generators;
+    use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
     use secp256k1::Keypair;
     use std::sync::Arc;
 
     #[tokio::test]
     async fn test_backfill() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
+        // Create a key pair for the sender
         let key_pair = Keypair::new_global(&mut generators::rng());
         let address = public_key_to_address(key_pair.public_key());
 
+        // Create a chain spec with a genesis state that contains the sender
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -187,6 +192,8 @@ mod tests {
                 .paris_activated()
                 .build(),
         );
+
+        // Replace the executor with a real one
         let (ctx, handle) = test_exex_context_with_chain_spec(chain_spec.clone()).await?;
         let components = NodeAdapter::<FullNodeTypesAdapter<TestNode, _, _>, _> {
             components: Components {
@@ -201,19 +208,37 @@ mod tests {
             provider: ctx.provider().clone(),
         };
 
+        // First block has a transaction that transfes some ETH to zero address
         let block1 = Block {
             header: Header {
                 parent_hash: chain_spec.genesis_hash(),
+                receipts_root: b256!(
+                    "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
+                ),
                 difficulty: chain_spec.fork(Hardfork::Paris).ttd().expect("Paris TTD"),
                 number: 1,
+                gas_limit: 21000,
+                gas_used: 21000,
                 ..Default::default()
             },
-            body: vec![],
+            body: vec![sign_tx_with_key_pair(
+                key_pair,
+                Transaction::Eip2930(TxEip2930 {
+                    chain_id: chain_spec.chain.id(),
+                    nonce: 0,
+                    gas_limit: 21000,
+                    gas_price: 1_500_000_000,
+                    to: TxKind::Call(Address::ZERO),
+                    value: U256::from(0.1 * ETH_TO_WEI as f64),
+                    ..Default::default()
+                }),
+            )],
             ..Default::default()
         }
         .with_recovered_senders()
         .ok_or_eyre("failed to recover senders")?;
 
+        // Second block has no state changes
         let block2 = Block {
             header: Header {
                 parent_hash: block1.hash_slow(),
@@ -221,14 +246,13 @@ mod tests {
                 number: 2,
                 ..Default::default()
             },
-            body: vec![],
             ..Default::default()
         }
         .with_recovered_senders()
         .ok_or_eyre("failed to recover senders")?;
 
         let provider = handle.provider_factory.provider()?;
-
+        // Execute only the first block on top of genesis state
         let outcome_single = EthExecutorProvider::ethereum(chain_spec.clone())
             .batch_executor(
                 StateProviderDatabase::new(LatestStateProviderRef::new(
@@ -238,7 +262,7 @@ mod tests {
                 PruneModes::none(),
             )
             .execute_and_verify_batch([(&block1, U256::ZERO).into()])?;
-
+        // Execute both blocks on top of the genesis state
         let outcome_batch = EthExecutorProvider::ethereum(chain_spec.clone())
             .batch_executor(
                 StateProviderDatabase::new(LatestStateProviderRef::new(
@@ -251,22 +275,30 @@ mod tests {
                 (&block1, U256::ZERO).into(),
                 (&block2, U256::ZERO).into(),
             ])?;
+        drop(provider);
 
         let block1 = block1.seal_slow();
         let block2 = block2.seal_slow();
 
+        // Update the state with the execution results of both blocks
         let provider_rw = handle.provider_factory.provider_rw()?;
-        provider_rw.insert_block(block1.clone(), None)?;
-        provider_rw.insert_block(block2, None)?;
-        outcome_batch.write_to_storage(provider_rw.tx_ref(), None, OriginalValuesKnown::Yes)?;
+        provider_rw.append_blocks_with_state(
+            vec![block1.clone(), block2],
+            outcome_batch,
+            Default::default(),
+            Default::default(),
+            None,
+        )?;
         provider_rw.commit()?;
 
+        // Backfill the first block
         let factory = BackfillJobFactory::new(components, ctx.config, Default::default());
-
         let job = factory.backfill(1..=1);
         let chains = job.collect::<Result<Vec<_>, _>>()?;
-        assert_eq!(chains.len(), 1);
 
+        // Assert that the backfill job produced the same chain as we got before when executing only
+        // the first block
+        assert_eq!(chains.len(), 1);
         let chain = chains.first().unwrap();
         assert_eq!(chain.blocks(), &[(1, block1)].into());
         assert_eq!(chain.execution_outcome(), &outcome_single);
