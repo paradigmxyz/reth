@@ -16,8 +16,7 @@ use reth_config::config::PruneConfig;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives::{
-    constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, kzg::KzgSettings, BlockHashOrNumber,
-    BlockNumber, Head, SealedHeader, B256,
+    revm_primitives::EnvKzgSettings, BlockHashOrNumber, BlockNumber, Head, SealedHeader, B256,
 };
 use reth_provider::{
     providers::StaticFileProvider, BlockHashReader, HeaderProvider, ProviderFactory,
@@ -270,9 +269,9 @@ impl NodeConfig {
         Ok(max_block)
     }
 
-    /// Loads '`MAINNET_KZG_TRUSTED_SETUP`'
-    pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
-        Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
+    /// Loads '`EnvKzgSettings::Default`'
+    pub const fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
+        Ok(EnvKzgSettings::Default)
     }
 
     /// Installs the prometheus recorder.
@@ -394,6 +393,7 @@ impl NodeConfig {
     /// [`RpcServerArgs::adjust_instance_ports`] method.
     pub fn adjust_instance_ports(&mut self) {
         self.rpc.adjust_instance_ports(self.instance);
+        self.network.adjust_instance_ports(self.instance);
     }
 
     /// Sets networking and RPC ports to zero, causing the OS to choose random unused ports when

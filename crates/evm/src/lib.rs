@@ -13,9 +13,17 @@
 extern crate alloc;
 
 use reth_chainspec::ChainSpec;
-use reth_primitives::{revm::env::fill_block_env, Address, Header, TransactionSigned, U256};
+use reth_primitives::{
+    revm::{
+        config::revm_spec,
+        env::{fill_block_env, fill_tx_env},
+    },
+    Address, Head, Header, TransactionSigned, U256,
+};
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv};
+use revm_primitives::{
+    AnalysisKind, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv,
+};
 
 pub mod either;
 pub mod execute;
@@ -27,6 +35,7 @@ pub mod provider;
 pub mod test_utils;
 
 /// Trait for configuring the EVM for executing full blocks.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// Associated type for the default external context that should be configured for the EVM.
     type DefaultExternalContext<'a>;
@@ -98,9 +107,14 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 
 /// This represents the set of methods used to configure the EVM's environment before block
 /// execution.
+///
+/// Default trait method  implementation is done w.r.t. L1.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// Fill transaction environment from a [`TransactionSigned`] and the given sender address.
-    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address);
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        fill_tx_env(tx_env, transaction, sender)
+    }
 
     /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header
     fn fill_cfg_env(
@@ -108,7 +122,23 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
-    );
+    ) {
+        let spec_id = revm_spec(
+            chain_spec,
+            Head {
+                number: header.number,
+                timestamp: header.timestamp,
+                difficulty: header.difficulty,
+                total_difficulty,
+                hash: Default::default(),
+            },
+        );
+
+        cfg_env.chain_id = chain_spec.chain().id();
+        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
+
+        cfg_env.handler_cfg.spec_id = spec_id;
+    }
 
     /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
     /// [`fill_block_env`].

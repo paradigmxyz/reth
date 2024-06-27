@@ -1,9 +1,5 @@
-use crate::eth::{
-    error::{EthApiError, EthResult},
-    revm_utils::prepare_call_env,
-    utils::recover_raw_transaction,
-    EthTransactions,
-};
+use std::{collections::HashSet, sync::Arc};
+
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
 use reth_consensus_common::calc::{
@@ -13,6 +9,12 @@ use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, Header, 
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
+use reth_rpc_eth_api::helpers::TraceExt;
+use reth_rpc_eth_types::{
+    error::{EthApiError, EthResult},
+    revm_utils::prepare_call_env,
+    utils::recover_raw_transaction,
+};
 use reth_rpc_types::{
     state::{EvmOverrides, StateOverride},
     trace::{
@@ -32,7 +34,6 @@ use revm_inspectors::{
     opcode::OpcodeGasInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
-use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `trace` API implementation.
@@ -74,7 +75,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: EthTransactions + 'static,
+    Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(&self, trace_request: TraceCallRequest) -> EthResult<TraceResults> {
@@ -86,6 +87,10 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, env| {
+                // wrapper is hack to get around 'higher-ranked lifetime error', see
+                // <https://github.com/rust-lang/rust/issues/100013>
+                let db = db.0;
+
                 let (res, _) = this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     &res,
@@ -372,7 +377,7 @@ where
             },
         );
 
-        let block = self.inner.eth_api.block_by_id(block_id);
+        let block = self.inner.eth_api.block(block_id);
         let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
 
         let mut maybe_traces =
@@ -455,7 +460,7 @@ where
         let res = self
             .inner
             .eth_api
-            .trace_block_with_inspector(
+            .trace_block_inspector(
                 block_id,
                 OpcodeGasInspector::default,
                 move |tx_info, inspector, _res, _, _| {
@@ -470,7 +475,7 @@ where
 
         let Some(transactions) = res else { return Ok(None) };
 
-        let Some(block) = self.inner.eth_api.block_by_id(block_id).await? else { return Ok(None) };
+        let Some(block) = self.inner.eth_api.block(block_id).await? else { return Ok(None) };
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),
@@ -548,7 +553,7 @@ where
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: EthTransactions + 'static,
+    Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     ///

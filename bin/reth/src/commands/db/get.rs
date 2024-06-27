@@ -1,4 +1,3 @@
-use crate::utils::DbTool;
 use clap::Parser;
 use reth_db::{
     static_file::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask, ReceiptMask, TransactionMask},
@@ -8,8 +7,10 @@ use reth_db_api::{
     database::Database,
     table::{Decompress, DupSort, Table},
 };
-use reth_primitives::{BlockHash, Header, StaticFileSegment};
+use reth_db_common::DbTool;
+use reth_primitives::{BlockHash, Header};
 use reth_provider::StaticFileProviderFactory;
+use reth_static_file_types::StaticFileSegment;
 use tracing::error;
 
 /// The arguments for the `reth db get` command

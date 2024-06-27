@@ -34,7 +34,15 @@ pub mod commands;
 #[cfg(feature = "compiler")]
 pub mod compiler;
 mod macros;
-pub mod utils;
+
+/// Re-exported utils.
+pub mod utils {
+    pub use reth_db::open_db_read_only;
+
+    /// Re-exported from `reth_node_core`, also to prevent a breaking change. See the comment
+    /// on the `reth_node_core::args` re-export for more details.
+    pub use reth_node_core::utils::*;
+}
 
 /// Re-exported payload related types
 pub mod payload {
@@ -142,6 +150,15 @@ pub mod rpc {
         pub use reth_rpc_types::*;
     }
 
+    /// Re-exported from `reth_rpc_server_types`.
+    pub mod server_types {
+        pub use reth_rpc_server_types::*;
+        /// Re-exported from `reth_rpc_eth_types`.
+        pub mod eth {
+            pub use reth_rpc_eth_types::*;
+        }
+    }
+
     /// Re-exported from `reth_rpc_api`.
     pub mod api {
         pub use reth_rpc_api::*;
@@ -153,10 +170,10 @@ pub mod rpc {
 
     /// Re-exported from `reth_rpc::rpc`.
     pub mod result {
-        pub use reth_rpc::result::*;
+        pub use reth_rpc_server_types::result::*;
     }
 
-    /// Re-exported from `reth_rpc::eth`.
+    /// Re-exported from `reth_rpc_types_compat`.
     pub mod compat {
         pub use reth_rpc_types_compat::*;
     }

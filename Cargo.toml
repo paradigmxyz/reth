@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.0.0-rc.2"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.79"
 license = "MIT OR Apache-2.0"
@@ -14,6 +14,8 @@ members = [
     "crates/blockchain-tree/",
     "crates/blockchain-tree-api/",
     "crates/chainspec/",
+    "crates/cli/cli/",
+    "crates/cli/commands/",
     "crates/cli/runner/",
     "crates/config/",
     "crates/consensus/auto-seal/",
@@ -23,7 +25,8 @@ members = [
     "crates/consensus/debug-client/",
     "crates/ethereum-forks/",
     "crates/e2e-test-utils/",
-    "crates/engine-primitives/",
+    "crates/engine/primitives/",
+    "crates/engine/util/",
     "crates/errors/",
     "crates/ethereum-forks/",
     "crates/ethereum/consensus/",
@@ -51,6 +54,7 @@ members = [
     "crates/net/eth-wire/",
     "crates/net/nat/",
     "crates/net/network-api/",
+    "crates/net/network-types/",
     "crates/net/network/",
     "crates/net/p2p/",
     "crates/net/peers/",
@@ -58,6 +62,7 @@ members = [
     "crates/node/api/",
     "crates/node/builder/",
     "crates/node/events/",
+    "crates/optimism/cli",
     "crates/optimism/consensus",
     "crates/optimism/evm/",
     "crates/optimism/node/",
@@ -76,8 +81,11 @@ members = [
     "crates/rpc/rpc-api/",
     "crates/rpc/rpc-builder/",
     "crates/rpc/rpc-engine-api/",
+    "crates/rpc/rpc-eth-api/",
+    "crates/rpc/rpc-eth-types/",
     "crates/rpc/rpc-layer",
     "crates/rpc/rpc-testing-util/",
+    "crates/rpc/rpc-server-types/",
     "crates/rpc/rpc-types-compat/",
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc/",
@@ -124,6 +132,9 @@ members = [
     "examples/polygon-p2p/",
     "examples/rpc-db/",
     "examples/txpool-tracing/",
+    "examples/custom-rlpx-subprotocol",
+    "examples/exex/minimal/",
+    "examples/exex/op-bridge/",
     "testing/ef-tests/",
     "testing/testing-utils",
 ]
@@ -225,20 +236,28 @@ opt-level = 3
 lto = "thin"
 
 [profile.release]
+opt-level = 3
 lto = "thin"
-strip = "debuginfo"
+debug = "line-tables-only"
+strip = true
+panic = "unwind"
+codegen-units = 16
 
-# Like release, but with full debug symbols. Useful for e.g. `perf`.
-[profile.debug-fast]
+# Use the `--profile profiling` flag to show symbols in release mode.
+# e.g. `cargo build --profile profiling`
+[profile.profiling]
 inherits = "release"
-strip = "none"
-debug = true
+debug = 2
+strip = false
+
+# Make sure debug symbols are in the bench profile
+[profile.bench]
+inherits = "profiling"
 
 [profile.maxperf]
 inherits = "release"
 lto = "fat"
 codegen-units = 1
-incremental = false
 
 [workspace.dependencies]
 # reth
@@ -250,6 +269,8 @@ reth-beacon-consensus = { path = "crates/consensus/beacon" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-blockchain-tree-api = { path = "crates/blockchain-tree-api" }
 reth-chainspec = { path = "crates/chainspec" }
+reth-cli = { path = "crates/cli/cli" }
+reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-codecs-derive = { path = "crates/storage/codecs/derive" }
@@ -266,7 +287,8 @@ reth-dns-discovery = { path = "crates/net/dns" }
 reth-downloaders = { path = "crates/net/downloaders" }
 reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-ecies = { path = "crates/net/ecies" }
-reth-engine-primitives = { path = "crates/engine-primitives" }
+reth-engine-primitives = { path = "crates/engine/primitives" }
+reth-engine-util = { path = "crates/engine/util" }
 reth-errors = { path = "crates/errors" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
@@ -294,6 +316,7 @@ reth-net-banlist = { path = "crates/net/banlist" }
 reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
+reth-network-types = { path = "crates/net/network-types" }
 reth-network-peers = { path = "crates/net/peers", default-features = false }
 reth-network-p2p = { path = "crates/net/p2p" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
@@ -303,6 +326,7 @@ reth-node-core = { path = "crates/node-core" }
 reth-node-ethereum = { path = "crates/ethereum/node" }
 reth-node-events = { path = "crates/node/events" }
 reth-node-optimism = { path = "crates/optimism/node" }
+reth-optimism-cli = { path = "crates/optimism/cli" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
 reth-optimism-payload-builder = { path = "crates/optimism/payload" }
 reth-optimism-primitives = { path = "crates/optimism/primitives" }
@@ -320,7 +344,9 @@ reth-rpc-api = { path = "crates/rpc/rpc-api" }
 reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
 reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
+reth-rpc-eth-api = { path = "crates/rpc/rpc-eth-api" }
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
+reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
@@ -400,6 +426,7 @@ aquamarine = "0.5"
 bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
+const_format = { version = "0.2.32", features = ["rust_1_64"] }
 dashmap = "5.5"
 derive_more = "0.99.17"
 fdlimit = "0.3.0"
@@ -433,6 +460,7 @@ paste = "1.0"
 indexmap = "2"
 url = "2.3"
 backon = "0.4"
+boyer-moore-magiclen = "0.2.16"
 
 # metrics
 metrics = "0.23.0"
@@ -498,7 +526,7 @@ assert_matches = "1.5.0"
 criterion = "0.5"
 pprof = "0.13"
 proptest = "1.4"
-proptest-derive = "0.4"
+proptest-derive = "0.5"
 serial_test = "3"
 similar-asserts = "1.5.0"
 tempfile = "3.8"

@@ -32,10 +32,8 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives::{
-    keccak256,
-    revm::{config::revm_spec, env::fill_block_env},
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    GotExpected, Head, Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders,
+    keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber,
+    BlockWithSenders, GotExpected, Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders,
     SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta, TransactionSigned,
     TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
     Withdrawals, B256, U256,
@@ -48,7 +46,7 @@ use reth_trie::{
     updates::TrieUpdates,
     HashedPostState, Nibbles, StateRoot,
 };
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
+use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     cmp::Ordering,
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
@@ -2002,41 +2000,6 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
             header,
             total_difficulty,
         );
-        Ok(())
-    }
-
-    fn fill_block_env_at(
-        &self,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
-
-        self.fill_block_env_with_header(block_env, &header)
-    }
-
-    fn fill_block_env_with_header(
-        &self,
-        block_env: &mut BlockEnv,
-        header: &Header,
-    ) -> ProviderResult<()> {
-        let total_difficulty = self
-            .header_td_by_number(header.number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        let spec_id = revm_spec(
-            &self.chain_spec,
-            Head {
-                number: header.number,
-                timestamp: header.timestamp,
-                difficulty: header.difficulty,
-                total_difficulty,
-                // Not required
-                hash: Default::default(),
-            },
-        );
-        let after_merge = spec_id >= SpecId::MERGE;
-        fill_block_env(block_env, &self.chain_spec, header, after_merge);
         Ok(())
     }
 

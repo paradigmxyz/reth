@@ -1,12 +1,13 @@
-use crate::eth::error::{EthApiError, EthResult};
+use std::{collections::HashMap, future::Future, sync::Arc};
+
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_errors::RethResult;
 use reth_primitives::{Address, BlockId, U256};
 use reth_provider::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_rpc_api::RethApiServer;
+use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_tasks::TaskSpawner;
-use std::{collections::HashMap, future::Future, sync::Arc};
 use tokio::sync::oneshot;
 
 /// `reth` API implementation.
