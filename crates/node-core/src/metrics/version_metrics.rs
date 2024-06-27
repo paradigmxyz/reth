@@ -1,6 +1,6 @@
 //! This exposes reth's version information over prometheus.
 
-use crate::version::{ build_profile_name, VERGEN_GIT_SHA };
+use crate::version::{build_profile_name, VERGEN_GIT_SHA};
 use metrics::gauge;
 
 /// Contains version information for the application.
@@ -48,4 +48,3 @@ impl VersionInfo {
         let _gauge = gauge!("info", &labels);
     }
 }
-
