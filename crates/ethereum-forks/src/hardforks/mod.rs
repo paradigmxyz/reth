@@ -1,10 +1,10 @@
 /// Ethereum helper methods
 mod ethereum;
-pub use ethereum::{EthereumActivations, EthereumHardforks};
+pub use ethereum::EthereumHardforks;
 
 /// Optimism helper methods
 mod optimism;
-pub use optimism::{OptimismActivations, OptimismHardforks};
+pub use optimism::OptimismHardforks;
 
 use crate::{ForkCondition, Hardfork};
 use std::collections::HashMap;

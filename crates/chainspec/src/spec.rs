@@ -14,9 +14,8 @@ use alloy_trie::EMPTY_ROOT_HASH;
 use derive_more::From;
 use once_cell::sync::Lazy;
 use reth_ethereum_forks::{
-        DEV_HARDFORKS,
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
-    ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head,
+    ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Head, DEV_HARDFORKS,
 };
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::{
