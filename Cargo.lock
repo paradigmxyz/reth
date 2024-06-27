@@ -6547,6 +6547,7 @@ name = "reth-cli"
 version = "1.0.0"
 dependencies = [
  "clap",
+ "reth-cli-runner",
 ]
 
 [[package]]

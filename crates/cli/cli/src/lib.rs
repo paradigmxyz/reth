@@ -10,6 +10,8 @@
 
 use std::{borrow::Cow, ffi::OsString};
 
+use reth_cli_runner::CliRunner;
+
 use clap::{Error, Parser};
 
 /// Reth based node cli.
@@ -41,5 +43,23 @@ pub trait RethCli: Sized {
         T: Into<OsString> + Clone,
     {
         <Self as Parser>::try_parse_from(itr)
+    }
+
+    /// Executes a command.
+    fn with_runner<F: FnOnce(Self, CliRunner)>(self, f: F) {
+        let runner = CliRunner::default();
+
+        f(self, runner)
+    }
+
+    /// Parses and executes a command.
+    fn execute<F: FnOnce(Self, CliRunner)>(f: F) -> Result<(), Error>
+    where
+        Self: Parser + Sized,
+    {
+        let cli = Self::parse_args()?;
+        cli.with_runner(f);
+
+        Ok(())
     }
 }
