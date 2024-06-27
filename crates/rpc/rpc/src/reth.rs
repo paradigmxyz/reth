@@ -6,7 +6,7 @@ use reth_errors::RethResult;
 use reth_primitives::{Address, BlockId, U256};
 use reth_provider::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_rpc_api::RethApiServer;
-use reth_rpc_server_types::eth::{EthApiError, EthResult};
+use reth_rpc_eth_server_types::{EthApiError, EthResult};
 use reth_tasks::TaskSpawner;
 use tokio::sync::oneshot;
 

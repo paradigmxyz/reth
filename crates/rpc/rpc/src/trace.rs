@@ -10,7 +10,7 @@ use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProvide
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_eth_api::helpers::TraceExt;
-use reth_rpc_server_types::eth::{
+use reth_rpc_eth_server_types::{
     error::{EthApiError, EthResult},
     revm_utils::prepare_call_env,
     utils::recover_raw_transaction,

@@ -183,8 +183,8 @@ use reth_rpc::{
     Web3Api,
 };
 use reth_rpc_api::*;
+use reth_rpc_eth_server_types::{EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
-use reth_rpc_server_types::eth::{EthStateCache, EthSubscriptionIdProvider};
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
@@ -996,7 +996,7 @@ where
     ///
     /// This will spawn the required service tasks for [`EthApi`] for:
     ///   - [`EthStateCache`]
-    ///   - [`FeeHistoryCache`](reth_rpc_server_types::eth::FeeHistoryCache)
+    ///   - [`FeeHistoryCache`](reth_rpc_eth_server_types::FeeHistoryCache)
     fn with_eth<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&EthHandlers<Provider, Pool, Network, Events, EvmConfig>) -> R,
@@ -1189,7 +1189,7 @@ impl RpcServerConfig {
     /// Configures the [`SocketAddr`] of the http server
     ///
     /// Default is [`Ipv4Addr::LOCALHOST`] and
-    /// [`reth_rpc_server_types::constants::DEFAULT_HTTP_RPC_PORT`]
+    /// [`reth_rpc_eth_server_types::constants::DEFAULT_HTTP_RPC_PORT`]
     pub const fn with_http_address(mut self, addr: SocketAddr) -> Self {
         self.http_addr = Some(addr);
         self
@@ -1198,7 +1198,7 @@ impl RpcServerConfig {
     /// Configures the [`SocketAddr`] of the ws server
     ///
     /// Default is [`Ipv4Addr::LOCALHOST`] and
-    /// [`reth_rpc_server_types::constants::DEFAULT_WS_RPC_PORT`]
+    /// [`reth_rpc_eth_server_types::constants::DEFAULT_WS_RPC_PORT`]
     pub const fn with_ws_address(mut self, addr: SocketAddr) -> Self {
         self.ws_addr = Some(addr);
         self
@@ -1235,7 +1235,7 @@ impl RpcServerConfig {
 
     /// Configures the endpoint of the ipc server
     ///
-    /// Default is [`reth_rpc_server_types::constants::DEFAULT_IPC_ENDPOINT`]
+    /// Default is [`reth_rpc_eth_server_types::constants::DEFAULT_IPC_ENDPOINT`]
     pub fn with_ipc_endpoint(mut self, path: impl Into<String>) -> Self {
         self.ipc_endpoint = Some(path.into());
         self

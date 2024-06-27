@@ -5,7 +5,7 @@ use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     RawTransactionForwarder,
 };
-use reth_rpc_server_types::eth::EthStateCache;
+use reth_rpc_eth_server_types::EthStateCache;
 use reth_transaction_pool::TransactionPool;
 
 use crate::EthApi;
@@ -65,7 +65,7 @@ mod tests {
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_rpc_eth_api::helpers::EthTransactions;
-    use reth_rpc_server_types::eth::{
+    use reth_rpc_eth_server_types::{
         EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
     };
     use reth_tasks::pool::BlockingTaskPool;

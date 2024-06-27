@@ -24,7 +24,7 @@ use reth_provider::{
 use reth_revm::{
     database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,
 };
-use reth_rpc_server_types::eth::{
+use reth_rpc_eth_server_types::{
     pending_block::{pre_block_beacon_root_contract_call, pre_block_blockhashes_update},
     EthApiError, EthResult, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin,
 };

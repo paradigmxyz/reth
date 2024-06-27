@@ -3,20 +3,25 @@
 
 use std::fmt::{self, Debug, Formatter};
 
-use derive_more::{Deref, DerefMut};
+use derive_more::{Deref, DerefMut, From, Into};
 use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag, B256, U256};
 use reth_provider::BlockReaderIdExt;
+use reth_rpc_server_types::constants;
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use tracing::warn;
 
-use crate::constants::gas_oracle::{
+use reth_rpc_server_types::constants::gas_oracle::{
     DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
-    DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, RPC_DEFAULT_GAS_CAP, SAMPLE_NUMBER,
+    DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, SAMPLE_NUMBER,
 };
 
 use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
+
+/// The default gas limit for `eth_call` and adjacent calls. See
+/// [`RPC_DEFAULT_GAS_CAP`](constants::gas_oracle::RPC_DEFAULT_GAS_CAP).
+pub const RPC_DEFAULT_GAS_CAP: GasCap = GasCap(constants::gas_oracle::RPC_DEFAULT_GAS_CAP);
 
 /// Settings for the [`GasPriceOracle`]
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -290,24 +295,12 @@ impl Default for GasPriceOracleResult {
 }
 
 /// The wrapper type for gas limit
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, From, Into)]
 pub struct GasCap(pub u64);
 
 impl Default for GasCap {
     fn default() -> Self {
         RPC_DEFAULT_GAS_CAP
-    }
-}
-
-impl From<u64> for GasCap {
-    fn from(gas_cap: u64) -> Self {
-        Self(gas_cap)
-    }
-}
-
-impl From<GasCap> for u64 {
-    fn from(gas_cap: GasCap) -> Self {
-        gas_cap.0
     }
 }
 

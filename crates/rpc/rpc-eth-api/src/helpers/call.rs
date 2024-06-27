@@ -13,18 +13,16 @@ use reth_primitives::{
 };
 use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
-use reth_rpc_server_types::{
-    constants::gas_oracle::{ESTIMATE_GAS_ERROR_RATIO, MIN_TRANSACTION_GAS},
-    eth::{
-        cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
-        error::ensure_success,
-        revm_utils::{
-            apply_state_overrides, build_call_evm_env, caller_gas_allowance,
-            cap_tx_gas_limit_with_caller_allowance, get_precompiles, prepare_call_env,
-        },
-        EthApiError, EthResult, RevertError, RpcInvalidTransactionError, StateCacheDb,
+use reth_rpc_eth_server_types::{
+    cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
+    error::ensure_success,
+    revm_utils::{
+        apply_state_overrides, build_call_evm_env, caller_gas_allowance,
+        cap_tx_gas_limit_with_caller_allowance, get_precompiles, prepare_call_env,
     },
+    EthApiError, EthResult, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
+use reth_rpc_server_types::constants::gas_oracle::{ESTIMATE_GAS_ERROR_RATIO, MIN_TRANSACTION_GAS};
 use reth_rpc_types::{
     state::{EvmOverrides, StateOverride},
     AccessListWithGasUsed, BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,

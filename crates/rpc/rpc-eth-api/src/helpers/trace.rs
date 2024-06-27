@@ -4,7 +4,7 @@ use futures::Future;
 use reth_evm::ConfigureEvm;
 use reth_primitives::{revm::env::tx_env_with_recovered, B256};
 use reth_revm::database::StateProviderDatabase;
-use reth_rpc_server_types::eth::{
+use reth_rpc_eth_server_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     EthApiError, EthResult,
 };

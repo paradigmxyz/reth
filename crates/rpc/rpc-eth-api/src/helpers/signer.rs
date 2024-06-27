@@ -5,7 +5,7 @@ use std::result;
 use alloy_dyn_abi::TypedData;
 use dyn_clone::DynClone;
 use reth_primitives::{Address, Signature, TransactionSigned};
-use reth_rpc_server_types::eth::SignError;
+use reth_rpc_eth_server_types::SignError;
 use reth_rpc_types::TypedTransactionRequest;
 
 /// Result returned by [`EthSigner`] methods.

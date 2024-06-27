@@ -1,11 +1,9 @@
 use crate::primitives::U256;
 use clap::Args;
-use reth_rpc_server_types::{
-    constants::gas_oracle::{
-        DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
-        DEFAULT_MAX_GAS_PRICE,
-    },
-    eth::GasPriceOracleConfig,
+use reth_rpc_eth_server_types::GasPriceOracleConfig;
+use reth_rpc_server_types::constants::gas_oracle::{
+    DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
+    DEFAULT_MAX_GAS_PRICE,
 };
 
 /// Parameters to configure Gas Price Oracle

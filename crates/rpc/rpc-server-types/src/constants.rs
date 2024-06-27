@@ -46,8 +46,6 @@ pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
 pub mod gas_oracle {
     use alloy_primitives::U256;
 
-    use crate::eth::GasCap;
-
     /// The number of transactions sampled in a block
     pub const SAMPLE_NUMBER: usize = 3_usize;
 
@@ -72,7 +70,7 @@ pub mod gas_oracle {
     /// This is different from the default to regular 30M block gas limit
     /// [`ETHEREUM_BLOCK_GAS_LIMIT`](reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT) to allow
     /// for more complex calls.
-    pub const RPC_DEFAULT_GAS_CAP: GasCap = GasCap(50_000_000);
+    pub const RPC_DEFAULT_GAS_CAP: u64 = 50_000_000;
 
     /// Gas per transaction not creating a contract.
     pub const MIN_TRANSACTION_GAS: u64 = 21_000u64;

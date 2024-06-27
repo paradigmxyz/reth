@@ -5,9 +5,10 @@
 use reth_chainspec::ChainInfo;
 use reth_primitives::{BlockNumHash, Receipt, TxHash};
 use reth_provider::{BlockReader, ProviderError};
+use reth_rpc_server_types::result::rpc_error_with_code;
 use reth_rpc_types::{FilterId, FilteredParams, Log};
 
-use crate::{eth::EthApiError, result::rpc_error_with_code};
+use crate::EthApiError;
 
 /// Errors that can occur in the handler implementation
 #[derive(Debug, thiserror::Error)]

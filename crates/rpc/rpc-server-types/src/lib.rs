@@ -10,7 +10,6 @@
 
 /// Common RPC constants.
 pub mod constants;
-pub mod eth;
 pub mod result;
 
 mod module;

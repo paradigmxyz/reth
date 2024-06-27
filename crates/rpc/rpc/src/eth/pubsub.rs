@@ -10,10 +10,8 @@ use reth_network_api::NetworkInfo;
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
 use reth_rpc_eth_api::pubsub::EthPubSubApiServer;
-use reth_rpc_server_types::{
-    eth::logs_utils,
-    result::{internal_rpc_err, invalid_params_rpc_err},
-};
+use reth_rpc_eth_server_types::logs_utils;
+use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_rpc_types::{
     pubsub::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,

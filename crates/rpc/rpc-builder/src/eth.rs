@@ -7,16 +7,14 @@ use reth_provider::{
     EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc::eth::{EthApi, EthFilter, EthFilterConfig, EthPubSub, RawTransactionForwarder};
-use reth_rpc_server_types::{
-    constants::{
-        default_max_tracing_requests, gas_oracle::RPC_DEFAULT_GAS_CAP,
-        DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE,
-    },
-    eth::{
-        cache::cache_new_blocks_task, fee_history::fee_history_cache_new_blocks_task,
-        EthStateCache, EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
-        GasPriceOracleConfig,
-    },
+use reth_rpc_eth_server_types::{
+    cache::cache_new_blocks_task, fee_history::fee_history_cache_new_blocks_task, EthStateCache,
+    EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
+    GasPriceOracleConfig,
+};
+use reth_rpc_server_types::constants::{
+    default_max_tracing_requests, gas_oracle::RPC_DEFAULT_GAS_CAP, DEFAULT_MAX_BLOCKS_PER_FILTER,
+    DEFAULT_MAX_LOGS_PER_RESPONSE,
 };
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
@@ -277,7 +275,7 @@ impl Default for EthConfig {
             max_tracing_requests: default_max_tracing_requests(),
             max_blocks_per_filter: DEFAULT_MAX_BLOCKS_PER_FILTER,
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
-            rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
+            rpc_gas_cap: RPC_DEFAULT_GAS_CAP,
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             fee_history_cache: FeeHistoryCacheConfig::default(),
         }

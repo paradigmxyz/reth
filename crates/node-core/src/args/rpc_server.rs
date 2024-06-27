@@ -1,22 +1,22 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
-use crate::args::{
-    types::{MaxU32, ZeroAsNoneU64},
-    GasPriceOracleArgs, RpcStateCacheArgs,
+use std::{
+    ffi::OsStr,
+    net::{IpAddr, Ipv4Addr},
+    path::PathBuf,
 };
+
 use alloy_rpc_types_engine::JwtSecret;
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
 use rand::Rng;
-use reth_rpc_server_types::constants::gas_oracle::RPC_DEFAULT_GAS_CAP;
-
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
-use std::{
-    ffi::OsStr,
-    net::{IpAddr, Ipv4Addr},
-    path::PathBuf,
+
+use crate::args::{
+    types::{MaxU32, ZeroAsNoneU64},
+    GasPriceOracleArgs, RpcStateCacheArgs,
 };
 
 /// Default max number of subscriptions per connection.
@@ -152,7 +152,7 @@ pub struct RpcServerArgs {
         alias = "rpc-gascap",
         value_name = "GAS_CAP",
         value_parser = RangedU64ValueParser::<u64>::new().range(1..),
-        default_value_t = RPC_DEFAULT_GAS_CAP.into()
+        default_value_t = constants::gas_oracle::RPC_DEFAULT_GAS_CAP
     )]
     pub rpc_gas_cap: u64,
 
@@ -285,7 +285,7 @@ impl Default for RpcServerArgs {
             rpc_max_tracing_requests: constants::default_max_tracing_requests(),
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
-            rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
+            rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
         }

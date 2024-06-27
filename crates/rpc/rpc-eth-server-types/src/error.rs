@@ -5,6 +5,9 @@ use std::time::Duration;
 use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes};
+use reth_rpc_server_types::result::{
+    internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
+};
 use reth_rpc_types::{
     error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
 };
@@ -14,8 +17,6 @@ use reth_transaction_pool::error::{
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
 use revm_inspectors::tracing::{js::JsInspectorError, MuxError};
-
-use crate::result::{internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code};
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;

@@ -3,7 +3,7 @@
 use futures::Future;
 use reth_primitives::U256;
 use reth_provider::{BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider};
-use reth_rpc_server_types::eth::{
+use reth_rpc_eth_server_types::{
     fee_history::calculate_reward_percentiles_for_block, EthApiError, EthResult, EthStateCache,
     FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };

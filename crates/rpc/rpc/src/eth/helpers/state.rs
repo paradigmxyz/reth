@@ -4,7 +4,7 @@ use reth_provider::StateProviderFactory;
 use reth_transaction_pool::TransactionPool;
 
 use reth_rpc_eth_api::helpers::{EthState, LoadState, SpawnBlocking};
-use reth_rpc_server_types::eth::EthStateCache;
+use reth_rpc_eth_server_types::EthStateCache;
 
 use crate::EthApi;
 
@@ -44,7 +44,7 @@ mod tests {
     };
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_rpc_eth_api::helpers::EthState;
-    use reth_rpc_server_types::eth::{
+    use reth_rpc_eth_server_types::{
         EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
     };
     use reth_tasks::pool::BlockingTaskPool;

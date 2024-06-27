@@ -15,13 +15,11 @@ use reth_chainspec::ChainInfo;
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::EthFilterApiServer;
-use reth_rpc_server_types::{
-    eth::{
-        logs_utils::{self, append_matching_block_logs},
-        EthApiError, EthFilterError, EthStateCache, EthSubscriptionIdProvider,
-    },
-    ToRpcResult,
+use reth_rpc_eth_server_types::{
+    logs_utils::{self, append_matching_block_logs},
+    EthApiError, EthFilterError, EthStateCache, EthSubscriptionIdProvider,
 };
+use reth_rpc_server_types::ToRpcResult;
 use reth_rpc_types::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, FilteredParams, Log,
     PendingTransactionFilterKind,

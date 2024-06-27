@@ -7,7 +7,7 @@ use reth_primitives::{
     eip191_hash_message, sign_message, Address, Signature, TransactionSigned, B256,
 };
 use reth_rpc_eth_api::helpers::{signer::Result, EthSigner};
-use reth_rpc_server_types::eth::SignError;
+use reth_rpc_eth_server_types::SignError;
 use reth_rpc_types::TypedTransactionRequest;
 use reth_rpc_types_compat::transaction::to_primitive_transaction;
 use secp256k1::SecretKey;

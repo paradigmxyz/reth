@@ -5,7 +5,7 @@ use std::sync::Arc;
 use futures::Future;
 use reth_primitives::{BlockId, Receipt, SealedBlock, SealedBlockWithSenders, TransactionMeta};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
-use reth_rpc_server_types::eth::{EthApiError, EthResult, EthStateCache, ReceiptBuilder};
+use reth_rpc_eth_server_types::{EthApiError, EthResult, EthStateCache, ReceiptBuilder};
 use reth_rpc_types::{AnyTransactionReceipt, Header, Index, RichBlock};
 use reth_rpc_types_compat::block::{from_block, uncle_block_from_header};
 

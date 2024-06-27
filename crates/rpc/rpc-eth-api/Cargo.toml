@@ -27,6 +27,7 @@ reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-chainspec.workspace = true
 reth-execution-types.workspace = true
+reth-rpc-eth-server-types.workspace = true
 reth-rpc-server-types.workspace = true
 
 # ethereum
@@ -57,5 +58,5 @@ optimism = [
     "reth-primitives/optimism",
     "revm/optimism",
     "reth-provider/optimism",
-    "reth-rpc-server-types/optimism"
+    "reth-rpc-eth-server-types/optimism"
 ]

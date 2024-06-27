@@ -22,7 +22,7 @@ use reth_rpc_types::TxGasAndReward;
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
-use crate::constants::gas_oracle::MAX_HEADER_HISTORY;
+use reth_rpc_server_types::constants::gas_oracle::MAX_HEADER_HISTORY;
 
 use super::{EthApiError, EthStateCache};
 

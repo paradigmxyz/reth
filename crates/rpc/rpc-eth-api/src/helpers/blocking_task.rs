@@ -2,7 +2,7 @@
 //! are executed on the `tokio` runtime.
 
 use futures::Future;
-use reth_rpc_server_types::eth::{EthApiError, EthResult};
+use reth_rpc_eth_server_types::{EthApiError, EthResult};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use tokio::sync::oneshot;
 

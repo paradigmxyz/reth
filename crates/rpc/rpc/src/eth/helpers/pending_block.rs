@@ -3,7 +3,7 @@
 use reth_evm::ConfigureEvm;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_rpc_eth_api::helpers::{LoadPendingBlock, SpawnBlocking};
-use reth_rpc_server_types::eth::PendingBlock;
+use reth_rpc_eth_server_types::PendingBlock;
 use reth_transaction_pool::TransactionPool;
 
 use crate::EthApi;

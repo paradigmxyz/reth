@@ -16,10 +16,10 @@ use revm::L1BlockInfo;
 use revm_primitives::{BlockEnv, ExecutionResult};
 
 use reth_rpc_eth_api::helpers::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
-use reth_rpc_server_types::{
-    eth::{EthApiError, EthResult, EthStateCache, PendingBlock, ReceiptBuilder},
-    result::internal_rpc_err,
+use reth_rpc_eth_server_types::{
+    EthApiError, EthResult, EthStateCache, PendingBlock, ReceiptBuilder,
 };
+use reth_rpc_server_types::result::internal_rpc_err;
 
 use crate::EthApi;
 

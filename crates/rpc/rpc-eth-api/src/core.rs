@@ -4,7 +4,8 @@
 use alloy_dyn_abi::TypedData;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
-use reth_rpc_server_types::{eth::EthApiError, result::internal_rpc_err, ToRpcResult};
+use reth_rpc_eth_server_types::EthApiError;
+use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
     state::{EvmOverrides, StateOverride},
