@@ -32,10 +32,8 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives::{
-    keccak256,
-    revm::{config::revm_spec, env::fill_block_env},
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    GotExpected, Head, Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders,
+    keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber,
+    BlockWithSenders, GotExpected, Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders,
     SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta, TransactionSigned,
     TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
     Withdrawals, B256, U256,
@@ -48,7 +46,7 @@ use reth_trie::{
     updates::TrieUpdates,
     HashedPostState, Nibbles, StateRoot,
 };
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
+use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     cmp::Ordering,
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
