@@ -293,7 +293,7 @@ pub trait LoadPendingBlock {
 
             let mut tx_env = TxEnv::default();
             let signer = tx.signer();
-            Self::evm_config(&self).fill_tx_env(&mut tx_env, &tx.clone().into_signed(), signer);
+            Self::evm_config(self).fill_tx_env(&mut tx_env, &tx.clone().into_signed(), signer);
 
             // Configure the environment for the block.
             let env = Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx_env);
