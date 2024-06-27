@@ -12,7 +12,7 @@ mod metrics;
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{static_file::SegmentHeader, StaticFileSegment};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use std::{ops::Deref, sync::Arc, vec::IntoIter};
+use std::{ops::Deref, sync::Arc};
 
 const BLOCKS_PER_STATIC_FILE: u64 = 500_000;
 
@@ -69,6 +69,7 @@ mod tests {
     };
     use reth_primitives::{static_file::find_fixed_range, BlockNumber, B256, U256};
     use reth_testing_utils::generators::{self, random_header_range};
+    use std::vec::IntoIter;
 
     #[test]
     fn test_snap() {
