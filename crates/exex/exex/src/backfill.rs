@@ -1,6 +1,6 @@
-use reth_config::Config;
 use reth_evm::execute::{BatchExecutor, BlockExecutionError, BlockExecutorProvider};
 use reth_node_api::FullNodeComponents;
+use reth_node_core::node_config::NodeConfig;
 use reth_primitives::BlockNumber;
 use reth_provider::{
     BlockReader, Chain, DatabaseProviderFactory, HeaderProvider, HistoricalStateProviderRef,
@@ -20,7 +20,7 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct BackfillJobFactory<Node: FullNodeComponents> {
     components: Node,
-    config: Config,
+    config: NodeConfig,
     thresholds: ExecutionStageThresholds,
 }
 
@@ -28,7 +28,7 @@ impl<Node: FullNodeComponents> BackfillJobFactory<Node> {
     /// Creates a new backfill job factory.
     pub const fn new(
         components: Node,
-        config: Config,
+        config: NodeConfig,
         thresholds: ExecutionStageThresholds,
     ) -> Self {
         Self { components, config, thresholds }
@@ -38,7 +38,7 @@ impl<Node: FullNodeComponents> BackfillJobFactory<Node> {
     pub fn backfill(&self, range: RangeInclusive<BlockNumber>) -> BackfillJob<Node> {
         BackfillJob {
             components: self.components.clone(),
-            prune_modes: self.config.prune.clone().unwrap_or_default().segments,
+            prune_modes: self.config.prune_config().unwrap_or_default().segments,
             range,
             thresholds: self.thresholds.clone(),
         }
@@ -144,5 +144,93 @@ impl<Node: FullNodeComponents> BackfillJob<Node> {
 
         let chain = Chain::new(blocks, executor.finalize(), None);
         Ok(chain)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::BackfillJobFactory;
+    use eyre::OptionExt;
+    use reth_chainspec::{ChainSpecBuilder, Hardfork, MAINNET};
+    use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_exex_test_utils::test_exex_context_with_chain_spec;
+    use reth_primitives::{
+        constants::ETH_TO_WEI, public_key_to_address, Block, Genesis, GenesisAccount, Header, U256,
+    };
+    use reth_provider::{BlockWriter, LatestStateProviderRef, OriginalValuesKnown, StateWriter};
+    use reth_prune_types::PruneModes;
+    use reth_revm::database::StateProviderDatabase;
+    use reth_testing_utils::generators;
+    use secp256k1::Keypair;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_backfill() -> eyre::Result<()> {
+        let key_pair = Keypair::new_global(&mut generators::rng());
+        let address = public_key_to_address(key_pair.public_key());
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(Genesis {
+                    alloc: [(
+                        address,
+                        GenesisAccount { balance: U256::from(ETH_TO_WEI), ..Default::default() },
+                    )]
+                    .into(),
+                    ..MAINNET.genesis.clone()
+                })
+                .paris_activated()
+                .build(),
+        );
+        let (ctx, handle) = test_exex_context_with_chain_spec(chain_spec.clone()).await?;
+
+        let block1 = Block {
+            header: Header {
+                parent_hash: chain_spec.genesis_hash(),
+                difficulty: chain_spec.fork(Hardfork::Paris).ttd().expect("Paris TTD"),
+                number: 1,
+                ..Default::default()
+            },
+            body: vec![],
+            ..Default::default()
+        }
+        .with_recovered_senders()
+        .ok_or_eyre("failed to recover senders")?;
+
+        let outcome = {
+            let provider = handle.provider_factory.provider()?;
+            let executor = EthExecutorProvider::ethereum(chain_spec.clone()).batch_executor(
+                StateProviderDatabase::new(LatestStateProviderRef::new(
+                    provider.tx_ref(),
+                    provider.static_file_provider().clone(),
+                )),
+                PruneModes::none(),
+            );
+
+            executor.execute_and_verify_batch([(&block1, U256::ZERO).into()])?
+        };
+        handle.executor.extend([outcome.clone()]);
+
+        let block1 = block1.seal_slow();
+
+        let provider_rw = handle.provider_factory.provider_rw()?;
+        provider_rw.insert_block(block1.clone(), None)?;
+        outcome.clone().write_to_storage(provider_rw.tx_ref(), None, OriginalValuesKnown::Yes)?;
+        provider_rw.commit()?;
+
+        let factory =
+            BackfillJobFactory::new(ctx.components.clone(), ctx.config, Default::default());
+
+        let job = factory.backfill(1..=1);
+        let chains = job.collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(chains.len(), 1);
+
+        let chain = chains.first().unwrap();
+        assert_eq!(chain.blocks(), &[(1, block1)].into());
+        assert_eq!(chain.execution_outcome(), &outcome);
+
+        Ok(())
     }
 }

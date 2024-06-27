@@ -39,6 +39,15 @@ eyre.workspace = true
 metrics.workspace = true
 serde = { workspace = true, optional = true }
 
+[dev-dependencies]
+reth-chainspec.workspace = true
+reth-consensus = { workspace = true, features = ["test-utils"] }
+reth-evm-ethereum.workspace = true
+reth-exex-test-utils.workspace = true
+reth-testing-utils.workspace = true
+
+secp256k1.workspace = true
+
 [features]
 default = []
 serde = ["dep:serde", "reth-provider/serde"]
