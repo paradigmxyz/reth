@@ -253,7 +253,7 @@ mod tests {
 
         let provider = handle.provider_factory.provider()?;
         // Execute only the first block on top of genesis state
-        let outcome_single = EthExecutorProvider::ethereum(chain_spec.clone())
+        let mut outcome_single = EthExecutorProvider::ethereum(chain_spec.clone())
             .batch_executor(
                 StateProviderDatabase::new(LatestStateProviderRef::new(
                     provider.tx_ref(),
@@ -262,6 +262,7 @@ mod tests {
                 PruneModes::none(),
             )
             .execute_and_verify_batch([(&block1, U256::ZERO).into()])?;
+        outcome_single.bundle.reverts.sort();
         // Execute both blocks on top of the genesis state
         let outcome_batch = EthExecutorProvider::ethereum(chain_spec.clone())
             .batch_executor(
@@ -296,10 +297,11 @@ mod tests {
         let job = factory.backfill(1..=1);
         let chains = job.collect::<Result<Vec<_>, _>>()?;
 
-        // Assert that the backfill job produced the same chain as we got before when executing only
-        // the first block
+        // Assert that the backfill job produced the same chain as we got before when we were
+        // executing only the first block
         assert_eq!(chains.len(), 1);
-        let chain = chains.first().unwrap();
+        let mut chain = chains.into_iter().next().unwrap();
+        chain.execution_outcome_mut().bundle.reverts.sort();
         assert_eq!(chain.blocks(), &[(1, block1)].into());
         assert_eq!(chain.execution_outcome(), &outcome_single);
 
