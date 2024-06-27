@@ -5,7 +5,7 @@ use reth_ethereum_forks::{EthereumHardfork, Head};
 ///
 /// Note: This is only intended to be used after the merge, when hardforks are activated by
 /// timestamp.
-pub fn revm_spec_by_timestamp_after_merge(
+pub fn revm_spec_by_timestamp_after_bedrock(
     chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> revm_primitives::SpecId {
@@ -81,23 +81,23 @@ mod tests {
             f(cs).build()
         }
         assert_eq!(
-            revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.fjord_activated()), 0),
+            revm_spec_by_timestamp_after_bedrock(&op_cs(|cs| cs.fjord_activated()), 0),
             revm_primitives::FJORD
         );
         assert_eq!(
-            revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.ecotone_activated()), 0),
+            revm_spec_by_timestamp_after_bedrock(&op_cs(|cs| cs.ecotone_activated()), 0),
             revm_primitives::ECOTONE
         );
         assert_eq!(
-            revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.canyon_activated()), 0),
+            revm_spec_by_timestamp_after_bedrock(&op_cs(|cs| cs.canyon_activated()), 0),
             revm_primitives::CANYON
         );
         assert_eq!(
-            revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.bedrock_activated()), 0),
+            revm_spec_by_timestamp_after_bedrock(&op_cs(|cs| cs.bedrock_activated()), 0),
             revm_primitives::BEDROCK
         );
         assert_eq!(
-            revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.regolith_activated()), 0),
+            revm_spec_by_timestamp_after_bedrock(&op_cs(|cs| cs.regolith_activated()), 0),
             revm_primitives::REGOLITH
         );
     }

@@ -4,7 +4,7 @@
 
 use alloy_rlp::Encodable;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_evm_optimism::revm_spec_by_timestamp_after_merge;
+use reth_evm_optimism::revm_spec_by_timestamp_after_bedrock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
@@ -113,7 +113,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
         let cfg = CfgEnv::default().with_chain_id(chain_spec.chain().id());
 
         // ensure we're not missing any timestamp based hardforks
-        let spec_id = revm_spec_by_timestamp_after_merge(chain_spec, self.timestamp());
+        let spec_id = revm_spec_by_timestamp_after_bedrock(chain_spec, self.timestamp());
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value
