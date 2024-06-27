@@ -310,32 +310,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pipeline_started_before_setting_target() {
+    async fn pipeline_started_and_finished() {
         const TOTAL_BLOCKS: usize = 10;
         const PIPELINE_DONE_AFTER: u64 = 5;
-        let TestHarness { mut pipeline_sync, .. } =
+        let TestHarness { mut pipeline_sync, tip } =
             TestHarness::new(TOTAL_BLOCKS, PIPELINE_DONE_AFTER);
 
         let sync_future = poll_fn(|cx| pipeline_sync.poll(cx));
         let next_event = poll!(sync_future);
 
+        // sync target not set, pipeline not started
         assert_matches!(next_event, Poll::Pending);
-    }
-
-    #[tokio::test]
-    async fn pipeline_started_after_setting_target() {
-        const TOTAL_BLOCKS: usize = 10;
-        const PIPELINE_DONE_AFTER: u64 = 5;
-        let TestHarness { mut pipeline_sync, tip } =
-            TestHarness::new(TOTAL_BLOCKS, PIPELINE_DONE_AFTER);
 
         pipeline_sync.set_pipeline_sync_target(tip.into());
 
         let sync_future = poll_fn(|cx| pipeline_sync.poll(cx));
         let next_event = poll!(sync_future);
 
-        // can assert that the first event here is Started because we set the sync target,
-        // and we should get Ready because the pipeline should be spawned immediately
+        // sync target set, pipeline started
         assert_matches!(next_event, Poll::Ready(BackfillEvent::Started(target)) => {
             assert_eq!(target.sync_target().unwrap(), tip);
         });
