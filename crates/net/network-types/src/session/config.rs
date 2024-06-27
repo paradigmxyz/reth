@@ -1,4 +1,4 @@
-//! Configuration types for [`SessionManager`](crate::session::SessionManager).
+//! Configuration types for peer sessions manager.
 
 use crate::peers::config::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND};
 use std::time::Duration;

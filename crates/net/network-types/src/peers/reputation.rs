@@ -9,7 +9,7 @@ pub const DEFAULT_REPUTATION: Reputation = 0;
 const REPUTATION_UNIT: i32 = -1024;
 
 /// The reputation value below which new connection from/to peers are rejected.
-pub(crate) const BANNED_REPUTATION: i32 = 50 * REPUTATION_UNIT;
+pub const BANNED_REPUTATION: i32 = 50 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer that dropped the connection.
 const REMOTE_DISCONNECT_REPUTATION_CHANGE: i32 = 4 * REPUTATION_UNIT;

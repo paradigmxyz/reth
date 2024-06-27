@@ -113,7 +113,7 @@ impl Default for ConnectionsConfig {
     }
 }
 
-/// Config type for initiating a [`PeersManager`] instance.
+/// Config type for initiating a `PeersManager` instance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
@@ -149,8 +149,7 @@ pub struct PeersConfig {
     pub connection_info: ConnectionsConfig,
     /// How to weigh reputation changes.
     pub reputation_weights: ReputationChangeWeights,
-    /// How long to backoff peers that are we failed to connect to for non-fatal reasons, such as
-    /// [`DisconnectReason::TooManyPeers`].
+    /// How long to backoff peers that we are failed to connect to for non-fatal reasons.
     ///
     /// The backoff duration increases with number of backoff attempts.
     pub backoff_durations: PeerBackoffDurations,
