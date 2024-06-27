@@ -24,6 +24,7 @@ impl RpcModules {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn test_parse_module_versions_roundtrip() {
         let s = r#"{"txpool":"1.0","trace":"1.0","eth":"1.0","web3":"1.0","net":"1.0"}"#;

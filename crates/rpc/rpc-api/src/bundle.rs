@@ -4,7 +4,7 @@
 
 use jsonrpsee::proc_macros::rpc;
 use reth_primitives::{Bytes, B256};
-use reth_rpc_types::{
+use reth_rpc_types::mev::{
     CancelBundleRequest, CancelPrivateTransactionRequest, EthBundleHash, EthCallBundle,
     EthCallBundleResponse, EthSendBundle, PrivateTransactionRequest,
 };
