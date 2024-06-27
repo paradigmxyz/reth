@@ -163,8 +163,6 @@ pub struct TestExExHandle {
     pub notifications_tx: Sender<ExExNotification>,
     /// Node task manager
     pub tasks: TaskManager,
-    /// Node executor provider
-    pub executor: MockExecutorProvider,
 }
 
 impl TestExExHandle {
@@ -252,7 +250,7 @@ pub async fn test_exex_context_with_chain_spec(
         components: Components {
             transaction_pool,
             evm_config,
-            executor: executor.clone(),
+            executor,
             consensus,
             network,
             payload_builder,
@@ -288,10 +286,7 @@ pub async fn test_exex_context_with_chain_spec(
         components,
     };
 
-    Ok((
-        ctx,
-        TestExExHandle { genesis, provider_factory, events_rx, notifications_tx, tasks, executor },
-    ))
+    Ok((ctx, TestExExHandle { genesis, provider_factory, events_rx, notifications_tx, tasks }))
 }
 
 /// Creates a new [`ExExContext`] with (mainnet)[`MAINNET`] chain spec.
