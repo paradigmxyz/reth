@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Reth RPC 'eth' namespace API implementation"
+description = "Reth RPC 'eth' namespace API"
 
 [lints]
 workspace = true
