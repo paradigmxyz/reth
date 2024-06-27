@@ -9,9 +9,7 @@ use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     RawTransactionForwarder,
 };
-use reth_rpc_eth_server_types::{
-    EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
-};
+use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
 use tokio::sync::Mutex;
 
@@ -319,7 +317,7 @@ mod tests {
         BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
     };
     use reth_rpc_eth_api::EthApiServer;
-    use reth_rpc_eth_server_types::{
+    use reth_rpc_eth_types::{
         EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
     };
     use reth_rpc_types::FeeHistory;

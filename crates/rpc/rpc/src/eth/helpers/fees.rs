@@ -3,7 +3,7 @@
 use reth_provider::{BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider};
 
 use reth_rpc_eth_api::helpers::{EthFees, LoadBlock, LoadFee};
-use reth_rpc_eth_server_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
+use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 
 use crate::EthApi;
 

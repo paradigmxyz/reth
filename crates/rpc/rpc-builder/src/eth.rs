@@ -7,7 +7,7 @@ use reth_provider::{
     EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc::eth::{EthApi, EthFilter, EthFilterConfig, EthPubSub, RawTransactionForwarder};
-use reth_rpc_eth_server_types::{
+use reth_rpc_eth_types::{
     cache::cache_new_blocks_task, fee_history::fee_history_cache_new_blocks_task, EthStateCache,
     EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
     GasPriceOracleConfig,

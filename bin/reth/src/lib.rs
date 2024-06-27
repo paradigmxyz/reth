@@ -143,9 +143,9 @@ pub mod rpc {
     /// Re-exported from `reth_rpc_server_types`.
     pub mod server_types {
         pub use reth_rpc_server_types::*;
-        /// Re-exported from `reth_rpc_eth_server_types`.
+        /// Re-exported from `reth_rpc_eth_types`.
         pub mod eth {
-            pub use reth_rpc_eth_server_types::*;
+            pub use reth_rpc_eth_types::*;
         }
     }
 

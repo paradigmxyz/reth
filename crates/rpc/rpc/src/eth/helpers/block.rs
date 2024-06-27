@@ -2,7 +2,7 @@
 
 use reth_provider::{BlockReaderIdExt, HeaderProvider};
 use reth_rpc_eth_api::helpers::{EthBlocks, LoadBlock, LoadPendingBlock, SpawnBlocking};
-use reth_rpc_eth_server_types::EthStateCache;
+use reth_rpc_eth_types::EthStateCache;
 
 use crate::EthApi;
 

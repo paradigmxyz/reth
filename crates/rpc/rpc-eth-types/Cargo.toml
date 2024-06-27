@@ -1,12 +1,12 @@
 [package]
-name = "reth-rpc-eth-server-types"
+name = "reth-rpc-eth-types"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "RPC server types used in 'eth' namespace"
+description = "Types supporting implementation of 'eth' namespace RPC server API"
 
 [lints]
 workspace = true

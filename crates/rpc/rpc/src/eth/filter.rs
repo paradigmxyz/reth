@@ -15,7 +15,7 @@ use reth_chainspec::ChainInfo;
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::EthFilterApiServer;
-use reth_rpc_eth_server_types::{
+use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs},
     EthApiError, EthFilterError, EthStateCache, EthSubscriptionIdProvider,
 };

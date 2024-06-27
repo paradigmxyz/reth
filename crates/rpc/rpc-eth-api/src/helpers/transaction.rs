@@ -10,7 +10,7 @@ use reth_primitives::{
     SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash, TxKind, B256, U256,
 };
 use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
-use reth_rpc_eth_server_types::{
+use reth_rpc_eth_types::{
     utils::recover_raw_transaction, EthApiError, EthResult, EthStateCache, SignError,
     TransactionSource,
 };

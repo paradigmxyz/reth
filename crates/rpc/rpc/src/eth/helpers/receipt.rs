@@ -1,7 +1,7 @@
 //! Builds an RPC receipt response w.r.t. data layout of network.
 
 use reth_rpc_eth_api::helpers::LoadReceipt;
-use reth_rpc_eth_server_types::EthStateCache;
+use reth_rpc_eth_types::EthStateCache;
 
 use crate::EthApi;
 

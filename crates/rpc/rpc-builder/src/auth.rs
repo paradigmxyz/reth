@@ -10,7 +10,7 @@ use jsonrpsee::{
 };
 use reth_engine_primitives::EngineTypes;
 use reth_rpc_api::*;
-use reth_rpc_eth_server_types::EthSubscriptionIdProvider;
+use reth_rpc_eth_types::EthSubscriptionIdProvider;
 use reth_rpc_layer::{
     secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, JwtAuthValidator,
     JwtSecret,

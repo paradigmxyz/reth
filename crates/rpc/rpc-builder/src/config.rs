@@ -4,7 +4,7 @@ use crate::{
 };
 use jsonrpsee::server::ServerBuilder;
 use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_path};
-use reth_rpc_eth_server_types::{EthStateCacheConfig, GasPriceOracleConfig};
+use reth_rpc_eth_types::{EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
 use reth_rpc_server_types::RpcModuleSelection;
 use std::{net::SocketAddr, path::PathBuf};

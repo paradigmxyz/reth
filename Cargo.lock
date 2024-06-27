@@ -6294,7 +6294,7 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-builder",
- "reth-rpc-eth-server-types",
+ "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-rpc-types",
  "reth-rpc-types-compat",
@@ -7519,7 +7519,7 @@ dependencies = [
  "reth-prune-types",
  "reth-rpc-api",
  "reth-rpc-eth-api",
- "reth-rpc-eth-server-types",
+ "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-rpc-types",
  "reth-rpc-types-compat",
@@ -7630,7 +7630,7 @@ dependencies = [
  "reth-revm",
  "reth-rpc",
  "reth-rpc-eth-api",
- "reth-rpc-eth-server-types",
+ "reth-rpc-eth-types",
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-tracing",
@@ -7947,7 +7947,7 @@ dependencies = [
  "reth-rpc-api",
  "reth-rpc-engine-api",
  "reth-rpc-eth-api",
- "reth-rpc-eth-server-types",
+ "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-rpc-types",
  "reth-rpc-types-compat",
@@ -8023,7 +8023,7 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-engine-api",
- "reth-rpc-eth-server-types",
+ "reth-rpc-eth-types",
  "reth-rpc-layer",
  "reth-rpc-server-types",
  "reth-rpc-types",
@@ -8092,7 +8092,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-rpc-eth-server-types",
+ "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-rpc-types",
  "reth-rpc-types-compat",
@@ -8106,7 +8106,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-rpc-eth-server-types"
+name = "reth-rpc-eth-types"
 version = "1.0.0"
 dependencies = [
  "alloy-sol-types",

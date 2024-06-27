@@ -3,7 +3,7 @@
 
 use futures::Future;
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
-use reth_rpc_eth_server_types::{EthApiError, EthResult, EthStateCache, ReceiptBuilder};
+use reth_rpc_eth_types::{EthApiError, EthResult, EthStateCache, ReceiptBuilder};
 use reth_rpc_types::AnyTransactionReceipt;
 
 /// Assembles transaction receipt data w.r.t to network.

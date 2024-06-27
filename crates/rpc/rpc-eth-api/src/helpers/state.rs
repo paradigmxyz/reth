@@ -7,7 +7,7 @@ use reth_primitives::{
     B256, U256,
 };
 use reth_provider::{BlockIdReader, StateProvider, StateProviderBox, StateProviderFactory};
-use reth_rpc_eth_server_types::{
+use reth_rpc_eth_types::{
     EthApiError, EthResult, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError,
 };
 use reth_rpc_types::{serde_helpers::JsonStorageKey, EIP1186AccountProofResponse};

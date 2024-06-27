@@ -22,7 +22,7 @@ use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
     EthCallBundleApiServer,
 };
-use reth_rpc_eth_server_types::{
+use reth_rpc_eth_types::{
     utils::recover_raw_transaction, EthApiError, EthResult, RpcInvalidTransactionError,
 };
 
