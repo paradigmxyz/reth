@@ -4,10 +4,7 @@
 
 use crate::{
     args::{get_secret_key, NetworkArgs, StageEnum},
-    commands::{
-        common::{AccessRights, Environment, EnvironmentArgs},
-        debug_cmd,
-    },
+    commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
     prometheus_exporter,
 };
@@ -19,7 +16,6 @@ use reth_db::DatabaseEnv;
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
 use reth_node_core::args::ExperimentalArgs;
-use reth_node_ethereum::EthExecutorProvider;
 use reth_provider::{
     ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
     StaticFileWriter,
@@ -32,9 +28,11 @@ use reth_stages::{
     },
     ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
 };
-use reth_tasks::TaskExecutor;
 use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
 use tracing::*;
+
+#[cfg(feature = "compiler")]
+use {reth_node_ethereum::EthExecutorProvider, reth_tasks::TaskExecutor};
 
 /// `reth stage` command
 #[derive(Debug, Parser)]

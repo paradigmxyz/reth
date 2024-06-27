@@ -4,7 +4,7 @@ use rayon::prelude::*;
 use reth_fs_util as fs;
 use reth_primitives::{keccak256, Bytes, B256};
 use revm::primitives::SpecId;
-use revmc::{debug_time, llvm, EvmCompiler, EvmLlvmBackend, Linker};
+use revmc::{llvm, EvmCompiler, EvmLlvmBackend, Linker};
 use serde::{Deserialize, Serialize};
 use std::{
     fmt, io,
@@ -217,15 +217,9 @@ impl EvmParCompiler {
     }
 
     /// Compiles the given contracts to object files.
+    #[instrument(level = "debug", skip_all)]
     pub fn compile_and_link_all(&self) -> EvmCompilerResult<()> {
-        debug_time!("compile and link all", || self.compile_and_link_all_inner())
-    }
-
-    fn compile_and_link_all_inner(&self) -> EvmCompilerResult<()> {
-        let to_compile = debug_time!("get contracts", || self
-            .metadata
-            .contracts_at(ContractState::ToCompile)
-            .collect::<Vec<_>>());
+        let to_compile = self.metadata.contracts_at(ContractState::ToCompile).collect::<Vec<_>>();
         if to_compile.is_empty() {
             debug!("no contracts to compile");
         } else {
@@ -255,7 +249,7 @@ impl EvmParCompiler {
         // Since shared libraries cannot be extended, we have to re-link all of the objects if there
         // are any new ones.
         let mut new_objects = false;
-        let to_link = debug_time!("get objects", || self
+        let to_link = self
             .metadata
             .all_contracts()
             .filter(|(.., s)| {
@@ -266,7 +260,7 @@ impl EvmParCompiler {
                 matches!(s, ContractState::Object | ContractState::Linked)
             })
             .map(|(i, h, c, _)| (i, h, c))
-            .collect::<Vec<_>>());
+            .collect::<Vec<_>>();
         if !self.force_link && (to_link.is_empty() || !new_objects) {
             debug!("no contracts to link");
         } else {
@@ -430,7 +424,7 @@ impl EvmParCompiler {
     }
 
     fn save(&self) -> fs::Result<()> {
-        debug_time!("save metadata", || self.metadata.save(&self.metadata_path))
+        self.metadata.save(&self.metadata_path)
     }
 }
 
@@ -464,6 +458,7 @@ impl Metadata {
         fs::read_json_file(path)
     }
 
+    #[instrument(level = "debug", skip_all, fields(path = %path.display()))]
     fn save(&self, path: &Path) -> fs::Result<()> {
         debug!(?path, "saving metadata");
         fs::write_json_file(path, self)

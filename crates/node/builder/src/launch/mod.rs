@@ -28,7 +28,7 @@ use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::EngineApi;
 use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
-use reth_tracing::tracing::{debug, info, warn};
+use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
 use std::{future::Future, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};

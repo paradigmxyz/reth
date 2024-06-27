@@ -1,7 +1,7 @@
 use libloading::Library;
 use reth_primitives::B256;
 use revm::primitives::SpecId;
-use revmc::{debug_time, trace_time, EvmCompilerFn};
+use revmc::EvmCompilerFn;
 use rustc_hash::FxHashMap;
 use std::{collections::hash_map::Entry, marker::PhantomData, path::Path};
 
@@ -30,25 +30,15 @@ impl EvmCompilerDll {
     /// # Safety
     ///
     /// The caller must ensure that the given file is a valid EVM compiler DLL.
+    #[instrument(name = "dlopen", level = "debug", skip_all)]
     pub unsafe fn open(path: &Path) -> Result<Self, libloading::Error> {
-        debug_time!("dlopen", || Self::open_inner(path))
-    }
-
-    unsafe fn open_inner(filename: &Path) -> Result<Self, libloading::Error> {
-        Library::new(filename).map(|lib| Self { lib, cache: FxHashMap::default() })
+        Library::new(path).map(|lib| Self { lib, cache: FxHashMap::default() })
     }
 
     /// Returns the function for the given bytecode hash.
     #[inline]
+    #[instrument(name = "dlsym", level = "debug", skip_all)]
     pub fn get_function(
-        &mut self,
-        hash: B256,
-    ) -> Result<Option<EvmCompilerSymbol<'_>>, libloading::Error> {
-        trace_time!("dlsym", || self.get_function_inner(hash))
-    }
-
-    #[inline]
-    fn get_function_inner(
         &mut self,
         hash: B256,
     ) -> Result<Option<EvmCompilerSymbol<'_>>, libloading::Error> {
