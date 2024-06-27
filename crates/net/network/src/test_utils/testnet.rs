@@ -308,7 +308,7 @@ impl<C, Pool> TestnetHandle<C, Pool> {
         for (idx, handle) in self.peers.iter().enumerate().take(self.peers.len() - 1) {
             for idx in (idx + 1)..self.peers.len() {
                 let neighbour = &self.peers[idx];
-                handle.network.add_peer(*neighbour.peer_id(), neighbour.local_addr());
+                handle.network.add_peer(*neighbour.peer_id(), neighbour.local_addr(), None);
             }
         }
 

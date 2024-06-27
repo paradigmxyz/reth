@@ -92,6 +92,11 @@ impl NodeRecord {
         Self { address: addr.ip(), tcp_port: addr.port(), udp_port: addr.port(), id }
     }
 
+    /// Creates a new record from an ip address and ports.
+    pub fn new_with_ip_ports(ip_addr: IpAddr, tcp_port: u16, udp_port: u16, id: PeerId) -> Self {
+        Self { address: ip_addr, tcp_port, udp_port, id }
+    }
+
     /// The TCP socket address of this node
     #[must_use]
     pub const fn tcp_addr(&self) -> SocketAddr {

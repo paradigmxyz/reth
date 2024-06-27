@@ -40,7 +40,7 @@ pub fn broadcast_ingress_bench(c: &mut Criterion) {
                         let handle = net.spawn();
                         let peer1 = handle.peers()[0].network().clone();
                         let peer0_id = peer0.peer_id();
-                        peer1.add_peer(peer0_id, peer0.local_addr());
+                        peer1.add_peer(peer0_id, peer0.local_addr(), None);
 
                         // await connection
                         tokio::select! {

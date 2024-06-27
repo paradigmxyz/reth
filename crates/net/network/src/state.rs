@@ -274,8 +274,14 @@ where
     }
 
     /// Adds a peer and its address with the given kind to the peerset.
-    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: SocketAddr) {
-        self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
+    pub(crate) fn add_peer_kind(
+        &mut self,
+        peer_id: PeerId,
+        kind: PeerKind,
+        tcp_addr: SocketAddr,
+        udp_addr: Option<SocketAddr>,
+    ) {
+        self.peers_manager.add_peer_kind(peer_id, kind, tcp_addr, udp_addr, None)
     }
 
     pub(crate) fn remove_peer(&mut self, peer_id: PeerId, kind: PeerKind) {
@@ -290,12 +296,14 @@ where
         match event {
             DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
                 peer_id,
-                socket_addr,
+                tcp_addr,
+                udp_addr,
                 fork_id,
             }) => {
                 self.queued_messages.push_back(StateAction::DiscoveredNode {
                     peer_id,
-                    socket_addr,
+                    tcp_addr,
+                    udp_addr,
                     fork_id,
                 });
             }
@@ -516,7 +524,12 @@ pub(crate) enum StateAction {
         fork_id: ForkId,
     },
     /// A new node was found through the discovery, possibly with a `ForkId`
-    DiscoveredNode { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
+    DiscoveredNode {
+        peer_id: PeerId,
+        tcp_addr: SocketAddr,
+        udp_addr: SocketAddr,
+        fork_id: Option<ForkId>,
+    },
     /// A peer was added
     PeerAdded(PeerId),
     /// A peer was dropped

@@ -40,7 +40,7 @@ pub struct Discovery {
     /// All nodes discovered via discovery protocol.
     ///
     /// These nodes can be ephemeral and are updated via the discovery protocol.
-    discovered_nodes: LruMap<PeerId, SocketAddr>,
+    discovered_nodes: LruMap<PeerId, (SocketAddr, SocketAddr)>,
     /// Local ENR of the discovery v4 service (discv5 ENR has same [`PeerId`]).
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
@@ -205,14 +205,15 @@ impl Discovery {
     /// Processes an incoming [`NodeRecord`] update from a discovery service
     fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
         let id = record.id;
-        let addr = record.tcp_addr();
+        let tcp_addr = record.tcp_addr();
+        let udp_addr = record.udp_addr();
         _ =
             self.discovered_nodes.get_or_insert(id, || {
                 self.queued_events.push_back(DiscoveryEvent::NewNode(
-                    DiscoveredEvent::EventQueued { peer_id: id, socket_addr: addr, fork_id },
+                    DiscoveredEvent::EventQueued { peer_id: id, tcp_addr, udp_addr, fork_id },
                 ));
 
-                addr
+                (tcp_addr, udp_addr)
             })
     }
 
@@ -224,8 +225,8 @@ impl Discovery {
             DiscoveryUpdate::EnrForkId(node, fork_id) => {
                 self.queued_events.push_back(DiscoveryEvent::EnrForkId(node.id, fork_id))
             }
-            DiscoveryUpdate::Removed(node) => {
-                self.discovered_nodes.remove(&node);
+            DiscoveryUpdate::Removed(peer_id) => {
+                self.discovered_nodes.remove(&peer_id);
             }
             DiscoveryUpdate::Batch(updates) => {
                 for update in updates {
@@ -427,7 +428,8 @@ mod tests {
         assert_eq!(
             DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
                 peer_id: discv4_id_2,
-                socket_addr: discv4_enr_2.tcp_addr(),
+                tcp_addr: discv4_enr_2.tcp_addr(),
+                udp_addr: discv4_enr_2.udp_addr(),
                 fork_id: None
             }),
             event_node_1
@@ -435,7 +437,8 @@ mod tests {
         assert_eq!(
             DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
                 peer_id: discv4_id_1,
-                socket_addr: discv4_enr_1.tcp_addr(),
+                tcp_addr: discv4_enr_1.tcp_addr(),
+                udp_addr: discv4_enr_1.udp_addr(),
                 fork_id: None
             }),
             event_node_2

@@ -247,14 +247,19 @@ where
             }
             StateAction::PeerAdded(peer_id) => return Some(SwarmEvent::PeerAdded(peer_id)),
             StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
-            StateAction::DiscoveredNode { peer_id, socket_addr, fork_id } => {
+            StateAction::DiscoveredNode { peer_id, tcp_addr, udp_addr, fork_id } => {
                 // Don't try to connect to peer if node is shutting down
                 if self.is_shutting_down() {
                     return None
                 }
                 // Insert peer only if no fork id or a valid fork id
                 if fork_id.map_or_else(|| true, |f| self.sessions.is_valid_fork_id(f)) {
-                    self.state_mut().peers_mut().add_peer(peer_id, socket_addr, fork_id);
+                    self.state_mut().peers_mut().add_peer(
+                        peer_id,
+                        tcp_addr,
+                        Some(udp_addr),
+                        fork_id,
+                    );
                 }
             }
             StateAction::DiscoveredEnrForkId { peer_id, fork_id } => {
