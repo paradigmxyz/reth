@@ -46,20 +46,19 @@ pub trait RethCli: Sized {
     }
 
     /// Executes a command.
-    fn with_runner<F: FnOnce(Self, CliRunner)>(self, f: F) {
+    fn with_runner<F: FnOnce(Self, CliRunner) -> R, R>(self, f: F) -> R {
         let runner = CliRunner::default();
 
         f(self, runner)
     }
 
     /// Parses and executes a command.
-    fn execute<F: FnOnce(Self, CliRunner)>(f: F) -> Result<(), Error>
+    fn execute<F: FnOnce(Self, CliRunner) -> R, R>(f: F) -> Result<R, Error>
     where
         Self: Parser + Sized,
     {
         let cli = Self::parse_args()?;
-        cli.with_runner(f);
 
-        Ok(())
+        Ok(cli.with_runner(f))
     }
 }
