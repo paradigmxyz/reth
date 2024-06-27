@@ -29,3 +29,4 @@ similar-asserts.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "rt"] }
+reth-rpc-eth-api.workspace = true

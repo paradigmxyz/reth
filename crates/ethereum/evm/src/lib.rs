@@ -12,14 +12,14 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{
-    revm::{config::revm_spec, env::fill_tx_env},
-    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Address, Head, Header, TransactionSigned, U256,
-};
+use reth_primitives::{Header, U256};
 use reth_revm::{Database, EvmBuilder};
+use revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg};
+
+mod config;
+pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};
 
 pub mod execute;
 
@@ -35,19 +35,15 @@ pub mod eip6110;
 pub struct EthEvmConfig;
 
 impl ConfigureEvmEnv for EthEvmConfig {
-    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        fill_tx_env(tx_env, transaction, sender)
-    }
-
     fn fill_cfg_env(
         cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
-        let spec_id = revm_spec(
+        let spec_id = config::revm_spec(
             chain_spec,
-            Head {
+            &Head {
                 number: header.number,
                 timestamp: header.timestamp,
                 difficulty: header.difficulty,
@@ -77,7 +73,12 @@ impl ConfigureEvm for EthEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::revm_primitives::{BlockEnv, CfgEnv, SpecId};
+    use reth_chainspec::ChainSpec;
+    use reth_primitives::{
+        revm_primitives::{BlockEnv, CfgEnv, SpecId},
+        Header, U256,
+    };
+    use revm_primitives::CfgEnvWithHandlerCfg;
 
     #[test]
     #[ignore]

@@ -80,8 +80,11 @@ members = [
     "crates/rpc/rpc-api/",
     "crates/rpc/rpc-builder/",
     "crates/rpc/rpc-engine-api/",
+    "crates/rpc/rpc-eth-api/",
+    "crates/rpc/rpc-eth-types/",
     "crates/rpc/rpc-layer",
     "crates/rpc/rpc-testing-util/",
+    "crates/rpc/rpc-server-types/",
     "crates/rpc/rpc-types-compat/",
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc/",
@@ -339,7 +342,9 @@ reth-rpc-api = { path = "crates/rpc/rpc-api" }
 reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
 reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
+reth-rpc-eth-api = { path = "crates/rpc/rpc-eth-api" }
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
+reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
@@ -414,6 +419,7 @@ aquamarine = "0.5"
 bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
+const_format = { version = "0.2.32", features = ["rust_1_64"] }
 dashmap = "5.5"
 derive_more = "0.99.17"
 fdlimit = "0.3.0"

@@ -58,7 +58,7 @@ mod tests {
     use super::*;
     use alloy_rlp::Encodable;
     use discv5::enr::{CombinedKey, EnrKey};
-    use reth_chainspec::{Hardfork, MAINNET};
+    use reth_chainspec::{EthereumHardfork, MAINNET};
     use reth_network_peers::NodeRecord;
 
     #[test]
@@ -84,7 +84,7 @@ mod tests {
         let key = CombinedKey::generate_secp256k1();
 
         let mut buf = Vec::new();
-        let fork_id = MAINNET.hardfork_fork_id(Hardfork::Frontier);
+        let fork_id = MAINNET.hardfork_fork_id(EthereumHardfork::Frontier);
         fork_id.unwrap().encode(&mut buf);
 
         let enr = Enr::builder()
