@@ -31,7 +31,7 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for TrieUpdatesCursorFactory<'
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor, DatabaseError> {
-        let cursor = self.cursor_factory.storage_tries_cursor(hashed_address)?;
+        let cursor = self.cursor_factory.storage_trie_cursor(hashed_address)?;
         Ok(TrieUpdatesStorageTrieCursor::new(cursor, hashed_address, self.trie_updates))
     }
 }
