@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "RPC server types and constants"
+description = "RPC server types used in 'eth' namespace"
 
 [lints]
 workspace = true
