@@ -25,15 +25,15 @@ pub fn revm_spec_by_timestamp_after_merge(
 /// return `revm_spec` from spec configuration.
 pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId {
     if chain_spec.fork(OptimismHardfork::Fjord).active_at_head(&block) {
-        return revm_primitives::FJORD
+        revm_primitives::FJORD
     } else if chain_spec.fork(OptimismHardfork::Ecotone).active_at_head(&block) {
-        return revm_primitives::ECOTONE
+        revm_primitives::ECOTONE
     } else if chain_spec.fork(OptimismHardfork::Canyon).active_at_head(&block) {
-        return revm_primitives::CANYON
+        revm_primitives::CANYON
     } else if chain_spec.fork(OptimismHardfork::Regolith).active_at_head(&block) {
-        return revm_primitives::REGOLITH
+        revm_primitives::REGOLITH
     } else if chain_spec.fork(OptimismHardfork::Bedrock).active_at_head(&block) {
-        return revm_primitives::BEDROCK
+        revm_primitives::BEDROCK
     } else if chain_spec.fork(EthereumHardfork::Prague).active_at_head(&block) {
         revm_primitives::PRAGUE
     } else if chain_spec.fork(EthereumHardfork::Cancun).active_at_head(&block) {
@@ -71,8 +71,7 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::U256;
-    use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_chainspec::ChainSpecBuilder;
 
     #[test]
     fn test_revm_spec_by_timestamp_after_merge() {
