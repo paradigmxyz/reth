@@ -432,7 +432,7 @@ impl EthereumHardfork {
 
 impl<const N: usize> From<[(EthereumHardfork, ForkCondition); N]> for ChainHardforks {
     fn from(list: [(EthereumHardfork, ForkCondition); N]) -> Self {
-        ChainHardforks::new(
+        Self::new(
             list.into_iter()
                 .map(|(fork, cond)| (Box::new(fork) as Box<dyn Hardfork>, cond))
                 .collect(),
