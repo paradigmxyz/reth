@@ -46,7 +46,8 @@ impl<Node: FullNodeComponents> BackfillJobFactory<Node> {
 
 /// Backfill job started for a specific range.
 ///
-/// It implements [`Iterator`] that executes blocks in batches and yields [`ExExNotification`]s.
+/// It implements [`Iterator`] that executes blocks in batches and yields
+/// [notifications](`crate::ExExNotification)s.
 #[derive(Debug)]
 pub struct BackfillJob<Node: FullNodeComponents> {
     components: Node,
