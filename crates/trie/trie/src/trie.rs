@@ -1409,7 +1409,7 @@ mod tests {
         modified_entry3.set_at(3, 0xb);
 
         // 0x0fba0..
-        let mut modified_entry4 = modified_key_prefix.clone();
+        let mut modified_entry4 = modified_key_prefix;
         modified_entry4.set_at(2, 0xb);
         modified_entry4.set_at(3, 0xa);
 
@@ -1455,7 +1455,7 @@ mod tests {
 
         // Commit trie updates
         {
-            let mut updates = block1_updates.clone();
+            let mut updates = block1_updates;
             updates.extend(block2_updates);
 
             let provider_rw = factory.provider_rw().unwrap();
