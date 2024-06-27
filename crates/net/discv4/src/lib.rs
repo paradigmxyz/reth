@@ -214,9 +214,8 @@ impl Discv4 {
     /// ```
     /// # use std::io;
     /// use rand::thread_rng;
-    /// use reth_chainspec::net::NodeRecord;
     /// use reth_discv4::{Discv4, Discv4Config};
-    /// use reth_network_peers::{pk2id, PeerId};
+    /// use reth_network_peers::{pk2id, NodeRecord, PeerId};
     /// use secp256k1::SECP256K1;
     /// use std::{net::SocketAddr, str::FromStr};
     /// # async fn t() -> io::Result<()> {
