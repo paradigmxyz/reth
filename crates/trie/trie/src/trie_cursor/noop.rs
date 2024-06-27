@@ -1,6 +1,7 @@
 use super::{TrieCursor, TrieCursorFactory};
 use crate::{updates::TrieKey, BranchNodeCompact, Nibbles};
 use reth_db::DatabaseError;
+use reth_primitives::B256;
 
 /// Noop trie cursor factory.
 #[derive(Default, Debug)]
@@ -14,9 +15,9 @@ impl TrieCursorFactory for NoopTrieCursorFactory {
     }
 
     /// Generates a Noop storage trie cursor.
-    fn storage_tries_cursor(
+    fn storage_trie_cursor(
         &self,
-        _hashed_address: reth_primitives::B256,
+        _hashed_address: B256,
     ) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
         Ok(Box::<NoopStorageTrieCursor>::default())
     }
