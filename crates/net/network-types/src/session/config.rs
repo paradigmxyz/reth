@@ -26,7 +26,7 @@ const DEFAULT_MAX_PEERS: usize =
 /// With maxed out peers, this will allow for 3 messages per session (average)
 const DEFAULT_SESSION_EVENT_BUFFER_SIZE: usize = DEFAULT_MAX_PEERS * 2;
 
-/// Configuration options when creating a [`SessionManager`](crate::session::SessionManager).
+/// Configuration options for peer session management.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
