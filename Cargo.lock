@@ -1865,10 +1865,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
-name = "const-str"
-version = "0.5.7"
+name = "const_format"
+version = "0.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3618cccc083bb987a415d85c02ca6c9994ea5b44731ec28b9ecf09658655fba9"
+checksum = "e3a214c7af3d04997541b18d432afaff4c455e79e2029079647e72fc2bd27673"
+dependencies = [
+ "const_format_proc_macros",
+ "konst",
+]
+
+[[package]]
+name = "const_format_proc_macros"
+version = "0.2.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7f6ff08fd20f4f299298a28e2dfa8a8ba1036e6cd2460ac1de7b425d76f2500"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-xid",
+]
 
 [[package]]
 name = "convert_case"
@@ -2807,6 +2822,26 @@ dependencies = [
  "reth-node-ethereum",
  "reth-payload-builder",
  "reth-primitives",
+ "tracing",
+]
+
+[[package]]
+name = "example-custom-rlpx-subprotocol"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "rand 0.8.5",
+ "reth",
+ "reth-eth-wire",
+ "reth-network",
+ "reth-network-api",
+ "reth-node-ethereum",
+ "reth-primitives",
+ "reth-provider",
+ "reth-rpc-types",
+ "tokio",
+ "tokio-stream",
  "tracing",
 ]
 
@@ -4481,6 +4516,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "konst"
+version = "0.2.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "330f0e13e6483b8c34885f7e6c9f19b1a7bd449c673fbb948a51c99d66ef74f4"
+dependencies = [
+ "konst_macro_rules",
+]
+
+[[package]]
+name = "konst_macro_rules"
+version = "0.2.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6031,19 +6081,20 @@ dependencies = [
 
 [[package]]
 name = "ratatui"
-version = "0.26.3"
+version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f44c9e68fd46eda15c646fbb85e1040b657a58cdc8c98db1d97a55930d991eef"
+checksum = "d16546c5b5962abf8ce6e2881e722b4e0ae3b6f1a08a26ae3573c55853ca68d3"
 dependencies = [
  "bitflags 2.5.0",
  "cassowary",
  "compact_str",
  "crossterm",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "lru",
  "paste",
  "stability",
  "strum",
+ "strum_macros",
  "unicode-segmentation",
  "unicode-truncate",
  "unicode-width",
@@ -6232,7 +6283,6 @@ dependencies = [
  "arbitrary",
  "assert_matches",
  "backon",
- "boyer-moore-magiclen",
  "clap",
  "comfy-table",
  "confy",
@@ -6265,6 +6315,7 @@ dependencies = [
  "reth-discv4",
  "reth-discv5",
  "reth-downloaders",
+ "reth-engine-util",
  "reth-errors",
  "reth-ethereum-payload-builder",
  "reth-evm",
@@ -6288,6 +6339,7 @@ dependencies = [
  "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
+ "reth-prune",
  "reth-prune-types",
  "reth-revm",
  "reth-rpc",
@@ -6523,6 +6575,9 @@ dependencies = [
 [[package]]
 name = "reth-cli"
 version = "1.0.0"
+dependencies = [
+ "clap",
+]
 
 [[package]]
 name = "reth-cli-commands"
@@ -6592,7 +6647,7 @@ version = "1.0.0"
 dependencies = [
  "confy",
  "humantime-serde",
- "reth-network",
+ "reth-network-types",
  "reth-prune-types",
  "serde",
  "tempfile",
@@ -6717,6 +6772,7 @@ name = "reth-db-common"
 version = "1.0.0"
 dependencies = [
  "alloy-genesis",
+ "boyer-moore-magiclen",
  "eyre",
  "reth-chainspec",
  "reth-codecs",
@@ -6724,6 +6780,7 @@ dependencies = [
  "reth-db",
  "reth-db-api",
  "reth-etl",
+ "reth-fs-util",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
@@ -6918,6 +6975,24 @@ dependencies = [
  "reth-chainspec",
  "reth-payload-primitives",
  "serde",
+]
+
+[[package]]
+name = "reth-engine-util"
+version = "1.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "pin-project",
+ "reth-beacon-consensus",
+ "reth-engine-primitives",
+ "reth-fs-util",
+ "reth-rpc",
+ "reth-rpc-types",
+ "serde",
+ "serde_json",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -7335,6 +7410,7 @@ dependencies = [
  "reth-network-api",
  "reth-network-p2p",
  "reth-network-peers",
+ "reth-network-types",
  "reth-primitives",
  "reth-provider",
  "reth-tasks",
@@ -7405,6 +7481,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-network-types"
+version = "1.0.0"
+dependencies = [
+ "humantime-serde",
+ "reth-net-banlist",
+ "reth-network-api",
+ "reth-network-peers",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "reth-nippy-jar"
 version = "1.0.0"
 dependencies = [
@@ -7463,6 +7552,7 @@ dependencies = [
  "reth-db-api",
  "reth-db-common",
  "reth-downloaders",
+ "reth-engine-util",
  "reth-evm",
  "reth-exex",
  "reth-network",
@@ -7497,7 +7587,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-rpc-types-engine",
  "clap",
- "const-str",
+ "const_format",
  "derive_more",
  "dirs-next",
  "eyre",
@@ -7510,7 +7600,6 @@ dependencies = [
  "metrics-process",
  "metrics-util",
  "once_cell",
- "pin-project",
  "procfs",
  "proptest",
  "rand 0.8.5",
@@ -7522,7 +7611,6 @@ dependencies = [
  "reth-db-api",
  "reth-discv4",
  "reth-discv5",
- "reth-engine-primitives",
  "reth-fs-util",
  "reth-metrics",
  "reth-net-nat",
@@ -7543,13 +7631,11 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "secp256k1",
- "serde",
  "serde_json",
  "shellexpand",
  "thiserror",
  "tikv-jemalloc-ctl",
  "tokio",
- "tokio-util",
  "tower",
  "tracing",
  "vergen",
@@ -7653,6 +7739,10 @@ dependencies = [
  "tokio",
  "tracing",
 ]
+
+[[package]]
+name = "reth-optimism-cli"
+version = "1.0.0"
 
 [[package]]
 name = "reth-optimism-consensus"
@@ -8251,6 +8341,7 @@ dependencies = [
  "reth-provider",
  "reth-prune-types",
  "reth-stages",
+ "reth-stages-types",
  "reth-static-file-types",
  "reth-storage-errors",
  "reth-testing-utils",
@@ -10314,6 +10405,12 @@ name = "unicode-width"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0336d538f7abc86d282a4189614dfaa90810dfc2c6f6427eaf88e16311dd225d"
+
+[[package]]
+name = "unicode-xid"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f962df74c8c05a667b5ee8bcf162993134c104e96440b663c8daa176dc772d8c"
 
 [[package]]
 name = "universal-hash"

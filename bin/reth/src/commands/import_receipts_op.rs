@@ -13,12 +13,13 @@ use reth_downloaders::{
 use reth_execution_types::ExecutionOutcome;
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
-use reth_primitives::{Receipts, StaticFileSegment};
+use reth_primitives::Receipts;
 use reth_provider::{
     OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateWriter,
     StaticFileProviderFactory, StaticFileWriter, StatsReader,
 };
 use reth_stages::StageId;
+use reth_static_file_types::StaticFileSegment;
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info, trace};
 

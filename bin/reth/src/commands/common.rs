@@ -65,7 +65,11 @@ impl EnvironmentArgs {
         }
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
-        let mut config: Config = confy::load_path(config_path).unwrap_or_default();
+        let mut config: Config = confy::load_path(config_path)
+            .inspect_err(
+                |err| warn!(target: "reth::cli", %err, "Failed to load config file, using default"),
+            )
+            .unwrap_or_default();
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
         if config.stages.etl.dir.is_none() {

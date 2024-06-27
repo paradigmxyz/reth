@@ -5,8 +5,8 @@ use reth_db_api::{
     table::Table,
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives::{static_file::find_fixed_range, StaticFileSegment};
 use reth_provider::{ProviderFactory, StaticFileProviderFactory};
+use reth_static_file_types::{find_fixed_range, StaticFileSegment};
 
 /// The arguments for the `reth db clear` command
 #[derive(Parser, Debug)]

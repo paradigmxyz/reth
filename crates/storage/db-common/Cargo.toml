@@ -19,6 +19,7 @@ reth-trie.workspace = true
 reth-etl.workspace = true
 reth-codecs.workspace = true
 reth-stages-types.workspace = true
+reth-fs-util.workspace = true
 
 # eth
 alloy-genesis.workspace = true
@@ -26,6 +27,7 @@ alloy-genesis.workspace = true
 # misc
 eyre.workspace = true
 thiserror.workspace = true
+boyer-moore-magiclen.workspace = true
 
 # io
 serde.workspace = true
