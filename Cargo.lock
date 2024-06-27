@@ -2778,6 +2778,7 @@ dependencies = [
  "eyre",
  "reth",
  "reth-chainspec",
+ "reth-evm-ethereum",
  "reth-node-api",
  "reth-node-core",
  "reth-node-ethereum",
