@@ -178,14 +178,12 @@ use reth_provider::{
     ChangeSetReader, EvmEnvProvider, StateProviderFactory,
 };
 use reth_rpc::{
-    eth::{
-        servers::RawTransactionForwarder, EthApi, EthBundle, EthStateCache,
-        EthSubscriptionIdProvider,
-    },
+    eth::{EthApi, EthBundle, RawTransactionForwarder},
     AdminApi, DebugApi, EngineEthApi, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi,
     Web3Api,
 };
-use reth_rpc_api::servers::*;
+use reth_rpc_api::*;
+use reth_rpc_eth_types::{EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
@@ -998,7 +996,7 @@ where
     ///
     /// This will spawn the required service tasks for [`EthApi`] for:
     ///   - [`EthStateCache`]
-    ///   - [`reth_rpc::eth::FeeHistoryCache`]
+    ///   - [`FeeHistoryCache`](reth_rpc_eth_types::FeeHistoryCache)
     fn with_eth<F, R>(&mut self, f: F) -> R
     where
         F: FnOnce(&EthHandlers<Provider, Pool, Network, Events, EvmConfig>) -> R,

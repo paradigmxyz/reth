@@ -3,7 +3,8 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
-use reth_rpc_eth_api::{result::internal_rpc_err, servers::TraceExt};
+use reth_rpc_eth_api::helpers::TraceExt;
+use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
     trace::otterscan::{
         BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
