@@ -65,7 +65,7 @@ impl Case for BlockchainTestCase {
         if self.skip {
             return Err(Error::Skipped)
         }
-        
+
         // Iterate through test cases, filtering by the network type to exclude specific forks.
         self.tests
             .values()
