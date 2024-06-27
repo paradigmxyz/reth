@@ -7,7 +7,7 @@ mod optimism;
 pub use optimism::OptimismHardforks;
 
 use crate::{ForkCondition, Hardfork};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Generic trait over a set of ordered hardforks
 pub trait Hardforks: Default + Clone {
@@ -33,7 +33,7 @@ pub trait Hardforks: Default + Clone {
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct ChainHardforks {
     forks: Vec<(Box<dyn Hardfork>, ForkCondition)>,
-    map: HashMap<&'static str, ForkCondition>,
+    map: FxHashMap<&'static str, ForkCondition>,
 }
 
 impl ChainHardforks {
