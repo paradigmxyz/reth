@@ -21,7 +21,7 @@ pub struct MerkleCheckpoint {
 
 impl MerkleCheckpoint {
     /// Creates a new Merkle checkpoint.
-    pub fn new(
+    pub const fn new(
         target_block: BlockNumber,
         last_account_key: B256,
         walker_stack: Vec<StoredSubNode>,

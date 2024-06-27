@@ -23,7 +23,7 @@ use reth_provider::{
     BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
 };
-use reth_prune_types::PruneModes;
+use reth_prune::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
     stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
@@ -167,7 +167,9 @@ impl Command {
                 OriginalValuesKnown::Yes,
             )?;
 
-            let checkpoint = Some(StageCheckpoint::new(block_number - 1));
+            let checkpoint = Some(StageCheckpoint::new(
+                block_number.checked_sub(1).ok_or(eyre::eyre!("GenesisBlockHasNoParent"))?,
+            ));
 
             let mut account_hashing_done = false;
             while !account_hashing_done {

@@ -16,17 +16,17 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use reth_beacon_consensus::BeaconEngineMessage;
+use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    constants::{EMPTY_TRANSACTIONS, ETHEREUM_BLOCK_GAS_LIMIT},
-    eip4844::calculate_excess_blob_gas,
-    proofs, Block, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainSpec, Header, Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256,
-    U256,
+    constants::ETHEREUM_BLOCK_GAS_LIMIT, eip4844::calculate_excess_blob_gas, proofs, Block,
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom, Header,
+    Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256, U256,
 };
-use reth_provider::{BlockReaderIdExt, ExecutionOutcome, StateProviderFactory, StateRootProvider};
+use reth_provider::{BlockReaderIdExt, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::TransactionPool;
 use std::{
@@ -56,7 +56,7 @@ pub struct AutoSealConsensus {
 
 impl AutoSealConsensus {
     /// Create a new instance of [`AutoSealConsensus`]
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
 }
@@ -263,7 +263,7 @@ impl StorageInner {
         ommers: &[Header],
         withdrawals: Option<&Withdrawals>,
         requests: Option<&Requests>,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: &ChainSpec,
     ) -> Header {
         // check previous block for base fee
         let base_fee_per_gas = self.headers.get(&self.best_block).and_then(|parent| {
@@ -287,7 +287,7 @@ impl StorageInner {
             ommers_hash: proofs::calculate_ommers_root(ommers),
             beneficiary: Default::default(),
             state_root: Default::default(),
-            transactions_root: Default::default(),
+            transactions_root: proofs::calculate_transaction_root(transactions),
             receipts_root: Default::default(),
             withdrawals_root: withdrawals.map(|w| proofs::calculate_withdrawals_root(w)),
             logs_bloom: Default::default(),
@@ -327,12 +327,6 @@ impl StorageInner {
                 Some(calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
         }
 
-        header.transactions_root = if transactions.is_empty() {
-            EMPTY_TRANSACTIONS
-        } else {
-            proofs::calculate_transaction_root(transactions)
-        };
-
         header
     }
 
@@ -367,7 +361,7 @@ impl StorageInner {
             &ommers,
             withdrawals.as_ref(),
             requests.as_ref(),
-            chain_spec,
+            &chain_spec,
         );
 
         let block = Block {
@@ -387,8 +381,13 @@ impl StorageInner {
         );
 
         // execute the block
-        let BlockExecutionOutput { state, receipts, requests: block_execution_requests, .. } =
-            executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
+        let BlockExecutionOutput {
+            state,
+            receipts,
+            requests: block_execution_requests,
+            gas_used,
+            ..
+        } = executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
         let execution_outcome = ExecutionOutcome::new(
             state,
             receipts.into(),
@@ -405,8 +404,30 @@ impl StorageInner {
 
         trace!(target: "consensus::auto", ?execution_outcome, ?header, ?body, "executed block, calculating state root and completing header");
 
-        // calculate the state root
+        // now we need to update certain header fields with the results of the execution
         header.state_root = db.state_root(execution_outcome.state())?;
+        header.gas_used = gas_used;
+
+        let receipts = execution_outcome.receipts_by_block(header.number);
+
+        // update logs bloom
+        let receipts_with_bloom =
+            receipts.iter().map(|r| r.as_ref().unwrap().bloom_slow()).collect::<Vec<Bloom>>();
+        header.logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | *r);
+
+        // update receipts root
+        header.receipts_root = {
+            #[cfg(feature = "optimism")]
+            let receipts_root = execution_outcome
+                .optimism_receipts_root_slow(header.number, &chain_spec, header.timestamp)
+                .expect("Receipts is present");
+
+            #[cfg(not(feature = "optimism"))]
+            let receipts_root =
+                execution_outcome.receipts_root_slow(header.number).expect("Receipts is present");
+
+            receipts_root
+        };
         trace!(target: "consensus::auto", root=?header.state_root, ?body, "calculated root");
 
         // finally insert into storage

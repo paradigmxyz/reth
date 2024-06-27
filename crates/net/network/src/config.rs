@@ -8,14 +8,16 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
+use reth_chainspec::{
+    net::{mainnet_nodes, sepolia_nodes, TrustedPeer},
+    ChainSpec, MAINNET,
+};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_network_peers::{pk2id, PeerId};
-use reth_primitives::{
-    mainnet_nodes, sepolia_nodes, ChainSpec, ForkFilter, Head, TrustedPeer, MAINNET,
-};
+use reth_primitives::{ForkFilter, Head};
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
@@ -135,7 +137,6 @@ where
 
 /// Builder for [`NetworkConfig`](struct.NetworkConfig.html).
 #[derive(Debug)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NetworkConfigBuilder {
     /// The node's secret key, from which the node's identity is derived.
     secret_key: SecretKey,
@@ -144,7 +145,6 @@ pub struct NetworkConfigBuilder {
     /// How to set up discovery version 4.
     discovery_v4_builder: Option<Discv4ConfigBuilder>,
     /// How to set up discovery version 5.
-    #[serde(skip)]
     discovery_v5_builder: Option<reth_discv5::ConfigBuilder>,
     /// All boot nodes to start network discovery with.
     boot_nodes: HashSet<TrustedPeer>,
@@ -161,19 +161,16 @@ pub struct NetworkConfigBuilder {
     /// The default mode of the network.
     network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
-    #[serde(skip)]
     executor: Option<Box<dyn TaskSpawner>>,
     /// Sets the hello message for the p2p handshake in `RLPx`
     hello_message: Option<HelloMessageWithProtocols>,
     /// The executor to use for spawning tasks.
-    #[serde(skip)]
     extra_protocols: RlpxSubProtocols,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
     /// Whether tx gossip is disabled
     tx_gossip_disabled: bool,
     /// The block importer type
-    #[serde(skip)]
     block_import: Option<Box<dyn BlockImport>>,
     /// How to instantiate transactions manager.
     transactions_manager_config: TransactionsManagerConfig,
@@ -417,8 +414,8 @@ impl NetworkConfigBuilder {
     /// Calls a closure on [`reth_discv5::ConfigBuilder`], if discv5 discovery is enabled and the
     /// builder has been set.
     /// ```
+    /// use reth_chainspec::MAINNET;
     /// use reth_network::NetworkConfigBuilder;
-    /// use reth_primitives::MAINNET;
     /// use reth_provider::test_utils::NoopProvider;
     /// use secp256k1::{rand::thread_rng, SecretKey};
     ///
@@ -584,8 +581,9 @@ impl NetworkMode {
 mod tests {
     use super::*;
     use rand::thread_rng;
+    use reth_chainspec::Chain;
     use reth_dns_discovery::tree::LinkEntry;
-    use reth_primitives::{Chain, ForkHash};
+    use reth_primitives::ForkHash;
     use reth_provider::test_utils::NoopProvider;
     use std::collections::BTreeMap;
 

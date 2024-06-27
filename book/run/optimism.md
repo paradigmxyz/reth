@@ -83,9 +83,11 @@ op-node \
     --l2.jwt-secret=/path/to/jwt.hex \
     --rpc.addr=0.0.0.0 \
     --rpc.port=7000 \
-    --l1.trustrpc \
     --l1.beacon=<your-beacon-node-http-endpoint>
+    --syncmode=execution-layer
 ```
+
+Consider adding the `--l1.trustrpc` flag to improve performance, if the connection to l1 is over localhost.
 
 If you opted to build the `op-node` with the `rethdb` build tag, this feature can be enabled by appending one extra flag to the `op-node` invocation:
 
@@ -101,7 +103,7 @@ op-node \
 [l1-el-spec]: https://github.com/ethereum/execution-specs
 [rollup-node-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/rollup-node.md
 [op-geth-forkdiff]: https://op-geth.optimism.io
-[sequencer]: https://github.com/ethereum-optimism/specs/blob/main/specs/introduction.md#sequencers
+[sequencer]: https://github.com/ethereum-optimism/specs/blob/main/specs/background.md#sequencers
 [op-stack-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs
 [l2-el-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/exec-engine.md
 [deposit-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/deposits.md

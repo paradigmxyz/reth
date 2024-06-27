@@ -1,19 +1,20 @@
 use crate::{
-    bundle_state::{BundleStateInit, ExecutionOutcome, HashedStateChanges, RevertsInit},
+    bundle_state::{BundleStateInit, HashedStateChanges, RevertsInit},
     providers::{database::metrics, static_file::StaticFileWriter, StaticFileProvider},
     to_range,
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
     AccountReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter,
-    Chain, EvmEnvProvider, FinalizedBlockReader, FinalizedBlockWriter, HashingWriter,
-    HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HistoricalStateProvider, HistoryWriter,
+    EvmEnvProvider, FinalizedBlockReader, FinalizedBlockWriter, HashingWriter, HeaderProvider,
+    HeaderSyncGap, HeaderSyncGapProvider, HistoricalStateProvider, HistoryWriter,
     LatestStateProvider, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
     PruneCheckpointWriter, RequestsProvider, StageCheckpointReader, StateProviderBox, StateWriter,
     StatsReader, StorageReader, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
     WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
+use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db::{tables, BlockNumberList};
 use reth_db_api::{
     common::KeyValue,
@@ -28,15 +29,16 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_evm::ConfigureEvmEnv;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives::{
     keccak256,
     revm::{config::revm_spec, env::fill_block_env},
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    ChainInfo, ChainSpec, GotExpected, Head, Header, Receipt, Requests, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta,
-    TransactionSigned, TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, Withdrawals, B256, U256,
+    GotExpected, Head, Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta, TransactionSigned,
+    TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
+    Withdrawals, B256, U256,
 };
 use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -115,7 +117,7 @@ impl<TX> DatabaseProvider<TX> {
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-write transaction.
-    pub fn new_rw(
+    pub const fn new_rw(
         tx: TX,
         chain_spec: Arc<ChainSpec>,
         static_file_provider: StaticFileProvider,
@@ -252,7 +254,7 @@ where
 
 impl<TX: DbTx> DatabaseProvider<TX> {
     /// Creates a provider with an inner read-only transaction.
-    pub fn new(
+    pub const fn new(
         tx: TX,
         chain_spec: Arc<ChainSpec>,
         static_file_provider: StaticFileProvider,

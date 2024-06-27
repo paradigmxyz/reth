@@ -12,10 +12,14 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
-#![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
+mod display;
+mod forkcondition;
 mod forkid;
 mod hardfork;
 mod head;
@@ -25,6 +29,12 @@ pub use forkid::{
 };
 pub use hardfork::Hardfork;
 pub use head::Head;
+
+pub use display::DisplayHardforks;
+pub use forkcondition::ForkCondition;
+
+/// Chains hardforks
+pub mod chains;
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;

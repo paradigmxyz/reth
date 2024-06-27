@@ -7,10 +7,13 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
-use reth_primitives::{
-    revm::env::fill_block_env, Address, ChainSpec, Header, TransactionSigned, U256,
-};
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
+use reth_chainspec::ChainSpec;
+use reth_primitives::{revm::env::fill_block_env, Address, Header, TransactionSigned, U256};
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv};
 

@@ -16,7 +16,7 @@ pub struct TestStage {
 }
 
 impl TestStage {
-    pub fn new(id: StageId) -> Self {
+    pub const fn new(id: StageId) -> Self {
         Self { id, exec_outputs: VecDeque::new(), unwind_outputs: VecDeque::new() }
     }
 

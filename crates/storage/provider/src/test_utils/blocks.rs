@@ -5,9 +5,9 @@ use alloy_rlp::Decodable;
 use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_primitives::{
-    alloy_primitives, b256, hex_literal::hex, revm::compat::into_reth_acc, Address, BlockNumber,
-    Bytes, Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders, TxType, Withdrawal,
-    Withdrawals, B256, U256,
+    alloy_primitives, b256, hex_literal::hex, Account, Address, BlockNumber, Bytes, Header,
+    Receipt, Requests, SealedBlock, SealedBlockWithSenders, TxType, Withdrawal, Withdrawals, B256,
+    U256,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::{
@@ -119,7 +119,7 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
                 (
                     address,
                     (
-                        into_reth_acc(info.clone()),
+                        Into::<Account>::into(info.clone()),
                         storage_root_unhashed(
                             account
                                 .storage

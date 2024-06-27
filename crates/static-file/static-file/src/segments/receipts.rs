@@ -1,14 +1,12 @@
 use crate::segments::{dataset_for_compression, prepare_jar, Segment};
+use alloy_primitives::{BlockNumber, TxNumber};
 use reth_db::{static_file::create_static_file_T1, tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
-use reth_primitives::{
-    static_file::{SegmentConfig, SegmentHeader},
-    BlockNumber, StaticFileSegment, TxNumber,
-};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockReader, DatabaseProviderRO, TransactionsProviderExt,
 };
+use reth_static_file_types::{SegmentConfig, SegmentHeader, StaticFileSegment};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{ops::RangeInclusive, path::Path};
 

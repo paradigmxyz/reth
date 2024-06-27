@@ -1,17 +1,22 @@
 use crate::{
-    Address, Bytes, GotExpected, Header, Requests, SealedHeader, TransactionSigned,
+    Address, Bytes, GotExpected, Header, SealedHeader, TransactionSigned,
     TransactionSignedEcRecovered, Withdrawals, B256,
 };
-use alloy_rlp::{RlpDecodable, RlpEncodable};
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::prelude::{any, prop_compose};
-use reth_codecs::derive_arbitrary;
-use serde::{Deserialize, Serialize};
-use std::ops::Deref;
-
 pub use alloy_eips::eip1898::{
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, ForkBlock, RpcBlockHash,
 };
+use alloy_rlp::{RlpDecodable, RlpEncodable};
+use derive_more::{Deref, DerefMut};
+#[cfg(any(test, feature = "arbitrary"))]
+use proptest::prelude::prop_compose;
+use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
+#[cfg(any(test, feature = "arbitrary"))]
+pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
+use reth_primitives_traits::Requests;
+use serde::{Deserialize, Serialize};
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 // HACK(onbjerg): we need this to always set `requests` to `None` since we might otherwise generate
 // a block with `None` withdrawals and `Some` requests, in which case we end up trying to decode the
@@ -26,37 +31,22 @@ prop_compose! {
 /// Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp, 25)]
+#[add_arbitrary_tests(rlp, 25)]
 #[derive(
-    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
+    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, RlpEncodable, RlpDecodable,
 )]
 #[rlp(trailing)]
 pub struct Block {
     /// Block header.
-    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "valid_header_strategy()"))]
+    #[deref]
     pub header: Header,
     /// Transactions in this block.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
-        )
-    )]
     pub body: Vec<TransactionSigned>,
     /// Ommers/uncles header.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(valid_header_strategy(), 0..=2)")
-    )]
     pub ommers: Vec<Header>,
     /// Block withdrawals.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
-    )]
     pub withdrawals: Option<Withdrawals>,
     /// Block requests.
-    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
     pub requests: Option<Requests>,
 }
 
@@ -175,23 +165,40 @@ impl Block {
     pub fn size(&self) -> usize {
         self.header.size() +
             // take into account capacity
-            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * core::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * core::mem::size_of::<Header>() +
+            self.withdrawals.as_ref().map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 }
 
-impl Deref for Block {
-    type Target = Header;
-    fn deref(&self) -> &Self::Target {
-        &self.header
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for Block {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        // first generate up to 100 txs
+        let transactions = (0..100)
+            .map(|_| TransactionSigned::arbitrary(u))
+            .collect::<arbitrary::Result<Vec<_>>>()?;
+
+        // then generate up to 2 ommers
+        let ommers = (0..2).map(|_| Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
+
+        Ok(Self {
+            header: u.arbitrary()?,
+            body: transactions,
+            ommers,
+            // for now just generate empty requests, see HACK above
+            requests: u.arbitrary()?,
+            withdrawals: u.arbitrary()?,
+        })
     }
 }
 
 /// Sealed block with senders recovered from transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deref, DerefMut)]
 pub struct BlockWithSenders {
     /// Block
+    #[deref]
+    #[deref_mut]
     pub block: Block,
     /// List of senders that match the transactions in the block
     pub senders: Vec<Address>,
@@ -253,53 +260,36 @@ impl BlockWithSenders {
     }
 }
 
-impl Deref for BlockWithSenders {
-    type Target = Block;
-    fn deref(&self) -> &Self::Target {
-        &self.block
-    }
-}
-
-#[cfg(any(test, feature = "test-utils"))]
-impl std::ops::DerefMut for BlockWithSenders {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.block
-    }
-}
-
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp)]
+#[derive_arbitrary(rlp 32)]
 #[derive(
-    Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    Deref,
+    DerefMut,
+    RlpEncodable,
+    RlpDecodable,
 )]
 #[rlp(trailing)]
 pub struct SealedBlock {
     /// Locked block header.
+    #[deref]
+    #[deref_mut]
     pub header: SealedHeader,
     /// Transactions with signatures.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
-        )
-    )]
     pub body: Vec<TransactionSigned>,
     /// Ommer/uncle headers
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(valid_header_strategy(), 0..=2)")
-    )]
     pub ommers: Vec<Header>,
     /// Block withdrawals.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::option::of(proptest::arbitrary::any::<Withdrawals>())")
-    )]
     pub withdrawals: Option<Withdrawals>,
     /// Block requests.
-    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
     pub requests: Option<Requests>,
 }
 
@@ -381,6 +371,43 @@ impl SealedBlock {
         }
     }
 
+    /// Transform into a [`SealedBlockWithSenders`].
+    ///
+    /// # Panics
+    ///
+    /// If the number of senders does not match the number of transactions in the block
+    /// and the signer recovery for one of the transactions fails.
+    #[track_caller]
+    pub fn with_senders_unchecked(self, senders: Vec<Address>) -> SealedBlockWithSenders {
+        self.try_with_senders_unchecked(senders).expect("stored block is valid")
+    }
+
+    /// Transform into a [`SealedBlockWithSenders`] using the given senders.
+    ///
+    /// If the number of senders does not match the number of transactions in the block, this falls
+    /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
+    /// See also [`TransactionSigned::recover_signer_unchecked`]
+    ///
+    /// Returns an error if a signature is invalid.
+    #[track_caller]
+    pub fn try_with_senders_unchecked(
+        self,
+        senders: Vec<Address>,
+    ) -> Result<SealedBlockWithSenders, Self> {
+        let senders = if self.body.len() == senders.len() {
+            senders
+        } else {
+            let Some(senders) =
+                TransactionSigned::recover_signers_unchecked(&self.body, self.body.len())
+            else {
+                return Err(self)
+            };
+            senders
+        };
+
+        Ok(SealedBlockWithSenders { block: self, senders })
+    }
+
     /// Unseal the block
     pub fn unseal(self) -> Block {
         Block {
@@ -397,9 +424,9 @@ impl SealedBlock {
     pub fn size(&self) -> usize {
         self.header.size() +
             // take into account capacity
-            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * std::mem::size_of::<TransactionSigned>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * std::mem::size_of::<Header>() +
-            self.withdrawals.as_ref().map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+            self.body.iter().map(TransactionSigned::size).sum::<usize>() + self.body.capacity() * core::mem::size_of::<TransactionSigned>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() + self.ommers.capacity() * core::mem::size_of::<Header>() +
+            self.withdrawals.as_ref().map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 
     /// Calculates the total gas used by blob transactions in the sealed block.
@@ -450,24 +477,12 @@ impl From<SealedBlock> for Block {
     }
 }
 
-impl Deref for SealedBlock {
-    type Target = SealedHeader;
-    fn deref(&self) -> &Self::Target {
-        &self.header
-    }
-}
-
-#[cfg(any(test, feature = "test-utils"))]
-impl std::ops::DerefMut for SealedBlock {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.header
-    }
-}
-
 /// Sealed block with senders recovered from transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SealedBlockWithSenders {
     /// Sealed block
+    #[deref]
+    #[deref_mut]
     pub block: SealedBlock,
     /// List of senders that match transactions from block.
     pub senders: Vec<Address>,
@@ -521,47 +536,22 @@ impl SealedBlockWithSenders {
     }
 }
 
-impl Deref for SealedBlockWithSenders {
-    type Target = SealedBlock;
-    fn deref(&self) -> &Self::Target {
-        &self.block
-    }
-}
-
-#[cfg(any(test, feature = "test-utils"))]
-impl std::ops::DerefMut for SealedBlockWithSenders {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.block
-    }
-}
-
 /// A response to `GetBlockBodies`, containing bodies if any bodies were found.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive_arbitrary(rlp, 10)]
+#[add_arbitrary_tests(rlp, 10)]
 #[derive(
     Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
 )]
 #[rlp(trailing)]
 pub struct BlockBody {
     /// Transactions in the block
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<TransactionSigned>(), 0..=100)"
-        )
-    )]
     pub transactions: Vec<TransactionSigned>,
     /// Uncle headers for the given block
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(strategy = "proptest::collection::vec(valid_header_strategy(), 0..=2)")
-    )]
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
     pub withdrawals: Option<Withdrawals>,
     /// Requests in the block.
-    #[cfg_attr(any(test, feature = "arbitrary"), proptest(strategy = "empty_requests_strategy()"))]
     pub requests: Option<Requests>,
 }
 
@@ -604,12 +594,12 @@ impl BlockBody {
     #[inline]
     pub fn size(&self) -> usize {
         self.transactions.iter().map(TransactionSigned::size).sum::<usize>() +
-            self.transactions.capacity() * std::mem::size_of::<TransactionSigned>() +
+            self.transactions.capacity() * core::mem::size_of::<TransactionSigned>() +
             self.ommers.iter().map(Header::size).sum::<usize>() +
-            self.ommers.capacity() * std::mem::size_of::<Header>() +
+            self.ommers.capacity() * core::mem::size_of::<Header>() +
             self.withdrawals
                 .as_ref()
-                .map_or(std::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+                .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
     }
 }
 
@@ -624,66 +614,19 @@ impl From<Block> for BlockBody {
     }
 }
 
-/// Generates a header which is valid __with respect to past and future forks__. This means, for
-/// example, that if the withdrawals root is present, the base fee per gas is also present.
-///
-/// If blob gas used were present, then the excess blob gas and parent beacon block root are also
-/// present. In this example, the withdrawals root would also be present.
-///
-/// This __does not, and should not guarantee__ that the header is valid with respect to __anything
-/// else__.
-#[cfg(any(test, feature = "arbitrary"))]
-pub fn generate_valid_header(
-    mut header: Header,
-    eip_4844_active: bool,
-    blob_gas_used: u64,
-    excess_blob_gas: u64,
-    parent_beacon_block_root: B256,
-) -> Header {
-    // EIP-1559 logic
-    if header.base_fee_per_gas.is_none() {
-        // If EIP-1559 is not active, clear related fields
-        header.withdrawals_root = None;
-        header.blob_gas_used = None;
-        header.excess_blob_gas = None;
-        header.parent_beacon_block_root = None;
-    } else if header.withdrawals_root.is_none() {
-        // If EIP-4895 is not active, clear related fields
-        header.blob_gas_used = None;
-        header.excess_blob_gas = None;
-        header.parent_beacon_block_root = None;
-    } else if eip_4844_active {
-        // Set fields based on EIP-4844 being active
-        header.blob_gas_used = Some(blob_gas_used);
-        header.excess_blob_gas = Some(excess_blob_gas);
-        header.parent_beacon_block_root = Some(parent_beacon_block_root);
-    } else {
-        // If EIP-4844 is not active, clear related fields
-        header.blob_gas_used = None;
-        header.excess_blob_gas = None;
-        header.parent_beacon_block_root = None;
-    }
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        // first generate up to 100 txs
+        let transactions = (0..100)
+            .map(|_| TransactionSigned::arbitrary(u))
+            .collect::<arbitrary::Result<Vec<_>>>()?;
 
-    // todo(onbjerg): adjust this for eip-7589
-    header.requests_root = None;
+        // then generate up to 2 ommers
+        let ommers = (0..2).map(|_| Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
 
-    header
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-prop_compose! {
-    /// Generates a proptest strategy for constructing an instance of a header which is valid __with
-    /// respect to past and future forks__.
-    ///
-    /// See docs for [generate_valid_header] for more information.
-    pub fn valid_header_strategy()(
-        header in any::<Header>(),
-        eip_4844_active in any::<bool>(),
-        blob_gas_used in any::<u64>(),
-        excess_blob_gas in any::<u64>(),
-        parent_beacon_block_root in any::<B256>()
-    ) -> Header {
-        generate_valid_header(header, eip_4844_active, blob_gas_used, excess_blob_gas, parent_beacon_block_root)
+        // for now just generate empty requests, see HACK above
+        Ok(Self { transactions, ommers, requests: None, withdrawals: u.arbitrary()? })
     }
 }
 

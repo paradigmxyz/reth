@@ -92,17 +92,19 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
             let block_hash = payload.block_hash();
             let block_number = payload.block_number();
 
+            previous_block_hashes.push(block_hash);
+
             // Send new events to execution client
-            reth_rpc_api::EngineApiClient::<T>::new_payload_v3(
+            let _ = reth_rpc_api::EngineApiClient::<T>::new_payload_v3(
                 &execution_client,
                 payload.execution_payload_v3,
                 payload.versioned_hashes,
                 payload.parent_beacon_block_root,
             )
             .await
-            .unwrap();
-
-            previous_block_hashes.push(block_hash);
+                .inspect_err(|err|  {
+                    warn!(target: "consensus::debug-client", %err, %block_hash,  %block_number, "failed to submit new payload to execution client");
+                });
 
             // Load previous block hashes. We're using (head - 32) and (head - 64) as the safe and
             // finalized block hashes.

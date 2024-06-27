@@ -13,6 +13,7 @@ use std::collections::{hash_map::IntoIter, HashMap, HashSet};
 
 /// The key of a trie node.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TrieKey {
     /// A node in the account trie.
     AccountNode(StoredNibbles),
@@ -22,8 +23,38 @@ pub enum TrieKey {
     StorageTrie(B256),
 }
 
+impl TrieKey {
+    /// Returns reference to account node key if the key is for [`Self::AccountNode`].
+    pub const fn as_account_node_key(&self) -> Option<&StoredNibbles> {
+        if let Self::AccountNode(nibbles) = &self {
+            Some(nibbles)
+        } else {
+            None
+        }
+    }
+
+    /// Returns reference to storage node key if the key is for [`Self::StorageNode`].
+    pub const fn as_storage_node_key(&self) -> Option<(&B256, &StoredNibblesSubKey)> {
+        if let Self::StorageNode(key, subkey) = &self {
+            Some((key, subkey))
+        } else {
+            None
+        }
+    }
+
+    /// Returns reference to storage trie key if the key is for [`Self::StorageTrie`].
+    pub const fn as_storage_trie_key(&self) -> Option<&B256> {
+        if let Self::StorageTrie(key) = &self {
+            Some(key)
+        } else {
+            None
+        }
+    }
+}
+
 /// The operation to perform on the trie.
 #[derive(PartialEq, Eq, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TrieOp {
     /// Delete the node entry.
     Delete,
@@ -36,10 +67,20 @@ impl TrieOp {
     pub const fn is_update(&self) -> bool {
         matches!(self, Self::Update(..))
     }
+
+    /// Returns reference to updated branch node if operation is [`Self::Update`].
+    pub const fn as_update(&self) -> Option<&BranchNodeCompact> {
+        if let Self::Update(node) = &self {
+            Some(node)
+        } else {
+            None
+        }
+    }
 }
 
 /// The aggregation of trie updates.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Deref)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TrieUpdates {
     trie_operations: HashMap<TrieKey, TrieOp>,
 }

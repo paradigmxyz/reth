@@ -1,10 +1,11 @@
 use crate::result::ToRpcResult;
+use alloy_genesis::ChainConfig;
 use alloy_primitives::B256;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
+use reth_chainspec::ChainSpec;
 use reth_network_api::{NetworkInfo, PeerKind, Peers};
-use reth_network_peers::AnyNode;
-use reth_primitives::{ChainSpec, NodeRecord};
+use reth_network_peers::{AnyNode, NodeRecord};
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_types::{
     admin::{EthProtocolInfo, NodeInfo, Ports, ProtocolInfo},
@@ -24,7 +25,7 @@ pub struct AdminApi<N> {
 
 impl<N> AdminApi<N> {
     /// Creates a new instance of `AdminApi`.
-    pub fn new(network: N, chain_spec: Arc<ChainSpec>) -> Self {
+    pub const fn new(network: N, chain_spec: Arc<ChainSpec>) -> Self {
         Self { network, chain_spec }
     }
 }
@@ -94,7 +95,14 @@ where
     async fn node_info(&self) -> RpcResult<NodeInfo> {
         let enode = self.network.local_node_record();
         let status = self.network.network_status().await.to_rpc_result()?;
-        let config = self.chain_spec.genesis().config.clone();
+        let config = ChainConfig {
+            chain_id: self.chain_spec.chain.id(),
+            terminal_total_difficulty_passed: self
+                .chain_spec
+                .get_final_paris_total_difficulty()
+                .is_some(),
+            ..self.chain_spec.genesis().config.clone()
+        };
 
         let node_info = NodeInfo {
             id: B256::from_slice(&enode.id.as_slice()[..32]),

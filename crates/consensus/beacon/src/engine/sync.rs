@@ -5,13 +5,14 @@ use crate::{
     ConsensusEngineLiveSyncProgress, EthBeaconConsensus,
 };
 use futures::FutureExt;
+use reth_chainspec::ChainSpec;
 use reth_db_api::database::Database;
 use reth_network_p2p::{
     bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     headers::client::HeadersClient,
 };
-use reth_primitives::{BlockNumber, ChainSpec, SealedBlock, B256};
+use reth_primitives::{BlockNumber, SealedBlock, B256};
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventSender;
@@ -413,12 +414,10 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use futures::poll;
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
-    use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, BlockBody, ChainSpecBuilder, Header, SealedHeader,
-        MAINNET,
-    };
+    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, BlockBody, Header, SealedHeader};
     use reth_provider::{
         test_utils::create_test_provider_factory_with_chain_spec, ExecutionOutcome,
     };
@@ -438,7 +437,7 @@ mod tests {
 
     impl TestPipelineBuilder {
         /// Create a new [`TestPipelineBuilder`].
-        fn new() -> Self {
+        const fn new() -> Self {
             Self {
                 pipeline_exec_outputs: VecDeque::new(),
                 executor_results: Vec::new(),

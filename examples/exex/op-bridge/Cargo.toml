@@ -1,5 +1,5 @@
 [package]
-name = "exex-op-bridge"
+name = "example-exex-op-bridge"
 version = "0.0.0"
 publish = false
 edition.workspace = true
@@ -11,7 +11,7 @@ reth-exex.workspace = true
 reth-node-api.workspace = true
 reth-node-ethereum.workspace = true
 reth-primitives.workspace = true
-reth-provider.workspace = true
+reth-execution-types.workspace = true
 reth-tracing.workspace = true
 
 eyre.workspace = true

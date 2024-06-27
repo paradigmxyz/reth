@@ -21,9 +21,9 @@ use crate::error::{
     ParseDnsEntryError::{FieldNotFound, UnknownEntry},
     ParseEntryResult,
 };
+use alloy_primitives::{hex, Bytes};
 use data_encoding::{BASE32_NOPAD, BASE64URL_NOPAD};
 use enr::{Enr, EnrKey, EnrKeyUnambiguous, EnrPublicKey, Error as EnrError};
-use reth_primitives::{hex, Bytes};
 use secp256k1::SecretKey;
 #[cfg(feature = "serde")]
 use serde_with::{DeserializeFromStr, SerializeDisplay};

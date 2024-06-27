@@ -4,13 +4,16 @@ use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification};
-use reth_primitives::{BlockNumber, Header, StaticFileSegment};
+use reth_primitives::{
+    constants::gas_units::{GIGAGAS, KILOGAS, MEGAGAS},
+    BlockNumber, Header, StaticFileSegment,
+};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, Chain, DatabaseProviderRW, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter, StatsReader,
-    TransactionVariant,
+    BlockReader, DatabaseProviderRW, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, StateWriter, StatsReader, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
@@ -611,12 +614,12 @@ impl From<ExecutionConfig> for ExecutionStageThresholds {
 /// Depending on the magnitude of the gas throughput.
 pub fn format_gas_throughput(gas: u64, execution_duration: Duration) -> String {
     let gas_per_second = gas as f64 / execution_duration.as_secs_f64();
-    if gas_per_second < 1_000_000.0 {
-        format!("{:.} Kgas/second", gas_per_second / 1_000.0)
-    } else if gas_per_second < 1_000_000_000.0 {
-        format!("{:.} Mgas/second", gas_per_second / 1_000_000.0)
+    if gas_per_second < MEGAGAS as f64 {
+        format!("{:.} Kgas/second", gas_per_second / KILOGAS as f64)
+    } else if gas_per_second < GIGAGAS as f64 {
+        format!("{:.} Mgas/second", gas_per_second / MEGAGAS as f64)
     } else {
-        format!("{:.} Ggas/second", gas_per_second / 1_000_000_000.0)
+        format!("{:.} Ggas/second", gas_per_second / GIGAGAS as f64)
     }
 }
 
@@ -704,12 +707,13 @@ mod tests {
     use crate::test_utils::TestStageDB;
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
+    use reth_chainspec::ChainSpecBuilder;
     use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_execution_errors::BlockValidationError;
     use reth_primitives::{
-        address, hex_literal::hex, keccak256, Account, Address, Bytecode, ChainSpecBuilder,
-        SealedBlock, StorageEntry, B256, U256,
+        address, hex_literal::hex, keccak256, Account, Address, Bytecode, SealedBlock,
+        StorageEntry, B256, U256,
     };
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, ReceiptProvider,

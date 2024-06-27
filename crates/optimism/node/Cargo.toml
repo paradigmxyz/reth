@@ -12,9 +12,12 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-payload-builder.workspace = true
+reth-auto-seal-consensus.workspace = true
 reth-basic-payload-builder.workspace = true
+reth-consensus.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-rpc-types.workspace = true
 reth-rpc.workspace = true
@@ -54,9 +57,11 @@ reth-revm = { workspace = true, features = ["test-utils"] }
 reth-e2e-test-utils.workspace = true
 tokio.workspace = true
 alloy-primitives.workspace = true
+alloy-genesis.workspace = true
 
 [features]
 optimism = [
+    "reth-chainspec/optimism",
     "reth-primitives/optimism",
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
@@ -64,4 +69,6 @@ optimism = [
     "reth-evm-optimism/optimism",
     "reth-optimism-payload-builder/optimism",
     "reth-beacon-consensus/optimism",
+    "reth-revm/optimism",
+    "reth-auto-seal-consensus/optimism",
 ]

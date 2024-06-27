@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
@@ -31,7 +32,7 @@ reth-config.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
-reth-engine-primitives.workspace = true
+reth-network-peers.workspace = true
 reth-tasks.workspace = true
 reth-consensus-common.workspace = true
 reth-beacon-consensus.workspace = true
@@ -39,12 +40,11 @@ reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 
 # ethereum
+alloy-genesis.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 # async
 tokio.workspace = true
-tokio-util.workspace = true
-pin-project.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -66,7 +66,6 @@ once_cell.workspace = true
 # io
 dirs-next = "2.0.0"
 shellexpand = "3.0.0"
-serde.workspace = true
 serde_json.workspace = true
 
 # http/rpc
@@ -96,7 +95,6 @@ procfs = "0.16.0"
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
-reth-network-peers.workspace = true
 
 [features]
 optimism = [

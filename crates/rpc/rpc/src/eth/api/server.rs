@@ -1,6 +1,15 @@
 //! Implementation of the [`jsonrpsee`] generated [`reth_rpc_api::EthApiServer`] trait
 //! Handles RPC requests for the `eth_` namespace.
 
+use super::EthApiSpec;
+use crate::{
+    eth::{
+        api::{EthApi, EthTransactions},
+        error::EthApiError,
+    },
+    result::{internal_rpc_err, ToRpcResult},
+};
+use alloy_dyn_abi::TypedData;
 use jsonrpsee::core::RpcResult as Result;
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
@@ -11,24 +20,14 @@ use reth_provider::{
 };
 use reth_rpc_api::EthApiServer;
 use reth_rpc_types::{
-    serde_helpers::JsonStorageKey, state::StateOverride, AccessListWithGasUsed,
-    AnyTransactionReceipt, BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse,
-    FeeHistory, Header, Index, RichBlock, StateContext, SyncStatus, TransactionRequest, Work,
+    serde_helpers::JsonStorageKey,
+    state::{EvmOverrides, StateOverride},
+    AccessListWithGasUsed, AnyTransactionReceipt, BlockOverrides, Bundle,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
+    StateContext, SyncStatus, TransactionRequest, Work,
 };
 use reth_transaction_pool::TransactionPool;
-use serde_json::Value;
 use tracing::trace;
-
-use crate::{
-    eth::{
-        api::{EthApi, EthTransactions},
-        error::EthApiError,
-        revm_utils::EvmOverrides,
-    },
-    result::{internal_rpc_err, ToRpcResult},
-};
-
-use super::EthApiSpec;
 
 #[async_trait::async_trait]
 impl<Provider, Pool, Network, EvmConfig> EthApiServer for EthApi<Provider, Pool, Network, EvmConfig>
@@ -391,7 +390,7 @@ where
     /// Handler for: `eth_sign`
     async fn sign(&self, address: Address, message: Bytes) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?address, ?message, "Serving eth_sign");
-        Ok(Self::sign(self, address, message).await?)
+        Ok(Self::sign(self, address, &message).await?)
     }
 
     /// Handler for: `eth_signTransaction`
@@ -400,9 +399,9 @@ where
     }
 
     /// Handler for: `eth_signTypedData`
-    async fn sign_typed_data(&self, address: Address, data: Value) -> Result<Bytes> {
+    async fn sign_typed_data(&self, address: Address, data: TypedData) -> Result<Bytes> {
         trace!(target: "rpc::eth", ?address, ?data, "Serving eth_signTypedData");
-        Ok(Self::sign_typed_data(self, data, address)?)
+        Ok(Self::sign_typed_data(self, &data, address)?)
     }
 
     /// Handler for: `eth_getProof`
@@ -434,11 +433,12 @@ mod tests {
         EthApi,
     };
     use jsonrpsee::types::error::INVALID_PARAMS_CODE;
+    use reth_chainspec::BaseFeeParams;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, BaseFeeParams, Block, BlockNumberOrTag, Header,
-        TransactionSigned, B256, U64,
+        constants::ETHEREUM_BLOCK_GAS_LIMIT, Block, BlockNumberOrTag, Header, TransactionSigned,
+        B256, U64,
     };
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},

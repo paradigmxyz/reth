@@ -86,7 +86,7 @@ impl OnForkChoiceUpdated {
     }
 
     /// If the forkchoice update was successful and no payload attributes were provided, this method
-    pub(crate) fn updated_with_pending_payload_id(
+    pub(crate) const fn updated_with_pending_payload_id(
         payload_status: PayloadStatus,
         pending_payload_id: oneshot::Receiver<Result<PayloadId, PayloadBuilderError>>,
     ) -> Self {

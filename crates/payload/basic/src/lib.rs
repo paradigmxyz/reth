@@ -11,6 +11,7 @@
 use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
+use reth_chainspec::ChainSpec;
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
     PayloadJobGenerator,
@@ -18,7 +19,7 @@ use reth_payload_builder::{
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, BlockNumberOrTag, Bytes, ChainSpec, Request, SealedBlock, Withdrawals, B256, U256,
+    proofs, BlockNumberOrTag, Bytes, Request, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
@@ -636,7 +637,7 @@ pub struct PendingPayload<P> {
 
 impl<P> PendingPayload<P> {
     /// Constructs a `PendingPayload` future.
-    pub fn new(
+    pub const fn new(
         cancel: Cancelled,
         payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
     ) -> Self {
@@ -773,7 +774,7 @@ pub struct BuildArguments<Pool, Client, Attributes, Payload> {
 
 impl<Pool, Client, Attributes, Payload> BuildArguments<Pool, Client, Attributes, Payload> {
     /// Create new build arguments.
-    pub fn new(
+    pub const fn new(
         client: Client,
         pool: Pool,
         cached_reads: CachedReads,

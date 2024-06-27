@@ -1,5 +1,6 @@
+use reth_chainspec::ChainSpecBuilder;
 use reth_db::open_db_read_only;
-use reth_primitives::{Address, ChainSpecBuilder, B256};
+use reth_primitives::{Address, B256};
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
     ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,

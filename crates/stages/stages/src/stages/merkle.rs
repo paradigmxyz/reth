@@ -23,13 +23,13 @@ use tracing::*;
 /// they should include in a bug report, since true state root errors can be impossible to debug
 /// with just basic logs.
 pub const INVALID_STATE_ROOT_ERROR_MESSAGE: &str = r#"
-Invalid state root error on new payload!
+Invalid state root error on stage verification!
 This is an error that likely requires a report to the reth team with additional information.
 Please include the following information in your report:
  * This error message
  * The state root of the block that was rejected
  * The output of `reth db stats --checksum` from the database that was being used. This will take a long time to run!
- * 50-100 lines of logs before and after the first occurrence of this log message. Please search your log output for the first observed occurrence of MAGIC_STATE_ROOT.
+ * 50-100 lines of logs before and after the first occurrence of the log message with the state root of the block that was rejected.
  * The debug logs from __the same time period__. To find the default location for these logs, run:
    `reth --help | grep -A 4 'log.file.directory'`
 

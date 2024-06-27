@@ -14,8 +14,9 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-config.workspace = true
-reth-primitives = { workspace = true, features = ["arbitrary", "clap"] }
+reth-primitives.workspace = true
 reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
@@ -24,6 +25,7 @@ reth-provider = { workspace = true }
 reth-evm.workspace = true
 reth-revm.workspace = true
 reth-stages.workspace = true
+reth-execution-types.workspace = true
 reth-errors.workspace = true
 reth-transaction-pool.workspace = true
 reth-beacon-consensus.workspace = true
@@ -37,7 +39,7 @@ reth-rpc-types-compat.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
-reth-net-common.workspace = true
+reth-net-banlist.workspace = true
 reth-network-api.workspace = true
 reth-downloaders.workspace = true
 reth-tracing.workspace = true
@@ -49,7 +51,8 @@ reth-payload-validator.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
-reth-static-file = { workspace = true }
+reth-static-file.workspace = true
+reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-node-api.workspace = true
@@ -64,6 +67,8 @@ reth-node-events.workspace = true
 reth-consensus.workspace = true
 reth-optimism-primitives.workspace = true
 reth-prune-types.workspace = true
+reth-engine-util.workspace = true
+reth-prune.workspace = true
 
 # crypto
 alloy-rlp.workspace = true
@@ -83,12 +88,14 @@ metrics-process.workspace = true
 
 # test vectors generation
 proptest.workspace = true
+arbitrary.workspace = true
+proptest-arbitrary-interop.workspace = true
 rand.workspace = true
 
 # tui
-comfy-table = "7.0"
+comfy-table = "7.1"
 crossterm = "0.27.0"
-ratatui = { version = "0.26", default-features = false, features = [
+ratatui = { version = "0.27", default-features = false, features = [
     "crossterm",
 ] }
 human_bytes = "0.4.1"
@@ -111,7 +118,6 @@ backon.workspace = true
 similar-asserts.workspace = true
 itertools.workspace = true
 rayon.workspace = true
-boyer-moore-magiclen = "0.2.16"
 ahash = "0.8"
 
 # p2p

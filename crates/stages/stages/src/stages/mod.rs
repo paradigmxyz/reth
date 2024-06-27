@@ -42,6 +42,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{StorageKind, TestStageDB};
     use alloy_rlp::Decodable;
+    use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
         mdbx::{cursor::Cursor, RW},
         tables,
@@ -56,8 +57,8 @@ mod tests {
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;
     use reth_primitives::{
-        address, hex_literal::hex, keccak256, Account, BlockNumber, Bytecode, ChainSpecBuilder,
-        SealedBlock, StaticFileSegment, B256, U256,
+        address, hex_literal::hex, keccak256, Account, BlockNumber, Bytecode, SealedBlock,
+        StaticFileSegment, B256, U256,
     };
     use reth_provider::{
         providers::StaticFileWriter, AccountExtReader, BlockReader, DatabaseProviderFactory,

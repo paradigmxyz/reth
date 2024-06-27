@@ -13,8 +13,6 @@
 | [Developer Docs](./docs)
 | [Crate Docs](https://reth.rs/docs)
 
-_The project is still work in progress, see the [disclaimer below](#status)._
-
 [gh-ci]: https://github.com/paradigmxyz/reth/actions/workflows/unit.yml
 [gh-deny]: https://github.com/paradigmxyz/reth/actions/workflows/deny.yml
 [tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fparadigm%5Freth
@@ -42,7 +40,7 @@ Reth is production ready, and suitable for usage in mission-critical environment
 
 More historical context below:
 * We released 1.0 "production-ready" stable Reth in June 2024.
-    * Reth completed an audit with [Sigma Prime](https://sigmaprime.io/), the developers of [Lighthouse](https://github.com/sigp/lighthouse), the Rust Consensus Layer implementation. Find it [here](./Sigma_Prime_Paradigm_Reth_Security_Assessment_Report_v1_0.pdf).
+    * Reth completed an audit with [Sigma Prime](https://sigmaprime.io/), the developers of [Lighthouse](https://github.com/sigp/lighthouse), the Rust Consensus Layer implementation. Find it [here](./audit/sigma_prime_audit_v1.pdf).
     * Revm (the EVM used in Reth) underwent an audit with [Guido Vranken](https://twitter.com/guidovranken) (#1 [Ethereum Bug Bounty](https://ethereum.org/en/bug-bounty)). We will publish the results soon.
 * We released multiple iterative beta versions, up to [beta.9](https://github.com/paradigmxyz/reth/releases/tag/v0.2.0-beta.9) on Monday June 3rd 2024 the last beta release.
 * We released [beta](https://github.com/paradigmxyz/reth/releases/tag/v0.2.0-beta.1) on Monday March 4th 2024, our first breaking change to the database model, providing faster query speed, smaller database footprint, and allowing "history" to be mounted on separate drives.
@@ -89,7 +87,7 @@ When updating this, also update:
 - .github/workflows/lint.yml
 -->
 
-The Minimum Supported Rust Version (MSRV) of this project is [1.76.0](https://blog.rust-lang.org/2024/02/08/Rust-1.76.0.html).
+The Minimum Supported Rust Version (MSRV) of this project is [1.79.0](https://blog.rust-lang.org/2024/06/13/Rust-1.79.0.html).
 
 See the book for detailed instructions on how to [build from source](https://paradigmxyz.github.io/reth/installation/source.html).
 

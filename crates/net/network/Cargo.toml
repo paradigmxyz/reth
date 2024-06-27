@@ -13,8 +13,9 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
-reth-net-common.workspace = true
+reth-net-banlist.workspace = true
 reth-network-api.workspace = true
 reth-network-p2p.workspace = true
 reth-discv4.workspace = true
@@ -25,7 +26,6 @@ reth-ecies.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
-reth-rpc-types.workspace = true
 reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-network-peers.workspace = true
@@ -55,7 +55,7 @@ metrics.workspace = true
 auto_impl.workspace = true
 aquamarine.workspace = true
 tracing.workspace = true
-fnv = "1.0"
+rustc-hash.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
 rand.workspace = true
@@ -82,7 +82,7 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 # alloy deps for testing against nodes
 alloy-node-bindings.workspace = true
-alloy-provider.workspace = true
+alloy-provider= { workspace = true, features = ["admin-api"] }
 
 # misc
 serial_test.workspace = true
@@ -94,9 +94,9 @@ criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 
 [features]
 default = ["serde"]
+geth-tests = []
 serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr/serde", "dep:serde_json"]
 test-utils = ["reth-provider/test-utils", "dep:tempfile", "reth-transaction-pool/test-utils"]
-geth-tests = []
 
 [[bench]]
 name = "bench"

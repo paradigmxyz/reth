@@ -1,9 +1,9 @@
 use crate::EthVersion;
+use alloy_genesis::Genesis;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
+use reth_chainspec::{Chain, ChainSpec, NamedChain, MAINNET};
 use reth_codecs_derive::derive_arbitrary;
-use reth_primitives::{
-    hex, Chain, ChainSpec, ForkId, Genesis, Hardfork, Head, NamedChain, B256, MAINNET, U256,
-};
+use reth_primitives::{hex, ForkId, Hardfork, Head, B256, U256};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
@@ -152,8 +152,9 @@ impl Default for Status {
 ///
 /// # Example
 /// ```
+/// use reth_chainspec::{Chain, Hardfork, MAINNET};
 /// use reth_eth_wire_types::{EthVersion, Status};
-/// use reth_primitives::{Chain, Hardfork, B256, MAINNET, MAINNET_GENESIS_HASH, U256};
+/// use reth_primitives::{B256, MAINNET_GENESIS_HASH, U256};
 ///
 /// // this is just an example status message!
 /// let status = Status::builder()
@@ -228,12 +229,11 @@ impl StatusBuilder {
 #[cfg(test)]
 mod tests {
     use crate::{EthVersion, Status};
+    use alloy_genesis::Genesis;
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
-    use reth_primitives::{
-        hex, Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head,
-        NamedChain, B256, U256,
-    };
+    use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};
+    use reth_primitives::{hex, ForkHash, ForkId, Hardfork, Head, B256, U256};
     use std::str::FromStr;
 
     #[test]

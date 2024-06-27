@@ -2,6 +2,7 @@
 
 use crate::version::P2P_CLIENT_VERSION;
 use clap::Args;
+use reth_chainspec::{net::mainnet_nodes, ChainSpec};
 use reth_config::Config;
 use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
@@ -17,7 +18,7 @@ use reth_network::{
     },
     HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
-use reth_primitives::{mainnet_nodes, ChainSpec, TrustedPeer};
+use reth_network_peers::TrustedPeer;
 use secp256k1::SecretKey;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -184,7 +185,7 @@ impl NetworkArgs {
                 } = self.discovery;
 
                 builder
-                    .add_unsigned_boot_nodes(chain_bootnodes.into_iter())
+                    .add_unsigned_boot_nodes(chain_bootnodes)
                     .lookup_interval(discv5_lookup_interval)
                     .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
                     .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
@@ -205,7 +206,7 @@ impl NetworkArgs {
 
     /// Sets the p2p and discovery ports to zero, allowing the OD to assign a random unused port
     /// when network components bind to sockets.
-    pub fn with_unused_ports(mut self) -> Self {
+    pub const fn with_unused_ports(mut self) -> Self {
         self = self.with_unused_p2p_port();
         self.discovery = self.discovery.with_unused_discovery_port();
         self
