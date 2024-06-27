@@ -290,7 +290,6 @@ where
                     builder = builder.discovery_v5(args.discovery.discovery_v5_builder(
                         rlpx_socket,
                         ctx.chain_spec().bootnodes().unwrap_or_default(),
-                        ctx.config().instance,
                     ));
                 }
 
