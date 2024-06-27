@@ -14,16 +14,11 @@ extern crate alloc;
 
 use reth_chainspec::ChainSpec;
 use reth_primitives::{
-    revm::{
-        config::revm_spec,
-        env::{fill_block_env, fill_tx_env},
-    },
-    Address, Head, Header, TransactionSigned, U256,
+    revm::env::{fill_block_env, fill_tx_env},
+    Address, Header, TransactionSigned, U256,
 };
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
-use revm_primitives::{
-    AnalysisKind, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv,
-};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv};
 
 pub mod either;
 pub mod execute;
@@ -122,23 +117,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
-    ) {
-        let spec_id = revm_spec(
-            chain_spec,
-            Head {
-                number: header.number,
-                timestamp: header.timestamp,
-                difficulty: header.difficulty,
-                total_difficulty,
-                hash: Default::default(),
-            },
-        );
-
-        cfg_env.chain_id = chain_spec.chain().id();
-        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
-
-        cfg_env.handler_cfg.spec_id = spec_id;
-    }
+    );
 
     /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
     /// [`fill_block_env`].
