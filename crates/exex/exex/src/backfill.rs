@@ -127,24 +127,20 @@ impl<Node: FullNodeComponents> BackfillJob<Node> {
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
-                break;
+                break
             }
         }
 
-        if let Some(last_block) = blocks.last() {
-            let last_block_number = last_block.number;
-
-            debug!(
-                target: "exex::backfill",
-                range = ?*self.range.start()..=last_block_number,
-                block_fetch = ?fetch_block_duration,
-                execution = ?execution_duration,
-                throughput = format_gas_throughput(cumulative_gas, execution_duration),
-                "Finished executing block range"
-            );
-
-            self.range = last_block_number + 1..=*self.range.end();
-        }
+        let last_block_number = blocks.last().expect("blocks should not be empty").number;
+        debug!(
+            target: "exex::backfill",
+            range = ?*self.range.start()..=last_block_number,
+            block_fetch = ?fetch_block_duration,
+            execution = ?execution_duration,
+            throughput = format_gas_throughput(cumulative_gas, execution_duration),
+            "Finished executing block range"
+        );
+        self.range = last_block_number + 1..=*self.range.end();
 
         let chain = Chain::new(blocks, executor.finalize(), None);
         Ok(chain)
