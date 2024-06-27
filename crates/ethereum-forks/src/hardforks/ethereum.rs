@@ -66,7 +66,6 @@ pub trait EthereumActivations {
 
     /// Retrieves the activation block for the specified hardfork on the Ethereum mainnet.
     fn mainnet_activation_block(fork: EthereumHardfork) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match fork {
             EthereumHardfork::Frontier => Some(0),
             EthereumHardfork::Homestead => Some(1150000),
@@ -91,7 +90,6 @@ pub trait EthereumActivations {
 
     /// Retrieves the activation block for the specified hardfork on the Sepolia testnet.
     fn sepolia_activation_block(fork: EthereumHardfork) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match fork {
             EthereumHardfork::Paris => Some(1735371),
             EthereumHardfork::Shanghai => Some(2990908),
@@ -116,7 +114,6 @@ pub trait EthereumActivations {
 
     /// Retrieves the activation block for the specified hardfork on the Arbitrum Sepolia testnet.
     fn arbitrum_sepolia_activation_block(fork: EthereumHardfork) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match fork {
             EthereumHardfork::Frontier |
             EthereumHardfork::Homestead |
@@ -143,7 +140,6 @@ pub trait EthereumActivations {
 
     /// Retrieves the activation block for the specified hardfork on the Arbitrum One mainnet.
     fn arbitrum_activation_block(fork: EthereumHardfork) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match fork {
             EthereumHardfork::Frontier |
             EthereumHardfork::Homestead |
@@ -170,7 +166,6 @@ pub trait EthereumActivations {
 
     /// Retrieves the activation block for the specified hardfork on the holesky testnet.
     fn holesky_activation_block(fork: EthereumHardfork) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match fork {
             EthereumHardfork::Dao |
             EthereumHardfork::Tangerine |
@@ -193,7 +188,6 @@ pub trait EthereumActivations {
 
     /// Retrieves the activation timestamp for the specified hardfork on the Ethereum mainnet.
     fn mainnet_activation_timestamp(fork: EthereumHardfork) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match fork {
             EthereumHardfork::Frontier => Some(1438226773),
             EthereumHardfork::Homestead => Some(1457938193),
@@ -219,7 +213,6 @@ pub trait EthereumActivations {
 
     /// Retrieves the activation timestamp for the specified hardfork on the Sepolia testnet.
     fn sepolia_activation_timestamp(fork: EthereumHardfork) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match fork {
             EthereumHardfork::Frontier |
             EthereumHardfork::Homestead |
@@ -244,7 +237,6 @@ pub trait EthereumActivations {
 
     /// Retrieves the activation timestamp for the specified hardfork on the Holesky testnet.
     fn holesky_activation_timestamp(fork: EthereumHardfork) -> Option<u64> {
-        #[allow(unreachable_patterns)]
         match fork {
             EthereumHardfork::Shanghai => Some(1696000704),
             EthereumHardfork::Cancun => Some(1707305664),

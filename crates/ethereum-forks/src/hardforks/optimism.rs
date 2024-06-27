@@ -25,38 +25,31 @@ pub trait OptimismActivations {
     fn base_sepolia_activation_block<H: Hardfork>(fork: H) -> Option<u64> {
         match_hardfork(
             fork,
-            |fork| {
-                #[allow(unreachable_patterns)]
-                match fork {
-                    EthereumHardfork::Frontier |
-                    EthereumHardfork::Homestead |
-                    EthereumHardfork::Dao |
-                    EthereumHardfork::Tangerine |
-                    EthereumHardfork::SpuriousDragon |
-                    EthereumHardfork::Byzantium |
-                    EthereumHardfork::Constantinople |
-                    EthereumHardfork::Petersburg |
-                    EthereumHardfork::Istanbul |
-                    EthereumHardfork::MuirGlacier |
-                    EthereumHardfork::Berlin |
-                    EthereumHardfork::London |
-                    EthereumHardfork::ArrowGlacier |
-                    EthereumHardfork::GrayGlacier |
-                    EthereumHardfork::Paris |
-                    EthereumHardfork::Shanghai => Some(2106456),
-                    EthereumHardfork::Cancun => Some(6383256),
-                    _ => None,
-                }
+            |fork| match fork {
+                EthereumHardfork::Frontier |
+                EthereumHardfork::Homestead |
+                EthereumHardfork::Dao |
+                EthereumHardfork::Tangerine |
+                EthereumHardfork::SpuriousDragon |
+                EthereumHardfork::Byzantium |
+                EthereumHardfork::Constantinople |
+                EthereumHardfork::Petersburg |
+                EthereumHardfork::Istanbul |
+                EthereumHardfork::MuirGlacier |
+                EthereumHardfork::Berlin |
+                EthereumHardfork::London |
+                EthereumHardfork::ArrowGlacier |
+                EthereumHardfork::GrayGlacier |
+                EthereumHardfork::Paris |
+                EthereumHardfork::Shanghai => Some(2106456),
+                EthereumHardfork::Cancun => Some(6383256),
+                _ => None,
             },
-            |fork| {
-                #[allow(unreachable_patterns)]
-                match fork {
-                    OptimismHardfork::Bedrock | OptimismHardfork::Regolith => Some(0),
-                    OptimismHardfork::Canyon => Some(2106456),
-                    OptimismHardfork::Ecotone => Some(6383256),
-                    OptimismHardfork::Fjord => Some(10615056),
-                    _ => None,
-                }
+            |fork| match fork {
+                OptimismHardfork::Bedrock | OptimismHardfork::Regolith => Some(0),
+                OptimismHardfork::Canyon => Some(2106456),
+                OptimismHardfork::Ecotone => Some(6383256),
+                OptimismHardfork::Fjord => Some(10615056),
             },
         )
     }
@@ -65,37 +58,31 @@ pub trait OptimismActivations {
     fn base_mainnet_activation_block<H: Hardfork>(fork: H) -> Option<u64> {
         match_hardfork(
             fork,
-            |fork| {
-                #[allow(unreachable_patterns)]
-                match fork {
-                    EthereumHardfork::Frontier |
-                    EthereumHardfork::Homestead |
-                    EthereumHardfork::Dao |
-                    EthereumHardfork::Tangerine |
-                    EthereumHardfork::SpuriousDragon |
-                    EthereumHardfork::Byzantium |
-                    EthereumHardfork::Constantinople |
-                    EthereumHardfork::Petersburg |
-                    EthereumHardfork::Istanbul |
-                    EthereumHardfork::MuirGlacier |
-                    EthereumHardfork::Berlin |
-                    EthereumHardfork::London |
-                    EthereumHardfork::ArrowGlacier |
-                    EthereumHardfork::GrayGlacier |
-                    EthereumHardfork::Paris |
-                    EthereumHardfork::Shanghai => Some(9101527),
-                    EthereumHardfork::Cancun => Some(11188936),
-                    _ => None,
-                }
+            |fork| match fork {
+                EthereumHardfork::Frontier |
+                EthereumHardfork::Homestead |
+                EthereumHardfork::Dao |
+                EthereumHardfork::Tangerine |
+                EthereumHardfork::SpuriousDragon |
+                EthereumHardfork::Byzantium |
+                EthereumHardfork::Constantinople |
+                EthereumHardfork::Petersburg |
+                EthereumHardfork::Istanbul |
+                EthereumHardfork::MuirGlacier |
+                EthereumHardfork::Berlin |
+                EthereumHardfork::London |
+                EthereumHardfork::ArrowGlacier |
+                EthereumHardfork::GrayGlacier |
+                EthereumHardfork::Paris |
+                EthereumHardfork::Shanghai => Some(9101527),
+                EthereumHardfork::Cancun => Some(11188936),
+                _ => None,
             },
-            |fork| {
-                #[allow(unreachable_patterns)]
-                match fork {
-                    OptimismHardfork::Bedrock | OptimismHardfork::Regolith => Some(0),
-                    OptimismHardfork::Canyon => Some(9101527),
-                    OptimismHardfork::Ecotone => Some(11188936),
-                    _ => None,
-                }
+            |fork| match fork {
+                OptimismHardfork::Bedrock | OptimismHardfork::Regolith => Some(0),
+                OptimismHardfork::Canyon => Some(9101527),
+                OptimismHardfork::Ecotone => Some(11188936),
+                _ => None,
             },
         )
     }
@@ -104,38 +91,31 @@ pub trait OptimismActivations {
     fn base_sepolia_activation_timestamp<H: Hardfork>(fork: H) -> Option<u64> {
         match_hardfork(
             fork,
-            |fork| {
-                #[allow(unreachable_patterns)]
-                match fork {
-                    EthereumHardfork::Frontier |
-                    EthereumHardfork::Homestead |
-                    EthereumHardfork::Dao |
-                    EthereumHardfork::Tangerine |
-                    EthereumHardfork::SpuriousDragon |
-                    EthereumHardfork::Byzantium |
-                    EthereumHardfork::Constantinople |
-                    EthereumHardfork::Petersburg |
-                    EthereumHardfork::Istanbul |
-                    EthereumHardfork::MuirGlacier |
-                    EthereumHardfork::Berlin |
-                    EthereumHardfork::London |
-                    EthereumHardfork::ArrowGlacier |
-                    EthereumHardfork::GrayGlacier |
-                    EthereumHardfork::Paris |
-                    EthereumHardfork::Shanghai => Some(1699981200),
-                    EthereumHardfork::Cancun => Some(1708534800),
-                    _ => None,
-                }
+            |fork| match fork {
+                EthereumHardfork::Frontier |
+                EthereumHardfork::Homestead |
+                EthereumHardfork::Dao |
+                EthereumHardfork::Tangerine |
+                EthereumHardfork::SpuriousDragon |
+                EthereumHardfork::Byzantium |
+                EthereumHardfork::Constantinople |
+                EthereumHardfork::Petersburg |
+                EthereumHardfork::Istanbul |
+                EthereumHardfork::MuirGlacier |
+                EthereumHardfork::Berlin |
+                EthereumHardfork::London |
+                EthereumHardfork::ArrowGlacier |
+                EthereumHardfork::GrayGlacier |
+                EthereumHardfork::Paris |
+                EthereumHardfork::Shanghai => Some(1699981200),
+                EthereumHardfork::Cancun => Some(1708534800),
+                _ => None,
             },
-            |fork| {
-                #[allow(unreachable_patterns)]
-                match fork {
-                    OptimismHardfork::Bedrock | OptimismHardfork::Regolith => Some(1695768288),
-                    OptimismHardfork::Canyon => Some(1699981200),
-                    OptimismHardfork::Ecotone => Some(1708534800),
-                    OptimismHardfork::Fjord => Some(1716998400),
-                    _ => None,
-                }
+            |fork| match fork {
+                OptimismHardfork::Bedrock | OptimismHardfork::Regolith => Some(1695768288),
+                OptimismHardfork::Canyon => Some(1699981200),
+                OptimismHardfork::Ecotone => Some(1708534800),
+                OptimismHardfork::Fjord => Some(1716998400),
             },
         )
     }
@@ -144,38 +124,31 @@ pub trait OptimismActivations {
     fn base_mainnet_activation_timestamp<H: Hardfork>(fork: H) -> Option<u64> {
         match_hardfork(
             fork,
-            |fork| {
-                #[allow(unreachable_patterns)]
-                match fork {
-                    EthereumHardfork::Frontier |
-                    EthereumHardfork::Homestead |
-                    EthereumHardfork::Dao |
-                    EthereumHardfork::Tangerine |
-                    EthereumHardfork::SpuriousDragon |
-                    EthereumHardfork::Byzantium |
-                    EthereumHardfork::Constantinople |
-                    EthereumHardfork::Petersburg |
-                    EthereumHardfork::Istanbul |
-                    EthereumHardfork::MuirGlacier |
-                    EthereumHardfork::Berlin |
-                    EthereumHardfork::London |
-                    EthereumHardfork::ArrowGlacier |
-                    EthereumHardfork::GrayGlacier |
-                    EthereumHardfork::Paris |
-                    EthereumHardfork::Shanghai => Some(1704992401),
-                    EthereumHardfork::Cancun => Some(1710374401),
-                    _ => None,
-                }
+            |fork| match fork {
+                EthereumHardfork::Frontier |
+                EthereumHardfork::Homestead |
+                EthereumHardfork::Dao |
+                EthereumHardfork::Tangerine |
+                EthereumHardfork::SpuriousDragon |
+                EthereumHardfork::Byzantium |
+                EthereumHardfork::Constantinople |
+                EthereumHardfork::Petersburg |
+                EthereumHardfork::Istanbul |
+                EthereumHardfork::MuirGlacier |
+                EthereumHardfork::Berlin |
+                EthereumHardfork::London |
+                EthereumHardfork::ArrowGlacier |
+                EthereumHardfork::GrayGlacier |
+                EthereumHardfork::Paris |
+                EthereumHardfork::Shanghai => Some(1704992401),
+                EthereumHardfork::Cancun => Some(1710374401),
+                _ => None,
             },
-            |fork| {
-                #[allow(unreachable_patterns)]
-                match fork {
-                    OptimismHardfork::Bedrock | OptimismHardfork::Regolith => Some(1686789347),
-                    OptimismHardfork::Canyon => Some(1704992401),
-                    OptimismHardfork::Ecotone => Some(1710374401),
-                    OptimismHardfork::Fjord => Some(1720627201),
-                    _ => None,
-                }
+            |fork| match fork {
+                OptimismHardfork::Bedrock | OptimismHardfork::Regolith => Some(1686789347),
+                OptimismHardfork::Canyon => Some(1704992401),
+                OptimismHardfork::Ecotone => Some(1710374401),
+                OptimismHardfork::Fjord => Some(1720627201),
             },
         )
     }

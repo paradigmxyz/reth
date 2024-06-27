@@ -37,9 +37,7 @@ pub use forkcondition::ForkCondition;
 pub use hardfork::Hardfork;
 pub use hardforks::*;
 
-#[cfg(feature = "optimism")]
 pub use chains::optimism::*;
-#[cfg(feature = "optimism")]
 pub use hardfork::optimism::*;
 
 /// Chains hardforks

@@ -3,7 +3,6 @@ mod macros;
 pub(crate) mod ethereum;
 pub use ethereum::EthereumHardfork;
 
-#[cfg(feature = "optimism")]
 pub(crate) mod optimism;
 
 use core::{
@@ -53,10 +52,8 @@ impl Hash for dyn Hardfork + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::str::FromStr;
-
-    #[cfg(feature = "optimism")]
     use crate::hardfork::optimism::OptimismHardfork;
+    use std::str::FromStr;
 
     #[test]
     fn check_hardfork_from_str() {
@@ -108,7 +105,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "optimism")]
     fn check_op_hardfork_from_str() {
         let hardfork_str = ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD"];
         let expected_hardforks = [

@@ -3,9 +3,7 @@ mod ethereum;
 pub use ethereum::{EthereumActivations, EthereumHardforks};
 
 /// Optimism helper methods
-#[cfg(feature = "optimism")]
 mod optimism;
-#[cfg(feature = "optimism")]
 pub use optimism::{OptimismActivations, OptimismHardforks};
 
 use crate::{ForkCondition, Hardfork};
@@ -39,7 +37,9 @@ pub struct ChainHardforks {
 }
 
 impl ChainHardforks {
-    /// Creates a new [`ChainHardforks`] from a list.
+    /// Creates a new [`ChainHardforks`] from a list which **must be ordered** by activation.
+    /// 
+    /// Equivalent Ethereum hardforks **must be included** as well.
     pub fn new(forks: Vec<(Box<dyn Hardfork>, ForkCondition)>) -> Self {
         let map = forks.iter().map(|(fork, condition)| (fork.name(), *condition)).collect();
 
@@ -47,9 +47,13 @@ impl ChainHardforks {
     }
 
     /// Total number of hardforks.
-    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.forks.len()
+    }
+
+    /// Checks if the fork list is empty.
+    pub fn is_empty(&self) -> bool {
+        self.forks.is_empty()
     }
 
     /// Retrieves [`ForkCondition`] from `fork`. If `fork` is not present, returns
