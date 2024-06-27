@@ -2005,41 +2005,6 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         Ok(())
     }
 
-    fn fill_block_env_at(
-        &self,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
-
-        self.fill_block_env_with_header(block_env, &header)
-    }
-
-    fn fill_block_env_with_header(
-        &self,
-        block_env: &mut BlockEnv,
-        header: &Header,
-    ) -> ProviderResult<()> {
-        let total_difficulty = self
-            .header_td_by_number(header.number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        let spec_id = revm_spec(
-            &self.chain_spec,
-            Head {
-                number: header.number,
-                timestamp: header.timestamp,
-                difficulty: header.difficulty,
-                total_difficulty,
-                // Not required
-                hash: Default::default(),
-            },
-        );
-        let after_merge = spec_id >= SpecId::MERGE;
-        fill_block_env(block_env, &self.chain_spec, header, after_merge);
-        Ok(())
-    }
-
     fn fill_cfg_env_at<EvmConfig>(
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
