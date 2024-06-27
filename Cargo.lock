@@ -7140,6 +7140,7 @@ dependencies = [
  "reth-metrics",
  "reth-network",
  "reth-node-api",
+ "reth-node-builder",
  "reth-node-core",
  "reth-payload-builder",
  "reth-primitives",

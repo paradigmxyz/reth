@@ -152,9 +152,12 @@ mod tests {
     use crate::BackfillJobFactory;
     use eyre::OptionExt;
     use reth_chainspec::{ChainSpecBuilder, Hardfork, MAINNET};
+    use reth_consensus::test_utils::TestConsensus;
     use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_exex_test_utils::test_exex_context_with_chain_spec;
+    use reth_exex_test_utils::{test_exex_context_with_chain_spec, TestNode};
+    use reth_node_api::FullNodeTypesAdapter;
+    use reth_node_builder::{components::Components, NodeAdapter};
     use reth_primitives::{
         constants::ETH_TO_WEI, public_key_to_address, Block, Genesis, GenesisAccount, Header, U256,
     };
@@ -185,6 +188,18 @@ mod tests {
                 .build(),
         );
         let (ctx, handle) = test_exex_context_with_chain_spec(chain_spec.clone()).await?;
+        let components = NodeAdapter::<FullNodeTypesAdapter<TestNode, _, _>, _> {
+            components: Components {
+                transaction_pool: ctx.pool().clone(),
+                evm_config: *ctx.evm_config(),
+                executor: EthExecutorProvider::ethereum(chain_spec.clone()),
+                consensus: Arc::new(TestConsensus::default()),
+                network: ctx.network().clone(),
+                payload_builder: ctx.payload_builder().clone(),
+            },
+            task_executor: handle.tasks.executor(),
+            provider: ctx.provider().clone(),
+        };
 
         let block1 = Block {
             header: Header {
@@ -199,29 +214,54 @@ mod tests {
         .with_recovered_senders()
         .ok_or_eyre("failed to recover senders")?;
 
-        let outcome = {
-            let provider = handle.provider_factory.provider()?;
-            let executor = EthExecutorProvider::ethereum(chain_spec.clone()).batch_executor(
+        let block2 = Block {
+            header: Header {
+                parent_hash: block1.hash_slow(),
+                difficulty: chain_spec.fork(Hardfork::Paris).ttd().expect("Paris TTD"),
+                number: 2,
+                ..Default::default()
+            },
+            body: vec![],
+            ..Default::default()
+        }
+        .with_recovered_senders()
+        .ok_or_eyre("failed to recover senders")?;
+
+        let provider = handle.provider_factory.provider()?;
+
+        let outcome_single = EthExecutorProvider::ethereum(chain_spec.clone())
+            .batch_executor(
                 StateProviderDatabase::new(LatestStateProviderRef::new(
                     provider.tx_ref(),
                     provider.static_file_provider().clone(),
                 )),
                 PruneModes::none(),
-            );
+            )
+            .execute_and_verify_batch([(&block1, U256::ZERO).into()])?;
 
-            executor.execute_and_verify_batch([(&block1, U256::ZERO).into()])?
-        };
-        handle.executor.extend([outcome.clone()]);
+        let outcome_batch = EthExecutorProvider::ethereum(chain_spec.clone())
+            .batch_executor(
+                StateProviderDatabase::new(LatestStateProviderRef::new(
+                    provider.tx_ref(),
+                    provider.static_file_provider().clone(),
+                )),
+                PruneModes::none(),
+            )
+            .execute_and_verify_batch([
+                (&block1, U256::ZERO).into(),
+                (&block2, U256::ZERO).into(),
+            ])?;
 
         let block1 = block1.seal_slow();
+        let block2 = block2.seal_slow();
 
         let provider_rw = handle.provider_factory.provider_rw()?;
         provider_rw.insert_block(block1.clone(), None)?;
-        outcome.clone().write_to_storage(provider_rw.tx_ref(), None, OriginalValuesKnown::Yes)?;
+        provider_rw.insert_block(block2, None)?;
+        outcome_batch.write_to_storage(provider_rw.tx_ref(), None, OriginalValuesKnown::Yes)?;
         provider_rw.commit()?;
 
-        let factory =
-            BackfillJobFactory::new(ctx.components.clone(), ctx.config, Default::default());
+        let factory = BackfillJobFactory::new(components, ctx.config, Default::default());
 
         let job = factory.backfill(1..=1);
         let chains = job.collect::<Result<Vec<_>, _>>()?;
@@ -229,7 +269,7 @@ mod tests {
 
         let chain = chains.first().unwrap();
         assert_eq!(chain.blocks(), &[(1, block1)].into());
-        assert_eq!(chain.execution_outcome(), &outcome);
+        assert_eq!(chain.execution_outcome(), &outcome_single);
 
         Ok(())
     }
