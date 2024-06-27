@@ -6,6 +6,8 @@ use crate::{
 };
 #[cfg(not(feature = "std"))]
 use alloc::{sync::Arc, vec, vec::Vec};
+use core::fmt::Debug;
+use dyn_clone::DynClone;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
@@ -110,11 +112,43 @@ where
 
 /// Helper type for the output of executing a block.
 #[derive(Debug, Clone)]
-struct EthExecuteOutput {
+pub struct EthExecuteOutput {
     receipts: Vec<Receipt>,
     requests: Vec<Request>,
     gas_used: u64,
 }
+
+/// Trait for pre hook (before any state change)
+pub trait PreHook: Debug + DynClone {
+    /// Executes the pre hook logic.
+    fn pre(&self, block: &BlockWithSenders) -> Result<(), BlockExecutionError>;
+}
+
+dyn_clone::clone_trait_object!(PreHook);
+
+/// Trait for `pre_transactions` hook (after EIP-4788 populate)
+pub trait PreTransactionsHook: Debug + DynClone {
+    /// Executes the `pre_transactions` hook logic.
+    fn pre_transactions(&self, block: &BlockWithSenders) -> Result<(), BlockExecutionError>;
+}
+
+dyn_clone::clone_trait_object!(PreTransactionsHook);
+
+/// Trait for `pre_requests` hook (after all transactions executed)
+pub trait PreRequestsHook: Debug + DynClone {
+    /// Executes the `pre_requests` hook logic.
+    fn pre_requests(&self, receipts: &[Receipt], gas_used: u64) -> Result<(), BlockExecutionError>;
+}
+
+dyn_clone::clone_trait_object!(PreRequestsHook);
+
+/// Trait for post hook
+pub trait PostHook: Debug + DynClone {
+    /// Executes the post hook logic.
+    fn post(&self, execution_outcome: &EthExecuteOutput) -> Result<(), BlockExecutionError>;
+}
+
+dyn_clone::clone_trait_object!(PostHook);
 
 /// Helper container type for EVM with chain spec.
 #[derive(Debug, Clone)]
@@ -123,6 +157,14 @@ struct EthEvmExecutor<EvmConfig> {
     chain_spec: Arc<ChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
+    /// Optional pre hook.
+    pre_hook: Option<Box<dyn PreHook>>,
+    /// Optional `pre_transactions` hook.
+    pre_transactions_hook: Option<Box<dyn PreTransactionsHook>>,
+    /// Optional `pre_requests` hook.
+    pre_requests_hook: Option<Box<dyn PreRequestsHook>>,
+    /// Optional post hook.
+    post_hook: Option<Box<dyn PostHook>>,
 }
 
 impl<EvmConfig> EthEvmExecutor<EvmConfig>
@@ -148,6 +190,11 @@ where
         DB: Database,
         DB::Error: Into<ProviderError> + std::fmt::Display,
     {
+        // Pre hook
+        if let Some(hook) = &self.pre_hook {
+            hook.pre(block)?;
+        }
+
         // apply pre execution changes
         apply_beacon_root_contract_call(
             &self.chain_spec,
@@ -163,6 +210,11 @@ where
             block.number,
             block.parent_hash,
         )?;
+
+        // Pre-transactions hook
+        if let Some(hook) = &self.pre_transactions_hook {
+            hook.pre_transactions(block)?;
+        }
 
         // execute transactions
         let mut cumulative_gas_used = 0;
@@ -202,19 +254,21 @@ where
             cumulative_gas_used += result.gas_used();
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            receipts.push(
-                #[allow(clippy::needless_update)] // side-effect of optimism fields
-                Receipt {
-                    tx_type: transaction.tx_type(),
-                    // Success flag was added in `EIP-658: Embedding transaction status code in
-                    // receipts`.
-                    success: result.is_success(),
-                    cumulative_gas_used,
-                    // convert to reth log
-                    logs: result.into_logs(),
-                    ..Default::default()
-                },
-            );
+            receipts.push(Receipt {
+                tx_type: transaction.tx_type(),
+                // Success flag was added in `EIP-658: Embedding transaction status code in
+                // receipts`.
+                success: result.is_success(),
+                cumulative_gas_used,
+                // convert to reth log
+                logs: result.into_logs(),
+                ..Default::default()
+            });
+        }
+
+        // Pre-requests hook
+        if let Some(hook) = &self.pre_requests_hook {
+            hook.pre_requests(&receipts, cumulative_gas_used)?;
         }
 
         let requests = if self.chain_spec.is_prague_active_at_timestamp(block.timestamp) {
@@ -230,7 +284,15 @@ where
             vec![]
         };
 
-        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
+        let execution_outcome =
+            EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used };
+
+        // Post hook
+        if let Some(hook) = &self.post_hook {
+            hook.post(&execution_outcome)?;
+        }
+
+        Ok(execution_outcome)
     }
 }
 
@@ -250,7 +312,40 @@ pub struct EthBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
     /// Creates a new Ethereum block executor.
     pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
-        Self { executor: EthEvmExecutor { chain_spec, evm_config }, state }
+        Self {
+            executor: EthEvmExecutor {
+                chain_spec,
+                evm_config,
+                pre_hook: None,
+                pre_transactions_hook: None,
+                pre_requests_hook: None,
+                post_hook: None,
+            },
+            state,
+        }
+    }
+
+    /// Constructor with hooks
+    pub const fn new_with_hooks(
+        chain_spec: Arc<ChainSpec>,
+        evm_config: EvmConfig,
+        state: State<DB>,
+        pre_hook: Option<Box<dyn PreHook>>,
+        pre_transactions_hook: Option<Box<dyn PreTransactionsHook>>,
+        pre_requests_hook: Option<Box<dyn PreRequestsHook>>,
+        post_hook: Option<Box<dyn PostHook>>,
+    ) -> Self {
+        Self {
+            executor: EthEvmExecutor {
+                chain_spec,
+                evm_config,
+                pre_hook,
+                pre_transactions_hook,
+                pre_requests_hook,
+                post_hook,
+            },
+            state,
+        }
     }
 
     #[inline]
