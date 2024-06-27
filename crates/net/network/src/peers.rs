@@ -218,6 +218,19 @@ impl PeersManager {
         })
     }
 
+    /// Returns the [`NodeRecord`] for the given peer id
+    #[allow(dead_code)]
+    fn peer_by_id(&self, peer_id: PeerId) -> Option<NodeRecord> {
+        self.peers.get(&peer_id).map(|v| {
+            NodeRecord::new_with_ip_ports(
+                v.tcp_addr.ip(),
+                v.tcp_addr.port(),
+                v.udp_addr.map(|addr| addr.port()),
+                peer_id,
+            )
+        })
+    }
+
     /// Returns an iterator over all peer ids for peers with the given kind
     pub(crate) fn peers_by_kind(&self, kind: PeerKind) -> impl Iterator<Item = PeerId> + '_ {
         self.peers.iter().filter_map(move |(peer_id, peer)| (peer.kind == kind).then_some(*peer_id))
@@ -1358,6 +1371,37 @@ mod tests {
             }
             _ => unreachable!(),
         }
+
+        let record = peers.peer_by_id(peer).unwrap();
+        assert_eq!(record.tcp_addr(), socket_addr);
+        assert_eq!(record.udp_addr(), socket_addr);
+    }
+
+    #[tokio::test]
+    async fn test_insert_udp() {
+        let peer = PeerId::random();
+        let tcp_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let udp_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8009);
+        let mut peers = PeersManager::default();
+        peers.add_peer(peer, tcp_addr, Some(udp_addr), None);
+
+        match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => {
+                assert_eq!(peer_id, peer);
+            }
+            _ => unreachable!(),
+        }
+        match event!(peers) {
+            PeerAction::Connect { peer_id, remote_addr } => {
+                assert_eq!(peer_id, peer);
+                assert_eq!(remote_addr, tcp_addr);
+            }
+            _ => unreachable!(),
+        }
+
+        let record = peers.peer_by_id(peer).unwrap();
+        assert_eq!(record.tcp_addr(), tcp_addr);
+        assert_eq!(record.udp_addr(), udp_addr);
     }
 
     #[tokio::test]
