@@ -8,8 +8,8 @@ use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, Provid
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
-    trie_cursor::{TrieCursorFactory, TrieUpdatesCursorFactory},
-    updates::{TrieUpdates, TrieUpdatesSorted},
+    trie_cursor::TrieCursorFactory,
+    updates::TrieUpdates,
     walker::TrieWalker,
     HashBuilder, HashedPostState, Nibbles, StorageRoot, TrieAccount,
 };
