@@ -1,6 +1,6 @@
 //! Prometheus exporter
 
-use crate::metrics::version_metrics::{register_version_metrics, VersionInfo};
+use crate::metrics::version_metrics::VersionInfo;
 use eyre::WrapErr;
 use futures::{future::FusedFuture, FutureExt};
 use http::Response;
@@ -151,7 +151,7 @@ where
     process.describe();
     describe_memory_stats();
     describe_io_stats();
-    register_version_metrics(VersionInfo::default());
+    VersionInfo::default().register_version_metrics();
 
     Ok(())
 }
