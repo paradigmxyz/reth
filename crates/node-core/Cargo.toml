@@ -36,7 +36,7 @@ reth-net-nat.workspace = true
 reth-network-peers.workspace = true
 reth-tasks.workspace = true
 reth-consensus-common.workspace = true
-reth-beacon-consensus.workspace = true
+reth-beacon-consensus = { workspace = true, optional = true }
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 
