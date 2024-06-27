@@ -71,10 +71,10 @@ rand.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 
-
 [dev-dependencies]
 reth-evm-ethereum.workspace = true
 reth-testing-utils.workspace = true
+jsonrpsee-types.workspace = true
 
 jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches.workspace = true
@@ -90,4 +90,5 @@ optimism = [
     "reth-revm/optimism",
     "jsonrpsee-types",
     "reth-evm-optimism",
+    "reth-rpc-server-types/optimism",
 ]

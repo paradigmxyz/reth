@@ -57,4 +57,5 @@ optimism = [
     "reth-primitives/optimism",
     "revm/optimism",
     "reth-provider/optimism",
+    "reth-rpc-server-types/optimism"
 ]

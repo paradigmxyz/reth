@@ -3,7 +3,6 @@
 use std::time::Duration;
 
 use alloy_sol_types::decode_revert_reason;
-use jsonrpsee::types::{error::CALL_EXECUTION_FAILED_CODE, ErrorObject};
 use reth_errors::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes};
 use reth_rpc_types::{
@@ -136,7 +135,7 @@ impl EthApiError {
     }
 }
 
-impl From<EthApiError> for ErrorObject<'static> {
+impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EthApiError) -> Self {
         match error {
             EthApiError::FailedToDecodeSignedTransaction |
@@ -167,9 +166,10 @@ impl From<EthApiError> for ErrorObject<'static> {
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),
-            err @ EthApiError::ExecutionTimedOut(_) => {
-                rpc_error_with_code(CALL_EXECUTION_FAILED_CODE, err.to_string())
-            }
+            err @ EthApiError::ExecutionTimedOut(_) => rpc_error_with_code(
+                jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
+                err.to_string(),
+            ),
             err @ EthApiError::InternalBlockingTaskError | err @ EthApiError::InternalEthError => {
                 internal_rpc_err(err.to_string())
             }
@@ -407,7 +407,7 @@ impl RpcInvalidTransactionError {
     }
 }
 
-impl From<RpcInvalidTransactionError> for ErrorObject<'static> {
+impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(err: RpcInvalidTransactionError) -> Self {
         match err {
             RpcInvalidTransactionError::Revert(revert) => {
@@ -582,7 +582,7 @@ pub enum RpcPoolError {
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl From<RpcPoolError> for ErrorObject<'static> {
+impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: RpcPoolError) -> Self {
         match error {
             RpcPoolError::Invalid(err) => err.into(),

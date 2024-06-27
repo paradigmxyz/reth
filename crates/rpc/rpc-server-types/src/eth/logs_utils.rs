@@ -33,21 +33,20 @@ pub enum EthFilterError {
 }
 
 // convert the error
-impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
+impl From<EthFilterError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(err: EthFilterError) -> Self {
         match err {
-            EthFilterError::FilterNotFound(_) => rpc_error_with_code(
-                jsonrpsee::types::error::INVALID_PARAMS_CODE,
-                "filter not found",
-            ),
+            EthFilterError::FilterNotFound(_) => {
+                rpc_error_with_code(jsonrpsee_types::error::INVALID_PARAMS_CODE, "filter not found")
+            }
             err @ EthFilterError::InternalError => {
-                rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
+                rpc_error_with_code(jsonrpsee_types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             EthFilterError::EthAPIError(err) => err.into(),
             err @ EthFilterError::InvalidBlockRangeParams |
             err @ EthFilterError::QueryExceedsMaxBlocks(_) |
             err @ EthFilterError::QueryExceedsMaxResults(_) => {
-                rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
+                rpc_error_with_code(jsonrpsee_types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }
     }

@@ -46,11 +46,14 @@ tracing.workspace = true
 # misc
 clap.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 eyre.workspace = true
 parking_lot.workspace = true
 thiserror.workspace = true
+
+# rpc
 jsonrpsee.workspace = true
+jsonrpsee-types.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 reth.workspace = true
@@ -73,4 +76,5 @@ optimism = [
     "reth-beacon-consensus/optimism",
     "reth-revm/optimism",
     "reth-auto-seal-consensus/optimism",
+    "reth-rpc-server-types/optimism"
 ]

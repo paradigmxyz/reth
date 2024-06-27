@@ -306,7 +306,7 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 
 #[cfg(test)]
 mod tests {
-    use jsonrpsee::types::error::INVALID_PARAMS_CODE;
+    use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use reth_chainspec::BaseFeeParams;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
