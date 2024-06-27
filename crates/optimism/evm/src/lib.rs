@@ -48,7 +48,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
     ) {
         let spec_id = revm_spec(
             chain_spec,
-            Head {
+            &Head {
                 number: header.number,
                 timestamp: header.timestamp,
                 difficulty: header.difficulty,

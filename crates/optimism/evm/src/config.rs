@@ -23,7 +23,7 @@ pub fn revm_spec_by_timestamp_after_bedrock(
 }
 
 /// return `revm_spec` from spec configuration.
-pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId {
+pub fn revm_spec(chain_spec: &ChainSpec, block: &Head) -> revm_primitives::SpecId {
     if chain_spec.fork(OptimismHardfork::Fjord).active_at_head(&block) {
         revm_primitives::FJORD
     } else if chain_spec.fork(OptimismHardfork::Ecotone).active_at_head(&block) {
@@ -110,23 +110,23 @@ mod tests {
             f(cs).build()
         }
         assert_eq!(
-            revm_spec(&op_cs(|cs| cs.fjord_activated()), Head::default()),
+            revm_spec(&op_cs(|cs| cs.fjord_activated()), &Head::default()),
             revm_primitives::FJORD
         );
         assert_eq!(
-            revm_spec(&op_cs(|cs| cs.ecotone_activated()), Head::default()),
+            revm_spec(&op_cs(|cs| cs.ecotone_activated()), &Head::default()),
             revm_primitives::ECOTONE
         );
         assert_eq!(
-            revm_spec(&op_cs(|cs| cs.canyon_activated()), Head::default()),
+            revm_spec(&op_cs(|cs| cs.canyon_activated()), &Head::default()),
             revm_primitives::CANYON
         );
         assert_eq!(
-            revm_spec(&op_cs(|cs| cs.bedrock_activated()), Head::default()),
+            revm_spec(&op_cs(|cs| cs.bedrock_activated()), &Head::default()),
             revm_primitives::BEDROCK
         );
         assert_eq!(
-            revm_spec(&op_cs(|cs| cs.regolith_activated()), Head::default()),
+            revm_spec(&op_cs(|cs| cs.regolith_activated()), &Head::default()),
             revm_primitives::REGOLITH
         );
     }

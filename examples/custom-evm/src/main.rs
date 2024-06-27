@@ -74,7 +74,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
     ) {
         let spec_id = reth_evm_ethereum::revm_spec(
             chain_spec,
-            Head {
+            &Head {
                 number: header.number,
                 timestamp: header.timestamp,
                 difficulty: header.difficulty,

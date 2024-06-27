@@ -43,7 +43,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
     ) {
         let spec_id = config::revm_spec(
             chain_spec,
-            Head {
+            &Head {
                 number: header.number,
                 timestamp: header.timestamp,
                 difficulty: header.difficulty,
