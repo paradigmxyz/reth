@@ -20,7 +20,7 @@ use reth_node_api::FullNodeTypes;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
-    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA_8_CHARS},
+    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
@@ -292,7 +292,7 @@ where
             code: CLIENT_CODE,
             name: NAME_CLIENT.to_string(),
             version: CARGO_PKG_VERSION.to_string(),
-            commit: VERGEN_GIT_SHA_8_CHARS.to_string(),
+            commit: VERGEN_GIT_SHA.to_string(),
         };
         let engine_api = EngineApi::new(
             ctx.blockchain_db().clone(),

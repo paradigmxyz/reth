@@ -14,11 +14,8 @@ pub const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The full SHA of the latest commit.
 pub const VERGEN_GIT_SHA_LONG: &str = env!("VERGEN_GIT_SHA");
 
-/// The 7 character short SHA of the latest commit.
-pub const VERGEN_GIT_SHA: &str = const_format::str_index!(VERGEN_GIT_SHA_LONG, ..7);
-
 /// The 8 character short SHA of the latest commit.
-pub const VERGEN_GIT_SHA_8_CHARS: &str = const_format::str_index!(VERGEN_GIT_SHA_LONG, ..8);
+pub const VERGEN_GIT_SHA: &str = const_format::str_index!(VERGEN_GIT_SHA_LONG, ..8);
 
 /// The build timestamp.
 pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
@@ -114,7 +111,7 @@ pub fn default_extradata() -> String {
 pub fn default_client_version() -> ClientVersion {
     ClientVersion {
         version: CARGO_PKG_VERSION.to_string(),
-        git_sha: VERGEN_GIT_SHA_8_CHARS.to_string(),
+        git_sha: VERGEN_GIT_SHA.to_string(),
         build_timestamp: VERGEN_BUILD_TIMESTAMP.to_string(),
     }
 }
@@ -125,7 +122,7 @@ pub(crate) const fn build_profile_name() -> &'static str {
     // `std::path::MAIN_SEPARATOR_STR`.
     const OUT_DIR: &str = env!("OUT_DIR");
     let unix_parts = const_format::str_split!(OUT_DIR, '/');
-    if unix_parts.len() > 0 {
+    if unix_parts.len() >= 4 {
         unix_parts[unix_parts.len() - 4]
     } else {
         let win_parts = const_format::str_split!(OUT_DIR, '\\');
