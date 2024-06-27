@@ -67,13 +67,7 @@ impl Command {
         let secret_key = get_secret_key(&network_secret_path)?;
         let network = self
             .network
-            .network_config(
-                config,
-                provider_factory.chain_spec(),
-                secret_key,
-                default_peers_path,
-                None,
-            )
+            .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
             .build(provider_factory)
             .start_network()

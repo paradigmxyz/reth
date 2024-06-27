@@ -108,7 +108,7 @@ impl Command {
             .disable_discv4_discovery_if(self.chain.chain.is_optimism())
             .boot_nodes(boot_nodes.clone())
             .apply(|builder| {
-                self.network.discovery.apply_to_builder(builder, rlpx_socket, boot_nodes, 1)
+                self.network.discovery.apply_to_builder(builder, rlpx_socket, boot_nodes)
             })
             .build(Arc::new(ProviderFactory::new(
                 noop_db,

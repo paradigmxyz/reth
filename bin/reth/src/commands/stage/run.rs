@@ -141,7 +141,6 @@ impl Command {
                             provider_factory.chain_spec(),
                             p2p_secret_key,
                             default_peers_path,
-                            None,
                         )
                         .build(provider_factory.clone())
                         .start_network()

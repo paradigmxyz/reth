@@ -129,12 +129,9 @@ impl NetworkArgs {
         chain_spec: Arc<ChainSpec>,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
-        instance: Option<u16>,
     ) -> NetworkConfigBuilder {
         let chain_bootnodes = chain_spec.bootnodes().unwrap_or_else(mainnet_nodes);
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
-
-        let instance = instance.unwrap_or(1);
 
         // Configure peer connections
         let peers_config = config
@@ -176,17 +173,16 @@ impl NetworkArgs {
             // apply discovery settings
             .apply(|builder| {
                 let rlpx_socket = (self.addr, self.port).into();
-                self.discovery.apply_to_builder(builder, rlpx_socket, chain_bootnodes, instance)
+                self.discovery.apply_to_builder(builder, rlpx_socket, chain_bootnodes)
             })
             .listener_addr(SocketAddr::new(
-                self.addr,
-                // set discovery port based on instance number
-                self.port + instance - 1,
+                self.addr, // set discovery port based on instance number
+                self.port,
             ))
             .discovery_addr(SocketAddr::new(
                 self.discovery.addr,
                 // set discovery port based on instance number
-                self.discovery.port + instance - 1,
+                self.discovery.port,
             ))
     }
 
@@ -208,6 +204,17 @@ impl NetworkArgs {
         self = self.with_unused_p2p_port();
         self.discovery = self.discovery.with_unused_discovery_port();
         self
+    }
+
+    /// Change networking port numbers based on the instance number.
+    /// Ports are updated to `previous_value + instance - 1`
+    ///
+    /// # Panics
+    /// Warning: if `instance` is zero in debug mode, this will panic.
+    pub fn adjust_instance_ports(&mut self, instance: u16) {
+        debug_assert_ne!(instance, 0, "instance must be non-zero");
+        self.port += instance - 1;
+        self.discovery.adjust_instance_ports(instance);
     }
 }
 
@@ -308,7 +315,6 @@ impl DiscoveryArgs {
         mut network_config_builder: NetworkConfigBuilder,
         rlpx_tcp_socket: SocketAddr,
         boot_nodes: impl IntoIterator<Item = NodeRecord>,
-        instance: u16,
     ) -> NetworkConfigBuilder {
         if self.disable_discovery || self.disable_dns_discovery {
             network_config_builder = network_config_builder.disable_dns_discovery();
@@ -320,7 +326,7 @@ impl DiscoveryArgs {
 
         if !self.disable_discovery && self.enable_discv5_discovery {
             network_config_builder = network_config_builder
-                .discovery_v5(self.discovery_v5_builder(rlpx_tcp_socket, boot_nodes, instance));
+                .discovery_v5(self.discovery_v5_builder(rlpx_tcp_socket, boot_nodes));
         }
 
         network_config_builder
@@ -331,7 +337,6 @@ impl DiscoveryArgs {
         &self,
         rlpx_tcp_socket: SocketAddr,
         boot_nodes: impl IntoIterator<Item = NodeRecord>,
-        instance: u16,
     ) -> reth_discv5::ConfigBuilder {
         let Self {
             discv5_addr,
@@ -354,14 +359,11 @@ impl DiscoveryArgs {
             SocketAddr::V6(addr) => Some(*addr.ip()),
         });
 
-        let discv5_port = discv5_port + instance - 1;
-        let discv5_port_ipv6 = discv5_port_ipv6 + instance - 1;
-
         reth_discv5::Config::builder(rlpx_tcp_socket)
             .discv5_config(
                 reth_discv5::discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
-                    discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port)),
-                    discv5_addr_ipv6.map(|addr| SocketAddrV6::new(addr, discv5_port_ipv6, 0, 0)),
+                    discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, *discv5_port)),
+                    discv5_addr_ipv6.map(|addr| SocketAddrV6::new(addr, *discv5_port_ipv6, 0, 0)),
                 ))
                 .build(),
             )
@@ -376,6 +378,18 @@ impl DiscoveryArgs {
     pub const fn with_unused_discovery_port(mut self) -> Self {
         self.port = 0;
         self
+    }
+
+    /// Change networking port numbers based on the instance number.
+    /// Ports are updated to `previous_value + instance - 1`
+    ///
+    /// # Panics
+    /// Warning: if `instance` is zero in debug mode, this will panic.
+    pub fn adjust_instance_ports(&mut self, instance: u16) {
+        debug_assert_ne!(instance, 0, "instance must be non-zero");
+        self.port += instance - 1;
+        self.discv5_port += instance - 1;
+        self.discv5_port_ipv6 += instance - 1;
     }
 }
 
