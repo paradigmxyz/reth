@@ -4,9 +4,10 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
+use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    revm::env::tx_env_with_recovered, Address, Block, BlockId, BlockNumberOrTag, Bytes,
-    TransactionSignedEcRecovered, Withdrawals, B256, U256,
+    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, Withdrawals,
+    B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory,
@@ -14,7 +15,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
-use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
+use reth_rpc_eth_api::helpers::{Call, EthApiSpec, EthTransactions, TraceExt};
 use reth_rpc_eth_types::{revm_utils::prepare_call_env, EthApiError, EthResult, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
@@ -34,6 +35,7 @@ use revm_inspectors::tracing::{
     js::{JsInspector, TransactionContext},
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig,
 };
+use revm_primitives::TxEnv;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
@@ -99,9 +101,17 @@ where
                 let mut transactions = transactions.into_iter().enumerate().peekable();
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = tx.hash;
-                    let tx = tx_env_with_recovered(&tx);
+
+                    let mut tx_env = TxEnv::default();
+                    let signer = tx.signer();
+                    Call::evm_config(this.eth_api()).fill_tx_env(
+                        &mut tx_env,
+                        &tx.clone().into_signed(),
+                        signer,
+                    );
+
                     let env = EnvWithHandlerCfg {
-                        env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                        env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx_env),
                         handler_cfg: cfg.handler_cfg,
                     };
                     let (result, state_changes) = this.trace_transaction(
@@ -239,8 +249,16 @@ where
                     tx.hash,
                 )?;
 
+                let mut tx_env = TxEnv::default();
+                let signer = tx.signer();
+                Call::evm_config(this.eth_api()).fill_tx_env(
+                    &mut tx_env,
+                    &tx.clone().into_signed(),
+                    signer,
+                );
+
                 let env = EnvWithHandlerCfg {
-                    env: Env::boxed(cfg.cfg_env.clone(), block_env, tx_env_with_recovered(&tx)),
+                    env: Env::boxed(cfg.cfg_env.clone(), block_env, tx_env),
                     handler_cfg: cfg.handler_cfg,
                 };
 
@@ -453,6 +471,7 @@ where
         }
 
         let this = self.clone();
+
         self.inner
             .eth_api
             .spawn_with_state_at_block(at.into(), move |state| {
@@ -467,9 +486,15 @@ where
 
                     // Execute all transactions until index
                     for tx in transactions {
-                        let tx = tx_env_with_recovered(&tx);
+                        let mut tx_env = TxEnv::default();
+                        let signer = tx.signer();
+                        Call::evm_config(this.eth_api()).fill_tx_env(
+                            &mut tx_env,
+                            &tx.into_signed(),
+                            signer,
+                        );
                         let env = EnvWithHandlerCfg {
-                            env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx),
+                            env: Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx_env),
                             handler_cfg: cfg.handler_cfg,
                         };
                         let (res, _) = this.inner.eth_api.transact(&mut db, env)?;

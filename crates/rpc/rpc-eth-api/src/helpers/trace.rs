@@ -1,8 +1,8 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
 use futures::Future;
-use reth_evm::ConfigureEvm;
-use reth_primitives::{revm::env::tx_env_with_recovered, B256};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_primitives::B256;
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -11,7 +11,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_types::{BlockId, TransactionInfo};
 use revm::{db::CacheDB, Database, DatabaseCommit, GetInspector, Inspector};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
-use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState};
+use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState, TxEnv};
 
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 
@@ -196,8 +196,11 @@ pub trait Trace: LoadState {
                     tx.hash,
                 )?;
 
-                let env =
-                    EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
+                let mut tx_env = TxEnv::default();
+                let signer = tx.signer();
+                Call::evm_config(&this).fill_tx_env(&mut tx_env, &tx.into_signed(), signer);
+
+                let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env);
                 let (res, _) =
                     this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
                 f(tx_info, inspector, res, db)
@@ -308,7 +311,13 @@ pub trait Trace: LoadState {
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
                         };
-                        let tx_env = tx_env_with_recovered(&tx);
+                        let mut tx_env = TxEnv::default();
+                        let signer = tx.signer();
+                        Trace::evm_config(&this).fill_tx_env(
+                            &mut tx_env,
+                            &tx.into_signed(),
+                            signer,
+                        );
                         (tx_info, tx_env)
                     })
                     .peekable();
