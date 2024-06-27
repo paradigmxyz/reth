@@ -26,6 +26,5 @@ serde_json = { workspace = true, optional = true }
 tracing.workspace = true
 
 [features]
-default = ["serde"]
 serde = ["dep:serde", "dep:humantime-serde", "dep:serde_json"]
 test-utils = []
