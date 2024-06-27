@@ -2288,8 +2288,8 @@ mod tests {
     use alloy_primitives::hex;
     use alloy_rlp::{Decodable, Encodable};
     use rand::{thread_rng, Rng};
-    use reth_chainspec::net::mainnet_nodes;
     use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
+    use reth_network_peers::mainnet_nodes;
     use std::future::poll_fn;
 
     #[tokio::test]

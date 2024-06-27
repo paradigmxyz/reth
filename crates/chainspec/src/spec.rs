@@ -37,10 +37,10 @@ use crate::constants::optimism::{
 pub use alloy_eips::eip1559::BaseFeeParams;
 #[cfg(feature = "optimism")]
 use reth_ethereum_forks::chains::optimism::*;
-
-#[cfg(feature = "optimism")]
-use crate::net::{base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes};
-use crate::net::{goerli_nodes, holesky_nodes, mainnet_nodes, sepolia_nodes};
+use reth_network_peers::{
+    base_nodes, base_testnet_nodes, goerli_nodes, holesky_nodes, mainnet_nodes, op_nodes,
+    op_testnet_nodes, sepolia_nodes,
+};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
