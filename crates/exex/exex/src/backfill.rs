@@ -1,4 +1,3 @@
-use crate::ExExNotification;
 use reth_config::Config;
 use reth_evm::execute::{BatchExecutor, BlockExecutionError, BlockExecutorProvider};
 use reth_node_api::FullNodeComponents;
@@ -13,7 +12,6 @@ use reth_stages_types::ExecutionStageThresholds;
 use reth_tracing::tracing::{debug, trace};
 use std::{
     ops::RangeInclusive,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -58,7 +56,7 @@ pub struct BackfillJob<Node: FullNodeComponents> {
 }
 
 impl<Node: FullNodeComponents> Iterator for BackfillJob<Node> {
-    type Item = Result<ExExNotification, BlockExecutionError>;
+    type Item = Result<Chain, BlockExecutionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.range.is_empty() {
@@ -70,7 +68,7 @@ impl<Node: FullNodeComponents> Iterator for BackfillJob<Node> {
 }
 
 impl<Node: FullNodeComponents> BackfillJob<Node> {
-    fn execute_range(&mut self) -> Result<ExExNotification, BlockExecutionError> {
+    fn execute_range(&mut self) -> Result<Chain, BlockExecutionError> {
         let provider = self.components.provider();
         let provider_ro = provider.database_provider_ro()?.disable_long_read_transaction_safety();
 
@@ -151,6 +149,6 @@ impl<Node: FullNodeComponents> BackfillJob<Node> {
         }
 
         let chain = Chain::new(blocks, executor.finalize(), None);
-        Ok(ExExNotification::ChainCommitted { new: Arc::new(chain) })
+        Ok(chain)
     }
 }

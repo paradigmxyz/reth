@@ -33,3 +33,12 @@ impl FinishedExExHeight {
         matches!(self, Self::NotReady)
     }
 }
+
+/// The thresholds at which the execution stage writes state changes to the database.
+///
+/// If either of the thresholds (`max_blocks` and `max_changes`) are hit, then the execution stage
+/// commits all pending changes to the database.
+///
+/// A third threshold, `max_changesets`, can be set to periodically write changesets to the
+/// current database transaction, which frees up memory.
+pub type BackfillThresholds = reth_stages_types::ExecutionStageThresholds;
