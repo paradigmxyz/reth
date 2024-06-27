@@ -9,7 +9,6 @@ pub use optimism::OptimismHardfork;
 mod dev;
 pub use dev::DEV_HARDFORKS;
 
-use auto_impl;
 use core::{
     any::Any,
     hash::{Hash, Hasher},
