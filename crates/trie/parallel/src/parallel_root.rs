@@ -38,8 +38,6 @@ pub struct ParallelStateRoot<DB, Provider> {
     view: ConsistentDbView<DB, Provider>,
     /// Changed hashed state.
     hashed_state: HashedPostState,
-    /// Trie updates.
-    trie_updates: Option<TrieUpdatesSorted>,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -47,15 +45,10 @@ pub struct ParallelStateRoot<DB, Provider> {
 
 impl<DB, Provider> ParallelStateRoot<DB, Provider> {
     /// Create new parallel state root calculator.
-    pub fn new(
-        view: ConsistentDbView<DB, Provider>,
-        hashed_state: HashedPostState,
-        trie_updates: Option<TrieUpdatesSorted>,
-    ) -> Self {
+    pub fn new(view: ConsistentDbView<DB, Provider>, hashed_state: HashedPostState) -> Self {
         Self {
             view,
             hashed_state,
-            trie_updates,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
@@ -90,7 +83,6 @@ where
             prefix_sets.storage_prefix_sets,
         );
         let hashed_state_sorted = self.hashed_state.into_sorted();
-        let trie_updates_sorted = self.trie_updates.unwrap_or_default();
 
         // Pre-calculate storage roots in parallel for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
@@ -100,7 +92,7 @@ where
             .map(|(hashed_address, prefix_set)| {
                 let provider_ro = self.view.provider_ro()?;
                 let storage_root_result = StorageRoot::new_hashed(
-                    TrieUpdatesCursorFactory::new(provider_ro.tx_ref(), &trie_updates_sorted),
+                    provider_ro.tx_ref(),
                     HashedPostStateCursorFactory::new(provider_ro.tx_ref(), &hashed_state_sorted),
                     hashed_address,
                     #[cfg(feature = "metrics")]
@@ -271,7 +263,7 @@ mod tests {
         }
 
         assert_eq!(
-            ParallelStateRoot::new(consistent_view.clone(), HashedPostState::default(), None)
+            ParallelStateRoot::new(consistent_view.clone(), HashedPostState::default())
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state.clone())
@@ -303,7 +295,7 @@ mod tests {
         }
 
         assert_eq!(
-            ParallelStateRoot::new(consistent_view, hashed_state, None).incremental_root().unwrap(),
+            ParallelStateRoot::new(consistent_view, hashed_state).incremental_root().unwrap(),
             test_utils::state_root(state)
         );
     }
