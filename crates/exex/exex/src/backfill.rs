@@ -208,7 +208,7 @@ mod tests {
             provider: ctx.provider().clone(),
         };
 
-        // First block has a transaction that transfes some ETH to zero address
+        // First block has a transaction that transfers some ETH to zero address
         let block1 = Block {
             header: Header {
                 parent_hash: chain_spec.genesis_hash(),
