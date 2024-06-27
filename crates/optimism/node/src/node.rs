@@ -283,27 +283,17 @@ where
             // purposefully disable discv4
             .disable_discv4_discovery()
             // apply discovery settings
-            .apply(|builder| {
+            .apply(|mut builder| {
                 let rlpx_socket = (args.addr, args.port).into();
-                let mut builder = args.discovery.apply_to_builder(builder, rlpx_socket);
 
                 if !args.discovery.disable_discovery {
-                    builder = builder.discovery_v5(reth_discv5::Config::builder(rlpx_socket));
+                    builder = builder.discovery_v5(args.discovery.discovery_v5_builder(
+                        rlpx_socket,
+                        ctx.chain_spec().bootnodes().unwrap_or_default(),
+                    ));
                 }
 
                 builder
-            })
-            // ensure we configure discv5
-            .map_discv5_config_builder(|builder| {
-                builder
-                    .add_unsigned_boot_nodes(ctx.chain_spec().bootnodes().unwrap_or_default())
-                    .lookup_interval(ctx.config().network.discovery.discv5_lookup_interval)
-                    .bootstrap_lookup_interval(
-                        ctx.config().network.discovery.discv5_bootstrap_lookup_interval,
-                    )
-                    .bootstrap_lookup_countdown(
-                        ctx.config().network.discovery.discv5_bootstrap_lookup_countdown,
-                    )
             });
 
         let mut network_config = ctx.build_network_config(network_builder);
