@@ -8090,7 +8090,6 @@ dependencies = [
  "reth-evm",
  "reth-evm-ethereum",
  "reth-execution-types",
- "reth-network-api",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
