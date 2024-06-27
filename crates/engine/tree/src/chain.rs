@@ -94,6 +94,10 @@ where
                             }
                         }
                     }
+                    BackfillEvent::TaskDropped(err) => {
+                        tracing::error!( %err, "pipeline task dropped");
+                        return Poll::Ready(ChainEvent::FatalError);
+                    }
                 },
                 Poll::Pending => {}
             }

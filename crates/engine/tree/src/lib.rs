@@ -26,3 +26,6 @@ pub mod metrics;
 pub mod persistence;
 /// Support for interacting with the blockchain tree.
 pub mod tree;
+
+#[cfg(test)]
+mod test_utils;
