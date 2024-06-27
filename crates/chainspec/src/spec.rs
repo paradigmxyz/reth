@@ -1070,9 +1070,7 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
         Self {
             chain: Some(value.chain),
             genesis: Some(value.genesis.clone()),
-            hardforks: ChainHardforks::new(
-                value.hardforks.forks_iter().map(|(fork, cond)| (fork.clone(), cond)).collect(),
-            ),
+            hardforks: value.hardforks.clone(),
         }
     }
 }
