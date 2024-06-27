@@ -255,6 +255,7 @@ where
 
             // Push transaction changeset and calculate header bloom filter for receipt.
             receipts.push(Receipt {
+                #[allow(clippy::needless_update)] // side-effect of optimism fields
                 tx_type: transaction.tx_type(),
                 // Success flag was added in `EIP-658: Embedding transaction status code in
                 // receipts`.
