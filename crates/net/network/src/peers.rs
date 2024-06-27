@@ -212,7 +212,7 @@ impl PeersManager {
             NodeRecord::new_with_ip_ports(
                 v.tcp_addr.ip(),
                 v.tcp_addr.port(),
-                v.udp_addr.unwrap_or(v.tcp_addr).port(),
+                v.udp_addr.map(|addr| addr.port()),
                 *peer_id,
             )
         })

@@ -93,7 +93,13 @@ impl NodeRecord {
     }
 
     /// Creates a new record from an ip address and ports.
-    pub fn new_with_ip_ports(ip_addr: IpAddr, tcp_port: u16, udp_port: u16, id: PeerId) -> Self {
+    pub fn new_with_ip_ports(
+        ip_addr: IpAddr,
+        tcp_port: u16,
+        udp_port: Option<u16>,
+        id: PeerId,
+    ) -> Self {
+        let udp_port = udp_port.unwrap_or(tcp_port);
         Self { address: ip_addr, tcp_port, udp_port, id }
     }
 
