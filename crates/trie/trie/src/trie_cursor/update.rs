@@ -27,7 +27,7 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for TrieUpdatesCursorFactory<'
         Ok(TrieUpdatesAccountTrieCursor::new(cursor, self.trie_updates))
     }
 
-    fn storage_tries_cursor(
+    fn storage_trie_cursor(
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor, DatabaseError> {
