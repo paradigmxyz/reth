@@ -35,7 +35,7 @@ impl Hardfork for Box<dyn Hardfork> {
 
 impl core::fmt::Debug for dyn Hardfork + 'static {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct(stringify!(self.name())).finish()
+        f.debug_struct(self.name()).finish()
     }
 }
 
