@@ -146,9 +146,9 @@ pub use network::{NetworkEvents, NetworkHandle, NetworkProtocols};
 pub use session::{
     ActiveSessionHandle, ActiveSessionMessage, Direction, PeerInfo, PendingSessionEvent,
     PendingSessionHandle, PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId,
-    SessionLimits, SessionManager, SessionsConfig,
+    SessionManager,
 };
 pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
-pub use reth_network_types::PeersConfig;
+pub use reth_network_types::{PeersConfig, SessionsConfig};

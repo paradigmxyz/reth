@@ -1265,8 +1265,8 @@ mod tests {
     use super::PeersManager;
     use crate::{
         peers::{
-            manager::{ConnectionInfo, PeerBackoffDurations, PeerConnectionState},
-            InboundConnectionError, PeerAction,
+            ConnectionInfo, InboundConnectionError, PeerAction, PeerBackoffDurations,
+            PeerConnectionState,
         },
         session::PendingSessionHandshakeError,
         PeersConfig,
@@ -2126,7 +2126,7 @@ mod tests {
         match a {
             Ok(_) => panic!(),
             Err(err) => match err {
-                peers::InboundConnectionError::IpBanned {} => {
+                InboundConnectionError::IpBanned {} => {
                     assert_eq!(peer_manager.connection_info.num_pending_in, 0)
                 }
                 _ => unreachable!(),

@@ -16,6 +16,9 @@
 pub mod peers;
 pub use peers::{ConnectionsConfig, PeersConfig, ReputationChangeWeights};
 
+pub mod session;
+pub use session::{SessionLimits, SessionsConfig};
+
 /// [`BackoffKind`] definition.
 mod backoff;
 pub use backoff::BackoffKind;

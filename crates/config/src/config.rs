@@ -1,6 +1,6 @@
 //! Configuration files.
 
-use reth_network::{PeersConfig, SessionsConfig};
+use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{

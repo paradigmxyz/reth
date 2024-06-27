@@ -6575,7 +6575,7 @@ version = "1.0.0"
 dependencies = [
  "confy",
  "humantime-serde",
- "reth-network",
+ "reth-network-types",
  "reth-prune-types",
  "serde",
  "tempfile",
