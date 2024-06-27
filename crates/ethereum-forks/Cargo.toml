@@ -23,11 +23,15 @@ crc = "3"
 # misc
 serde = { workspace = true, features = ["derive"], optional = true }
 thiserror-no-std = { workspace = true, default-features = false }
+once_cell.workspace = true
+dyn-clone.workspace = true
+rustc-hash.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
+auto_impl.workspace = true
 
 [dev-dependencies]
 arbitrary = { workspace = true, features = ["derive"] }

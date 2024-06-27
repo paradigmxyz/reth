@@ -11,5 +11,8 @@ repository.workspace = true
 
 
 [dependencies]
+# reth
+reth-cli-runner.workspace = true
+
 # misc
 clap.workspace = true
