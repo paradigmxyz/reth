@@ -1,4 +1,5 @@
-use crate::result::ToRpcResult;
+use std::sync::Arc;
+
 use alloy_genesis::ChainConfig;
 use alloy_primitives::B256;
 use async_trait::async_trait;
@@ -7,11 +8,11 @@ use reth_chainspec::ChainSpec;
 use reth_network_api::{NetworkInfo, PeerKind, Peers};
 use reth_network_peers::{AnyNode, NodeRecord};
 use reth_rpc_api::AdminApiServer;
+use reth_rpc_server_types::ToRpcResult;
 use reth_rpc_types::{
     admin::{EthProtocolInfo, NodeInfo, Ports, ProtocolInfo},
     PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo,
 };
-use std::sync::Arc;
 
 /// `admin` API implementation.
 ///

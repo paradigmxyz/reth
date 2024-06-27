@@ -189,8 +189,9 @@ impl<Node: FullNodeComponents> Clone for RpcRegistry<Node> {
 /// [`AuthRpcModule`].
 ///
 /// This can be used to access installed modules, or create commonly used handlers like
-/// [`reth_rpc::EthApi`], and ultimately merge additional rpc handler into the configured transport
-/// modules [`TransportRpcModules`] as well as configured authenticated methods [`AuthRpcModule`].
+/// [`reth_rpc::eth::EthApi`], and ultimately merge additional rpc handler into the configured
+/// transport modules [`TransportRpcModules`] as well as configured authenticated methods
+/// [`AuthRpcModule`].
 #[allow(missing_debug_implementations)]
 pub struct RpcContext<'a, Node: FullNodeComponents> {
     /// The node components.
