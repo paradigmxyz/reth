@@ -28,20 +28,12 @@ mod head;
 pub use forkid::{
     EnrForkIdEntry, ForkFilter, ForkFilterKey, ForkHash, ForkId, ForkTransition, ValidationError,
 };
-pub use hardfork::EthereumHardfork;
+pub use hardfork::{EthereumHardfork, Hardfork, OptimismHardfork, DEV_HARDFORKS};
 pub use head::Head;
 
-pub use chains::ethereum::*;
 pub use display::DisplayHardforks;
 pub use forkcondition::ForkCondition;
-pub use hardfork::Hardfork;
 pub use hardforks::*;
-
-pub use chains::optimism::*;
-pub use hardfork::optimism::*;
-
-/// Chains hardforks
-pub mod chains;
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;

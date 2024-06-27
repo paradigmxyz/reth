@@ -1,9 +1,13 @@
 mod macros;
 
-pub(crate) mod ethereum;
+mod ethereum;
 pub use ethereum::EthereumHardfork;
 
-pub(crate) mod optimism;
+mod optimism;
+pub use optimism::OptimismHardfork;
+
+mod dev;
+pub use dev::DEV_HARDFORKS;
 
 use core::{
     any::Any,

@@ -38,7 +38,7 @@ pub struct ChainHardforks {
 
 impl ChainHardforks {
     /// Creates a new [`ChainHardforks`] from a list which **must be ordered** by activation.
-    /// 
+    ///
     /// Equivalent Ethereum hardforks **must be included** as well.
     pub fn new(forks: Vec<(Box<dyn Hardfork>, ForkCondition)>) -> Self {
         let map = forks.iter().map(|(fork, condition)| (fork.name(), *condition)).collect();
