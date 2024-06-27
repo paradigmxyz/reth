@@ -1131,7 +1131,7 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     ipc_endpoint: Option<String>,
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
-    /// solala
+    /// Configurable middleware layer.
     rpc_middleware: Option<RpcServiceBuilder<RpcMiddleware>>,
 }
 
