@@ -20,6 +20,8 @@ pub mod chain;
 pub mod download;
 /// Engine Api chain handler support.
 pub mod engine;
+/// Metrics support.
+pub mod metrics;
 /// The background writer task for batch db writes.
 pub mod persistence;
 /// Support for interacting with the blockchain tree.

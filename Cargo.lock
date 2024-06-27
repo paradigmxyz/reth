@@ -6909,12 +6909,14 @@ name = "reth-engine-tree"
 version = "1.0.0"
 dependencies = [
  "aquamarine",
+ "assert_matches",
  "futures",
  "metrics",
  "parking_lot 0.12.3",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-blockchain-tree-api",
+ "reth-chainspec",
  "reth-consensus",
  "reth-db",
  "reth-engine-primitives",

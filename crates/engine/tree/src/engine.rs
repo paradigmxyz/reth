@@ -11,7 +11,7 @@ use reth_engine_primitives::EngineTypes;
 use reth_primitives::{SealedBlockWithSenders, B256};
 use reth_rpc_types::engine::{PayloadStatus, PayloadStatusEnum};
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     task::{Context, Poll},
 };
 use tokio::sync::mpsc;
@@ -207,8 +207,8 @@ pub enum RequestHandlerEvent<T> {
 /// A request to download blocks from the network.
 #[derive(Debug)]
 pub enum DownloadRequest {
-    /// Download the given blocks.
-    Blocks(Vec<B256>),
+    /// Download the given set of blocks.
+    BlockSet(HashSet<B256>),
     /// Download the given range of blocks.
-    Range(B256, usize),
+    BlockRange(B256, u64),
 }
