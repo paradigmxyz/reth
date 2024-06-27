@@ -160,7 +160,6 @@ use crate::{
     cors::CorsDomainError,
     error::WsHttpSamePortError,
     eth::{EthHandlersBuilder, EthHandlersConfig},
-    metrics::RpcRequestMetrics,
 };
 use error::{ConflictingModules, RpcError, ServerKind};
 use http::{header::AUTHORIZATION, HeaderMap};
@@ -197,6 +196,8 @@ use std::{
 use tower_http::cors::CorsLayer;
 use tracing::{instrument, trace};
 
+use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceT};
+
 // re-export for convenience
 pub use jsonrpsee::server::ServerBuilder;
 pub use reth_ipc::server::{
@@ -223,6 +224,7 @@ pub use eth::{EthConfig, EthHandlers};
 
 // Rpc server metrics
 mod metrics;
+pub use metrics::RpcRequestMetrics;
 
 /// Convenience function for starting a server in one step.
 #[allow(clippy::too_many_arguments)]
@@ -1109,8 +1111,8 @@ where
 ///
 /// Once the [`RpcModule`] is built via [`RpcModuleBuilder`] the servers can be started, See also
 /// [`ServerBuilder::build`] and [`Server::start`](jsonrpsee::server::Server::start).
-#[derive(Default, Debug)]
-pub struct RpcServerConfig {
+#[derive(Debug)]
+pub struct RpcServerConfig<RpcMiddleware = Identity> {
     /// Configs for JSON-RPC Http.
     http_server_config: Option<ServerBuilder<Identity, Identity>>,
     /// Allowed CORS Domains for http
@@ -1129,24 +1131,63 @@ pub struct RpcServerConfig {
     ipc_endpoint: Option<String>,
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
+    /// solala
+    rpc_middleware: Option<RpcServiceBuilder<RpcMiddleware>>,
+}
+
+impl Default for RpcServerConfig<Identity> {
+    fn default() -> Self {
+        Self {
+            http_server_config: None,
+            http_cors_domains: None,
+            http_addr: None,
+            ws_server_config: None,
+            ws_cors_domains: None,
+            ws_addr: None,
+            ipc_server_config: None,
+            ipc_endpoint: None,
+            jwt_secret: None,
+            rpc_middleware: None,
+        }
+    }
 }
 
 // === impl RpcServerConfig ===
 
-impl RpcServerConfig {
+impl<RpcMiddleware> RpcServerConfig<RpcMiddleware>
+where
+    RpcMiddleware: tower::Layer<RpcService> + Clone + Send + Sync + 'static,
+    for<'a> <RpcMiddleware as tower::Layer<RpcService>>::Service: Send + Sync + RpcServiceT<'a>,
+{
+    /// A new `RpcServerConfig` instance.
+    pub const fn new() -> Self {
+        Self {
+            http_server_config: None,
+            http_cors_domains: None,
+            http_addr: None,
+            ws_server_config: None,
+            ws_cors_domains: None,
+            ws_addr: None,
+            ipc_server_config: None,
+            ipc_endpoint: None,
+            jwt_secret: None,
+            rpc_middleware: None,
+        }
+    }
+
     /// Creates a new config with only http set
     pub fn http(config: ServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_http(config)
+        Self { http_server_config: Some(config), ..Self::new() }
     }
 
     /// Creates a new config with only ws set
     pub fn ws(config: ServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_ws(config)
+        Self { ws_server_config: Some(config), ..Self::new() }
     }
 
     /// Creates a new config with only ipc set
     pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_ipc(config)
+        Self { ipc_server_config: Some(config), ..Self::new() }
     }
 
     /// Configures the http server
@@ -1174,6 +1215,30 @@ impl RpcServerConfig {
     pub fn with_ws_cors(mut self, cors_domain: Option<String>) -> Self {
         self.ws_cors_domains = cors_domain;
         self
+    }
+
+    /// solala
+    // pub fn with_rpc_middleware<T>(mut self, rpc_middleware: RpcServiceBuilder<T>) ->
+    // RpcServerConfig<RpcMiddleware> {     self.rpc_middleware = Some(rpc_middleware);
+    //     self
+    // }
+    /// Configure rpc middleware.
+    pub fn with_rpc_middleware<T>(
+        self,
+        rpc_middleware: RpcServiceBuilder<T>,
+    ) -> RpcServerConfig<T> {
+        RpcServerConfig {
+            http_server_config: self.http_server_config,
+            http_cors_domains: self.http_cors_domains,
+            http_addr: self.http_addr,
+            ws_server_config: self.ws_server_config,
+            ws_cors_domains: self.ws_cors_domains,
+            ws_addr: self.ws_addr,
+            ipc_server_config: self.ipc_server_config,
+            ipc_endpoint: self.ipc_endpoint,
+            jwt_secret: self.jwt_secret,
+            rpc_middleware: Some(rpc_middleware),
+        }
     }
 
     /// Configures the ws server
@@ -1291,7 +1356,7 @@ impl RpcServerConfig {
     async fn build_ws_http(
         &mut self,
         modules: &TransportRpcModules,
-    ) -> Result<WsHttpServer, RpcError> {
+    ) -> Result<WsHttpServer<RpcMiddleware>, RpcError> {
         let http_socket_addr = self.http_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::LOCALHOST,
             constants::DEFAULT_HTTP_RPC_PORT,
@@ -1335,14 +1400,15 @@ impl RpcServerConfig {
                         .option_layer(self.maybe_jwt_layer()),
                 )
                 .set_rpc_middleware(
-                    RpcServiceBuilder::new().layer(
-                        modules
-                            .http
-                            .as_ref()
-                            .or(modules.ws.as_ref())
-                            .map(RpcRequestMetrics::same_port)
-                            .unwrap_or_default(),
-                    ),
+                    //RpcServiceBuilder::new().layer(
+                    //modules
+                    //.http
+                    //.as_ref()
+                    //.or(modules.ws.as_ref())
+                    //.map(RpcRequestMetrics::same_port)
+                    //.unwrap_or_default(),
+                    //),
+                    self.rpc_middleware.clone().expect("REASON"),
                 )
                 .build(http_socket_addr)
                 .await
@@ -1372,8 +1438,9 @@ impl RpcServerConfig {
                         .option_layer(self.maybe_jwt_layer()),
                 )
                 .set_rpc_middleware(
-                    RpcServiceBuilder::new()
-                        .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
+                    //RpcServiceBuilder::new()
+                    //.layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
+                    self.rpc_middleware.clone().expect("REASON"),
                 )
                 .build(ws_socket_addr)
                 .await
@@ -1395,9 +1462,10 @@ impl RpcServerConfig {
                         .option_layer(self.maybe_jwt_layer()),
                 )
                 .set_rpc_middleware(
-                    RpcServiceBuilder::new().layer(
-                        modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
-                    ),
+                    //RpcServiceBuilder::new().layer(
+                    //modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
+                    //),
+                    self.rpc_middleware.clone().expect("REASON"),
                 )
                 .build(http_socket_addr)
                 .await
@@ -1423,7 +1491,10 @@ impl RpcServerConfig {
     ///
     /// Note: The server is not started and does nothing unless polled, See also
     /// [`RpcServer::start`]
-    pub async fn build(mut self, modules: &TransportRpcModules) -> Result<RpcServer, RpcError> {
+    pub async fn build(
+        mut self,
+        modules: &TransportRpcModules,
+    ) -> Result<RpcServer<RpcMiddleware>, RpcError> {
         let mut server = RpcServer::empty();
         server.ws_http = self.build_ws_http(modules).await?;
 
@@ -1653,45 +1724,62 @@ impl TransportRpcModules {
 }
 
 /// Container type for ws and http servers in all possible combinations.
-#[derive(Default)]
-struct WsHttpServer {
+struct WsHttpServer<RpcMiddleware> {
     /// The address of the http server
     http_local_addr: Option<SocketAddr>,
     /// The address of the ws server
     ws_local_addr: Option<SocketAddr>,
     /// Configured ws,http servers
-    server: WsHttpServers,
+    server: WsHttpServers<RpcMiddleware>,
     /// The jwt secret.
     jwt_secret: Option<JwtSecret>,
 }
 
+impl<RpcMiddleware> Default for WsHttpServer<RpcMiddleware> {
+    fn default() -> Self {
+        Self {
+            http_local_addr: None,
+            ws_local_addr: None,
+            server: WsHttpServers::default(),
+            jwt_secret: None,
+        }
+    }
+}
+
 // Define the type alias with detailed type complexity
-type WsHttpServerKind = Server<
+type WsHttpServerKind<RpcMiddleware> = Server<
     Stack<
         tower::util::Either<AuthLayer<JwtAuthValidator>, Identity>,
         Stack<tower::util::Either<CorsLayer, Identity>, Identity>,
     >,
-    Stack<RpcRequestMetrics, Identity>,
+    RpcMiddleware,
 >;
 
 /// Enum for holding the http and ws servers in all possible combinations.
-enum WsHttpServers {
+enum WsHttpServers<RpcMiddleware> {
     /// Both servers are on the same port
-    SamePort(WsHttpServerKind),
+    SamePort(WsHttpServerKind<RpcMiddleware>),
     /// Servers are on different ports
-    DifferentPort { http: Option<WsHttpServerKind>, ws: Option<WsHttpServerKind> },
+    DifferentPort {
+        http: Option<WsHttpServerKind<RpcMiddleware>>,
+        ws: Option<WsHttpServerKind<RpcMiddleware>>,
+    },
 }
 
 // === impl WsHttpServers ===
 
-impl WsHttpServers {
+impl<RpcMiddleware> WsHttpServers<RpcMiddleware> {
     /// Starts the servers and returns the handles (http, ws)
     async fn start(
         self,
         http_module: Option<RpcModule<()>>,
         ws_module: Option<RpcModule<()>>,
         config: &TransportRpcModuleConfig,
-    ) -> Result<(Option<ServerHandle>, Option<ServerHandle>), RpcError> {
+    ) -> Result<(Option<ServerHandle>, Option<ServerHandle>), RpcError>
+    where
+        RpcMiddleware: tower::Layer<RpcService> + Clone + Send + Sync + 'static,
+        for<'a> <RpcMiddleware as tower::Layer<RpcService>>::Service: Send + Sync + RpcServiceT<'a>,
+    {
         let mut http_handle = None;
         let mut ws_handle = None;
         match self {
@@ -1724,23 +1812,23 @@ impl WsHttpServers {
     }
 }
 
-impl Default for WsHttpServers {
+impl<RpcMiddleware> Default for WsHttpServers<RpcMiddleware> {
     fn default() -> Self {
         Self::DifferentPort { http: None, ws: None }
     }
 }
 
 /// Container type for each transport ie. http, ws, and ipc server
-pub struct RpcServer {
+pub struct RpcServer<RpcMiddleware> {
     /// Configured ws,http servers
-    ws_http: WsHttpServer,
+    ws_http: WsHttpServer<RpcMiddleware>,
     /// ipc server
     ipc: Option<IpcServer<Identity, Stack<RpcRequestMetrics, Identity>>>,
 }
 
 // === impl RpcServer ===
 
-impl RpcServer {
+impl<RpcMiddleware> RpcServer<RpcMiddleware> {
     fn empty() -> Self {
         Self { ws_http: Default::default(), ipc: None }
     }
@@ -1769,7 +1857,11 @@ impl RpcServer {
     /// This returns an [RpcServerHandle] that's connected to the server task(s) until the server is
     /// stopped or the [RpcServerHandle] is dropped.
     #[instrument(name = "start", skip_all, fields(http = ?self.http_local_addr(), ws = ?self.ws_local_addr(), ipc = ?self.ipc_endpoint()), target = "rpc", level = "TRACE")]
-    pub async fn start(self, modules: TransportRpcModules) -> Result<RpcServerHandle, RpcError> {
+    pub async fn start(self, modules: TransportRpcModules) -> Result<RpcServerHandle, RpcError>
+    where
+        RpcMiddleware: tower::Layer<RpcService> + Clone + Send + Sync + 'static,
+        for<'a> <RpcMiddleware as tower::Layer<RpcService>>::Service: Send + Sync + RpcServiceT<'a>,
+    {
         trace!(target: "rpc", "staring RPC server");
         let Self { ws_http, ipc: ipc_server } = self;
         let TransportRpcModules { config, http, ws, ipc } = modules;
@@ -1798,7 +1890,7 @@ impl RpcServer {
     }
 }
 
-impl fmt::Debug for RpcServer {
+impl<RpcMiddleware> fmt::Debug for RpcServer<RpcMiddleware> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RpcServer")
             .field("http", &self.ws_http.http_local_addr.is_some())

@@ -28,6 +28,7 @@ use reth::rpc::builder::{
     RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig,
 };
 // Configuring the network parts, ideally also wouldn't need to think about this.
+use jsonrpsee::server::RpcServiceBuilder;
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 use reth::{
     blockchain_tree::noop::NoopBlockchainTree, providers::test_utils::TestCanonStateSubscriptions,
@@ -35,6 +36,8 @@ use reth::{
 };
 use reth_node_ethereum::EthEvmConfig;
 use std::{path::Path, sync::Arc};
+
+use reth_rpc_builder::RpcRequestMetrics;
 
 // Custom rpc extension
 pub mod myrpc_ext;
@@ -77,9 +80,12 @@ async fn main() -> eyre::Result<()> {
     let custom_rpc = MyRpcExt { provider };
     server.merge_configured(custom_rpc.into_rpc())?;
 
+    let rpc_middleware = RpcServiceBuilder::new().layer(RpcRequestMetrics::default());
+
     // Start the server & keep it alive
-    let server_args =
-        RpcServerConfig::http(Default::default()).with_http_address("0.0.0.0:8545".parse()?);
+    let server_args = RpcServerConfig::<RpcRequestMetrics>::http(Default::default())
+        .with_rpc_middleware(rpc_middleware)
+        .with_http_address("0.0.0.0:8545".parse()?);
     let _handle = server_args.start(server).await?;
     futures::future::pending::<()>().await;
 
