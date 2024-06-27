@@ -52,20 +52,6 @@ pub trait EvmEnvProvider: Send + Sync {
     where
         EvmConfig: ConfigureEvmEnv;
 
-    /// Fills the [BlockEnv] fields with values specific to the given [BlockHashOrNumber].
-    fn fill_block_env_at(
-        &self,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
-    ) -> ProviderResult<()>;
-
-    /// Fills the [BlockEnv] fields with values specific to the given [Header].
-    fn fill_block_env_with_header(
-        &self,
-        block_env: &mut BlockEnv,
-        header: &Header,
-    ) -> ProviderResult<()>;
-
     /// Fills the [`CfgEnvWithHandlerCfg`] fields with values specific to the given
     /// [BlockHashOrNumber].
     fn fill_cfg_env_at<EvmConfig>(
