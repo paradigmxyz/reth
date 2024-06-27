@@ -1,5 +1,3 @@
-#[cfg(feature = "optimism")]
-use reth_chainspec::OptimismHardfork;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_ethereum_forks::{EthereumHardfork, Head};
 
@@ -11,21 +9,6 @@ pub fn revm_spec_by_timestamp_after_merge(
     chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> revm_primitives::SpecId {
-    #[cfg(feature = "optimism")]
-    if chain_spec.is_optimism() {
-        return if chain_spec.fork(OptimismHardfork::Fjord).active_at_timestamp(timestamp) {
-            revm_primitives::FJORD
-        } else if chain_spec.fork(OptimismHardfork::Ecotone).active_at_timestamp(timestamp) {
-            revm_primitives::ECOTONE
-        } else if chain_spec.fork(OptimismHardfork::Canyon).active_at_timestamp(timestamp) {
-            revm_primitives::CANYON
-        } else if chain_spec.fork(OptimismHardfork::Regolith).active_at_timestamp(timestamp) {
-            revm_primitives::REGOLITH
-        } else {
-            revm_primitives::BEDROCK
-        }
-    }
-
     if chain_spec.is_prague_active_at_timestamp(timestamp) {
         revm_primitives::PRAGUE
     } else if chain_spec.is_cancun_active_at_timestamp(timestamp) {
@@ -39,21 +22,6 @@ pub fn revm_spec_by_timestamp_after_merge(
 
 /// return `revm_spec` from spec configuration.
 pub fn revm_spec(chain_spec: &ChainSpec, block: Head) -> revm_primitives::SpecId {
-    #[cfg(feature = "optimism")]
-    if chain_spec.is_optimism() {
-        if chain_spec.fork(OptimismHardfork::Fjord).active_at_head(&block) {
-            return revm_primitives::FJORD
-        } else if chain_spec.fork(OptimismHardfork::Ecotone).active_at_head(&block) {
-            return revm_primitives::ECOTONE
-        } else if chain_spec.fork(OptimismHardfork::Canyon).active_at_head(&block) {
-            return revm_primitives::CANYON
-        } else if chain_spec.fork(OptimismHardfork::Regolith).active_at_head(&block) {
-            return revm_primitives::REGOLITH
-        } else if chain_spec.fork(OptimismHardfork::Bedrock).active_at_head(&block) {
-            return revm_primitives::BEDROCK
-        }
-    }
-
     if chain_spec.fork(EthereumHardfork::Prague).active_at_head(&block) {
         revm_primitives::PRAGUE
     } else if chain_spec.fork(EthereumHardfork::Cancun).active_at_head(&block) {
@@ -114,34 +82,6 @@ mod tests {
             revm_spec_by_timestamp_after_merge(&ChainSpecBuilder::mainnet().build(), 0),
             revm_primitives::MERGE
         );
-        #[cfg(feature = "optimism")]
-        {
-            #[inline(always)]
-            fn op_cs(f: impl FnOnce(ChainSpecBuilder) -> ChainSpecBuilder) -> ChainSpec {
-                let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10));
-                f(cs).build()
-            }
-            assert_eq!(
-                revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.fjord_activated()), 0),
-                revm_primitives::FJORD
-            );
-            assert_eq!(
-                revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.ecotone_activated()), 0),
-                revm_primitives::ECOTONE
-            );
-            assert_eq!(
-                revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.canyon_activated()), 0),
-                revm_primitives::CANYON
-            );
-            assert_eq!(
-                revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.bedrock_activated()), 0),
-                revm_primitives::BEDROCK
-            );
-            assert_eq!(
-                revm_spec_by_timestamp_after_merge(&op_cs(|cs| cs.regolith_activated()), 0),
-                revm_primitives::REGOLITH
-            );
-        }
     }
 
     #[test]
@@ -200,34 +140,6 @@ mod tests {
             revm_spec(&ChainSpecBuilder::mainnet().frontier_activated().build(), Head::default()),
             revm_primitives::FRONTIER
         );
-        #[cfg(feature = "optimism")]
-        {
-            #[inline(always)]
-            fn op_cs(f: impl FnOnce(ChainSpecBuilder) -> ChainSpecBuilder) -> ChainSpec {
-                let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10));
-                f(cs).build()
-            }
-            assert_eq!(
-                revm_spec(&op_cs(|cs| cs.fjord_activated()), Head::default()),
-                revm_primitives::FJORD
-            );
-            assert_eq!(
-                revm_spec(&op_cs(|cs| cs.ecotone_activated()), Head::default()),
-                revm_primitives::ECOTONE
-            );
-            assert_eq!(
-                revm_spec(&op_cs(|cs| cs.canyon_activated()), Head::default()),
-                revm_primitives::CANYON
-            );
-            assert_eq!(
-                revm_spec(&op_cs(|cs| cs.bedrock_activated()), Head::default()),
-                revm_primitives::BEDROCK
-            );
-            assert_eq!(
-                revm_spec(&op_cs(|cs| cs.regolith_activated()), Head::default()),
-                revm_primitives::REGOLITH
-            );
-        }
     }
 
     #[test]

@@ -4,10 +4,10 @@
 
 use alloy_rlp::Encodable;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_evm_optimism::revm_spec_by_timestamp_after_merge;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
-    revm::config::revm_spec_by_timestamp_after_merge,
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
     Address, BlobTransactionSidecar, Header, SealedBlock, TransactionSigned, Withdrawals, B256,
     U256,
