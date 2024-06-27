@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::tree::ExecutedBlock;
 use reth_db::database::Database;
 use reth_errors::ProviderResult;
@@ -10,6 +12,7 @@ use tokio::sync::oneshot;
 ///
 /// It's expected that this will be spawned in its own thread with [`std::thread::spawn`], since
 /// this performs blocking database operations.
+#[derive(Debug)]
 pub struct Persistence<DB> {
     /// The db / static file provider to use
     provider: ProviderFactory<DB>,
@@ -18,16 +21,37 @@ pub struct Persistence<DB> {
 }
 
 impl<DB: Database> Persistence<DB> {
-    // TODO: initialization
+    /// Create a new persistence task
+    const fn new(provider: ProviderFactory<DB>, incoming: Receiver<PersistenceAction>) -> Self {
+        Self { provider, incoming }
+    }
+
     /// Writes the cloned tree state to the database
-    fn write(&mut self, blocks: Vec<ExecutedBlock>) -> ProviderResult<()> {
-        let mut rw = self.provider.provider_rw()?;
+    fn write(&self, _blocks: Vec<ExecutedBlock>) -> ProviderResult<()> {
+        let mut _rw = self.provider.provider_rw()?;
         todo!("implement this")
     }
 
     /// Removes the blocks above the give block number from the database, returning them.
-    fn remove_blocks_above(&mut self, block_number: u64) -> Vec<ExecutedBlock> {
+    fn remove_blocks_above(&self, _block_number: u64) -> Vec<ExecutedBlock> {
         todo!("implement this")
+    }
+}
+
+impl<DB> Persistence<DB>
+where
+    DB: Database + 'static,
+{
+    /// Create a new persistence task, spawning it, and returning a [`PersistenceHandle`].
+    fn spawn_new(provider: ProviderFactory<DB>) -> PersistenceHandle {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let task = Self::new(provider, rx);
+        std::thread::Builder::new()
+            .name("Persistence Task".to_string())
+            .spawn(|| task.run())
+            .unwrap();
+
+        PersistenceHandle::new(tx)
     }
 }
 
@@ -37,7 +61,7 @@ where
 {
     /// This is the main loop, that will listen to persistence events and perform the requested
     /// database actions
-    fn run(&mut self) {
+    fn run(self) {
         // If the receiver errors then senders have disconnected, so the loop should then end.
         while let Ok(action) = self.incoming.recv() {
             match action {
@@ -60,6 +84,7 @@ where
 }
 
 /// A signal to the persistence task that part of the tree state can be persisted.
+#[derive(Debug)]
 pub enum PersistenceAction {
     /// The section of tree state that should be persisted. These blocks are expected in order of
     /// increasing block number.
@@ -77,6 +102,11 @@ pub struct PersistenceHandle {
 }
 
 impl PersistenceHandle {
+    /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
+    pub const fn new(sender: Sender<PersistenceAction>) -> Self {
+        Self { sender }
+    }
+
     /// Tells the persistence task to save a certain list of finalized blocks. The blocks are
     /// assumed to be ordered by block number.
     ///
