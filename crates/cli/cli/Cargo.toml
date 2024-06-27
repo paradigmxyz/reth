@@ -8,3 +8,8 @@ homepage.workspace = true
 repository.workspace = true
 
 [lints]
+
+
+[dependencies]
+# misc
+clap.workspace = true

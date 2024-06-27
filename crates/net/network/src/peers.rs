@@ -1,12 +1,7 @@
+//! Peer related implementations
+
 use crate::{
-    error::{BackoffKind, SessionError},
-    peers::{
-        reputation::{
-            is_banned_reputation, DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE,
-        },
-        ReputationChangeWeights, DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS,
-        DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND,
-    },
+    error::SessionError,
     session::{Direction, PendingSessionHandshakeError},
     swarm::NetworkConnectionState,
 };
@@ -15,13 +10,21 @@ use reth_eth_wire::{errors::EthStreamError, DisconnectReason};
 use reth_net_banlist::BanList;
 use reth_network_api::{PeerKind, ReputationChangeKind};
 use reth_network_peers::{NodeRecord, PeerId};
+use reth_network_types::{
+    peers::{
+        config::PeerBackoffDurations,
+        reputation::{
+            is_banned_reputation, DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE,
+        },
+    },
+    ConnectionsConfig, PeersConfig, ReputationChangeWeights,
+};
 use reth_primitives::ForkId;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     fmt::Display,
-    io::{self, ErrorKind},
+    io::{self},
     net::{IpAddr, SocketAddr},
-    path::Path,
     task::{Context, Poll},
     time::Duration,
 };
@@ -31,7 +34,7 @@ use tokio::{
     time::{Instant, Interval},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{info, trace};
+use tracing::trace;
 
 /// A communication channel to the [`PeersManager`] to apply manual changes to the peer set.
 #[derive(Clone, Debug)]
@@ -170,7 +173,7 @@ impl PeersManager {
             reputation_weights,
             refill_slots_interval: tokio::time::interval(refill_slots_interval),
             release_interval: tokio::time::interval_at(now + unban_interval, unban_interval),
-            connection_info,
+            connection_info: ConnectionInfo::new(connection_info),
             ban_list,
             backed_off_peers: Default::default(),
             ban_duration,
@@ -238,9 +241,7 @@ impl PeersManager {
             return Err(InboundConnectionError::IpBanned)
         }
 
-        if (!self.connection_info.has_in_capacity() || self.connection_info.max_inbound == 0) &&
-            self.trusted_peer_ids.is_empty()
-        {
+        if !self.connection_info.has_in_capacity() && self.trusted_peer_ids.is_empty() {
             // if we don't have any inbound slots and no trusted peers, we don't accept any new
             // connections
             return Err(InboundConnectionError::ExceedsCapacity)
@@ -918,42 +919,37 @@ impl Default for PeersManager {
 }
 
 /// Tracks stats about connected nodes
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(default))]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ConnectionInfo {
     /// Counter for currently occupied slots for active outbound connections.
-    #[cfg_attr(feature = "serde", serde(skip))]
     num_outbound: usize,
     /// Counter for pending outbound connections.
-    #[cfg_attr(feature = "serde", serde(skip))]
     num_pending_out: usize,
     /// Counter for currently occupied slots for active inbound connections.
-    #[cfg_attr(feature = "serde", serde(skip))]
     num_inbound: usize,
     /// Counter for pending inbound connections.
-    #[cfg_attr(feature = "serde", serde(skip))]
     num_pending_in: usize,
-    /// Maximum allowed outbound connections.
-    max_outbound: usize,
-    /// Maximum allowed inbound connections.
-    max_inbound: usize,
-    /// Maximum allowed concurrent outbound dials.
-    #[cfg_attr(feature = "serde", serde(default))]
-    max_concurrent_outbound_dials: usize,
+    /// Restrictions on number of connections.
+    config: ConnectionsConfig,
 }
 
 // === impl ConnectionInfo ===
 
 impl ConnectionInfo {
+    /// Returns a new [`ConnectionInfo`] with the given config.
+    const fn new(config: ConnectionsConfig) -> Self {
+        Self { config, num_outbound: 0, num_pending_out: 0, num_inbound: 0, num_pending_in: 0 }
+    }
+
     ///  Returns `true` if there's still capacity for a new outgoing connection.
     const fn has_out_capacity(&self) -> bool {
-        self.num_pending_out < self.max_concurrent_outbound_dials &&
-            self.num_outbound < self.max_outbound
+        self.num_pending_out < self.config.max_concurrent_outbound_dials &&
+            self.num_outbound < self.config.max_outbound
     }
 
     ///  Returns `true` if there's still capacity for a new incoming connection.
     const fn has_in_capacity(&self) -> bool {
-        self.num_inbound < self.max_inbound
+        self.num_inbound < self.config.max_inbound
     }
 
     fn decr_state(&mut self, state: PeerConnectionState) {
@@ -998,20 +994,6 @@ impl ConnectionInfo {
     }
 }
 
-impl Default for ConnectionInfo {
-    fn default() -> Self {
-        Self {
-            num_outbound: 0,
-            num_inbound: 0,
-            max_outbound: DEFAULT_MAX_COUNT_PEERS_OUTBOUND as usize,
-            max_inbound: DEFAULT_MAX_COUNT_PEERS_INBOUND as usize,
-            max_concurrent_outbound_dials: DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS,
-            num_pending_out: 0,
-            num_pending_in: 0,
-        }
-    }
-}
-
 /// Tracks info about a single peer.
 #[derive(Debug, Clone)]
 pub struct Peer {
@@ -1029,7 +1011,8 @@ pub struct Peer {
     kind: PeerKind,
     /// Whether the peer is currently backed off.
     backed_off: bool,
-    /// Counts number of times the peer was backed off due to a severe [`BackoffKind`].
+    /// Counts number of times the peer was backed off due to a severe
+    /// [`reth_network_types::BackoffKind`].
     severe_backoff_counter: u8,
 }
 
@@ -1263,265 +1246,6 @@ pub enum PeerAction {
     PeerRemoved(PeerId),
 }
 
-/// Config type for initiating a [`PeersManager`] instance.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(default))]
-pub struct PeersConfig {
-    /// How often to recheck free slots for outbound connections.
-    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
-    pub refill_slots_interval: Duration,
-    /// Trusted nodes to connect to or accept from
-    pub trusted_nodes: HashSet<NodeRecord>,
-    /// Connect to or accept from trusted nodes only?
-    #[cfg_attr(feature = "serde", serde(alias = "connect_trusted_nodes_only"))]
-    pub trusted_nodes_only: bool,
-    /// Maximum number of backoff attempts before we give up on a peer and dropping.
-    ///
-    /// The max time spent of a peer before it's removed from the set is determined by the
-    /// configured backoff duration and the max backoff count.
-    ///
-    /// With a backoff counter of 5 and a backoff duration of 1h, the minimum time spent of the
-    /// peer in the table is the sum of all backoffs (1h + 2h + 3h + 4h + 5h = 15h).
-    ///
-    /// Note: this does not apply to trusted peers.
-    pub max_backoff_count: u8,
-    /// Basic nodes to connect to.
-    #[cfg_attr(feature = "serde", serde(skip))]
-    pub basic_nodes: HashSet<NodeRecord>,
-    /// How long to ban bad peers.
-    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
-    pub ban_duration: Duration,
-    /// Restrictions on `PeerIds` and Ips.
-    #[cfg_attr(feature = "serde", serde(skip))]
-    pub ban_list: BanList,
-    /// Restrictions on connections.
-    pub connection_info: ConnectionInfo,
-    /// How to weigh reputation changes.
-    pub reputation_weights: ReputationChangeWeights,
-    /// How long to backoff peers that are we failed to connect to for non-fatal reasons, such as
-    /// [`DisconnectReason::TooManyPeers`].
-    ///
-    /// The backoff duration increases with number of backoff attempts.
-    pub backoff_durations: PeerBackoffDurations,
-}
-
-impl Default for PeersConfig {
-    fn default() -> Self {
-        Self {
-            refill_slots_interval: Duration::from_millis(5_000),
-            connection_info: Default::default(),
-            reputation_weights: Default::default(),
-            ban_list: Default::default(),
-            // Ban peers for 12h
-            ban_duration: Duration::from_secs(60 * 60 * 12),
-            backoff_durations: Default::default(),
-            trusted_nodes: Default::default(),
-            trusted_nodes_only: false,
-            basic_nodes: Default::default(),
-            max_backoff_count: 5,
-        }
-    }
-}
-
-impl PeersConfig {
-    /// A set of `peer_ids` and ip addr that we want to never connect to
-    pub fn with_ban_list(mut self, ban_list: BanList) -> Self {
-        self.ban_list = ban_list;
-        self
-    }
-
-    /// Configure how long to ban bad peers
-    pub const fn with_ban_duration(mut self, ban_duration: Duration) -> Self {
-        self.ban_duration = ban_duration;
-        self
-    }
-
-    /// Maximum occupied slots for outbound connections.
-    pub const fn with_max_pending_outbound(mut self, num_outbound: usize) -> Self {
-        self.connection_info.num_outbound = num_outbound;
-        self
-    }
-
-    /// Maximum occupied slots for inbound connections.
-    pub const fn with_max_pending_inbound(mut self, num_inbound: usize) -> Self {
-        self.connection_info.num_inbound = num_inbound;
-        self
-    }
-
-    /// Maximum allowed outbound connections.
-    pub const fn with_max_outbound(mut self, max_outbound: usize) -> Self {
-        self.connection_info.max_outbound = max_outbound;
-        self
-    }
-
-    /// Maximum allowed inbound connections with optional update.
-    pub const fn with_max_inbound_opt(mut self, max_inbound: Option<usize>) -> Self {
-        if let Some(max_inbound) = max_inbound {
-            self.connection_info.max_inbound = max_inbound;
-        }
-        self
-    }
-
-    /// Maximum allowed outbound connections with optional update.
-    pub const fn with_max_outbound_opt(mut self, max_outbound: Option<usize>) -> Self {
-        if let Some(max_outbound) = max_outbound {
-            self.connection_info.max_outbound = max_outbound;
-        }
-        self
-    }
-
-    /// Maximum allowed inbound connections.
-    pub const fn with_max_inbound(mut self, max_inbound: usize) -> Self {
-        self.connection_info.max_inbound = max_inbound;
-        self
-    }
-
-    /// Maximum allowed concurrent outbound dials.
-    pub const fn with_max_concurrent_dials(mut self, max_concurrent_outbound_dials: usize) -> Self {
-        self.connection_info.max_concurrent_outbound_dials = max_concurrent_outbound_dials;
-        self
-    }
-
-    /// Nodes to always connect to.
-    pub fn with_trusted_nodes(mut self, nodes: HashSet<NodeRecord>) -> Self {
-        self.trusted_nodes = nodes;
-        self
-    }
-
-    /// Connect only to trusted nodes.
-    pub const fn with_trusted_nodes_only(mut self, trusted_only: bool) -> Self {
-        self.trusted_nodes_only = trusted_only;
-        self
-    }
-
-    /// Nodes available at launch.
-    pub fn with_basic_nodes(mut self, nodes: HashSet<NodeRecord>) -> Self {
-        self.basic_nodes = nodes;
-        self
-    }
-
-    /// Configures the max allowed backoff count.
-    pub const fn with_max_backoff_count(mut self, max_backoff_count: u8) -> Self {
-        self.max_backoff_count = max_backoff_count;
-        self
-    }
-
-    /// Configures how to weigh reputation changes.
-    pub const fn with_reputation_weights(
-        mut self,
-        reputation_weights: ReputationChangeWeights,
-    ) -> Self {
-        self.reputation_weights = reputation_weights;
-        self
-    }
-
-    /// Configures how long to backoff peers that are we failed to connect to for non-fatal reasons
-    pub const fn with_backoff_durations(mut self, backoff_durations: PeerBackoffDurations) -> Self {
-        self.backoff_durations = backoff_durations;
-        self
-    }
-
-    /// Returns the maximum number of peers, inbound and outbound.
-    pub const fn max_peers(&self) -> usize {
-        self.connection_info.max_outbound + self.connection_info.max_inbound
-    }
-
-    /// Read from file nodes available at launch. Ignored if None.
-    pub fn with_basic_nodes_from_file(
-        self,
-        optional_file: Option<impl AsRef<Path>>,
-    ) -> Result<Self, io::Error> {
-        let Some(file_path) = optional_file else { return Ok(self) };
-        let reader = match std::fs::File::open(file_path.as_ref()) {
-            Ok(file) => io::BufReader::new(file),
-            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(self),
-            Err(e) => Err(e)?,
-        };
-        info!(target: "net::peers", file = %file_path.as_ref().display(), "Loading saved peers");
-        let nodes: HashSet<NodeRecord> = serde_json::from_reader(reader)?;
-        Ok(self.with_basic_nodes(nodes))
-    }
-
-    /// Returns settings for testing
-    #[cfg(test)]
-    fn test() -> Self {
-        Self {
-            refill_slots_interval: Duration::from_millis(100),
-            backoff_durations: PeerBackoffDurations::test(),
-            ..Default::default()
-        }
-    }
-}
-
-/// The durations to use when a backoff should be applied to a peer.
-///
-/// See also [`BackoffKind`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct PeerBackoffDurations {
-    /// Applies to connection problems where there is a chance that they will be resolved after the
-    /// short duration.
-    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
-    pub low: Duration,
-    /// Applies to more severe connection problems where there is a lower chance that they will be
-    /// resolved.
-    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
-    pub medium: Duration,
-    /// Intended for spammers, or bad peers in general.
-    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
-    pub high: Duration,
-    /// Maximum total backoff duration.
-    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
-    pub max: Duration,
-}
-
-impl PeerBackoffDurations {
-    /// Returns the corresponding [`Duration`]
-    pub const fn backoff(&self, kind: BackoffKind) -> Duration {
-        match kind {
-            BackoffKind::Low => self.low,
-            BackoffKind::Medium => self.medium,
-            BackoffKind::High => self.high,
-        }
-    }
-
-    /// Returns the timestamp until which we should backoff.
-    ///
-    /// The Backoff duration is capped by the configured maximum backoff duration.
-    pub fn backoff_until(&self, kind: BackoffKind, backoff_counter: u8) -> std::time::Instant {
-        let backoff_time = self.backoff(kind);
-        let backoff_time = backoff_time + backoff_time * backoff_counter as u32;
-        let now = std::time::Instant::now();
-        now + backoff_time.min(self.max)
-    }
-
-    /// Returns durations for testing.
-    #[cfg(test)]
-    const fn test() -> Self {
-        Self {
-            low: Duration::from_millis(200),
-            medium: Duration::from_millis(200),
-            high: Duration::from_millis(200),
-            max: Duration::from_millis(200),
-        }
-    }
-}
-
-impl Default for PeerBackoffDurations {
-    fn default() -> Self {
-        Self {
-            low: Duration::from_secs(30),
-            // 3min
-            medium: Duration::from_secs(60 * 3),
-            // 15min
-            high: Duration::from_secs(60 * 15),
-            // 1h
-            max: Duration::from_secs(60 * 60),
-        }
-    }
-}
-
 /// Error thrown when a incoming connection is rejected right away
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum InboundConnectionError {
@@ -1541,11 +1265,9 @@ impl Display for InboundConnectionError {
 mod tests {
     use super::PeersManager;
     use crate::{
-        error::BackoffKind,
         peers::{
-            manager::{ConnectionInfo, PeerBackoffDurations, PeerConnectionState},
-            reputation::DEFAULT_REPUTATION,
-            InboundConnectionError, PeerAction,
+            ConnectionInfo, InboundConnectionError, PeerAction, PeerBackoffDurations,
+            PeerConnectionState,
         },
         session::PendingSessionHandshakeError,
         PeersConfig,
@@ -1558,6 +1280,7 @@ mod tests {
     use reth_net_banlist::BanList;
     use reth_network_api::{Direction, ReputationChangeKind};
     use reth_network_peers::PeerId;
+    use reth_network_types::{peers::reputation::DEFAULT_REPUTATION, BackoffKind};
     use reth_primitives::B512;
     use std::{
         collections::HashSet,
@@ -2106,7 +1829,7 @@ mod tests {
         peers.add_trusted_peer_id(trusted);
 
         // saturate the inbound slots
-        for i in 0..peers.connection_info.max_inbound {
+        for i in 0..peers.connection_info.config.max_inbound {
             let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, i as u8)), 8008);
             assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
             let peer_id = PeerId::random();
@@ -2404,7 +2127,7 @@ mod tests {
         match a {
             Ok(_) => panic!(),
             Err(err) => match err {
-                super::InboundConnectionError::IpBanned {} => {
+                InboundConnectionError::IpBanned {} => {
                     assert_eq!(peer_manager.connection_info.num_pending_in, 0)
                 }
                 _ => unreachable!(),
@@ -2769,7 +2492,7 @@ mod tests {
         let mut peer_manager = PeersManager::new(config);
         let ip = IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2));
         let socket_addr = SocketAddr::new(ip, 8008);
-        for _ in 0..peer_manager.connection_info.max_concurrent_outbound_dials * 2 {
+        for _ in 0..peer_manager.connection_info.config.max_concurrent_outbound_dials * 2 {
             peer_manager.add_peer(PeerId::random(), socket_addr, None);
         }
 
@@ -2779,7 +2502,7 @@ mod tests {
             .iter()
             .filter(|ev| matches!(ev, PeerAction::Connect { .. }))
             .count();
-        assert_eq!(dials, peer_manager.connection_info.max_concurrent_outbound_dials);
+        assert_eq!(dials, peer_manager.connection_info.config.max_concurrent_outbound_dials);
     }
 
     #[tokio::test]
@@ -2790,18 +2513,18 @@ mod tests {
         let socket_addr = SocketAddr::new(ip, 8008);
 
         // add more peers than allowed
-        for _ in 0..peer_manager.connection_info.max_concurrent_outbound_dials * 2 {
+        for _ in 0..peer_manager.connection_info.config.max_concurrent_outbound_dials * 2 {
             peer_manager.add_peer(PeerId::random(), socket_addr, None);
         }
 
-        for _ in 0..peer_manager.connection_info.max_concurrent_outbound_dials * 2 {
+        for _ in 0..peer_manager.connection_info.config.max_concurrent_outbound_dials * 2 {
             match event!(peer_manager) {
                 PeerAction::PeerAdded(_) => {}
                 _ => unreachable!(),
             }
         }
 
-        for _ in 0..peer_manager.connection_info.max_concurrent_outbound_dials {
+        for _ in 0..peer_manager.connection_info.config.max_concurrent_outbound_dials {
             match event!(peer_manager) {
                 PeerAction::Connect { .. } => {}
                 _ => unreachable!(),
@@ -2813,7 +2536,7 @@ mod tests {
 
         // all dialed connections should be in 'PendingOut' state
         let dials = peer_manager.connection_info.num_pending_out;
-        assert_eq!(dials, peer_manager.connection_info.max_concurrent_outbound_dials);
+        assert_eq!(dials, peer_manager.connection_info.config.max_concurrent_outbound_dials);
 
         let num_pendingout_states = peer_manager
             .peers
@@ -2823,7 +2546,7 @@ mod tests {
             .collect::<Vec<PeerId>>();
         assert_eq!(
             num_pendingout_states.len(),
-            peer_manager.connection_info.max_concurrent_outbound_dials
+            peer_manager.connection_info.config.max_concurrent_outbound_dials
         );
 
         // establish dialed connections

@@ -1,4 +1,4 @@
-//! Common CLI utility functions.
+//! Common db operations
 
 use boyer_moore_magiclen::BMByte;
 use eyre::Result;
@@ -15,15 +15,6 @@ use reth_fs_util as fs;
 use reth_provider::{ChainSpecProvider, ProviderFactory};
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
-
-/// Exposing `open_db_read_only` function
-pub mod db {
-    pub use reth_db::open_db_read_only;
-}
-
-/// Re-exported from `reth_node_core`, also to prevent a breaking change. See the comment on
-/// the `reth_node_core::args` re-export for more details.
-pub use reth_node_core::utils::*;
 
 /// Wrapper over DB that implements many useful DB queries.
 #[derive(Debug)]
