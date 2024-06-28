@@ -476,8 +476,8 @@ impl BlockReader for MockEthProvider {
 
     fn sealed_block_with_senders(
         &self,
-        id: BlockHashOrNumber,
-        transaction_kind: TransactionVariant,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<SealedBlockWithSenders>> {
         Ok(None)
     }
