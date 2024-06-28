@@ -111,7 +111,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// Returns a [`TxEnv`] from a [`TransactionSignedEcRecovered`].
     fn tx_env(&self, transaction: &TransactionSignedEcRecovered) -> TxEnv {
         let mut tx_env = TxEnv::default();
-        fill_tx_env(&mut tx_env, transaction.deref(), transaction.signer());
+        self.fill_tx_env(&mut tx_env, transaction.deref(), transaction.signer());
         tx_env
     }
 
