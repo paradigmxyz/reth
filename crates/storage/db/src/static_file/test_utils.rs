@@ -1,3 +1,5 @@
+//! Test helper impls for generating static files
+
 use crate::{RawKey, RawTable};
 use reth_db_api::{
     cursor::DbCursorRO,

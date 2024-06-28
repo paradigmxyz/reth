@@ -1,12 +1,9 @@
 //! reth's static file database table import and access
 
-mod generation;
 use std::{
     collections::{hash_map::Entry, HashMap},
     path::Path,
 };
-
-pub use generation::*;
 
 mod cursor;
 pub use cursor::StaticFileCursor;
@@ -20,6 +17,9 @@ use reth_primitives::{
 };
 
 mod masks;
+
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
 
 /// Alias type for a map of [`StaticFileSegment`] and sorted lists of existing static file ranges.
 type SortedStaticFiles =

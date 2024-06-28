@@ -1,14 +1,14 @@
-use crate::segments::{ Segment};
-use alloy_primitives::{BlockNumber, TxNumber};
-use reth_db::{static_file::create_static_file_T1, tables};
+use crate::segments::Segment;
+use alloy_primitives::BlockNumber;
+use reth_db::tables;
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockReader, DatabaseProviderRO, TransactionsProviderExt,
+    BlockReader, DatabaseProviderRO,
 };
-use reth_static_file_types::{SegmentConfig, SegmentHeader, StaticFileSegment};
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use std::{ops::RangeInclusive, path::Path};
+use std::ops::RangeInclusive;
 
 /// Static File segment responsible for [`StaticFileSegment::Transactions`] part of data.
 #[derive(Debug, Default)]

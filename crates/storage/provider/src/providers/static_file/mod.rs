@@ -60,7 +60,7 @@ mod tests {
     use crate::{test_utils::create_test_provider_factory, HeaderProvider};
     use rand::seq::SliceRandom;
     use reth_db::{
-        static_file::create_static_file_T1_T2_T3, CanonicalHeaders, HeaderNumbers,
+        static_file::test_utils::create_static_file_T1_T2_T3, CanonicalHeaders, HeaderNumbers,
         HeaderTerminalDifficulties, Headers, RawTable,
     };
     use reth_db_api::{

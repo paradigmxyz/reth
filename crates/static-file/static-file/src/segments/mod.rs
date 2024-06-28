@@ -10,20 +10,11 @@ mod receipts;
 pub use receipts::Receipts;
 
 use alloy_primitives::BlockNumber;
-use reth_db::{RawKey, RawTable};
-use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
-use reth_nippy_jar::NippyJar;
-use reth_provider::{
-    providers::StaticFileProvider, DatabaseProviderRO, ProviderError, TransactionsProviderExt,
-};
-use reth_static_file_types::{
-    find_fixed_range, Compression, Filters, InclusionFilter, PerfectHashingFunction, SegmentConfig,
-    SegmentHeader, StaticFileSegment,
-};
+use reth_db_api::database::Database;
+use reth_provider::{providers::StaticFileProvider, DatabaseProviderRO};
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
-use std::{ops::RangeInclusive, path::Path};
-
-pub(crate) type Rows<const COLUMNS: usize> = [Vec<Vec<u8>>; COLUMNS];
+use std::ops::RangeInclusive;
 
 /// A segment represents moving some portion of the data to static files.
 pub trait Segment<DB: Database>: Send + Sync {

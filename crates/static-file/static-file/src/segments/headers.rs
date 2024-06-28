@@ -1,14 +1,14 @@
-use crate::segments::{ Segment, SegmentHeader};
+use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
-use reth_db::{static_file::create_static_file_T1_T2_T3, tables, RawKey, RawTable};
+use reth_db::tables;
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     DatabaseProviderRO,
 };
-use reth_static_file_types::{SegmentConfig, StaticFileSegment};
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
-use std::{ops::RangeInclusive, path::Path};
+use std::ops::RangeInclusive;
 
 /// Static File segment responsible for [`StaticFileSegment::Headers`] part of data.
 #[derive(Debug, Default)]
