@@ -1033,7 +1033,7 @@ pub struct PeerAddr {
 
 impl PeerAddr {
     /// Returns a new `PeerAddr` with the given `tcp` and `udp` addresses.
-    pub fn new(tcp: SocketAddr, udp: Option<SocketAddr>) -> Self {
+    pub const fn new(tcp: SocketAddr, udp: Option<SocketAddr>) -> Self {
         Self { tcp, udp }
     }
 
@@ -1317,7 +1317,7 @@ mod tests {
     use super::PeersManager;
     use crate::{
         peers::{
-            ConnectionInfo, InboundConnectionError, PeerAction, PeerBackoffDurations,
+            ConnectionInfo, InboundConnectionError, PeerAction, PeerAddr, PeerBackoffDurations,
             PeerConnectionState,
         },
         session::PendingSessionHandshakeError,
