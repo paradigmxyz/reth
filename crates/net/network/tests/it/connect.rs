@@ -45,8 +45,8 @@ async fn test_establish_connections() {
         let mut listener1 = handle1.event_listener();
         let mut listener2 = handle2.event_listener();
 
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
-        handle0.add_peer(*handle2.peer_id(), handle2.local_addr(), None);
+        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+        handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
 
         let mut expected_connections = HashSet::from([*handle1.peer_id(), *handle2.peer_id()]);
         let mut expected_peers = expected_connections.clone();
@@ -106,12 +106,12 @@ async fn test_already_connected() {
     let mut listener0 = NetworkEventStream::new(handle0.event_listener());
     let mut listener2 = NetworkEventStream::new(handle2.event_listener());
 
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
 
     let peer = listener0.next_session_established().await.unwrap();
     assert_eq!(peer, *handle1.peer_id());
 
-    handle2.add_peer(*handle0.peer_id(), handle0.local_addr(), None);
+    handle2.add_peer(*handle0.peer_id(), handle0.local_addr());
     let peer = listener2.next_session_established().await.unwrap();
     assert_eq!(peer, *handle0.peer_id());
 
@@ -148,10 +148,10 @@ async fn test_get_peer() {
 
     let mut listener0 = NetworkEventStream::new(handle0.event_listener());
 
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
     let _ = listener0.next_session_established().await.unwrap();
 
-    handle0.add_peer(*handle2.peer_id(), handle2.local_addr(), None);
+    handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
     let _ = listener0.next_session_established().await.unwrap();
 
     let peers = handle0.get_all_peers().await.unwrap();
@@ -182,7 +182,7 @@ async fn test_get_peer_by_id() {
 
     let mut listener0 = NetworkEventStream::new(handle0.event_listener());
 
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
     let _ = listener0.next_session_established().await.unwrap();
 
     let peer = handle0.get_peer_by_id(*handle1.peer_id()).await.unwrap();
@@ -442,7 +442,7 @@ async fn test_outgoing_connect_with_single_geth() {
         let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
 
         // add geth as a peer then wait for a `SessionEstablished` event
-        handle.add_peer(geth_peer_id, geth_socket, None);
+        handle.add_peer(geth_peer_id, geth_socket);
 
         // check for a sessionestablished event
         let incoming_peer_id = event_stream.next_session_established().await.unwrap();
@@ -488,7 +488,7 @@ async fn test_geth_disconnect() {
         let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
 
         // add geth as a peer then wait for `PeerAdded` and `SessionEstablished` events.
-        handle.add_peer(geth_peer_id, geth_socket, None);
+        handle.add_peer(geth_peer_id, geth_socket);
 
         match events.next().await {
             Some(NetworkEvent::PeerAdded(peer_id)) => assert_eq!(peer_id, geth_peer_id),
@@ -531,9 +531,9 @@ async fn test_shutdown() {
     let mut listener0 = NetworkEventStream::new(handle0.event_listener());
     let mut listener1 = NetworkEventStream::new(handle1.event_listener());
 
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
-    handle0.add_peer(*handle2.peer_id(), handle2.local_addr(), None);
-    handle1.add_peer(*handle2.peer_id(), handle2.local_addr(), None);
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    handle0.add_peer(*handle2.peer_id(), handle2.local_addr());
+    handle1.add_peer(*handle2.peer_id(), handle2.local_addr());
 
     let mut expected_connections = HashSet::from([*handle1.peer_id(), *handle2.peer_id()]);
 
@@ -558,7 +558,7 @@ async fn test_shutdown() {
     assert_eq!(reason, Some(DisconnectReason::ClientQuitting));
 
     // New connections ignored
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
     assert_eq!(handle0.num_connected_peers(), 0);
 }
 
@@ -580,7 +580,7 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
 
     let handle = network.handle().clone();
 
-    other_peer_handle.add_peer(*handle.peer_id(), handle.local_addr(), None);
+    other_peer_handle.add_peer(*handle.peer_id(), handle.local_addr());
 
     tokio::task::spawn(network);
     let net_handle = net.spawn();
@@ -615,7 +615,7 @@ async fn test_always_accept_incoming_connections_from_trusted_peers() {
     let mut events_peer1 = NetworkEventStream::new(peer1_handle.event_listener());
 
     // incoming connection should fail because exceeding max_inbound
-    peer1_handle.add_peer(*handle.peer_id(), handle.local_addr(), None);
+    peer1_handle.add_peer(*handle.peer_id(), handle.local_addr());
 
     let (peer_id, reason) = events_peer1.next_session_closed().await.unwrap();
     assert_eq!(peer_id, *handle.peer_id());
@@ -625,7 +625,7 @@ async fn test_always_accept_incoming_connections_from_trusted_peers() {
     assert_eq!(peer_id, *peer1_handle.peer_id());
 
     // outbound connection from `peer2` should succeed
-    peer2_handle.add_peer(*handle.peer_id(), handle.local_addr(), None);
+    peer2_handle.add_peer(*handle.peer_id(), handle.local_addr());
     let peer_id = events.next_session_established().await.unwrap();
     assert_eq!(peer_id, *peer2_handle.peer_id());
 
@@ -652,18 +652,18 @@ async fn test_rejected_by_already_connect() {
     let mut events = NetworkEventStream::new(handle.event_listener());
 
     // incoming connection should succeed
-    other_peer_handle1.add_peer(*handle.peer_id(), handle.local_addr(), None);
+    other_peer_handle1.add_peer(*handle.peer_id(), handle.local_addr());
     let peer_id = events.next_session_established().await.unwrap();
     assert_eq!(peer_id, *other_peer_handle1.peer_id());
     assert_eq!(handle.num_connected_peers(), 1);
 
     // incoming connection from the same peer should be rejected by already connected
     // and num_inbount should still be 1
-    other_peer_handle1.add_peer(*handle.peer_id(), handle.local_addr(), None);
+    other_peer_handle1.add_peer(*handle.peer_id(), handle.local_addr());
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     // incoming connection from other_peer2 should succeed
-    other_peer_handle2.add_peer(*handle.peer_id(), handle.local_addr(), None);
+    other_peer_handle2.add_peer(*handle.peer_id(), handle.local_addr());
     let peer_id = events.next_session_established().await.unwrap();
     assert_eq!(peer_id, *other_peer_handle2.peer_id());
 

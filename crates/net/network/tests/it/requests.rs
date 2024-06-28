@@ -55,7 +55,7 @@ async fn test_get_body() {
 
     let fetch0 = handle0.fetch_client().await.unwrap();
 
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
     let connected = events0.next_session_established().await.unwrap();
     assert_eq!(connected, *handle1.peer_id());
 
@@ -103,7 +103,7 @@ async fn test_get_header() {
 
     let fetch0 = handle0.fetch_client().await.unwrap();
 
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
     let connected = events0.next_session_established().await.unwrap();
     assert_eq!(connected, *handle1.peer_id());
 

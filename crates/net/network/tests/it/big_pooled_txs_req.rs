@@ -57,7 +57,7 @@ async fn test_large_tx_req() {
 
     let _handle = net.spawn();
 
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
     let connected = events0.next_session_established().await.unwrap();
     assert_eq!(connected, *handle1.peer_id());
 

@@ -1680,7 +1680,7 @@ mod tests {
         let handle = net.spawn();
 
         let listener0 = handle0.event_listener();
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
+        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();
@@ -1763,7 +1763,7 @@ mod tests {
         let handle = net.spawn();
 
         let listener0 = handle0.event_listener();
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
+        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();
@@ -1852,7 +1852,7 @@ mod tests {
 
         let listener0 = handle0.event_listener();
 
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
+        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();
@@ -1943,7 +1943,7 @@ mod tests {
 
         let listener0 = handle0.event_listener();
 
-        handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
+        handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
         let client = NoopProvider::default();

@@ -24,7 +24,7 @@ async fn test_session_established_with_highest_version() {
     let handle = net.spawn();
 
     let mut events = handle0.event_listener().take(2);
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
 
     while let Some(event) = events.next().await {
         match event {
@@ -62,7 +62,7 @@ async fn test_session_established_with_different_capability() {
     let handle = net.spawn();
 
     let mut events = handle0.event_listener().take(2);
-    handle0.add_peer(*handle1.peer_id(), handle1.local_addr(), None);
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
 
     while let Some(event) = events.next().await {
         match event {
