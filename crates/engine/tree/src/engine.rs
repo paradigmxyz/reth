@@ -1,21 +1,18 @@
 //! An engine API handler for the chain.
 
 use crate::{
-    chain::{ChainHandler, FromOrchestrator, HandlerEvent, OrchestratorState},
+    chain::{ChainHandler, FromOrchestrator, HandlerEvent},
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
-    tree::{EngineApiTreeHandler, TreeEvent},
 };
 use futures::{Stream, StreamExt};
-use reth_beacon_consensus::{BeaconEngineMessage, OnForkChoiceUpdated};
+use reth_beacon_consensus::BeaconEngineMessage;
 use reth_engine_primitives::EngineTypes;
 use reth_primitives::{SealedBlockWithSenders, B256};
-use reth_rpc_types::engine::{PayloadStatus, PayloadStatusEnum};
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::HashSet,
     task::{Context, Poll},
 };
 use tokio::sync::mpsc;
-use tracing::trace;
 
 /// Advances the chain based on incoming requests.
 ///
@@ -46,7 +43,7 @@ pub struct EngineHandler<T, S, D> {
 
 impl<T, S, D> EngineHandler<T, S, D> {
     /// Creates a new [`EngineHandler`] with the given handler and downloader.
-    pub fn new(handler: T, downloader: D, incoming_requests: S) -> Self
+    pub const fn new(handler: T, downloader: D, incoming_requests: S) -> Self
     where
         T: EngineRequestHandler,
     {
@@ -70,31 +67,26 @@ where
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<HandlerEvent<Self::Event>> {
         loop {
             // drain the handler first
-            loop {
-                match self.handler.poll(cx) {
-                    Poll::Ready(ev) => {
-                        match ev {
-                            RequestHandlerEvent::Idle => break,
-                            RequestHandlerEvent::HandlerEvent(ev) => {
-                                return match ev {
-                                    HandlerEvent::Pipeline(target) => {
-                                        // bubble up pipeline request
-                                        self.downloader.on_action(DownloadAction::Clear);
-                                        Poll::Ready(HandlerEvent::Pipeline(target))
-                                    }
-                                    HandlerEvent::Event(ev) => {
-                                        // bubble up the event
-                                        Poll::Ready(HandlerEvent::Event(ev))
-                                    }
-                                }
+            while let Poll::Ready(ev) = self.handler.poll(cx) {
+                match ev {
+                    RequestHandlerEvent::Idle => break,
+                    RequestHandlerEvent::HandlerEvent(ev) => {
+                        return match ev {
+                            HandlerEvent::Pipeline(target) => {
+                                // bubble up pipeline request
+                                self.downloader.on_action(DownloadAction::Clear);
+                                Poll::Ready(HandlerEvent::Pipeline(target))
                             }
-                            RequestHandlerEvent::Download(req) => {
-                                // delegate download request to the downloader
-                                self.downloader.on_action(DownloadAction::Download(req));
+                            HandlerEvent::Event(ev) => {
+                                // bubble up the event
+                                Poll::Ready(HandlerEvent::Event(ev))
                             }
                         }
                     }
-                    Poll::Pending => break,
+                    RequestHandlerEvent::Download(req) => {
+                        // delegate download request to the downloader
+                        self.downloader.on_action(DownloadAction::Download(req));
+                    }
                 }
             }
 
@@ -185,8 +177,11 @@ pub enum EngineApiEvent {}
 
 #[derive(Debug)]
 pub enum FromEngine<Req> {
+    /// Event from the top level orchestrator.
     Event(FromOrchestrator),
+    /// Request from the engine
     Request(Req),
+    /// Downloaded blocks from the network.
     DownloadedBlocks(Vec<SealedBlockWithSenders>),
 }
 
@@ -199,8 +194,11 @@ impl<Req> From<FromOrchestrator> for FromEngine<Req> {
 /// Requests produced by a [`EngineRequestHandler`].
 #[derive(Debug)]
 pub enum RequestHandlerEvent<T> {
+    /// The handler is idle.
     Idle,
+    /// An event emitted by the handler.
     HandlerEvent(HandlerEvent<T>),
+    /// Request to download blocks.
     Download(DownloadRequest),
 }
 

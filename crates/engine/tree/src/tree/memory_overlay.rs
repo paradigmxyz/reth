@@ -17,7 +17,7 @@ pub struct MemoryOverlayStateProvider<H> {
 
 impl<H> MemoryOverlayStateProvider<H> {
     /// Create new memory overlay state provider.
-    pub fn new(in_memory: Vec<ExecutedBlock>, historical: H) -> Self {
+    pub const fn new(in_memory: Vec<ExecutedBlock>, historical: H) -> Self {
         Self { in_memory, historical }
     }
 }

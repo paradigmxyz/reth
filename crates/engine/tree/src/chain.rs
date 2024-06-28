@@ -102,27 +102,24 @@ where
                 Poll::Pending => {}
             }
 
-            // drain the handler
-            loop {
-                // poll the handler for the next event
-                match this.handler.poll(cx) {
-                    Poll::Ready(handler_event) => {
-                        match handler_event {
-                            HandlerEvent::Pipeline(target) => {
-                                // trigger pipeline and start polling it
-                                this.pipeline.on_action(BackfillAction::Start(target));
-                                continue 'outer
-                            }
-                            HandlerEvent::Event(ev) => {
-                                // bubble up the event
-                                return Poll::Ready(ChainEvent::Handler(ev));
-                            }
+            // poll the handler for the next event
+            match this.handler.poll(cx) {
+                Poll::Ready(handler_event) => {
+                    match handler_event {
+                        HandlerEvent::Pipeline(target) => {
+                            // trigger pipeline and start polling it
+                            this.pipeline.on_action(BackfillAction::Start(target));
+                            continue 'outer
+                        }
+                        HandlerEvent::Event(ev) => {
+                            // bubble up the event
+                            return Poll::Ready(ChainEvent::Handler(ev));
                         }
                     }
-                    Poll::Pending => {
-                        // no more events to process
-                        break 'outer
-                    }
+                }
+                Poll::Pending => {
+                    // no more events to process
+                    break 'outer
                 }
             }
         }

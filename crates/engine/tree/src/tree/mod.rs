@@ -162,7 +162,7 @@ pub struct TreeOutcome<T> {
 
 impl<T> TreeOutcome<T> {
     /// Create new tree outcome.
-    pub fn new(outcome: T) -> Self {
+    pub const fn new(outcome: T) -> Self {
         Self { outcome, event: None }
     }
 
@@ -518,7 +518,7 @@ where
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         } else {
             let mut latest_valid_hash = None;
-            let status = match self.insert_block_without_senders(block.clone()).unwrap() {
+            let status = match self.insert_block_without_senders(block).unwrap() {
                 InsertPayloadOk::Inserted(BlockStatus::Valid(_)) |
                 InsertPayloadOk::AlreadySeen(BlockStatus::Valid(_)) => {
                     latest_valid_hash = Some(block_hash);
