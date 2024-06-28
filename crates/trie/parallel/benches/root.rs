@@ -30,7 +30,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
             HashedStateChanges(db_state).write_to_db(provider_rw.tx_ref()).unwrap();
             let (_, updates) =
                 StateRoot::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
-            StorageWriter.write_trie_updates(updates, provider_rw.tx_ref()).unwrap();
+            StorageWriter::write_trie_updates(provider_rw.tx_ref(), updates).unwrap();
             provider_rw.commit().unwrap();
         }
 

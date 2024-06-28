@@ -623,7 +623,7 @@ mod tests {
         let modified_root = loader.root().unwrap();
 
         // Update the intermediate roots table so that we can run the incremental verification
-        StorageWriter.write_trie_updates(trie_updates, tx.tx_ref()).unwrap();
+        StorageWriter::write_trie_updates(tx.tx_ref(), trie_updates).unwrap();
 
         // 3. Calculate the incremental root
         let mut storage_changes = PrefixSetMut::default();
@@ -1225,7 +1225,7 @@ mod tests {
 
         let (got, updates) = StateRoot::from_tx(tx.tx_ref()).root_with_updates().unwrap();
         assert_eq!(expected, got);
-        StorageWriter.write_trie_updates(updates, tx.tx_ref()).unwrap();
+        StorageWriter::write_trie_updates(tx.tx_ref(), updates).unwrap();
 
         // read the account updates from the db
         let mut accounts_trie = tx.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
@@ -1272,7 +1272,7 @@ mod tests {
                     state.iter().map(|(&key, &balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
                 );
                 assert_eq!(expected_root, state_root);
-                StorageWriter.write_trie_updates(trie_updates, tx.tx_ref()).unwrap();
+                StorageWriter::write_trie_updates( tx.tx_ref(),trie_updates,).unwrap();
             }
         }
     }

@@ -892,7 +892,7 @@ mod tests {
             }
 
             let (_, updates) = StateRoot::from_tx(tx).root_with_updates().unwrap();
-            StorageWriter.write_trie_updates(updates, tx).unwrap();
+            StorageWriter::write_trie_updates(tx, updates).unwrap();
         })
         .unwrap();
 

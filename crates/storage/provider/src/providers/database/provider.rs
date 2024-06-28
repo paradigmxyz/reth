@@ -2381,7 +2381,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     block_hash: end_block_hash,
                 })))
             }
-            StorageWriter.write_trie_updates(trie_updates, &self.tx)?
+            StorageWriter::write_trie_updates(&self.tx, trie_updates)?
         }
         durations_recorder.record_relative(metrics::Action::InsertMerkleTree);
 
@@ -2577,7 +2577,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                     block_hash: parent_hash,
                 })))
             }
-            StorageWriter.write_trie_updates(trie_updates, &self.tx)?;
+            StorageWriter::write_trie_updates(&self.tx, trie_updates)?;
         }
 
         // get blocks
@@ -2778,7 +2778,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         // insert hashes and intermediate merkle nodes
         {
             HashedStateChanges(hashed_state).write_to_db(&self.tx)?;
-            StorageWriter.write_trie_updates(trie_updates, &self.tx)?;
+            StorageWriter::write_trie_updates(&self.tx, trie_updates)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 
@@ -2865,9 +2865,8 @@ impl StorageWriter {
     /// This method processes the trie operations contained within `TrieUpdates` and applies
     /// them to the database using the provided transaction.
     pub fn write_trie_updates(
-        &self,
-        trie_updates: TrieUpdates,
         tx: &(impl DbTx + DbTxMut),
+        trie_updates: TrieUpdates,
     ) -> Result<(), DatabaseError> {
         if trie_updates.is_empty() {
             return Ok(());

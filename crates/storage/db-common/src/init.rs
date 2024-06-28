@@ -474,7 +474,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
                 );
 
                 intermediate_state = Some(*state);
-                StorageWriter.write_trie_updates(updates, tx)?;
+                StorageWriter::write_trie_updates(tx, updates)?;
 
                 total_flushed_updates += updates_len;
 
@@ -488,7 +488,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
             StateRootProgress::Complete(root, _, updates) => {
                 let updates_len = updates.len();
 
-                StorageWriter.write_trie_updates(updates, tx)?;
+                StorageWriter::write_trie_updates(tx, updates)?;
 
                 total_flushed_updates += updates_len;
 

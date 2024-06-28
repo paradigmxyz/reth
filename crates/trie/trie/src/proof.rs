@@ -228,7 +228,7 @@ mod tests {
         let (root, updates) = StateRoot::from_tx(provider.tx_ref())
             .root_with_updates()
             .map_err(Into::<reth_db::DatabaseError>::into)?;
-        StorageWriter.write_trie_updates(updates, provider.tx_ref())?;
+        StorageWriter::write_trie_updates(provider.tx_ref(), updates)?;
 
         provider.commit()?;
 
