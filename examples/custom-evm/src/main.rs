@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_genesis::Genesis;
 use reth::{
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     primitives::{
@@ -17,11 +18,14 @@ use reth::{
     },
     tasks::TaskManager,
 };
-use reth_chainspec::{Chain, ChainSpec};
+use reth_chainspec::{Chain, ChainSpec, Head};
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
-use reth_primitives::Genesis;
+use reth_primitives::{
+    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg},
+    Header, U256,
+};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
 
@@ -61,7 +65,30 @@ impl MyEvmConfig {
     }
 }
 
-impl ConfigureEvmEnv for MyEvmConfig {}
+impl ConfigureEvmEnv for MyEvmConfig {
+    fn fill_cfg_env(
+        cfg_env: &mut CfgEnvWithHandlerCfg,
+        chain_spec: &ChainSpec,
+        header: &Header,
+        total_difficulty: U256,
+    ) {
+        let spec_id = reth_evm_ethereum::revm_spec(
+            chain_spec,
+            &Head {
+                number: header.number,
+                timestamp: header.timestamp,
+                difficulty: header.difficulty,
+                total_difficulty,
+                hash: Default::default(),
+            },
+        );
+
+        cfg_env.chain_id = chain_spec.chain().id();
+        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
+
+        cfg_env.handler_cfg.spec_id = spec_id;
+    }
+}
 
 impl ConfigureEvm for MyEvmConfig {
     type DefaultExternalContext<'a> = ();

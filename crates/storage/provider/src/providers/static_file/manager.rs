@@ -1457,6 +1457,15 @@ impl BlockReader for StaticFileProvider {
         Err(ProviderError::UnsupportedProvider)
     }
 
+    fn sealed_block_with_senders(
+        &self,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        // Required data not present in static_files
+        Err(ProviderError::UnsupportedProvider)
+    }
+
     fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)

@@ -12,18 +12,15 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
+use core::ops::Deref;
+
 use reth_chainspec::ChainSpec;
 use reth_primitives::{
-    revm::{
-        config::revm_spec,
-        env::{fill_block_env, fill_tx_env},
-    },
-    Address, Head, Header, TransactionSigned, U256,
+    revm::env::{fill_block_env, fill_tx_env},
+    Address, Header, TransactionSigned, TransactionSignedEcRecovered, U256,
 };
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
-use revm_primitives::{
-    AnalysisKind, BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv,
-};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv};
 
 pub mod either;
 pub mod execute;
@@ -111,6 +108,13 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 /// Default trait method  implementation is done w.r.t. L1.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
+    /// Returns a [`TxEnv`] from a [`TransactionSignedEcRecovered`].
+    fn tx_env(&self, transaction: &TransactionSignedEcRecovered) -> TxEnv {
+        let mut tx_env = TxEnv::default();
+        self.fill_tx_env(&mut tx_env, transaction.deref(), transaction.signer());
+        tx_env
+    }
+
     /// Fill transaction environment from a [`TransactionSigned`] and the given sender address.
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         fill_tx_env(tx_env, transaction, sender)
@@ -122,23 +126,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
-    ) {
-        let spec_id = revm_spec(
-            chain_spec,
-            Head {
-                number: header.number,
-                timestamp: header.timestamp,
-                difficulty: header.difficulty,
-                total_difficulty,
-                hash: Default::default(),
-            },
-        );
-
-        cfg_env.chain_id = chain_spec.chain().id();
-        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
-
-        cfg_env.handler_cfg.spec_id = spec_id;
-    }
+    );
 
     /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
     /// [`fill_block_env`].

@@ -21,6 +21,7 @@ reth-provider.workspace = true
 reth-node-builder.workspace = true
 reth-tokio-util.workspace = true
 reth-stages-types.workspace = true
+reth-network-peers.workspace = true
 
 jsonrpsee.workspace = true
 

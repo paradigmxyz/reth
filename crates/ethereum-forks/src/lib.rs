@@ -22,19 +22,18 @@ mod display;
 mod forkcondition;
 mod forkid;
 mod hardfork;
+mod hardforks;
 mod head;
 
 pub use forkid::{
     EnrForkIdEntry, ForkFilter, ForkFilterKey, ForkHash, ForkId, ForkTransition, ValidationError,
 };
-pub use hardfork::Hardfork;
+pub use hardfork::{EthereumHardfork, Hardfork, OptimismHardfork, DEV_HARDFORKS};
 pub use head::Head;
 
 pub use display::DisplayHardforks;
 pub use forkcondition::ForkCondition;
-
-/// Chains hardforks
-pub mod chains;
+pub use hardforks::*;
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub use arbitrary;

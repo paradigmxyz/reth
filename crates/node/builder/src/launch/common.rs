@@ -107,7 +107,7 @@ impl LaunchContext {
     ) -> eyre::Result<()> {
         if reth_config.prune.is_none() {
             if let Some(prune_config) = config.prune_config() {
-                reth_config.update_prune_confing(prune_config);
+                reth_config.update_prune_config(prune_config);
                 info!(target: "reth::cli", "Saving prune config to toml file");
                 reth_config.save(config_path.as_ref())?;
             }
@@ -251,7 +251,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     /// - Making sure the ETL dir is set to the datadir
     /// - RPC settings are adjusted to the correct port
     pub fn with_adjusted_configs(self) -> Self {
-        self.ensure_etl_datadir().with_adjusted_rpc_instance_ports()
+        self.ensure_etl_datadir().with_adjusted_instance_ports()
     }
 
     /// Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
@@ -265,7 +265,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     }
 
     /// Change rpc port numbers based on the instance number.
-    pub fn with_adjusted_rpc_instance_ports(mut self) -> Self {
+    pub fn with_adjusted_instance_ports(mut self) -> Self {
         self.node_config_mut().adjust_instance_ports();
         self
     }
