@@ -4,6 +4,7 @@
 use std::time::{Duration, Instant};
 
 use futures::Future;
+use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvm;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{

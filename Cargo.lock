@@ -2725,6 +2725,7 @@ dependencies = [
  "reth-discv4",
  "reth-network",
  "reth-network-api",
+ "reth-network-peers",
  "reth-primitives",
  "reth-tracing",
  "secp256k1",
@@ -2778,6 +2779,7 @@ dependencies = [
  "eyre",
  "reth",
  "reth-chainspec",
+ "reth-evm-ethereum",
  "reth-node-api",
  "reth-node-core",
  "reth-node-ethereum",
@@ -6579,6 +6581,7 @@ name = "reth-cli"
 version = "1.0.0"
 dependencies = [
  "clap",
+ "reth-cli-runner",
 ]
 
 [[package]]
@@ -6907,6 +6910,7 @@ dependencies = [
  "reth",
  "reth-chainspec",
  "reth-db",
+ "reth-network-peers",
  "reth-node-builder",
  "reth-payload-builder",
  "reth-primitives",
@@ -7064,6 +7068,7 @@ dependencies = [
  "alloy-rlp",
  "reth-chainspec",
  "reth-engine-primitives",
+ "reth-evm-ethereum",
  "reth-payload-primitives",
  "reth-primitives",
  "reth-rpc-types",
@@ -7082,9 +7087,13 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
+ "auto_impl",
  "crc",
+ "dyn-clone",
+ "once_cell",
  "proptest",
  "proptest-derive 0.5.0",
+ "rustc-hash 2.0.0",
  "serde",
  "thiserror-no-std",
 ]
@@ -7142,6 +7151,7 @@ dependencies = [
  "alloy-sol-types",
  "reth-chainspec",
  "reth-ethereum-consensus",
+ "reth-ethereum-forks",
  "reth-evm",
  "reth-execution-types",
  "reth-primitives",
@@ -7159,6 +7169,7 @@ version = "1.0.0"
 dependencies = [
  "reth-chainspec",
  "reth-consensus-common",
+ "reth-ethereum-forks",
  "reth-evm",
  "reth-execution-errors",
  "reth-execution-types",
@@ -7520,7 +7531,6 @@ dependencies = [
  "aquamarine",
  "backon",
  "confy",
- "discv5",
  "eyre",
  "fdlimit",
  "futures",
@@ -8100,6 +8110,7 @@ dependencies = [
  "reth-ipc",
  "reth-metrics",
  "reth-network-api",
+ "reth-network-peers",
  "reth-node-core",
  "reth-payload-builder",
  "reth-primitives",

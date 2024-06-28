@@ -1,6 +1,6 @@
 //! Collection of methods for block validation.
 
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     constants::{
@@ -8,7 +8,7 @@ use reth_primitives::{
         MAXIMUM_EXTRA_DATA_SIZE,
     },
     eip4844::calculate_excess_blob_gas,
-    GotExpected, Hardfork, Header, SealedBlock, SealedHeader,
+    EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader,
 };
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
@@ -29,7 +29,7 @@ pub fn validate_header_base_fee(
     header: &SealedHeader,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
-    if chain_spec.fork(Hardfork::London).active_at_block(header.number) &&
+    if chain_spec.fork(EthereumHardfork::London).active_at_block(header.number) &&
         header.base_fee_per_gas.is_none()
     {
         return Err(ConsensusError::BaseFeeMissing)
@@ -192,11 +192,11 @@ pub fn validate_against_parent_eip1559_base_fee(
     parent: &SealedHeader,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
-    if chain_spec.fork(Hardfork::London).active_at_block(header.number) {
+    if chain_spec.fork(EthereumHardfork::London).active_at_block(header.number) {
         let base_fee = header.base_fee_per_gas.ok_or(ConsensusError::BaseFeeMissing)?;
 
         let expected_base_fee =
-            if chain_spec.fork(Hardfork::London).transitions_at_block(header.number) {
+            if chain_spec.fork(EthereumHardfork::London).transitions_at_block(header.number) {
                 reth_primitives::constants::EIP1559_INITIAL_BASE_FEE
             } else {
                 // This BaseFeeMissing will not happen as previous blocks are checked to have

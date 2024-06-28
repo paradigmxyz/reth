@@ -26,7 +26,7 @@ crates/primitives/          @DaniPopes @Rjected
 crates/primitives-traits/   @DaniPopes @Rjected @joshieDo
 crates/prune/               @shekhirin @joshieDo
 crates/revm/                @mattsse @rakita
-crates/rpc/                 @mattsse @Rjected
+crates/rpc/                 @mattsse @Rjected @emhane
 crates/stages/              @onbjerg @rkrasiuk @shekhirin
 crates/static-file/         @joshieDo @shekhirin
 crates/storage/codecs/      @joshieDo

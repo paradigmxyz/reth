@@ -1,7 +1,10 @@
-use reth_chainspec::{net::NodeRecord, BaseFeeParams, Chain, ChainSpec, ForkCondition, Hardfork};
+use reth_chainspec::{
+    BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition,
+};
+use reth_network_peers::NodeRecord;
 use reth_primitives::{b256, B256};
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 pub const SHANGHAI_TIME: u64 = 1705996800;
 
@@ -13,7 +16,10 @@ pub(crate) fn bsc_chain_spec() -> Arc<ChainSpec> {
         genesis: serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis"),
         genesis_hash: Some(GENESIS),
         paris_block_and_final_difficulty: None,
-        hardforks: BTreeMap::from([(Hardfork::Shanghai, ForkCondition::Timestamp(SHANGHAI_TIME))]),
+        hardforks: ChainHardforks::new(vec![(
+            EthereumHardfork::Shanghai.boxed(),
+            ForkCondition::Timestamp(SHANGHAI_TIME),
+        )]),
         deposit_contract: None,
         base_fee_params: reth_chainspec::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 0,
