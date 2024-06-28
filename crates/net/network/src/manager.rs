@@ -26,7 +26,7 @@ use crate::{
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     network::{NetworkHandle, NetworkHandleMessage},
-    peers::{PeersHandle, PeersManager},
+    peers::{PeerAddr, PeersHandle, PeersManager},
     poll_nested_stream_with_budget,
     protocol::IntoRlpxSubProtocol,
     session::SessionManager,
@@ -555,10 +555,10 @@ where
             NetworkHandleMessage::AddTrustedPeerId(peer_id) => {
                 self.swarm.state_mut().add_trusted_peer_id(peer_id);
             }
-            NetworkHandleMessage::AddPeerAddress(peer, kind, tcp_addr, udp_addr) => {
+            NetworkHandleMessage::AddPeerAddress(peer, kind, addr) => {
                 // only add peer if we are not shutting down
                 if !self.swarm.is_shutting_down() {
-                    self.swarm.state_mut().add_peer_kind(peer, kind, tcp_addr, udp_addr);
+                    self.swarm.state_mut().add_peer_kind(peer, kind, addr);
                 }
             }
             NetworkHandleMessage::RemovePeer(peer_id, kind) => {
@@ -1030,12 +1030,7 @@ pub enum NetworkEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscoveredEvent {
-    EventQueued {
-        peer_id: PeerId,
-        tcp_addr: SocketAddr,
-        udp_addr: SocketAddr,
-        fork_id: Option<ForkId>,
-    },
+    EventQueued { peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId> },
 }
 
 #[derive(Debug, Default)]

@@ -205,14 +205,14 @@ impl Discovery {
 
     /// Processes an incoming [`NodeRecord`] update from a discovery service
     fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
-        let id = record.id;
+        let peer_id = record.id;
         let tcp_addr = record.tcp_addr();
         let udp_addr = record.udp_addr();
         let addr = PeerAddr::new(tcp_addr, Some(udp_addr));
         _ =
-            self.discovered_nodes.get_or_insert(id, || {
+            self.discovered_nodes.get_or_insert(peer_id, || {
                 self.queued_events.push_back(DiscoveryEvent::NewNode(
-                    DiscoveredEvent::EventQueued { peer_id: id, tcp_addr, udp_addr, fork_id },
+                    DiscoveredEvent::EventQueued { peer_id, addr, fork_id },
                 ));
 
                 addr

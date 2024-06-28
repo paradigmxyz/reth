@@ -1025,17 +1025,19 @@ impl ConnectionInfo {
 /// - `tcp`: A `SocketAddr` representing the peer's data transfer address.
 /// - `udp`: An optional `SocketAddr` representing the peer's discover address. `None` if the peer
 ///   is directly connecting to us or the port is the same to `tcp`'s
-#[derive(Debug, Clone)]
-pub(crate) struct PeerAddr {
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct PeerAddr {
     tcp: SocketAddr,
     udp: Option<SocketAddr>,
 }
 
 impl PeerAddr {
+    /// Returns a new `PeerAddr` with the given `tcp` and `udp` addresses.
     pub fn new(tcp: SocketAddr, udp: Option<SocketAddr>) -> Self {
         Self { tcp, udp }
     }
 
+    /// Returns a new `PeerAddr` with the given `tcp` and `udp` ports.
     fn new_with_ports(ip: IpAddr, tcp_port: u16, udp_port: Option<u16>) -> Self {
         let tcp = SocketAddr::new(ip, tcp_port);
         let udp = udp_port.map(|port| SocketAddr::new(ip, port));
