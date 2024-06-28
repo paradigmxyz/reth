@@ -2856,6 +2856,7 @@ impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
 /// This struct encapsulates the logic required to flush trie operations to the appropriate
 /// database tables.
 #[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct StorageWriter;
 
 impl StorageWriter {
