@@ -42,7 +42,7 @@ pub enum DownloadOutcome {
     Blocks(Vec<SealedBlockWithSenders>),
 }
 
-/// Basic [BlockDownloader].
+/// Basic [`BlockDownloader`].
 pub struct BasicBlockDownloader<Client>
 where
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
@@ -253,7 +253,7 @@ impl From<OrderedSealedBlockWithSenders> for SealedBlockWithSenders {
     }
 }
 
-/// A [BlockDownloader] that does nothing.
+/// A [`BlockDownloader`] that does nothing.
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct NoopBlockDownloader;

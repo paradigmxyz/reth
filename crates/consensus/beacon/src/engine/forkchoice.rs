@@ -140,8 +140,11 @@ impl From<PayloadStatusEnum> for ForkchoiceStatus {
 /// A helper type to check represent hashes of a [`ForkchoiceState`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ForkchoiceStateHash {
+    /// Head hash of the [`ForkchoiceState`].
     Head(B256),
+    /// Safe hash of the [`ForkchoiceState`].
     Safe(B256),
+    /// Finalized hash of the [`ForkchoiceState`].
     Finalized(B256),
 }
 
