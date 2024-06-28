@@ -17,12 +17,12 @@
 //! Configure only an http server with a selection of [`RethRpcModule`]s
 //!
 //! ```
-//! use reth_ethereum_rpc::EthApiBuild;
 //! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc_builder::{
-//!     RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
+//!     EthApiBuild, RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder,
+//!     TransportRpcModuleConfig,
 //! };
 //!
 //! use reth_tasks::TokioTaskExecutor;
@@ -69,7 +69,6 @@
 //!
 //! ```
 //! use reth_engine_primitives::EngineTypes;
-//! use reth_ethereum_rpc::EthApiBuild;
 //! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
@@ -82,6 +81,7 @@
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! use tokio::try_join;
+//! use EthApiBuild;
 //! pub async fn launch<Provider, Pool, Network, Events, EngineApi, EngineT, EvmConfig>(
 //!     provider: Provider,
 //!     pool: Pool,
@@ -201,7 +201,7 @@ pub mod error;
 /// Eth utils
 pub mod eth;
 pub use eth::{
-    EthApiBuilder, EthApiBuilderCtx, EthConfig, EthHandlers, FeeHistoryCacheBuilder,
+    EthApiBuild, EthApiBuilder, EthApiBuilderCtx, EthConfig, EthHandlers, FeeHistoryCacheBuilder,
     GasPriceOracleBuilder,
 };
 
@@ -460,13 +460,13 @@ where
     /// # Example
     ///
     /// ```no_run
-    /// use reth_ethereum_rpc::EthApiBuild;
     /// use reth_evm::ConfigureEvm;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
     /// use reth_rpc_builder::RpcModuleBuilder;
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
+    /// use EthApiBuild;
     ///
     /// fn init<Evm: ConfigureEvm + 'static>(evm: Evm) {
     ///     let mut registry = RpcModuleBuilder::default()

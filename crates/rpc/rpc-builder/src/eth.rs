@@ -1,11 +1,12 @@
 use std::{fmt::Debug, time::Duration};
 
 use reth_evm::ConfigureEvm;
+use reth_network_api::NetworkInfo;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
-    StateProviderFactory,
+    FullRpcProvider, StateProviderFactory,
 };
-use reth_rpc::{eth::EthFilterConfig, EthFilter, EthPubSub};
+use reth_rpc::{eth::EthFilterConfig, EthApi, EthFilter, EthPubSub};
 use reth_rpc_eth_api::FullEthApiServer;
 use reth_rpc_eth_types::{
     cache::cache_new_blocks_task, fee_history::fee_history_cache_new_blocks_task, EthStateCache,
@@ -15,7 +16,8 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE,
 };
-use reth_tasks::TaskSpawner;
+use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
+use reth_transaction_pool::TransactionPool;
 use serde::{Deserialize, Serialize};
 
 /// Default value for stale filter ttl
@@ -248,6 +250,45 @@ pub trait EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>: Debu
     ) -> Self::Server
     where
         Self::Server: FullEthApiServer;
+}
+
+/// Ethereum layer one `eth` RPC server builder.
+#[derive(Default, Debug, Clone, Copy)]
+pub struct EthApiBuild;
+
+impl<Provider, Pool, EvmConfig, Network, Tasks, Events>
+    EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events> for EthApiBuild
+where
+    Provider: FullRpcProvider,
+    Pool: TransactionPool,
+    Network: NetworkInfo + Clone,
+    Tasks: TaskSpawner + Clone + 'static,
+    Events: CanonStateSubscriptions,
+    EvmConfig: ConfigureEvm,
+{
+    type Server = EthApi<Provider, Pool, Network, EvmConfig>;
+
+    fn build(
+        &self,
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    ) -> Self::Server {
+        let gas_oracle = GasPriceOracleBuilder::build(ctx);
+        let fee_history_cache = FeeHistoryCacheBuilder::build(ctx);
+
+        EthApi::with_spawner(
+            ctx.provider.clone(),
+            ctx.pool.clone(),
+            ctx.network.clone(),
+            ctx.cache.clone(),
+            gas_oracle,
+            ctx.config.rpc_gas_cap,
+            Box::new(ctx.executor.clone()),
+            BlockingTaskPool::build().expect("failed to build blocking task pool"),
+            fee_history_cache,
+            ctx.evm_config.clone(),
+            None,
+        )
+    }
 }
 
 /// Builds the `eth_` namespace API [`EthFilterApiServer`](reth_rpc_eth_api::EthFilterApiServer).

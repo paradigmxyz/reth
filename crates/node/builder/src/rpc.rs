@@ -14,7 +14,7 @@ use reth_rpc::eth::EthApi;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
-    RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
+    EthApiBuild, RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_layer::JwtSecret;
 use reth_tasks::TaskExecutor;
@@ -275,7 +275,7 @@ where
         .with_events(node.provider().clone())
         .with_executor(node.task_executor().clone())
         .with_evm_config(node.evm_config().clone())
-        .build_with_auth_server(module_config, engine_api, reth_ethereum_rpc::EthApiBuild);
+        .build_with_auth_server(module_config, engine_api, EthApiBuild);
 
     let mut registry = RpcRegistry { registry };
     let ctx = RpcContext {

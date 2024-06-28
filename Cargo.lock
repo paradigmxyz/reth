@@ -3055,7 +3055,6 @@ dependencies = [
  "reth-chainspec",
  "reth-db",
  "reth-db-api",
- "reth-ethereum-rpc",
  "reth-node-ethereum",
  "tokio",
 ]
@@ -7119,19 +7118,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-ethereum-rpc"
-version = "1.0.0"
-dependencies = [
- "reth-evm",
- "reth-network-api",
- "reth-provider",
- "reth-rpc",
- "reth-rpc-builder",
- "reth-tasks",
- "reth-transaction-pool",
-]
-
-[[package]]
 name = "reth-etl"
 version = "1.0.0"
 dependencies = [
@@ -7573,7 +7559,6 @@ dependencies = [
  "reth-db-common",
  "reth-downloaders",
  "reth-engine-util",
- "reth-ethereum-rpc",
  "reth-evm",
  "reth-exex",
  "reth-network",
@@ -8133,7 +8118,6 @@ dependencies = [
  "reth-chainspec",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
- "reth-ethereum-rpc",
  "reth-evm",
  "reth-evm-ethereum",
  "reth-ipc",
