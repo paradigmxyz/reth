@@ -1,7 +1,7 @@
 use reth_chainspec::{
-    net::NodeRecord, BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork,
-    ForkCondition,
+    BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition,
 };
+use reth_network_peers::NodeRecord;
 use reth_primitives::{b256, B256};
 
 use std::sync::Arc;

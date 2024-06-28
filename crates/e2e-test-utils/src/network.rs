@@ -3,7 +3,7 @@ use reth::{
     network::{NetworkEvent, NetworkEvents, NetworkHandle, PeersInfo},
     rpc::types::PeerId,
 };
-use reth_chainspec::net::NodeRecord;
+use reth_network_peers::NodeRecord;
 use reth_tokio_util::EventStream;
 use reth_tracing::tracing::info;
 
