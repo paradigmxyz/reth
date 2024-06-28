@@ -1,8 +1,8 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/rust
 {
-	"name": "Rust",
-	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+	"name": "Rust for reth",
+
 	"build": {
 		"dockerfile": "./Dockerfile",
 		"context": "."
@@ -19,18 +19,9 @@
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	"features": {
-		"ghcr.io/devcontainers/features/common-utils:2": {
-			"installZsh": "true",
-			"username": "vscode",
-			"userUid": "1000",
-			"userGid": "1000",
-			"upgradePackages": "true"
-	},
-	"ghcr.io/devcontainers/features/rust:1": "latest",
-	"ghcr.io/devcontainers/features/git:1": {
-			"version": "latest",
-			"ppa": "false"
-		}
+		"ghcr.io/devcontainers/features/common-utils:2": {},
+		"ghcr.io/devcontainers/features/rust:1": {},
+		"ghcr.io/devcontainers/features/git:1.3.0": {}
 	},
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
