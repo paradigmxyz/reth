@@ -121,9 +121,9 @@ impl TrieUpdates {
     /// Extend the updates with account trie updates.
     pub fn extend_with_account_updates(&mut self, updates: HashMap<Nibbles, BranchNodeCompact>) {
         self.extend(
-            updates.into_iter().map(|(nibbles, node)| {
-                (TrieKey::AccountNode(nibbles.into()), TrieOp::Update(node))
-            }),
+            updates
+                .into_iter()
+                .map(|(nibbles, node)| (TrieKey::AccountNode(nibbles), TrieOp::Update(node))),
         );
     }
 
@@ -162,7 +162,7 @@ impl TrieUpdates {
         // Add storage node updates from hash builder.
         let (_, hash_builder_updates) = hash_builder.split();
         self.extend(hash_builder_updates.into_iter().map(|(nibbles, node)| {
-            (TrieKey::StorageNode(hashed_address, nibbles.into()), TrieOp::Update(node))
+            (TrieKey::StorageNode(hashed_address, nibbles), TrieOp::Update(node))
         }));
     }
 
