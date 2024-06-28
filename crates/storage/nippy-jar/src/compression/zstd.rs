@@ -185,7 +185,7 @@ impl Compression for Zstd {
         matches!(self.state, ZstdState::Ready)
     }
 
-    #[cfg(any(test, feature = "test-utils"))]
+    #[cfg(test)]
     /// If using it with dictionaries, prepares a dictionary for each column.
     fn prepare_compression(
         &mut self,
@@ -273,6 +273,7 @@ impl<'a> std::fmt::Debug for ZstdDictionaries<'a> {
 }
 
 impl<'a> ZstdDictionaries<'a> {
+    #[cfg(test)]
     /// Creates [`ZstdDictionaries`].
     pub(crate) fn new(raw: Vec<RawDictionary>) -> Self {
         Self(raw.into_iter().map(ZstdDictionary::Raw).collect())
@@ -315,6 +316,7 @@ impl<'a> ZstdDictionaries<'a> {
 /// A Zstd dictionary. It's created and serialized with [`ZstdDictionary::Raw`], and deserialized as
 /// [`ZstdDictionary::Loaded`].
 pub(crate) enum ZstdDictionary<'a> {
+    #[allow(dead_code)]
     Raw(RawDictionary),
     Loaded(DecoderDictionary<'a>),
 }

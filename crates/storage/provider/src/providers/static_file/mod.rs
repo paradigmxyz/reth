@@ -59,29 +59,16 @@ mod tests {
     use super::*;
     use crate::{test_utils::create_test_provider_factory, HeaderProvider};
     use rand::seq::SliceRandom;
-    use reth_db::{
-        static_file::test_utils::create_static_file_T1_T2_T3, CanonicalHeaders, HeaderNumbers,
-        HeaderTerminalDifficulties, Headers, RawTable,
-    };
-    use reth_db_api::{
-        cursor::DbCursorRO,
-        transaction::{DbTx, DbTxMut},
-    };
-    use reth_primitives::{static_file::find_fixed_range, BlockNumber, B256, U256};
+    use reth_db::{CanonicalHeaders, HeaderNumbers, HeaderTerminalDifficulties, Headers};
+    use reth_db_api::transaction::DbTxMut;
+    use reth_primitives::{static_file::find_fixed_range, B256, U256};
     use reth_testing_utils::generators::{self, random_header_range};
-    use std::vec::IntoIter;
 
     #[test]
     fn test_snap() {
         // Ranges
         let row_count = 100u64;
         let range = 0..=(row_count - 1);
-        let segment_header = SegmentHeader::new(
-            range.clone().into(),
-            Some(range.clone().into()),
-            Some(range.clone().into()),
-            StaticFileSegment::Headers,
-        );
 
         // Data sources
         let factory = create_test_provider_factory();
@@ -113,46 +100,21 @@ mod tests {
 
         // Create StaticFile
         {
-            let with_compression = true;
-            let with_filter = true;
+            let manager = StaticFileProvider::read_write(static_files_path.path()).unwrap();
+            let mut writer = manager.latest_writer(StaticFileSegment::Headers).unwrap();
 
-            let mut nippy_jar = NippyJar::new(3, static_file.as_path(), segment_header);
-
-            if with_compression {
-                nippy_jar = nippy_jar.with_zstd(false, 0);
+            for header in headers.clone() {
+                td += header.header().difficulty;
+                let hash = header.hash();
+                writer.append_header(header.unseal(), td, hash).unwrap();
             }
-
-            if with_filter {
-                nippy_jar = nippy_jar.with_cuckoo_filter(row_count as usize + 10).with_fmph();
-            }
-
-            let provider = factory.provider().unwrap();
-            let tx = provider.tx_ref();
-
-            let none_vec: Option<Vec<IntoIter<Vec<u8>>>> = None;
-
-            // Generate list of hashes for filters & PHF
-            let mut cursor = tx.cursor_read::<RawTable<CanonicalHeaders>>().unwrap();
-            let hashes = cursor
-                .walk(None)
-                .unwrap()
-                .map(|row| row.map(|(_key, value)| value.into_value()).map_err(|e| e.into()));
-
-            create_static_file_T1_T2_T3::<
-                Headers,
-                HeaderTerminalDifficulties,
-                CanonicalHeaders,
-                BlockNumber,
-                SegmentHeader,
-            >(tx, range, None, none_vec, Some(hashes), row_count as usize, nippy_jar)
-            .unwrap();
+            writer.commit_without_sync_all().unwrap();
         }
 
         // Use providers to query Header data and compare if it matches
         {
             let db_provider = factory.provider().unwrap();
-            let manager =
-                StaticFileProvider::read_write(static_files_path.path()).unwrap().with_filters();
+            let manager = StaticFileProvider::read_write(static_files_path.path()).unwrap();
             let jar_provider = manager
                 .get_segment_provider_from_block(StaticFileSegment::Headers, 0, Some(&static_file))
                 .unwrap();

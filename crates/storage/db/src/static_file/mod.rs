@@ -18,9 +18,6 @@ use reth_primitives::{
 
 mod masks;
 
-#[cfg(any(test, feature = "test-utils"))]
-pub mod test_utils;
-
 /// Alias type for a map of [`StaticFileSegment`] and sorted lists of existing static file ranges.
 type SortedStaticFiles =
     HashMap<StaticFileSegment, Vec<(SegmentRangeInclusive, Option<SegmentRangeInclusive>)>>;

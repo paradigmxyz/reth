@@ -28,7 +28,9 @@ pub mod filter;
 use filter::{Cuckoo, InclusionFilter, InclusionFilters};
 
 pub mod compression;
-use compression::{Compression, Compressors};
+use compression::Compressors;
+#[cfg(test)]
+use compression::Compression;
 
 pub mod phf;
 pub use phf::PHFKey;
@@ -354,7 +356,7 @@ impl<H: NippyJarHeader> PerfectHashingFunction for NippyJar<H> {
     }
 }
 
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(test)]
 impl<H: NippyJarHeader> NippyJar<H> {
     /// If required, prepares any compression algorithm to an early pass of the data.
     pub fn prepare_compression(
@@ -584,6 +586,7 @@ impl DataReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use compression::Compression;
     use rand::{rngs::SmallRng, seq::SliceRandom, RngCore, SeedableRng};
     use std::{collections::HashSet, fs::OpenOptions};
 
