@@ -67,8 +67,13 @@ pub trait PeersInfo: Send + Sync {
 /// Provides an API for managing the peers of the network.
 pub trait Peers: PeersInfo {
     /// Adds a peer to the peer set.
-    fn add_peer(&self, peer: PeerId, tcp_addr: SocketAddr, udp_addr: Option<SocketAddr>) {
-        self.add_peer_kind(peer, PeerKind::Basic, tcp_addr, udp_addr);
+    fn add_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
+        self.add_peer_kind(peer, PeerKind::Basic, tcp_addr, None);
+    }
+
+    /// Adds a peer to the peer set with UDP `SocketAddr`.
+    fn add_peer_with_udp(&self, peer: PeerId, tcp_addr: SocketAddr, udp_addr: SocketAddr) {
+        self.add_peer_kind(peer, PeerKind::Basic, tcp_addr, Some(udp_addr));
     }
 
     /// Adds a trusted [`PeerId`] to the peer set.

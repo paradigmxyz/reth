@@ -38,7 +38,7 @@ where
 {
     /// Handler for `admin_addPeer`
     fn add_peer(&self, record: NodeRecord) -> RpcResult<bool> {
-        self.network.add_peer(record.id, record.tcp_addr(), Some(record.udp_addr()));
+        self.network.add_peer_with_udp(record.id, record.tcp_addr(), record.udp_addr());
         Ok(true)
     }
 
