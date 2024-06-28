@@ -5,7 +5,7 @@ use crate::{
 use reth_db::tables;
 use reth_db_api::database::Database;
 use reth_provider::{
-    errors::provider::ProviderResult, DatabaseProviderRW, PruneCheckpointWriter,
+    errors::provider::ProviderResult, DatabaseProviderRW, ProviderFactory, PruneCheckpointWriter,
     TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
@@ -31,13 +31,13 @@ impl<DB: Database> Segment<DB> for Receipts {
         Some(self.mode)
     }
 
-    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
+    #[instrument(level = "trace", target = "pruner", skip(self, provider_factory), ret)]
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider_factory: &ProviderFactory<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
-        let tx_range = match input.get_next_tx_num_range(provider)? {
+        let tx_range = match input.get_next_tx_num_range(provider_factory)? {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No receipts to prune");
@@ -49,13 +49,15 @@ impl<DB: Database> Segment<DB> for Receipts {
         let mut limiter = input.limiter;
 
         let mut last_pruned_transaction = tx_range_end;
+
+        let provider = provider_factory.provider_rw()?;
+
         let (pruned, done) = provider.prune_table_with_range::<tables::Receipts>(
             tx_range,
             &mut limiter,
             |_| false,
             |row| last_pruned_transaction = row.0,
         )?;
-        trace!(target: "pruner", %pruned, %done, "Pruned receipts");
 
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
@@ -64,16 +66,20 @@ impl<DB: Database> Segment<DB> for Receipts {
             // so we could finish pruning its receipts on the next run.
             .checked_sub(if done { 0 } else { 1 });
 
+        let checkpoint = PruneOutputCheckpoint {
+            block_number: last_pruned_block,
+            tx_number: Some(last_pruned_transaction),
+        };
+
+        self.save_checkpoint(&provider, checkpoint.as_prune_checkpoint(self.mode))?;
+
+        provider.commit()?;
+
+        trace!(target: "pruner", %pruned, %done, "Pruned receipts");
+
         let progress = PruneProgress::new(done, &limiter);
 
-        Ok(PruneOutput {
-            progress,
-            pruned,
-            checkpoint: Some(PruneOutputCheckpoint {
-                block_number: last_pruned_block,
-                tx_number: Some(last_pruned_transaction),
-            }),
-        })
+        Ok(PruneOutput { progress, pruned, checkpoint: Some(checkpoint) })
     }
 
     fn save_checkpoint(
@@ -174,8 +180,7 @@ mod tests {
                 )
                 .sub(1);
 
-            let provider = db.factory.provider_rw().unwrap();
-            let result = segment.prune(&provider, input).unwrap();
+            let result = segment.prune(&db.factory, input).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 
             assert_matches!(
@@ -183,14 +188,6 @@ mod tests {
                 PruneOutput {progress, pruned, checkpoint: Some(_)}
                     if (progress, pruned) == expected_result
             );
-
-            segment
-                .save_checkpoint(
-                    &provider,
-                    result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
-                )
-                .unwrap();
-            provider.commit().expect("commit");
 
             let last_pruned_block_number = blocks
                 .iter()
