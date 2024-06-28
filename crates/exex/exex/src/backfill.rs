@@ -2,9 +2,7 @@ use reth_db_api::database::Database;
 use reth_evm::execute::{BatchExecutor, BlockExecutionError, BlockExecutorProvider};
 use reth_node_api::FullNodeComponents;
 use reth_primitives::{Block, BlockNumber};
-use reth_provider::{
-    Chain, FullProvider, HistoricalStateProviderRef, ProviderError, TransactionVariant,
-};
+use reth_provider::{Chain, FullProvider, ProviderError, TransactionVariant};
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{format_gas_throughput, ExecutionStageThresholds};
@@ -24,17 +22,20 @@ pub struct BackfillJobFactory<E, P> {
     thresholds: ExecutionStageThresholds,
 }
 
-impl<E: Clone, P: Clone> BackfillJobFactory<E, P> {
+impl<E, P> BackfillJobFactory<E, P> {
     /// Creates a new [`BackfillJobFactory`].
-    pub const fn new(
-        executor: E,
-        provider: P,
-        prune_modes: PruneModes,
-        thresholds: ExecutionStageThresholds,
-    ) -> Self {
-        Self { executor, provider, prune_modes, thresholds }
+    pub fn new(executor: E, provider: P, prune_modes: PruneModes) -> Self {
+        Self { executor, provider, prune_modes, thresholds: ExecutionStageThresholds::default() }
     }
 
+    /// Sets the thresholds
+    pub const fn with_thresholds(mut self, thresholds: ExecutionStageThresholds) -> Self {
+        self.thresholds = thresholds;
+        self
+    }
+}
+
+impl<E: Clone, P: Clone> BackfillJobFactory<E, P> {
     /// Creates a new backfill job for the given range.
     pub fn backfill<DB>(&self, range: RangeInclusive<BlockNumber>) -> BackfillJob<E, DB, P> {
         BackfillJob {
@@ -53,13 +54,11 @@ impl BackfillJobFactory<(), ()> {
     pub fn new_from_components<Node: FullNodeComponents>(
         components: Node,
         prune_modes: PruneModes,
-        thresholds: ExecutionStageThresholds,
     ) -> BackfillJobFactory<Node::Executor, Node::Provider> {
         BackfillJobFactory::<_, _>::new(
             components.block_executor().clone(),
             components.provider().clone(),
             prune_modes,
-            thresholds,
         )
     }
 }
@@ -102,15 +101,8 @@ where
     P: FullProvider<DB>,
 {
     fn execute_range(&mut self) -> Result<Chain, BlockExecutionError> {
-        let provider_ro =
-            self.provider.database_provider_ro()?.disable_long_read_transaction_safety();
-
         let mut executor = self.executor.batch_executor(
-            StateProviderDatabase(HistoricalStateProviderRef::new(
-                provider_ro.tx_ref(),
-                *self.range.start(),
-                self.provider.static_file_provider(),
-            )),
+            StateProviderDatabase::new(self.provider.history_by_block_number(*self.range.start())?),
             self.prune_modes.clone(),
         );
 
@@ -333,12 +325,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Backfill the first block
-        let factory = BackfillJobFactory::new(
-            executor,
-            blockchain_db,
-            PruneModes::none(),
-            Default::default(),
-        );
+        let factory = BackfillJobFactory::new(executor, blockchain_db, PruneModes::none());
         let job = factory.backfill(1..=1);
         let chains = job.collect::<Result<Vec<_>, _>>()?;
 
