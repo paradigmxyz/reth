@@ -158,19 +158,13 @@ impl PeersManager {
         for NodeRecord { address, tcp_port, udp_port, id } in trusted_nodes {
             trusted_peer_ids.insert(id);
             peers.entry(id).or_insert_with(|| {
-                Peer::trusted(
-                    SocketAddr::from((address, tcp_port)),
-                    Some(SocketAddr::from((address, udp_port))),
-                )
+                Peer::trusted(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
             });
         }
 
         for NodeRecord { address, tcp_port, udp_port, id } in basic_nodes {
             peers.entry(id).or_insert_with(|| {
-                Peer::new(
-                    SocketAddr::from((address, tcp_port)),
-                    Some(SocketAddr::from((address, udp_port))),
-                )
+                Peer::new(PeerAddr::new_with_ports(address, tcp_port, Some(udp_port)))
             });
         }
 
@@ -210,9 +204,9 @@ impl PeersManager {
     pub(crate) fn iter_peers(&self) -> impl Iterator<Item = NodeRecord> + '_ {
         self.peers.iter().map(|(peer_id, v)| {
             NodeRecord::new_with_ports(
-                v.tcp_addr.ip(),
-                v.tcp_addr.port(),
-                v.udp_addr.map(|addr| addr.port()),
+                v.addr.tcp.ip(),
+                v.addr.tcp.port(),
+                v.addr.udp.map(|addr| addr.port()),
                 *peer_id,
             )
         })
@@ -223,9 +217,9 @@ impl PeersManager {
     fn peer_by_id(&self, peer_id: PeerId) -> Option<NodeRecord> {
         self.peers.get(&peer_id).map(|v| {
             NodeRecord::new_with_ports(
-                v.tcp_addr.ip(),
-                v.tcp_addr.port(),
-                v.udp_addr.map(|addr| addr.port()),
+                v.addr.tcp.ip(),
+                v.addr.tcp.port(),
+                v.addr.udp.map(|addr| addr.port()),
                 peer_id,
             )
         })
@@ -368,7 +362,7 @@ impl PeersManager {
             Entry::Vacant(entry) => {
                 // peer is missing in the table, we add it but mark it as to be removed after
                 // disconnect, because we only know the outgoing port
-                let mut peer = Peer::with_state(addr, None, PeerConnectionState::In);
+                let mut peer = Peer::with_state(PeerAddr::new(addr, None), PeerConnectionState::In);
                 peer.remove_after_disconnect = true;
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
@@ -736,13 +730,14 @@ impl PeersManager {
             return
         }
 
+        let addr = PeerAddr::new(tcp_addr, udp_addr);
+
         match self.peers.entry(peer_id) {
             Entry::Occupied(mut entry) => {
                 let peer = entry.get_mut();
                 peer.kind = kind;
                 peer.fork_id = fork_id;
-                peer.tcp_addr = tcp_addr;
-                peer.udp_addr = udp_addr;
+                peer.addr = addr;
 
                 if peer.state.is_incoming() {
                     // now that we have an actual discovered address, for that peer and not just the
@@ -753,7 +748,7 @@ impl PeersManager {
             }
             Entry::Vacant(entry) => {
                 trace!(target: "net::peers", ?peer_id, ?tcp_addr, "discovered new node");
-                let mut peer = Peer::with_kind(tcp_addr, udp_addr, kind);
+                let mut peer = Peer::with_kind(addr, kind);
                 peer.fork_id = fork_id;
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
@@ -864,10 +859,10 @@ impl PeersManager {
                     _ => break,
                 };
 
-                trace!(target: "net::peers", ?peer_id, addr=?peer.tcp_addr, "schedule outbound connection");
+                trace!(target: "net::peers", ?peer_id, addr=?peer.addr, "schedule outbound connection");
 
                 peer.state = PeerConnectionState::PendingOut;
-                PeerAction::Connect { peer_id, remote_addr: peer.tcp_addr }
+                PeerAction::Connect { peer_id, remote_addr: peer.addr.tcp }
             };
 
             self.connection_info.inc_pending_out();
@@ -1037,13 +1032,36 @@ impl ConnectionInfo {
     }
 }
 
+/// Represents a peer's address information.
+///
+/// # Fields
+///
+/// - `tcp`: A `SocketAddr` representing the peer's data transfer address.
+/// - `udp`: An optional `SocketAddr` representing the peer's discover address. `None` if the peer
+///   is directly connecting to us or the port is the same to `tcp`'s
+#[derive(Debug, Clone)]
+pub(crate) struct PeerAddr {
+    tcp: SocketAddr,
+    udp: Option<SocketAddr>,
+}
+
+impl PeerAddr {
+    fn new(tcp: SocketAddr, udp: Option<SocketAddr>) -> Self {
+        Self { tcp, udp }
+    }
+
+    fn new_with_ports(ip: IpAddr, tcp_port: u16, udp_port: Option<u16>) -> Self {
+        let tcp = SocketAddr::new(ip, tcp_port);
+        let udp = udp_port.map(|port| SocketAddr::new(ip, port));
+        Self::new(tcp, udp)
+    }
+}
+
 /// Tracks info about a single peer.
 #[derive(Debug, Clone)]
 pub struct Peer {
-    /// Peer's TCP address.
-    tcp_addr: SocketAddr,
-    /// Peer's UDP address if it's port is different to the TCP's.
-    udp_addr: Option<SocketAddr>,
+    /// Where to reach the peer.
+    addr: PeerAddr,
     /// Reputation of the peer.
     reputation: i32,
     /// The state of the connection, if any.
@@ -1064,12 +1082,12 @@ pub struct Peer {
 // === impl Peer ===
 
 impl Peer {
-    fn new(tcp_addr: SocketAddr, udp_addr: Option<SocketAddr>) -> Self {
-        Self::with_state(tcp_addr, udp_addr, Default::default())
+    fn new(addr: PeerAddr) -> Self {
+        Self::with_state(addr, Default::default())
     }
 
-    fn trusted(tcp_addr: SocketAddr, udp_addr: Option<SocketAddr>) -> Self {
-        Self { kind: PeerKind::Trusted, ..Self::new(tcp_addr, udp_addr) }
+    fn trusted(addr: PeerAddr) -> Self {
+        Self { kind: PeerKind::Trusted, ..Self::new(addr) }
     }
 
     /// Returns the reputation of the peer
@@ -1077,14 +1095,9 @@ impl Peer {
         self.reputation
     }
 
-    fn with_state(
-        tcp_addr: SocketAddr,
-        udp_addr: Option<SocketAddr>,
-        state: PeerConnectionState,
-    ) -> Self {
+    fn with_state(addr: PeerAddr, state: PeerConnectionState) -> Self {
         Self {
-            tcp_addr,
-            udp_addr,
+            addr,
             state,
             reputation: DEFAULT_REPUTATION,
             fork_id: None,
@@ -1095,8 +1108,8 @@ impl Peer {
         }
     }
 
-    fn with_kind(tcp_addr: SocketAddr, udp_addr: Option<SocketAddr>, kind: PeerKind) -> Self {
-        Self { kind, ..Self::new(tcp_addr, udp_addr) }
+    fn with_kind(addr: PeerAddr, kind: PeerKind) -> Self {
+        Self { kind, ..Self::new(addr) }
     }
 
     /// Resets the reputation of the peer to the default value. This always returns
@@ -1980,7 +1993,7 @@ mod tests {
         // to increase by 1
         peers.on_incoming_session_established(peer, socket_addr);
         let p = peers.peers.get_mut(&peer).expect("peer not found");
-        assert_eq!(p.tcp_addr, socket_addr);
+        assert_eq!(p.addr.tcp, socket_addr);
         assert_eq!(peers.connection_info.num_pending_in, 0);
         assert_eq!(peers.connection_info.num_inbound, 1);
 
@@ -1995,7 +2008,7 @@ mod tests {
         peers.on_already_connected(Direction::Incoming);
 
         let p = peers.peers.get_mut(&peer).expect("peer not found");
-        assert_eq!(p.tcp_addr, socket_addr);
+        assert_eq!(p.addr.tcp, socket_addr);
         assert_eq!(peers.connection_info.num_pending_in, 0);
         assert_eq!(peers.connection_info.num_inbound, 1);
     }
