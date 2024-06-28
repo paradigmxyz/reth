@@ -1,45 +1,48 @@
+use reth_db_api::database::Database;
 use reth_evm::execute::{BatchExecutor, BlockExecutionError, BlockExecutorProvider};
-use reth_node_api::FullNodeComponents;
-use reth_node_core::node_config::NodeConfig;
 use reth_primitives::{Block, BlockNumber};
 use reth_provider::{
-    BlockReader, Chain, DatabaseProviderFactory, HeaderProvider, HistoricalStateProviderRef,
-    ProviderError, StaticFileProviderFactory, TransactionVariant,
+    Chain, FullProvider, HistoricalStateProviderRef, ProviderError, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{format_gas_throughput, ExecutionStageThresholds};
 use reth_tracing::tracing::{debug, trace};
 use std::{
+    marker::PhantomData,
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
 
 /// Factory for creating new backfill jobs.
 #[derive(Debug, Clone)]
-pub struct BackfillJobFactory<Node: FullNodeComponents> {
-    components: Node,
-    config: NodeConfig,
+pub struct BackfillJobFactory<E, P> {
+    executor: E,
+    provider: P,
+    prune_modes: PruneModes,
     thresholds: ExecutionStageThresholds,
 }
 
-impl<Node: FullNodeComponents> BackfillJobFactory<Node> {
+impl<E: Clone, P: Clone> BackfillJobFactory<E, P> {
     /// Creates a new backfill job factory.
     pub const fn new(
-        components: Node,
-        config: NodeConfig,
+        executor: E,
+        provider: P,
+        prune_modes: PruneModes,
         thresholds: ExecutionStageThresholds,
     ) -> Self {
-        Self { components, config, thresholds }
+        Self { executor, provider, prune_modes, thresholds }
     }
 
     /// Creates a new backfill job for the given range.
-    pub fn backfill(&self, range: RangeInclusive<BlockNumber>) -> BackfillJob<Node> {
+    pub fn backfill<DB>(&self, range: RangeInclusive<BlockNumber>) -> BackfillJob<E, DB, P> {
         BackfillJob {
-            components: self.components.clone(),
-            prune_modes: self.config.prune_config().unwrap_or_default().segments,
+            executor: self.executor.clone(),
+            provider: self.provider.clone(),
+            prune_modes: self.prune_modes.clone(),
             range,
             thresholds: self.thresholds.clone(),
+            _db: PhantomData,
         }
     }
 }
@@ -49,14 +52,21 @@ impl<Node: FullNodeComponents> BackfillJobFactory<Node> {
 /// It implements [`Iterator`] that executes blocks in batches and yields
 /// [notifications](`crate::ExExNotification)s.
 #[derive(Debug)]
-pub struct BackfillJob<Node: FullNodeComponents> {
-    components: Node,
+pub struct BackfillJob<E, DB, P> {
+    executor: E,
+    provider: P,
     prune_modes: PruneModes,
     range: RangeInclusive<BlockNumber>,
     thresholds: ExecutionStageThresholds,
+    _db: PhantomData<DB>,
 }
 
-impl<Node: FullNodeComponents> Iterator for BackfillJob<Node> {
+impl<E, DB, P> Iterator for BackfillJob<E, DB, P>
+where
+    E: BlockExecutorProvider,
+    DB: Database,
+    P: FullProvider<DB>,
+{
     type Item = Result<Chain, BlockExecutionError>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -68,16 +78,21 @@ impl<Node: FullNodeComponents> Iterator for BackfillJob<Node> {
     }
 }
 
-impl<Node: FullNodeComponents> BackfillJob<Node> {
+impl<E, DB, P> BackfillJob<E, DB, P>
+where
+    E: BlockExecutorProvider,
+    DB: Database,
+    P: FullProvider<DB>,
+{
     fn execute_range(&mut self) -> Result<Chain, BlockExecutionError> {
-        let provider = self.components.provider();
-        let provider_ro = provider.database_provider_ro()?.disable_long_read_transaction_safety();
+        let provider_ro =
+            self.provider.database_provider_ro()?.disable_long_read_transaction_safety();
 
-        let mut executor = self.components.block_executor().batch_executor(
+        let mut executor = self.executor.batch_executor(
             StateProviderDatabase(HistoricalStateProviderRef::new(
                 provider_ro.tx_ref(),
                 *self.range.start(),
-                provider.static_file_provider(),
+                self.provider.static_file_provider(),
             )),
             self.prune_modes.clone(),
         );
@@ -92,12 +107,14 @@ impl<Node: FullNodeComponents> BackfillJob<Node> {
             // Fetch the block
             let fetch_block_start = Instant::now();
 
-            let td = provider
+            let td = self
+                .provider
                 .header_td_by_number(block_number)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
             // we need the block's transactions along with their hashes
-            let block = provider
+            let block = self
+                .provider
                 .sealed_block_with_senders(block_number.into(), TransactionVariant::WithHash)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
@@ -163,18 +180,19 @@ impl<Node: FullNodeComponents> BackfillJob<Node> {
 mod tests {
     use crate::BackfillJobFactory;
     use eyre::OptionExt;
+    use reth_blockchain_tree::noop::NoopBlockchainTree;
     use reth_chainspec::{ChainSpecBuilder, Hardfork, MAINNET};
-    use reth_consensus::test_utils::TestConsensus;
+    use reth_db_common::init::init_genesis;
     use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_exex_test_utils::{test_exex_context_with_chain_spec, TestNode};
-    use reth_node_api::FullNodeTypesAdapter;
-    use reth_node_builder::{components::Components, NodeAdapter};
     use reth_primitives::{
         b256, constants::ETH_TO_WEI, public_key_to_address, Address, Block, Genesis,
         GenesisAccount, Header, Transaction, TxEip2930, TxKind, U256,
     };
-    use reth_provider::{BlockWriter, LatestStateProviderRef};
+    use reth_provider::{
+        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+        BlockWriter, LatestStateProviderRef,
+    };
     use reth_prune_types::PruneModes;
     use reth_revm::database::StateProviderDatabase;
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
@@ -205,20 +223,13 @@ mod tests {
                 .build(),
         );
 
-        // Replace the executor with a real one
-        let (ctx, handle) = test_exex_context_with_chain_spec(chain_spec.clone()).await?;
-        let components = NodeAdapter::<FullNodeTypesAdapter<TestNode, _, _>, _> {
-            components: Components {
-                transaction_pool: ctx.pool().clone(),
-                evm_config: *ctx.evm_config(),
-                executor: EthExecutorProvider::ethereum(chain_spec.clone()),
-                consensus: Arc::new(TestConsensus::default()),
-                network: ctx.network().clone(),
-                payload_builder: ctx.payload_builder().clone(),
-            },
-            task_executor: handle.tasks.executor(),
-            provider: ctx.provider().clone(),
-        };
+        let executor = EthExecutorProvider::ethereum(chain_spec.clone());
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        init_genesis(provider_factory.clone())?;
+        let blockchain_db = BlockchainProvider::new(
+            provider_factory.clone(),
+            Arc::new(NoopBlockchainTree::default()),
+        )?;
 
         // First block has a transaction that transfers some ETH to zero address
         let block1 = Block {
@@ -263,7 +274,7 @@ mod tests {
         .with_recovered_senders()
         .ok_or_eyre("failed to recover senders")?;
 
-        let provider = handle.provider_factory.provider()?;
+        let provider = provider_factory.provider()?;
         // Execute only the first block on top of genesis state
         let mut outcome_single = EthExecutorProvider::ethereum(chain_spec.clone())
             .batch_executor(
@@ -276,7 +287,7 @@ mod tests {
             .execute_and_verify_batch([(&block1, U256::ZERO).into()])?;
         outcome_single.bundle.reverts.sort();
         // Execute both blocks on top of the genesis state
-        let outcome_batch = EthExecutorProvider::ethereum(chain_spec.clone())
+        let outcome_batch = EthExecutorProvider::ethereum(chain_spec)
             .batch_executor(
                 StateProviderDatabase::new(LatestStateProviderRef::new(
                     provider.tx_ref(),
@@ -294,7 +305,7 @@ mod tests {
         let block2 = block2.seal_slow();
 
         // Update the state with the execution results of both blocks
-        let provider_rw = handle.provider_factory.provider_rw()?;
+        let provider_rw = provider_factory.provider_rw()?;
         provider_rw.append_blocks_with_state(
             vec![block1.clone(), block2],
             outcome_batch,
@@ -305,7 +316,12 @@ mod tests {
         provider_rw.commit()?;
 
         // Backfill the first block
-        let factory = BackfillJobFactory::new(components, ctx.config, Default::default());
+        let factory = BackfillJobFactory::new(
+            executor,
+            blockchain_db,
+            PruneModes::none(),
+            Default::default(),
+        );
         let job = factory.backfill(1..=1);
         let chains = job.collect::<Result<Vec<_>, _>>()?;
 

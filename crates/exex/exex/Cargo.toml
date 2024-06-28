@@ -28,6 +28,7 @@ reth-evm.workspace = true
 reth-prune-types.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
+reth-db-api.workspace = true
 
 ## async
 tokio.workspace = true
@@ -40,11 +41,10 @@ serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-chainspec.workspace = true
-reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-evm-ethereum.workspace = true
-reth-exex-test-utils.workspace = true
-reth-node-builder.workspace = true
 reth-testing-utils.workspace = true
+reth-blockchain-tree.workspace = true
+reth-db-common.workspace = true
 
 secp256k1.workspace = true
 
