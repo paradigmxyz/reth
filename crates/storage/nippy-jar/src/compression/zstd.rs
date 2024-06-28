@@ -216,7 +216,8 @@ impl Compression for Zstd {
             .collect::<Vec<_>>()
             .into_par_iter()
             .map(|column| {
-                // ZSTD requires all training data to be continuous in memory, alongside the size of each entry
+                // ZSTD requires all training data to be continuous in memory, alongside the size of
+                // each entry
                 let mut sizes = Vec::with_capacity(column.len());
                 let data: Vec<_> = column
                     .into_iter()
@@ -225,7 +226,7 @@ impl Compression for Zstd {
                         data
                     })
                     .collect();
-    
+
                 zstd::dict::from_continuous(&data, &sizes, self.max_dict_size)
             })
             .collect::<Result<Vec<_>, _>>()?;
