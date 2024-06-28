@@ -1,5 +1,4 @@
-//! The [`ChainOrchestrator`] contains the state of the chain and orchestrates the components
-//! responsible for advancing the chain.
+//! This crate includes the core components for advancing a reth chain.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
