@@ -1,30 +1,39 @@
 //! Helper types for waiting for the node to exit.
 
-use futures::FutureExt;
+use futures::{future::BoxFuture, FutureExt};
 use std::{
+    fmt,
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
 };
 
 /// A Future which resolves when the node exits
-#[allow(missing_debug_implementations)]
 pub struct NodeExitFuture {
     /// The consensus engine future.
     /// This can be polled to wait for the consensus engine to exit.
-    consensus_engine_fut: Option<Pin<Box<dyn Future<Output = eyre::Result<()>>>>>,
+    consensus_engine_fut: Option<BoxFuture<'static, eyre::Result<()>>>,
 
     /// Flag indicating whether the node should be terminated after the pipeline sync.
     terminate: bool,
 }
 
+impl fmt::Debug for NodeExitFuture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NodeExitFuture")
+            .field("consensus_engine_fut", &"...")
+            .field("terminate", &self.terminate)
+            .finish()
+    }
+}
+
 impl NodeExitFuture {
     /// Create a new `NodeExitFuture`.
-    pub const fn new(
-        consensus_engine_fut: Pin<Box<dyn Future<Output = eyre::Result<()>>>>,
-        terminate: bool,
-    ) -> Self {
-        Self { consensus_engine_fut: Some(consensus_engine_fut), terminate }
+    pub fn new<F>(consensus_engine_fut: F, terminate: bool) -> Self
+    where
+        F: Future<Output = eyre::Result<()>> + 'static + Send,
+    {
+        Self { consensus_engine_fut: Some(Box::pin(consensus_engine_fut)), terminate }
     }
 }
 
@@ -58,7 +67,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_node_exit_future_terminate_true() {
-        let fut = Box::pin(async { Ok(()) });
+        let fut = async { Ok(()) };
 
         let node_exit_future = NodeExitFuture::new(fut, true);
 
@@ -69,7 +78,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_node_exit_future_terminate_false() {
-        let fut = Box::pin(async { Ok(()) });
+        let fut = async { Ok(()) };
 
         let mut node_exit_future = NodeExitFuture::new(fut, false);
         poll_fn(|cx| {

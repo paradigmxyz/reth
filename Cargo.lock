@@ -7587,7 +7587,6 @@ dependencies = [
  "procfs",
  "proptest",
  "rand 0.8.5",
- "reth-beacon-consensus",
  "reth-chainspec",
  "reth-config",
  "reth-consensus-common",
