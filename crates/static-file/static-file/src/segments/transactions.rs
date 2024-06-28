@@ -1,4 +1,4 @@
-use crate::segments::{dataset_for_compression, prepare_jar, Segment};
+use crate::segments::{ Segment};
 use alloy_primitives::{BlockNumber, TxNumber};
 use reth_db::{static_file::create_static_file_T1, tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
