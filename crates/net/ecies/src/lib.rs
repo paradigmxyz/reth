@@ -16,7 +16,7 @@ pub mod util;
 mod error;
 pub use error::ECIESError;
 
-mod codec;
+pub mod codec;
 
 use alloy_primitives::{
     bytes::{Bytes, BytesMut},
