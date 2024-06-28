@@ -8,7 +8,11 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use std::borrow::Cow;
+use std::{borrow::Cow, ffi::OsString};
+
+use reth_cli_runner::CliRunner;
+
+use clap::{Error, Parser};
 
 /// Reth based node cli.
 ///
@@ -22,4 +26,43 @@ pub trait RethCli: Sized {
 
     /// The version of the node, such as `reth/v1.0.0`
     fn version(&self) -> Cow<'static, str>;
+
+    /// Parse args from iterator from [`std::env::args_os()`].
+    fn parse_args() -> Result<Self, Error>
+    where
+        Self: Parser + Sized,
+    {
+        <Self as RethCli>::try_parse_from(std::env::args_os())
+    }
+
+    /// Parse args from the given iterator.
+    fn try_parse_from<I, T>(itr: I) -> Result<Self, Error>
+    where
+        Self: Parser + Sized,
+        I: IntoIterator<Item = T>,
+        T: Into<OsString> + Clone,
+    {
+        <Self as Parser>::try_parse_from(itr)
+    }
+
+    /// Executes a command.
+    fn with_runner<F, R>(self, f: F) -> R
+    where
+        F: FnOnce(Self, CliRunner) -> R,
+    {
+        let runner = CliRunner::default();
+
+        f(self, runner)
+    }
+
+    /// Parses and executes a command.
+    fn execute<F, R>(f: F) -> Result<R, Error>
+    where
+        Self: Parser + Sized,
+        F: FnOnce(Self, CliRunner) -> R,
+    {
+        let cli = Self::parse_args()?;
+
+        Ok(cli.with_runner(f))
+    }
 }

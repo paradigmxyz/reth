@@ -3,20 +3,16 @@
 use crate::{
     error::NetworkError,
     import::{BlockImport, ProofOfStakeBlockImport},
-    peers::PeersConfig,
-    session::SessionsConfig,
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
-use reth_chainspec::{
-    net::{mainnet_nodes, sepolia_nodes, TrustedPeer},
-    ChainSpec, MAINNET,
-};
+use reth_chainspec::{ChainSpec, MAINNET};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
-use reth_network_peers::{pk2id, PeerId};
+use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
+use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_primitives::{ForkFilter, Head};
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -411,36 +407,6 @@ impl NetworkConfigBuilder {
         }
     }
 
-    /// Calls a closure on [`reth_discv5::ConfigBuilder`], if discv5 discovery is enabled and the
-    /// builder has been set.
-    /// ```
-    /// use reth_chainspec::MAINNET;
-    /// use reth_network::NetworkConfigBuilder;
-    /// use reth_provider::test_utils::NoopProvider;
-    /// use secp256k1::{rand::thread_rng, SecretKey};
-    ///
-    /// let sk = SecretKey::new(&mut thread_rng());
-    /// let fork_id = MAINNET.latest_fork_id();
-    /// let network_config = NetworkConfigBuilder::new(sk)
-    ///     .map_discv5_config_builder(|builder| builder.fork(b"eth", fork_id))
-    ///     .build(NoopProvider::default());
-    /// ```
-    pub fn map_discv5_config_builder(
-        mut self,
-        f: impl FnOnce(reth_discv5::ConfigBuilder) -> reth_discv5::ConfigBuilder,
-    ) -> Self {
-        if let Some(mut builder) = self.discovery_v5_builder {
-            if let Some(network_stack_id) = NetworkStackId::id(&self.chain_spec) {
-                let fork_id = self.chain_spec.latest_fork_id();
-                builder = builder.fork(network_stack_id, fork_id);
-            }
-
-            self.discovery_v5_builder = Some(f(builder));
-        }
-
-        self
-    }
-
     /// Adds a new additional protocol to the `RLPx` sub-protocol list.
     pub fn add_rlpx_sub_protocol(mut self, protocol: impl IntoRlpxSubProtocol) -> Self {
         self.extra_protocols.push(protocol);
@@ -480,7 +446,7 @@ impl NetworkConfigBuilder {
             secret_key,
             mut dns_discovery_config,
             discovery_v4_builder,
-            discovery_v5_builder,
+            mut discovery_v5_builder,
             boot_nodes,
             discovery_addr,
             listener_addr,
@@ -496,6 +462,15 @@ impl NetworkConfigBuilder {
             block_import,
             transactions_manager_config,
         } = self;
+
+        discovery_v5_builder = discovery_v5_builder.map(|mut builder| {
+            if let Some(network_stack_id) = NetworkStackId::id(&chain_spec) {
+                let fork_id = chain_spec.latest_fork_id();
+                builder = builder.fork(network_stack_id, fork_id)
+            }
+
+            builder
+        });
 
         let listener_addr = listener_addr.unwrap_or(DEFAULT_DISCOVERY_ADDRESS);
 
@@ -585,7 +560,6 @@ mod tests {
     use reth_dns_discovery::tree::LinkEntry;
     use reth_primitives::ForkHash;
     use reth_provider::test_utils::NoopProvider;
-    use std::collections::BTreeMap;
 
     fn builder() -> NetworkConfigBuilder {
         let secret_key = SecretKey::new(&mut thread_rng());
@@ -609,7 +583,7 @@ mod tests {
         let mut chain_spec = Arc::clone(&MAINNET);
 
         // remove any `next` fields we would have by removing all hardforks
-        Arc::make_mut(&mut chain_spec).hardforks = BTreeMap::new();
+        Arc::make_mut(&mut chain_spec).hardforks = Default::default();
 
         // check that the forkid is initialized with the genesis and no other forks
         let genesis_fork_hash = ForkHash::from(chain_spec.genesis_hash());

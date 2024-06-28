@@ -478,11 +478,10 @@ where
                     //
                     // It's possible we already tried to RLP decode this, but it was snappy
                     // compressed, so we need to RLP decode it again.
-                    let reason = DisconnectReason::decode(&mut &decompress_buf[1..]).map_err(|err| {
+                    let reason = DisconnectReason::decode(&mut &decompress_buf[1..]).inspect_err(|err| {
                         debug!(
                             %err, msg=%hex::encode(&decompress_buf[1..]), "Failed to decode disconnect message from peer"
                         );
-                        err
                     })?;
                     return Poll::Ready(Some(Err(P2PStreamError::Disconnected(reason))))
                 }

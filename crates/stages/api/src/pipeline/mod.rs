@@ -13,7 +13,6 @@ use reth_provider::{
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
-use reth_static_file_types::HighestStaticFiles;
 use reth_tokio_util::{EventSender, EventStream};
 use std::pin::Pin;
 use tokio::sync::watch;
@@ -248,26 +247,9 @@ where
     /// CAUTION: This method locks the static file producer Mutex, hence can block the thread if the
     /// lock is occupied.
     pub fn move_to_static_files(&self) -> RethResult<()> {
-        let static_file_producer = self.static_file_producer.lock();
-
         // Copies data from database to static files
-        let lowest_static_file_height = {
-            let provider = self.provider_factory.provider()?;
-            let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
-                .into_iter()
-                .map(|stage| {
-                    provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
-                headers: stages_checkpoints[0],
-                receipts: stages_checkpoints[1],
-                transactions: stages_checkpoints[2],
-            })?;
-            static_file_producer.run(targets)?;
-            stages_checkpoints.into_iter().min().expect("exists")
-        };
+        let lowest_static_file_height =
+            self.static_file_producer.lock().copy_to_static_files()?.min();
 
         // Deletes data which has been copied to static files.
         if let Some(prune_tip) = lowest_static_file_height {

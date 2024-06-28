@@ -1,6 +1,6 @@
 //! Configuration files.
 
-use reth_network::{PeersConfig, SessionsConfig};
+use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use reth_stages_types::ExecutionStageThresholds;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -54,7 +54,7 @@ impl Config {
     }
 
     /// Sets the pruning configuration.
-    pub fn update_prune_confing(&mut self, prune_config: PruneConfig) {
+    pub fn update_prune_config(&mut self, prune_config: PruneConfig) {
         self.prune = Some(prune_config);
     }
 }

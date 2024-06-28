@@ -1,11 +1,9 @@
 //! Database debugging tool
 
-use crate::{
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
-    utils::DbTool,
-};
+use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
 use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
+use reth_db_common::DbTool;
 use std::io::{self, Write};
 
 mod checksum;

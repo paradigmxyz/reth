@@ -3,7 +3,7 @@ use alloy_eips::{
     eip7002::WithdrawalRequest,
 };
 use alloy_rlp::Buf;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus_common::calc;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
@@ -11,7 +11,7 @@ use reth_primitives::{
         fill_tx_env_with_beacon_root_contract_call,
         fill_tx_env_with_withdrawal_requests_contract_call,
     },
-    Address, Header, Request, Withdrawal, B256, U256,
+    Address, Block, Request, Withdrawal, Withdrawals, B256, U256,
 };
 use reth_storage_errors::provider::ProviderError;
 use revm::{
@@ -36,40 +36,34 @@ use std::collections::HashMap;
 ///
 /// Balance changes might include the block reward, uncle rewards, withdrawals, or irregular
 /// state changes (DAO fork).
-#[allow(clippy::too_many_arguments)]
 #[inline]
 pub fn post_block_balance_increments(
     chain_spec: &ChainSpec,
-    block_number: u64,
-    block_difficulty: U256,
-    beneficiary: Address,
-    block_timestamp: u64,
+    block: &Block,
     total_difficulty: U256,
-    ommers: &[Header],
-    withdrawals: Option<&[Withdrawal]>,
 ) -> HashMap<Address, u128> {
     let mut balance_increments = HashMap::new();
 
     // Add block rewards if they are enabled.
     if let Some(base_block_reward) =
-        calc::base_block_reward(chain_spec, block_number, block_difficulty, total_difficulty)
+        calc::base_block_reward(chain_spec, block.number, block.difficulty, total_difficulty)
     {
         // Ommer rewards
-        for ommer in ommers {
+        for ommer in &block.ommers {
             *balance_increments.entry(ommer.beneficiary).or_default() +=
-                calc::ommer_reward(base_block_reward, block_number, ommer.number);
+                calc::ommer_reward(base_block_reward, block.number, ommer.number);
         }
 
         // Full block reward
-        *balance_increments.entry(beneficiary).or_default() +=
-            calc::block_reward(base_block_reward, ommers.len());
+        *balance_increments.entry(block.beneficiary).or_default() +=
+            calc::block_reward(base_block_reward, block.ommers.len());
     }
 
     // process withdrawals
     insert_post_block_withdrawals_balance_increments(
         chain_spec,
-        block_timestamp,
-        withdrawals,
+        block.timestamp,
+        block.withdrawals.as_ref().map(Withdrawals::as_ref),
         &mut balance_increments,
     );
 

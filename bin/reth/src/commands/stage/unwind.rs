@@ -13,7 +13,7 @@ use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, FinalizedBlockReader,
     FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
 };
-use reth_prune_types::PruneModes;
+use reth_prune::PruneModes;
 use reth_stages::{
     sets::{DefaultStages, OfflineStages},
     stages::ExecutionStage,

@@ -57,9 +57,9 @@ pub mod tx_manager {
 
 /// Constants used by [`TransactionFetcher`](super::TransactionFetcher).
 pub mod tx_fetcher {
-    use crate::{
-        peers::{DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND},
-        transactions::fetcher::TransactionFetcherInfo,
+    use crate::transactions::fetcher::TransactionFetcherInfo;
+    use reth_network_types::peers::config::{
+        DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND,
     };
 
     use super::{

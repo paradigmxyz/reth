@@ -1,7 +1,7 @@
 //! Optimism block executor.
 
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
-use reth_chainspec::{ChainSpec, Hardfork};
+use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
@@ -11,9 +11,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::validate_block_post_execution;
-use reth_primitives::{
-    BlockNumber, BlockWithSenders, Header, Receipt, Receipts, TxType, Withdrawals, U256,
-};
+use reth_primitives::{BlockNumber, BlockWithSenders, Header, Receipt, Receipts, TxType, U256};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
@@ -133,7 +131,7 @@ where
 
         // execute transactions
         let is_regolith =
-            self.chain_spec.fork(Hardfork::Regolith).active_at_timestamp(block.timestamp);
+            self.chain_spec.fork(OptimismHardfork::Regolith).active_at_timestamp(block.timestamp);
 
         // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
         // blocks will always have at least a single transaction in them (the L1 info transaction),
@@ -177,7 +175,7 @@ where
                 .transpose()
                 .map_err(|_| OptimismBlockExecutionError::AccountLoadFailed(*sender))?;
 
-            EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender);
+            self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
 
             // Execute transaction.
             let ResultAndState { result, state } = evm.transact().map_err(move |err| {
@@ -220,7 +218,7 @@ where
                 // this is only set for post-Canyon deposit transactions.
                 deposit_receipt_version: (transaction.is_deposit() &&
                     self.chain_spec
-                        .is_fork_active_at_timestamp(Hardfork::Canyon, block.timestamp))
+                        .is_fork_active_at_timestamp(OptimismHardfork::Canyon, block.timestamp))
                 .then_some(1),
             });
         }
@@ -324,16 +322,8 @@ where
         block: &BlockWithSenders,
         total_difficulty: U256,
     ) -> Result<(), BlockExecutionError> {
-        let balance_increments = post_block_balance_increments(
-            self.chain_spec(),
-            block.number,
-            block.difficulty,
-            block.beneficiary,
-            block.timestamp,
-            total_difficulty,
-            &block.ommers,
-            block.withdrawals.as_ref().map(Withdrawals::as_ref),
-        );
+        let balance_increments =
+            post_block_balance_increments(self.chain_spec(), block, total_difficulty);
         // increment balances
         self.state
             .increment_balances(balance_increments)

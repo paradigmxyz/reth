@@ -366,22 +366,6 @@ impl EvmEnvProvider for NoopProvider {
         Ok(())
     }
 
-    fn fill_block_env_at(
-        &self,
-        _block_env: &mut BlockEnv,
-        _at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        Ok(())
-    }
-
-    fn fill_block_env_with_header(
-        &self,
-        _block_env: &mut BlockEnv,
-        _header: &Header,
-    ) -> ProviderResult<()> {
-        Ok(())
-    }
-
     fn fill_cfg_env_at<EvmConfig>(
         &self,
         _cfg: &mut CfgEnvWithHandlerCfg,
