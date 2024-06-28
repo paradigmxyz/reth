@@ -9,17 +9,20 @@ use reth_primitives::B256;
 pub struct NoopTrieCursorFactory;
 
 impl TrieCursorFactory for NoopTrieCursorFactory {
+    type AccountTrieCursor = NoopAccountTrieCursor;
+    type StorageTrieCursor = NoopStorageTrieCursor;
+
     /// Generates a Noop account trie cursor.
-    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
-        Ok(Box::<NoopAccountTrieCursor>::default())
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
+        Ok(NoopAccountTrieCursor::default())
     }
 
     /// Generates a Noop storage trie cursor.
     fn storage_trie_cursor(
         &self,
         _hashed_address: B256,
-    ) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
-        Ok(Box::<NoopStorageTrieCursor>::default())
+    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+        Ok(NoopStorageTrieCursor::default())
     }
 }
 

@@ -3,6 +3,7 @@ use reth_db::DatabaseError;
 use reth_primitives::B256;
 mod database_cursors;
 mod subnode;
+mod update;
 
 /// Noop trie cursor implementations.
 pub mod noop;
@@ -10,18 +11,24 @@ pub mod noop;
 pub use self::{
     database_cursors::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
     subnode::CursorSubNode,
+    update::*,
 };
 
 /// Factory for creating trie cursors.
 pub trait TrieCursorFactory {
+    /// The account trie cursor type.
+    type AccountTrieCursor: TrieCursor;
+    /// The storage trie cursor type.
+    type StorageTrieCursor: TrieCursor;
+
     /// Create an account trie cursor.
-    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor + '_>, DatabaseError>;
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError>;
 
     /// Create a storage tries cursor.
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Box<dyn TrieCursor + '_>, DatabaseError>;
+    ) -> Result<Self::StorageTrieCursor, DatabaseError>;
 }
 
 /// A cursor for navigating a trie that works with both Tables and DupSort tables.
