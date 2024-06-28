@@ -49,8 +49,8 @@ impl<E: Clone, P: Clone> BackfillJobFactory<E, P> {
 
 /// Backfill job started for a specific range.
 ///
-/// It implements [`Iterator`] that executes blocks in batches and yields
-/// [notifications](`crate::ExExNotification)s.
+/// It implements [`Iterator`] that executes blocks in batches according to the provided thresholds
+/// and yields [`Chain`]
 #[derive(Debug)]
 pub struct BackfillJob<E, DB, P> {
     executor: E,
