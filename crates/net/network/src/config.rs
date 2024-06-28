@@ -6,15 +6,12 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
-use reth_chainspec::{
-    net::{mainnet_nodes, sepolia_nodes, TrustedPeer},
-    ChainSpec, MAINNET,
-};
+use reth_chainspec::{ChainSpec, MAINNET};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
-use reth_network_peers::{pk2id, PeerId};
+use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_primitives::{ForkFilter, Head};
 use reth_provider::{BlockReader, HeaderProvider};
