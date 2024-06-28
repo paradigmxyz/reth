@@ -4,6 +4,7 @@ use crate::{
     cache::LruMap,
     error::{NetworkError, ServiceKind},
     manager::DiscoveredEvent,
+    peers::PeerAddr,
 };
 use enr::Enr;
 use futures::StreamExt;
@@ -40,7 +41,7 @@ pub struct Discovery {
     /// All nodes discovered via discovery protocol.
     ///
     /// These nodes can be ephemeral and are updated via the discovery protocol.
-    discovered_nodes: LruMap<PeerId, (SocketAddr, SocketAddr)>,
+    discovered_nodes: LruMap<PeerId, PeerAddr>,
     /// Local ENR of the discovery v4 service (discv5 ENR has same [`PeerId`]).
     local_enr: NodeRecord,
     /// Handler to interact with the Discovery v4 service
@@ -207,13 +208,14 @@ impl Discovery {
         let id = record.id;
         let tcp_addr = record.tcp_addr();
         let udp_addr = record.udp_addr();
+        let addr = PeerAddr::new(tcp_addr, Some(udp_addr));
         _ =
             self.discovered_nodes.get_or_insert(id, || {
                 self.queued_events.push_back(DiscoveryEvent::NewNode(
                     DiscoveredEvent::EventQueued { peer_id: id, tcp_addr, udp_addr, fork_id },
                 ));
 
-                (tcp_addr, udp_addr)
+                addr
             })
     }
 
@@ -428,8 +430,7 @@ mod tests {
         assert_eq!(
             DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
                 peer_id: discv4_id_2,
-                tcp_addr: discv4_enr_2.tcp_addr(),
-                udp_addr: discv4_enr_2.udp_addr(),
+                addr: PeerAddr::new(discv4_enr_2.tcp_addr(), Some(discv4_enr_2.udp_addr())),
                 fork_id: None
             }),
             event_node_1
@@ -437,8 +438,7 @@ mod tests {
         assert_eq!(
             DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
                 peer_id: discv4_id_1,
-                tcp_addr: discv4_enr_1.tcp_addr(),
-                udp_addr: discv4_enr_1.udp_addr(),
+                addr: PeerAddr::new(discv4_enr_2.tcp_addr(), Some(discv4_enr_2.udp_addr())),
                 fork_id: None
             }),
             event_node_2

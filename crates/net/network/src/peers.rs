@@ -1046,7 +1046,7 @@ pub(crate) struct PeerAddr {
 }
 
 impl PeerAddr {
-    fn new(tcp: SocketAddr, udp: Option<SocketAddr>) -> Self {
+    pub fn new(tcp: SocketAddr, udp: Option<SocketAddr>) -> Self {
         Self { tcp, udp }
     }
 
