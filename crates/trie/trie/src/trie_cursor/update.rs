@@ -2,7 +2,7 @@ use super::{TrieCursor, TrieCursorFactory};
 use crate::updates::{TrieKey, TrieOp, TrieUpdatesSorted};
 use reth_db::DatabaseError;
 use reth_primitives::B256;
-use reth_trie_common::{BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey};
+use reth_trie_common::{BranchNodeCompact, Nibbles};
 
 /// The trie cursor factory for the trie updates.
 #[derive(Debug, Clone)]
@@ -64,8 +64,7 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesAccountTrieCursor<'a, C> {
             }
         } else {
             let result = self.cursor.seek_exact(key)?;
-            self.last_key =
-                result.as_ref().map(|(k, _)| TrieKey::AccountNode(StoredNibbles(k.clone())));
+            self.last_key = result.as_ref().map(|(k, _)| TrieKey::AccountNode(k.clone()));
             Ok(result)
         }
     }
@@ -74,12 +73,11 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesAccountTrieCursor<'a, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let stored_nibbles = StoredNibbles(key.clone());
         let trie_update_entry = self
             .trie_updates
             .trie_operations
             .iter()
-            .find(|(k, _)| matches!(k, TrieKey::AccountNode(nibbles) if nibbles <= &stored_nibbles))
+            .find(|(k, _)| matches!(k, TrieKey::AccountNode(nibbles) if nibbles <= &key))
             .cloned();
 
         if let Some((trie_key, trie_op)) = trie_update_entry {
@@ -89,14 +87,13 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesAccountTrieCursor<'a, C> {
             };
             self.last_key = Some(trie_key);
             match trie_op {
-                TrieOp::Update(node) => return Ok(Some((nibbles.0, node))),
+                TrieOp::Update(node) => return Ok(Some((nibbles, node))),
                 TrieOp::Delete => return Ok(None),
             }
         }
 
         let result = self.cursor.seek(key)?;
-        self.last_key =
-            result.as_ref().map(|(k, _)| TrieKey::AccountNode(StoredNibbles(k.clone())));
+        self.last_key = result.as_ref().map(|(k, _)| TrieKey::AccountNode(k.clone()));
         Ok(result)
     }
 
@@ -141,9 +138,8 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
             }
         } else {
             let result = self.cursor.seek_exact(key)?;
-            self.last_key = result.as_ref().map(|(k, _)| {
-                TrieKey::StorageNode(self.hashed_address, StoredNibblesSubKey(k.clone()))
-            });
+            self.last_key =
+                result.as_ref().map(|(k, _)| TrieKey::StorageNode(self.hashed_address, k.clone()));
             Ok(result)
         }
     }
@@ -154,7 +150,7 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let mut trie_update_entry = self.trie_updates.trie_operations.get(self.trie_update_index);
         while trie_update_entry
-            .filter(|(k, _)| matches!(k, TrieKey::StorageNode(address, nibbles) if address == &self.hashed_address && nibbles.0 < key)).is_some()
+            .filter(|(k, _)| matches!(k, TrieKey::StorageNode(address, nibbles) if address == &self.hashed_address && nibbles < &key)).is_some()
         {
             self.trie_update_index += 1;
             trie_update_entry = self.trie_updates.trie_operations.get(self.trie_update_index);
@@ -169,15 +165,14 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
             };
             self.last_key = Some(trie_key.clone());
             match trie_op {
-                TrieOp::Update(node) => return Ok(Some((nibbles.0, node.clone()))),
+                TrieOp::Update(node) => return Ok(Some((nibbles, node.clone()))),
                 TrieOp::Delete => return Ok(None),
             }
         }
 
         let result = self.cursor.seek(key)?;
-        self.last_key = result.as_ref().map(|(k, _)| {
-            TrieKey::StorageNode(self.hashed_address, StoredNibblesSubKey(k.clone()))
-        });
+        self.last_key =
+            result.as_ref().map(|(k, _)| TrieKey::StorageNode(self.hashed_address, k.clone()));
         Ok(result)
     }
 

@@ -61,7 +61,7 @@ where
 
     /// Retrieves the current key in the cursor.
     fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
-        Ok(self.0.current()?.map(|(k, _)| TrieKey::AccountNode(k)))
+        Ok(self.0.current()?.map(|(k, _)| TrieKey::AccountNode(k.0)))
     }
 }
 
@@ -110,7 +110,7 @@ where
 
     /// Retrieves the current value in the storage trie cursor.
     fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
-        Ok(self.cursor.current()?.map(|(k, v)| TrieKey::StorageNode(k, v.nibbles)))
+        Ok(self.cursor.current()?.map(|(k, v)| TrieKey::StorageNode(k, v.nibbles.0)))
     }
 }
 
