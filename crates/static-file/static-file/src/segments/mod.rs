@@ -38,16 +38,6 @@ pub trait Segment<DB: Database>: Send + Sync {
         static_file_provider: StaticFileProvider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()>;
-
-    /// Create a static file of data for the provided block range. The `directory` parameter
-    /// determines the static file's save location.
-    fn create_static_file_file(
-        &self,
-        provider: &DatabaseProviderRO<DB>,
-        directory: &Path,
-        config: SegmentConfig,
-        block_range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<()>;
 }
 
 /// Returns a [`NippyJar`] according to the desired configuration. The `directory` parameter
