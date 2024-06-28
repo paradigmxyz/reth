@@ -185,6 +185,7 @@ impl Compression for Zstd {
         matches!(self.state, ZstdState::Ready)
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     /// If using it with dictionaries, prepares a dictionary for each column.
     fn prepare_compression(
         &mut self,
@@ -208,7 +209,6 @@ impl Compression for Zstd {
             return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
         }
 
-        // TODO: parallel calculation
         let mut dictionaries = vec![];
         for column in columns {
             // ZSTD requires all training data to be continuous in memory, alongside the size of

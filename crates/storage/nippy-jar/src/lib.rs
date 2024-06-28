@@ -306,6 +306,56 @@ impl<H: NippyJarHeader> NippyJar<H> {
         DataReader::new(self.data_path())
     }
 
+    /// Writes all necessary configuration to file.
+    fn freeze_config(&self) -> Result<(), NippyJarError> {
+        // Atomic writes are hard: <https://github.com/paradigmxyz/reth/issues/8622>
+        let mut tmp_path = self.config_path();
+        tmp_path.set_extension(".tmp");
+
+        // Write to temporary file
+        let mut file = File::create(&tmp_path)?;
+        bincode::serialize_into(&mut file, &self)?;
+
+        // fsync() file
+        file.sync_all()?;
+
+        // Rename file, not move
+        reth_fs_util::rename(&tmp_path, self.config_path())?;
+
+        // fsync() dir
+        if let Some(parent) = tmp_path.parent() {
+            OpenOptions::new().read(true).open(parent)?.sync_all()?;
+        }
+        Ok(())
+    }
+}
+
+impl<H: NippyJarHeader> InclusionFilter for NippyJar<H> {
+    fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
+        self.filter.as_mut().ok_or(NippyJarError::FilterMissing)?.add(element)
+    }
+
+    fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
+        self.filter.as_ref().ok_or(NippyJarError::FilterMissing)?.contains(element)
+    }
+
+    fn size(&self) -> usize {
+        self.filter.as_ref().map(|f| f.size()).unwrap_or(0)
+    }
+}
+
+impl<H: NippyJarHeader> PerfectHashingFunction for NippyJar<H> {
+    fn set_keys<T: PHFKey>(&mut self, keys: &[T]) -> Result<(), NippyJarError> {
+        self.phf.as_mut().ok_or(NippyJarError::PHFMissing)?.set_keys(keys)
+    }
+
+    fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
+        self.phf.as_ref().ok_or(NippyJarError::PHFMissing)?.get_index(key)
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl<H: NippyJarHeader> NippyJar<H> {
     /// If required, prepares any compression algorithm to an early pass of the data.
     pub fn prepare_compression(
         &mut self,
@@ -428,53 +478,6 @@ impl<H: NippyJarHeader> NippyJar<H> {
         }
 
         Ok(())
-    }
-
-    /// Writes all necessary configuration to file.
-    fn freeze_config(&self) -> Result<(), NippyJarError> {
-        // Atomic writes are hard: <https://github.com/paradigmxyz/reth/issues/8622>
-        let mut tmp_path = self.config_path();
-        tmp_path.set_extension(".tmp");
-
-        // Write to temporary file
-        let mut file = File::create(&tmp_path)?;
-        bincode::serialize_into(&mut file, &self)?;
-
-        // fsync() file
-        file.sync_all()?;
-
-        // Rename file, not move
-        reth_fs_util::rename(&tmp_path, self.config_path())?;
-
-        // fsync() dir
-        if let Some(parent) = tmp_path.parent() {
-            OpenOptions::new().read(true).open(parent)?.sync_all()?;
-        }
-        Ok(())
-    }
-}
-
-impl<H: NippyJarHeader> InclusionFilter for NippyJar<H> {
-    fn add(&mut self, element: &[u8]) -> Result<(), NippyJarError> {
-        self.filter.as_mut().ok_or(NippyJarError::FilterMissing)?.add(element)
-    }
-
-    fn contains(&self, element: &[u8]) -> Result<bool, NippyJarError> {
-        self.filter.as_ref().ok_or(NippyJarError::FilterMissing)?.contains(element)
-    }
-
-    fn size(&self) -> usize {
-        self.filter.as_ref().map(|f| f.size()).unwrap_or(0)
-    }
-}
-
-impl<H: NippyJarHeader> PerfectHashingFunction for NippyJar<H> {
-    fn set_keys<T: PHFKey>(&mut self, keys: &[T]) -> Result<(), NippyJarError> {
-        self.phf.as_mut().ok_or(NippyJarError::PHFMissing)?.set_keys(keys)
-    }
-
-    fn get_index(&self, key: &[u8]) -> Result<Option<u64>, NippyJarError> {
-        self.phf.as_ref().ok_or(NippyJarError::PHFMissing)?.get_index(key)
     }
 }
 

@@ -52,6 +52,7 @@ strum = { workspace = true, features = ["derive"] }
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
+reth-nippy-jar = { workspace = true, features = ["test-utils"] }
 rand.workspace = true
 serde_json.workspace = true
 
@@ -75,7 +76,10 @@ assert_matches.workspace = true
 
 [features]
 default = ["mdbx"]
-test-utils = ["tempfile", "arbitrary"]
+test-utils = [
+    "tempfile",
+    "arbitrary",
+]
 mdbx = ["reth-libmdbx"]
 bench = []
 arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
