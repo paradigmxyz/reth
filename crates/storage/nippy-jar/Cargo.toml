@@ -39,11 +39,12 @@ tracing.workspace = true
 anyhow = "1.0"
 thiserror.workspace = true
 derive_more.workspace = true
+rayon.workspace = true
 
 [dev-dependencies]
 rand = { workspace = true, features = ["small_rng"] }
 tempfile.workspace = true
-
+ 
 
 [features]
 default = []

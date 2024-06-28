@@ -7500,6 +7500,7 @@ dependencies = [
  "memmap2",
  "ph",
  "rand 0.8.5",
+ "rayon",
  "reth-fs-util",
  "serde",
  "sucds",
