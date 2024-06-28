@@ -2,7 +2,7 @@ use reth_evm::execute::{BatchExecutor, BlockExecutionError, BlockExecutorProvide
 use reth_exex_types::BackfillThresholds;
 use reth_node_api::FullNodeComponents;
 use reth_node_core::node_config::NodeConfig;
-use reth_primitives::BlockNumber;
+use reth_primitives::{Block, BlockNumber};
 use reth_provider::{
     BlockReader, Chain, DatabaseProviderFactory, HeaderProvider, HistoricalStateProviderRef,
     ProviderError, StaticFileProviderFactory, TransactionVariant,
@@ -95,7 +95,7 @@ impl<Node: FullNodeComponents> BackfillJob<Node> {
 
             // we need the block's transactions along with their hashes
             let block = provider
-                .block_with_senders(block_number.into(), TransactionVariant::WithHash)?
+                .sealed_block_with_senders(block_number.into(), TransactionVariant::WithHash)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
             fetch_block_duration += fetch_block_start.elapsed();
@@ -108,12 +108,25 @@ impl<Node: FullNodeComponents> BackfillJob<Node> {
             // Execute the block
             let execute_start = Instant::now();
 
+            // Unseal the block for execution
+            let (block, senders) = block.into_components();
+            let (unsealed_header, hash) = block.header.split();
+            let block = Block {
+                header: unsealed_header,
+                body: block.body,
+                ommers: block.ommers,
+                withdrawals: block.withdrawals,
+                requests: block.requests,
+            }
+            .with_senders_unchecked(senders);
+
             executor.execute_and_verify_one((&block, td).into())?;
             execution_duration += execute_start.elapsed();
 
             // TODO(alexey): report gas metrics using `block.header.gas_used`
 
-            blocks.push(block.seal_slow());
+            // Seal the block back and save it
+            blocks.push(block.seal(hash));
 
             // Check if we should commit now
             let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;

@@ -359,6 +359,65 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         )
     }
 
+    fn block_with_senders<H, HF, B, BF>(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+        header_by_number: HF,
+        construct_block: BF,
+    ) -> ProviderResult<Option<B>>
+    where
+        H: AsRef<Header>,
+        HF: FnOnce(BlockNumber) -> ProviderResult<Option<H>>,
+        BF: FnOnce(
+            H,
+            Vec<TransactionSigned>,
+            Vec<Address>,
+            Vec<Header>,
+            Option<Withdrawals>,
+            Option<Requests>,
+        ) -> ProviderResult<Option<B>>,
+    {
+        let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
+        let Some(header) = header_by_number(block_number)? else { return Ok(None) };
+
+        let ommers = self.ommers(block_number.into())?.unwrap_or_default();
+        let withdrawals =
+            self.withdrawals_by_block(block_number.into(), header.as_ref().timestamp)?;
+        let requests = self.requests_by_block(block_number.into(), header.as_ref().timestamp)?;
+
+        // Get the block body
+        //
+        // If the body indices are not found, this means that the transactions either do not exist
+        // in the database yet, or they do exit but are not indexed. If they exist but are not
+        // indexed, we don't have enough information to return the block anyways, so we return
+        // `None`.
+        let Some(body) = self.block_body_indices(block_number)? else { return Ok(None) };
+
+        let tx_range = body.tx_num_range();
+
+        let (transactions, senders) = if tx_range.is_empty() {
+            (vec![], vec![])
+        } else {
+            (self.transactions_by_tx_range(tx_range.clone())?, self.senders_by_tx_range(tx_range)?)
+        };
+
+        let body = transactions
+            .into_iter()
+            .map(|tx| match transaction_kind {
+                TransactionVariant::NoHash => TransactionSigned {
+                    // Caller explicitly asked for no hash, so we don't calculate it
+                    hash: B256::ZERO,
+                    signature: tx.signature,
+                    transaction: tx.transaction,
+                },
+                TransactionVariant::WithHash => tx.with_hash(),
+            })
+            .collect();
+
+        construct_block(header, body, senders, ommers, withdrawals, requests)
+    }
+
     /// Returns a range of blocks from the database.
     ///
     /// Uses the provided `headers_range` to get the headers for the range, and `assemble_block` to
@@ -1552,48 +1611,41 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<BlockWithSenders>> {
-        let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
-        let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };
+        self.block_with_senders(
+            id,
+            transaction_kind,
+            |block_number| self.header_by_number(block_number),
+            |header, body, senders, ommers, withdrawals, requests| {
+                Block { header, body, ommers, withdrawals, requests }
+                    // Note: we're using unchecked here because we know the block contains valid txs
+                    // wrt to its height and can ignore the s value check so pre
+                    // EIP-2 txs are allowed
+                    .try_with_senders_unchecked(senders)
+                    .map(Some)
+                    .map_err(|_| ProviderError::SenderRecoveryError)
+            },
+        )
+    }
 
-        let ommers = self.ommers(block_number.into())?.unwrap_or_default();
-        let withdrawals = self.withdrawals_by_block(block_number.into(), header.timestamp)?;
-        let requests = self.requests_by_block(block_number.into(), header.timestamp)?;
-
-        // Get the block body
-        //
-        // If the body indices are not found, this means that the transactions either do not exist
-        // in the database yet, or they do exit but are not indexed. If they exist but are not
-        // indexed, we don't have enough information to return the block anyways, so we return
-        // `None`.
-        let Some(body) = self.block_body_indices(block_number)? else { return Ok(None) };
-
-        let tx_range = body.tx_num_range();
-
-        let (transactions, senders) = if tx_range.is_empty() {
-            (vec![], vec![])
-        } else {
-            (self.transactions_by_tx_range(tx_range.clone())?, self.senders_by_tx_range(tx_range)?)
-        };
-
-        let body = transactions
-            .into_iter()
-            .map(|tx| match transaction_kind {
-                TransactionVariant::NoHash => TransactionSigned {
-                    // Caller explicitly asked for no hash, so we don't calculate it
-                    hash: B256::ZERO,
-                    signature: tx.signature,
-                    transaction: tx.transaction,
-                },
-                TransactionVariant::WithHash => tx.with_hash(),
-            })
-            .collect();
-
-        Block { header, body, ommers, withdrawals, requests }
-            // Note: we're using unchecked here because we know the block contains valid txs wrt to
-            // its height and can ignore the s value check so pre EIP-2 txs are allowed
-            .try_with_senders_unchecked(senders)
-            .map(Some)
-            .map_err(|_| ProviderError::SenderRecoveryError)
+    fn sealed_block_with_senders(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        self.block_with_senders(
+            id,
+            transaction_kind,
+            |block_number| self.sealed_header(block_number),
+            |header, body, senders, ommers, withdrawals, requests| {
+                SealedBlock { header, body, ommers, withdrawals, requests }
+                    // Note: we're using unchecked here because we know the block contains valid txs
+                    // wrt to its height and can ignore the s value check so pre
+                    // EIP-2 txs are allowed
+                    .try_with_senders_unchecked(senders)
+                    .map(Some)
+                    .map_err(|_| ProviderError::SenderRecoveryError)
+            },
+        )
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
