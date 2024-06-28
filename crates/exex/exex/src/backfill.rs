@@ -1,5 +1,6 @@
 use reth_db_api::database::Database;
 use reth_evm::execute::{BatchExecutor, BlockExecutionError, BlockExecutorProvider};
+use reth_node_api::FullNodeComponents;
 use reth_primitives::{Block, BlockNumber};
 use reth_provider::{
     Chain, FullProvider, HistoricalStateProviderRef, ProviderError, TransactionVariant,
@@ -24,7 +25,7 @@ pub struct BackfillJobFactory<E, P> {
 }
 
 impl<E: Clone, P: Clone> BackfillJobFactory<E, P> {
-    /// Creates a new backfill job factory.
+    /// Creates a new [`BackfillJobFactory`].
     pub const fn new(
         executor: E,
         provider: P,
@@ -44,6 +45,22 @@ impl<E: Clone, P: Clone> BackfillJobFactory<E, P> {
             thresholds: self.thresholds.clone(),
             _db: PhantomData,
         }
+    }
+}
+
+impl BackfillJobFactory<(), ()> {
+    /// Creates a new [`BackfillJobFactory`] from [`FullNodeComponents`].
+    pub fn new_from_components<Node: FullNodeComponents>(
+        components: Node,
+        prune_modes: PruneModes,
+        thresholds: ExecutionStageThresholds,
+    ) -> BackfillJobFactory<Node::Executor, Node::Provider> {
+        BackfillJobFactory::<_, _>::new(
+            components.block_executor().clone(),
+            components.provider().clone(),
+            prune_modes,
+            thresholds,
+        )
     }
 }
 

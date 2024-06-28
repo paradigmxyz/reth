@@ -45,6 +45,7 @@ reth-evm-ethereum.workspace = true
 reth-testing-utils.workspace = true
 reth-blockchain-tree.workspace = true
 reth-db-common.workspace = true
+reth-node-api.workspace = true
 
 secp256k1.workspace = true
 
