@@ -198,7 +198,7 @@ mod tests {
     use crate::BackfillJobFactory;
     use eyre::OptionExt;
     use reth_blockchain_tree::noop::NoopBlockchainTree;
-    use reth_chainspec::{ChainSpecBuilder, Hardfork, MAINNET};
+    use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, MAINNET};
     use reth_db_common::init::init_genesis;
     use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
     use reth_evm_ethereum::execute::EthExecutorProvider;
@@ -255,7 +255,7 @@ mod tests {
                 receipts_root: b256!(
                     "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
                 ),
-                difficulty: chain_spec.fork(Hardfork::Paris).ttd().expect("Paris TTD"),
+                difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
                 number: 1,
                 gas_limit: 21000,
                 gas_used: 21000,
@@ -282,7 +282,7 @@ mod tests {
         let block2 = Block {
             header: Header {
                 parent_hash: block1.hash_slow(),
-                difficulty: chain_spec.fork(Hardfork::Paris).ttd().expect("Paris TTD"),
+                difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
                 number: 2,
                 ..Default::default()
             },
