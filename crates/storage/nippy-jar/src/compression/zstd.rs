@@ -1,5 +1,6 @@
 use crate::{compression::Compression, NippyJarError};
 use derive_more::Deref;
+use rayon::prelude::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     fs::File,
@@ -9,7 +10,6 @@ use std::{
 use tracing::*;
 use zstd::bulk::Compressor;
 pub use zstd::{bulk::Decompressor, dict::DecoderDictionary};
-use rayon::prelude::*;
 
 type RawDictionary = Vec<u8>;
 
