@@ -93,7 +93,7 @@ impl NodeRecord {
     }
 
     /// Creates a new record from an ip address and ports.
-    pub fn new_with_ip_ports(
+    pub fn new_with_ports(
         ip_addr: IpAddr,
         tcp_port: u16,
         udp_port: Option<u16>,

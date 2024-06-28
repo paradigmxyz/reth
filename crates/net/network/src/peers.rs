@@ -209,7 +209,7 @@ impl PeersManager {
     /// Returns an iterator over all peers
     pub(crate) fn iter_peers(&self) -> impl Iterator<Item = NodeRecord> + '_ {
         self.peers.iter().map(|(peer_id, v)| {
-            NodeRecord::new_with_ip_ports(
+            NodeRecord::new_with_ports(
                 v.tcp_addr.ip(),
                 v.tcp_addr.port(),
                 v.udp_addr.map(|addr| addr.port()),
@@ -222,7 +222,7 @@ impl PeersManager {
     #[allow(dead_code)]
     fn peer_by_id(&self, peer_id: PeerId) -> Option<NodeRecord> {
         self.peers.get(&peer_id).map(|v| {
-            NodeRecord::new_with_ip_ports(
+            NodeRecord::new_with_ports(
                 v.tcp_addr.ip(),
                 v.tcp_addr.port(),
                 v.udp_addr.map(|addr| addr.port()),
