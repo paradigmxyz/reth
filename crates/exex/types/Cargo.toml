@@ -12,5 +12,4 @@ description = "Commonly used types for exex usage in reth."
 workspace = true
 
 [dependencies]
-reth-stages-types.workspace = true
 alloy-primitives.workspace = true

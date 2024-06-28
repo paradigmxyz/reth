@@ -33,6 +33,3 @@ impl FinishedExExHeight {
         matches!(self, Self::NotReady)
     }
 }
-
-/// The thresholds at which the backfill stops executing the range of blocks and returns the result.
-pub type BackfillThresholds = reth_stages_types::ExecutionStageThresholds;

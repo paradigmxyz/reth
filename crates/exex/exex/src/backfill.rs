@@ -1,5 +1,4 @@
 use reth_evm::execute::{BatchExecutor, BlockExecutionError, BlockExecutorProvider};
-use reth_exex_types::BackfillThresholds;
 use reth_node_api::FullNodeComponents;
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::{Block, BlockNumber};
@@ -9,7 +8,7 @@ use reth_provider::{
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
-use reth_stages_api::format_gas_throughput;
+use reth_stages_api::{format_gas_throughput, ExecutionStageThresholds};
 use reth_tracing::tracing::{debug, trace};
 use std::{
     ops::RangeInclusive,
@@ -21,12 +20,16 @@ use std::{
 pub struct BackfillJobFactory<Node: FullNodeComponents> {
     components: Node,
     config: NodeConfig,
-    thresholds: BackfillThresholds,
+    thresholds: ExecutionStageThresholds,
 }
 
 impl<Node: FullNodeComponents> BackfillJobFactory<Node> {
     /// Creates a new backfill job factory.
-    pub const fn new(components: Node, config: NodeConfig, thresholds: BackfillThresholds) -> Self {
+    pub const fn new(
+        components: Node,
+        config: NodeConfig,
+        thresholds: ExecutionStageThresholds,
+    ) -> Self {
         Self { components, config, thresholds }
     }
 
@@ -50,7 +53,7 @@ pub struct BackfillJob<Node: FullNodeComponents> {
     components: Node,
     prune_modes: PruneModes,
     range: RangeInclusive<BlockNumber>,
-    thresholds: BackfillThresholds,
+    thresholds: ExecutionStageThresholds,
 }
 
 impl<Node: FullNodeComponents> Iterator for BackfillJob<Node> {
