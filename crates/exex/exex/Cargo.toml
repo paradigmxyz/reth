@@ -46,6 +46,7 @@ reth-testing-utils.workspace = true
 reth-blockchain-tree.workspace = true
 reth-db-common.workspace = true
 reth-node-api.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 
 secp256k1.workspace = true
 
