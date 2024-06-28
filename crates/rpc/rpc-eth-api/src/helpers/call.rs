@@ -4,6 +4,7 @@
 use futures::Future;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
+    revm::env::tx_env_with_recovered,
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
         ResultAndState, TransactTo,
@@ -118,11 +119,9 @@ pub trait EthCall: Call + LoadPendingBlock {
                     // to be replayed
                     let transactions = block.into_transactions_ecrecovered().take(num_txs);
                     for tx in transactions {
-                        let env = EnvWithHandlerCfg::new_with_cfg_env(
-                            cfg.clone(),
-                            block_env.clone(),
-                            Call::evm_config(&this).tx_env(&tx),
-                        );
+                        let tx = tx_env_with_recovered(&tx);
+                        let env =
+                            EnvWithHandlerCfg::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
                         let (res, _) = this.transact(&mut db, env)?;
                         db.commit(res.state);
                     }
@@ -423,11 +422,8 @@ pub trait Call: LoadState + SpawnBlocking {
                     tx.hash,
                 )?;
 
-                let env = EnvWithHandlerCfg::new_with_cfg_env(
-                    cfg,
-                    block_env,
-                    Call::evm_config(&this).tx_env(&tx),
-                );
+                let env =
+                    EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
 
                 let (res, _) = this.transact(&mut db, env)?;
                 f(tx_info, res, db)

@@ -1,8 +1,8 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
 use futures::Future;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::B256;
+use reth_evm::ConfigureEvm;
+use reth_primitives::{revm::env::tx_env_with_recovered, B256};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -196,11 +196,8 @@ pub trait Trace: LoadState {
                     tx.hash,
                 )?;
 
-                let env = EnvWithHandlerCfg::new_with_cfg_env(
-                    cfg,
-                    block_env,
-                    Call::evm_config(&this).tx_env(&tx),
-                );
+                let env =
+                    EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, tx_env_with_recovered(&tx));
                 let (res, _) =
                     this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
                 f(tx_info, inspector, res, db)
@@ -311,7 +308,7 @@ pub trait Trace: LoadState {
                             block_number: Some(block_number),
                             base_fee: Some(base_fee),
                         };
-                        let tx_env = Trace::evm_config(&this).tx_env(&tx);
+                        let tx_env = tx_env_with_recovered(&tx);
                         (tx_info, tx_env)
                     })
                     .peekable();

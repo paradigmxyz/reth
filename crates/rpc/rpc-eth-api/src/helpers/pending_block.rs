@@ -5,11 +5,12 @@ use std::time::{Duration, Instant};
 
 use futures::Future;
 use reth_chainspec::EthereumHardforks;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::ConfigureEvm;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
     proofs::calculate_transaction_root,
+    revm::env::tx_env_with_recovered,
     revm_primitives::{
         BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
         ResultAndState, SpecId,
@@ -291,11 +292,8 @@ pub trait LoadPendingBlock {
             }
 
             // Configure the environment for the block.
-            let env = Env::boxed(
-                cfg.cfg_env.clone(),
-                block_env.clone(),
-                Self::evm_config(self).tx_env(&tx),
-            );
+            let env =
+                Env::boxed(cfg.cfg_env.clone(), block_env.clone(), tx_env_with_recovered(&tx));
 
             let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
 
