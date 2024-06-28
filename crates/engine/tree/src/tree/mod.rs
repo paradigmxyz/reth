@@ -14,9 +14,7 @@ use reth_primitives::{
     Address, Block, BlockNumber, Receipts, Requests, SealedBlock, SealedBlockWithSenders, B256,
     U256,
 };
-use reth_provider::{
-    BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory, StateRootProvider,
-};
+use reth_provider::{BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
     engine::{
