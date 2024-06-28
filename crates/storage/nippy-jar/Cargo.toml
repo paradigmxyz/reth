@@ -44,7 +44,7 @@ rayon.workspace = true
 [dev-dependencies]
 rand = { workspace = true, features = ["small_rng"] }
 tempfile.workspace = true
- 
+
 
 [features]
 default = []
