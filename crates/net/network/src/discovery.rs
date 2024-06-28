@@ -438,7 +438,7 @@ mod tests {
         assert_eq!(
             DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
                 peer_id: discv4_id_1,
-                addr: PeerAddr::new(discv4_enr_2.tcp_addr(), Some(discv4_enr_2.udp_addr())),
+                addr: PeerAddr::new(discv4_enr_1.tcp_addr(), Some(discv4_enr_1.udp_addr())),
                 fork_id: None
             }),
             event_node_2
