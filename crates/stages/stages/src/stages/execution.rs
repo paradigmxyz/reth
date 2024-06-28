@@ -224,8 +224,9 @@ where
             provider.tx_ref(),
             provider.static_file_provider().clone(),
         ));
-        let mut executor = self.executor_provider.batch_executor(db, prune_modes);
+        let mut executor = self.executor_provider.batch_executor(db);
         executor.set_tip(max_block);
+        executor.set_prune_modes(prune_modes);
 
         // Progress tracking
         let mut stage_progress = start_block;

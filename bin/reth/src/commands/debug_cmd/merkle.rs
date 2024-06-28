@@ -23,7 +23,6 @@ use reth_provider::{
     BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
 };
-use reth_prune::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
     stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
@@ -148,13 +147,12 @@ impl Command {
             provider_rw.insert_block(sealed_block.clone(), None)?;
 
             td += sealed_block.difficulty;
-            let mut executor = executor_provider.batch_executor(
-                StateProviderDatabase::new(LatestStateProviderRef::new(
+            let mut executor = executor_provider.batch_executor(StateProviderDatabase::new(
+                LatestStateProviderRef::new(
                     provider_rw.tx_ref(),
                     provider_rw.static_file_provider().clone(),
-                )),
-                PruneModes::none(),
-            );
+                ),
+            ));
             executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
             executor.finalize().write_to_storage(
                 provider_rw.tx_ref(),
