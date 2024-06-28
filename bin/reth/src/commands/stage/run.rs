@@ -20,11 +20,11 @@ use reth_provider::{
 };
 use reth_stages::{
     stages::{
-        AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TransactionLookupStage,
+        AccountHashingStage, BodyStage, ExecutionStage, IndexAccountHistoryStage,
+        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
+        TransactionLookupStage,
     },
-    ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
+    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
 use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
 use tracing::*;

@@ -12,10 +12,10 @@ use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use reth_prune::PruneModes;
 use reth_stages::{
     stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
-        StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+        AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage,
+        MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
     },
-    Stage, StageCheckpoint, UnwindInput,
+    ExecutionStageThresholds, Stage, StageCheckpoint, UnwindInput,
 };
 use tracing::info;
 

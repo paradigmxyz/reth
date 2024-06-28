@@ -28,9 +28,8 @@ use reth_provider::{
 };
 use reth_prune::PruneModes;
 use reth_stages::{
-    sets::DefaultStages,
-    stages::{ExecutionStage, ExecutionStageThresholds},
-    Pipeline, StageId, StageSet,
+    sets::DefaultStages, stages::ExecutionStage, ExecutionStageThresholds, Pipeline, StageId,
+    StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
