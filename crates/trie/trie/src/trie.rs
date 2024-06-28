@@ -1208,7 +1208,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => {
-                    Some((nibbles.0.clone(), node.clone()))
+                    Some((nibbles.clone(), node.clone()))
                 }
                 _ => None,
             })
@@ -1295,7 +1295,7 @@ mod tests {
             .iter()
             .filter_map(|entry| match entry {
                 (TrieKey::StorageNode(_, nibbles), TrieOp::Update(node)) => {
-                    Some((nibbles.0.clone(), node.clone()))
+                    Some((nibbles.clone(), node.clone()))
                 }
                 _ => None,
             })
