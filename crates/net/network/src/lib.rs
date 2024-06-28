@@ -46,8 +46,8 @@
 //!
 //! ```
 //! # async fn launch() {
-//! use reth_chainspec::net::mainnet_nodes;
 //! use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+//! use reth_network_peers::mainnet_nodes;
 //! use reth_provider::test_utils::NoopProvider;
 //!
 //! // This block provider implementation is used for testing purposes.
@@ -71,8 +71,8 @@
 //! ### Configure all components of the Network with the [`NetworkBuilder`]
 //!
 //! ```
-//! use reth_chainspec::net::mainnet_nodes;
 //! use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+//! use reth_network_peers::mainnet_nodes;
 //! use reth_provider::test_utils::NoopProvider;
 //! use reth_transaction_pool::TransactionPool;
 //! async fn launch<Pool: TransactionPool>(pool: Pool) {
@@ -143,12 +143,12 @@ pub use fetch::FetchClient;
 pub use manager::{NetworkEvent, NetworkManager};
 pub use message::PeerRequest;
 pub use network::{NetworkEvents, NetworkHandle, NetworkProtocols};
-pub use peers::PeersConfig;
 pub use session::{
     ActiveSessionHandle, ActiveSessionMessage, Direction, PeerInfo, PendingSessionEvent,
     PendingSessionHandle, PendingSessionHandshakeError, SessionCommand, SessionEvent, SessionId,
-    SessionLimits, SessionManager, SessionsConfig,
+    SessionManager,
 };
 pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
+pub use reth_network_types::{PeersConfig, SessionsConfig};

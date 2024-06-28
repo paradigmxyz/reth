@@ -1,7 +1,7 @@
 //! Optimism-specific implementation and utilities for the executor
 
 use crate::OptimismBlockExecutionError;
-use reth_chainspec::{ChainSpec, Hardfork};
+use reth_chainspec::{ChainSpec, OptimismHardfork};
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{address, b256, hex, Address, Block, Bytes, B256, U256};
 use revm::{
@@ -191,13 +191,14 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Ok(U256::ZERO)
         }
 
-        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, timestamp) {
+        let spec_id = if chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, timestamp)
+        {
             SpecId::FJORD
-        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Ecotone, timestamp) {
+        } else if chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Ecotone, timestamp) {
             SpecId::ECOTONE
-        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
+        } else if chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, timestamp) {
             SpecId::REGOLITH
-        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
+        } else if chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Bedrock, timestamp) {
             SpecId::BEDROCK
         } else {
             return Err(OptimismBlockExecutionError::L1BlockInfoError {
@@ -214,11 +215,12 @@ impl RethL1BlockInfo for L1BlockInfo {
         timestamp: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError> {
-        let spec_id = if chain_spec.is_fork_active_at_timestamp(Hardfork::Fjord, timestamp) {
+        let spec_id = if chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Fjord, timestamp)
+        {
             SpecId::FJORD
-        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Regolith, timestamp) {
+        } else if chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Regolith, timestamp) {
             SpecId::REGOLITH
-        } else if chain_spec.is_fork_active_at_timestamp(Hardfork::Bedrock, timestamp) {
+        } else if chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Bedrock, timestamp) {
             SpecId::BEDROCK
         } else {
             return Err(OptimismBlockExecutionError::L1BlockInfoError {
@@ -245,8 +247,9 @@ where
     // previous block timestamp (heuristically, block time is not perfectly constant at 2s), and the
     // chain is an optimism chain, then we need to force-deploy the create2 deployer contract.
     if chain_spec.is_optimism() &&
-        chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(Hardfork::Canyon, timestamp.saturating_sub(2))
+        chain_spec.is_fork_active_at_timestamp(OptimismHardfork::Canyon, timestamp) &&
+        !chain_spec
+            .is_fork_active_at_timestamp(OptimismHardfork::Canyon, timestamp.saturating_sub(2))
     {
         trace!(target: "evm", "Forcing create2 deployer contract deployment on Canyon transition");
 

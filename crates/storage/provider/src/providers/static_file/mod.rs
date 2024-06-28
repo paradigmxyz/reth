@@ -69,6 +69,7 @@ mod tests {
     };
     use reth_primitives::{static_file::find_fixed_range, BlockNumber, B256, U256};
     use reth_testing_utils::generators::{self, random_header_range};
+    use std::vec::IntoIter;
 
     #[test]
     fn test_snap() {
@@ -128,9 +129,7 @@ mod tests {
             let provider = factory.provider().unwrap();
             let tx = provider.tx_ref();
 
-            // Hacky type inference. TODO fix
-            let mut none_vec = Some(vec![vec![vec![0u8]].into_iter()]);
-            let _ = none_vec.take();
+            let none_vec: Option<Vec<IntoIter<Vec<u8>>>> = None;
 
             // Generate list of hashes for filters & PHF
             let mut cursor = tx.cursor_read::<RawTable<CanonicalHeaders>>().unwrap();

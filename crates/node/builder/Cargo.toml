@@ -45,6 +45,7 @@ reth-node-events.workspace = true
 reth-consensus.workspace = true
 reth-consensus-debug-client.workspace = true
 reth-rpc-types.workspace = true
+reth-engine-util.workspace = true
 
 ## async
 futures.workspace = true
@@ -55,9 +56,6 @@ tokio = { workspace = true, features = [
     "rt-multi-thread",
 ] }
 tokio-stream.workspace = true
-
-## ethereum
-discv5.workspace = true
 
 ## crypto
 secp256k1 = { workspace = true, features = [

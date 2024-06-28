@@ -1,9 +1,7 @@
 //! `eth_` `PubSub` RPC handler implementation
 
-use crate::{
-    eth::logs_utils,
-    result::{internal_rpc_err, invalid_params_rpc_err},
-};
+use std::sync::Arc;
+
 use futures::StreamExt;
 use jsonrpsee::{
     server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
@@ -11,7 +9,9 @@ use jsonrpsee::{
 use reth_network_api::NetworkInfo;
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
-use reth_rpc_api::EthPubSubApiServer;
+use reth_rpc_eth_api::pubsub::EthPubSubApiServer;
+use reth_rpc_eth_types::logs_utils;
+use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_rpc_types::{
     pubsub::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
@@ -22,7 +22,6 @@ use reth_rpc_types::{
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
-use std::sync::Arc;
 use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
     Stream,
@@ -197,10 +196,10 @@ where
 /// Helper to convert a serde error into an [`ErrorObject`]
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to serialize subscription item: {0}")]
-pub(crate) struct SubscriptionSerializeError(#[from] serde_json::Error);
+pub struct SubscriptionSerializeError(#[from] serde_json::Error);
 
 impl SubscriptionSerializeError {
-    pub(crate) const fn new(err: serde_json::Error) -> Self {
+    const fn new(err: serde_json::Error) -> Self {
         Self(err)
     }
 }

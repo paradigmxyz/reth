@@ -2491,7 +2491,7 @@ mod tests {
         use super::*;
         use alloy_genesis::Genesis;
         use reth_db::test_utils::create_test_static_files_dir;
-        use reth_primitives::{Hardfork, U256};
+        use reth_primitives::{EthereumHardfork, U256};
         use reth_provider::{
             providers::StaticFileProvider, test_utils::blocks::BlockchainTestData,
         };
@@ -2720,9 +2720,9 @@ mod tests {
         async fn payload_pre_merge() {
             let data = BlockchainTestData::default();
             let mut block1 = data.blocks[0].0.block.clone();
-            block1
-                .header
-                .set_difficulty(MAINNET.fork(Hardfork::Paris).ttd().unwrap() - U256::from(1));
+            block1.header.set_difficulty(
+                MAINNET.fork(EthereumHardfork::Paris).ttd().unwrap() - U256::from(1),
+            );
             block1 = block1.unseal().seal_slow();
             let (block2, exec_result2) = data.blocks[1].clone();
             let mut block2 = block2.unseal().block;

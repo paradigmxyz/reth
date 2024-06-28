@@ -25,8 +25,9 @@ members = [
     "crates/consensus/debug-client/",
     "crates/ethereum-forks/",
     "crates/e2e-test-utils/",
-    "crates/engine-primitives/",
+    "crates/engine/primitives/",
     "crates/engine/tree/",
+    "crates/engine/util/",
     "crates/errors/",
     "crates/ethereum-forks/",
     "crates/ethereum/consensus/",
@@ -53,6 +54,7 @@ members = [
     "crates/net/eth-wire/",
     "crates/net/nat/",
     "crates/net/network-api/",
+    "crates/net/network-types/",
     "crates/net/network/",
     "crates/net/p2p/",
     "crates/net/peers/",
@@ -79,8 +81,11 @@ members = [
     "crates/rpc/rpc-api/",
     "crates/rpc/rpc-builder/",
     "crates/rpc/rpc-engine-api/",
+    "crates/rpc/rpc-eth-api/",
+    "crates/rpc/rpc-eth-types/",
     "crates/rpc/rpc-layer",
     "crates/rpc/rpc-testing-util/",
+    "crates/rpc/rpc-server-types/",
     "crates/rpc/rpc-types-compat/",
     "crates/rpc/rpc-types/",
     "crates/rpc/rpc/",
@@ -127,6 +132,9 @@ members = [
     "examples/polygon-p2p/",
     "examples/rpc-db/",
     "examples/txpool-tracing/",
+    "examples/custom-rlpx-subprotocol",
+    "examples/exex/minimal/",
+    "examples/exex/op-bridge/",
     "testing/ef-tests/",
     "testing/testing-utils",
 ]
@@ -279,8 +287,9 @@ reth-dns-discovery = { path = "crates/net/dns" }
 reth-downloaders = { path = "crates/net/downloaders" }
 reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-ecies = { path = "crates/net/ecies" }
-reth-engine-primitives = { path = "crates/engine-primitives" }
+reth-engine-primitives = { path = "crates/engine/primitives" }
 reth-engine-tree = { path = "crates/engine/tree" }
+reth-engine-util = { path = "crates/engine/util" }
 reth-errors = { path = "crates/errors" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
@@ -307,6 +316,7 @@ reth-net-banlist = { path = "crates/net/banlist" }
 reth-net-nat = { path = "crates/net/nat" }
 reth-network = { path = "crates/net/network" }
 reth-network-api = { path = "crates/net/network-api" }
+reth-network-types = { path = "crates/net/network-types" }
 reth-network-peers = { path = "crates/net/peers", default-features = false }
 reth-network-p2p = { path = "crates/net/p2p" }
 reth-nippy-jar = { path = "crates/storage/nippy-jar" }
@@ -334,7 +344,9 @@ reth-rpc-api = { path = "crates/rpc/rpc-api" }
 reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
 reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
+reth-rpc-eth-api = { path = "crates/rpc/rpc-eth-api" }
 reth-rpc-layer = { path = "crates/rpc/rpc-layer" }
+reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types" }
 reth-rpc-server-types = { path = "crates/rpc/rpc-server-types" }
 reth-rpc-types = { path = "crates/rpc/rpc-types" }
 reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
@@ -409,6 +421,7 @@ aquamarine = "0.5"
 bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
+const_format = { version = "0.2.32", features = ["rust_1_64"] }
 dashmap = "5.5"
 derive_more = "0.99.17"
 fdlimit = "0.3.0"
