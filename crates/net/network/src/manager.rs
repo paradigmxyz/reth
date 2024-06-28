@@ -280,8 +280,8 @@ where
     /// components of the network
     ///
     /// ```
-    /// use reth_chainspec::net::mainnet_nodes;
     /// use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+    /// use reth_network_peers::mainnet_nodes;
     /// use reth_provider::test_utils::NoopProvider;
     /// use reth_transaction_pool::TransactionPool;
     /// async fn launch<Pool: TransactionPool>(pool: Pool) {

@@ -53,7 +53,7 @@ impl Config {
     }
 
     /// Sets the pruning configuration.
-    pub fn update_prune_confing(&mut self, prune_config: PruneConfig) {
+    pub fn update_prune_config(&mut self, prune_config: PruneConfig) {
         self.prune = Some(prune_config);
     }
 }

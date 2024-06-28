@@ -15,7 +15,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, EthereumHardfork, Header, Receipt, Withdrawals, U256,
+    BlockNumber, BlockWithSenders, EthereumHardfork, Header, Receipt, U256,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::{
@@ -325,16 +325,8 @@ where
         block: &BlockWithSenders,
         total_difficulty: U256,
     ) -> Result<(), BlockExecutionError> {
-        let mut balance_increments = post_block_balance_increments(
-            self.chain_spec(),
-            block.number,
-            block.difficulty,
-            block.beneficiary,
-            block.timestamp,
-            total_difficulty,
-            &block.ommers,
-            block.withdrawals.as_ref().map(Withdrawals::as_ref),
-        );
+        let mut balance_increments =
+            post_block_balance_increments(self.chain_spec(), block, total_difficulty);
 
         // Irregular state change at Ethereum DAO hardfork
         if self.chain_spec().fork(EthereumHardfork::Dao).transitions_at_block(block.number) {
