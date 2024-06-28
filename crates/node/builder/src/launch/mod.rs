@@ -390,7 +390,7 @@ where
 
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(
-                async { rx.await?.map_err(Into::into) },
+                async { Ok(rx.await??) },
                 full_node.config.debug.terminate,
             ),
             node: full_node,
