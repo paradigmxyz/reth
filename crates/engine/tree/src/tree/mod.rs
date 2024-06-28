@@ -1,6 +1,8 @@
 use crate::{backfill::BackfillAction, engine::DownloadRequest};
 use reth_beacon_consensus::{ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated};
-use reth_blockchain_tree::{BlockBuffer, BlockStatus};
+use reth_blockchain_tree::{
+    error::InsertBlockErrorKind, BlockAttachment, BlockBuffer, BlockStatus,
+};
 use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
@@ -12,7 +14,9 @@ use reth_primitives::{
     Address, Block, BlockNumber, Receipts, Requests, SealedBlock, SealedBlockWithSenders, B256,
     U256,
 };
-use reth_provider::{BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory};
+use reth_provider::{
+    BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory, StateRootProvider,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
     engine::{
@@ -387,12 +391,21 @@ where
         &mut self,
         block: SealedBlockWithSenders,
     ) -> Result<InsertPayloadOk, InsertBlockError> {
-        // TODO: check if block is known
+        self.insert_block_inner(block.clone())
+            .map_err(|kind| InsertBlockError::new(block.block, kind))
+    }
+
+    fn insert_block_inner(
+        &mut self,
+        block: SealedBlockWithSenders,
+    ) -> Result<InsertPayloadOk, InsertBlockErrorKind> {
+        if self.block_by_hash(block.hash())?.is_some() {
+            let attachment = BlockAttachment::Canonical; // TODO: remove or revise attachment
+            return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid(attachment)))
+        }
 
         // validate block consensus rules
-        if let Err(err) = self.validate_block(&block) {
-            return Err(InsertBlockError::consensus_error(err, block.block))
-        }
+        self.validate_block(&block)?;
 
         let state_provider = self.state_provider(block.parent_hash).unwrap();
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
@@ -401,14 +414,10 @@ where
         let block_hash = block.hash();
         let block = block.unseal();
         let output = executor.execute((&block, U256::MAX).into()).unwrap();
-        self.consensus
-            .validate_block_post_execution(
-                &block,
-                PostExecutionInput::new(&output.receipts, &output.requests),
-            )
-            .map_err(|error| {
-                InsertBlockError::new(block.block.clone().seal(block_hash), error.into())
-            })?;
+        self.consensus.validate_block_post_execution(
+            &block,
+            PostExecutionInput::new(&output.receipts, &output.requests),
+        )?;
 
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
@@ -429,7 +438,8 @@ where
         };
         self.state.tree_state.insert_executed(executed);
 
-        todo!()
+        let attachment = BlockAttachment::Canonical; // TODO: remove or revise attachment
+        Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)))
     }
 }
 
