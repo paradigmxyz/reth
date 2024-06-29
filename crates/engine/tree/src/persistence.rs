@@ -10,8 +10,15 @@ use tokio::sync::oneshot;
 
 /// Writes parts of reth's in memory tree state to the database.
 ///
-/// It's expected that this will be spawned in its own thread with [`std::thread::spawn`], since
-/// this performs blocking database operations.
+/// This is meant to be a spawned task that listens for various incoming persistence operations,
+/// performing those actions on disk, and returning the result in a channel.
+///
+/// There are two types of operations this task can perform:
+/// - Writing executed blocks to disk, returning the hash of the latest block that was inserted.
+/// - Removing blocks from disk, returning the removed blocks.
+///
+/// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
+/// blocking database operations in an endless loop.
 #[derive(Debug)]
 pub struct Persistence<DB> {
     /// The db / static file provider to use
@@ -70,7 +77,7 @@ where
                     let output = self.remove_blocks_above(new_tip_num);
                     sender.send(output).unwrap();
                 }
-                PersistenceAction::SaveFinalizedBlocks((blocks, sender)) => {
+                PersistenceAction::SaveBlocks((blocks, sender)) => {
                     if blocks.is_empty() {
                         todo!("return error or something");
                     }
@@ -88,7 +95,7 @@ where
 pub enum PersistenceAction {
     /// The section of tree state that should be persisted. These blocks are expected in order of
     /// increasing block number.
-    SaveFinalizedBlocks((Vec<ExecutedBlock>, oneshot::Sender<B256>)),
+    SaveBlocks((Vec<ExecutedBlock>, oneshot::Sender<B256>)),
 
     /// Removes the blocks above the given block number from the database.
     RemoveBlocksAbove((u64, oneshot::Sender<Vec<ExecutedBlock>>)),
@@ -115,7 +122,7 @@ impl PersistenceHandle {
     pub async fn save_blocks(&self, blocks: Vec<ExecutedBlock>) -> B256 {
         let (tx, rx) = oneshot::channel();
         self.sender
-            .send(PersistenceAction::SaveFinalizedBlocks((blocks, tx)))
+            .send(PersistenceAction::SaveBlocks((blocks, tx)))
             .expect("should be able to send");
         rx.await.expect("todo: err handling")
     }
