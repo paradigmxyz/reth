@@ -94,6 +94,11 @@ impl Chain {
         &self.execution_outcome
     }
 
+    /// Get mutable execution outcome of this chain
+    pub fn execution_outcome_mut(&mut self) -> &mut ExecutionOutcome {
+        &mut self.execution_outcome
+    }
+
     /// Prepends the given state to the current state.
     pub fn prepend_state(&mut self, state: BundleState) {
         self.execution_outcome.prepend_state(state);

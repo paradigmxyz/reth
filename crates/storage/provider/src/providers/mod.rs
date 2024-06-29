@@ -328,6 +328,14 @@ where
         self.database.block_with_senders(id, transaction_kind)
     }
 
+    fn sealed_block_with_senders(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        self.database.sealed_block_with_senders(id, transaction_kind)
+    }
+
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         self.database.block_range(range)
     }

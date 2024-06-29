@@ -8,7 +8,8 @@ use reth_db::tables;
 use reth_db_api::{database::Database, transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_primitives::{
-    Account, Address, Bytecode, Receipts, StaticFileSegment, StorageEntry, B256, U256,
+    revm::compat::into_revm_acc, Account, Address, Bytecode, ChainSpec, GenesisAccount, Receipts,
+    StaticFileSegment, StorageEntry, B256, U256,
 };
 use reth_provider::{
     errors::provider::ProviderResult,
@@ -17,6 +18,7 @@ use reth_provider::{
     HashingWriter, HistoryWriter, OriginalValuesKnown, ProviderError, ProviderFactory,
     StageCheckpointWriter, StateWriter, StaticFileProviderFactory,
 };
+use reth_revm::db::states::BundleBuilder;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use revm::db::states::BundleBuilder;

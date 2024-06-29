@@ -325,15 +325,6 @@ impl PeersManager {
                 peer.state = PeerConnectionState::In;
 
                 is_trusted = is_trusted || peer.is_trusted();
-
-                // if a peer is not trusted and we don't have capacity for more inbound connections,
-                // disconnecting the peer
-                if !is_trusted && !has_in_capacity {
-                    self.queued_actions.push_back(PeerAction::Disconnect {
-                        peer_id,
-                        reason: Some(DisconnectReason::TooManyPeers),
-                    });
-                }
             }
             Entry::Vacant(entry) => {
                 // peer is missing in the table, we add it but mark it as to be removed after
@@ -342,15 +333,15 @@ impl PeersManager {
                 peer.remove_after_disconnect = true;
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
-
-                // disconnect the peer if we don't have capacity for more inbound connections
-                if !is_trusted && !has_in_capacity {
-                    self.queued_actions.push_back(PeerAction::Disconnect {
-                        peer_id,
-                        reason: Some(DisconnectReason::TooManyPeers),
-                    });
-                }
             }
+        }
+
+        // disconnect the peer if we don't have capacity for more inbound connections
+        if !is_trusted && !has_in_capacity {
+            self.queued_actions.push_back(PeerAction::Disconnect {
+                peer_id,
+                reason: Some(DisconnectReason::TooManyPeers),
+            });
         }
     }
 

@@ -16,16 +16,16 @@ use std::collections::{hash_map::IntoIter, HashMap, HashSet};
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum TrieKey {
     /// A node in the account trie.
-    AccountNode(StoredNibbles),
+    AccountNode(Nibbles),
     /// A node in the storage trie.
-    StorageNode(B256, StoredNibblesSubKey),
+    StorageNode(B256, Nibbles),
     /// Storage trie of an account.
     StorageTrie(B256),
 }
 
 impl TrieKey {
     /// Returns reference to account node key if the key is for [`Self::AccountNode`].
-    pub const fn as_account_node_key(&self) -> Option<&StoredNibbles> {
+    pub const fn as_account_node_key(&self) -> Option<&Nibbles> {
         if let Self::AccountNode(nibbles) = &self {
             Some(nibbles)
         } else {
@@ -34,7 +34,7 @@ impl TrieKey {
     }
 
     /// Returns reference to storage node key if the key is for [`Self::StorageNode`].
-    pub const fn as_storage_node_key(&self) -> Option<(&B256, &StoredNibblesSubKey)> {
+    pub const fn as_storage_node_key(&self) -> Option<(&B256, &Nibbles)> {
         if let Self::StorageNode(key, subkey) = &self {
             Some((key, subkey))
         } else {
@@ -121,9 +121,9 @@ impl TrieUpdates {
     /// Extend the updates with account trie updates.
     pub fn extend_with_account_updates(&mut self, updates: HashMap<Nibbles, BranchNodeCompact>) {
         self.extend(
-            updates.into_iter().map(|(nibbles, node)| {
-                (TrieKey::AccountNode(nibbles.into()), TrieOp::Update(node))
-            }),
+            updates
+                .into_iter()
+                .map(|(nibbles, node)| (TrieKey::AccountNode(nibbles), TrieOp::Update(node))),
         );
     }
 
@@ -162,7 +162,7 @@ impl TrieUpdates {
         // Add storage node updates from hash builder.
         let (_, hash_builder_updates) = hash_builder.split();
         self.extend(hash_builder_updates.into_iter().map(|(nibbles, node)| {
-            (TrieKey::StorageNode(hashed_address, nibbles.into()), TrieOp::Update(node))
+            (TrieKey::StorageNode(hashed_address, nibbles), TrieOp::Update(node))
         }));
     }
 
@@ -179,18 +179,21 @@ impl TrieUpdates {
         trie_operations.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         for (key, operation) in trie_operations {
             match key {
-                TrieKey::AccountNode(nibbles) => match operation {
-                    TrieOp::Delete => {
-                        if account_trie_cursor.seek_exact(nibbles)?.is_some() {
-                            account_trie_cursor.delete_current()?;
+                TrieKey::AccountNode(nibbles) => {
+                    let nibbles = StoredNibbles(nibbles);
+                    match operation {
+                        TrieOp::Delete => {
+                            if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                                account_trie_cursor.delete_current()?;
+                            }
+                        }
+                        TrieOp::Update(node) => {
+                            if !nibbles.0.is_empty() {
+                                account_trie_cursor.upsert(nibbles, StoredBranchNode(node))?;
+                            }
                         }
                     }
-                    TrieOp::Update(node) => {
-                        if !nibbles.0.is_empty() {
-                            account_trie_cursor.upsert(nibbles, StoredBranchNode(node))?;
-                        }
-                    }
-                },
+                }
                 TrieKey::StorageTrie(hashed_address) => match operation {
                     TrieOp::Delete => {
                         if storage_trie_cursor.seek_exact(hashed_address)?.is_some() {
@@ -201,6 +204,7 @@ impl TrieUpdates {
                 },
                 TrieKey::StorageNode(hashed_address, nibbles) => {
                     if !nibbles.is_empty() {
+                        let nibbles = StoredNibblesSubKey(nibbles);
                         // Delete the old entry if it exists.
                         if storage_trie_cursor
                             .seek_by_key_subkey(hashed_address, nibbles.clone())?
@@ -221,5 +225,47 @@ impl TrieUpdates {
         }
 
         Ok(())
+    }
+
+    /// creates [`TrieUpdatesSorted`] by sorting the `trie_operations`.
+    pub fn sorted(&self) -> TrieUpdatesSorted {
+        let mut trie_operations = Vec::from_iter(self.trie_operations.clone());
+        trie_operations.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        TrieUpdatesSorted { trie_operations }
+    }
+
+    /// converts trie updates into [`TrieUpdatesSorted`].
+    pub fn into_sorted(self) -> TrieUpdatesSorted {
+        let mut trie_operations = Vec::from_iter(self.trie_operations);
+        trie_operations.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        TrieUpdatesSorted { trie_operations }
+    }
+}
+
+/// The aggregation of trie updates.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deref)]
+pub struct TrieUpdatesSorted {
+    /// Sorted collection of trie operations.
+    pub(crate) trie_operations: Vec<(TrieKey, TrieOp)>,
+}
+
+impl TrieUpdatesSorted {
+    /// Find the account node with the given nibbles.
+    pub fn find_account_node(&self, key: &Nibbles) -> Option<(TrieKey, TrieOp)> {
+        self.trie_operations
+            .iter()
+            .find(|(k, _)| matches!(k, TrieKey::AccountNode(nibbles) if nibbles == key))
+            .cloned()
+    }
+
+    /// Find the storage node with the given hashed address and key.
+    pub fn find_storage_node(
+        &self,
+        hashed_address: &B256,
+        key: &Nibbles,
+    ) -> Option<(TrieKey, TrieOp)> {
+        self.trie_operations.iter().find(|(k, _)| {
+            matches!(k, TrieKey::StorageNode(address, nibbles) if address == hashed_address && nibbles == key)
+        }).cloned()
     }
 }

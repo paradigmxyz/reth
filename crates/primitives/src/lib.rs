@@ -115,13 +115,7 @@ pub use c_kzg as kzg;
 #[cfg(feature = "optimism")]
 mod optimism {
     pub use crate::transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID};
-    pub use reth_chainspec::{
-        net::{
-            base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes, OP_BOOTNODES,
-            OP_TESTNET_BOOTNODES,
-        },
-        BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA,
-    };
+    pub use reth_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 }
 
 #[cfg(feature = "optimism")]

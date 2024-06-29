@@ -1,6 +1,6 @@
 use reth_primitives::{
     logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests,
-    StorageEntry, B256, U256,
+    B256, U256,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -10,7 +10,6 @@ use revm::{
     },
     primitives::AccountInfo,
 };
-use std::collections::HashMap;
 
 /// Represents the outcome of block execution, including post-execution changes and reverts.
 ///
@@ -37,16 +36,6 @@ pub struct ExecutionOutcome {
     /// guaranteed to be the same as the number of transactions.
     pub requests: Vec<Requests>,
 }
-
-/// Type used to initialize revms bundle state.
-pub type BundleStateInit =
-    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
-
-/// Types used inside `RevertsInit` to initialize revms reverts.
-pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
-
-/// Type used to initialize revms reverts.
-pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
 
 impl ExecutionOutcome {
     /// Creates a new `ExecutionOutcome`.

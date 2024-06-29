@@ -113,6 +113,14 @@ impl BlockReader for NoopProvider {
         Ok(None)
     }
 
+    fn sealed_block_with_senders(
+        &self,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        Ok(None)
+    }
+
     fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         Ok(vec![])
     }

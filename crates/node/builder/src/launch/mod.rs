@@ -389,7 +389,10 @@ where
         on_node_started.on_event(full_node.clone())?;
 
         let handle = NodeHandle {
-            node_exit_future: NodeExitFuture::new(rx, full_node.config.debug.terminate),
+            node_exit_future: NodeExitFuture::new(
+                async { Ok(rx.await??) },
+                full_node.config.debug.terminate,
+            ),
             node: full_node,
         };
 

@@ -6,10 +6,7 @@ use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification};
-use reth_primitives::{
-    constants::gas_units::{GIGAGAS, KILOGAS, MEGAGAS},
-    BlockNumber, Header, StaticFileSegment,
-};
+use reth_primitives::{BlockNumber, Header, StaticFileSegment};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     BlockReader, DatabaseProviderRW, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
@@ -18,9 +15,9 @@ use reth_provider::{
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
-    BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
-    ExecutionCheckpoint, MetricEvent, MetricEventsSender, Stage, StageCheckpoint, StageError,
-    StageId, UnwindInput, UnwindOutput,
+    format_gas_throughput, BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput,
+    ExecOutput, ExecutionCheckpoint, ExecutionStageThresholds, MetricEvent, MetricEventsSender,
+    Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use std::{
     cmp::Ordering,
@@ -546,83 +543,6 @@ fn calculate_gas_used_from_headers(
     Ok(gas_total)
 }
 
-/// The thresholds at which the execution stage writes state changes to the database.
-///
-/// If either of the thresholds (`max_blocks` and `max_changes`) are hit, then the execution stage
-/// commits all pending changes to the database.
-///
-/// A third threshold, `max_changesets`, can be set to periodically write changesets to the
-/// current database transaction, which frees up memory.
-#[derive(Debug, Clone)]
-pub struct ExecutionStageThresholds {
-    /// The maximum number of blocks to execute before the execution stage commits.
-    pub max_blocks: Option<u64>,
-    /// The maximum number of state changes to keep in memory before the execution stage commits.
-    pub max_changes: Option<u64>,
-    /// The maximum cumulative amount of gas to process before the execution stage commits.
-    pub max_cumulative_gas: Option<u64>,
-    /// The maximum spent on blocks processing before the execution stage commits.
-    pub max_duration: Option<Duration>,
-}
-
-impl Default for ExecutionStageThresholds {
-    fn default() -> Self {
-        Self {
-            max_blocks: Some(500_000),
-            max_changes: Some(5_000_000),
-            // 50k full blocks of 30M gas
-            max_cumulative_gas: Some(30_000_000 * 50_000),
-            // 10 minutes
-            max_duration: Some(Duration::from_secs(10 * 60)),
-        }
-    }
-}
-
-impl ExecutionStageThresholds {
-    /// Check if the batch thresholds have been hit.
-    #[inline]
-    pub fn is_end_of_batch(
-        &self,
-        blocks_processed: u64,
-        changes_processed: u64,
-        cumulative_gas_used: u64,
-        elapsed: Duration,
-    ) -> bool {
-        blocks_processed >= self.max_blocks.unwrap_or(u64::MAX) ||
-            changes_processed >= self.max_changes.unwrap_or(u64::MAX) ||
-            cumulative_gas_used >= self.max_cumulative_gas.unwrap_or(u64::MAX) ||
-            elapsed >= self.max_duration.unwrap_or(Duration::MAX)
-    }
-}
-
-impl From<ExecutionConfig> for ExecutionStageThresholds {
-    fn from(config: ExecutionConfig) -> Self {
-        Self {
-            max_blocks: config.max_blocks,
-            max_changes: config.max_changes,
-            max_cumulative_gas: config.max_cumulative_gas,
-            max_duration: config.max_duration,
-        }
-    }
-}
-
-/// Returns a formatted gas throughput log, showing either:
-///  * "Kgas/s", or 1,000 gas per second
-///  * "Mgas/s", or 1,000,000 gas per second
-///  * "Ggas/s", or 1,000,000,000 gas per second
-///
-/// Depending on the magnitude of the gas throughput.
-pub fn format_gas_throughput(gas: u64, execution_duration: Duration) -> String {
-    let gas_per_second = gas as f64 / execution_duration.as_secs_f64();
-    if gas_per_second < MEGAGAS as f64 {
-        format!("{:.} Kgas/second", gas_per_second / KILOGAS as f64)
-    } else if gas_per_second < GIGAGAS as f64 {
-        format!("{:.} Mgas/second", gas_per_second / MEGAGAS as f64)
-    } else {
-        format!("{:.} Ggas/second", gas_per_second / GIGAGAS as f64)
-    }
-}
-
 /// Returns a `StaticFileProviderRWRefMut` static file producer after performing a consistency
 /// check.
 ///
@@ -720,7 +640,7 @@ mod tests {
         StaticFileProviderFactory,
     };
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
-    use reth_stages_api::StageUnitCheckpoint;
+    use reth_stages_api::{format_gas_throughput, StageUnitCheckpoint};
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthExecutorProvider> {
