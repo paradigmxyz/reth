@@ -758,12 +758,16 @@ pub trait PoolTransaction:
     fmt::Debug + Send + Sync + Sized + FromRecoveredPooledTransaction
 {
     type Source: TryInto<Self> + TryFrom<TransactionSignedEcRecovered>;
+    type Pooled: From<PooledTransactionsElementEcRecovered>;
 
     /// Converts from the given source type.
     fn from_source(source: Self::Source) -> Result<Self, <Self::Source as TryInto<Self>>::Error>;
 
     /// Converts to a recovered transaction.
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered;
+
+    /// Converts from a pooled transaction.
+    fn from_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self;
 
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
@@ -986,6 +990,7 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
 
 impl PoolTransaction for EthPooledTransaction {
     type Source = TransactionSignedEcRecovered;
+    type Pooled = PooledTransactionsElementEcRecovered;
 
     fn from_source(source: Self::Source) -> Result<Self, <Self::Source as TryInto<Self>>::Error> {
         source.try_into()
@@ -993,6 +998,10 @@ impl PoolTransaction for EthPooledTransaction {
 
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
         self.transaction.clone()
+    }
+
+    fn from_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
+        EthPooledTransaction::from_recovered_pooled_transaction(tx)
     }
 
     /// Returns hash of the transaction.
