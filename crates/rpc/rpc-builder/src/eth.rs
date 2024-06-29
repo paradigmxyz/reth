@@ -7,7 +7,6 @@ use reth_provider::{
     FullRpcProvider, StateProviderFactory,
 };
 use reth_rpc::{eth::EthFilterConfig, EthApi, EthFilter, EthPubSub};
-use reth_rpc_eth_api::FullEthApiServer;
 use reth_rpc_eth_types::{
     cache::cache_new_blocks_task, fee_history::fee_history_cache_new_blocks_task, EthStateCache,
     EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
@@ -22,6 +21,10 @@ use serde::{Deserialize, Serialize};
 
 /// Default value for stale filter ttl
 const DEFAULT_STALE_FILTER_TTL: Duration = Duration::from_secs(5 * 60);
+
+/// Alias for function that builds the core `eth` namespace API.
+pub type EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi> =
+    Box<dyn FnOnce(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi>;
 
 /// Handlers for core, filter and pubsub `eth` namespace APIs.
 #[derive(Debug, Clone)]
@@ -39,7 +42,7 @@ pub struct EthHandlers<Provider, Pool, Network, Events, EthApi> {
 impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Network, Events, EthApi> {
     /// Returns a new [`EthHandlers`] builder.
     #[allow(clippy::too_many_arguments)]
-    pub fn builder<EvmConfig, Tasks>(
+    pub fn builder<EvmConfig, Tasks, EthApiB>(
         provider: Provider,
         pool: Pool,
         network: Network,
@@ -47,9 +50,12 @@ impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Networ
         config: EthConfig,
         executor: Tasks,
         events: Events,
-        eth_api_builder: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi = EthApi>
+        eth_api_builder: EthApiB,
+    ) -> EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
+    where
+        EthApiB: FnOnce(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi
             + 'static,
-    ) -> EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi> {
+    {
         EthHandlersBuilder {
             provider,
             pool,
@@ -64,7 +70,7 @@ impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Networ
 }
 
 /// Builds [`EthHandlers`] for core, filter, and pubsub `eth_` apis.
-#[derive(Debug)]
+#[allow(missing_debug_implementations)]
 pub struct EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi> {
     provider: Provider,
     pool: Pool,
@@ -73,8 +79,7 @@ pub struct EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig,
     config: EthConfig,
     executor: Tasks,
     events: Events,
-    eth_api_builder:
-        Box<dyn EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi = EthApi>>,
+    eth_api_builder: EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
 }
 
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
@@ -84,9 +89,8 @@ where
     Pool: Send + Sync + Clone + 'static,
     EvmConfig: ConfigureEvm,
     Network: Clone,
-    Events: CanonStateSubscriptions + Clone,
     Tasks: TaskSpawner + Clone + 'static,
-    EthApi: FullEthApiServer,
+    Events: CanonStateSubscriptions + Clone,
 {
     /// Returns a new instance with handlers for `eth` namespace.
     pub fn build(self) -> EthHandlers<Provider, Pool, Network, Events, EthApi> {
@@ -120,7 +124,7 @@ where
             cache,
         };
 
-        let api = eth_api_builder.build(&ctx);
+        let api = eth_api_builder(&ctx);
 
         let filter = EthFilterApiBuilder::build(&ctx);
 
@@ -238,40 +242,23 @@ pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events> {
     pub cache: EthStateCache,
 }
 
-/// Builds [`EthApiServer`](reth_rpc_eth_api::EthApiServer), the core `eth` namespace API.
-pub trait EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>: Debug {
-    /// `eth` namespace RPC server type.
-    type EthApi;
-
-    /// Builds the [`EthApiServer`](reth_rpc_eth_api::EthApiServer), for given context.
-    fn build(
-        &self,
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
-    ) -> Self::EthApi
-    where
-        Self::EthApi: FullEthApiServer;
-}
-
 /// Ethereum layer one `eth` RPC server builder.
 #[derive(Default, Debug, Clone, Copy)]
 pub struct EthApiBuild;
 
-impl<Provider, Pool, EvmConfig, Network, Tasks, Events>
-    EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events> for EthApiBuild
-where
-    Provider: FullRpcProvider,
-    Pool: TransactionPool,
-    Network: NetworkInfo + Clone,
-    Tasks: TaskSpawner + Clone + 'static,
-    Events: CanonStateSubscriptions,
-    EvmConfig: ConfigureEvm,
-{
-    type EthApi = EthApi<Provider, Pool, Network, EvmConfig>;
-
-    fn build(
-        &self,
+impl EthApiBuild {
+    /// Builds the [`EthApiServer`](reth_rpc_eth_api::EthApiServer), for given context.
+    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
         ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
-    ) -> Self::EthApi {
+    ) -> EthApi<Provider, Pool, Network, EvmConfig>
+    where
+        Provider: FullRpcProvider,
+        Pool: TransactionPool,
+        Network: NetworkInfo + Clone,
+        Tasks: TaskSpawner + Clone + 'static,
+        Events: CanonStateSubscriptions,
+        EvmConfig: ConfigureEvm,
+    {
         let gas_oracle = GasPriceOracleBuilder::build(ctx);
         let fee_history_cache = FeeHistoryCacheBuilder::build(ctx);
 

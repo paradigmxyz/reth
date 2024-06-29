@@ -17,18 +17,18 @@ use tracing::trace;
 
 use crate::helpers::{
     transaction::UpdateRawTxForwarder, EthApiSpec, EthBlocks, EthCall, EthFees, EthState,
-    EthTransactions, FullEthApiServerBehaviour, LoadReceipt, Trace,
+    EthTransactions, FullEthApiServerGateway,
 };
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
 /// server.
 pub trait FullEthApiServer:
-    EthApiServer + FullEthApiServerBehaviour + UpdateRawTxForwarder + Clone
+    EthApiServer + FullEthApiServerGateway + UpdateRawTxForwarder + Clone
 {
 }
 
 impl<T> FullEthApiServer for T where
-    T: EthApiServer + FullEthApiServerBehaviour + UpdateRawTxForwarder + Clone
+    T: EthApiServer + FullEthApiServerGateway + UpdateRawTxForwarder + Clone
 {
 }
 
@@ -337,14 +337,7 @@ pub trait EthApi {
 #[async_trait::async_trait]
 impl<T> EthApiServer for T
 where
-    Self: EthApiSpec
-        + EthTransactions
-        + EthBlocks
-        + EthState
-        + EthCall
-        + EthFees
-        + Trace
-        + LoadReceipt,
+    Self: FullEthApiServerGateway,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> RpcResult<U64> {
