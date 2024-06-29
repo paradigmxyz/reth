@@ -66,12 +66,12 @@ pub trait PeersInfo: Send + Sync {
 
 /// Provides an API for managing the peers of the network.
 pub trait Peers: PeersInfo {
-    /// Adds a peer to the peer set.
+    /// Adds a peer to the peer set with UDP `SocketAddr`.
     fn add_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
         self.add_peer_kind(peer, PeerKind::Basic, tcp_addr, None);
     }
 
-    /// Adds a peer to the peer set with UDP `SocketAddr`.
+    /// Adds a peer to the peer set with TCP and UDP `SocketAddr`.
     fn add_peer_with_udp(&self, peer: PeerId, tcp_addr: SocketAddr, udp_addr: SocketAddr) {
         self.add_peer_kind(peer, PeerKind::Basic, tcp_addr, Some(udp_addr));
     }
@@ -81,9 +81,14 @@ pub trait Peers: PeersInfo {
     /// This allows marking a peer as trusted without having to know the peer's address.
     fn add_trusted_peer_id(&self, peer: PeerId);
 
-    /// Adds a trusted peer to the peer set.
-    fn add_trusted_peer(&self, peer: PeerId, tcp_addr: SocketAddr, udp_addr: Option<SocketAddr>) {
-        self.add_peer_kind(peer, PeerKind::Trusted, tcp_addr, udp_addr);
+    /// Adds a trusted peer to the peer set with UDP `SocketAddr`.
+    fn add_trusted_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
+        self.add_peer_kind(peer, PeerKind::Trusted, tcp_addr, None);
+    }
+
+    /// Adds a trusted peer with TCP and UDP `SocketAddr` to the peer set.
+    fn add_trusted_peer_with_udp(&self, peer: PeerId, tcp_addr: SocketAddr, udp_addr: SocketAddr) {
+        self.add_peer_kind(peer, PeerKind::Trusted, tcp_addr, Some(udp_addr));
     }
 
     /// Adds a peer to the known peer set, with the given kind.

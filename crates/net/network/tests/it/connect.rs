@@ -276,7 +276,7 @@ async fn test_connect_to_trusted_peer() {
 
     let node: NodeRecord = std::env::var("ENODE").unwrap().parse().unwrap();
 
-    handle.add_trusted_peer(node.id, node.tcp_addr(), None);
+    handle.add_trusted_peer(node.id, node.tcp_addr());
 
     let h = handle.clone();
     h.update_sync_state(SyncState::Syncing);

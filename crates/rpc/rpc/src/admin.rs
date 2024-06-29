@@ -51,7 +51,7 @@ where
     /// Handler for `admin_addTrustedPeer`
     fn add_trusted_peer(&self, record: AnyNode) -> RpcResult<bool> {
         if let Some(record) = record.node_record() {
-            self.network.add_trusted_peer(record.id, record.tcp_addr(), Some(record.udp_addr()))
+            self.network.add_trusted_peer_with_udp(record.id, record.tcp_addr(), record.udp_addr())
         }
         self.network.add_trusted_peer_id(record.peer_id());
         Ok(true)
