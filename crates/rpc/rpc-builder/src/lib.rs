@@ -74,14 +74,13 @@
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc_api::EngineApiServer;
 //! use reth_rpc_builder::{
-//!     auth::AuthServerConfig, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
+//!     auth::AuthServerConfig, EthApiBuild, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
 //!     TransportRpcModuleConfig,
 //! };
 //! use reth_rpc_layer::JwtSecret;
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
 //! use tokio::try_join;
-//! use EthApiBuild;
 //! pub async fn launch<Provider, Pool, Network, Events, EngineApi, EngineT, EvmConfig>(
 //!     provider: Provider,
 //!     pool: Pool,
@@ -470,10 +469,9 @@ where
     /// use reth_evm::ConfigureEvm;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
-    /// use reth_rpc_builder::RpcModuleBuilder;
+    /// use reth_rpc_builder::{EthApiBuild, RpcModuleBuilder};
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
-    /// use EthApiBuild;
     ///
     /// fn init<Evm: ConfigureEvm + 'static>(evm: Evm) {
     ///     let mut registry = RpcModuleBuilder::default()
