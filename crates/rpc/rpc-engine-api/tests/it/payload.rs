@@ -87,7 +87,7 @@ fn payload_validation() {
     );
 
     // Invalid encoded transactions
-    let mut payload_with_invalid_txs: ExecutionPayloadV1 = block_to_payload_v1(block.clone());
+    let mut payload_with_invalid_txs: ExecutionPayloadV1 = block_to_payload_v1(&block);
 
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
         *tx = Bytes::new();

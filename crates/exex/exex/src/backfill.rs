@@ -52,7 +52,7 @@ impl<E: Clone, P: Clone> BackfillJobFactory<E, P> {
 impl BackfillJobFactory<(), ()> {
     /// Creates a new [`BackfillJobFactory`] from [`FullNodeComponents`].
     pub fn new_from_components<Node: FullNodeComponents>(
-        components: Node,
+        components: &Node,
         prune_modes: PruneModes,
     ) -> BackfillJobFactory<Node::Executor, Node::Provider> {
         BackfillJobFactory::<_, _>::new(
@@ -236,7 +236,7 @@ mod tests {
 
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
-        init_genesis(provider_factory.clone())?;
+        init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(
             provider_factory.clone(),
             Arc::new(NoopBlockchainTree::default()),

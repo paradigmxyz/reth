@@ -124,7 +124,7 @@ where
     fn init_cache(&self) -> EthStateCache {
         EthStateCache::spawn_with(
             self.eth_handlers_config.provider.clone(),
-            self.rpc_config.eth.cache.clone(),
+            &self.rpc_config.eth.cache,
             self.eth_handlers_config.executor.clone(),
             self.eth_handlers_config.evm_config.clone(),
         )
@@ -213,7 +213,7 @@ where
             self.eth_handlers_config.provider.clone(),
             self.eth_handlers_config.pool.clone(),
             cache.clone(),
-            self.rpc_config.eth.filter_config(),
+            &self.rpc_config.eth.filter_config(),
             Box::new(self.eth_handlers_config.executor.clone()),
         )
     }

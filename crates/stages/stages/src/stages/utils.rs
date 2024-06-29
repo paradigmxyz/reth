@@ -144,7 +144,7 @@ where
                 &mut current_list,
                 &sharded_key_factory,
                 append_only,
-                LoadMode::Flush,
+                &LoadMode::Flush,
             )?;
 
             current_partial = partial_key;
@@ -168,7 +168,7 @@ where
             &mut current_list,
             &sharded_key_factory,
             append_only,
-            LoadMode::KeepLast,
+            &LoadMode::KeepLast,
         )?;
     }
 
@@ -179,7 +179,7 @@ where
         &mut current_list,
         &sharded_key_factory,
         append_only,
-        LoadMode::Flush,
+        &LoadMode::Flush,
     )?;
 
     Ok(())
@@ -192,7 +192,7 @@ pub(crate) fn load_indices<H, C, P>(
     list: &mut Vec<BlockNumber>,
     sharded_key_factory: &impl Fn(P, BlockNumber) -> <H as Table>::Key,
     append_only: bool,
-    mode: LoadMode,
+    mode: &LoadMode,
 ) -> Result<(), StageError>
 where
     C: DbCursorRO<H> + DbCursorRW<H>,

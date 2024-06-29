@@ -207,7 +207,7 @@ where
         provider: Provider,
         tip: watch::Receiver<B256>,
         header_downloader: H,
-        consensus: Arc<dyn Consensus>,
+        consensus: &Arc<dyn Consensus>,
         stages_config: StageConfig,
     ) -> StageSetBuilder<DB> {
         StageSetBuilder::default()

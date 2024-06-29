@@ -205,7 +205,7 @@ impl Tracer for RethTracer {
         }
 
         let file_guard = if let Some((config, file_info)) = self.file {
-            Some(layers.file(config.format, &config.filters, file_info)?)
+            Some(layers.file(config.format, &config.filters, &file_info)?)
         } else {
             None
         };

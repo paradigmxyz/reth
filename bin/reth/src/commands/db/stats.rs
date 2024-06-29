@@ -38,7 +38,7 @@ impl Command {
     /// Execute `db stats` command
     pub fn execute(
         self,
-        data_dir: ChainPath<DataDirPath>,
+        data_dir: &ChainPath<DataDirPath>,
         tool: &DbTool<Arc<DatabaseEnv>>,
     ) -> eyre::Result<()> {
         if self.checksum {
@@ -140,7 +140,7 @@ impl Command {
 
     fn static_files_stats_table(
         &self,
-        data_dir: ChainPath<DataDirPath>,
+        data_dir: &ChainPath<DataDirPath>,
     ) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);

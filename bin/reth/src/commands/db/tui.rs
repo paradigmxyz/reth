@@ -258,7 +258,7 @@ where
 
         // Poll events
         if crossterm::event::poll(timeout)? {
-            running = !handle_event(app, event::read()?)?;
+            running = !handle_event(app, &event::read()?)?;
         }
 
         if last_tick.elapsed() >= tick_rate {
@@ -270,7 +270,7 @@ where
 }
 
 /// Handle incoming events
-fn handle_event<F, T: Table>(app: &mut DbListTUI<F, T>, event: Event) -> io::Result<bool>
+fn handle_event<F, T: Table>(app: &mut DbListTUI<F, T>, event: &Event) -> io::Result<bool>
 where
     F: FnMut(usize, usize) -> Vec<TableRow<T>>,
 {

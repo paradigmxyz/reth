@@ -256,7 +256,7 @@ impl<Pool: TransactionPool> TransactionsManager<Pool> {
         network: NetworkHandle,
         pool: Pool,
         from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent>,
-        transactions_manager_config: TransactionsManagerConfig,
+        transactions_manager_config: &TransactionsManagerConfig,
     ) -> Self {
         let network_events = network.event_listener();
 
@@ -316,7 +316,7 @@ where
     Pool: TransactionPool + 'static,
 {
     #[inline]
-    fn update_poll_metrics(&self, start: Instant, poll_durations: TxManagerPollDurations) {
+    fn update_poll_metrics(&self, start: Instant, poll_durations: &TxManagerPollDurations) {
         let metrics = &self.metrics;
 
         let TxManagerPollDurations {
@@ -394,7 +394,12 @@ where
         // This fetches all transaction from the pool, including the 4844 blob transactions but
         // __without__ their sidecar, because 4844 transactions are only ever announced as hashes.
         let propagated = self.propagate_transactions(
-            self.pool.get_all(hashes).into_iter().map(PropagateTransaction::new).collect(),
+            &self
+                .pool
+                .get_all(hashes)
+                .into_iter()
+                .map(|tx| PropagateTransaction::new(&tx))
+                .collect::<Vec<PropagateTransaction>>(),
         );
 
         // notify pool so events get fired
@@ -409,7 +414,7 @@ where
     /// Note: EIP-4844 are disallowed from being broadcast in full and are only ever sent as hashes, see also <https://eips.ethereum.org/EIPS/eip-4844#networking>.
     fn propagate_transactions(
         &mut self,
-        to_propagate: Vec<PropagateTransaction>,
+        to_propagate: &[PropagateTransaction],
     ) -> PropagatedTransactions {
         let mut propagated = PropagatedTransactions::default();
         if self.network.tx_gossip_disabled() {
@@ -429,7 +434,7 @@ where
             // Iterate through the transactions to propagate and fill the hashes and full
             // transaction lists, before deciding whether or not to send full transactions to the
             // peer.
-            for tx in &to_propagate {
+            for tx in to_propagate {
                 if peer.seen_transactions.insert(tx.hash()) {
                     hashes.push(tx);
 
@@ -512,7 +517,7 @@ where
             .get_all(txs)
             .into_iter()
             .filter(|tx| !tx.transaction.is_eip4844())
-            .map(PropagateTransaction::new);
+            .map(|tx| PropagateTransaction::new(&tx));
 
         // Iterate through the transactions to propagate and fill the hashes and full transaction
         for tx in to_propagate {
@@ -553,8 +558,12 @@ where
                 return
             };
 
-            let to_propagate: Vec<PropagateTransaction> =
-                self.pool.get_all(hashes).into_iter().map(PropagateTransaction::new).collect();
+            let to_propagate: Vec<PropagateTransaction> = self
+                .pool
+                .get_all(hashes)
+                .into_iter()
+                .map(|tx| PropagateTransaction::new(&tx))
+                .collect();
 
             let mut propagated = PropagatedTransactions::default();
 
@@ -824,7 +833,7 @@ where
                     .filter_map(Result::ok)
                     .collect::<PooledTransactions>();
 
-                self.import_transactions(peer_id, non_blob_txs, TransactionSource::Broadcast);
+                self.import_transactions(peer_id, non_blob_txs, &TransactionSource::Broadcast);
 
                 if has_blob_txs {
                     debug!(target: "net::tx", ?peer_id, "received bad full blob transaction broadcast");
@@ -918,7 +927,7 @@ where
                 let mut msg_builder = PooledTransactionsHashesBuilder::new(version);
                 for pooled_tx in pooled_txs {
                     peer.seen_transactions.insert(*pooled_tx.hash());
-                    msg_builder.push_pooled(pooled_tx);
+                    msg_builder.push_pooled(&pooled_tx);
                 }
 
                 let msg = msg_builder.build();
@@ -933,7 +942,7 @@ where
         &mut self,
         peer_id: PeerId,
         transactions: PooledTransactions,
-        source: TransactionSource,
+        source: &TransactionSource,
     ) {
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
@@ -1077,7 +1086,7 @@ where
                     self.on_good_import(hash);
                 }
                 Err(err) => {
-                    self.on_bad_import(err);
+                    self.on_bad_import(&err);
                 }
             }
         }
@@ -1087,11 +1096,11 @@ where
     fn on_fetch_event(&mut self, fetch_event: FetchEvent) {
         match fetch_event {
             FetchEvent::TransactionsFetched { peer_id, transactions } => {
-                self.import_transactions(peer_id, transactions, TransactionSource::Response);
+                self.import_transactions(peer_id, transactions, &TransactionSource::Response);
             }
             FetchEvent::FetchError { peer_id, error } => {
                 trace!(target: "net::tx", ?peer_id, %error, "requesting transactions from peer failed");
-                self.on_request_error(peer_id, error);
+                self.on_request_error(peer_id, &error);
             }
             FetchEvent::EmptyResponse { peer_id } => {
                 trace!(target: "net::tx", ?peer_id, "peer returned empty response");
@@ -1121,7 +1130,7 @@ where
         self.network.reputation_change(peer_id, kind);
     }
 
-    fn on_request_error(&self, peer_id: PeerId, req_err: RequestError) {
+    fn on_request_error(&self, peer_id: PeerId, req_err: &RequestError) {
         let kind = match req_err {
             RequestError::UnsupportedCapability => ReputationChangeKind::BadProtocol,
             RequestError::Timeout => ReputationChangeKind::Timeout,
@@ -1167,7 +1176,7 @@ where
     /// - kzg error
     /// - not blob transaction (tx type mismatch)
     /// - wrong versioned kzg commitment hash
-    fn on_bad_import(&mut self, err: PoolError) {
+    fn on_bad_import(&mut self, err: &PoolError) {
         let peers = self.transactions_by_peers.remove(&err.hash);
 
         // if we're _currently_ syncing, we ignore a bad transaction
@@ -1351,7 +1360,7 @@ where
             return Poll::Pending
         }
 
-        this.update_poll_metrics(start, poll_durations);
+        this.update_poll_metrics(start, &poll_durations);
 
         Poll::Pending
     }
@@ -1371,7 +1380,7 @@ impl PropagateTransaction {
     }
 
     /// Create a new instance from a pooled transaction
-    fn new<T: PoolTransaction>(tx: Arc<ValidPoolTransaction<T>>) -> Self {
+    fn new<T: PoolTransaction>(tx: &Arc<ValidPoolTransaction<T>>) -> Self {
         let size = tx.encoded_length();
         let transaction = Arc::new(tx.transaction.to_recovered_transaction().into_signed());
         Self { size, transaction }
@@ -1428,7 +1437,7 @@ enum PooledTransactionsHashesBuilder {
 
 impl PooledTransactionsHashesBuilder {
     /// Push a transaction from the pool to the list.
-    fn push_pooled<T: PoolTransaction>(&mut self, pooled_tx: Arc<ValidPoolTransaction<T>>) {
+    fn push_pooled<T: PoolTransaction>(&mut self, pooled_tx: &Arc<ValidPoolTransaction<T>>) {
         match self {
             Self::Eth66(msg) => msg.0.push(*pooled_tx.hash()),
             Self::Eth68(msg) => {
@@ -1640,7 +1649,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), transactions_manager_config)
+            .transactions(pool.clone(), &transactions_manager_config)
             .split_with_handle();
 
         transactions
@@ -1694,7 +1703,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), transactions_manager_config)
+            .transactions(pool.clone(), &transactions_manager_config)
             .split_with_handle();
 
         tokio::task::spawn(network);
@@ -1777,7 +1786,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), transactions_manager_config)
+            .transactions(pool.clone(), &transactions_manager_config)
             .split_with_handle();
 
         tokio::task::spawn(network);
@@ -1866,7 +1875,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), transactions_manager_config)
+            .transactions(pool.clone(), &transactions_manager_config)
             .split_with_handle();
         tokio::task::spawn(network);
 
@@ -1957,7 +1966,7 @@ mod tests {
             .await
             .unwrap()
             .into_builder()
-            .transactions(pool.clone(), transactions_manager_config)
+            .transactions(pool.clone(), &transactions_manager_config)
             .split_with_handle();
         tokio::task::spawn(network);
 

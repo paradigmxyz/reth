@@ -71,7 +71,7 @@ impl Command {
                     StageId::Headers.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.env.chain)?;
+                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, &self.env.chain)?;
             }
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
@@ -84,7 +84,7 @@ impl Command {
                     StageId::Bodies.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.env.chain)?;
+                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, &self.env.chain)?;
             }
             StageEnum::Senders => {
                 tx.clear::<tables::TransactionSenders>()?;
@@ -171,7 +171,7 @@ impl Command {
                     StageId::TransactionLookup.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.env.chain)?;
+                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, &self.env.chain)?;
             }
         }
 

@@ -531,7 +531,7 @@ fn calculate_gas_used_from_headers(
     for entry in provider.fetch_range_iter(
         StaticFileSegment::Headers,
         *range.start()..*range.end() + 1,
-        |cursor, number| cursor.get_one::<HeaderMask<Header>>(number.into()),
+        |cursor, number| cursor.get_one::<HeaderMask<Header>>(&(number.into())),
     )? {
         let Header { gas_used, .. } = entry?;
         gas_total += gas_used;

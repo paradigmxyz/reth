@@ -43,7 +43,7 @@ impl OptimismNode {
 
     /// Returns the components for the given [`RollupArgs`].
     pub fn components<Node>(
-        args: RollupArgs,
+        args: &RollupArgs,
     ) -> ComponentsBuilder<
         Node,
         OptimismPoolBuilder,
@@ -60,10 +60,10 @@ impl OptimismNode {
             .node_types::<Node>()
             .pool(OptimismPoolBuilder::default())
             .payload(OptimismPayloadBuilder::new(
-                compute_pending_block,
+                *compute_pending_block,
                 OptimismEvmConfig::default(),
             ))
-            .network(OptimismNetworkBuilder { disable_txpool_gossip })
+            .network(OptimismNetworkBuilder { disable_txpool_gossip: *disable_txpool_gossip })
             .executor(OptimismExecutorBuilder::default())
             .consensus(OptimismConsensusBuilder::default())
     }
@@ -84,7 +84,7 @@ where
 
     fn components_builder(self) -> Self::ComponentsBuilder {
         let Self { args } = self;
-        Self::components(args)
+        Self::components(&args)
     }
 }
 
@@ -133,7 +133,7 @@ where
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let data_dir = ctx.config().datadir();
-        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
+        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), &Default::default())?;
 
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
             .with_head_timestamp(ctx.head().timestamp)

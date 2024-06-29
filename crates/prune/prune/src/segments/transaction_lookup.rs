@@ -125,7 +125,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 1..=10, B256::ZERO, 2..3);
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), &StorageKind::Database(None)).expect("insert blocks");
 
         let mut tx_hash_numbers = Vec::new();
         for block in &blocks {

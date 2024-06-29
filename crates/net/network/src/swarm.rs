@@ -131,7 +131,7 @@ where
                 self.state.on_session_activated(
                     peer_id,
                     capabilities.clone(),
-                    status.clone(),
+                    &status,
                     messages.clone(),
                     timeout,
                 );

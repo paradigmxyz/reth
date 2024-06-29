@@ -91,13 +91,13 @@ fn benchmark_pools(group: &mut BenchmarkGroup<'_, WallTime>, senders: usize, max
     let txs = generate_many_transactions(senders, max_depth);
 
     // benchmark parked pool
-    truncate_basefee(group, "BasefeePool", txs.clone(), senders, max_depth);
+    truncate_basefee(group, "BasefeePool", &txs, senders, max_depth);
 
     // benchmark pending pool
-    truncate_pending(group, "PendingPool", txs.clone(), senders, max_depth);
+    truncate_pending(group, "PendingPool", &txs, senders, max_depth);
 
     // benchmark queued pool
-    truncate_queued(group, "QueuedPool", txs, senders, max_depth);
+    truncate_queued(group, "QueuedPool", &txs, senders, max_depth);
 
     // TODO: benchmark blob truncate
 }
@@ -134,7 +134,7 @@ fn txpool_truncate(c: &mut Criterion) {
 fn truncate_pending(
     group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
-    seed: Vec<MockTransaction>,
+    seed: &[MockTransaction],
     senders: usize,
     max_depth: usize,
 ) {
@@ -142,7 +142,7 @@ fn truncate_pending(
         let mut txpool = PendingPool::new(MockOrdering::default());
         let mut f = MockTransactionFactory::default();
 
-        for tx in &seed {
+        for tx in seed {
             // add transactions with a basefee of zero, so they are not immediately removed
             txpool.add_transaction(f.validated_arc(tx.clone()), 0);
         }
@@ -169,7 +169,7 @@ fn truncate_pending(
 fn truncate_queued(
     group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
-    seed: Vec<MockTransaction>,
+    seed: &[MockTransaction],
     senders: usize,
     max_depth: usize,
 ) {
@@ -177,7 +177,7 @@ fn truncate_queued(
         let mut txpool = ParkedPool::<QueuedOrd<_>>::default();
         let mut f = MockTransactionFactory::default();
 
-        for tx in &seed {
+        for tx in seed {
             txpool.add_transaction(f.validated_arc(tx.clone()));
         }
         txpool
@@ -203,7 +203,7 @@ fn truncate_queued(
 fn truncate_basefee(
     group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
-    seed: Vec<MockTransaction>,
+    seed: &[MockTransaction],
     senders: usize,
     max_depth: usize,
 ) {
@@ -211,7 +211,7 @@ fn truncate_basefee(
         let mut txpool = ParkedPool::<BasefeeOrd<_>>::default();
         let mut f = MockTransactionFactory::default();
 
-        for tx in &seed {
+        for tx in seed {
             txpool.add_transaction(f.validated_arc(tx.clone()));
         }
         txpool

@@ -193,7 +193,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
     /// Sends  the event to all listeners.
     ///
     /// Remove channels that got closed.
-    fn notify(&mut self, record: DnsNodeRecordUpdate) {
+    fn notify(&mut self, record: &DnsNodeRecordUpdate) {
         self.node_record_listeners.retain_mut(|listener| match listener.try_send(record.clone()) {
             Ok(()) => true,
             Err(err) => match err {
@@ -243,7 +243,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
 
     fn on_resolved_enr(&mut self, enr: Enr<SecretKey>) {
         if let Some(record) = convert_enr_node_record(&enr) {
-            self.notify(record);
+            self.notify(&record);
         }
         self.queued_events.push_back(DnsDiscoveryEvent::Enr(enr))
     }
@@ -278,7 +278,7 @@ impl<R: Resolver> DnsDiscoveryService<R> {
                     }
                     DnsEntry::Branch(branch_entry) => {
                         if let Some(tree) = self.trees.get_mut(&link) {
-                            tree.extend_children(kind, branch_entry.children)
+                            tree.extend_children(&kind, branch_entry.children)
                         }
                     }
                     DnsEntry::Node(entry) => {

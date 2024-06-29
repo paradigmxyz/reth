@@ -107,7 +107,7 @@ impl AppendableChain {
     pub(crate) fn new_chain_fork<DB, E>(
         &self,
         block: SealedBlockWithSenders,
-        side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
+        side_chain_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_fork: ForkBlock,
         externals: &TreeExternals<DB, E>,
@@ -131,7 +131,7 @@ impl AppendableChain {
         // Revert changesets to get the state of the parent that we need to apply the change.
         let bundle_state_data = BundleStateDataRef {
             execution_outcome: &execution_outcome,
-            sidechain_block_hashes: &side_chain_block_hashes,
+            sidechain_block_hashes: side_chain_block_hashes,
             canonical_block_hashes,
             canonical_fork,
         };
@@ -272,7 +272,7 @@ impl AppendableChain {
     pub(crate) fn append_block<DB, E>(
         &mut self,
         block: SealedBlockWithSenders,
-        side_chain_block_hashes: BTreeMap<BlockNumber, BlockHash>,
+        side_chain_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         canonical_block_hashes: &BTreeMap<BlockNumber, BlockHash>,
         externals: &TreeExternals<DB, E>,
         canonical_fork: ForkBlock,
@@ -287,7 +287,7 @@ impl AppendableChain {
 
         let bundle_state_data = BundleStateDataRef {
             execution_outcome: self.execution_outcome(),
-            sidechain_block_hashes: &side_chain_block_hashes,
+            sidechain_block_hashes: side_chain_block_hashes,
             canonical_block_hashes,
             canonical_fork,
         };

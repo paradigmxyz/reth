@@ -913,7 +913,7 @@ mod tests {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();
             for i in 0usize..1_000 {
-                tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()).unwrap()
+                tx.put(db.dbi(), i.to_le_bytes(), b"0", &WriteFlags::empty()).unwrap()
             }
             tx.commit().unwrap();
         }
@@ -926,7 +926,7 @@ mod tests {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();
             for i in 0usize..1_000 {
-                tx.put(db.dbi(), i.to_le_bytes(), b"1", WriteFlags::empty()).unwrap();
+                tx.put(db.dbi(), i.to_le_bytes(), b"1", &WriteFlags::empty()).unwrap();
             }
             tx.commit().unwrap();
         }
@@ -937,7 +937,7 @@ mod tests {
             let tx = env.begin_rw_txn().unwrap();
             let db = tx.open_db(None).unwrap();
             for i in 1_000usize..1_000_000 {
-                match tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()) {
+                match tx.put(db.dbi(), i.to_le_bytes(), b"0", &WriteFlags::empty()) {
                     Ok(_) => continue,
                     Err(Error::MapFull) => break,
                     result @ Err(_) => result.unwrap(),

@@ -96,7 +96,7 @@ where
     // Sort them by `Key`
     rows.sort_by(|a, b| a.0.cmp(&b.0));
 
-    save_to_file::<T>(rows)
+    save_to_file::<T>(&rows)
 }
 
 /// Generates test-vectors for DUPSORT tables. Each key has multiple (subkey, value). Keys and
@@ -136,11 +136,11 @@ where
     // Sort them by `Key`
     rows.sort_by(|a, b| a.0.cmp(&b.0));
 
-    save_to_file::<T>(rows)
+    save_to_file::<T>(&rows)
 }
 
 /// Save rows to file.
-fn save_to_file<T: Table>(rows: Vec<TableRow<T>>) -> eyre::Result<()>
+fn save_to_file<T: Table>(rows: &[TableRow<T>]) -> eyre::Result<()>
 where
     T::Key: serde::Serialize,
     T::Value: serde::Serialize,

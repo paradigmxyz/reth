@@ -80,7 +80,9 @@ impl From<DatabaseError> for InitDatabaseError {
 }
 
 /// Write the genesis block if it has not already been written
-pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, InitDatabaseError> {
+pub fn init_genesis<DB: Database>(
+    factory: &ProviderFactory<DB>,
+) -> Result<B256, InitDatabaseError> {
     let chain = factory.chain_spec();
 
     let genesis = chain.genesis();
@@ -115,7 +117,7 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
     // Insert header
     let tx = provider_rw.tx_ref();
     let static_file_provider = factory.static_file_provider();
-    insert_genesis_header::<DB>(tx, &static_file_provider, chain.clone())?;
+    insert_genesis_header::<DB>(tx, &static_file_provider, &chain)?;
 
     insert_genesis_state::<DB>(tx, alloc.len(), alloc.iter())?;
 
@@ -276,7 +278,7 @@ pub fn insert_history<'a, 'b, DB: Database>(
 pub fn insert_genesis_header<DB: Database>(
     tx: &<DB as Database>::TXMut,
     static_file_provider: &StaticFileProvider,
-    chain: Arc<ChainSpec>,
+    chain: &Arc<ChainSpec>,
 ) -> ProviderResult<()> {
     let (header, block_hash) = chain.sealed_genesis_header().split();
 
@@ -304,7 +306,7 @@ pub fn insert_genesis_header<DB: Database>(
 /// bedrock transition block.
 pub fn init_from_state_dump<DB: Database>(
     mut reader: impl BufRead,
-    factory: ProviderFactory<DB>,
+    factory: &ProviderFactory<DB>,
     etl_config: EtlConfig,
 ) -> eyre::Result<B256> {
     let block = factory.last_block_number()?;
@@ -551,7 +553,7 @@ mod tests {
     #[test]
     fn success_init_genesis_mainnet() {
         let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(MAINNET.clone())).unwrap();
+            init_genesis(&create_test_provider_factory_with_chain_spec(MAINNET.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, MAINNET_GENESIS_HASH);
@@ -560,7 +562,7 @@ mod tests {
     #[test]
     fn success_init_genesis_goerli() {
         let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(GOERLI.clone())).unwrap();
+            init_genesis(&create_test_provider_factory_with_chain_spec(GOERLI.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, GOERLI_GENESIS_HASH);
@@ -569,7 +571,7 @@ mod tests {
     #[test]
     fn success_init_genesis_sepolia() {
         let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
+            init_genesis(&create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
@@ -579,10 +581,10 @@ mod tests {
     fn fail_init_inconsistent_db() {
         let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
         let static_file_provider = factory.static_file_provider();
-        init_genesis(factory.clone()).unwrap();
+        init_genesis(&factory).unwrap();
 
         // Try to init db with a different genesis block
-        let genesis_hash = init_genesis(ProviderFactory::new(
+        let genesis_hash = init_genesis(&ProviderFactory::new(
             factory.into_db(),
             MAINNET.clone(),
             static_file_provider,
@@ -628,7 +630,7 @@ mod tests {
         });
 
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
-        init_genesis(factory.clone()).unwrap();
+        init_genesis(&factory).unwrap();
 
         let provider = factory.provider().unwrap();
 

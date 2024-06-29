@@ -62,7 +62,7 @@ where
 
         let transactions = txs
             .into_iter()
-            .map(recover_raw_transaction)
+            .map(|data| recover_raw_transaction(&data))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .map(|tx| tx.into_components())

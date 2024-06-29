@@ -107,7 +107,7 @@ pub(crate) fn setup<DB: Database>(
 
     info!(target: "reth::cli", ?output_db, "Creating separate db");
 
-    let output_datadir = init_db(output_db, DatabaseArguments::new(ClientVersion::default()))?;
+    let output_datadir = init_db(output_db, &DatabaseArguments::new(ClientVersion::default()))?;
 
     output_datadir.update(|tx| {
         tx.import_table_with_range::<tables::BlockBodyIndices, _>(

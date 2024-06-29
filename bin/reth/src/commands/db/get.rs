@@ -78,7 +78,7 @@ impl Command {
                     segment,
                     |provider| {
                         let mut cursor = provider.cursor()?;
-                        cursor.get(key.into(), mask).map(|result| {
+                        cursor.get(&(key.into()), mask).map(|result| {
                             result.map(|vec| {
                                 vec.iter().map(|slice| slice.to_vec()).collect::<Vec<_>>()
                             })

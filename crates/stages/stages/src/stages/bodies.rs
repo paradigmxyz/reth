@@ -913,7 +913,9 @@ mod tests {
                 for header in static_file_provider.fetch_range_iter(
                     StaticFileSegment::Headers,
                     *range.start()..*range.end() + 1,
-                    |cursor, number| cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into()),
+                    |cursor, number| {
+                        cursor.get_two::<HeaderMask<Header, BlockHash>>(&(number.into()))
+                    },
                 )? {
                     let (header, hash) = header?;
                     self.headers.push_back(header.seal(hash));

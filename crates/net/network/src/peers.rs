@@ -587,7 +587,7 @@ impl PeersManager {
                     }
 
                     let backoff_time =
-                        self.backoff_durations.backoff_until(kind, peer.severe_backoff_counter);
+                        self.backoff_durations.backoff_until(&kind, peer.severe_backoff_counter);
 
                     // The peer has signaled that it is currently unable to process any more
                     // connections, so we will hold off on attempting any new connections for a
@@ -1509,7 +1509,7 @@ mod tests {
 
         let backoff_timestamp = peers
             .backoff_durations
-            .backoff_until(BackoffKind::Low, peer_struct.severe_backoff_counter);
+            .backoff_until(&BackoffKind::Low, peer_struct.severe_backoff_counter);
 
         let expected = std::time::Instant::now() + peers.backoff_durations.low;
         assert!(backoff_timestamp <= expected);
@@ -1534,7 +1534,7 @@ mod tests {
         // Get official backoff time
         let backoff_time = peers
             .backoff_durations
-            .backoff_until(BackoffKind::High, peer_struct.severe_backoff_counter);
+            .backoff_until(&BackoffKind::High, peer_struct.severe_backoff_counter);
 
         // Duration of the backoff should be 2 * 15 minutes = 30 minutes
         let backoff_duration = std::time::Duration::new(30 * 60, 0);

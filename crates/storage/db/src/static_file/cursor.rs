@@ -28,7 +28,7 @@ impl<'a> StaticFileCursor<'a> {
     /// Gets a row of values.
     pub fn get(
         &mut self,
-        key_or_num: KeyOrNumber<'_>,
+        key_or_num: &KeyOrNumber<'_>,
         mask: usize,
     ) -> ProviderResult<Option<Vec<&'_ [u8]>>> {
         if self.jar().rows() == 0 {
@@ -39,7 +39,7 @@ impl<'a> StaticFileCursor<'a> {
             KeyOrNumber::Key(k) => self.row_by_key_with_cols(k, mask),
             KeyOrNumber::Number(n) => match self.jar().user_header().start() {
                 Some(offset) => {
-                    if offset > n {
+                    if offset > *n {
                         return Ok(None)
                     }
                     self.row_by_number_with_cols((n - offset) as usize, mask)
@@ -55,7 +55,7 @@ impl<'a> StaticFileCursor<'a> {
     /// Gets one column value from a row.
     pub fn get_one<M: ColumnSelectorOne>(
         &mut self,
-        key_or_num: KeyOrNumber<'_>,
+        key_or_num: &KeyOrNumber<'_>,
     ) -> ProviderResult<Option<M::FIRST>> {
         let row = self.get(key_or_num, M::MASK)?;
 
@@ -68,7 +68,7 @@ impl<'a> StaticFileCursor<'a> {
     /// Gets two column values from a row.
     pub fn get_two<M: ColumnSelectorTwo>(
         &mut self,
-        key_or_num: KeyOrNumber<'_>,
+        key_or_num: &KeyOrNumber<'_>,
     ) -> ProviderResult<Option<(M::FIRST, M::SECOND)>> {
         let row = self.get(key_or_num, M::MASK)?;
 
@@ -82,7 +82,7 @@ impl<'a> StaticFileCursor<'a> {
     #[allow(clippy::type_complexity)]
     pub fn get_three<M: ColumnSelectorThree>(
         &mut self,
-        key_or_num: KeyOrNumber<'_>,
+        key_or_num: &KeyOrNumber<'_>,
     ) -> ProviderResult<Option<(M::FIRST, M::SECOND, M::THIRD)>> {
         let row = self.get(key_or_num, M::MASK)?;
 

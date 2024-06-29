@@ -124,7 +124,7 @@ where
         &mut self,
         peer: PeerId,
         capabilities: Arc<Capabilities>,
-        status: Arc<Status>,
+        status: &Arc<Status>,
         request_tx: PeerRequestSender,
         timeout: Arc<AtomicU64>,
     ) {
@@ -163,7 +163,7 @@ where
     /// > the total number of peers) using the `NewBlock` message.
     ///
     /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md>
-    pub(crate) fn announce_new_block(&mut self, msg: NewBlockMessage) {
+    pub(crate) fn announce_new_block(&mut self, msg: &NewBlockMessage) {
         // send a `NewBlock` message to a fraction of the connected peers (square root of the total
         // number of peers)
         let num_propagate = (self.active_peers.len() as f64).sqrt() as u64 + 1;
@@ -205,7 +205,7 @@ where
 
     /// Completes the block propagation process started in [`NetworkState::announce_new_block()`]
     /// but sending `NewBlockHash` broadcast to all peers that haven't seen it yet.
-    pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage) {
+    pub(crate) fn announce_new_block_hash(&mut self, msg: &NewBlockMessage) {
         let number = msg.block.block.header.number;
         let hashes = NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]);
         for (peer_id, peer) in &mut self.active_peers {
@@ -286,7 +286,7 @@ where
     }
 
     /// Event hook for events received from the discovery service.
-    fn on_discovery_event(&mut self, event: DiscoveryEvent) {
+    fn on_discovery_event(&mut self, event: &DiscoveryEvent) {
         match event {
             DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
                 peer_id,
@@ -294,42 +294,49 @@ where
                 fork_id,
             }) => {
                 self.queued_messages.push_back(StateAction::DiscoveredNode {
-                    peer_id,
-                    socket_addr,
-                    fork_id,
+                    peer_id: *peer_id,
+                    socket_addr: *socket_addr,
+                    fork_id: *fork_id,
                 });
             }
             DiscoveryEvent::EnrForkId(peer_id, fork_id) => {
-                self.queued_messages
-                    .push_back(StateAction::DiscoveredEnrForkId { peer_id, fork_id });
+                self.queued_messages.push_back(StateAction::DiscoveredEnrForkId {
+                    peer_id: *peer_id,
+                    fork_id: *fork_id,
+                });
             }
         }
     }
 
     /// Event hook for new actions derived from the peer management set.
-    fn on_peer_action(&mut self, action: PeerAction) {
+    fn on_peer_action(&mut self, action: &PeerAction) {
         match action {
             PeerAction::Connect { peer_id, remote_addr } => {
-                self.queued_messages.push_back(StateAction::Connect { peer_id, remote_addr });
+                self.queued_messages.push_back(StateAction::Connect {
+                    peer_id: *peer_id,
+                    remote_addr: *remote_addr,
+                });
             }
             PeerAction::Disconnect { peer_id, reason } => {
-                self.state_fetcher.on_pending_disconnect(&peer_id);
-                self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason });
+                self.state_fetcher.on_pending_disconnect(peer_id);
+                self.queued_messages
+                    .push_back(StateAction::Disconnect { peer_id: *peer_id, reason: *reason });
             }
             PeerAction::DisconnectBannedIncoming { peer_id } |
             PeerAction::DisconnectUntrustedIncoming { peer_id } => {
-                self.state_fetcher.on_pending_disconnect(&peer_id);
-                self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
+                self.state_fetcher.on_pending_disconnect(peer_id);
+                self.queued_messages
+                    .push_back(StateAction::Disconnect { peer_id: *peer_id, reason: None });
             }
             PeerAction::DiscoveryBanPeerId { peer_id, ip_addr } => {
-                self.ban_discovery(peer_id, ip_addr)
+                self.ban_discovery(*peer_id, *ip_addr)
             }
-            PeerAction::DiscoveryBanIp { ip_addr } => self.ban_ip_discovery(ip_addr),
+            PeerAction::DiscoveryBanIp { ip_addr } => self.ban_ip_discovery(*ip_addr),
             PeerAction::PeerAdded(peer_id) => {
-                self.queued_messages.push_back(StateAction::PeerAdded(peer_id))
+                self.queued_messages.push_back(StateAction::PeerAdded(*peer_id))
             }
             PeerAction::PeerRemoved(peer_id) => {
-                self.queued_messages.push_back(StateAction::PeerRemoved(peer_id))
+                self.queued_messages.push_back(StateAction::PeerRemoved(*peer_id))
             }
             PeerAction::BanPeer { .. } | PeerAction::UnBanPeer { .. } => {}
         }
@@ -401,7 +408,7 @@ where
             }
 
             while let Poll::Ready(discovery) = self.discovery.poll(cx) {
-                self.on_discovery_event(discovery);
+                self.on_discovery_event(&discovery);
             }
 
             while let Poll::Ready(action) = self.state_fetcher.poll(cx) {
@@ -457,7 +464,7 @@ where
 
             // poll peer manager
             while let Poll::Ready(action) = self.peers_manager.poll(cx) {
-                self.on_peer_action(action);
+                self.on_peer_action(&action);
             }
 
             if self.queued_messages.is_empty() {
@@ -576,7 +583,7 @@ mod tests {
         state.on_session_activated(
             peer_id,
             capabilities(),
-            Arc::default(),
+            &Arc::default(),
             peer_tx,
             Arc::new(AtomicU64::new(1)),
         );

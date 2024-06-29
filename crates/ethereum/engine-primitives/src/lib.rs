@@ -46,6 +46,6 @@ impl EngineTypes for EthEngineTypes {
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, EthPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, payload_or_attrs)
+        validate_version_specific_fields(chain_spec, version, &payload_or_attrs)
     }
 }

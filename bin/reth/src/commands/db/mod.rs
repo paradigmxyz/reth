@@ -73,7 +73,7 @@ impl Command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats(command) => {
                 db_ro_exec!(self.env, tool, {
-                    command.execute(data_dir, &tool)?;
+                    command.execute(&data_dir, &tool)?;
                 });
             }
             Subcommands::List(command) => {
@@ -118,7 +118,7 @@ impl Command {
             }
             Subcommands::Clear(command) => {
                 let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
-                command.execute(provider_factory)?;
+                command.execute(&provider_factory)?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {

@@ -249,7 +249,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
             Some(value.unwrap_or(&self.buf).len()),
             |this| {
                 this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::UPSERT)
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), &WriteFlags::UPSERT)
                     .map_err(|e| {
                         DatabaseWriteError {
                             info: e.into(),
@@ -271,7 +271,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
             Some(value.unwrap_or(&self.buf).len()),
             |this| {
                 this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::NO_OVERWRITE)
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), &WriteFlags::NO_OVERWRITE)
                     .map_err(|e| {
                         DatabaseWriteError {
                             info: e.into(),
@@ -295,7 +295,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
             Some(value.unwrap_or(&self.buf).len()),
             |this| {
                 this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND)
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), &WriteFlags::APPEND)
                     .map_err(|e| {
                         DatabaseWriteError {
                             info: e.into(),
@@ -311,7 +311,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
 
     fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.execute_with_operation_metric(Operation::CursorDeleteCurrent, None, |this| {
-            this.inner.del(WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
+            this.inner.del(&WriteFlags::CURRENT).map_err(|e| DatabaseError::Delete(e.into()))
         })
     }
 }
@@ -319,7 +319,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
 impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
         self.execute_with_operation_metric(Operation::CursorDeleteCurrentDuplicates, None, |this| {
-            this.inner.del(WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))
+            this.inner.del(&WriteFlags::NO_DUP_DATA).map_err(|e| DatabaseError::Delete(e.into()))
         })
     }
 
@@ -331,7 +331,7 @@ impl<T: DupSort> DbDupCursorRW<T> for Cursor<RW, T> {
             Some(value.unwrap_or(&self.buf).len()),
             |this| {
                 this.inner
-                    .put(key.as_ref(), value.unwrap_or(&this.buf), WriteFlags::APPEND_DUP)
+                    .put(key.as_ref(), value.unwrap_or(&this.buf), &WriteFlags::APPEND_DUP)
                     .map_err(|e| {
                         DatabaseWriteError {
                             info: e.into(),

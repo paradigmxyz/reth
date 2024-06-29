@@ -280,7 +280,7 @@ mod tests {
         let db = TestStageDB::default();
 
         let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), &StorageKind::Database(None)).expect("insert blocks");
         // Unwind headers from static_files and manually insert them into the database, so we're
         // able to check that static_file_producer works
         let static_file_provider = db.factory.static_file_provider();

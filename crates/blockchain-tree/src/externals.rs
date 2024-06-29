@@ -74,7 +74,7 @@ impl<DB: Database, E> TreeExternals<DB, E> {
             hashes.extend(range.clone().zip(static_file_provider.fetch_range_with_predicate(
                 StaticFileSegment::Headers,
                 range,
-                |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
+                |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(&(number.into())),
                 |_| true,
             )?));
         }

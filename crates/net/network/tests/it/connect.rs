@@ -265,7 +265,7 @@ async fn test_connect_to_trusted_peer() {
         .unwrap()
         .into_builder()
         .request_handler(client)
-        .transactions(testing_pool(), transactions_manager_config)
+        .transactions(testing_pool(), &transactions_manager_config)
         .split_with_handle();
 
     let mut events = handle.event_listener();
@@ -323,7 +323,7 @@ async fn test_incoming_node_id_blacklist() {
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
-        let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
+        let geth_peer_id = enr_to_peer_id(&(enr.parse().unwrap()));
 
         let ban_list = BanList::new(vec![geth_peer_id], HashSet::new());
         let peer_config = PeersConfig::default().with_ban_list(ban_list);
@@ -377,7 +377,7 @@ async fn test_incoming_connect_with_single_geth() {
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
-        let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
+        let geth_peer_id = enr_to_peer_id(&(enr.parse().unwrap()));
 
         let config = NetworkConfigBuilder::new(secret_key)
             .listener_port(0)
@@ -439,7 +439,7 @@ async fn test_outgoing_connect_with_single_geth() {
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
-        let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
+        let geth_peer_id = enr_to_peer_id(&(enr.parse().unwrap()));
 
         // add geth as a peer then wait for a `SessionEstablished` event
         handle.add_peer(geth_peer_id, geth_socket);
@@ -485,7 +485,7 @@ async fn test_geth_disconnect() {
 
         // get the peer id we should be expecting
         let enr = provider.node_info().await.unwrap().enr;
-        let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
+        let geth_peer_id = enr_to_peer_id(&(enr.parse().unwrap()));
 
         // add geth as a peer then wait for `PeerAdded` and `SessionEstablished` events.
         handle.add_peer(geth_peer_id, geth_socket);

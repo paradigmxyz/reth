@@ -94,12 +94,12 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
     fn broadcast_event(
         &mut self,
         hash: &TxHash,
-        event: TransactionEvent,
-        pool_event: FullTransactionEvent<T>,
+        event: &TransactionEvent,
+        pool_event: &FullTransactionEvent<T>,
     ) {
         // Broadcast to all listeners for the transaction hash.
         if let Entry::Occupied(mut sink) = self.broadcasters_by_hash.entry(*hash) {
-            sink.get_mut().broadcast(event.clone());
+            sink.get_mut().broadcast(event);
 
             if sink.get().is_empty() || event.is_final() {
                 sink.remove();
@@ -134,27 +134,27 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
 
     /// Notify listeners about a transaction that was added to the pending queue.
     pub(crate) fn pending(&mut self, tx: &TxHash, replaced: Option<Arc<ValidPoolTransaction<T>>>) {
-        self.broadcast_event(tx, TransactionEvent::Pending, FullTransactionEvent::Pending(*tx));
+        self.broadcast_event(tx, &TransactionEvent::Pending, &FullTransactionEvent::Pending(*tx));
 
         if let Some(replaced) = replaced {
             // notify listeners that this transaction was replaced
-            self.replaced(replaced, *tx);
+            self.replaced(&replaced, *tx);
         }
     }
 
     /// Notify listeners about a transaction that was replaced.
-    pub(crate) fn replaced(&mut self, tx: Arc<ValidPoolTransaction<T>>, replaced_by: TxHash) {
-        let transaction = Arc::clone(&tx);
+    pub(crate) fn replaced(&mut self, tx: &Arc<ValidPoolTransaction<T>>, replaced_by: TxHash) {
+        let transaction = Arc::clone(tx);
         self.broadcast_event(
             tx.hash(),
-            TransactionEvent::Replaced(replaced_by),
-            FullTransactionEvent::Replaced { transaction, replaced_by },
+            &TransactionEvent::Replaced(replaced_by),
+            &FullTransactionEvent::Replaced { transaction, replaced_by },
         );
     }
 
     /// Notify listeners about a transaction that was added to the queued pool.
     pub(crate) fn queued(&mut self, tx: &TxHash) {
-        self.broadcast_event(tx, TransactionEvent::Queued, FullTransactionEvent::Queued(*tx));
+        self.broadcast_event(tx, &TransactionEvent::Queued, &FullTransactionEvent::Queued(*tx));
     }
 
     /// Notify listeners about a transaction that was propagated.
@@ -162,22 +162,26 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
         let peers = Arc::new(peers);
         self.broadcast_event(
             tx,
-            TransactionEvent::Propagated(Arc::clone(&peers)),
-            FullTransactionEvent::Propagated(peers),
+            &TransactionEvent::Propagated(Arc::clone(&peers)),
+            &FullTransactionEvent::Propagated(peers),
         );
     }
 
     /// Notify listeners about a transaction that was discarded.
     pub(crate) fn discarded(&mut self, tx: &TxHash) {
-        self.broadcast_event(tx, TransactionEvent::Discarded, FullTransactionEvent::Discarded(*tx));
+        self.broadcast_event(
+            tx,
+            &TransactionEvent::Discarded,
+            &FullTransactionEvent::Discarded(*tx),
+        );
     }
 
     /// Notify listeners that the transaction was mined
     pub(crate) fn mined(&mut self, tx: &TxHash, block_hash: B256) {
         self.broadcast_event(
             tx,
-            TransactionEvent::Mined(block_hash),
-            FullTransactionEvent::Mined { tx_hash: *tx, block_hash },
+            &TransactionEvent::Mined(block_hash),
+            &FullTransactionEvent::Mined { tx_hash: *tx, block_hash },
         );
     }
 }
@@ -199,7 +203,7 @@ impl<T: PoolTransaction> Default for AllPoolEventsBroadcaster<T> {
 
 impl<T: PoolTransaction> AllPoolEventsBroadcaster<T> {
     // Broadcast an event to all listeners. Dropped listeners are silently evicted.
-    fn broadcast(&mut self, event: FullTransactionEvent<T>) {
+    fn broadcast(&mut self, event: &FullTransactionEvent<T>) {
         self.senders.retain(|sender| match sender.try_send(event.clone()) {
             Ok(_) | Err(TrySendError::Full(_)) => true,
             Err(TrySendError::Closed(_)) => false,
@@ -223,7 +227,7 @@ impl PoolEventBroadcaster {
     }
 
     // Broadcast an event to all listeners. Dropped listeners are silently evicted.
-    fn broadcast(&mut self, event: TransactionEvent) {
+    fn broadcast(&mut self, event: &TransactionEvent) {
         self.senders.retain(|sender| sender.send(event.clone()).is_ok())
     }
 }

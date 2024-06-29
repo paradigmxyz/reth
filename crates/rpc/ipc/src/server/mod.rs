@@ -856,7 +856,7 @@ mod tests {
     }
 
     // Naive example that broadcasts the produced values to all active subscribers.
-    fn produce_items(tx: broadcast::Sender<usize>) {
+    fn produce_items(tx: &broadcast::Sender<usize>) {
         for c in 1..=100 {
             std::thread::sleep(std::time::Duration::from_millis(1));
             let _ = tx.send(c);
@@ -1002,7 +1002,7 @@ mod tests {
         let (tx, _rx) = broadcast::channel::<usize>(16);
 
         let mut module = RpcModule::new(tx.clone());
-        std::thread::spawn(move || produce_items(tx));
+        std::thread::spawn(move || produce_items(&tx));
 
         module
             .register_subscription(

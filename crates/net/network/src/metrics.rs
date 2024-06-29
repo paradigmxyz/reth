@@ -376,7 +376,7 @@ impl TxTypesCounter {
 impl AnnouncedTxTypesMetrics {
     /// Update metrics during announcement validation, by examining each announcement entry based on
     /// `TxType`
-    pub(crate) fn update_eth68_announcement_metrics(&self, tx_types_counter: TxTypesCounter) {
+    pub(crate) fn update_eth68_announcement_metrics(&self, tx_types_counter: &TxTypesCounter) {
         self.legacy.record(tx_types_counter.legacy as f64);
         self.eip2930.record(tx_types_counter.eip2930 as f64);
         self.eip1559.record(tx_types_counter.eip1559 as f64);

@@ -145,7 +145,7 @@ impl<C> NetworkManager<C> {
     }
 
     #[inline]
-    fn update_poll_metrics(&self, start: Instant, poll_durations: NetworkManagerPollDurations) {
+    fn update_poll_metrics(&self, start: Instant, poll_durations: &NetworkManagerPollDurations) {
         let metrics = &self.metrics;
 
         let NetworkManagerPollDurations { acc_network_handle, acc_swarm } = poll_durations;
@@ -373,8 +373,8 @@ where
     fn on_invalid_message(
         &mut self,
         peer_id: PeerId,
-        _capabilities: Arc<Capabilities>,
-        _message: CapabilityMessage,
+        _capabilities: &Arc<Capabilities>,
+        _message: &CapabilityMessage,
     ) {
         trace!(target: "net", ?peer_id, "received unexpected message");
         self.swarm
@@ -452,10 +452,10 @@ where
             Ok(validated_block) => match validated_block {
                 BlockValidation::ValidHeader { block } => {
                     self.swarm.state_mut().update_peer_block(&peer, block.hash, block.number());
-                    self.swarm.state_mut().announce_new_block(block);
+                    self.swarm.state_mut().announce_new_block(&block);
                 }
                 BlockValidation::ValidBlock { block } => {
-                    self.swarm.state_mut().announce_new_block_hash(block);
+                    self.swarm.state_mut().announce_new_block_hash(&block);
                 }
             },
             Err(_err) => {
@@ -540,7 +540,7 @@ where
                     return
                 }
                 let msg = NewBlockMessage { hash, block: Arc::new(block) };
-                self.swarm.state_mut().announce_new_block(msg);
+                self.swarm.state_mut().announce_new_block(&msg);
             }
             NetworkHandleMessage::EthRequest { peer_id, request } => {
                 self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::EthRequest(request))
@@ -632,7 +632,7 @@ where
         match event {
             SwarmEvent::ValidMessage { peer_id, message } => self.on_peer_message(peer_id, message),
             SwarmEvent::InvalidCapabilityMessage { peer_id, capabilities, message } => {
-                self.on_invalid_message(peer_id, capabilities, message);
+                self.on_invalid_message(peer_id, &capabilities, &message);
                 self.metrics.invalid_messages_received.increment(1);
             }
             SwarmEvent::TcpListenerClosed { remote_addr } => {
@@ -986,7 +986,7 @@ where
             return Poll::Pending
         }
 
-        this.update_poll_metrics(start, poll_durations);
+        this.update_poll_metrics(start, &poll_durations);
 
         Poll::Pending
     }

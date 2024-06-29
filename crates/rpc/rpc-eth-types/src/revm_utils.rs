@@ -70,7 +70,7 @@ where
             db.block_hashes
                 .extend(block_hashes.into_iter().map(|(num, hash)| (U256::from(num), hash)))
         }
-        apply_block_overrides(*block_overrides, &mut block);
+        apply_block_overrides(&block_overrides, &mut block);
     }
 
     let request_gas = request.gas;
@@ -347,7 +347,7 @@ impl CallFees {
 }
 
 /// Applies the given block overrides to the env
-fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
+fn apply_block_overrides(overrides: &BlockOverrides, env: &mut BlockEnv) {
     let BlockOverrides {
         number,
         difficulty,
@@ -360,25 +360,25 @@ fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
     } = overrides;
 
     if let Some(number) = number {
-        env.number = number;
+        env.number = *number;
     }
     if let Some(difficulty) = difficulty {
-        env.difficulty = difficulty;
+        env.difficulty = *difficulty;
     }
     if let Some(time) = time {
-        env.timestamp = U256::from(time);
+        env.timestamp = U256::from(*time);
     }
     if let Some(gas_limit) = gas_limit {
-        env.gas_limit = U256::from(gas_limit);
+        env.gas_limit = U256::from(*gas_limit);
     }
     if let Some(coinbase) = coinbase {
-        env.coinbase = coinbase;
+        env.coinbase = *coinbase;
     }
     if let Some(random) = random {
-        env.prevrandao = Some(random);
+        env.prevrandao = Some(*random);
     }
     if let Some(base_fee) = base_fee {
-        env.basefee = base_fee;
+        env.basefee = *base_fee;
     }
 }
 

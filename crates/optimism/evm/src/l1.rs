@@ -236,7 +236,7 @@ impl RethL1BlockInfo for L1BlockInfo {
 /// deployer contract. This is done by directly setting the code of the create2 deployer account
 /// prior to executing any transactions on the timestamp activation of the fork.
 pub fn ensure_create2_deployer<DB>(
-    chain_spec: Arc<ChainSpec>,
+    chain_spec: &Arc<ChainSpec>,
     timestamp: u64,
     db: &mut revm::State<DB>,
 ) -> Result<(), DB::Error>

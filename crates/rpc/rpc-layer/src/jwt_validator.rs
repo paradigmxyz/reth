@@ -28,14 +28,14 @@ impl AuthValidator for JwtAuthValidator {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     error!(target: "engine::jwt-validator", "Invalid JWT: {e}");
-                    let response = err_response(e);
+                    let response = err_response(&e);
                     Err(response)
                 }
             },
             None => {
                 let e = JwtError::MissingOrInvalidAuthorizationHeader;
                 error!(target: "engine::jwt-validator", "Invalid JWT: {e}");
-                let response = err_response(e);
+                let response = err_response(&e);
                 Err(response)
             }
         }
@@ -53,7 +53,7 @@ fn get_bearer(headers: &HeaderMap) -> Option<String> {
     Some(token.into())
 }
 
-fn err_response(err: JwtError) -> HttpResponse {
+fn err_response(err: &JwtError) -> HttpResponse {
     // We build a response from an error message.
     // We don't cope with headers or other structured fields.
     // Then we are safe to "expect" on the result.

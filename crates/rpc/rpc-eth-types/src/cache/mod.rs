@@ -101,7 +101,7 @@ impl EthStateCache {
     /// See also [`Self::spawn_with`]
     pub fn spawn<Provider, EvmConfig>(
         provider: Provider,
-        config: EthStateCacheConfig,
+        config: &EthStateCacheConfig,
         evm_config: EvmConfig,
     ) -> Self
     where
@@ -117,7 +117,7 @@ impl EthStateCache {
     /// The cache is memory limited by the given max bytes values.
     pub fn spawn_with<Provider, Tasks, EvmConfig>(
         provider: Provider,
-        config: EthStateCacheConfig,
+        config: &EthStateCacheConfig,
         executor: Tasks,
         evm_config: EvmConfig,
     ) -> Self
@@ -132,10 +132,10 @@ impl EthStateCache {
             provider,
             executor.clone(),
             evm_config,
-            max_blocks,
-            max_receipts,
-            max_envs,
-            max_concurrent_db_requests,
+            *max_blocks,
+            *max_receipts,
+            *max_envs,
+            *max_concurrent_db_requests,
         );
         executor.spawn_critical("eth state cache", Box::pin(service));
         this
@@ -359,7 +359,7 @@ where
         }
     }
 
-    fn on_reorg_block(&mut self, block_hash: B256, res: ProviderResult<Option<BlockWithSenders>>) {
+    fn on_reorg_block(&mut self, block_hash: B256, res: &ProviderResult<Option<BlockWithSenders>>) {
         if let Some(queued) = self.full_block_cache.remove(&block_hash) {
             // send the response to queued senders
             for tx in queued {
@@ -381,7 +381,7 @@ where
     fn on_reorg_receipts(
         &mut self,
         block_hash: B256,
-        res: ProviderResult<Option<Arc<Vec<Receipt>>>>,
+        res: &ProviderResult<Option<Arc<Vec<Receipt>>>>,
     ) {
         if let Some(queued) = self.receipts_cache.remove(&block_hash) {
             // send the response to queued senders
@@ -576,13 +576,13 @@ where
                         }
                         CacheAction::RemoveReorgedChain { chain_change } => {
                             for block in chain_change.blocks {
-                                this.on_reorg_block(block.hash(), Ok(Some(block.unseal())));
+                                this.on_reorg_block(block.hash(), &Ok(Some(block.unseal())));
                             }
 
                             for block_receipts in chain_change.receipts {
                                 this.on_reorg_receipts(
                                     block_receipts.block_hash,
-                                    Ok(Some(Arc::new(
+                                    &Ok(Some(Arc::new(
                                         block_receipts.receipts.into_iter().flatten().collect(),
                                     ))),
                                 );
@@ -621,7 +621,7 @@ struct ChainChange {
 }
 
 impl ChainChange {
-    fn new(chain: Arc<Chain>) -> Self {
+    fn new(chain: &Arc<Chain>) -> Self {
         let (blocks, receipts): (Vec<_>, Vec<_>) = chain
             .blocks_and_receipts()
             .map(|(block, receipts)| {
@@ -644,13 +644,13 @@ where
 {
     while let Some(event) = events.next().await {
         if let Some(reverted) = event.reverted() {
-            let chain_change = ChainChange::new(reverted);
+            let chain_change = ChainChange::new(&reverted);
 
             let _ =
                 eth_state_cache.to_service.send(CacheAction::RemoveReorgedChain { chain_change });
         }
 
-        let chain_change = ChainChange::new(event.committed());
+        let chain_change = ChainChange::new(&event.committed());
 
         let _ =
             eth_state_cache.to_service.send(CacheAction::CacheNewCanonicalChain { chain_change });

@@ -496,7 +496,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         Pool: TransactionPool + Unpin + 'static,
     {
         let (handle, network, txpool, eth) = builder
-            .transactions(pool, Default::default())
+            .transactions(pool, &Default::default())
             .request_handler(self.provider().clone())
             .split_with_handle();
 

@@ -483,7 +483,7 @@ where
             debug!(target: "blockchain_tree", ?block_hash, ?block_number, "Appending block to side chain");
             parent_chain.append_block(
                 block,
-                block_hashes,
+                &block_hashes,
                 canonical_chain.inner(),
                 &self.externals,
                 canonical_fork,
@@ -498,7 +498,7 @@ where
             // the block starts a new fork
             let chain = parent_chain.new_chain_fork(
                 block,
-                block_hashes,
+                &block_hashes,
                 canonical_chain.inner(),
                 canonical_fork,
                 &self.externals,

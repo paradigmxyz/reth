@@ -111,7 +111,7 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> EthResult<TraceResults> {
-        let tx = recover_raw_transaction(tx)?;
+        let tx = recover_raw_transaction(&tx)?;
 
         let (cfg, block, at) = self.inner.eth_api.evm_env_at(block_id.unwrap_or_default()).await?;
 

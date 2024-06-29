@@ -94,7 +94,7 @@ impl<'a> BuiltPayload for &'a EthBuiltPayload {
 // V1 engine_getPayloadV1 response
 impl From<EthBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: EthBuiltPayload) -> Self {
-        block_to_payload_v1(value.block)
+        block_to_payload_v1(&value.block)
     }
 }
 

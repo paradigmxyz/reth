@@ -329,15 +329,17 @@ impl DbTxMut for Tx<RW> {
             Operation::Put,
             Some(value.as_ref().len()),
             |tx| {
-                tx.put(self.get_dbi::<T>()?, key.as_ref(), value, WriteFlags::UPSERT).map_err(|e| {
-                    DatabaseWriteError {
-                        info: e.into(),
-                        operation: DatabaseWriteOperation::Put,
-                        table_name: T::NAME,
-                        key: key.into(),
-                    }
-                    .into()
-                })
+                tx.put(self.get_dbi::<T>()?, key.as_ref(), value, &WriteFlags::UPSERT).map_err(
+                    |e| {
+                        DatabaseWriteError {
+                            info: e.into(),
+                            operation: DatabaseWriteOperation::Put,
+                            table_name: T::NAME,
+                            key: key.into(),
+                        }
+                        .into()
+                    },
+                )
             },
         )
     }
@@ -393,7 +395,7 @@ mod tests {
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
                 MAX_DURATION,
             )));
-        let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
+        let db = DatabaseEnv::open(dir.path(), &DatabaseEnvKind::RW, &args).unwrap().with_metrics();
 
         let mut tx = db.tx().unwrap();
         tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;
@@ -419,7 +421,7 @@ mod tests {
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Set(
                 MAX_DURATION,
             )));
-        let db = DatabaseEnv::open(dir.path(), DatabaseEnvKind::RW, args).unwrap().with_metrics();
+        let db = DatabaseEnv::open(dir.path(), &DatabaseEnvKind::RW, &args).unwrap().with_metrics();
 
         let mut tx = db.tx().unwrap();
         tx.metrics_handler.as_mut().unwrap().long_transaction_duration = MAX_DURATION;

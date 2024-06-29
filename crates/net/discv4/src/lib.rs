@@ -784,14 +784,14 @@ impl Discv4Service {
         ctx.mark_queried(node.id);
         let id = ctx.target();
         let msg = Message::FindNode(FindNode { id, expire: self.find_node_expiration() });
-        self.send_packet(msg, node.udp_addr());
+        self.send_packet(&msg, node.udp_addr());
         self.pending_find_nodes.insert(node.id, FindNodeRequest::new(ctx));
     }
 
     /// Notifies all listeners.
     ///
     /// Removes all listeners that are closed.
-    fn notify(&mut self, update: DiscoveryUpdate) {
+    fn notify(&mut self, update: &DiscoveryUpdate) {
         self.update_listeners.retain_mut(|listener| match listener.try_send(update.clone()) {
             Ok(()) => true,
             Err(err) => match err {
@@ -832,7 +832,7 @@ impl Discv4Service {
         let removed = self.kbuckets.remove(&key);
         if removed {
             trace!(target: "discv4", ?node_id, "removed node");
-            self.notify(DiscoveryUpdate::Removed(node_id));
+            self.notify(&DiscoveryUpdate::Removed(node_id));
         }
         removed
     }
@@ -915,7 +915,7 @@ impl Discv4Service {
                 if !old_status.is_connected() {
                     let _ = entry.update(ConnectionState::Connected, Some(old_status.direction));
                     trace!(target: "discv4", ?record, "added after successful endpoint proof");
-                    self.notify(DiscoveryUpdate::Added(record));
+                    self.notify(&DiscoveryUpdate::Added(record));
 
                     if has_enr_seq {
                         // request the ENR of the node
@@ -932,7 +932,7 @@ impl Discv4Service {
                     status.state = ConnectionState::Connected;
                     let _ = entry.update(status);
                     trace!(target: "discv4", ?record, "added after successful endpoint proof");
-                    self.notify(DiscoveryUpdate::Added(record));
+                    self.notify(&DiscoveryUpdate::Added(record));
 
                     if has_enr_seq {
                         // request the ENR of the node
@@ -985,7 +985,7 @@ impl Discv4Service {
     }
 
     /// Encodes the packet, sends it and returns the hash.
-    pub(crate) fn send_packet(&self, msg: Message, to: SocketAddr) -> B256 {
+    pub(crate) fn send_packet(&self, msg: &Message, to: SocketAddr) -> B256 {
         let (payload, hash) = msg.encode(&self.secret_key);
         trace!(target: "discv4", r#type=?msg.msg_type(), ?to, ?hash, "sending packet");
         let _ = self.egress.try_send((payload, to)).map_err(|err| {
@@ -999,7 +999,7 @@ impl Discv4Service {
     }
 
     /// Message handler for an incoming `Ping`
-    fn on_ping(&mut self, ping: Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: B256) {
+    fn on_ping(&mut self, ping: &Ping, remote_addr: SocketAddr, remote_id: PeerId, hash: B256) {
         if self.is_expired(ping.expire) {
             // ping's expiration timestamp is in the past
             return
@@ -1056,7 +1056,7 @@ impl Discv4Service {
                         // full, we can't add any additional peers to that bucket, but we still want
                         // to emit an event that we discovered the node
                         trace!(target: "discv4", ?record, "discovered new record but bucket is full");
-                        self.notify(DiscoveryUpdate::DiscoveredAtCapacity(record));
+                        self.notify(&DiscoveryUpdate::DiscoveredAtCapacity(record));
                         needs_bond = true;
                     }
                     BucketInsertResult::TooManyIncoming | BucketInsertResult::NodeExists => {
@@ -1080,7 +1080,7 @@ impl Discv4Service {
             expire: ping.expire,
             enr_sq: self.enr_seq(),
         });
-        self.send_packet(pong, remote_addr);
+        self.send_packet(&pong, remote_addr);
 
         // if node was absent also send a ping to establish the endpoint proof from our end
         if is_new_insert {
@@ -1153,7 +1153,7 @@ impl Discv4Service {
             enr_sq: self.enr_seq(),
         };
         trace!(target: "discv4", ?ping, "sending ping");
-        let echo_hash = self.send_packet(Message::Ping(ping), remote_addr);
+        let echo_hash = self.send_packet(&Message::Ping(ping), remote_addr);
 
         self.pending_pings
             .insert(id, PingRequest { sent_at: Instant::now(), node, echo_hash, reason });
@@ -1171,14 +1171,14 @@ impl Discv4Service {
         let enr_request = EnrRequest { expire: self.enr_request_expiration() };
 
         trace!(target: "discv4", ?enr_request, "sending enr request");
-        let echo_hash = self.send_packet(Message::EnrRequest(enr_request), remote_addr);
+        let echo_hash = self.send_packet(&Message::EnrRequest(enr_request), remote_addr);
 
         self.pending_enr_requests
             .insert(node.id, EnrRequestState { sent_at: Instant::now(), echo_hash });
     }
 
     /// Message handler for an incoming `Pong`.
-    fn on_pong(&mut self, pong: Pong, remote_addr: SocketAddr, remote_id: PeerId) {
+    fn on_pong(&mut self, pong: &Pong, remote_addr: SocketAddr, remote_id: PeerId) {
         if self.is_expired(pong.expire) {
             return
         }
@@ -1238,7 +1238,7 @@ impl Discv4Service {
     }
 
     /// Handler for incoming `EnrResponse` message
-    fn on_enr_response(&mut self, msg: EnrResponse, remote_addr: SocketAddr, id: PeerId) {
+    fn on_enr_response(&mut self, msg: &EnrResponse, remote_addr: SocketAddr, id: PeerId) {
         trace!(target: "discv4", ?remote_addr, ?msg, "received ENR response");
         if let Some(resp) = self.pending_enr_requests.remove(&id) {
             // ensure the ENR's public key matches the expected node id
@@ -1264,10 +1264,10 @@ impl Discv4Service {
                 match (fork_id, old_fork_id) {
                     (Some(new), Some(old)) => {
                         if new != old {
-                            self.notify(DiscoveryUpdate::EnrForkId(record, new))
+                            self.notify(&DiscoveryUpdate::EnrForkId(record, new))
                         }
                     }
-                    (Some(new), None) => self.notify(DiscoveryUpdate::EnrForkId(record, new)),
+                    (Some(new), None) => self.notify(&DiscoveryUpdate::EnrForkId(record, new)),
                     _ => {}
                 }
             }
@@ -1288,7 +1288,7 @@ impl Discv4Service {
 
         if self.has_bond(id, remote_addr.ip()) {
             self.send_packet(
-                Message::EnrResponse(EnrResponse {
+                &Message::EnrResponse(EnrResponse {
                     request_hash,
                     enr: self.local_eip_868_enr.clone(),
                 }),
@@ -1378,7 +1378,7 @@ impl Discv4Service {
                         }
                         BucketInsertResult::Full => {
                             // new node but the node's bucket is already full
-                            self.notify(DiscoveryUpdate::DiscoveredAtCapacity(closest))
+                            self.notify(&DiscoveryUpdate::DiscoveredAtCapacity(closest))
                         }
                         _ => {}
                     }
@@ -1413,7 +1413,7 @@ impl Discv4Service {
             let nodes = nodes.iter().map(|node| node.value.record).collect::<Vec<NodeRecord>>();
             trace!(target: "discv4", len = nodes.len(), to=?to,"Sent neighbours packet");
             let msg = Message::Neighbours(Neighbours { nodes, expire });
-            self.send_packet(msg, to);
+            self.send_packet(&msg, to);
         }
     }
 
@@ -1673,11 +1673,11 @@ impl Discv4Service {
                         trace!(target: "discv4", r#type=?msg.msg_type(), from=?remote_addr,"received packet");
                         let event = match msg {
                             Message::Ping(ping) => {
-                                self.on_ping(ping, remote_addr, node_id, hash);
+                                self.on_ping(&ping, remote_addr, node_id, hash);
                                 Discv4Event::Ping
                             }
                             Message::Pong(pong) => {
-                                self.on_pong(pong, remote_addr, node_id);
+                                self.on_pong(&pong, remote_addr, node_id);
                                 Discv4Event::Pong
                             }
                             Message::FindNode(msg) => {
@@ -1693,7 +1693,7 @@ impl Discv4Service {
                                 Discv4Event::EnrRequest
                             }
                             Message::EnrResponse(msg) => {
-                                self.on_enr_response(msg, remote_addr, node_id);
+                                self.on_enr_response(&msg, remote_addr, node_id);
                                 Discv4Event::EnrResponse
                             }
                         };
@@ -2437,7 +2437,7 @@ mod tests {
         };
 
         let id = PeerId::random_with(&mut rng);
-        service.on_ping(ping, addr, id, rng.gen());
+        service.on_ping(&ping, addr, id, rng.gen());
 
         let key = kad_key(id);
         match service.kbuckets.entry(&key) {
@@ -2469,7 +2469,7 @@ mod tests {
         };
 
         let id = PeerId::random_with(&mut rng);
-        service.on_ping(ping, addr, id, rng.gen());
+        service.on_ping(&ping, addr, id, rng.gen());
 
         let key = kad_key(id);
         match service.kbuckets.entry(&key) {
@@ -2689,7 +2689,7 @@ mod tests {
             expire: service.ping_expiration(),
             enr_sq: service.enr_seq(),
         };
-        let echo_hash = service.send_packet(Message::Ping(ping), record.udp_addr());
+        let echo_hash = service.send_packet(&Message::Ping(ping), record.udp_addr());
         let ping_request = PingRequest {
             sent_at: Instant::now(),
             node: record,
@@ -2732,7 +2732,7 @@ mod tests {
         };
         ping.to.address = "192.0.2.0".parse().unwrap();
 
-        let echo_hash = service_1.send_packet(Message::Ping(ping), service_2.local_addr());
+        let echo_hash = service_1.send_packet(&Message::Ping(ping), service_2.local_addr());
         let ping_request = PingRequest {
             sent_at: Instant::now(),
             node: service_2.local_node_record,

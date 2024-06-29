@@ -7,7 +7,7 @@ pub const GETH_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Obtains a `PeerId` from an ENR. In this case, the `PeerId` represents the public key contained
 /// in the ENR.
-pub fn enr_to_peer_id(enr: Enr<SigningKey>) -> PeerId {
+pub fn enr_to_peer_id(enr: &Enr<SigningKey>) -> PeerId {
     // In the following tests, methods which accept a public key expect it to contain the public
     // key in its 64-byte encoded (uncompressed) form.
     enr.public_key().encode_uncompressed().into()

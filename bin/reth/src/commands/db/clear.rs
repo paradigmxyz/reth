@@ -17,7 +17,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db clear` command
-    pub fn execute<DB: Database>(self, provider_factory: ProviderFactory<DB>) -> eyre::Result<()> {
+    pub fn execute<DB: Database>(self, provider_factory: &ProviderFactory<DB>) -> eyre::Result<()> {
         match self.subcommand {
             Subcommands::Mdbx { table } => {
                 table.view(&ClearViewer { db: provider_factory.db_ref() })?
