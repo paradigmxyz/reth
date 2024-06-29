@@ -9,7 +9,7 @@ use crate::{
         BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
         PeerResponseResult,
     },
-    peers::{PeerAction, PeersManager},
+    peers::{PeerAction, PeerAddr, PeersManager},
     FetchClient,
 };
 use rand::seq::SliceRandom;
@@ -274,7 +274,7 @@ where
     }
 
     /// Adds a peer and its address with the given kind to the peerset.
-    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: SocketAddr) {
+    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: PeerAddr) {
         self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
     }
 
@@ -288,14 +288,10 @@ where
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: &DiscoveryEvent) {
         match event {
-            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
-                peer_id,
-                socket_addr,
-                fork_id,
-            }) => {
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued { peer_id, addr, fork_id }) => {
                 self.queued_messages.push_back(StateAction::DiscoveredNode {
                     peer_id: *peer_id,
-                    socket_addr: *socket_addr,
+                    addr: *addr,
                     fork_id: *fork_id,
                 });
             }
@@ -523,7 +519,7 @@ pub(crate) enum StateAction {
         fork_id: ForkId,
     },
     /// A new node was found through the discovery, possibly with a `ForkId`
-    DiscoveredNode { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
+    DiscoveredNode { peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId> },
     /// A peer was added
     PeerAdded(PeerId),
     /// A peer was dropped
