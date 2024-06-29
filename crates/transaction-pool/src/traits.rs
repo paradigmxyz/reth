@@ -12,9 +12,9 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives::{
     kzg::KzgSettings, transaction::TryFromRecoveredTransactionError, AccessList, Address,
     BlobTransactionSidecar, BlobTransactionValidationError, FromRecoveredPooledTransaction,
-    IntoRecoveredTransaction, PooledTransactionsElement, PooledTransactionsElementEcRecovered,
-    SealedBlock, Transaction, TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxHash,
-    TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, U256,
+    PooledTransactionsElement, PooledTransactionsElementEcRecovered, SealedBlock, Transaction,
+    TransactionSignedEcRecovered, TxHash, TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
+    U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -754,9 +754,7 @@ impl BestTransactionsAttributes {
 }
 
 /// Trait for transaction types used inside the pool
-pub trait PoolTransaction:
-    fmt::Debug + Send + Sync + Sized + FromRecoveredPooledTransaction
-{
+pub trait PoolTransaction: fmt::Debug + Send + Sync + Sized {
     type Source: TryInto<Self> + TryFrom<TransactionSignedEcRecovered>;
     type Pooled: From<PooledTransactionsElementEcRecovered>;
 
