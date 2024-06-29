@@ -1,3 +1,5 @@
+//! This contains the main codec for `RLPx` ECIES messages
+
 use crate::{algorithm::ECIES, ECIESError, EgressECIESValue, IngressECIESValue};
 use alloy_primitives::{bytes::BytesMut, B512 as PeerId};
 use secp256k1::SecretKey;
@@ -7,14 +9,14 @@ use tracing::{instrument, trace};
 
 /// Tokio codec for ECIES
 #[derive(Debug)]
-pub(crate) struct ECIESCodec {
+pub struct ECIESCodec {
     ecies: ECIES,
     state: ECIESState,
 }
 
 /// Current ECIES state of a connection
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ECIESState {
+pub enum ECIESState {
     /// The first stage of the ECIES handshake, where each side of the connection sends an auth
     /// message containing the ephemeral public key, signature of the public key, nonce, and other
     /// metadata.
@@ -23,7 +25,12 @@ enum ECIESState {
     /// The second stage of the ECIES handshake, where each side of the connection sends an ack
     /// message containing the nonce and other metadata.
     Ack,
+
+    /// The third stage of the ECIES handshake, where header is parsed, message integrity checks
+    /// performed, and message is decrypted.
     Header,
+
+    /// The final stage, where the ECIES message is actually read and returned by the ECIES codec.
     Body,
 }
 
@@ -43,7 +50,7 @@ impl Decoder for ECIESCodec {
     type Item = IngressECIESValue;
     type Error = ECIESError;
 
-    #[instrument(level = "trace", skip_all, fields(peer=&*format!("{:?}", self.ecies.remote_id.map(|s| s.to_string())), state=&*format!("{:?}", self.state)))]
+    #[instrument(level = "trace", skip_all, fields(peer=?self.ecies.remote_id, state=?self.state))]
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         loop {
             match self.state {
@@ -115,7 +122,7 @@ impl Decoder for ECIESCodec {
 impl Encoder<EgressECIESValue> for ECIESCodec {
     type Error = io::Error;
 
-    #[instrument(level = "trace", skip(self, buf), fields(peer=&*format!("{:?}", self.ecies.remote_id.map(|s| s.to_string())), state=&*format!("{:?}", self.state)))]
+    #[instrument(level = "trace", skip(self, buf), fields(peer=?self.ecies.remote_id, state=?self.state))]
     fn encode(&mut self, item: EgressECIESValue, buf: &mut BytesMut) -> Result<(), Self::Error> {
         match item {
             EgressECIESValue::Auth => {

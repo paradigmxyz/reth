@@ -1,11 +1,7 @@
 //! Support for handling peer sessions.
 
-use crate::{
-    message::PeerMessage,
-    metrics::SessionManagerMetrics,
-    session::{active::ActiveSession, config::SessionCounter},
-};
-use fnv::FnvHashMap;
+use crate::{message::PeerMessage, metrics::SessionManagerMetrics, session::active::ActiveSession};
+use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
@@ -16,8 +12,10 @@ use reth_eth_wire::{
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_peers::PeerId;
+use reth_network_types::SessionsConfig;
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_tasks::TaskSpawner;
+use rustc_hash::FxHashMap;
 use secp256k1::SecretKey;
 use std::{
     collections::HashMap,
@@ -37,12 +35,11 @@ use tokio_util::sync::PollSender;
 use tracing::{debug, instrument, trace};
 
 mod active;
-mod config;
 mod conn;
+mod counter;
 mod handle;
 pub use crate::message::PeerRequestSender;
 use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocolHandlers, RlpxSubProtocols};
-pub use config::{SessionLimits, SessionsConfig};
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     SessionCommand,
@@ -86,7 +83,7 @@ pub struct SessionManager {
     ///
     /// Events produced during the authentication phase are reported to this manager. Once the
     /// session is authenticated, it can be moved to the `active_session` set.
-    pending_sessions: FnvHashMap<SessionId, PendingSessionHandle>,
+    pending_sessions: FxHashMap<SessionId, PendingSessionHandle>,
     /// All active sessions that are ready to exchange messages.
     active_sessions: HashMap<PeerId, ActiveSessionHandle>,
     /// The original Sender half of the [`PendingSessionEvent`] channel.
@@ -1006,10 +1003,7 @@ async fn authenticate_stream(
         (eth_stream.into(), their_status)
     } else {
         // Multiplex the stream with the extra protocols
-        let (mut multiplex_stream, their_status) = RlpxProtocolMultiplexer::new(p2p_stream)
-            .into_eth_satellite_stream(status, fork_filter)
-            .await
-            .unwrap();
+        let mut multiplex_stream = RlpxProtocolMultiplexer::new(p2p_stream);
 
         // install additional handlers
         for handler in extra_handlers.into_iter() {
@@ -1021,6 +1015,19 @@ async fn authenticate_stream(
                 })
                 .ok();
         }
+
+        let (multiplex_stream, their_status) =
+            match multiplex_stream.into_eth_satellite_stream(status, fork_filter).await {
+                Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
+                Err(err) => {
+                    return PendingSessionEvent::Disconnected {
+                        remote_addr,
+                        session_id,
+                        direction,
+                        error: Some(PendingSessionHandshakeError::Eth(err)),
+                    }
+                }
+            };
 
         (multiplex_stream.into(), their_status)
     };

@@ -1,9 +1,9 @@
 use crate::EthVersion;
+use alloy_genesis::Genesis;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
+use reth_chainspec::{Chain, ChainSpec, NamedChain, MAINNET};
 use reth_codecs_derive::derive_arbitrary;
-use reth_primitives::{
-    hex, Chain, ChainSpec, ForkId, Genesis, Hardfork, Head, NamedChain, B256, MAINNET, U256,
-};
+use reth_primitives::{hex, EthereumHardfork, ForkId, Head, B256, U256};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
@@ -142,7 +142,7 @@ impl Default for Status {
             blockhash: mainnet_genesis,
             genesis: mainnet_genesis,
             forkid: MAINNET
-                .hardfork_fork_id(Hardfork::Frontier)
+                .hardfork_fork_id(EthereumHardfork::Frontier)
                 .expect("The Frontier hardfork should always exist"),
         }
     }
@@ -152,8 +152,9 @@ impl Default for Status {
 ///
 /// # Example
 /// ```
+/// use reth_chainspec::{Chain, EthereumHardfork, MAINNET};
 /// use reth_eth_wire_types::{EthVersion, Status};
-/// use reth_primitives::{Chain, Hardfork, B256, MAINNET, MAINNET_GENESIS_HASH, U256};
+/// use reth_primitives::{B256, MAINNET_GENESIS_HASH, U256};
 ///
 /// // this is just an example status message!
 /// let status = Status::builder()
@@ -162,7 +163,7 @@ impl Default for Status {
 ///     .total_difficulty(U256::from(100))
 ///     .blockhash(B256::from(MAINNET_GENESIS_HASH))
 ///     .genesis(B256::from(MAINNET_GENESIS_HASH))
-///     .forkid(MAINNET.hardfork_fork_id(Hardfork::Paris).unwrap())
+///     .forkid(MAINNET.hardfork_fork_id(EthereumHardfork::Paris).unwrap())
 ///     .build();
 ///
 /// assert_eq!(
@@ -173,7 +174,7 @@ impl Default for Status {
 ///         total_difficulty: U256::from(100),
 ///         blockhash: B256::from(MAINNET_GENESIS_HASH),
 ///         genesis: B256::from(MAINNET_GENESIS_HASH),
-///         forkid: MAINNET.hardfork_fork_id(Hardfork::Paris).unwrap(),
+///         forkid: MAINNET.hardfork_fork_id(EthereumHardfork::Paris).unwrap(),
 ///     }
 /// );
 /// ```
@@ -228,12 +229,11 @@ impl StatusBuilder {
 #[cfg(test)]
 mod tests {
     use crate::{EthVersion, Status};
+    use alloy_genesis::Genesis;
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
-    use reth_primitives::{
-        hex, Chain, ChainSpec, ForkCondition, ForkHash, ForkId, Genesis, Hardfork, Head,
-        NamedChain, B256, U256,
-    };
+    use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};
+    use reth_primitives::{hex, EthereumHardfork, ForkHash, ForkId, Head, B256, U256};
     use std::str::FromStr;
 
     #[test]
@@ -368,12 +368,12 @@ mod tests {
 
         // add a few hardforks
         let hardforks = vec![
-            (Hardfork::Tangerine, ForkCondition::Block(1)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(2)),
-            (Hardfork::Byzantium, ForkCondition::Block(3)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(5)),
-            (Hardfork::London, ForkCondition::Block(8)),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(13)),
+            (EthereumHardfork::Tangerine, ForkCondition::Block(1)),
+            (EthereumHardfork::SpuriousDragon, ForkCondition::Block(2)),
+            (EthereumHardfork::Byzantium, ForkCondition::Block(3)),
+            (EthereumHardfork::MuirGlacier, ForkCondition::Block(5)),
+            (EthereumHardfork::London, ForkCondition::Block(8)),
+            (EthereumHardfork::Shanghai, ForkCondition::Timestamp(13)),
         ];
 
         let mut chainspec = ChainSpec::builder().genesis(genesis).chain(Chain::from_id(1337));

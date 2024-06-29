@@ -24,7 +24,7 @@ pub enum NippyJarError {
     #[error("unexpected missing value: row:col {0}:{1}")]
     UnexpectedMissingValue(u64, u64),
     #[error(transparent)]
-    FilterError(#[from] cuckoofilter::CuckooError),
+    EthFilterError(#[from] cuckoofilter::CuckooError),
     #[error("nippy jar initialized without filter")]
     FilterMissing,
     #[error("filter has reached max capacity")]
@@ -39,6 +39,11 @@ pub enum NippyJarError {
     UnsupportedFilterQuery,
     #[error("the size of an offset must be at most 8 bytes, got {offset_size}")]
     OffsetSizeTooBig {
+        /// The read offset size in number of bytes.
+        offset_size: u8,
+    },
+    #[error("the size of an offset must be at least 1 byte, got {offset_size}")]
+    OffsetSizeTooSmall {
         /// The read offset size in number of bytes.
         offset_size: u8,
     },

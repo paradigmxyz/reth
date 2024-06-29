@@ -19,17 +19,15 @@ alloy-rpc-types = { workspace = true, features = ["jsonrpsee-types"] }
 alloy-rpc-types-anvil.workspace = true
 alloy-rpc-types-trace.workspace = true
 alloy-rpc-types-beacon.workspace = true
+alloy-rpc-types-admin.workspace = true
+alloy-rpc-types-txpool.workspace = true
+alloy-serde.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["jsonrpsee-types"] }
 
 # misc
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 jsonrpsee-types = { workspace = true, optional = true }
-
-[features]
-default = ["jsonrpsee-types"]
-arbitrary = ["alloy-primitives/arbitrary", "alloy-rpc-types/arbitrary"]
-
 
 [dev-dependencies]
 # misc
@@ -41,3 +39,6 @@ rand.workspace = true
 similar-asserts.workspace = true
 bytes.workspace = true
 
+[features]
+default = ["jsonrpsee-types"]
+arbitrary = ["alloy-primitives/arbitrary", "alloy-rpc-types/arbitrary"]

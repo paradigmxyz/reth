@@ -14,15 +14,20 @@ workspace = true
 [dependencies]
 reth-codecs.workspace = true
 
-alloy-consensus.workspace = true
+alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-alloy-rpc-types-eth = { workspace = true, optional = true } 
+alloy-rpc-types-eth = { workspace = true, optional = true }
 
 derive_more.workspace = true
-revm-primitives.workspace = true
+revm-primitives = { workspace = true, features = ["serde"] }
+
+# misc
+thiserror-no-std = { workspace = true, default-features = false }
+roaring = "0.10.2"
+byteorder = "1"
 
 # required by reth-codecs
 modular-bitfield.workspace = true
@@ -32,20 +37,25 @@ serde.workspace = true
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
+proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
 proptest-derive.workspace = true
 test-fuzz.workspace = true
 rand.workspace = true
+serde_json.workspace = true
 
 [features]
+default = ["std"]
+std = ["thiserror-no-std/std"]
 test-utils = ["arbitrary"]
 arbitrary = [
+    "alloy-consensus/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
-    "dep:proptest-derive"
+    "dep:proptest-arbitrary-interop",
 ]
 alloy-compat = ["alloy-rpc-types-eth"]

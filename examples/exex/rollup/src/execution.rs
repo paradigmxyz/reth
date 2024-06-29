@@ -12,8 +12,8 @@ use reth_primitives::{
     keccak256,
     revm::env::fill_tx_env,
     revm_primitives::{CfgEnvWithHandlerCfg, EVMError, ExecutionResult, ResultAndState},
-    Address, Block, BlockWithSenders, Bytes, Hardfork, Header, Receipt, TransactionSigned, TxType,
-    B256, U256,
+    Address, Block, BlockWithSenders, Bytes, EthereumHardfork, Header, Receipt, TransactionSigned,
+    TxType, B256, U256,
 };
 use reth_revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
@@ -69,16 +69,17 @@ fn construct_header(db: &Database, header: &RollupContract::BlockHeader) -> eyre
     let block_number = u64::try_from(header.sequence)?;
 
     // Calculate base fee per gas for EIP-1559 transactions
-    let base_fee_per_gas = if CHAIN_SPEC.fork(Hardfork::London).transitions_at_block(block_number) {
-        constants::EIP1559_INITIAL_BASE_FEE
-    } else {
-        parent_block
-            .as_ref()
-            .ok_or(eyre::eyre!("parent block not found"))?
-            .header
-            .next_block_base_fee(CHAIN_SPEC.base_fee_params_at_block(block_number))
-            .ok_or(eyre::eyre!("failed to calculate base fee"))?
-    };
+    let base_fee_per_gas =
+        if CHAIN_SPEC.fork(EthereumHardfork::London).transitions_at_block(block_number) {
+            constants::EIP1559_INITIAL_BASE_FEE
+        } else {
+            parent_block
+                .as_ref()
+                .ok_or(eyre::eyre!("parent block not found"))?
+                .header
+                .next_block_base_fee(CHAIN_SPEC.base_fee_params_at_block(block_number))
+                .ok_or(eyre::eyre!("failed to calculate base fee"))?
+        };
 
     // Construct header
     Ok(Header {
@@ -103,7 +104,7 @@ fn configure_evm<'a>(
             .build(),
     );
     evm.db_mut().set_state_clear_flag(
-        CHAIN_SPEC.fork(Hardfork::SpuriousDragon).active_at_block(header.number),
+        CHAIN_SPEC.fork(EthereumHardfork::SpuriousDragon).active_at_block(header.number),
     );
 
     let mut cfg = CfgEnvWithHandlerCfg::new_with_spec_id(evm.cfg().clone(), evm.spec_id());
@@ -277,7 +278,7 @@ mod tests {
         bytes,
         constants::ETH_TO_WEI,
         keccak256, public_key_to_address,
-        revm_primitives::{AccountInfo, ExecutionResult, Output, TransactTo, TxEnv},
+        revm_primitives::{AccountInfo, ExecutionResult, Output, TxEnv},
         BlockNumber, Receipt, SealedBlockWithSenders, Transaction, TxEip2930, TxKind, U256,
     };
     use reth_revm::Evm;
@@ -383,7 +384,7 @@ mod tests {
             .with_tx_env(TxEnv {
                 caller: sender_address,
                 gas_limit: 50_000_000,
-                transact_to: TransactTo::Call(weth_address),
+                transact_to: TxKind::Call(weth_address),
                 data: WETH::balanceOfCall::new((sender_address,)).abi_encode().into(),
                 ..Default::default()
             })
@@ -408,7 +409,7 @@ mod tests {
             .with_tx_env(TxEnv {
                 caller: sender_address,
                 gas_limit: 50_000_000,
-                transact_to: TransactTo::Call(weth_address),
+                transact_to: TxKind::Call(weth_address),
                 data: WETH::balanceOfCall::new((sender_address,)).abi_encode().into(),
                 ..Default::default()
             })

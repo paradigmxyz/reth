@@ -15,12 +15,13 @@ use alloy_eips::{
 use alloy_primitives::{keccak256, Address, BlockNumber, Bloom, Bytes, B256, B64, U256};
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::BufMut;
-use reth_codecs::{main_codec, Compact};
+use core::mem;
+use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
 use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
-use std::mem;
 
 /// Block header
-#[main_codec]
+#[main_codec(no_arbitrary)]
+#[add_arbitrary_tests(rlp, 25)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Header {
     /// The Keccak 256-bit hash of the parent
@@ -380,26 +381,22 @@ impl Encodable for Header {
         self.mix_hash.encode(out); // Encode mix hash.
         B64::new(self.nonce.to_be_bytes()).encode(out); // Encode nonce.
 
-        // Encode base fee. Put empty list if base fee is missing,
-        // but withdrawals root is present.
+        // Encode base fee.
         if let Some(ref base_fee) = self.base_fee_per_gas {
             U256::from(*base_fee).encode(out);
         }
 
-        // Encode withdrawals root. Put empty string if withdrawals root is missing,
-        // but blob gas used is present.
+        // Encode withdrawals root.
         if let Some(ref root) = self.withdrawals_root {
             root.encode(out);
         }
 
-        // Encode blob gas used. Put empty list if blob gas used is missing,
-        // but excess blob gas is present.
+        // Encode blob gas used.
         if let Some(ref blob_gas_used) = self.blob_gas_used {
             U256::from(*blob_gas_used).encode(out);
         }
 
-        // Encode excess blob gas. Put empty list if excess blob gas is missing,
-        // but parent beacon block root is present.
+        // Encode excess blob gas.
         if let Some(ref excess_blob_gas) = self.excess_blob_gas {
             U256::from(*excess_blob_gas).encode(out);
         }
@@ -410,14 +407,6 @@ impl Encodable for Header {
         }
 
         // Encode EIP-7685 requests root
-        //
-        // If new fields are added, the above pattern will need to
-        // be repeated and placeholders added. Otherwise, it's impossible to tell _which_
-        // fields are missing. This is mainly relevant for contrived cases where a header is
-        // created at random, for example:
-        //  * A header is created with a withdrawals root, but no base fee. Shanghai blocks are
-        //    post-London, so this is technically not valid. However, a tool like proptest would
-        //    generate a block like this.
         if let Some(ref requests_root) = self.requests_root {
             requests_root.encode(out);
         }
@@ -485,14 +474,6 @@ impl Decodable for Header {
         }
 
         // Decode requests root.
-        //
-        // If new fields are added, the above pattern will need to
-        // be repeated and placeholders decoded. Otherwise, it's impossible to tell _which_
-        // fields are missing. This is mainly relevant for contrived cases where a header is
-        // created at random, for example:
-        //  * A header is created with a withdrawals root, but no base fee. Shanghai blocks are
-        //    post-London, so this is technically not valid. However, a tool like proptest would
-        //    generate a block like this.
         if started_len - buf.len() < rlp_head.payload_length {
             this.requests_root = Some(B256::decode(buf)?);
         }
@@ -505,5 +486,44 @@ impl Decodable for Header {
             })
         }
         Ok(this)
+    }
+}
+
+#[cfg(any(test, feature = "test-utils", feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for Header {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        // Generate an arbitrary header, passing it to the generate_valid_header function to make
+        // sure it is valid _with respect to hardforks only_.
+        let base = Self {
+            parent_hash: u.arbitrary()?,
+            ommers_hash: u.arbitrary()?,
+            beneficiary: u.arbitrary()?,
+            state_root: u.arbitrary()?,
+            transactions_root: u.arbitrary()?,
+            receipts_root: u.arbitrary()?,
+            logs_bloom: u.arbitrary()?,
+            difficulty: u.arbitrary()?,
+            number: u.arbitrary()?,
+            gas_limit: u.arbitrary()?,
+            gas_used: u.arbitrary()?,
+            timestamp: u.arbitrary()?,
+            extra_data: u.arbitrary()?,
+            mix_hash: u.arbitrary()?,
+            nonce: u.arbitrary()?,
+            base_fee_per_gas: u.arbitrary()?,
+            blob_gas_used: u.arbitrary()?,
+            excess_blob_gas: u.arbitrary()?,
+            parent_beacon_block_root: u.arbitrary()?,
+            requests_root: u.arbitrary()?,
+            withdrawals_root: u.arbitrary()?,
+        };
+
+        Ok(test_utils::generate_valid_header(
+            base,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+            u.arbitrary()?,
+        ))
     }
 }

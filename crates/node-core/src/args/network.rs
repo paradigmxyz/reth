@@ -2,10 +2,11 @@
 
 use crate::version::P2P_CLIENT_VERSION;
 use clap::Args;
+use reth_chainspec::ChainSpec;
 use reth_config::Config;
-use reth_discv4::{DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
+use reth_discv4::{NodeRecord, DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT};
 use reth_discv5::{
-    DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
+    discv5::ListenConfig, DEFAULT_COUNT_BOOTSTRAP_LOOKUPS, DEFAULT_DISCOVERY_V5_PORT,
     DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL, DEFAULT_SECONDS_LOOKUP_INTERVAL,
 };
 use reth_net_nat::NatResolver;
@@ -17,10 +18,10 @@ use reth_network::{
     },
     HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
 };
-use reth_primitives::{mainnet_nodes, ChainSpec, TrustedPeer};
+use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     ops::Not,
     path::PathBuf,
     sync::Arc,
@@ -172,23 +173,17 @@ impl NetworkArgs {
             // apply discovery settings
             .apply(|builder| {
                 let rlpx_socket = (self.addr, self.port).into();
-                self.discovery.apply_to_builder(builder, rlpx_socket)
+                self.discovery.apply_to_builder(builder, rlpx_socket, chain_bootnodes)
             })
-            // modify discv5 settings if enabled in previous step
-            .map_discv5_config_builder(|builder| {
-                let DiscoveryArgs {
-                    discv5_lookup_interval,
-                    discv5_bootstrap_lookup_interval,
-                    discv5_bootstrap_lookup_countdown,
-                    ..
-                } = self.discovery;
-
-                builder
-                    .add_unsigned_boot_nodes(chain_bootnodes.into_iter())
-                    .lookup_interval(discv5_lookup_interval)
-                    .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
-                    .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
-            })
+            .listener_addr(SocketAddr::new(
+                self.addr, // set discovery port based on instance number
+                self.port,
+            ))
+            .discovery_addr(SocketAddr::new(
+                self.discovery.addr,
+                // set discovery port based on instance number
+                self.discovery.port,
+            ))
     }
 
     /// If `no_persist_peers` is false then this returns the path to the persistent peers file path.
@@ -209,6 +204,17 @@ impl NetworkArgs {
         self = self.with_unused_p2p_port();
         self.discovery = self.discovery.with_unused_discovery_port();
         self
+    }
+
+    /// Change networking port numbers based on the instance number.
+    /// Ports are updated to `previous_value + instance - 1`
+    ///
+    /// # Panics
+    /// Warning: if `instance` is zero in debug mode, this will panic.
+    pub fn adjust_instance_ports(&mut self, instance: u16) {
+        debug_assert_ne!(instance, 0, "instance must be non-zero");
+        self.port += instance - 1;
+        self.discovery.adjust_instance_ports(instance);
     }
 }
 
@@ -308,6 +314,7 @@ impl DiscoveryArgs {
         &self,
         mut network_config_builder: NetworkConfigBuilder,
         rlpx_tcp_socket: SocketAddr,
+        boot_nodes: impl IntoIterator<Item = NodeRecord>,
     ) -> NetworkConfigBuilder {
         if self.disable_discovery || self.disable_dns_discovery {
             network_config_builder = network_config_builder.disable_dns_discovery();
@@ -318,11 +325,52 @@ impl DiscoveryArgs {
         }
 
         if !self.disable_discovery && self.enable_discv5_discovery {
-            network_config_builder =
-                network_config_builder.discovery_v5(reth_discv5::Config::builder(rlpx_tcp_socket));
+            network_config_builder = network_config_builder
+                .discovery_v5(self.discovery_v5_builder(rlpx_tcp_socket, boot_nodes));
         }
 
         network_config_builder
+    }
+
+    /// Creates a [`reth_discv5::ConfigBuilder`] filling it with the values from this struct.
+    pub fn discovery_v5_builder(
+        &self,
+        rlpx_tcp_socket: SocketAddr,
+        boot_nodes: impl IntoIterator<Item = NodeRecord>,
+    ) -> reth_discv5::ConfigBuilder {
+        let Self {
+            discv5_addr,
+            discv5_addr_ipv6,
+            discv5_port,
+            discv5_port_ipv6,
+            discv5_lookup_interval,
+            discv5_bootstrap_lookup_interval,
+            discv5_bootstrap_lookup_countdown,
+            ..
+        } = self;
+
+        // Use rlpx address if none given
+        let discv5_addr_ipv4 = discv5_addr.or(match rlpx_tcp_socket {
+            SocketAddr::V4(addr) => Some(*addr.ip()),
+            SocketAddr::V6(_) => None,
+        });
+        let discv5_addr_ipv6 = discv5_addr_ipv6.or(match rlpx_tcp_socket {
+            SocketAddr::V4(_) => None,
+            SocketAddr::V6(addr) => Some(*addr.ip()),
+        });
+
+        reth_discv5::Config::builder(rlpx_tcp_socket)
+            .discv5_config(
+                reth_discv5::discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
+                    discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, *discv5_port)),
+                    discv5_addr_ipv6.map(|addr| SocketAddrV6::new(addr, *discv5_port_ipv6, 0, 0)),
+                ))
+                .build(),
+            )
+            .add_unsigned_boot_nodes(boot_nodes)
+            .lookup_interval(*discv5_lookup_interval)
+            .bootstrap_lookup_interval(*discv5_bootstrap_lookup_interval)
+            .bootstrap_lookup_countdown(*discv5_bootstrap_lookup_countdown)
     }
 
     /// Set the discovery port to zero, to allow the OS to assign a random unused port when
@@ -330,6 +378,18 @@ impl DiscoveryArgs {
     pub const fn with_unused_discovery_port(mut self) -> Self {
         self.port = 0;
         self
+    }
+
+    /// Change networking port numbers based on the instance number.
+    /// Ports are updated to `previous_value + instance - 1`
+    ///
+    /// # Panics
+    /// Warning: if `instance` is zero in debug mode, this will panic.
+    pub fn adjust_instance_ports(&mut self, instance: u16) {
+        debug_assert_ne!(instance, 0, "instance must be non-zero");
+        self.port += instance - 1;
+        self.discv5_port += instance - 1;
+        self.discv5_port_ipv6 += instance - 1;
     }
 }
 

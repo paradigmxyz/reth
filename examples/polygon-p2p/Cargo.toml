@@ -1,5 +1,5 @@
 [package]
-name = "polygon-p2p"
+name = "example-polygon-p2p"
 version = "0.0.0"
 publish = false
 edition.workspace = true
@@ -11,6 +11,7 @@ license.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 tokio.workspace = true
 reth-network.workspace = true
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 serde_json.workspace = true
 reth-tracing.workspace = true

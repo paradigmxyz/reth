@@ -4,6 +4,9 @@ use crate::{EthEngineTypes, EthEvmConfig};
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_ethereum_engine_primitives::{
+    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
+};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_node_builder::{
@@ -12,7 +15,7 @@ use reth_node_builder::{
         PayloadServiceBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes},
-    BuilderContext, Node, PayloadBuilderConfig,
+    BuilderContext, Node, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
@@ -39,7 +42,12 @@ impl EthereumNode {
         EthereumConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<Engine = EthEngineTypes>,
+        Node: FullNodeTypes,
+        <Node as NodeTypes>::Engine: PayloadTypes<
+            BuiltPayload = EthBuiltPayload,
+            PayloadAttributes = EthPayloadAttributes,
+            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+        >,
     {
         ComponentsBuilder::default()
             .node_types::<Node>()
@@ -178,8 +186,13 @@ pub struct EthereumPayloadBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder
 where
-    Node: FullNodeTypes<Engine = EthEngineTypes>,
     Pool: TransactionPool + Unpin + 'static,
+    Node: FullNodeTypes,
+    <Node as NodeTypes>::Engine: PayloadTypes<
+        BuiltPayload = EthBuiltPayload,
+        PayloadAttributes = EthPayloadAttributes,
+        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+    >,
 {
     async fn spawn_payload_service(
         self,

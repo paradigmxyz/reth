@@ -27,7 +27,7 @@ use reth_provider::{
     BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderError, ProviderFactory,
     StageCheckpointReader,
 };
-use reth_prune_types::PruneModes;
+use reth_prune::PruneModes;
 use reth_stages::{prelude::*, Pipeline, StageId, StageSet};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
@@ -237,7 +237,7 @@ mod tests {
             let args: ImportCommand = ImportCommand::parse_from(["reth", "--chain", chain, "."]);
             assert_eq!(
                 Ok(args.env.chain.chain),
-                chain.parse::<reth_primitives::Chain>(),
+                chain.parse::<reth_chainspec::Chain>(),
                 "failed to parse chain {chain}"
             );
         }

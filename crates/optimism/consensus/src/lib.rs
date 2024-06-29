@@ -9,6 +9,7 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
@@ -17,7 +18,7 @@ use reth_consensus_common::validation::{
     validate_header_gas,
 };
 use reth_primitives::{
-    BlockWithSenders, ChainSpec, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
+    BlockWithSenders, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
 

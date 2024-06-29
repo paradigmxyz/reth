@@ -1,5 +1,5 @@
 [package]
-name = "network-txpool"
+name = "example-network-txpool"
 version = "0.0.0"
 publish = false
 edition.workspace = true

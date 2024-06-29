@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
 use crate::error::{RpcError, ServerKind};
 use http::header::AUTHORIZATION;
 use jsonrpsee::{
@@ -7,14 +9,13 @@ use jsonrpsee::{
     Methods,
 };
 use reth_engine_primitives::EngineTypes;
-use reth_rpc::EthSubscriptionIdProvider;
-use reth_rpc_api::servers::*;
+use reth_rpc_api::*;
+use reth_rpc_eth_types::EthSubscriptionIdProvider;
 use reth_rpc_layer::{
     secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, JwtAuthValidator,
     JwtSecret,
 };
 use reth_rpc_server_types::constants;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tower::layer::util::Identity;
 
 pub use jsonrpsee::server::ServerBuilder;
@@ -68,7 +69,7 @@ impl AuthServerConfig {
             .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
 
         let handle = server.start(module.inner.clone());
-        let mut ipc_handle: Option<reth_ipc::server::ServerHandle> = None;
+        let mut ipc_handle: Option<jsonrpsee::server::ServerHandle> = None;
 
         if let Some(ipc_server_config) = ipc_server_config {
             let ipc_endpoint_str = ipc_endpoint
@@ -241,7 +242,7 @@ pub struct AuthServerHandle {
     handle: jsonrpsee::server::ServerHandle,
     secret: JwtSecret,
     ipc_endpoint: Option<String>,
-    ipc_handle: Option<reth_ipc::server::ServerHandle>,
+    ipc_handle: Option<jsonrpsee::server::ServerHandle>,
 }
 
 // === impl AuthServerHandle ===
@@ -298,7 +299,7 @@ impl AuthServerHandle {
     pub async fn ipc_client(&self) -> Option<jsonrpsee::async_client::Client> {
         use reth_ipc::client::IpcClientBuilder;
 
-        if let Some(ipc_endpoint) = self.ipc_endpoint.clone() {
+        if let Some(ipc_endpoint) = &self.ipc_endpoint {
             return Some(
                 IpcClientBuilder::default()
                     .build(ipc_endpoint)
@@ -310,7 +311,7 @@ impl AuthServerHandle {
     }
 
     /// Returns an ipc handle
-    pub fn ipc_handle(&self) -> Option<reth_ipc::server::ServerHandle> {
+    pub fn ipc_handle(&self) -> Option<jsonrpsee::server::ServerHandle> {
         self.ipc_handle.clone()
     }
 

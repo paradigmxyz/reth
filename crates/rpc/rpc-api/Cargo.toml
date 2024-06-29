@@ -15,11 +15,11 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-rpc-types.workspace = true
+reth-rpc-eth-api.workspace = true
 reth-engine-primitives.workspace = true
 reth-network-peers.workspace = true
 
 # misc
-alloy-dyn-abi = { workspace = true, features = ["eip712"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 serde = { workspace = true, features = ["derive"] }
 
@@ -27,4 +27,9 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 
 [features]
-client = ["jsonrpsee/client", "jsonrpsee/async-client"]
+client = [
+    "jsonrpsee/client",
+    "jsonrpsee/async-client",
+    "reth-rpc-eth-api/client"
+]
+optimism = ["reth-rpc-eth-api/optimism"]

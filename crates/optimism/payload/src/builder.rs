@@ -5,17 +5,18 @@ use crate::{
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
 use reth_basic_payload_builder::*;
+use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::ConfigureEvm;
+use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
     constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
     eip4844::calculate_excess_blob_gas,
     proofs,
     revm::env::tx_env_with_recovered,
-    Block, ChainSpec, Hardfork, Header, IntoRecoveredTransaction, Receipt, TxType,
-    EMPTY_OMMER_ROOT_HASH, U256,
+    Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH, U256,
 };
-use reth_provider::{ExecutionOutcome, StateProviderFactory};
+use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{
@@ -279,8 +280,10 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
-    let is_regolith = chain_spec
-        .is_fork_active_at_timestamp(Hardfork::Regolith, attributes.payload_attributes.timestamp);
+    let is_regolith = chain_spec.is_fork_active_at_timestamp(
+        OptimismHardfork::Regolith,
+        attributes.payload_attributes.timestamp,
+    );
 
     // apply eip-4788 pre block contract call
     pre_block_beacon_root_contract_call(
@@ -391,7 +394,7 @@ where
             // ensures this is only set for post-Canyon deposit transactions.
             deposit_receipt_version: chain_spec
                 .is_fork_active_at_timestamp(
-                    Hardfork::Canyon,
+                    OptimismHardfork::Canyon,
                     attributes.payload_attributes.timestamp,
                 )
                 .then_some(1),

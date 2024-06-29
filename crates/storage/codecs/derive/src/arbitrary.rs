@@ -47,10 +47,10 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
 
                 #[test]
                 fn malformed_rlp_header_check() {
-                     use rand::RngCore;
+                    use rand::RngCore;
 
                     // get random instance of type
-                    let mut raw = [0u8;1024];
+                    let mut raw = [0u8; 1024];
                     rand::thread_rng().fill_bytes(&mut raw);
                     let mut unstructured = arbitrary::Unstructured::new(&raw[..]);
                     let val = <super::#type_ident as arbitrary::Arbitrary>::arbitrary(&mut unstructured);
@@ -72,7 +72,6 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                     let res = super::#type_ident::decode(&mut b.as_ref());
                     assert!(res.is_err(), "malformed header was decoded");
                 }
-
             });
         } else if let Ok(num) = arg.to_string().parse() {
             default_cases = num;
@@ -88,12 +87,13 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
             #[cfg(test)]
             mod #mod_tests {
                 #(#traits)*
+                use proptest_arbitrary_interop::arb;
 
                 #[test]
                 fn proptest() {
                     let mut config = proptest::prelude::ProptestConfig::with_cases(#default_cases as u32);
 
-                    proptest::proptest!(config, |(field: super::#type_ident)| {
+                    proptest::proptest!(config, |(field in arb::<super::#type_ident>())| {
                         #(#roundtrips)*
                     });
                 }

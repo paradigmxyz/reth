@@ -11,7 +11,6 @@
 pub mod args;
 pub mod cli;
 pub mod dirs;
-pub mod engine;
 pub mod exit;
 pub mod metrics;
 pub mod node_config;
@@ -39,12 +38,12 @@ pub mod rpc {
     }
     /// Re-exported from `reth_rpc::eth`.
     pub mod eth {
-        pub use reth_rpc::eth::*;
+        pub use reth_rpc_eth_api::*;
     }
 
     /// Re-exported from `reth_rpc::rpc`.
     pub mod result {
-        pub use reth_rpc::result::*;
+        pub use reth_rpc_server_types::result::*;
     }
 
     /// Re-exported from `reth_rpc::eth`.

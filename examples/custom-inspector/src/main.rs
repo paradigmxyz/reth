@@ -21,13 +21,11 @@ use reth::{
         interpreter::{Interpreter, OpCode},
         Database, Evm, EvmContext, Inspector,
     },
-    rpc::{
-        compat::transaction::transaction_to_call_request,
-        eth::{revm_utils::EvmOverrides, EthTransactions},
-    },
+    rpc::{api::eth::helpers::Call, compat::transaction::transaction_to_call_request},
     transaction_pool::TransactionPool,
 };
 use reth_node_ethereum::node::EthereumNode;
+use reth_rpc_types::state::EvmOverrides;
 
 fn main() {
     Cli::<RethCliTxpoolExt>::parse()

@@ -6,13 +6,14 @@ use crate::{
     StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
     WithdrawalsProvider,
 };
+use reth_chainspec::{ChainInfo, ChainSpec, MAINNET};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, BlockWithSenders,
-    Bytecode, ChainInfo, ChainSpec, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, MAINNET, U256,
+    Bytecode, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageKey,
+    StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
+    Withdrawal, Withdrawals, B256, U256,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -109,6 +110,14 @@ impl BlockReader for NoopProvider {
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<reth_primitives::BlockWithSenders>> {
+        Ok(None)
+    }
+
+    fn sealed_block_with_senders(
+        &self,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
         Ok(None)
     }
 
@@ -354,22 +363,6 @@ impl EvmEnvProvider for NoopProvider {
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        Ok(())
-    }
-
-    fn fill_block_env_at(
-        &self,
-        _block_env: &mut BlockEnv,
-        _at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        Ok(())
-    }
-
-    fn fill_block_env_with_header(
-        &self,
-        _block_env: &mut BlockEnv,
-        _header: &Header,
-    ) -> ProviderResult<()> {
         Ok(())
     }
 

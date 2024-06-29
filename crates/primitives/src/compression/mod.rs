@@ -1,6 +1,9 @@
 use std::{cell::RefCell, thread_local};
 use zstd::bulk::{Compressor, Decompressor};
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// Compression/Decompression dictionary for `Receipt`.
 pub static RECEIPT_DICTIONARY: &[u8] = include_bytes!("./receipt_dictionary.bin");
 /// Compression/Decompression dictionary for `Transaction`.

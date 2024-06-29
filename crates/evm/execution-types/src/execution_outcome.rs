@@ -1,6 +1,6 @@
 use reth_primitives::{
-    logs_bloom, revm::compat::into_reth_acc, Account, Address, BlockNumber, Bloom, Bytecode, Log,
-    Receipt, Receipts, Requests, B256, U256,
+    logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests,
+    B256, U256,
 };
 use reth_trie::HashedPostState;
 use revm::{
@@ -13,6 +13,7 @@ use revm::{
 /// The `ExecutionOutcome` structure aggregates the state changes over an arbitrary number of
 /// blocks, capturing the resulting state, receipts, and requests following the execution.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExecutionOutcome {
     /// Bundle state with reverts.
     pub bundle: BundleState,
@@ -74,7 +75,7 @@ impl ExecutionOutcome {
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address).map(|a| a.info.clone().map(into_reth_acc))
+        self.bundle.account(address).map(|a| a.info.clone().map(Into::into))
     }
 
     /// Get storage if value is known.
@@ -135,7 +136,7 @@ impl ExecutionOutcome {
     pub fn optimism_receipts_root_slow(
         &self,
         block_number: BlockNumber,
-        chain_spec: &reth_primitives::ChainSpec,
+        chain_spec: &reth_chainspec::ChainSpec,
         timestamp: u64,
     ) -> Option<B256> {
         self.receipts.optimism_root_slow(
@@ -322,7 +323,7 @@ mod tests {
             }),
             Request::WithdrawalRequest(WithdrawalRequest {
                 source_address: Address::from([1; 20]),
-                validator_public_key: FixedBytes::<48>::from([10; 48]),
+                validator_pubkey: FixedBytes::<48>::from([10; 48]),
                 amount: 72,
             }),
         ])];

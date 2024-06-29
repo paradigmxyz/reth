@@ -204,6 +204,9 @@ Networking:
 
           [default: 131072]
 
+      --offline
+          If this is enabled, then all stages except headers, bodies, and sender recovery will be unwound
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout

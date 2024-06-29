@@ -1,18 +1,24 @@
-use crate::eth::{
-    error::{EthApiError, EthResult},
-    revm_utils::{prepare_call_env, EvmOverrides},
-    utils::recover_raw_transaction,
-    EthTransactions,
-};
+use std::{collections::HashSet, sync::Arc};
+
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
-use reth_consensus_common::calc::{base_block_reward, block_reward, ommer_reward};
-use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, SealedHeader, B256, U256};
+use reth_chainspec::EthereumHardforks;
+use reth_consensus_common::calc::{
+    base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
+};
+use reth_evm::ConfigureEvmEnv;
+use reth_primitives::{BlockId, Bytes, Header, B256, U256};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
+use reth_rpc_eth_api::helpers::{Call, TraceExt};
+use reth_rpc_eth_types::{
+    error::{EthApiError, EthResult},
+    revm_utils::prepare_call_env,
+    utils::recover_raw_transaction,
+};
 use reth_rpc_types::{
-    state::StateOverride,
+    state::{EvmOverrides, StateOverride},
     trace::{
         filter::TraceFilter,
         opcode::{BlockOpcodeGas, TransactionOpcodeGas},
@@ -30,7 +36,6 @@ use revm_inspectors::{
     opcode::OpcodeGasInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
-use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `trace` API implementation.
@@ -72,7 +77,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: EthTransactions + 'static,
+    Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(&self, trace_request: TraceCallRequest) -> EthResult<TraceResults> {
@@ -84,6 +89,10 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, env| {
+                // wrapper is hack to get around 'higher-ranked lifetime error', see
+                // <https://github.com/rust-lang/rust/issues/100013>
+                let db = db.0;
+
                 let (res, _) = this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     &res,
@@ -105,8 +114,12 @@ where
         let tx = recover_raw_transaction(tx)?;
 
         let (cfg, block, at) = self.inner.eth_api.evm_env_at(block_id.unwrap_or_default()).await?;
-        let tx = tx_env_with_recovered(&tx.into_ecrecovered_transaction());
-        let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block, tx);
+
+        let env = EnvWithHandlerCfg::new_with_cfg_env(
+            cfg,
+            block,
+            Call::evm_config(self.eth_api()).tx_env(&tx.into_ecrecovered_transaction()),
+        );
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
 
@@ -266,7 +279,7 @@ where
 
         // find relevant blocks to trace
         let mut target_blocks = Vec::new();
-        for block in blocks {
+        for block in &blocks {
             let mut transaction_indices = HashSet::new();
             let mut highest_matching_index = 0;
             for (tx_idx, tx) in block.body.iter().enumerate() {
@@ -308,11 +321,26 @@ where
         }
 
         let block_traces = futures::future::try_join_all(block_traces).await?;
-        let all_traces = block_traces
+        let mut all_traces = block_traces
             .into_iter()
             .flatten()
             .flat_map(|traces| traces.into_iter().flatten().flat_map(|traces| traces.into_iter()))
-            .collect();
+            .collect::<Vec<_>>();
+
+        // add reward traces for all blocks
+        for block in &blocks {
+            if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
+                all_traces.extend(self.extract_reward_traces(
+                    &block.header,
+                    &block.ommers,
+                    base_block_reward,
+                ));
+            } else {
+                // no block reward, means we're past the Paris hardfork and don't expect any rewards
+                // because the blocks in ascending order
+                break
+            }
+        }
 
         Ok(all_traces)
     }
@@ -355,43 +383,19 @@ where
             },
         );
 
-        let block = self.inner.eth_api.block_by_id(block_id);
+        let block = self.inner.eth_api.block(block_id);
         let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
 
         let mut maybe_traces =
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
         if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            if let Some(header_td) = self.provider().header_td(&block.header.hash())? {
-                if let Some(base_block_reward) = base_block_reward(
-                    self.provider().chain_spec().as_ref(),
-                    block.header.number,
-                    block.header.difficulty,
-                    header_td,
-                ) {
-                    let block_reward = block_reward(base_block_reward, block.ommers.len());
-                    traces.push(reward_trace(
-                        &block.header,
-                        RewardAction {
-                            author: block.header.beneficiary,
-                            reward_type: RewardType::Block,
-                            value: U256::from(block_reward),
-                        },
-                    ));
-
-                    for uncle in &block.ommers {
-                        let uncle_reward =
-                            ommer_reward(base_block_reward, block.header.number, uncle.number);
-                        traces.push(reward_trace(
-                            &block.header,
-                            RewardAction {
-                                author: uncle.beneficiary,
-                                reward_type: RewardType::Uncle,
-                                value: U256::from(uncle_reward),
-                            },
-                        ));
-                    }
-                }
+            if let Some(base_block_reward) = self.calculate_base_block_reward(&block.header)? {
+                traces.extend(self.extract_reward_traces(
+                    &block.header,
+                    &block.ommers,
+                    base_block_reward,
+                ));
             }
         }
 
@@ -462,7 +466,7 @@ where
         let res = self
             .inner
             .eth_api
-            .trace_block_with_inspector(
+            .trace_block_inspector(
                 block_id,
                 OpcodeGasInspector::default,
                 move |tx_info, inspector, _res, _, _| {
@@ -477,13 +481,77 @@ where
 
         let Some(transactions) = res else { return Ok(None) };
 
-        let Some(block) = self.inner.eth_api.block_by_id(block_id).await? else { return Ok(None) };
+        let Some(block) = self.inner.eth_api.block(block_id).await? else { return Ok(None) };
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),
-            block_number: block.number,
+            block_number: block.header.number,
             transactions,
         }))
+    }
+
+    /// Calculates the base block reward for the given block:
+    ///
+    /// - if Paris hardfork is activated, no block rewards are given
+    /// - if Paris hardfork is not activated, calculate block rewards with block number only
+    /// - if Paris hardfork is unknown, calculate block rewards with block number and ttd
+    fn calculate_base_block_reward(&self, header: &Header) -> EthResult<Option<u128>> {
+        let chain_spec = self.provider().chain_spec();
+        let is_paris_activated = chain_spec.is_paris_active_at_block(header.number);
+
+        Ok(match is_paris_activated {
+            Some(true) => None,
+            Some(false) => Some(base_block_reward_pre_merge(&chain_spec, header.number)),
+            None => {
+                // if Paris hardfork is unknown, we need to fetch the total difficulty at the
+                // block's height and check if it is pre-merge to calculate the base block reward
+                if let Some(header_td) = self.provider().header_td_by_number(header.number)? {
+                    base_block_reward(
+                        chain_spec.as_ref(),
+                        header.number,
+                        header.difficulty,
+                        header_td,
+                    )
+                } else {
+                    None
+                }
+            }
+        })
+    }
+
+    /// Extracts the reward traces for the given block:
+    ///  - block reward
+    ///  - uncle rewards
+    fn extract_reward_traces(
+        &self,
+        header: &Header,
+        ommers: &[Header],
+        base_block_reward: u128,
+    ) -> Vec<LocalizedTransactionTrace> {
+        let mut traces = Vec::with_capacity(ommers.len() + 1);
+
+        let block_reward = block_reward(base_block_reward, ommers.len());
+        traces.push(reward_trace(
+            header,
+            RewardAction {
+                author: header.beneficiary,
+                reward_type: RewardType::Block,
+                value: U256::from(block_reward),
+            },
+        ));
+
+        for uncle in ommers {
+            let uncle_reward = ommer_reward(base_block_reward, header.number, uncle.number);
+            traces.push(reward_trace(
+                header,
+                RewardAction {
+                    author: uncle.beneficiary,
+                    reward_type: RewardType::Uncle,
+                    value: U256::from(uncle_reward),
+                },
+            ));
+        }
+        traces
     }
 }
 
@@ -491,7 +559,7 @@ where
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: EthTransactions + 'static,
+    Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     ///
@@ -628,9 +696,9 @@ struct TraceApiInner<Provider, Eth> {
 
 /// Helper to construct a [`LocalizedTransactionTrace`] that describes a reward to the block
 /// beneficiary.
-fn reward_trace(header: &SealedHeader, reward: RewardAction) -> LocalizedTransactionTrace {
+fn reward_trace(header: &Header, reward: RewardAction) -> LocalizedTransactionTrace {
     LocalizedTransactionTrace {
-        block_hash: Some(header.hash()),
+        block_hash: Some(header.hash_slow()),
         block_number: Some(header.number),
         transaction_hash: None,
         transaction_position: None,

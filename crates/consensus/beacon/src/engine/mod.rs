@@ -1975,7 +1975,7 @@ mod tests {
         BeaconForkChoiceUpdateError,
     };
     use assert_matches::assert_matches;
-    use reth_primitives::{ChainSpecBuilder, MAINNET};
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_provider::{BlockWriter, ProviderFactory};
     use reth_rpc_types::engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
@@ -2162,7 +2162,7 @@ mod tests {
                         b.clone().try_seal_with_senders().expect("invalid tx signature in block"),
                         None,
                     )
-                    .map(|_| ())
+                    .map(drop)
             })
             .expect("failed to insert");
         provider.commit().unwrap();
@@ -2490,8 +2490,9 @@ mod tests {
 
     mod new_payload {
         use super::*;
+        use alloy_genesis::Genesis;
         use reth_db::test_utils::create_test_static_files_dir;
-        use reth_primitives::{genesis::Genesis, Hardfork, U256};
+        use reth_primitives::{EthereumHardfork, U256};
         use reth_provider::{
             providers::StaticFileProvider, test_utils::blocks::BlockchainTestData,
         };
@@ -2720,9 +2721,9 @@ mod tests {
         async fn payload_pre_merge() {
             let data = BlockchainTestData::default();
             let mut block1 = data.blocks[0].0.block.clone();
-            block1
-                .header
-                .set_difficulty(MAINNET.fork(Hardfork::Paris).ttd().unwrap() - U256::from(1));
+            block1.header.set_difficulty(
+                MAINNET.fork(EthereumHardfork::Paris).ttd().unwrap() - U256::from(1),
+            );
             block1 = block1.unseal().seal_slow();
             let (block2, exec_result2) = data.blocks[1].clone();
             let mut block2 = block2.unseal().block;
