@@ -90,7 +90,7 @@
 //!     let (handle, network, transactions, request_handler) = NetworkManager::builder(config)
 //!         .await
 //!         .unwrap()
-//!         .transactions(pool, transactions_manager_config)
+//!         .transactions(pool, &transactions_manager_config)
 //!         .request_handler(client)
 //!         .split_with_handle();
 //! }
