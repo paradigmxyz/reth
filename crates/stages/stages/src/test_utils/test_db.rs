@@ -219,7 +219,7 @@ impl TestStageDB {
     /// database.
     ///
     /// Assumes that there's a single transition for each transaction (i.e. no block rewards).
-    pub fn insert_blocks<'a, I>(&self, blocks: I, storage_kind: StorageKind) -> ProviderResult<()>
+    pub fn insert_blocks<'a, I>(&self, blocks: I, storage_kind: &StorageKind) -> ProviderResult<()>
     where
         I: IntoIterator<Item = &'a SealedBlock>,
     {
@@ -330,7 +330,7 @@ impl TestStageDB {
     pub fn insert_receipts_by_block<I, J>(
         &self,
         receipts: I,
-        storage_kind: StorageKind,
+        storage_kind: &StorageKind,
     ) -> ProviderResult<()>
     where
         I: IntoIterator<Item = (BlockNumber, J)>,

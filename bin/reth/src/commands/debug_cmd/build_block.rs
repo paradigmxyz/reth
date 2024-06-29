@@ -83,7 +83,7 @@ impl Command {
     /// If the database is empty, returns the genesis block.
     fn lookup_best_block(
         &self,
-        factory: ProviderFactory<Arc<DatabaseEnv>>,
+        factory: &ProviderFactory<Arc<DatabaseEnv>>,
     ) -> RethResult<Arc<SealedBlock>> {
         let provider = factory.provider()?;
 
@@ -129,9 +129,8 @@ impl Command {
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // fetch the best block from the database
-        let best_block = self
-            .lookup_best_block(provider_factory.clone())
-            .wrap_err("the head block is missing")?;
+        let best_block =
+            self.lookup_best_block(&provider_factory).wrap_err("the head block is missing")?;
 
         let blockchain_db =
             BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;

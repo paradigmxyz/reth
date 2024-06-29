@@ -135,7 +135,7 @@ where
                         transactions.clone(),
                         ommers.clone(),
                         &client,
-                        chain_spec,
+                        &chain_spec,
                         &executor,
                     ) {
                         Ok((new_header, _bundle_state)) => {

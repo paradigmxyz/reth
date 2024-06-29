@@ -97,7 +97,7 @@ impl PayloadAttributes for CustomPayloadAttributes {
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, self.into())?;
+        validate_version_specific_fields(chain_spec, version, &(self.into()))?;
 
         // custom validation logic - ensure that the custom field is not zero
         if self.custom == 0 {
@@ -182,7 +182,7 @@ impl EngineTypes for CustomEngineTypes {
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<'_, CustomPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, payload_or_attrs)
+        validate_version_specific_fields(chain_spec, version, &payload_or_attrs)
     }
 }
 

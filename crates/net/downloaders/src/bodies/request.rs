@@ -84,8 +84,8 @@ where
         self
     }
 
-    fn on_error(&mut self, error: DownloadError, peer_id: Option<PeerId>) {
-        self.metrics.increment_errors(&error);
+    fn on_error(&mut self, error: &DownloadError, peer_id: Option<PeerId>) {
+        self.metrics.increment_errors(error);
         tracing::debug!(target: "downloaders::bodies", ?peer_id, %error, "Error requesting bodies");
         if let Some(peer_id) = peer_id {
             self.client.report_bad_message(peer_id);
@@ -225,7 +225,7 @@ where
                     Ok(response) => {
                         let peer_id = response.peer_id();
                         if let Err(error) = this.on_block_response(response) {
-                            this.on_error(error, Some(peer_id));
+                            this.on_error(&error, Some(peer_id));
                         }
                     }
                     Err(error) => {
@@ -233,7 +233,7 @@ where
                             return Poll::Ready(Err(error.into()))
                         }
 
-                        this.on_error(error.into(), None);
+                        this.on_error(&(error.into()), None);
                     }
                 }
             }

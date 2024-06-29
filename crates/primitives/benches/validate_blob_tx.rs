@@ -23,7 +23,7 @@ fn blob_validation(c: &mut Criterion) {
 
     for num_blobs in 1..=MAX_BLOB_NUMBER_PER_BLOCK {
         println!("Benchmarking validation for tx with {num_blobs} blobs");
-        validate_blob_tx(&mut group, "ValidateBlob", num_blobs, EnvKzgSettings::Default);
+        validate_blob_tx(&mut group, "ValidateBlob", num_blobs, &EnvKzgSettings::Default);
     }
 }
 
@@ -31,7 +31,7 @@ fn validate_blob_tx(
     group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
     num_blobs: u64,
-    kzg_settings: EnvKzgSettings,
+    kzg_settings: &EnvKzgSettings,
 ) {
     let setup = || {
         let config = ProptestConfig::default();

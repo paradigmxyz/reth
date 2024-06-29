@@ -105,7 +105,7 @@ impl ExecutionPayloadValidator {
     pub fn ensure_well_formed_payload(
         &self,
         payload: ExecutionPayload,
-        cancun_fields: MaybeCancunPayloadFields,
+        cancun_fields: &MaybeCancunPayloadFields,
     ) -> Result<SealedBlock, PayloadError> {
         let expected_hash = payload.block_hash();
 
@@ -160,7 +160,7 @@ impl ExecutionPayloadValidator {
         }
 
         // EIP-4844 checks
-        self.ensure_matching_blob_versioned_hashes(&sealed_block, &cancun_fields)?;
+        self.ensure_matching_blob_versioned_hashes(&sealed_block, cancun_fields)?;
 
         Ok(sealed_block)
     }

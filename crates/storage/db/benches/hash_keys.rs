@@ -124,7 +124,7 @@ where
 
         // Execute once more to show table stats (doesn't count for benchmarking speed)
         let db = execution(setup());
-        get_table_stats::<T>(db);
+        get_table_stats::<T>(&db);
     }
 }
 
@@ -222,7 +222,7 @@ struct TableStats {
     size: usize,
 }
 
-fn get_table_stats<T>(db: DatabaseEnv)
+fn get_table_stats<T>(db: &DatabaseEnv)
 where
     T: Table,
 {

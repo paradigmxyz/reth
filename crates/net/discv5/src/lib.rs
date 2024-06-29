@@ -93,8 +93,8 @@ impl Discv5 {
     /// If the key already exists, this will update it.
     ///
     /// CAUTION: The value **must** be rlp encoded
-    pub fn set_eip868_in_local_enr(&self, key: Vec<u8>, rlp: Bytes) {
-        let Ok(key_str) = std::str::from_utf8(&key) else {
+    pub fn set_eip868_in_local_enr(&self, key: &[u8], rlp: &Bytes) {
+        let Ok(key_str) = std::str::from_utf8(key) else {
             error!(target: "discv5",
                 err="key not utf-8",
                 "failed to update local enr"
@@ -112,14 +112,10 @@ impl Discv5 {
     /// Sets the pair in the EIP-868 [`Enr`] of the node.
     ///
     /// If the key already exists, this will update it.
-    pub fn encode_and_set_eip868_in_local_enr(
-        &self,
-        key: Vec<u8>,
-        value: impl alloy_rlp::Encodable,
-    ) {
+    pub fn encode_and_set_eip868_in_local_enr(&self, key: &[u8], value: impl alloy_rlp::Encodable) {
         let mut buf = Vec::new();
         value.encode(&mut buf);
-        self.set_eip868_in_local_enr(key, buf.into())
+        self.set_eip868_in_local_enr(key, &(buf.into()))
     }
 
     /// Adds the peer and id to the ban list.

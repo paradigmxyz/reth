@@ -127,12 +127,12 @@ pub fn block_to_payload(value: SealedBlock) -> (ExecutionPayload, Option<B256>) 
         (ExecutionPayload::V2(block_to_payload_v2(value)), None)
     } else {
         // otherwise V1
-        (ExecutionPayload::V1(block_to_payload_v1(value)), None)
+        (ExecutionPayload::V1(block_to_payload_v1(&value)), None)
     }
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV1`]
-pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
+pub fn block_to_payload_v1(value: &SealedBlock) -> ExecutionPayloadV1 {
     let transactions = value.raw_transactions();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,
@@ -242,7 +242,7 @@ pub fn convert_block_to_payload_field_v2(value: SealedBlock) -> ExecutionPayload
     if value.withdrawals.is_some() {
         ExecutionPayloadFieldV2::V2(block_to_payload_v2(value))
     } else {
-        ExecutionPayloadFieldV2::V1(block_to_payload_v1(value))
+        ExecutionPayloadFieldV2::V1(block_to_payload_v1(&value))
     }
 }
 
@@ -283,7 +283,7 @@ pub fn convert_payload_input_v2_to_payload(value: ExecutionPayloadInputV2) -> Ex
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadInputV2`]
-pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayloadInputV2 {
+pub fn convert_block_to_payload_input_v2(value: &SealedBlock) -> ExecutionPayloadInputV2 {
     ExecutionPayloadInputV2 {
         withdrawals: value.withdrawals.clone().map(Withdrawals::into_inner),
         execution_payload: block_to_payload_v1(value),
@@ -369,7 +369,7 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
 }
 
 /// Transforms a [`SealedBlock`] into a [`ExecutionPayloadV1`]
-pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPayloadV1 {
+pub fn execution_payload_from_sealed_block(value: &SealedBlock) -> ExecutionPayloadV1 {
     let transactions = value.raw_transactions();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,

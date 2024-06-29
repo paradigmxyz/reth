@@ -46,7 +46,7 @@ pub struct PeerBackoffDurations {
 
 impl PeerBackoffDurations {
     /// Returns the corresponding [`Duration`]
-    pub const fn backoff(&self, kind: BackoffKind) -> Duration {
+    pub const fn backoff(&self, kind: &BackoffKind) -> Duration {
         match kind {
             BackoffKind::Low => self.low,
             BackoffKind::Medium => self.medium,
@@ -57,7 +57,7 @@ impl PeerBackoffDurations {
     /// Returns the timestamp until which we should backoff.
     ///
     /// The Backoff duration is capped by the configured maximum backoff duration.
-    pub fn backoff_until(&self, kind: BackoffKind, backoff_counter: u8) -> std::time::Instant {
+    pub fn backoff_until(&self, kind: &BackoffKind, backoff_counter: u8) -> std::time::Instant {
         let backoff_time = self.backoff(kind);
         let backoff_time = backoff_time + backoff_time * backoff_counter as u32;
         let now = std::time::Instant::now();

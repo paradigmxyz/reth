@@ -47,7 +47,7 @@ impl InitStateCommand {
 
         info!(target: "reth::cli", "Initiating state dump");
 
-        let hash = init_at_state(self.state, provider_factory, config.stages.etl)?;
+        let hash = init_at_state(self.state, &provider_factory, config.stages.etl)?;
 
         info!(target: "reth::cli", hash = ?hash, "Genesis block written");
         Ok(())
@@ -57,7 +57,7 @@ impl InitStateCommand {
 /// Initialize chain with state at specific block, from a file with state dump.
 pub fn init_at_state<DB: Database>(
     state_dump_path: PathBuf,
-    factory: ProviderFactory<DB>,
+    factory: &ProviderFactory<DB>,
     etl_config: EtlConfig,
 ) -> eyre::Result<B256> {
     info!(target: "reth::cli",

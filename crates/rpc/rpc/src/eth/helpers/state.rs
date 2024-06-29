@@ -58,7 +58,7 @@ mod tests {
         let pool = testing_pool();
         let evm_config = EthEvmConfig::default();
 
-        let cache = EthStateCache::spawn(NoopProvider::default(), Default::default(), evm_config);
+        let cache = EthStateCache::spawn(NoopProvider::default(), &Default::default(), evm_config);
         let eth_api = EthApi::new(
             NoopProvider::default(),
             pool.clone(),
@@ -83,7 +83,7 @@ mod tests {
         let account = ExtendedAccount::new(0, U256::ZERO).extend_storage(storage);
         mock_provider.add_account(address, account);
 
-        let cache = EthStateCache::spawn(mock_provider.clone(), Default::default(), evm_config);
+        let cache = EthStateCache::spawn(mock_provider.clone(), &Default::default(), evm_config);
         let eth_api = EthApi::new(
             mock_provider.clone(),
             pool,

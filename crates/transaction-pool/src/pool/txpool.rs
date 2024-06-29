@@ -384,7 +384,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Updates the transactions for the changed senders.
     pub(crate) fn update_accounts(
         &mut self,
-        changed_senders: HashMap<SenderId, SenderInfo>,
+        changed_senders: &HashMap<SenderId, SenderInfo>,
     ) -> UpdateOutcome<T::Transaction> {
         // track changed accounts
         self.sender_info.extend(changed_senders.clone());
@@ -405,7 +405,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         &mut self,
         block_info: BlockInfo,
         mined_transactions: Vec<TxHash>,
-        changed_senders: HashMap<SenderId, SenderInfo>,
+        changed_senders: &HashMap<SenderId, SenderInfo>,
     ) -> OnNewCanonicalStateOutcome<T::Transaction> {
         // update block info
         let block_hash = block_info.last_seen_block_hash;
@@ -1016,7 +1016,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// that got transaction included in the block.
     pub(crate) fn update(
         &mut self,
-        changed_accounts: HashMap<SenderId, SenderInfo>,
+        changed_accounts: &HashMap<SenderId, SenderInfo>,
     ) -> Vec<PoolUpdate> {
         // pre-allocate a few updates
         let mut updates = Vec::with_capacity(64);
@@ -2016,7 +2016,7 @@ mod tests {
         fn assert_subpool_lengths<T: TransactionOrdering>(
             &self,
             pool: &TxPool<T>,
-            failure_message: String,
+            failure_message: &str,
             check_subpool: SubPool,
         ) {
             match check_subpool {
@@ -2053,7 +2053,7 @@ mod tests {
         fn assert_single_tx_starting_subpool<T: TransactionOrdering>(&self, pool: &TxPool<T>) {
             self.assert_subpool_lengths(
                 pool,
-                format!("pool length check failed at start of test: {self:?}"),
+                &format!("pool length check failed at start of test: {self:?}"),
                 self.subpool,
             );
         }
@@ -2064,7 +2064,7 @@ mod tests {
         fn assert_single_tx_ending_subpool<T: TransactionOrdering>(&self, pool: &TxPool<T>) {
             self.assert_subpool_lengths(
                 pool,
-                format!("pool length check failed at end of test: {self:?}"),
+                &format!("pool length check failed at end of test: {self:?}"),
                 self.new_subpool,
             );
         }
@@ -2679,7 +2679,7 @@ mod tests {
             id.sender,
             SenderInfo { state_nonce: next.get_nonce(), balance: U256::from(1_000) },
         );
-        let outcome = pool.update_accounts(changed_senders);
+        let outcome = pool.update_accounts(&changed_senders);
         assert_eq!(outcome.discarded.len(), 1);
         assert_eq!(pool.pending_pool.len(), 1);
     }
@@ -2864,7 +2864,7 @@ mod tests {
             v0.sender_id(),
             SenderInfo { state_nonce: on_chain_nonce, balance: on_chain_balance },
         );
-        pool.update_accounts(updated_accounts);
+        pool.update_accounts(&updated_accounts);
 
         // 'pending' now).
         assert!(pool.queued_transactions().is_empty());
@@ -2939,7 +2939,7 @@ mod tests {
             v0.sender_id(),
             SenderInfo { state_nonce: on_chain_nonce, balance: on_chain_balance },
         );
-        pool.update_accounts(updated_accounts);
+        pool.update_accounts(&updated_accounts);
 
         // Transactions are not changed (IMHO - this is a bug, as transaction v2 should be in the
         // 'pending' now).

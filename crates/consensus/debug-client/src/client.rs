@@ -87,7 +87,7 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
         };
 
         while let Some(block) = block_stream.recv().await {
-            let payload = rich_block_to_execution_payload_v3(block);
+            let payload = rich_block_to_execution_payload_v3(&block);
 
             let block_hash = payload.block_hash();
             let block_number = payload.block_number();
@@ -172,7 +172,7 @@ impl ExecutionNewPayload {
 
 /// Convert a rich block from RPC / Etherscan to params for an execution client's "new payload"
 /// method. Assumes that the block contains full transactions.
-fn rich_block_to_execution_payload_v3(block: RichBlock) -> ExecutionNewPayload {
+fn rich_block_to_execution_payload_v3(block: &RichBlock) -> ExecutionNewPayload {
     let transactions = match &block.transactions {
         BlockTransactions::Full(txs) => txs.clone(),
         // Empty array gets deserialized as BlockTransactions::Hashes.

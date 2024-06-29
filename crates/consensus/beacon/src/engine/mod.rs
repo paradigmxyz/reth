@@ -295,7 +295,7 @@ where
         let sync = EngineSyncController::new(
             pipeline,
             client,
-            task_spawner.clone(),
+            task_spawner,
             max_block,
             blockchain.chain_spec(),
             event_sender.clone(),
@@ -420,7 +420,7 @@ where
                 } else if let Some(attrs) = attrs {
                     // the CL requested to build a new payload on top of this new VALID head
                     let head = outcome.into_header().unseal();
-                    self.process_payload_attributes(attrs, head, state)
+                    self.process_payload_attributes(attrs, &head, state)
                 } else {
                     OnForkChoiceUpdated::valid(PayloadStatus::new(
                         PayloadStatusEnum::Valid,
@@ -435,7 +435,7 @@ where
                     Err(err)
                 } else {
                     Ok(OnForkChoiceUpdated::valid(
-                        self.on_failed_canonical_forkchoice_update(&state, err)?,
+                        self.on_failed_canonical_forkchoice_update(&state, &err)?,
                     ))
                 }
             }
@@ -972,7 +972,7 @@ where
     fn on_failed_canonical_forkchoice_update(
         &mut self,
         state: &ForkchoiceState,
-        error: CanonicalError,
+        error: &CanonicalError,
     ) -> ProviderResult<PayloadStatus> {
         debug_assert!(self.sync.is_pipeline_idle(), "pipeline must be idle");
 
@@ -1106,7 +1106,7 @@ where
         let parent_hash = payload.parent_hash();
         let block = match self
             .payload_validator
-            .ensure_well_formed_payload(payload, cancun_fields.into())
+            .ensure_well_formed_payload(payload, &(cancun_fields.into()))
         {
             Ok(block) => block,
             Err(error) => {
@@ -1152,7 +1152,7 @@ where
     fn process_payload_attributes(
         &self,
         attrs: EngineT::PayloadAttributes,
-        head: Header,
+        head: &Header,
         state: ForkchoiceState,
     ) -> OnForkChoiceUpdated {
         // 7. Client software MUST ensure that payloadAttributes.timestamp is greater than timestamp
@@ -1546,7 +1546,7 @@ where
         Ok(())
     }
 
-    fn on_hook_result(&self, polled_hook: PolledHook) -> Result<(), BeaconConsensusEngineError> {
+    fn on_hook_result(&self, polled_hook: &PolledHook) -> Result<(), BeaconConsensusEngineError> {
         if let EngineHookEvent::Finished(Err(error)) = &polled_hook.event {
             error!(
                 target: "consensus::engine",
@@ -1812,7 +1812,7 @@ where
                 if let Poll::Ready(result) =
                     this.hooks.poll_active_db_write_hook(cx, this.current_engine_hook_context()?)?
                 {
-                    this.on_hook_result(result)?;
+                    this.on_hook_result(&result)?;
                     continue
                 }
 
@@ -1905,7 +1905,7 @@ where
                     this.current_engine_hook_context()?,
                     this.sync.is_pipeline_active(),
                 )? {
-                    this.on_hook_result(result)?;
+                    this.on_hook_result(&result)?;
 
                     // ensure we're polling until pending while also checking for new engine
                     // messages before polling the next hook
@@ -2042,7 +2042,7 @@ mod tests {
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
         // consensus engine is still idle because no FCUs were received
-        let _ = env.send_new_payload(block_to_payload_v1(SealedBlock::default()), None).await;
+        let _ = env.send_new_payload(block_to_payload_v1(&SealedBlock::default()), None).await;
 
         assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
@@ -2151,7 +2151,7 @@ mod tests {
     }
 
     fn insert_blocks<'a, DB: Database>(
-        provider_factory: ProviderFactory<DB>,
+        provider_factory: &ProviderFactory<DB>,
         mut blocks: impl Iterator<Item = &'a SealedBlock>,
     ) {
         let provider = provider_factory.provider_rw().unwrap();
@@ -2230,7 +2230,7 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
+                &ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -2290,7 +2290,7 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
+                &ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -2314,7 +2314,7 @@ mod tests {
 
             // Insert next head immediately after sending forkchoice update
             insert_blocks(
-                ProviderFactory::new(
+                &ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -2358,7 +2358,7 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
+                &ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -2413,7 +2413,7 @@ mod tests {
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(
+                &ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -2462,7 +2462,7 @@ mod tests {
             let (_temp_dir, temp_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
+                &ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(temp_dir_path).unwrap(),
@@ -2520,7 +2520,7 @@ mod tests {
             // Send new payload
             let res = env
                 .send_new_payload(
-                    block_to_payload_v1(random_block(&mut rng, 0, None, None, Some(0))),
+                    block_to_payload_v1(&random_block(&mut rng, 0, None, None, Some(0))),
                     None,
                 )
                 .await;
@@ -2531,7 +2531,7 @@ mod tests {
             // Send new payload
             let res = env
                 .send_new_payload(
-                    block_to_payload_v1(random_block(&mut rng, 1, None, None, Some(0))),
+                    block_to_payload_v1(&random_block(&mut rng, 1, None, None, Some(0))),
                     None,
                 )
                 .await;
@@ -2566,7 +2566,7 @@ mod tests {
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
-                ProviderFactory::new(
+                &ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -2590,7 +2590,7 @@ mod tests {
 
             // Send new payload
             let result = env
-                .send_new_payload_retry_on_syncing(block_to_payload_v1(block2.clone()), None)
+                .send_new_payload_retry_on_syncing(block_to_payload_v1(&block2), None)
                 .await
                 .unwrap();
 
@@ -2638,7 +2638,7 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
+                &ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -2685,7 +2685,7 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
+                &ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -2710,7 +2710,7 @@ mod tests {
             // Send new payload
             let parent = rng.gen();
             let block = random_block(&mut rng, 2, Some(parent), None, Some(0));
-            let res = env.send_new_payload(block_to_payload_v1(block), None).await;
+            let res = env.send_new_payload(block_to_payload_v1(&block), None).await;
             let expected_result = PayloadStatus::from_status(PayloadStatusEnum::Syncing);
             assert_matches!(res, Ok(result) => assert_eq!(result, expected_result));
 
@@ -2752,7 +2752,7 @@ mod tests {
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
             insert_blocks(
-                ProviderFactory::new(
+                &ProviderFactory::new(
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
@@ -2780,7 +2780,7 @@ mod tests {
 
             // Send new payload
             let result = env
-                .send_new_payload_retry_on_syncing(block_to_payload_v1(block2.clone()), None)
+                .send_new_payload_retry_on_syncing(block_to_payload_v1(&block2), None)
                 .await
                 .unwrap();
 

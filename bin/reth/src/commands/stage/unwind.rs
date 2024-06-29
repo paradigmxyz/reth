@@ -52,7 +52,7 @@ impl Command {
     pub async fn execute(self) -> eyre::Result<()> {
         let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
 
-        let range = self.command.unwind_range(provider_factory.clone())?;
+        let range = self.command.unwind_range(&provider_factory)?;
         if *range.start() == 0 {
             eyre::bail!("Cannot unwind genesis block")
         }
@@ -184,7 +184,7 @@ impl Subcommands {
     /// This returns an inclusive range: [target..=latest]
     fn unwind_range<DB: Database>(
         &self,
-        factory: ProviderFactory<DB>,
+        factory: &ProviderFactory<DB>,
     ) -> eyre::Result<RangeInclusive<u64>> {
         let provider = factory.provider()?;
         let last = provider.last_block_number()?;

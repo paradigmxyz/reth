@@ -55,7 +55,7 @@ impl Command {
         warn!("Make sure the node is not running when running `reth db diff`!");
         // open second db
         let second_db_path: PathBuf = self.secondary_datadir.join("db").into();
-        let second_db = open_db_read_only(&second_db_path, self.second_db.database_args())?;
+        let second_db = open_db_read_only(&second_db_path, &self.second_db.database_args())?;
 
         let tables = match &self.table {
             Some(table) => std::slice::from_ref(table),
@@ -73,8 +73,8 @@ impl Command {
 
             let output_dir = self.output.clone();
             tables_to_generic!(table, |Table| find_diffs::<Table>(
-                primary_tx,
-                secondary_tx,
+                &primary_tx,
+                &secondary_tx,
                 output_dir
             ))?;
         }
@@ -85,8 +85,8 @@ impl Command {
 
 /// Find diffs for a table, then analyzing the result
 fn find_diffs<T: Table>(
-    primary_tx: impl DbTx,
-    secondary_tx: impl DbTx,
+    primary_tx: &impl DbTx,
+    secondary_tx: &impl DbTx,
     output_dir: impl AsRef<Path>,
 ) -> eyre::Result<()>
 where
@@ -96,7 +96,7 @@ where
     let table = T::NAME;
 
     info!("Analyzing table {table}...");
-    let result = find_diffs_advanced::<T>(&primary_tx, &secondary_tx)?;
+    let result = find_diffs_advanced::<T>(primary_tx, secondary_tx)?;
     info!("Done analyzing table {table}!");
 
     // Pretty info summary header: newline then header

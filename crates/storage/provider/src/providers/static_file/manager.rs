@@ -1076,7 +1076,7 @@ impl HeaderProvider for StaticFileProvider {
         self.find_static_file(StaticFileSegment::Headers, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
-                .get_two::<HeaderMask<Header, BlockHash>>(block_hash.into())?
+                .get_two::<HeaderMask<Header, BlockHash>>(&(block_hash.into()))?
                 .and_then(|(header, hash)| {
                     if &hash == block_hash {
                         return Some(header)
@@ -1102,7 +1102,7 @@ impl HeaderProvider for StaticFileProvider {
         self.find_static_file(StaticFileSegment::Headers, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
-                .get_two::<HeaderMask<CompactU256, BlockHash>>(block_hash.into())?
+                .get_two::<HeaderMask<CompactU256, BlockHash>>(&(block_hash.into()))?
                 .and_then(|(td, hash)| (&hash == block_hash).then_some(td.0)))
         })
     }
@@ -1123,7 +1123,7 @@ impl HeaderProvider for StaticFileProvider {
         self.fetch_range_with_predicate(
             StaticFileSegment::Headers,
             to_range(range),
-            |cursor, number| cursor.get_one::<HeaderMask<Header>>(number.into()),
+            |cursor, number| cursor.get_one::<HeaderMask<Header>>(&(number.into())),
             |_| true,
         )
     }
@@ -1150,7 +1150,7 @@ impl HeaderProvider for StaticFileProvider {
             to_range(range),
             |cursor, number| {
                 Ok(cursor
-                    .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
+                    .get_two::<HeaderMask<Header, BlockHash>>(&(number.into()))?
                     .map(|(header, hash)| header.seal(hash)))
             },
             predicate,
@@ -1171,7 +1171,7 @@ impl BlockHashReader for StaticFileProvider {
         self.fetch_range_with_predicate(
             StaticFileSegment::Headers,
             start..end,
-            |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
+            |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(&(number.into())),
             |_| true,
         )
     }
@@ -1208,7 +1208,7 @@ impl ReceiptProvider for StaticFileProvider {
         self.fetch_range_with_predicate(
             StaticFileSegment::Receipts,
             to_range(range),
-            |cursor, number| cursor.get_one::<ReceiptMask<Receipt>>(number.into()),
+            |cursor, number| cursor.get_one::<ReceiptMask<Receipt>>(&(number.into())),
             |_| true,
         )
     }
@@ -1248,7 +1248,7 @@ impl TransactionsProviderExt for StaticFileProvider {
                     chunk_range,
                     |cursor, number| {
                         Ok(cursor
-                            .get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())?
+                            .get_one::<TransactionMask<TransactionSignedNoHash>>(&(number.into()))?
                             .map(|transaction| {
                                 rlp_buf.clear();
                                 let _ = channel_tx
@@ -1279,7 +1279,7 @@ impl TransactionsProvider for StaticFileProvider {
         self.find_static_file(StaticFileSegment::Transactions, |jar_provider| {
             let mut cursor = jar_provider.cursor()?;
             if cursor
-                .get_one::<TransactionMask<TransactionSignedNoHash>>((&tx_hash).into())?
+                .get_one::<TransactionMask<TransactionSignedNoHash>>(&((&tx_hash).into()))?
                 .and_then(|tx| (tx.hash() == tx_hash).then_some(tx))
                 .is_some()
             {
@@ -1321,7 +1321,7 @@ impl TransactionsProvider for StaticFileProvider {
         self.find_static_file(StaticFileSegment::Transactions, |jar_provider| {
             Ok(jar_provider
                 .cursor()?
-                .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
+                .get_one::<TransactionMask<TransactionSignedNoHash>>(&((&hash).into()))?
                 .map(|tx| tx.with_hash())
                 .and_then(|tx| (tx.hash_ref() == &hash).then_some(tx)))
         })
@@ -1364,7 +1364,7 @@ impl TransactionsProvider for StaticFileProvider {
             StaticFileSegment::Transactions,
             to_range(range),
             |cursor, number| {
-                cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(number.into())
+                cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(&(number.into()))
             },
             |_| true,
         )

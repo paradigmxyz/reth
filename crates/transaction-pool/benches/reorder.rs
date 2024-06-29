@@ -24,8 +24,8 @@ fn txpool_reordering(c: &mut Criterion) {
             txpool_reordering_bench::<VecTxPoolSortStable>(
                 &mut group,
                 "VecTxPoolSortStable",
-                txs.clone(),
-                new_txs.clone(),
+                &txs,
+                &new_txs,
                 base_fee,
             );
 
@@ -33,8 +33,8 @@ fn txpool_reordering(c: &mut Criterion) {
             txpool_reordering_bench::<VecTxPoolSortUnstable>(
                 &mut group,
                 "VecTxPoolSortUnstable",
-                txs.clone(),
-                new_txs.clone(),
+                &txs,
+                &new_txs,
                 base_fee,
             );
 
@@ -42,8 +42,8 @@ fn txpool_reordering(c: &mut Criterion) {
             txpool_reordering_bench::<BinaryHeapTxPool>(
                 &mut group,
                 "BinaryHeapTxPool",
-                txs,
-                new_txs,
+                &txs,
+                &new_txs,
                 base_fee,
             );
         }
@@ -53,18 +53,18 @@ fn txpool_reordering(c: &mut Criterion) {
 fn txpool_reordering_bench<T: BenchTxPool>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
-    seed: Vec<MockTransaction>,
-    new_txs: Vec<MockTransaction>,
+    seed: &[MockTransaction],
+    new_txs: &[MockTransaction],
     base_fee: u64,
 ) {
     let setup = || {
         let mut txpool = T::default();
         txpool.reorder(base_fee);
 
-        for tx in &seed {
+        for tx in seed {
             txpool.add_transaction(tx.clone());
         }
-        (txpool, new_txs.clone())
+        (txpool, new_txs)
     };
 
     let group_id = format!(
@@ -82,7 +82,7 @@ fn txpool_reordering_bench<T: BenchTxPool>(
 
                 // Reorder with new base fee after adding transactions.
                 for new_tx in new_txs {
-                    txpool.add_transaction(new_tx);
+                    txpool.add_transaction(new_tx.clone());
                 }
                 let smaller_base_fee = base_fee.saturating_sub(10);
                 txpool.reorder(smaller_base_fee)

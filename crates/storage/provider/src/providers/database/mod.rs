@@ -82,7 +82,7 @@ impl ProviderFactory<DatabaseEnv> {
     pub fn new_with_database_path<P: AsRef<Path>>(
         path: P,
         chain_spec: Arc<ChainSpec>,
-        args: DatabaseArguments,
+        args: &DatabaseArguments,
         static_file_provider: StaticFileProvider,
     ) -> RethResult<Self> {
         Ok(Self {
@@ -639,7 +639,7 @@ mod tests {
         let factory = ProviderFactory::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
             Arc::new(chain_spec),
-            DatabaseArguments::new(Default::default()),
+            &DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
         )
         .unwrap();

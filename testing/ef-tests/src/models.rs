@@ -216,15 +216,15 @@ impl Account {
             Error::Assertion(format!("Expected account ({address}) is missing from DB: {self:?}"))
         })?;
 
-        assert_equal(self.balance, account.balance, "Balance does not match")?;
-        assert_equal(self.nonce.to(), account.nonce, "Nonce does not match")?;
+        assert_equal(&self.balance, &account.balance, "Balance does not match")?;
+        assert_equal(&(self.nonce.to()), &account.nonce, "Nonce does not match")?;
 
         if let Some(bytecode_hash) = account.bytecode_hash {
-            assert_equal(keccak256(&self.code), bytecode_hash, "Bytecode does not match")?;
+            assert_equal(&keccak256(&self.code), &bytecode_hash, "Bytecode does not match")?;
         } else {
             assert_equal(
-                self.code.is_empty(),
-                true,
+                &self.code.is_empty(),
+                &true,
                 "Expected empty bytecode, got bytecode in db.",
             )?;
         }
@@ -236,8 +236,8 @@ impl Account {
             {
                 if U256::from_be_bytes(entry.key.0) == *slot {
                     assert_equal(
-                        *value,
-                        entry.value,
+                        value,
+                        &entry.value,
                         &format!("Storage for slot {slot:?} does not match"),
                     )?;
                 } else {

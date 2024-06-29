@@ -2099,28 +2099,28 @@ mod tests {
             });
 
             let tx_signed_no_hash = TransactionSignedNoHash { signature, transaction };
-            test_transaction_signed_to_from_compact(tx_signed_no_hash);
+            test_transaction_signed_to_from_compact(&tx_signed_no_hash);
         }
     }
 
-    fn test_transaction_signed_to_from_compact(tx_signed_no_hash: TransactionSignedNoHash) {
+    fn test_transaction_signed_to_from_compact(tx_signed_no_hash: &TransactionSignedNoHash) {
         // zstd aware `to_compact`
         let mut buff: Vec<u8> = Vec::new();
         let written_bytes = tx_signed_no_hash.clone().to_compact(&mut buff);
         let (decoded, _) = TransactionSignedNoHash::from_compact(&buff, written_bytes);
-        assert_eq!(tx_signed_no_hash, decoded);
+        assert_eq!(*tx_signed_no_hash, decoded);
 
         // zstd unaware `to_compact`/`from_compact`
         let mut buff: Vec<u8> = Vec::new();
         let written_bytes = to_compact_ztd_unaware(tx_signed_no_hash.clone(), &mut buff);
         let (decoded_no_zstd, _something) = from_compact_zstd_unaware(&buff, written_bytes);
-        assert_eq!(tx_signed_no_hash, decoded_no_zstd);
+        assert_eq!(*tx_signed_no_hash, decoded_no_zstd);
 
         // zstd unaware `to_compact`, but decode with zstd awareness
         let mut buff: Vec<u8> = Vec::new();
         let written_bytes = to_compact_ztd_unaware(tx_signed_no_hash.clone(), &mut buff);
         let (decoded, _) = TransactionSignedNoHash::from_compact(&buff, written_bytes);
-        assert_eq!(tx_signed_no_hash, decoded);
+        assert_eq!(*tx_signed_no_hash, decoded);
     }
 
     #[test]

@@ -500,7 +500,7 @@ mod tests {
                     B256::ZERO,
                     0..1,
                 ));
-                self.db.insert_blocks(preblocks.iter(), StorageKind::Static)?;
+                self.db.insert_blocks(preblocks.iter(), &StorageKind::Static)?;
             }
 
             let num_of_accounts = 31;
@@ -534,7 +534,7 @@ mod tests {
             let mut blocks = vec![sealed_head];
             blocks.extend(random_block_range(&mut rng, start..=end, head_hash, 0..3));
             let last_block = blocks.last().cloned().unwrap();
-            self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
+            self.db.insert_blocks(blocks.iter(), &StorageKind::Static)?;
 
             let (transitions, final_state) = random_changeset_range(
                 &mut rng,

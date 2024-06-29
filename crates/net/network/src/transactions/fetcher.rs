@@ -112,7 +112,7 @@ impl TransactionFetcher {
     }
 
     #[inline]
-    fn update_pending_fetch_cache_search_metrics(&self, durations: TxFetcherSearchDurations) {
+    fn update_pending_fetch_cache_search_metrics(&self, durations: &TxFetcherSearchDurations) {
         let metrics = &self.metrics;
 
         let TxFetcherSearchDurations { find_idle_peer, fill_request } = durations;
@@ -473,7 +473,7 @@ impl TransactionFetcher {
         // free unused memory
         hashes_to_request.shrink_to_fit();
 
-        self.update_pending_fetch_cache_search_metrics(search_durations);
+        self.update_pending_fetch_cache_search_metrics(&search_durations);
 
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),

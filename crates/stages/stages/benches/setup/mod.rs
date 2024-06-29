@@ -167,7 +167,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         updated_header.state_root = root;
         *last_block = SealedBlock { header: updated_header.seal_slow(), ..cloned_last };
 
-        db.insert_blocks(blocks.iter(), StorageKind::Static).unwrap();
+        db.insert_blocks(blocks.iter(), &StorageKind::Static).unwrap();
 
         // initialize TD
         db.commit(|tx| {

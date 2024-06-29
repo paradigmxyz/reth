@@ -255,9 +255,9 @@ impl<'a> EncryptedMessage<'a> {
 
     /// Use the given ECIES keys to check the integrity of the message, returning an error if the
     /// tag check fails, and then decrypt the message, returning the decrypted data.
-    pub fn check_and_decrypt(self, keys: RLPxSymmetricKeys) -> Result<&'a mut [u8], ECIESError> {
-        self.check_integrity(&keys)?;
-        Ok(self.decrypt(&keys))
+    pub fn check_and_decrypt(self, keys: &RLPxSymmetricKeys) -> Result<&'a mut [u8], ECIESError> {
+        self.check_integrity(keys)?;
+        Ok(self.decrypt(keys))
     }
 }
 
@@ -406,7 +406,7 @@ impl ECIES {
         let keys = encrypted_message.derive_keys(&self.secret_key);
 
         // check message integrity and decrypt the message
-        encrypted_message.check_and_decrypt(keys)
+        encrypted_message.check_and_decrypt(&keys)
     }
 
     fn create_auth_unencrypted(&self) -> BytesMut {

@@ -340,7 +340,7 @@ mod tests {
         provider: P,
     ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig> {
         let evm_config = EthEvmConfig::default();
-        let cache = EthStateCache::spawn(provider.clone(), Default::default(), evm_config);
+        let cache = EthStateCache::spawn(provider.clone(), &Default::default(), evm_config);
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
 

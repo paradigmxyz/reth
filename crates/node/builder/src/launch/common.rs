@@ -476,13 +476,13 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitDatabaseError> {
-        init_genesis(self.provider_factory().clone())?;
+        init_genesis(self.provider_factory())?;
         Ok(self)
     }
 
     /// Write the genesis block and state if it has not already been written
     pub fn init_genesis(&self) -> Result<B256, InitDatabaseError> {
-        init_genesis(self.provider_factory().clone())
+        init_genesis(self.provider_factory())
     }
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the
@@ -579,7 +579,7 @@ where
     /// If the database is empty, returns the genesis block.
     pub fn lookup_head(&self) -> eyre::Result<Head> {
         self.node_config()
-            .lookup_head(self.provider_factory().clone())
+            .lookup_head(self.provider_factory())
             .wrap_err("the head block is missing")
     }
 

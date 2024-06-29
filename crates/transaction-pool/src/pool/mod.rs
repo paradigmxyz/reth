@@ -380,7 +380,7 @@ where
         let outcome = self.pool.write().on_canonical_state_change(
             block_info,
             mined_transactions,
-            changed_senders,
+            &changed_senders,
         );
 
         // This will discard outdated transactions based on the account's nonce
@@ -396,7 +396,7 @@ where
     pub(crate) fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
         let changed_senders = self.changed_senders(accounts.into_iter());
         let UpdateOutcome { promoted, discarded } =
-            self.pool.write().update_accounts(changed_senders);
+            self.pool.write().update_accounts(&changed_senders);
         let mut listener = self.event_listener.write();
 
         promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
@@ -475,7 +475,7 @@ where
                 }
 
                 // Notify listeners for _all_ transactions
-                self.on_new_transaction(added.into_new_transaction_event());
+                self.on_new_transaction(&added.into_new_transaction_event());
 
                 Ok(hash)
             }
@@ -559,7 +559,7 @@ where
     }
 
     /// Notify all listeners about a newly inserted pending transaction.
-    fn on_new_transaction(&self, event: NewTransactionEvent<T::Transaction>) {
+    fn on_new_transaction(&self, event: &NewTransactionEvent<T::Transaction>) {
         let mut transaction_listeners = self.transaction_listener.lock();
         transaction_listeners.retain_mut(|listener| {
             if listener.kind.is_propagate_only() && !event.transaction.propagate {
@@ -639,7 +639,7 @@ where
             AddedTransaction::Parked { transaction, replaced, .. } => {
                 listener.queued(transaction.hash());
                 if let Some(replaced) = replaced {
-                    listener.replaced(replaced.clone(), *transaction.hash());
+                    listener.replaced(replaced, *transaction.hash());
                 }
             }
         }

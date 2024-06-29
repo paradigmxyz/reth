@@ -55,7 +55,7 @@ impl<K: EnrKeyUnambiguous> SyncTree<K> {
 
     pub(crate) fn extend_children(
         &mut self,
-        kind: ResolveKind,
+        kind: &ResolveKind,
         children: impl IntoIterator<Item = String>,
     ) {
         match kind {

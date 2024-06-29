@@ -114,7 +114,7 @@ fn fill(
 }
 
 /// Convert [`TransactionSignedEcRecovered`] to [`TransactionRequest`]
-pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> TransactionRequest {
+pub fn transaction_to_call_request(tx: &TransactionSignedEcRecovered) -> TransactionRequest {
     let from = tx.signer();
     let to = Some(tx.transaction.to().into());
     let gas = tx.transaction.gas_limit();

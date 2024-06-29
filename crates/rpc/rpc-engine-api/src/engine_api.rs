@@ -904,7 +904,7 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         tokio::spawn(async move {
-            api.new_payload_v1(execution_payload_from_sealed_block(SealedBlock::default()))
+            api.new_payload_v1(execution_payload_from_sealed_block(&SealedBlock::default()))
                 .await
                 .unwrap();
         });

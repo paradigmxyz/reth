@@ -308,7 +308,7 @@ impl TaskExecutor {
     }
 
     /// Spawns a future on the tokio runtime depending on the [`TaskKind`]
-    fn spawn_on_rt<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
+    fn spawn_on_rt<F>(&self, fut: F, task_kind: &TaskKind) -> JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -322,7 +322,7 @@ impl TaskExecutor {
     }
 
     /// Spawns a regular task depending on the given [`TaskKind`]
-    fn spawn_task_as<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
+    fn spawn_task_as<F>(&self, fut: F, task_kind: &TaskKind) -> JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -354,7 +354,7 @@ impl TaskExecutor {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawn_task_as(fut, TaskKind::Default)
+        self.spawn_task_as(fut, &TaskKind::Default)
     }
 
     /// Spawns a blocking task onto the runtime.
@@ -365,7 +365,7 @@ impl TaskExecutor {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawn_task_as(fut, TaskKind::Blocking)
+        self.spawn_task_as(fut, &TaskKind::Blocking)
     }
 
     /// Spawns the task onto the runtime.
@@ -389,7 +389,7 @@ impl TaskExecutor {
         &self,
         name: &'static str,
         fut: F,
-        task_kind: TaskKind,
+        task_kind: &TaskKind,
     ) -> JoinHandle<()>
     where
         F: Future<Output = ()> + Send + 'static,
@@ -428,7 +428,7 @@ impl TaskExecutor {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawn_critical_as(name, fut, TaskKind::Blocking)
+        self.spawn_critical_as(name, fut, &TaskKind::Blocking)
     }
 
     /// This spawns a critical task onto the runtime.
@@ -439,7 +439,7 @@ impl TaskExecutor {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawn_critical_as(name, fut, TaskKind::Default)
+        self.spawn_critical_as(name, fut, &TaskKind::Default)
     }
 
     /// This spawns a critical task onto the runtime.

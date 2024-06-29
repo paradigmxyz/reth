@@ -310,7 +310,7 @@ impl FilterAnnouncement for EthMessageFilter {
                 }
             }
         });
-        self.announced_tx_types_metrics.update_eth68_announcement_metrics(tx_types_counter);
+        self.announced_tx_types_metrics.update_eth68_announcement_metrics(&tx_types_counter);
         (
             if should_report_peer { FilterOutcome::ReportPeer } else { FilterOutcome::Ok },
             ValidAnnouncementData::from_partially_valid_data(msg),

@@ -161,7 +161,7 @@ where
         self.commit_and_rebind_open_dbs().map(|v| (v.0, v.1))
     }
 
-    pub fn prime_for_permaopen(&self, db: Database) {
+    pub fn prime_for_permaopen(&self, db: &Database) {
         self.inner.primed_dbis.lock().insert(db.dbi());
     }
 
@@ -354,7 +354,7 @@ where
 }
 
 impl Transaction<RW> {
-    fn open_db_with_flags(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
+    fn open_db_with_flags(&self, name: Option<&str>, flags: &DatabaseFlags) -> Result<Database> {
         Database::new(self, name, flags.bits())
     }
 
@@ -371,7 +371,7 @@ impl Transaction<RW> {
     /// This function will fail with [`Error::BadRslot`] if called by a thread with an open
     /// transaction.
     pub fn create_db(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
-        self.open_db_with_flags(name, flags | DatabaseFlags::CREATE)
+        self.open_db_with_flags(name, &(flags | DatabaseFlags::CREATE))
     }
 
     /// Stores an item into a database.
@@ -385,7 +385,7 @@ impl Transaction<RW> {
         dbi: ffi::MDBX_dbi,
         key: impl AsRef<[u8]>,
         data: impl AsRef<[u8]>,
-        flags: WriteFlags,
+        flags: &WriteFlags,
     ) -> Result<()> {
         let key = key.as_ref();
         let data = data.as_ref();
@@ -408,7 +408,7 @@ impl Transaction<RW> {
         db: &Database,
         key: impl AsRef<[u8]>,
         len: usize,
-        flags: WriteFlags,
+        flags: &WriteFlags,
     ) -> Result<&mut [u8]> {
         let key = key.as_ref();
         let key_val: ffi::MDBX_val =
@@ -480,7 +480,7 @@ impl Transaction<RW> {
     /// # Safety
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
-    pub unsafe fn drop_db(&self, db: Database) -> Result<()> {
+    pub unsafe fn drop_db(&self, db: &Database) -> Result<()> {
         mdbx_result(self.txn_execute(|txn| ffi::mdbx_drop(txn, db.dbi(), true))?)?;
 
         Ok(())
@@ -493,7 +493,7 @@ impl Transaction<RO> {
     /// # Safety
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
-    pub unsafe fn close_db(&self, db: Database) -> Result<()> {
+    pub unsafe fn close_db(&self, db: &Database) -> Result<()> {
         mdbx_result(ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()))?;
 
         Ok(())

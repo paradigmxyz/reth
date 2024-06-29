@@ -25,11 +25,11 @@ impl DiskFileBlobStore {
     /// Opens and initializes a new disk file blob store according to the given options.
     pub fn open(
         blob_dir: impl Into<PathBuf>,
-        opts: DiskFileBlobStoreConfig,
+        opts: &DiskFileBlobStoreConfig,
     ) -> Result<Self, DiskFileBlobStoreError> {
         let blob_dir = blob_dir.into();
         let DiskFileBlobStoreConfig { max_cached_entries, .. } = opts;
-        let inner = DiskFileBlobStoreInner::new(blob_dir, max_cached_entries);
+        let inner = DiskFileBlobStoreInner::new(blob_dir, *max_cached_entries);
 
         // initialize the blob store
         inner.delete_all()?;
@@ -449,7 +449,7 @@ mod tests {
 
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let store = DiskFileBlobStore::open(dir.path(), Default::default()).unwrap();
+        let store = DiskFileBlobStore::open(dir.path(), &Default::default()).unwrap();
         (store, dir)
     }
 

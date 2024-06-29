@@ -234,7 +234,7 @@ impl<'a> BuiltPayload for &'a OptimismBuiltPayload {
 // V1 engine_getPayloadV1 response
 impl From<OptimismBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: OptimismBuiltPayload) -> Self {
-        block_to_payload_v1(value.block)
+        block_to_payload_v1(&value.block)
     }
 }
 

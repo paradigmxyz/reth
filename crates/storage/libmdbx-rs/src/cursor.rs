@@ -434,7 +434,7 @@ where
 impl Cursor<RW> {
     /// Puts a key/data pair into the database. The cursor will be positioned at
     /// the new data item, or on failure usually near it.
-    pub fn put(&mut self, key: &[u8], data: &[u8], flags: WriteFlags) -> Result<()> {
+    pub fn put(&mut self, key: &[u8], data: &[u8], flags: &WriteFlags) -> Result<()> {
         let key_val: ffi::MDBX_val =
             ffi::MDBX_val { iov_len: key.len(), iov_base: key.as_ptr() as *mut c_void };
         let mut data_val: ffi::MDBX_val =
@@ -454,7 +454,7 @@ impl Cursor<RW> {
     ///
     /// [`WriteFlags::NO_DUP_DATA`] may be used to delete all data items for the
     /// current key, if the database was opened with [`DatabaseFlags::DUP_SORT`].
-    pub fn del(&mut self, flags: WriteFlags) -> Result<()> {
+    pub fn del(&mut self, flags: &WriteFlags) -> Result<()> {
         mdbx_result(unsafe {
             self.txn.txn_execute(|_| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
         })?;

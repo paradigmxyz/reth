@@ -243,7 +243,7 @@ mod tests {
             random_block_range(&mut rng, (tip - 100 + 1)..=tip, B256::ZERO, 1..5),
         ]
         .concat();
-        db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), &StorageKind::Database(None)).expect("insert blocks");
 
         let mut receipts = Vec::new();
 

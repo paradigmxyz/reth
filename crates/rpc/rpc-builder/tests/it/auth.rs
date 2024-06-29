@@ -16,8 +16,8 @@ where
     C: ClientT + SubscriptionClientT + Sync + EngineApiClient<EthEngineTypes>,
 {
     let block = Block::default().seal_slow();
-    EngineApiClient::new_payload_v1(client, block_to_payload_v1(block.clone())).await;
-    EngineApiClient::new_payload_v2(client, convert_block_to_payload_input_v2(block)).await;
+    EngineApiClient::new_payload_v1(client, block_to_payload_v1(&block)).await;
+    EngineApiClient::new_payload_v2(client, convert_block_to_payload_input_v2(&block)).await;
     EngineApiClient::fork_choice_updated_v1(client, ForkchoiceState::default(), None).await;
     EngineApiClient::get_payload_v1(client, PayloadId::new([0, 0, 0, 0, 0, 0, 0, 0])).await;
     EngineApiClient::get_payload_v2(client, PayloadId::new([0, 0, 0, 0, 0, 0, 0, 0])).await;

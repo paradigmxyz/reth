@@ -12,9 +12,9 @@ fn test_get() {
 
     assert_eq!(None, txn.cursor(&db).unwrap().first::<(), ()>().unwrap());
 
-    txn.put(db.dbi(), b"key1", b"val1", WriteFlags::empty()).unwrap();
-    txn.put(db.dbi(), b"key2", b"val2", WriteFlags::empty()).unwrap();
-    txn.put(db.dbi(), b"key3", b"val3", WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key1", b"val1", &WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key2", b"val2", &WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key3", b"val3", &WriteFlags::empty()).unwrap();
 
     let mut cursor = txn.cursor(&db).unwrap();
     assert_eq!(cursor.first().unwrap(), Some((*b"key1", *b"val1")));
@@ -34,12 +34,12 @@ fn test_get_dup() {
 
     let txn = env.begin_rw_txn().unwrap();
     let db = txn.create_db(None, DatabaseFlags::DUP_SORT).unwrap();
-    txn.put(db.dbi(), b"key1", b"val1", WriteFlags::empty()).unwrap();
-    txn.put(db.dbi(), b"key1", b"val2", WriteFlags::empty()).unwrap();
-    txn.put(db.dbi(), b"key1", b"val3", WriteFlags::empty()).unwrap();
-    txn.put(db.dbi(), b"key2", b"val1", WriteFlags::empty()).unwrap();
-    txn.put(db.dbi(), b"key2", b"val2", WriteFlags::empty()).unwrap();
-    txn.put(db.dbi(), b"key2", b"val3", WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key1", b"val1", &WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key1", b"val2", &WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key1", b"val3", &WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key2", b"val1", &WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key2", b"val2", &WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key2", b"val3", &WriteFlags::empty()).unwrap();
 
     let mut cursor = txn.cursor(&db).unwrap();
     assert_eq!(cursor.first().unwrap(), Some((*b"key1", *b"val1")));
@@ -63,11 +63,11 @@ fn test_get_dup() {
     assert_eq!(cursor.get_both_range(b"key2", b"val").unwrap(), Some(*b"val1"));
 
     assert_eq!(cursor.last().unwrap(), Some((*b"key2", *b"val3")));
-    cursor.del(WriteFlags::empty()).unwrap();
+    cursor.del(&WriteFlags::empty()).unwrap();
     assert_eq!(cursor.last().unwrap(), Some((*b"key2", *b"val2")));
-    cursor.del(WriteFlags::empty()).unwrap();
+    cursor.del(&WriteFlags::empty()).unwrap();
     assert_eq!(cursor.last().unwrap(), Some((*b"key2", *b"val1")));
-    cursor.del(WriteFlags::empty()).unwrap();
+    cursor.del(&WriteFlags::empty()).unwrap();
     assert_eq!(cursor.last().unwrap(), Some((*b"key1", *b"val3")));
 }
 
@@ -78,12 +78,12 @@ fn test_get_dupfixed() {
 
     let txn = env.begin_rw_txn().unwrap();
     let db = txn.create_db(None, DatabaseFlags::DUP_SORT | DatabaseFlags::DUP_FIXED).unwrap();
-    txn.put(db.dbi(), b"key1", b"val1", WriteFlags::empty()).unwrap();
-    txn.put(db.dbi(), b"key1", b"val2", WriteFlags::empty()).unwrap();
-    txn.put(db.dbi(), b"key1", b"val3", WriteFlags::empty()).unwrap();
-    txn.put(db.dbi(), b"key2", b"val4", WriteFlags::empty()).unwrap();
-    txn.put(db.dbi(), b"key2", b"val5", WriteFlags::empty()).unwrap();
-    txn.put(db.dbi(), b"key2", b"val6", WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key1", b"val1", &WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key1", b"val2", &WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key1", b"val3", &WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key2", b"val4", &WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key2", b"val5", &WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key2", b"val6", &WriteFlags::empty()).unwrap();
 
     let mut cursor = txn.cursor(&db).unwrap();
     assert_eq!(cursor.first().unwrap(), Some((*b"key1", *b"val1")));
@@ -107,7 +107,7 @@ fn test_iter() {
         let txn = env.begin_rw_txn().unwrap();
         let db = txn.open_db(None).unwrap();
         for (key, data) in &items {
-            txn.put(db.dbi(), key, data, WriteFlags::empty()).unwrap();
+            txn.put(db.dbi(), key, data, &WriteFlags::empty()).unwrap();
         }
         assert!(!txn.commit().unwrap().0);
     }
@@ -216,7 +216,7 @@ fn test_iter_dup() {
         let txn = env.begin_rw_txn().unwrap();
         for (key, data) in items.clone() {
             let db = txn.open_db(None).unwrap();
-            txn.put(db.dbi(), key, data, WriteFlags::empty()).unwrap();
+            txn.put(db.dbi(), key, data, &WriteFlags::empty()).unwrap();
         }
         txn.commit().unwrap();
     }
@@ -287,7 +287,7 @@ fn test_iter_del_get() {
         let txn = env.begin_rw_txn().unwrap();
         let db = txn.open_db(None).unwrap();
         for (key, data) in &items {
-            txn.put(db.dbi(), key, data, WriteFlags::empty()).unwrap();
+            txn.put(db.dbi(), key, data, &WriteFlags::empty()).unwrap();
         }
         txn.commit().unwrap();
     }
@@ -304,7 +304,7 @@ fn test_iter_del_get() {
 
     assert_eq!(cursor.set(b"a").unwrap(), Some(*b"1"));
 
-    cursor.del(WriteFlags::empty()).unwrap();
+    cursor.del(&WriteFlags::empty()).unwrap();
 
     assert_eq!(cursor.iter_dup_of::<(), ()>(b"a").collect::<Result<Vec<_>>>().unwrap().len(), 0);
 }
@@ -318,16 +318,16 @@ fn test_put_del() {
     let db = txn.open_db(None).unwrap();
     let mut cursor = txn.cursor(&db).unwrap();
 
-    cursor.put(b"key1", b"val1", WriteFlags::empty()).unwrap();
-    cursor.put(b"key2", b"val2", WriteFlags::empty()).unwrap();
-    cursor.put(b"key3", b"val3", WriteFlags::empty()).unwrap();
+    cursor.put(b"key1", b"val1", &WriteFlags::empty()).unwrap();
+    cursor.put(b"key2", b"val2", &WriteFlags::empty()).unwrap();
+    cursor.put(b"key3", b"val3", &WriteFlags::empty()).unwrap();
 
     assert_eq!(
         cursor.get_current().unwrap().unwrap(),
         (Cow::Borrowed(b"key3" as &[u8]), Cow::Borrowed(b"val3" as &[u8]))
     );
 
-    cursor.del(WriteFlags::empty()).unwrap();
+    cursor.del(&WriteFlags::empty()).unwrap();
     assert_eq!(cursor.get_current::<Vec<u8>, Vec<u8>>().unwrap(), None);
     assert_eq!(
         cursor.last().unwrap().unwrap(),

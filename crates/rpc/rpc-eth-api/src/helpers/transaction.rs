@@ -243,7 +243,7 @@ pub trait EthTransactions: LoadTransaction {
                 client.forward_raw_transaction(&tx).await?;
             }
 
-            let recovered = recover_raw_transaction(tx)?;
+            let recovered = recover_raw_transaction(&tx)?;
             let pool_transaction =
                 <Self::Pool as TransactionPool>::Transaction::from_recovered_pooled_transaction(
                     recovered,

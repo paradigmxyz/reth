@@ -198,7 +198,7 @@ mod tests {
 
     fn insert_genesis<DB: Database>(
         provider_factory: &ProviderFactory<DB>,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: &Arc<ChainSpec>,
     ) -> ProviderResult<B256> {
         let mut provider = provider_factory.provider_rw()?;
 
@@ -237,7 +237,7 @@ mod tests {
     fn testspec_proofs() {
         // Create test database and insert genesis accounts.
         let factory = create_test_provider_factory();
-        let root = insert_genesis(&factory, TEST_SPEC.clone()).unwrap();
+        let root = insert_genesis(&factory, &TEST_SPEC).unwrap();
 
         let data = Vec::from([
             (
@@ -295,7 +295,7 @@ mod tests {
     fn testspec_empty_storage_proof() {
         // Create test database and insert genesis accounts.
         let factory = create_test_provider_factory();
-        let root = insert_genesis(&factory, TEST_SPEC.clone()).unwrap();
+        let root = insert_genesis(&factory, &TEST_SPEC).unwrap();
 
         let target = Address::from_str("0x1ed9b1dd266b607ee278726d324b855a093394a6").unwrap();
         let slots = Vec::from([B256::with_last_byte(1), B256::with_last_byte(3)]);
@@ -317,7 +317,7 @@ mod tests {
     fn mainnet_genesis_account_proof() {
         // Create test database and insert genesis accounts.
         let factory = create_test_provider_factory();
-        let root = insert_genesis(&factory, MAINNET.clone()).unwrap();
+        let root = insert_genesis(&factory, &MAINNET).unwrap();
 
         // Address from mainnet genesis allocation.
         // keccak256 - `0xcf67b71c90b0d523dd5004cf206f325748da347685071b34812e21801f5270c4`
@@ -342,7 +342,7 @@ mod tests {
     fn mainnet_genesis_account_proof_nonexistent() {
         // Create test database and insert genesis accounts.
         let factory = create_test_provider_factory();
-        let root = insert_genesis(&factory, MAINNET.clone()).unwrap();
+        let root = insert_genesis(&factory, &MAINNET).unwrap();
 
         // Address that does not exist in mainnet genesis allocation.
         // keccak256 - `0x18f415ffd7f66bb1924d90f0e82fb79ca8c6d8a3473cd9a95446a443b9db1761`
@@ -365,7 +365,7 @@ mod tests {
     fn holesky_deposit_contract_proof() {
         // Create test database and insert genesis accounts.
         let factory = create_test_provider_factory();
-        let root = insert_genesis(&factory, HOLESKY.clone()).unwrap();
+        let root = insert_genesis(&factory, &HOLESKY).unwrap();
 
         let target = Address::from_str("0x4242424242424242424242424242424242424242").unwrap();
         // existent

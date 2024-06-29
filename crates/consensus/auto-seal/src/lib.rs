@@ -339,7 +339,7 @@ impl StorageInner {
         transactions: Vec<TransactionSigned>,
         ommers: Vec<Header>,
         provider: &Provider,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: &Arc<ChainSpec>,
         executor: &Executor,
     ) -> Result<(SealedHeader, ExecutionOutcome), BlockExecutionError>
     where
@@ -361,7 +361,7 @@ impl StorageInner {
             &ommers,
             withdrawals.as_ref(),
             requests.as_ref(),
-            &chain_spec,
+            chain_spec,
         );
 
         let block = Block {
@@ -419,7 +419,7 @@ impl StorageInner {
         header.receipts_root = {
             #[cfg(feature = "optimism")]
             let receipts_root = execution_outcome
-                .optimism_receipts_root_slow(header.number, &chain_spec, header.timestamp)
+                .optimism_receipts_root_slow(header.number, chain_spec, header.timestamp)
                 .expect("Receipts is present");
 
             #[cfg(not(feature = "optimism"))]

@@ -115,7 +115,7 @@ impl MockDiscovery {
     }
 
     /// Encodes the packet, sends it and returns the hash.
-    fn send_packet(&self, msg: Message, to: SocketAddr) -> B256 {
+    fn send_packet(&self, msg: &Message, to: SocketAddr) -> B256 {
         let (payload, hash) = msg.encode(&self.secret_key);
         let _ = self.egress.try_send((payload, to));
         hash
@@ -160,7 +160,7 @@ impl Stream for MockDiscovery {
                                 enr_sq: None,
                             };
                             let msg = Message::Pong(pong.clone());
-                            this.send_packet(msg, remote_addr);
+                            this.send_packet(&msg, remote_addr);
                             return Poll::Ready(Some(MockEvent::Pong {
                                 ping,
                                 pong,
@@ -175,7 +175,7 @@ impl Stream for MockDiscovery {
                                 nodes: nodes.clone(),
                                 expire: this.send_neighbours_timeout(),
                             });
-                            this.send_packet(msg, remote_addr);
+                            this.send_packet(&msg, remote_addr);
                             return Poll::Ready(Some(MockEvent::Neighbours {
                                 nodes,
                                 to: remote_addr,

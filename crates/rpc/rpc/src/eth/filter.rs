@@ -58,7 +58,7 @@ where
         provider: Provider,
         pool: Pool,
         eth_cache: EthStateCache,
-        config: EthFilterConfig,
+        config: &EthFilterConfig,
         task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         let EthFilterConfig { max_blocks_per_filter, max_logs_per_response, stale_filter_ttl } =
@@ -71,7 +71,7 @@ where
             eth_cache,
             max_headers_range: MAX_HEADERS_RANGE,
             task_spawner,
-            stale_filter_ttl,
+            stale_filter_ttl: *stale_filter_ttl,
             // if not set, use the max value, which is effectively no limit
             max_blocks_per_filter: max_blocks_per_filter.unwrap_or(u64::MAX),
             max_logs_per_response: max_logs_per_response.unwrap_or(usize::MAX),

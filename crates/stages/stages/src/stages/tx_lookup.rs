@@ -281,7 +281,7 @@ mod tests {
             .collect::<Vec<_>>();
         runner
             .db
-            .insert_blocks(blocks.iter(), StorageKind::Static)
+            .insert_blocks(blocks.iter(), &StorageKind::Static)
             .expect("failed to insert blocks");
 
         let rx = runner.execute(input);
@@ -322,7 +322,7 @@ mod tests {
             random_block_range(&mut rng, stage_progress + 1..=previous_stage, B256::ZERO, 0..2);
         runner
             .db
-            .insert_blocks(seed.iter(), StorageKind::Static)
+            .insert_blocks(seed.iter(), &StorageKind::Static)
             .expect("failed to seed execution");
 
         runner.set_prune_mode(PruneMode::Before(prune_target));
@@ -354,7 +354,7 @@ mod tests {
         let mut rng = generators::rng();
 
         let blocks = random_block_range(&mut rng, 0..=100, B256::ZERO, 0..10);
-        db.insert_blocks(blocks.iter(), StorageKind::Static).expect("insert blocks");
+        db.insert_blocks(blocks.iter(), &StorageKind::Static).expect("insert blocks");
 
         let max_pruned_block = 30;
         let max_processed_block = 70;
@@ -480,7 +480,7 @@ mod tests {
             let mut rng = generators::rng();
 
             let blocks = random_block_range(&mut rng, stage_progress + 1..=end, B256::ZERO, 0..2);
-            self.db.insert_blocks(blocks.iter(), StorageKind::Static)?;
+            self.db.insert_blocks(blocks.iter(), &StorageKind::Static)?;
             Ok(blocks)
         }
 

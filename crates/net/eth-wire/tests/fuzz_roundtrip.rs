@@ -8,14 +8,14 @@ use std::fmt::Debug;
 /// [`Decodable`](alloy_rlp::Decodable).
 ///
 /// The test will create a random instance of the type, encode it, and then decode it.
-fn roundtrip_encoding<T>(thing: T)
+fn roundtrip_encoding<T>(thing: &T)
 where
     T: Encodable + Decodable + Debug + PartialEq + Eq,
 {
     let mut encoded = Vec::new();
     thing.encode(&mut encoded);
     let decoded = T::decode(&mut &encoded[..]).unwrap();
-    assert_eq!(thing, decoded, "expected: {thing:?}, got: {decoded:?}");
+    assert_eq!(*thing, decoded, "expected: {thing:?}, got: {decoded:?}");
 }
 
 /// This method delegates to `roundtrip_encoding`, but is used to enforce that each type input to
@@ -26,7 +26,7 @@ where
 /// fuzz test from compiling, rather than failing at runtime.
 /// In this case, we should implement a wrapper for the type that should no longer implement
 /// Default, Clone, or Serialize, and fuzz the wrapper type instead.
-fn roundtrip_fuzz<T>(thing: T)
+fn roundtrip_fuzz<T>(thing: &T)
 where
     T: Encodable + Decodable + Clone + Serialize + Debug + PartialEq + Eq + Default,
 {
@@ -40,7 +40,7 @@ macro_rules! fuzz_type_and_name {
         #[allow(non_snake_case)]
         #[test_fuzz]
         fn $fuzzname(thing: $x) {
-            crate::roundtrip_fuzz::<$x>(thing)
+            crate::roundtrip_fuzz::<$x>(&thing)
         }
     };
 }
@@ -65,13 +65,13 @@ pub mod fuzz_rlp {
     /// Tests the round-trip encoding of Ping
     #[test]
     fn roundtrip_ping() {
-        roundtrip_encoding::<P2PMessage>(P2PMessage::Ping)
+        roundtrip_encoding::<P2PMessage>(&P2PMessage::Ping)
     }
 
     /// Tests the round-trip encoding of Pong
     #[test]
     fn roundtrip_pong() {
-        roundtrip_encoding::<P2PMessage>(P2PMessage::Pong)
+        roundtrip_encoding::<P2PMessage>(&P2PMessage::Pong)
     }
 
     // p2p subprotocol messages

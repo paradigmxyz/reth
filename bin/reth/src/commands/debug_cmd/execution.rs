@@ -61,7 +61,7 @@ impl Command {
         &self,
         config: &Config,
         client: Client,
-        consensus: Arc<dyn Consensus>,
+        consensus: &Arc<dyn Consensus>,
         provider_factory: ProviderFactory<DB>,
         task_executor: &TaskExecutor,
         static_file_producer: StaticFileProducer<DB>,
@@ -72,11 +72,11 @@ impl Command {
     {
         // building network downloaders using the fetch client
         let header_downloader = ReverseHeadersDownloaderBuilder::new(config.stages.headers)
-            .build(client.clone(), Arc::clone(&consensus))
+            .build(client.clone(), Arc::clone(consensus))
             .into_task_with(task_executor);
 
         let body_downloader = BodiesDownloaderBuilder::new(config.stages.bodies)
-            .build(client, Arc::clone(&consensus), provider_factory.clone())
+            .build(client, Arc::clone(consensus), provider_factory.clone())
             .into_task_with(task_executor);
 
         let stage_conf = &config.stages;
@@ -91,7 +91,7 @@ impl Command {
                 DefaultStages::new(
                     provider_factory.clone(),
                     tip_rx,
-                    Arc::clone(&consensus),
+                    Arc::clone(consensus),
                     header_downloader,
                     body_downloader,
                     executor.clone(),
@@ -184,7 +184,7 @@ impl Command {
         let mut pipeline = self.build_pipeline(
             &config,
             fetch_client.clone(),
-            Arc::clone(&consensus),
+            &Arc::clone(&consensus),
             provider_factory.clone(),
             &ctx.task_executor,
             static_file_producer,

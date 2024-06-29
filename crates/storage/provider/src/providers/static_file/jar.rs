@@ -78,25 +78,25 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
     fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderMask<Header, BlockHash>>(block_hash.into())?
+            .get_two::<HeaderMask<Header, BlockHash>>(&(block_hash.into()))?
             .filter(|(_, hash)| hash == block_hash)
             .map(|(header, _)| header))
     }
 
     fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
-        self.cursor()?.get_one::<HeaderMask<Header>>(num.into())
+        self.cursor()?.get_one::<HeaderMask<Header>>(&(num.into()))
     }
 
     fn header_td(&self, block_hash: &BlockHash) -> ProviderResult<Option<U256>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderMask<CompactU256, BlockHash>>(block_hash.into())?
+            .get_two::<HeaderMask<CompactU256, BlockHash>>(&(block_hash.into()))?
             .filter(|(_, hash)| hash == block_hash)
             .map(|(td, _)| td.into()))
     }
 
     fn header_td_by_number(&self, num: BlockNumber) -> ProviderResult<Option<U256>> {
-        Ok(self.cursor()?.get_one::<HeaderMask<CompactU256>>(num.into())?.map(Into::into))
+        Ok(self.cursor()?.get_one::<HeaderMask<CompactU256>>(&(num.into()))?.map(Into::into))
     }
 
     fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
@@ -106,7 +106,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
         let mut headers = Vec::with_capacity((range.end - range.start) as usize);
 
         for num in range.start..range.end {
-            if let Some(header) = cursor.get_one::<HeaderMask<Header>>(num.into())? {
+            if let Some(header) = cursor.get_one::<HeaderMask<Header>>(&(num.into()))? {
                 headers.push(header);
             }
         }
@@ -117,7 +117,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
         Ok(self
             .cursor()?
-            .get_two::<HeaderMask<Header, BlockHash>>(number.into())?
+            .get_two::<HeaderMask<Header, BlockHash>>(&(number.into()))?
             .map(|(header, hash)| header.seal(hash)))
     }
 
@@ -133,7 +133,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
 
         for number in range.start..range.end {
             if let Some((header, hash)) =
-                cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into())?
+                cursor.get_two::<HeaderMask<Header, BlockHash>>(&(number.into()))?
             {
                 let sealed = header.seal(hash);
                 if !predicate(&sealed) {
@@ -148,7 +148,7 @@ impl<'a> HeaderProvider for StaticFileJarProvider<'a> {
 
 impl<'a> BlockHashReader for StaticFileJarProvider<'a> {
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.cursor()?.get_one::<HeaderMask<BlockHash>>(number.into())
+        self.cursor()?.get_one::<HeaderMask<BlockHash>>(&(number.into()))
     }
 
     fn canonical_hashes_range(
@@ -160,7 +160,7 @@ impl<'a> BlockHashReader for StaticFileJarProvider<'a> {
         let mut hashes = Vec::with_capacity((end - start) as usize);
 
         for number in start..end {
-            if let Some(hash) = cursor.get_one::<HeaderMask<BlockHash>>(number.into())? {
+            if let Some(hash) = cursor.get_one::<HeaderMask<BlockHash>>(&(number.into()))? {
                 hashes.push(hash)
             }
         }
@@ -188,7 +188,7 @@ impl<'a> BlockNumReader for StaticFileJarProvider<'a> {
         let mut cursor = self.cursor()?;
 
         Ok(cursor
-            .get_one::<HeaderMask<BlockHash>>((&hash).into())?
+            .get_one::<HeaderMask<BlockHash>>(&((&hash).into()))?
             .and_then(|res| (res == hash).then(|| cursor.number()).flatten()))
     }
 }
@@ -198,14 +198,14 @@ impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
         let mut cursor = self.cursor()?;
 
         Ok(cursor
-            .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
+            .get_one::<TransactionMask<TransactionSignedNoHash>>(&((&hash).into()))?
             .and_then(|res| (res.hash() == hash).then(|| cursor.number()).flatten()))
     }
 
     fn transaction_by_id(&self, num: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
         Ok(self
             .cursor()?
-            .get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
+            .get_one::<TransactionMask<TransactionSignedNoHash>>(&(num.into()))?
             .map(|tx| tx.with_hash()))
     }
 
@@ -213,13 +213,13 @@ impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
         &self,
         num: TxNumber,
     ) -> ProviderResult<Option<TransactionSignedNoHash>> {
-        self.cursor()?.get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())
+        self.cursor()?.get_one::<TransactionMask<TransactionSignedNoHash>>(&(num.into()))
     }
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
         Ok(self
             .cursor()?
-            .get_one::<TransactionMask<TransactionSignedNoHash>>((&hash).into())?
+            .get_one::<TransactionMask<TransactionSignedNoHash>>(&((&hash).into()))?
             .map(|tx| tx.with_hash()))
     }
 
@@ -264,7 +264,7 @@ impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
 
         for num in range {
             if let Some(tx) =
-                cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
+                cursor.get_one::<TransactionMask<TransactionSignedNoHash>>(&(num.into()))?
             {
                 txes.push(tx)
             }
@@ -284,14 +284,14 @@ impl<'a> TransactionsProvider for StaticFileJarProvider<'a> {
     fn transaction_sender(&self, num: TxNumber) -> ProviderResult<Option<Address>> {
         Ok(self
             .cursor()?
-            .get_one::<TransactionMask<TransactionSignedNoHash>>(num.into())?
+            .get_one::<TransactionMask<TransactionSignedNoHash>>(&(num.into()))?
             .and_then(|tx| tx.recover_signer()))
     }
 }
 
 impl<'a> ReceiptProvider for StaticFileJarProvider<'a> {
     fn receipt(&self, num: TxNumber) -> ProviderResult<Option<Receipt>> {
-        self.cursor()?.get_one::<ReceiptMask<Receipt>>(num.into())
+        self.cursor()?.get_one::<ReceiptMask<Receipt>>(&(num.into()))
     }
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
@@ -318,7 +318,7 @@ impl<'a> ReceiptProvider for StaticFileJarProvider<'a> {
         let mut receipts = Vec::with_capacity((range.end - range.start) as usize);
 
         for num in range {
-            if let Some(tx) = cursor.get_one::<ReceiptMask<Receipt>>(num.into())? {
+            if let Some(tx) = cursor.get_one::<ReceiptMask<Receipt>>(&(num.into()))? {
                 receipts.push(tx)
             }
         }

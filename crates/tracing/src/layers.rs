@@ -99,7 +99,7 @@ impl Layers {
         &mut self,
         format: LogFormat,
         filter: &str,
-        file_info: FileInfo,
+        file_info: &FileInfo,
     ) -> eyre::Result<FileWorkerGuard> {
         let (writer, guard) = file_info.create_log_writer();
         let file_filter = build_env_filter(None, filter)?;

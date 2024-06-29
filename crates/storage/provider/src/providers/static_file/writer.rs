@@ -51,7 +51,7 @@ impl StaticFileProviderRW {
         reader: Weak<StaticFileProviderInner>,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<Self> {
-        let (writer, data_path) = Self::open(segment, block, reader.clone(), metrics.clone())?;
+        let (writer, data_path) = Self::open(segment, block, &reader, &metrics)?;
         Ok(Self {
             writer,
             data_path,
@@ -65,12 +65,12 @@ impl StaticFileProviderRW {
     fn open(
         segment: StaticFileSegment,
         block: u64,
-        reader: Weak<StaticFileProviderInner>,
-        metrics: Option<Arc<StaticFileProviderMetrics>>,
+        reader: &Weak<StaticFileProviderInner>,
+        metrics: &Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<(NippyJarWriter<SegmentHeader>, PathBuf)> {
         let start = Instant::now();
 
-        let static_file_provider = Self::upgrade_provider_to_strong_reference(&reader);
+        let static_file_provider = Self::upgrade_provider_to_strong_reference(reader);
 
         let block_range = find_fixed_range(block);
         let (jar, path) = match static_file_provider.get_segment_provider_from_block(
@@ -90,7 +90,7 @@ impl StaticFileProviderRW {
             Err(err) => return Err(err),
         };
 
-        let reader = Self::upgrade_provider_to_strong_reference(&reader);
+        let reader = Self::upgrade_provider_to_strong_reference(reader);
         let access = if reader.is_read_only() {
             ConsistencyFailStrategy::ThrowError
         } else {
@@ -284,7 +284,7 @@ impl StaticFileProviderRW {
 
                 // Opens the new static file
                 let (writer, data_path) =
-                    Self::open(segment, last_block + 1, self.reader.clone(), self.metrics.clone())?;
+                    Self::open(segment, last_block + 1, &self.reader, &self.metrics)?;
                 self.writer = writer;
                 self.data_path = data_path;
 
@@ -414,8 +414,8 @@ impl StaticFileProviderRW {
         let (previous_writer, data_path) = Self::open(
             self.user_header().segment(),
             self.writer.user_header().expected_block_start() - 1,
-            self.reader.clone(),
-            self.metrics.clone(),
+            &self.reader,
+            &self.metrics,
         )?;
         self.writer = previous_writer;
         self.data_path = data_path;

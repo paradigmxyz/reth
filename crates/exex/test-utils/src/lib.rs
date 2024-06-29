@@ -230,7 +230,7 @@ pub async fn test_exex_context_with_chain_spec(
     let consensus = Arc::new(TestConsensus::default());
 
     let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
-    let genesis_hash = init_genesis(provider_factory.clone())?;
+    let genesis_hash = init_genesis(&provider_factory)?;
     let provider =
         BlockchainProvider::new(provider_factory.clone(), Arc::new(NoopBlockchainTree::default()))?;
 

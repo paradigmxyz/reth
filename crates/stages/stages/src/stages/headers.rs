@@ -91,7 +91,7 @@ where
     fn write_headers<DB: Database>(
         &mut self,
         tx: &<DB as Database>::TXMut,
-        static_file_provider: StaticFileProvider,
+        static_file_provider: &StaticFileProvider,
     ) -> Result<BlockNumber, StageError> {
         let total_headers = self.header_collector.len();
 
@@ -281,7 +281,7 @@ where
         // Write the headers and related tables to DB from ETL space
         let to_be_processed = self.hash_collector.len() as u64;
         let last_header_number =
-            self.write_headers::<DB>(provider.tx_ref(), provider.static_file_provider().clone())?;
+            self.write_headers::<DB>(provider.tx_ref(), provider.static_file_provider())?;
 
         // Clear ETL collectors
         self.hash_collector.clear();
