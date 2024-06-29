@@ -755,13 +755,16 @@ impl BestTransactionsAttributes {
 
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction:
-    fmt::Debug
-    + Send
-    + Sync
-    + FromRecoveredPooledTransaction
-    + TryFromRecoveredTransaction
-    + IntoRecoveredTransaction
+    fmt::Debug + Send + Sync + Sized + FromRecoveredPooledTransaction
 {
+    type Source: TryInto<Self> + TryFrom<TransactionSignedEcRecovered>;
+
+    /// Converts from the given source type.
+    fn from_source(source: Self::Source) -> Result<Self, <Self::Source as TryInto<Self>>::Error>;
+
+    /// Converts to a recovered transaction.
+    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered;
+
     /// Hash of the transaction.
     fn hash(&self) -> &TxHash;
 
@@ -982,6 +985,16 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
 }
 
 impl PoolTransaction for EthPooledTransaction {
+    type Source = TransactionSignedEcRecovered;
+
+    fn from_source(source: Self::Source) -> Result<Self, <Self::Source as TryInto<Self>>::Error> {
+        source.try_into()
+    }
+
+    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
+        self.transaction.clone()
+    }
+
     /// Returns hash of the transaction.
     fn hash(&self) -> &TxHash {
         self.transaction.hash_ref()
@@ -1092,6 +1105,14 @@ impl PoolTransaction for EthPooledTransaction {
     fn chain_id(&self) -> Option<u64> {
         self.transaction.chain_id()
     }
+
+    fn is_eip1559(&self) -> bool {
+        self.tx_type() == EIP1559_TX_TYPE_ID
+    }
+
+    fn is_eip4844(&self) -> bool {
+        self.tx_type() == EIP4844_TX_TYPE_ID
+    }
 }
 
 impl EthPoolTransaction for EthPooledTransaction {
@@ -1122,13 +1143,11 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 }
 
-impl TryFromRecoveredTransaction for EthPooledTransaction {
+impl TryFrom<TransactionSignedEcRecovered> for EthPooledTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from_recovered_transaction(
-        tx: TransactionSignedEcRecovered,
-    ) -> Result<Self, Self::Error> {
-        // ensure we can handle the transaction type and its format
+    fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
+        // Ensure we can handle the transaction type and its format
         match tx.tx_type() as u8 {
             0..=EIP1559_TX_TYPE_ID => {
                 // supported
@@ -1154,12 +1173,6 @@ impl TryFromRecoveredTransaction for EthPooledTransaction {
 impl FromRecoveredPooledTransaction for EthPooledTransaction {
     fn from_recovered_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
         Self::from(tx)
-    }
-}
-
-impl IntoRecoveredTransaction for EthPooledTransaction {
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.clone()
     }
 }
 
