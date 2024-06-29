@@ -1,5 +1,5 @@
 use crate::{
-    bundle_state::{BundleStateInit, HashedStateChanges, RevertsInit},
+    bundle_state::{ExecutionOutcome, HashedStateChanges},
     providers::{database::metrics, static_file::StaticFileWriter, StaticFileProvider},
     to_range,
     traits::{
@@ -29,7 +29,7 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_execution_types::{Chain, ExecutionOutcome};
+use reth_execution_types::Chain;
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber,
@@ -46,7 +46,7 @@ use reth_trie::{
     updates::TrieUpdates,
     HashedPostState, Nibbles, StateRoot,
 };
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
+use revm::{db::states::BundleBuilder, primitives::{BlockEnv, CfgEnvWithHandlerCfg}};
 use std::{
     cmp::Ordering,
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
@@ -628,13 +628,14 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         let storage_changeset =
             self.get_or_take::<tables::StorageChangeSets, TAKE>(storage_range)?;
-        let account_changeset = self.get_or_take::<tables::AccountChangeSets, TAKE>(range)?;
+        let account_changeset =
+            self.get_or_take::<tables::AccountChangeSets, TAKE>(range.clone())?;
 
         // iterate previous value and get plain state value to create changeset
         // Double option around Account represent if Account state is know (first option) and
         // account is removed (Second Option)
 
-        let mut state: BundleStateInit = HashMap::new();
+        let mut bundle_builder = BundleBuilder::new(range);
 
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
@@ -643,39 +644,49 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
-        let mut reverts: RevertsInit = HashMap::new();
-
         // add account changeset changes
         for (block_number, account_before) in account_changeset.into_iter().rev() {
             let AccountBeforeTx { info: old_info, address } = account_before;
-            match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((old_info, new_info, HashMap::new()));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    // overwrite old account state.
-                    entry.get_mut().0 = old_info;
+            if !bundle_builder.get_states().contains(&address) {
+                let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
+                if let Some(new_info) = new_info {
+                    bundle_builder =
+                        bundle_builder.state_present_account_info(address, into_revm_acc(new_info));
                 }
             }
+            if let Some(old_info) = old_info {
+                bundle_builder =
+                    bundle_builder.state_original_account_info(address, into_revm_acc(old_info));
+            }
+
             // insert old info into reverts.
-            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
+            bundle_builder = bundle_builder.revert_account_info(
+                block_number,
+                address,
+                Some(old_info.map(into_revm_acc)),
+            );
         }
 
         // add storage changeset changes
         for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
             let BlockNumberAddress((block_number, address)) = block_and_address;
             // get account state or insert from plain state.
-            let account_state = match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((present_info, present_info, HashMap::new()))
+            if !bundle_builder.get_states().contains(&address) {
+                let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
+                if let Some(present_info) = present_info {
+                    bundle_builder = bundle_builder
+                        .state_original_account_info(address, into_revm_acc(present_info))
+                        .state_present_account_info(address, into_revm_acc(present_info));
                 }
+            }
+
+            let account_state = match bundle_builder.get_state_storage_mut().entry(address) {
                 hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                hash_map::Entry::Vacant(entry) => entry.insert(HashMap::new()),
             };
 
             // match storage.
-            match account_state.2.entry(old_storage.key) {
+            match account_state.entry(old_storage.key.into()) {
                 hash_map::Entry::Vacant(entry) => {
                     let new_storage = plain_storage_cursor
                         .seek_by_key_subkey(address, old_storage.key)?
@@ -688,44 +699,46 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
             };
 
-            reverts
-                .entry(block_number)
+            bundle_builder
+                .get_revert_storage_mut()
+                .entry((block_number, address))
                 .or_default()
-                .entry(address)
-                .or_default()
-                .1
-                .push(old_storage);
+                .push((old_storage.key.into(), old_storage.value));
         }
+
+        let bundle_state = bundle_builder.build();
 
         if TAKE {
             // iterate over local plain state remove all account and all storages.
-            for (address, (old_account, new_account, storage)) in &state {
+
+            for (address, bundle_account) in &bundle_state.state {
                 // revert account if needed.
-                if old_account != new_account {
+                if bundle_account.is_info_changed() {
                     let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
-                    if let Some(account) = old_account {
-                        plain_accounts_cursor.upsert(*address, *account)?;
+                    if let Some(account) = &bundle_account.original_info {
+                        plain_accounts_cursor.upsert(*address, into_reth_acc(account.clone()))?;
                     } else if existing_entry.is_some() {
                         plain_accounts_cursor.delete_current()?;
                     }
                 }
 
                 // revert storages
-                for (storage_key, (old_storage_value, _new_storage_value)) in storage {
+                for (storage_key, storage_slot) in &bundle_account.storage {
+                    let storage_key: B256 = (*storage_key).into();
                     let storage_entry =
-                        StorageEntry { key: *storage_key, value: *old_storage_value };
+                        StorageEntry { key: storage_key, value: storage_slot.original_value() };
                     // delete previous value
                     // TODO: This does not use dupsort features
                     if plain_storage_cursor
-                        .seek_by_key_subkey(*address, *storage_key)?
-                        .filter(|s| s.key == *storage_key)
+                        .seek_by_key_subkey(*address, storage_key)?
+                        .filter(|s| s.key == storage_key)
                         .is_some()
                     {
                         plain_storage_cursor.delete_current()?
                     }
 
                     // insert value if needed
-                    if *old_storage_value != U256::ZERO {
+                    if storage_slot.original_value() != U256::ZERO {
                         plain_storage_cursor.upsert(*address, storage_entry)?;
                     }
                 }
@@ -749,11 +762,9 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             receipts.push(block_receipts);
         }
 
-        Ok(ExecutionOutcome::new_init(
-            state,
-            reverts,
-            Vec::new(),
-            receipts.into(),
+        Ok(ExecutionOutcome::new(
+            bundle_state,
+            reth_primitives::Receipts::from(receipts),
             start_block_number,
             Vec::new(),
         ))
