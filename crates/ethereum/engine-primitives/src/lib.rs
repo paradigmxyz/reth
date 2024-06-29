@@ -23,45 +23,121 @@ pub use reth_rpc_types::{
     },
     ExecutionPayloadV1,
 };
+use serde::{de::DeserializeOwned, Serialize};
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct EthEngineTypes<P, PA, PBA> {
-    _phantom: std::marker::PhantomData<(P, PA, PBA)>,
+pub struct EthEngineTypes<P, PA, PBA, V1, V2, V3, V4> {
+    _phantom: std::marker::PhantomData<(P, PA, PBA, V1, V2, V3, V4)>,
 }
 
 /// The default mainnet ethereum beacon consensus engine.
-pub type EthEngine =
-    EthEngineTypes<EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes>;
+pub type EthEngine = EthEngineTypes<
+    EthBuiltPayload,
+    EthPayloadAttributes,
+    EthPayloadBuilderAttributes,
+    ExecutionPayloadV1,
+    ExecutionPayloadEnvelopeV2,
+    ExecutionPayloadEnvelopeV3,
+    ExecutionPayloadEnvelopeV4,
+>;
 
-impl<P, PA, PBA> PayloadTypes for EthEngineTypes<P, PA, PBA>
+impl<P, PA, PBA, V1, V2, V3, V4> PayloadTypes for EthEngineTypes<P, PA, PBA, V1, V2, V3, V4>
 where
+    Self: std::marker::Unpin,
     P: BuiltPayload + Unpin + Clone,
     PA: PayloadAttributes + Unpin + Clone,
     PBA: PayloadBuilderAttributes<RpcPayloadAttributes = PA> + Unpin + Clone,
-    Self: std::marker::Unpin,
+    V1: DeserializeOwned
+        + std::fmt::Debug
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static
+        + std::convert::From<P>,
+    V2: DeserializeOwned
+        + std::fmt::Debug
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static
+        + std::convert::From<P>,
+    V3: DeserializeOwned
+        + std::fmt::Debug
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static
+        + std::convert::From<P>,
+    V4: DeserializeOwned
+        + std::fmt::Debug
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static
+        + std::convert::From<P>,
 {
     type BuiltPayload = P;
     type PayloadAttributes = PA;
     type PayloadBuilderAttributes = PBA;
 }
 
-impl<P, PA, PBA> EngineTypes for EthEngineTypes<P, PA, PBA>
+impl<P, PA, PBA, V1, V2, V3, V4> EngineTypes for EthEngineTypes<P, PA, PBA, V1, V2, V3, V4>
 where
+    Self: std::marker::Unpin,
     P: BuiltPayload + Unpin + Clone,
     PA: PayloadAttributes + Unpin + Clone,
     PBA: PayloadBuilderAttributes<RpcPayloadAttributes = PA> + Unpin + Clone,
-    Self: std::marker::Unpin,
-    ExecutionPayloadEnvelopeV4: std::convert::From<P>,
-    ExecutionPayloadEnvelopeV3: std::convert::From<P>,
-    ExecutionPayloadEnvelopeV2: std::convert::From<P>,
-    ExecutionPayloadV1: std::convert::From<P>,
+    V1: DeserializeOwned
+        + std::fmt::Debug
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static
+        + std::convert::From<P>,
+    V2: DeserializeOwned
+        + std::fmt::Debug
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static
+        + std::convert::From<P>,
+    V3: DeserializeOwned
+        + std::fmt::Debug
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static
+        + std::convert::From<P>,
+    V4: DeserializeOwned
+        + std::fmt::Debug
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static
+        + std::convert::From<P>,
 {
-    type ExecutionPayloadV1 = ExecutionPayloadV1;
-    type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
-    type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
-    type ExecutionPayloadV4 = ExecutionPayloadEnvelopeV4;
+    type ExecutionPayloadV1 = V1;
+    type ExecutionPayloadV2 = V2;
+    type ExecutionPayloadV3 = V3;
+    type ExecutionPayloadV4 = V4;
 
     fn validate_version_specific_fields(
         chain_spec: &ChainSpec,
