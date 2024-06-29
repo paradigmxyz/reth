@@ -1,6 +1,9 @@
 use futures_util::StreamExt;
-use reth::network::{NetworkEvent, NetworkEvents, NetworkHandle, PeersInfo};
-use reth_chainspec::net::NodeRecord;
+use reth::{
+    network::{NetworkEvent, NetworkEvents, NetworkHandle, PeersInfo},
+    rpc::types::PeerId,
+};
+use reth_network_peers::NodeRecord;
 use reth_tokio_util::EventStream;
 use reth_tracing::tracing::info;
 
@@ -23,7 +26,7 @@ impl NetworkTestContext {
 
         match self.network_events.next().await {
             Some(NetworkEvent::PeerAdded(_)) => (),
-            _ => panic!("Expected a peer added event"),
+            ev => panic!("Expected a peer added event, got: {ev:?}"),
         }
     }
 
@@ -32,13 +35,17 @@ impl NetworkTestContext {
         self.network.local_node_record()
     }
 
-    /// Expects a session to be established
-    pub async fn expect_session(&mut self) {
-        match self.network_events.next().await {
-            Some(NetworkEvent::SessionEstablished { remote_addr, .. }) => {
-                info!(?remote_addr, "Session established")
+    /// Awaits the next event for an established session.
+    pub async fn next_session_established(&mut self) -> Option<PeerId> {
+        while let Some(ev) = self.network_events.next().await {
+            match ev {
+                NetworkEvent::SessionEstablished { peer_id, .. } => {
+                    info!("Session established with peer: {:?}", peer_id);
+                    return Some(peer_id)
+                }
+                _ => continue,
             }
-            _ => panic!("Expected session established event"),
         }
+        None
     }
 }

@@ -10,7 +10,7 @@ use alloy_primitives::BlockNumber;
 use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
 use reth_provider::{
-    DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
+    DatabaseProviderFactory, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
 };
 use reth_prune_types::{PruneLimiter, PruneProgress, PruneSegment};
 use reth_tokio_util::{EventSender, EventStream};
@@ -133,10 +133,8 @@ impl<DB: Database> Pruner<DB> {
             limiter = limiter.set_time_limit(timeout);
         };
 
-        let provider = self.provider_factory.provider_rw()?;
         let (stats, deleted_entries, progress) =
-            self.prune_segments(&provider, tip_block_number, &mut limiter)?;
-        provider.commit()?;
+            self.prune_segments(tip_block_number, &mut limiter)?;
 
         self.previous_tip_block_number = Some(tip_block_number);
 
@@ -171,7 +169,6 @@ impl<DB: Database> Pruner<DB> {
     /// Returns [`PrunerStats`], total number of entries pruned, and [`PruneProgress`].
     fn prune_segments(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
         tip_block_number: BlockNumber,
         limiter: &mut PruneLimiter,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
@@ -200,15 +197,15 @@ impl<DB: Database> Pruner<DB> {
                 );
 
                 let segment_start = Instant::now();
-                let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
+                let previous_checkpoint = self
+                    .provider_factory
+                    .database_provider_ro()?
+                    .get_prune_checkpoint(segment.segment())?;
                 let output = segment.prune(
-                    provider,
+                    &self.provider_factory,
                     PruneInput { previous_checkpoint, to_block, limiter: limiter.clone() },
                 )?;
-                if let Some(checkpoint) = output.checkpoint {
-                    segment
-                        .save_checkpoint(provider, checkpoint.as_prune_checkpoint(prune_mode))?;
-                }
+
                 self.metrics
                     .get_prune_segment_metrics(segment.segment())
                     .duration_seconds

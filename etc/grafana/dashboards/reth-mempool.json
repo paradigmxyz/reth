@@ -1719,6 +1719,23 @@
           "range": true,
           "refId": "C",
           "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blob_transactions_nonce_gaps{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Blob transactions nonce gaps",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
         }
       ],
       "title": "All Transactions metrics",

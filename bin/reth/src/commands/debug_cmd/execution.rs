@@ -26,15 +26,14 @@ use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
     BlockExecutionWriter, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
 };
-use reth_prune_types::PruneModes;
+use reth_prune::PruneModes;
 use reth_stages::{
-    sets::DefaultStages,
-    stages::{ExecutionStage, ExecutionStageThresholds},
-    Pipeline, StageId, StageSet,
+    sets::DefaultStages, stages::ExecutionStage, ExecutionStageThresholds, Pipeline, StageId,
+    StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
 use tracing::*;
 
@@ -130,11 +129,6 @@ impl Command {
             .network
             .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::new(self.network.addr, self.network.port))
-            .discovery_addr(SocketAddr::new(
-                self.network.discovery.addr,
-                self.network.discovery.port,
-            ))
             .build(provider_factory)
             .start_network()
             .await?;

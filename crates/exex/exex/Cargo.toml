@@ -24,6 +24,11 @@ reth-tasks.workspace = true
 reth-tracing.workspace = true
 reth-network.workspace = true
 reth-payload-builder.workspace = true
+reth-evm.workspace = true
+reth-prune-types.workspace = true
+reth-revm.workspace = true
+reth-stages-api.workspace = true
+reth-db-api.workspace = true
 
 ## async
 tokio.workspace = true
@@ -33,6 +38,17 @@ tokio-util.workspace = true
 eyre.workspace = true
 metrics.workspace = true
 serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+reth-chainspec.workspace = true
+reth-evm-ethereum.workspace = true
+reth-testing-utils.workspace = true
+reth-blockchain-tree.workspace = true
+reth-db-common.workspace = true
+reth-node-api.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+
+secp256k1.workspace = true
 
 [features]
 default = []

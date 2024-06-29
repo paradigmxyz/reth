@@ -113,6 +113,14 @@ impl BlockReader for NoopProvider {
         Ok(None)
     }
 
+    fn sealed_block_with_senders(
+        &self,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        Ok(None)
+    }
+
     fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         Ok(vec![])
     }
@@ -355,22 +363,6 @@ impl EvmEnvProvider for NoopProvider {
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        Ok(())
-    }
-
-    fn fill_block_env_at(
-        &self,
-        _block_env: &mut BlockEnv,
-        _at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        Ok(())
-    }
-
-    fn fill_block_env_with_header(
-        &self,
-        _block_env: &mut BlockEnv,
-        _header: &Header,
-    ) -> ProviderResult<()> {
         Ok(())
     }
 

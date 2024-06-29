@@ -12,8 +12,13 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
+use core::ops::Deref;
+
 use reth_chainspec::ChainSpec;
-use reth_primitives::{revm::env::fill_block_env, Address, Header, TransactionSigned, U256};
+use reth_primitives::{
+    revm::env::{fill_block_env, fill_tx_env},
+    Address, Header, TransactionSigned, TransactionSignedEcRecovered, U256,
+};
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv};
 
@@ -27,6 +32,7 @@ pub mod provider;
 pub mod test_utils;
 
 /// Trait for configuring the EVM for executing full blocks.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// Associated type for the default external context that should be configured for the EVM.
     type DefaultExternalContext<'a>;
@@ -98,9 +104,21 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 
 /// This represents the set of methods used to configure the EVM's environment before block
 /// execution.
+///
+/// Default trait method  implementation is done w.r.t. L1.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
+    /// Returns a [`TxEnv`] from a [`TransactionSignedEcRecovered`].
+    fn tx_env(&self, transaction: &TransactionSignedEcRecovered) -> TxEnv {
+        let mut tx_env = TxEnv::default();
+        self.fill_tx_env(&mut tx_env, transaction.deref(), transaction.signer());
+        tx_env
+    }
+
     /// Fill transaction environment from a [`TransactionSigned`] and the given sender address.
-    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address);
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        fill_tx_env(tx_env, transaction, sender)
+    }
 
     /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header
     fn fill_cfg_env(

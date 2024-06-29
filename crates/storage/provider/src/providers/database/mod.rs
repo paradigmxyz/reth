@@ -330,6 +330,14 @@ impl<DB: Database> BlockReader for ProviderFactory<DB> {
         self.provider()?.block_with_senders(id, transaction_kind)
     }
 
+    fn sealed_block_with_senders(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        self.provider()?.sealed_block_with_senders(id, transaction_kind)
+    }
+
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         self.provider()?.block_range(range)
     }
@@ -517,22 +525,6 @@ impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
         EvmConfig: ConfigureEvmEnv,
     {
         self.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
-    }
-
-    fn fill_block_env_at(
-        &self,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        self.provider()?.fill_block_env_at(block_env, at)
-    }
-
-    fn fill_block_env_with_header(
-        &self,
-        block_env: &mut BlockEnv,
-        header: &Header,
-    ) -> ProviderResult<()> {
-        self.provider()?.fill_block_env_with_header(block_env, header)
     }
 
     fn fill_cfg_env_at<EvmConfig>(

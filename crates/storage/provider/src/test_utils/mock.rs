@@ -474,6 +474,14 @@ impl BlockReader for MockEthProvider {
         Ok(None)
     }
 
+    fn sealed_block_with_senders(
+        &self,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        Ok(None)
+    }
+
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         let lock = self.blocks.lock();
 
@@ -596,22 +604,6 @@ impl EvmEnvProvider for MockEthProvider {
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        Ok(())
-    }
-
-    fn fill_block_env_at(
-        &self,
-        _block_env: &mut BlockEnv,
-        _at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        Ok(())
-    }
-
-    fn fill_block_env_with_header(
-        &self,
-        _block_env: &mut BlockEnv,
-        _header: &Header,
-    ) -> ProviderResult<()> {
         Ok(())
     }
 

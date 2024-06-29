@@ -1,7 +1,7 @@
 //! Optimism block executor.
 
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
-use reth_chainspec::{ChainSpec, Hardfork};
+use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
@@ -11,9 +11,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::validate_block_post_execution;
-use reth_primitives::{
-    BlockNumber, BlockWithSenders, Header, Receipt, Receipts, TxType, Withdrawals, U256,
-};
+use reth_primitives::{BlockNumber, BlockWithSenders, Header, Receipt, Receipts, TxType, U256};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
@@ -23,7 +21,7 @@ use reth_revm::{
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
+    BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ResultAndState,
 };
 use std::sync::Arc;
 use tracing::trace;
@@ -55,7 +53,7 @@ where
 {
     fn op_executor<DB>(&self, db: DB) -> OpBlockExecutor<EvmConfig, DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
     {
         OpBlockExecutor::new(
             self.chain_spec.clone(),
@@ -69,19 +67,21 @@ impl<EvmConfig> BlockExecutorProvider for OpExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
-    type Executor<DB: Database<Error = ProviderError>> = OpBlockExecutor<EvmConfig, DB>;
+    type Executor<DB: Database<Error: Into<ProviderError> + std::fmt::Display>> =
+        OpBlockExecutor<EvmConfig, DB>;
 
-    type BatchExecutor<DB: Database<Error = ProviderError>> = OpBatchExecutor<EvmConfig, DB>;
+    type BatchExecutor<DB: Database<Error: Into<ProviderError> + std::fmt::Display>> =
+        OpBatchExecutor<EvmConfig, DB>;
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
     {
         self.op_executor(db)
     }
 
     fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
     {
         let executor = self.op_executor(db);
         OpBatchExecutor {
@@ -118,7 +118,7 @@ where
         mut evm: Evm<'_, Ext, &mut State<DB>>,
     ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
     {
         // apply pre execution changes
         apply_beacon_root_contract_call(
@@ -131,7 +131,7 @@ where
 
         // execute transactions
         let is_regolith =
-            self.chain_spec.fork(Hardfork::Regolith).active_at_timestamp(block.timestamp);
+            self.chain_spec.fork(OptimismHardfork::Regolith).active_at_timestamp(block.timestamp);
 
         // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
         // blocks will always have at least a single transaction in them (the L1 info transaction),
@@ -175,14 +175,21 @@ where
                 .transpose()
                 .map_err(|_| OptimismBlockExecutionError::AccountLoadFailed(*sender))?;
 
-            EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender);
+            self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
 
             // Execute transaction.
             let ResultAndState { result, state } = evm.transact().map_err(move |err| {
+                let new_err = match err {
+                    EVMError::Transaction(e) => EVMError::Transaction(e),
+                    EVMError::Header(e) => EVMError::Header(e),
+                    EVMError::Database(e) => EVMError::Database(e.into()),
+                    EVMError::Custom(e) => EVMError::Custom(e),
+                    EVMError::Precompile(e) => EVMError::Precompile(e),
+                };
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {
                     hash: transaction.recalculate_hash(),
-                    error: err.into(),
+                    error: Box::new(new_err),
                 }
             })?;
 
@@ -211,7 +218,7 @@ where
                 // this is only set for post-Canyon deposit transactions.
                 deposit_receipt_version: (transaction.is_deposit() &&
                     self.chain_spec
-                        .is_fork_active_at_timestamp(Hardfork::Canyon, block.timestamp))
+                        .is_fork_active_at_timestamp(OptimismHardfork::Canyon, block.timestamp))
                 .then_some(1),
             });
         }
@@ -255,7 +262,7 @@ impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
     /// Configures a new evm configuration and block environment for the given block.
     ///
@@ -315,16 +322,8 @@ where
         block: &BlockWithSenders,
         total_difficulty: U256,
     ) -> Result<(), BlockExecutionError> {
-        let balance_increments = post_block_balance_increments(
-            self.chain_spec(),
-            block.number,
-            block.difficulty,
-            block.beneficiary,
-            block.timestamp,
-            total_difficulty,
-            &block.ommers,
-            block.withdrawals.as_ref().map(Withdrawals::as_ref),
-        );
+        let balance_increments =
+            post_block_balance_increments(self.chain_spec(), block, total_difficulty);
         // increment balances
         self.state
             .increment_balances(balance_increments)
@@ -337,7 +336,7 @@ where
 impl<EvmConfig, DB> Executor<DB> for OpBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
@@ -394,7 +393,7 @@ impl<EvmConfig, DB> OpBatchExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> BatchExecutor<DB> for OpBatchExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = ExecutionOutcome;

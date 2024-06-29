@@ -14,7 +14,7 @@ use crate::{
     WithdrawalsProvider,
 };
 use itertools::{izip, Itertools};
-use reth_chainspec::{ChainInfo, ChainSpec};
+use reth_chainspec::{ChainInfo, ChainSpec, EthereumHardforks};
 use reth_db::{tables, BlockNumberList};
 use reth_db_api::{
     common::KeyValue,
@@ -32,10 +32,8 @@ use reth_evm::ConfigureEvmEnv;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives::{
-    keccak256,
-    revm::{config::revm_spec, env::fill_block_env},
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders,
-    GotExpected, Head, Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders,
+    keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber,
+    BlockWithSenders, GotExpected, Header, Receipt, Requests, SealedBlock, SealedBlockWithSenders,
     SealedHeader, StaticFileSegment, StorageEntry, TransactionMeta, TransactionSigned,
     TransactionSignedEcRecovered, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal,
     Withdrawals, B256, U256,
@@ -48,7 +46,7 @@ use reth_trie::{
     updates::TrieUpdates,
     HashedPostState, Nibbles, StateRoot,
 };
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
+use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     cmp::Ordering,
     collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
@@ -357,6 +355,65 @@ impl<TX: DbTx> DatabaseProvider<TX> {
             |range, _| self.cursor_collect(cursor, range),
             |_| true,
         )
+    }
+
+    fn block_with_senders<H, HF, B, BF>(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+        header_by_number: HF,
+        construct_block: BF,
+    ) -> ProviderResult<Option<B>>
+    where
+        H: AsRef<Header>,
+        HF: FnOnce(BlockNumber) -> ProviderResult<Option<H>>,
+        BF: FnOnce(
+            H,
+            Vec<TransactionSigned>,
+            Vec<Address>,
+            Vec<Header>,
+            Option<Withdrawals>,
+            Option<Requests>,
+        ) -> ProviderResult<Option<B>>,
+    {
+        let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
+        let Some(header) = header_by_number(block_number)? else { return Ok(None) };
+
+        let ommers = self.ommers(block_number.into())?.unwrap_or_default();
+        let withdrawals =
+            self.withdrawals_by_block(block_number.into(), header.as_ref().timestamp)?;
+        let requests = self.requests_by_block(block_number.into(), header.as_ref().timestamp)?;
+
+        // Get the block body
+        //
+        // If the body indices are not found, this means that the transactions either do not exist
+        // in the database yet, or they do exit but are not indexed. If they exist but are not
+        // indexed, we don't have enough information to return the block anyways, so we return
+        // `None`.
+        let Some(body) = self.block_body_indices(block_number)? else { return Ok(None) };
+
+        let tx_range = body.tx_num_range();
+
+        let (transactions, senders) = if tx_range.is_empty() {
+            (vec![], vec![])
+        } else {
+            (self.transactions_by_tx_range(tx_range.clone())?, self.senders_by_tx_range(tx_range)?)
+        };
+
+        let body = transactions
+            .into_iter()
+            .map(|tx| match transaction_kind {
+                TransactionVariant::NoHash => TransactionSigned {
+                    // Caller explicitly asked for no hash, so we don't calculate it
+                    hash: B256::ZERO,
+                    signature: tx.signature,
+                    transaction: tx.transaction,
+                },
+                TransactionVariant::WithHash => tx.with_hash(),
+            })
+            .collect();
+
+        construct_block(header, body, senders, ommers, withdrawals, requests)
     }
 
     /// Returns a range of blocks from the database.
@@ -1552,48 +1609,41 @@ impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<BlockWithSenders>> {
-        let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
-        let Some(header) = self.header_by_number(block_number)? else { return Ok(None) };
+        self.block_with_senders(
+            id,
+            transaction_kind,
+            |block_number| self.header_by_number(block_number),
+            |header, body, senders, ommers, withdrawals, requests| {
+                Block { header, body, ommers, withdrawals, requests }
+                    // Note: we're using unchecked here because we know the block contains valid txs
+                    // wrt to its height and can ignore the s value check so pre
+                    // EIP-2 txs are allowed
+                    .try_with_senders_unchecked(senders)
+                    .map(Some)
+                    .map_err(|_| ProviderError::SenderRecoveryError)
+            },
+        )
+    }
 
-        let ommers = self.ommers(block_number.into())?.unwrap_or_default();
-        let withdrawals = self.withdrawals_by_block(block_number.into(), header.timestamp)?;
-        let requests = self.requests_by_block(block_number.into(), header.timestamp)?;
-
-        // Get the block body
-        //
-        // If the body indices are not found, this means that the transactions either do not exist
-        // in the database yet, or they do exit but are not indexed. If they exist but are not
-        // indexed, we don't have enough information to return the block anyways, so we return
-        // `None`.
-        let Some(body) = self.block_body_indices(block_number)? else { return Ok(None) };
-
-        let tx_range = body.tx_num_range();
-
-        let (transactions, senders) = if tx_range.is_empty() {
-            (vec![], vec![])
-        } else {
-            (self.transactions_by_tx_range(tx_range.clone())?, self.senders_by_tx_range(tx_range)?)
-        };
-
-        let body = transactions
-            .into_iter()
-            .map(|tx| match transaction_kind {
-                TransactionVariant::NoHash => TransactionSigned {
-                    // Caller explicitly asked for no hash, so we don't calculate it
-                    hash: B256::ZERO,
-                    signature: tx.signature,
-                    transaction: tx.transaction,
-                },
-                TransactionVariant::WithHash => tx.with_hash(),
-            })
-            .collect();
-
-        Block { header, body, ommers, withdrawals, requests }
-            // Note: we're using unchecked here because we know the block contains valid txs wrt to
-            // its height and can ignore the s value check so pre EIP-2 txs are allowed
-            .try_with_senders_unchecked(senders)
-            .map(Some)
-            .map_err(|_| ProviderError::SenderRecoveryError)
+    fn sealed_block_with_senders(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        self.block_with_senders(
+            id,
+            transaction_kind,
+            |block_number| self.sealed_header(block_number),
+            |header, body, senders, ommers, withdrawals, requests| {
+                SealedBlock { header, body, ommers, withdrawals, requests }
+                    // Note: we're using unchecked here because we know the block contains valid txs
+                    // wrt to its height and can ignore the s value check so pre
+                    // EIP-2 txs are allowed
+                    .try_with_senders_unchecked(senders)
+                    .map(Some)
+                    .map_err(|_| ProviderError::SenderRecoveryError)
+            },
+        )
     }
 
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
@@ -2002,41 +2052,6 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
             header,
             total_difficulty,
         );
-        Ok(())
-    }
-
-    fn fill_block_env_at(
-        &self,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
-
-        self.fill_block_env_with_header(block_env, &header)
-    }
-
-    fn fill_block_env_with_header(
-        &self,
-        block_env: &mut BlockEnv,
-        header: &Header,
-    ) -> ProviderResult<()> {
-        let total_difficulty = self
-            .header_td_by_number(header.number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        let spec_id = revm_spec(
-            &self.chain_spec,
-            Head {
-                number: header.number,
-                timestamp: header.timestamp,
-                difficulty: header.difficulty,
-                total_difficulty,
-                // Not required
-                hash: Default::default(),
-            },
-        );
-        let after_merge = spec_id >= SpecId::MERGE;
-        fill_block_env(block_env, &self.chain_spec, header, after_merge);
         Ok(())
     }
 

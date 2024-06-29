@@ -489,7 +489,7 @@ impl Decodable for Header {
     }
 }
 
-#[cfg(feature = "arbitrary")]
+#[cfg(any(test, feature = "test-utils", feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for Header {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         // Generate an arbitrary header, passing it to the generate_valid_header function to make

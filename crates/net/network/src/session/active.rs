@@ -3,7 +3,6 @@
 use crate::{
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerResponse, PeerResponseResult},
     session::{
-        config::INITIAL_REQUEST_TIMEOUT,
         conn::EthRlpxConnection,
         handle::{ActiveSessionMessage, SessionCommand},
         SessionId,
@@ -20,6 +19,7 @@ use reth_eth_wire::{
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_p2p::error::RequestError;
 use reth_network_peers::PeerId;
+use reth_network_types::session::config::INITIAL_REQUEST_TIMEOUT;
 use rustc_hash::FxHashMap;
 use std::{
     collections::VecDeque,
@@ -759,10 +759,7 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::{
-        config::PROTOCOL_BREACH_REQUEST_TIMEOUT, handle::PendingSessionEvent,
-        start_pending_incoming_session,
-    };
+    use crate::session::{handle::PendingSessionEvent, start_pending_incoming_session};
     use reth_chainspec::MAINNET;
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
@@ -770,7 +767,8 @@ mod tests {
         UnauthedEthStream, UnauthedP2PStream,
     };
     use reth_network_peers::pk2id;
-    use reth_primitives::{ForkFilter, Hardfork};
+    use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
+    use reth_primitives::{EthereumHardfork, ForkFilter};
     use secp256k1::{SecretKey, SECP256K1};
     use tokio::{
         net::{TcpListener, TcpStream},
@@ -920,7 +918,7 @@ mod tests {
                 local_peer_id,
                 status: StatusBuilder::default().build(),
                 fork_filter: MAINNET
-                    .hardfork_fork_filter(Hardfork::Frontier)
+                    .hardfork_fork_filter(EthereumHardfork::Frontier)
                     .expect("The Frontier fork filter should exist on mainnet"),
             }
         }

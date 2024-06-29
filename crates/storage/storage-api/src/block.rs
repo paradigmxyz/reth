@@ -118,6 +118,17 @@ pub trait BlockReader:
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<BlockWithSenders>>;
 
+    /// Returns the sealed block with senders with matching number or hash from database.
+    ///
+    /// Returns the block's transactions in the requested variant.
+    ///
+    /// Returns `None` if block is not found.
+    fn sealed_block_with_senders(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>>;
+
     /// Returns all blocks in the given inclusive range.
     ///
     /// Note: returns only available blocks

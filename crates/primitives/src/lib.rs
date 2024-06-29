@@ -14,8 +14,6 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
-#![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -117,13 +115,7 @@ pub use c_kzg as kzg;
 #[cfg(feature = "optimism")]
 mod optimism {
     pub use crate::transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID};
-    pub use reth_chainspec::{
-        net::{
-            base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes, OP_BOOTNODES,
-            OP_TESTNET_BOOTNODES,
-        },
-        BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA,
-    };
+    pub use reth_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 }
 
 #[cfg(feature = "optimism")]

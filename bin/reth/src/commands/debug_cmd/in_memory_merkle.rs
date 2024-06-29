@@ -26,7 +26,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
 use reth_trie::{updates::TrieKey, StateRoot};
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tracing::*;
 
 /// `reth debug in-memory-merkle` command
@@ -64,11 +64,6 @@ impl Command {
             .network
             .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::new(self.network.addr, self.network.port))
-            .discovery_addr(SocketAddr::new(
-                self.network.discovery.addr,
-                self.network.discovery.port,
-            ))
             .build(provider_factory)
             .start_network()
             .await?;
@@ -201,7 +196,7 @@ impl Command {
                 (Some(in_mem), Some(incr)) => {
                     similar_asserts::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
                     if in_mem.1 != incr.1 &&
-                        matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.0.len() > self.skip_node_depth.unwrap_or_default())
+                        matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.len() > self.skip_node_depth.unwrap_or_default())
                     {
                         in_mem_mismatched.push(in_mem);
                         incremental_mismatched.push(incr);
