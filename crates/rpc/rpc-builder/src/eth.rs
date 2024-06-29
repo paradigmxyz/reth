@@ -47,7 +47,7 @@ impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Networ
         config: EthConfig,
         executor: Tasks,
         events: Events,
-        eth_api_builder: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Server = EthApi>
+        eth_api_builder: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi = EthApi>
             + 'static,
     ) -> EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi> {
         EthHandlersBuilder {
@@ -74,7 +74,7 @@ pub struct EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig,
     executor: Tasks,
     events: Events,
     eth_api_builder:
-        Box<dyn EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Server = EthApi>>,
+        Box<dyn EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi = EthApi>>,
 }
 
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
@@ -241,15 +241,15 @@ pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events> {
 /// Builds [`EthApiServer`](reth_rpc_eth_api::EthApiServer), the core `eth` namespace API.
 pub trait EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events>: Debug {
     /// `eth` namespace RPC server type.
-    type Server;
+    type EthApi;
 
     /// Builds the [`EthApiServer`](reth_rpc_eth_api::EthApiServer), for given context.
     fn build(
         &self,
         ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
-    ) -> Self::Server
+    ) -> Self::EthApi
     where
-        Self::Server: FullEthApiServer;
+        Self::EthApi: FullEthApiServer;
 }
 
 /// Ethereum layer one `eth` RPC server builder.
@@ -266,12 +266,12 @@ where
     Events: CanonStateSubscriptions,
     EvmConfig: ConfigureEvm,
 {
-    type Server = EthApi<Provider, Pool, Network, EvmConfig>;
+    type EthApi = EthApi<Provider, Pool, Network, EvmConfig>;
 
     fn build(
         &self,
         ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
-    ) -> Self::Server {
+    ) -> Self::EthApi {
         let gas_oracle = GasPriceOracleBuilder::build(ctx);
         let fee_history_cache = FeeHistoryCacheBuilder::build(ctx);
 

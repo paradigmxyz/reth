@@ -219,7 +219,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>(
     executor: Tasks,
     events: Events,
     evm_config: EvmConfig,
-    eth: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Server = EthApi>
+    eth: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi = EthApi>
         + 'static,
 ) -> Result<RpcServerHandle, RpcError>
 where
@@ -425,7 +425,7 @@ where
         self,
         module_config: TransportRpcModuleConfig,
         engine: EngineApi,
-        eth: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Server = EthApi>
+        eth: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi = EthApi>
             + 'static,
     ) -> (
         TransportRpcModules,
@@ -484,7 +484,7 @@ where
     pub fn into_registry<EthApi>(
         self,
         config: RpcModuleConfig,
-        eth: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Server = EthApi>
+        eth: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi = EthApi>
             + 'static,
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
     where
@@ -501,7 +501,7 @@ where
     pub fn build<EthApi>(
         self,
         module_config: TransportRpcModuleConfig,
-        eth: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Server = EthApi>
+        eth: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi = EthApi>
             + 'static,
     ) -> TransportRpcModules<()>
     where
@@ -647,7 +647,7 @@ where
         events: Events,
         config: RpcModuleConfig,
         evm_config: EvmConfig,
-        eth_server_builder: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Server = EthApi>
+        eth_server_builder: impl EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi = EthApi>
             + 'static,
     ) -> Self
     where
