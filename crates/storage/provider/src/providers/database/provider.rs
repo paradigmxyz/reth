@@ -29,7 +29,7 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_evm::ConfigureEvmEnv;
-use reth_execution_types::Chain;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_primitives::{
     keccak256, Account, Address, Block, BlockHash, BlockHashOrNumber, BlockNumber,
