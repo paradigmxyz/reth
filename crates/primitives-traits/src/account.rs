@@ -66,6 +66,12 @@ impl Bytecode {
     }
 }
 
+impl From<Bytecode> for RevmBytecode {
+    fn from(value: Bytecode) -> Self {
+        value.0
+    }
+}
+
 impl Compact for Bytecode {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where

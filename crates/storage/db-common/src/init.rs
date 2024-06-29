@@ -21,6 +21,7 @@ use reth_provider::{
 use reth_revm::db::states::BundleBuilder;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
+use revm::db::states::BundleBuilder;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -145,52 +146,61 @@ pub fn insert_state<'a, 'b, DB: Database>(
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
     block: u64,
 ) -> ProviderResult<()> {
+    // Create an empty bundle builder to accumulate the state changes
     let mut bundle_builder = BundleBuilder::default();
 
+    // Iterate over each address and its corresponding account
     for (address, account) in alloc {
+        // Check if the account has associated bytecode
         let bytecode_hash = if let Some(code) = &account.code {
+            // Create a new bytecode object from the code
             let bytecode = Bytecode::new_raw(code.clone());
+            // Compute the hash of the bytecode
             let hash = bytecode.hash_slow();
+            // Add the contract with its bytecode to the bundle builder
             bundle_builder = bundle_builder.contract(hash, bytecode.into());
+            // Store the hash for later use
             Some(hash)
         } else {
+            // No bytecode, so no hash
             None
         };
 
-        // get state
+        // Get the storage of the account, converting it to the required format
         let storage = account
             .storage
             .as_ref()
             .map(|m| {
                 m.iter()
-                    .map(|(key, value)| {
-                        let value = U256::from_be_bytes(value.0);
-                        ((*key).into(), (U256::ZERO, value))
-                    })
+                    .map(|(key, value)| ((*key).into(), (U256::ZERO, (*value).into())))
                     .collect::<HashMap<_, _>>()
             })
             .unwrap_or_default();
 
+        // Update the bundle builder with the account's state
         bundle_builder = bundle_builder
-            .revert_storage(
-                block,
-                *address,
-                storage.keys().map(|k| (*k, U256::ZERO)).collect::<Vec<(U256, U256)>>(),
-            )
+            .revert_storage(block, *address, storage.keys().map(|k| (*k, U256::ZERO)).collect())
             .state_present_account_info(
                 *address,
-                into_revm_acc(Account {
+                Account {
                     nonce: account.nonce.unwrap_or_default(),
                     balance: account.balance,
                     bytecode_hash,
-                }),
+                }
+                .into(),
             )
             .state_storage(*address, storage);
     }
 
-    let execution_outcome =
-        ExecutionOutcome::new(bundle_builder.build(), Receipts::default(), block, Vec::new());
+    // Create an execution outcome
+    let execution_outcome = ExecutionOutcome::from_state_builder(
+        bundle_builder,
+        Receipts::default(),
+        block,
+        Vec::new(),
+    );
 
+    // Write the execution outcome to the database storage
     execution_outcome.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;
 
     trace!(target: "reth::cli", "Inserted state");
