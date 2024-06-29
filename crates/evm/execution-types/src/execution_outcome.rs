@@ -1,12 +1,13 @@
 use reth_primitives::{
     logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests,
-    B256, U256,
+    StorageEntry, B256, U256,
 };
 use reth_trie::HashedPostState;
 use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,
 };
+use std::collections::HashMap;
 
 /// Represents the outcome of block execution, including post-execution changes and reverts.
 ///
@@ -34,6 +35,16 @@ pub struct ExecutionOutcome {
     pub requests: Vec<Requests>,
 }
 
+/// Type used to initialize revms bundle state.
+pub type BundleStateInit =
+    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
+
+/// Types used inside `RevertsInit` to initialize revms reverts.
+pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
+
+/// Type used to initialize revms reverts.
+pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
+
 impl ExecutionOutcome {
     /// Creates a new `ExecutionOutcome`.
     ///
@@ -45,6 +56,48 @@ impl ExecutionOutcome {
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
+        Self { bundle, receipts, first_block, requests }
+    }
+
+    /// Creates a new `ExecutionOutcome` from initialization parameters.
+    ///
+    /// This constructor initializes a new `ExecutionOutcome` instance using detailed
+    /// initialization parameters.
+    pub fn new_init(
+        state_init: BundleStateInit,
+        revert_init: RevertsInit,
+        contracts_init: Vec<(B256, Bytecode)>,
+        receipts: Receipts,
+        first_block: BlockNumber,
+        requests: Vec<Requests>,
+    ) -> Self {
+        // sort reverts by block number
+        let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
+        reverts.sort_unstable_by_key(|a| a.0);
+
+        // initialize revm bundle
+        let bundle = BundleState::new(
+            state_init.into_iter().map(|(address, (original, present, storage))| {
+                (
+                    address,
+                    original.map(Into::into),
+                    present.map(Into::into),
+                    storage.into_iter().map(|(k, s)| (k.into(), s)).collect(),
+                )
+            }),
+            reverts.into_iter().map(|(_, reverts)| {
+                // does not needs to be sorted, it is done when taking reverts.
+                reverts.into_iter().map(|(address, (original, storage))| {
+                    (
+                        address,
+                        original.map(|i| i.map(Into::into)),
+                        storage.into_iter().map(|entry| (entry.key.into(), entry.value)),
+                    )
+                })
+            }),
+            contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
+        );
+
         Self { bundle, receipts, first_block, requests }
     }
 
@@ -341,7 +394,37 @@ mod tests {
         };
 
         // Assert that creating a new ExecutionOutcome using the constructor matches exec_res
-        assert_eq!(ExecutionOutcome::new(bundle, receipts, first_block, requests), exec_res);
+        assert_eq!(
+            ExecutionOutcome::new(bundle, receipts.clone(), first_block, requests.clone()),
+            exec_res
+        );
+
+        // Create a BundleStateInit object and insert initial data
+        let mut state_init: BundleStateInit = HashMap::new();
+        state_init
+            .insert(Address::new([2; 20]), (None, Some(Account::default()), HashMap::default()));
+
+        // Create a HashMap for account reverts and insert initial data
+        let mut revert_inner: HashMap<Address, AccountRevertInit> = HashMap::new();
+        revert_inner.insert(Address::new([2; 20]), (None, vec![]));
+
+        // Create a RevertsInit object and insert the revert_inner data
+        let mut revert_init: RevertsInit = HashMap::new();
+        revert_init.insert(123, revert_inner);
+
+        // Assert that creating a new ExecutionOutcome using the new_init method matches
+        // exec_res
+        assert_eq!(
+            ExecutionOutcome::new_init(
+                state_init,
+                revert_init,
+                vec![],
+                receipts,
+                first_block,
+                requests,
+            ),
+            exec_res
+        );
     }
 
     #[test]
