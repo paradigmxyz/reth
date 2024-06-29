@@ -11,10 +11,10 @@
 mod payload;
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_chainspec::ChainSpec;
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{BuiltPayload, EngineTypes};
 use reth_payload_primitives::{
     validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    PayloadOrAttributes, PayloadTypes,
+    PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes, PayloadTypes,
 };
 pub use reth_rpc_types::{
     engine::{
@@ -27,15 +27,37 @@ pub use reth_rpc_types::{
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct EthEngineTypes;
-
-impl PayloadTypes for EthEngineTypes {
-    type BuiltPayload = EthBuiltPayload;
-    type PayloadAttributes = EthPayloadAttributes;
-    type PayloadBuilderAttributes = EthPayloadBuilderAttributes;
+pub struct EthEngineTypes<P, PA, PBA> {
+    _phantom: std::marker::PhantomData<(P, PA, PBA)>,
 }
 
-impl EngineTypes for EthEngineTypes {
+/// The default mainnet ethereum beacon consensus engine.
+pub type EthEngine =
+    EthEngineTypes<EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes>;
+
+impl<P, PA, PBA> PayloadTypes for EthEngineTypes<P, PA, PBA>
+where
+    P: BuiltPayload + Unpin + Clone,
+    PA: PayloadAttributes + Unpin + Clone,
+    PBA: PayloadBuilderAttributes<RpcPayloadAttributes = PA> + Unpin + Clone,
+    Self: std::marker::Unpin,
+{
+    type BuiltPayload = P;
+    type PayloadAttributes = PA;
+    type PayloadBuilderAttributes = PBA;
+}
+
+impl<P, PA, PBA> EngineTypes for EthEngineTypes<P, PA, PBA>
+where
+    P: BuiltPayload + Unpin + Clone,
+    PA: PayloadAttributes + Unpin + Clone,
+    PBA: PayloadBuilderAttributes<RpcPayloadAttributes = PA> + Unpin + Clone,
+    Self: std::marker::Unpin,
+    ExecutionPayloadEnvelopeV4: std::convert::From<P>,
+    ExecutionPayloadEnvelopeV3: std::convert::From<P>,
+    ExecutionPayloadEnvelopeV2: std::convert::From<P>,
+    ExecutionPayloadV1: std::convert::From<P>,
+{
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
@@ -44,7 +66,7 @@ impl EngineTypes for EthEngineTypes {
     fn validate_version_specific_fields(
         chain_spec: &ChainSpec,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, EthPayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, PA>,
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(chain_spec, version, payload_or_attrs)
     }

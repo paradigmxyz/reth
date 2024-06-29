@@ -14,7 +14,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_engine_primitives::EthEngine;
 use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_exex_types::FinishedExExHeight;
@@ -45,7 +45,7 @@ type TestBeaconConsensusEngine<Client> = BeaconConsensusEngine<
     Arc<DatabaseEnv>,
     BlockchainProvider<Arc<DatabaseEnv>>,
     Arc<Either<Client, NoopFullBlockClient>>,
-    EthEngineTypes,
+    EthEngine,
 >;
 
 #[derive(Debug)]
@@ -54,14 +54,14 @@ pub struct TestEnv<DB> {
     // Keep the tip receiver around, so it's not dropped.
     #[allow(dead_code)]
     tip_rx: watch::Receiver<B256>,
-    engine_handle: BeaconConsensusEngineHandle<EthEngineTypes>,
+    engine_handle: BeaconConsensusEngineHandle<EthEngine>,
 }
 
 impl<DB> TestEnv<DB> {
     const fn new(
         db: DB,
         tip_rx: watch::Receiver<B256>,
-        engine_handle: BeaconConsensusEngineHandle<EthEngineTypes>,
+        engine_handle: BeaconConsensusEngineHandle<EthEngine>,
     ) -> Self {
         Self { db, tip_rx, engine_handle }
     }
@@ -331,7 +331,7 @@ where
             }
             TestConsensusConfig::Test => Arc::new(TestConsensus::default()),
         };
-        let payload_builder = spawn_test_payload_service::<EthEngineTypes>();
+        let payload_builder = spawn_test_payload_service::<EthEngine>();
 
         // use either noop client or a user provided client (for example TestFullBlockClient)
         let client = Arc::new(

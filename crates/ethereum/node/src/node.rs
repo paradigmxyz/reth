@@ -1,11 +1,11 @@
 //! Ethereum Node types config.
 
-use crate::{EthEngineTypes, EthEvmConfig};
+use crate::EthEvmConfig;
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{
-    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
+    EthBuiltPayload, EthEngine, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
@@ -61,12 +61,12 @@ impl EthereumNode {
 
 impl NodeTypes for EthereumNode {
     type Primitives = ();
-    type Engine = EthEngineTypes;
+    type Engine = EthEngine;
 }
 
 impl<N> Node<N> for EthereumNode
 where
-    N: FullNodeTypes<Engine = EthEngineTypes>,
+    N: FullNodeTypes<Engine = EthEngine>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,

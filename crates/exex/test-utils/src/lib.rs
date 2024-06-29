@@ -29,7 +29,7 @@ use reth_node_builder::{
 use reth_node_core::node_config::NodeConfig;
 use reth_node_ethereum::{
     node::{EthereumNetworkBuilder, EthereumPayloadBuilder},
-    EthEngineTypes, EthEvmConfig,
+    EthEngine, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
 use reth_primitives::{Head, SealedBlockWithSenders};
@@ -110,12 +110,12 @@ pub struct TestNode;
 
 impl NodeTypes for TestNode {
     type Primitives = ();
-    type Engine = EthEngineTypes;
+    type Engine = EthEngine;
 }
 
 impl<N> Node<N> for TestNode
 where
-    N: FullNodeTypes<Engine = EthEngineTypes>,
+    N: FullNodeTypes<Engine = EthEngine>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -241,7 +241,7 @@ pub async fn test_exex_context_with_chain_spec(
     .await?;
     let network = network_manager.handle().clone();
 
-    let (_, payload_builder) = NoopPayloadBuilderService::<EthEngineTypes>::new();
+    let (_, payload_builder) = NoopPayloadBuilderService::<EthEngine>::new();
 
     let tasks = TaskManager::current();
     let task_executor = tasks.executor();

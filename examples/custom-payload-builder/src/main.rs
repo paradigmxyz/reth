@@ -20,7 +20,7 @@ use reth::{
     transaction_pool::TransactionPool,
 };
 use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
-use reth_node_ethereum::{EthEngineTypes, EthereumNode};
+use reth_node_ethereum::{EthEngine, EthereumNode};
 use reth_payload_builder::PayloadBuilderService;
 
 pub mod generator;
@@ -32,7 +32,7 @@ pub struct CustomPayloadBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadBuilder
 where
-    Node: FullNodeTypes<Engine = EthEngineTypes>,
+    Node: FullNodeTypes<Engine = EthEngine>,
     Pool: TransactionPool + Unpin + 'static,
 {
     async fn spawn_payload_service(
