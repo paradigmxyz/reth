@@ -326,7 +326,7 @@ mod test {
         assert_eq!(segments_len + 1, total_segments);
         // back at start table
         assert_eq!(TableRef::default(), ring.current_table());
-        assert_eq!(TableRef::Drop(segments_len - 1), ring.prev_table().unwrap());
+        assert_eq!(TableRef::Other(segments_len - 1), ring.prev_table().unwrap());
     }
 
     #[test]
@@ -354,7 +354,7 @@ mod test {
         assert_eq!(segments_len + 3, total_segments);
         // back at start table
         assert_eq!(TableRef::default(), ring.current_table());
-        assert_eq!(TableRef::Drop(segments_len - 1), ring.prev_table().unwrap());
+        assert_eq!(TableRef::Other(segments_len - 1), ring.prev_table().unwrap());
     }
 
     const fn expected_prev_table(start_index: usize) -> TableRef {
