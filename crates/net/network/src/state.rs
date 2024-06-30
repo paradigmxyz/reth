@@ -278,7 +278,8 @@ where
         self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
     }
 
-    pub(crate) fn remove_peer(&mut self, peer_id: PeerId, kind: PeerKind) {
+    /// Removes a peer and its address with the given kind from the peerset.
+    pub(crate) fn remove_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind) {
         match kind {
             PeerKind::Basic | PeerKind::Static => self.peers_manager.remove_peer(peer_id),
             PeerKind::Trusted => self.peers_manager.remove_peer_from_trusted_set(peer_id),

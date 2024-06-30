@@ -562,7 +562,7 @@ where
                 }
             }
             NetworkHandleMessage::RemovePeer(peer_id, kind) => {
-                self.swarm.state_mut().remove_peer(peer_id, kind);
+                self.swarm.state_mut().remove_peer_kind(peer_id, kind);
             }
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
