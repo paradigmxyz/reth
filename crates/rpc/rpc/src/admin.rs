@@ -85,8 +85,8 @@ where
                         remote_address: peer.remote_addr,
                         local_address: peer.local_addr.unwrap_or_else(|| self.network.local_addr()),
                         inbound: peer.direction.is_incoming(),
-                        trusted: false,     // TODO: check
-                        static_node: false, // TODO: check
+                        trusted: peer.kind.is_trusted(),
+                        static_node: false, // TODO: add static kind
                     },
                     protocols: PeerProtocolInfo {
                         eth: Some(EthPeerInfo::Info(EthInfo {

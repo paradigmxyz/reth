@@ -211,6 +211,8 @@ pub struct PeerInfo {
     pub status: Arc<Status>,
     /// The timestamp when the session to that peer has been established.
     pub session_established: Instant,
+    /// The peer's connection kind
+    pub kind: PeerKind,
 }
 
 /// The direction of the connection.

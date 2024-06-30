@@ -870,8 +870,8 @@ where
         let peer_manager = self.swarm.state().peers();
         let mut peers = Vec::with_capacity(peer_manager.num_known_peers());
         for (peer_id, session) in self.swarm.sessions().active_sessions() {
-            if let Some(record) = peer_manager.peer_by_id(*peer_id) {
-                peers.push(session.peer_info(&record));
+            if let Some((record, kind)) = peer_manager.peer_by_id(*peer_id) {
+                peers.push(session.peer_info(&record, kind));
             }
         }
         peers
@@ -882,7 +882,11 @@ where
     /// Returns `None` if there's no active session to the peer.
     fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
         if let Some(session) = self.swarm.sessions().active_sessions().get(&peer_id) {
-            self.swarm.state().peers().peer_by_id(peer_id).map(|record| session.peer_info(&record))
+            self.swarm
+                .state()
+                .peers()
+                .peer_by_id(peer_id)
+                .map(|(record, kind)| session.peer_info(&record, kind))
         } else {
             None
         }
