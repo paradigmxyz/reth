@@ -71,6 +71,7 @@ fdlimit.workspace = true
 confy.workspace = true
 rayon.workspace = true
 backon.workspace = true
+derive_more.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

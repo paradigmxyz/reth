@@ -7543,6 +7543,7 @@ dependencies = [
  "aquamarine",
  "backon",
  "confy",
+ "derive_more",
  "eyre",
  "fdlimit",
  "futures",

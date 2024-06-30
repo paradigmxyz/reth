@@ -1,10 +1,8 @@
 //! Builder support for rpc components.
 
-use std::{
-    fmt,
-    ops::{Deref, DerefMut},
-};
+use std::fmt;
 
+use derive_more::{Deref, DerefMut};
 use futures::TryFutureExt;
 use reth_network::NetworkHandle;
 use reth_node_api::FullNodeComponents;
@@ -148,7 +146,7 @@ impl<Node: FullNodeComponents> ExtendRpcModules<Node> for () {
 }
 
 /// Helper wrapper type to encapsulate the [`RpcRegistryInner`] over components trait.
-#[derive(Debug)]
+#[derive(Debug, Deref, DerefMut, Clone)]
 #[allow(clippy::type_complexity)]
 pub struct RpcRegistry<Node: FullNodeComponents> {
     pub(crate) registry: RpcRegistryInner<
@@ -159,33 +157,6 @@ pub struct RpcRegistry<Node: FullNodeComponents> {
         Node::Provider,
         EthApi<Node::Provider, Node::Pool, NetworkHandle, Node::Evm>,
     >,
-}
-
-impl<Node: FullNodeComponents> Deref for RpcRegistry<Node> {
-    type Target = RpcRegistryInner<
-        Node::Provider,
-        Node::Pool,
-        NetworkHandle,
-        TaskExecutor,
-        Node::Provider,
-        EthApi<Node::Provider, Node::Pool, NetworkHandle, Node::Evm>,
-    >;
-
-    fn deref(&self) -> &Self::Target {
-        &self.registry
-    }
-}
-
-impl<Node: FullNodeComponents> DerefMut for RpcRegistry<Node> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.registry
-    }
-}
-
-impl<Node: FullNodeComponents> Clone for RpcRegistry<Node> {
-    fn clone(&self) -> Self {
-        Self { registry: self.registry.clone() }
-    }
 }
 
 /// Helper container to encapsulate [`RpcRegistryInner`], [`TransportRpcModules`] and
