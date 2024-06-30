@@ -140,8 +140,9 @@ impl ActiveSessionHandle {
         PeerInfo {
             remote_id: self.remote_id,
             direction: self.direction,
-            tcp_addr: record.tcp_addr(),
-            udp_addr: record.udp_addr(),
+            enode: record.to_string(),
+            enr: None,
+            remote_addr: self.remote_addr,
             local_addr: self.local_addr,
             capabilities: self.capabilities.clone(),
             client_version: self.client_version.clone(),
