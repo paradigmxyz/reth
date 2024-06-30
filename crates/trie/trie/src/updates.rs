@@ -76,6 +76,15 @@ impl TrieOp {
             None
         }
     }
+
+    /// Returns owned updated branch node if operation is [`Self::Update`].
+    pub fn into_update(self) -> Option<BranchNodeCompact> {
+        if let Self::Update(node) = self {
+            Some(node)
+        } else {
+            None
+        }
+    }
 }
 
 /// The aggregation of trie updates.
