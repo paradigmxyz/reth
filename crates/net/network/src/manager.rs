@@ -881,18 +881,13 @@ where
     ///
     /// Returns `None` if there's no active session to the peer.
     fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
-        self.swarm
-            .sessions()
-            .active_sessions()
-            .get(&peer_id)
-            .map(|session| {
-                self.swarm
-                    .state()
-                    .peers()
-                    .peer_by_id(peer_id)
-                    .map(|(record, kind)| session.peer_info(&record, kind))
-            })
-            .flatten()
+        self.swarm.sessions().active_sessions().get(&peer_id).and_then(|session| {
+            self.swarm
+                .state()
+                .peers()
+                .peer_by_id(peer_id)
+                .map(|(record, kind)| session.peer_info(&record, kind))
+        })
     }
 
     /// Returns [`PeerInfo`] for a given peers.

@@ -68,7 +68,7 @@ where
         let peers = self.network.get_all_peers().await.to_rpc_result()?;
         let mut infos = Vec::with_capacity(peers.len());
 
-        for peer in peers.into_iter() {
+        for peer in peers {
             if let Ok(pk) = id2pk(peer.remote_id) {
                 infos.push(PeerInfo {
                     id: pk.to_string(),
