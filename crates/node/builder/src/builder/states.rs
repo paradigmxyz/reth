@@ -5,6 +5,16 @@
 //! The node builder process is essentially a state machine that transitions through various states
 //! before the node can be launched.
 
+use std::{fmt, future::Future};
+
+use derive_more::Constructor;
+use reth_exex::ExExContext;
+use reth_network::NetworkHandle;
+use reth_node_api::{FullNodeComponents, FullNodeComponentsExt, FullNodeTypes, NodeTypes, Rpc};
+use reth_node_core::node_config::NodeConfig;
+use reth_payload_builder::PayloadBuilderHandle;
+use reth_tasks::TaskExecutor;
+
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     exex::BoxedLaunchExEx,
@@ -13,13 +23,6 @@ use crate::{
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
     FullNode,
 };
-use reth_exex::ExExContext;
-use reth_network::NetworkHandle;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
-use reth_node_core::node_config::NodeConfig;
-use reth_payload_builder::PayloadBuilderHandle;
-use reth_tasks::TaskExecutor;
-use std::{fmt, future::Future};
 
 /// A node builder that also has the configured types.
 pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
@@ -36,7 +39,10 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     }
 
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB>
+    pub fn with_components<CB, R>(
+        self,
+        components_builder: CB,
+    ) -> NodeBuilderWithComponents<T, CB, R>
     where
         CB: NodeComponentsBuilder<T>,
     {
@@ -48,8 +54,8 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             components_builder,
             add_ons: NodeAddOns {
                 hooks: NodeHooks::default(),
-                rpc: RpcHooks::new(),
                 exexs: Vec::new(),
+                hooks_ext: NodeAddOnsExt::new(RpcHooks::new()),
             },
         }
     }
@@ -77,7 +83,7 @@ impl<T: FullNodeTypes> fmt::Debug for NodeTypesAdapter<T> {
 /// Container for the node's types and the components and other internals that can be used by addons
 /// of the node.
 pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
-    /// The components of the node.
+    /// The core components of the node.
     pub components: C,
     /// The task executor for the node.
     pub task_executor: TaskExecutor,
@@ -142,7 +148,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
 /// A fully type configured node builder.
 ///
 /// Supports adding additional addons to the node.
-pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> {
+pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsBuilder<T>, X> {
     /// All settings for how the node should be configured.
     pub(crate) config: NodeConfig,
     /// Adapter for the underlying node types and database
@@ -153,13 +159,13 @@ pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsBuilder
     pub(crate) add_ons: NodeAddOns<NodeAdapter<T, CB::Components>>,
 }
 
-impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T, CB> {
+impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>, X> NodeBuilderWithComponents<T, CB, X> {
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
         F: FnOnce(NodeAdapter<T, CB::Components>) -> eyre::Result<()> + Send + 'static,
     {
-        self.add_ons.hooks.set_on_component_initialized(hook);
+        self.add_ons.hooks = self.add_ons.hooks.on_components_initialized(hook);
         self
     }
 
@@ -212,14 +218,6 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
         self
     }
 
-    /// Launches the node with the given launcher.
-    pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
-    where
-        L: LaunchNode<Self>,
-    {
-        launcher.launch_node(self).await
-    }
-
     /// Launches the node with the given closure.
     pub fn launch_with_fn<L, R>(self, launcher: L) -> R
     where
@@ -236,12 +234,84 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
     }
 }
 
+impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>, X> NodeBuilderWithComponents<T, CB, X> {
+    /// Launches the node with the given launcher.
+    pub async fn launch_with<L, C>(self, launcher: L) -> eyre::Result<L::Node>
+    where
+        L: LaunchNode<Self>,
+    {
+        launcher.launch_node(self).await
+    }
+}
+
 /// Additional node extensions.
 pub(crate) struct NodeAddOns<Node: FullNodeComponents> {
     /// Additional `NodeHooks` that are called at specific points in the node's launch lifecycle.
     pub(crate) hooks: NodeHooks<Node>,
-    /// Additional RPC hooks.
-    pub(crate) rpc: RpcHooks<Node>,
     /// The `ExExs` (execution extensions) of the node.
     pub(crate) exexs: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
+    /// Hooks for optional components.
+    pub(crate) hooks_ext: NodeAddOnsExt<Node>,
+}
+
+#[derive(Constructor)]
+pub struct NodeAddOnsExt<Node: FullNodeComponents> {
+    /// Additional RPC hooks.
+    pub rpc: RpcHooks<Node>,
+}
+
+pub struct NodeAdapterExt<Node: FullNodeComponents, Rpc: Rpc<Self>> {
+    pub core: Node,
+    pub rpc: Rpc,
+}
+
+impl<Node, Rpc> FullNodeComponents for NodeAdapterExt<Node, Rpc>
+where
+    Node: FullNodeComponents,
+    Rpc: Rpc<Self>,
+{
+    type Pool = Node::Pool;
+    type Evm = Node::Evm;
+    type Executor = Node::Executor;
+
+    fn pool(&self) -> &Self::Pool {
+        self.core.pool()
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        self.core.evm_config()
+    }
+
+    fn block_executor(&self) -> &Self::Executor {
+        self.core.block_executor()
+    }
+
+    fn provider(&self) -> &Self::Provider {
+        self.core.provider()
+    }
+
+    fn network(&self) -> &NetworkHandle {
+        self.core.network()
+    }
+
+    fn payload_builder(&self) -> &PayloadBuilderHandle<Self::Engine> {
+        self.core.payload_builder()
+    }
+
+    fn task_executor(&self) -> &TaskExecutor {
+        self.core.task_executor()
+    }
+}
+
+impl<T, C, Rpc> FullNodeComponentsExt for NodeAdapterExt<NodeAdapter<T, C>, Rpc>
+where
+    T: FullNodeTypes,
+    C: NodeComponents<T>,
+    Rpc: Rpc<Self>,
+{
+    type Rpc = Rpc;
+
+    fn rpc(&self) -> &Self::Rpc {
+        &self.rpc
+    }
 }

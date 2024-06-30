@@ -7,25 +7,29 @@
 //!
 //! Components depend on a fully type configured node: [FullNodeTypes](crate::node::FullNodeTypes).
 
-use crate::{ConfigureEvm, FullNodeTypes};
-pub use builder::*;
-pub use consensus::*;
-pub use execute::*;
-pub use network::*;
-pub use payload::*;
-pub use pool::*;
-use reth_consensus::Consensus;
-use reth_evm::execute::BlockExecutorProvider;
-use reth_network::NetworkHandle;
-use reth_payload_builder::PayloadBuilderHandle;
-use reth_transaction_pool::TransactionPool;
-
 mod builder;
 mod consensus;
 mod execute;
 mod network;
 mod payload;
 mod pool;
+
+pub use builder::*;
+pub use consensus::*;
+pub use execute::*;
+pub use network::*;
+pub use payload::*;
+pub use pool::*;
+
+use std::ops::Deref;
+
+use reth_consensus::Consensus;
+use reth_evm::execute::BlockExecutorProvider;
+use reth_network::NetworkHandle;
+use reth_payload_builder::PayloadBuilderHandle;
+use reth_transaction_pool::TransactionPool;
+
+use crate::{ConfigureEvm, FullNodeTypes};
 
 /// An abstraction over the components of a node, consisting of:
 ///  - evm and executor

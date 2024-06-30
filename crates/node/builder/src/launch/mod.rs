@@ -1,12 +1,7 @@
 //! Abstraction for launching a node.
 
-use crate::{
-    builder::{NodeAdapter, NodeAddOns, NodeTypesAdapter},
-    components::{NodeComponents, NodeComponentsBuilder},
-    hooks::NodeHooks,
-    node::FullNode,
-    NodeBuilderWithComponents, NodeHandle,
-};
+use std::{future::Future, sync::Arc};
+
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
@@ -16,10 +11,11 @@ use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, 
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::NetworkEvents;
-use reth_node_api::FullNodeTypes;
+use reth_node_api::{FullNodeComponentsExt, FullNodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
+    rpc::eth::FullEthApiServer,
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
@@ -30,9 +26,17 @@ use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
-use std::{future::Future, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+
+use crate::{
+    builder::{NodeAdapter, NodeAdapterExt, NodeAddOns, NodeTypesAdapter},
+    components::{NodeComponents, NodeComponentsBuilder},
+    hooks::NodeHooks,
+    node::FullNode,
+    rpc::{RethRpcServerHandles, RpcRegistry},
+    NodeBuilderWithComponents, NodeHandle,
+};
 
 pub mod common;
 pub use common::LaunchContext;
@@ -80,22 +84,24 @@ impl DefaultNodeLauncher {
     }
 }
 
-impl<T, CB> LaunchNode<NodeBuilderWithComponents<T, CB>> for DefaultNodeLauncher
+impl<T, CB, R, X, EthApi> LaunchNode<NodeBuilderWithComponents<T, CB, X>> for DefaultNodeLauncher
 where
     T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
+    X: FullNodeComponentsExt,
     CB: NodeComponentsBuilder<T>,
+    EthApi: FullEthApiServer,
 {
-    type Node = NodeHandle<NodeAdapter<T, CB::Components>>;
+    type Node = NodeHandle<NodeAdapterExt<T, CB::Components>>;
 
-    async fn launch_node(
+    async fn launch_node<C>(
         self,
-        target: NodeBuilderWithComponents<T, CB>,
+        target: NodeBuilderWithComponents<T, CB, R>,
     ) -> eyre::Result<Self::Node> {
         let Self { ctx } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             components_builder,
-            add_ons: NodeAddOns { hooks, rpc, exexs: installed_exex },
+            add_ons: NodeAddOns { hooks, exexs: installed_exex, hooks_ext },
             config,
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
@@ -128,12 +134,12 @@ where
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
             .with_blockchain_db::<T>().await?
-            .with_components(components_builder, on_component_initialized).await?;
+            .with_components::<_, X>(components_builder, move |ctx, n| move || on_component_initialized(ctx, n, hooks_ext) ).await?;
 
         // spawn exexs
         let exex_manager_handle = ExExLauncher::new(
             ctx.head(),
-            ctx.node_adapter().clone(),
+            ctx.components().clone(),
             installed_exex,
             ctx.configs().clone(),
         )
@@ -182,10 +188,10 @@ where
             let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(
                 ctx.chain_spec(),
                 ctx.blockchain_db().clone(),
-                ctx.components().pool().clone(),
+                ctx.pool().clone(),
                 consensus_engine_tx.clone(),
                 mining_mode,
-                ctx.components().block_executor().clone(),
+                ctx.block_executor().clone(),
             )
             .build();
 
@@ -288,100 +294,16 @@ where
             ),
         );
 
-        let client = ClientVersionV1 {
-            code: CLIENT_CODE,
-            name: NAME_CLIENT.to_string(),
-            version: CARGO_PKG_VERSION.to_string(),
-            commit: VERGEN_GIT_SHA.to_string(),
-        };
-        let engine_api = EngineApi::new(
-            ctx.blockchain_db().clone(),
-            ctx.chain_spec(),
-            beacon_engine_handle,
-            ctx.components().payload_builder().clone().into(),
-            Box::new(ctx.task_executor().clone()),
-            client,
-        );
-        info!(target: "reth::cli", "Engine API handler initialized");
-
-        // extract the jwt secret from the args if possible
-        let jwt_secret = ctx.auth_jwt_secret()?;
-
-        // Start RPC servers
-        let (rpc_server_handles, rpc_registry) = crate::rpc::launch_rpc_servers(
-            ctx.node_adapter().clone(),
-            engine_api,
-            ctx.node_config(),
-            jwt_secret,
-            rpc,
-        )
-        .await?;
-
-        // in dev mode we generate 20 random dev-signer accounts
-        if ctx.is_dev() {
-            rpc_registry.eth_api().with_dev_accounts();
-        }
-
-        // Run consensus engine to completion
-        let (tx, rx) = oneshot::channel();
-        info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
-            let res = beacon_consensus_engine.await;
-            let _ = tx.send(res);
-        });
-
-        if let Some(maybe_custom_etherscan_url) = ctx.node_config().debug.etherscan.clone() {
-            info!(target: "reth::cli", "Using etherscan as consensus client");
-
-            let chain = ctx.node_config().chain.chain;
-            let etherscan_url = maybe_custom_etherscan_url.map(Ok).unwrap_or_else(|| {
-                // If URL isn't provided, use default Etherscan URL for the chain if it is known
-                chain
-                    .etherscan_urls()
-                    .map(|urls| urls.0.to_string())
-                    .ok_or_else(|| eyre::eyre!("failed to get etherscan url for chain: {chain}"))
-            })?;
-
-            let block_provider = EtherscanBlockProvider::new(
-                etherscan_url,
-                chain.etherscan_api_key().ok_or_else(|| {
-                    eyre::eyre!(
-                        "etherscan api key not found for rpc consensus client for chain: {chain}"
-                    )
-                })?,
-            );
-            let rpc_consensus_client = DebugConsensusClient::new(
-                rpc_server_handles.auth.clone(),
-                Arc::new(block_provider),
-            );
-            ctx.task_executor().spawn_critical("etherscan consensus client", async move {
-                rpc_consensus_client.run::<T::Engine>().await
-            });
-        }
-
-        if let Some(rpc_ws_url) = ctx.node_config().debug.rpc_consensus_ws.clone() {
-            info!(target: "reth::cli", "Using rpc provider as consensus client");
-
-            let block_provider = RpcBlockProvider::new(rpc_ws_url);
-            let rpc_consensus_client = DebugConsensusClient::new(
-                rpc_server_handles.auth.clone(),
-                Arc::new(block_provider),
-            );
-            ctx.task_executor().spawn_critical("rpc consensus client", async move {
-                rpc_consensus_client.run::<T::Engine>().await
-            });
-        }
-
         let full_node = FullNode {
             evm_config: ctx.components().evm_config().clone(),
             block_executor: ctx.components().block_executor().clone(),
             pool: ctx.components().pool().clone(),
             network: ctx.components().network().clone(),
-            provider: ctx.node_adapter().provider.clone(),
+            provider: ctx.components().provider().clone(),
             payload_builder: ctx.components().payload_builder().clone(),
             task_executor: ctx.task_executor().clone(),
-            rpc_server_handles,
-            rpc_registry,
+            rpc_server_handles: ctx.rpc().rpc_server_handles(),
+            rpc_registry: ctx.rpc().rpc_registry(),
             config: ctx.node_config().clone(),
             data_dir: ctx.data_dir().clone(),
         };

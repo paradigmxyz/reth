@@ -4,7 +4,7 @@
 
 use crate::{
     common::WithConfigs,
-    components::NodeComponentsBuilder,
+    components::{NodeComponents, NodeComponentsBuilder},
     node::FullNode,
     rpc::{RethRpcServerHandles, RpcContext},
     DefaultNodeLauncher, Node, NodeHandle,
@@ -208,10 +208,10 @@ where
     /// Preconfigures the node with a specific node implementation.
     ///
     /// This is a convenience method that sets the node's types and components in one call.
-    pub fn node<N>(
+    pub fn node<N, T, X>(
         self,
         node: N,
-    ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>
+    ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, X>
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
@@ -255,10 +255,10 @@ where
     /// Preconfigures the node with a specific node implementation.
     ///
     /// This is a convenience method that sets the node's types and components in one call.
-    pub fn node<N>(
+    pub fn node<N, T, X>(
         self,
         node: N,
-    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>>
+    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, X>>
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
@@ -270,7 +270,7 @@ where
     /// This bootstraps the node internals, creates all the components with the given [Node]
     ///
     /// Returns a [`NodeHandle`] that can be used to interact with the node.
-    pub async fn launch_node<N>(
+    pub async fn launch_node<N, X>(
         self,
         node: N,
     ) -> eyre::Result<
@@ -284,7 +284,7 @@ where
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.node(node).launch().await
+        self.node::<_, X>(node).launch().await
     }
 }
 
@@ -294,10 +294,10 @@ where
     T: NodeTypes,
 {
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB>(
+    pub fn with_components<CB, X>(
         self,
         components_builder: CB,
-    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
+    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, X>>
     where
         CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     {
@@ -308,7 +308,7 @@ where
     }
 }
 
-impl<T, DB, CB> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
+impl<T, DB, CB, X> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, X>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: NodeTypes,
