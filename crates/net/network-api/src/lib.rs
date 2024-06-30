@@ -195,8 +195,10 @@ pub struct PeerInfo {
     pub remote_id: PeerId,
     /// The client's name and version
     pub client_version: Arc<str>,
-    /// The peer's address we're connected to
-    pub remote_addr: SocketAddr,
+    /// The peer's TCP address we're connected to
+    pub tcp_addr: SocketAddr,
+    /// The peer's UDP address used as discovery
+    pub udp_addr: SocketAddr,
     /// The local address of the connection
     pub local_addr: Option<SocketAddr>,
     /// The direction of the session
