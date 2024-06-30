@@ -288,7 +288,7 @@ where
     let mut server_config = config.rpc.rpc_server_config();
 
     let cloned_modules = modules.clone();
-    let launch_rpc = server_config.build_ws_http(&cloned_modules).await?;
+    let launch_rpc = server_config.start_ws_http(&cloned_modules).await?;
 
     if let Some(path) = launch_rpc.ipc_endpoint() {
         info!(target: "reth::cli", %path, "RPC IPC server started");

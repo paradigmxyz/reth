@@ -65,11 +65,8 @@
 //!         evm_config,
 //!     )
 //!     .build(transports);
-//!     let handle = RpcServerConfig::default()
-//!         .with_http(ServerBuilder::default())
-//!         .start(transport_modules)
-//!         .await
-//!         .unwrap();
+//!     let mut handle = RpcServerConfig::default().with_http(ServerBuilder::default());
+//!     handle.start_ws_http(&transport_modules).await.unwrap();
 //! }
 //! ```
 //!
@@ -139,10 +136,10 @@
 //!
 //!     // start the servers
 //!     let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
-//!     let config = RpcServerConfig::default();
+//!     let mut config = RpcServerConfig::default();
 //!
 //!     let (_rpc_handle, _auth_handle) =
-//!         try_join!(modules.start_server(config), auth_module.start_server(auth_config),)
+//!         try_join!(config.start_ws_http(&modules), auth_module.start_server(auth_config),)
 //!             .unwrap();
 //! }
 //! ```
@@ -254,12 +251,10 @@ where
 {
     let module_config = module_config.into();
     let mut server_config = server_config.into();
-
-    let value = RpcModuleBuilder::new(provider, pool, network, executor, events, evm_config)
+    let modules = RpcModuleBuilder::new(provider, pool, network, executor, events, evm_config)
         .build(module_config);
-
-    let output: RpcServerHandle = server_config.build_ws_http(&value).await?;
-    Ok(output)
+    let handle: RpcServerHandle = server_config.start_ws_http(&modules).await?;
+    Ok(handle)
 }
 
 /// A builder type to configure the RPC module: See [`RpcModule`]
@@ -1249,8 +1244,6 @@ impl RpcServerConfig {
     }
 
     /// Returns true if any server is configured.
-    ///
-    /// If no server is configured, no server will be launched on [`RpcServerConfig::start`].
     pub const fn has_server(&self) -> bool {
         self.http_server_config.is_some() ||
             self.ws_server_config.is_some() ||
@@ -1285,7 +1278,7 @@ impl RpcServerConfig {
     /// Builds the ws and http server(s).
     ///
     /// If both are on the same port, they are combined into one server.
-    pub async fn build_ws_http(
+    pub async fn start_ws_http(
         &mut self,
         modules: &TransportRpcModules,
     ) -> Result<RpcServerHandle, RpcError> {
@@ -1314,7 +1307,7 @@ impl RpcServerConfig {
                             http_cors_domains: Some(http_cors.clone()),
                             ws_cors_domains: Some(ws_cors.clone()),
                         }
-                        .into())
+                        .into());
                     }
                     Some(ws_cors)
                 }
@@ -1362,9 +1355,9 @@ impl RpcServerConfig {
                 http: http_handle,
                 ws: ws_handle,
                 ipc_endpoint: None,
-                ipc: None,     
+                ipc: None,
                 jwt_secret: self.jwt_secret,
-            })
+            });
         }
 
         let mut http_local_addr = None;
@@ -1417,18 +1410,17 @@ impl RpcServerConfig {
             http_local_addr = Some(local_addr);
             http_server = Some(server);
         }
-
-        http_handle =
-            Some(http_server.expect("REASON").start(modules.http.clone().expect("REASON")));
-        ws_handle = Some(ws_server.expect("REASON").start(modules.ws.clone().expect("REASON")));
-
+        http_handle = http_server
+            .map(|http_server| http_server.start(modules.http.clone().expect("http server error")));
+        ws_handle = ws_server
+            .map(|ws_server| ws_server.start(modules.ws.clone().expect("ws server error")));
         Ok(RpcServerHandle {
             http_local_addr,
             ws_local_addr,
             http: http_handle,
             ws: ws_handle,
             ipc_endpoint: None,
-            ipc: None,     
+            ipc: None,
             jwt_secret: self.jwt_secret,
         })
     }
@@ -1596,7 +1588,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no http transport is configured.
     pub fn merge_http(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut http) = self.http {
-            return http.merge(other.into()).map(|_| true)
+            return http.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -1608,7 +1600,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no ws transport is configured.
     pub fn merge_ws(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ws) = self.ws {
-            return ws.merge(other.into()).map(|_| true)
+            return ws.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -1620,7 +1612,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no ipc transport is configured.
     pub fn merge_ipc(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ipc) = self.ipc {
-            return ipc.merge(other.into()).map(|_| true)
+            return ipc.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
