@@ -21,6 +21,7 @@ reth-trie-common.workspace = true
 reth-chainspec.workspace = true
 revm.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
+revm-precompile = { workspace = true }
 
 # ethereum
 alloy-consensus = { workspace = true, features = ["serde"] }

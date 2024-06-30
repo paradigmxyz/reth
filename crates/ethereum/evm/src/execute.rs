@@ -5,7 +5,8 @@ use crate::{
     taiko::{check_anchor_tx, TaikoData}, EthEvmConfig,
 };
 use reth_chainspec::{ChainSpec, MAINNET};
-pub use reth_ethereum_consensus::validate_block_post_execution;
+pub use reth_consensus::Consensus;
+pub use reth_ethereum_consensus::{EthBeaconConsensus, validate_block_post_execution};
 use reth_evm::{
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,

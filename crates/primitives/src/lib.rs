@@ -102,6 +102,7 @@ pub use alloy_primitives::{
 };
 pub use reth_ethereum_forks::*;
 pub use revm_primitives::{self, JumpTable};
+pub use revm_precompile::{self};
 
 #[doc(hidden)]
 #[deprecated = "use B64 instead"]
