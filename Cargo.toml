@@ -484,7 +484,6 @@ tower-http = "0.5"
 
 # p2p
 discv5 = "0.6.0"
-igd-next = "0.14.3"
 
 # rpc
 jsonrpsee = "0.23"
