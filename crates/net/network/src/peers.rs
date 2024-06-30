@@ -213,8 +213,7 @@ impl PeersManager {
     }
 
     /// Returns the [`NodeRecord`] for the given peer id
-    #[allow(dead_code)]
-    fn peer_by_id(&self, peer_id: PeerId) -> Option<NodeRecord> {
+    pub(crate) fn peer_by_id(&self, peer_id: PeerId) -> Option<NodeRecord> {
         self.peers.get(&peer_id).map(|v| {
             NodeRecord::new_with_ports(
                 v.addr.tcp.ip(),

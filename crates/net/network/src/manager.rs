@@ -42,7 +42,7 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
-use reth_network_api::{EthProtocolInfo, NetworkStatus, ReputationChangeKind};
+use reth_network_api::{EthProtocolInfo, NetworkStatus, PeerInfo, ReputationChangeKind};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_primitives::ForkId;
 use reth_provider::{BlockNumReader, BlockReader};
@@ -604,17 +604,17 @@ where
                 }
             }
             NetworkHandleMessage::GetPeerInfos(tx) => {
-                let _ = tx.send(self.swarm.sessions_mut().get_peer_info());
+                let _ = tx.send(self.get_peer_infos());
             }
             NetworkHandleMessage::GetPeerInfoById(peer_id, tx) => {
-                let _ = tx.send(self.swarm.sessions_mut().get_peer_info_by_id(peer_id));
+                let _ = tx.send(self.get_peer_info_by_id(peer_id));
             }
             NetworkHandleMessage::GetPeerInfosByIds(peer_ids, tx) => {
-                let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peer_ids));
+                let _ = tx.send(self.get_peer_infos_by_ids(peer_ids));
             }
             NetworkHandleMessage::GetPeerInfosByPeerKind(kind, tx) => {
-                let peers = self.swarm.state().peers().peers_by_kind(kind);
-                let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peers));
+                let peer_ids = self.swarm.state().peers().peers_by_kind(kind);
+                let _ = tx.send(self.get_peer_infos_by_ids(peer_ids));
             }
             NetworkHandleMessage::AddRlpxSubProtocol(proto) => self.add_rlpx_sub_protocol(proto),
             NetworkHandleMessage::GetTransactionsHandle(tx) => {
@@ -863,6 +863,42 @@ where
                     .apply_reputation_change(&peer_id, ReputationChangeKind::BadProtocol);
             }
         }
+    }
+
+    /// Returns [`PeerInfo`] for all connected peers
+    fn get_peer_infos(&self) -> Vec<PeerInfo> {
+        let peer_manager = self.swarm.state().peers();
+        let mut peers = Vec::with_capacity(peer_manager.num_known_peers());
+        for (peer_id, session) in self.swarm.sessions().active_sessions() {
+            if let Some(_nr) = peer_manager.peer_by_id(*peer_id) {
+                peers.push(session.peer_info());
+            }
+        }
+        peers
+    }
+
+    /// Returns [`PeerInfo`] for a given peer.
+    ///
+    /// Returns `None` if there's no active session to the peer.
+    fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
+        if let Some(session) = self.swarm.sessions().active_sessions().get(&peer_id) {
+            self.swarm.state().peers().peer_by_id(peer_id).map(|_nr| session.peer_info())
+        } else {
+            None
+        }
+    }
+
+    /// Returns [`PeerInfo`] for a given peers.
+    ///
+    /// Ignore the non-active peer.
+    fn get_peer_infos_by_ids(&self, peer_ids: impl IntoIterator<Item = PeerId>) -> Vec<PeerInfo> {
+        let mut infos = Vec::new();
+        for peer_id in peer_ids {
+            if let Some(info) = self.get_peer_info_by_id(peer_id) {
+                infos.push(info)
+            }
+        }
+        infos
     }
 
     /// Updates the metrics for active,established connections
