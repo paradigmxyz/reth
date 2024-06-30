@@ -29,7 +29,7 @@ pub fn validate_header_base_fee(
     header: &SealedHeader,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
-    if chain_spec.fork(EthereumHardfork::London).active_at_block(header.number) &&
+    if chain_spec.is_fork_active_at_block(EthereumHardfork::London, header.number) &&
         header.base_fee_per_gas.is_none()
     {
         return Err(ConsensusError::BaseFeeMissing)
@@ -152,8 +152,9 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
 /// This must be 32 bytes or fewer; formally Hx.
 #[inline]
 pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> {
-    if header.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-        Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
+    let extradata_len = header.extra_data.len();
+    if extradata_len > MAXIMUM_EXTRA_DATA_SIZE {
+        Err(ConsensusError::ExtraDataExceedsMax { len: extradata_len })
     } else {
         Ok(())
     }
