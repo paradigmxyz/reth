@@ -53,7 +53,7 @@ pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHan
     let builder = test_rpc_builder();
     let server = builder.build(TransportRpcModuleConfig::set_http(modules));
     let mut config = RpcServerConfig::http(Default::default()).with_http_address(test_address());
-    config.start_ws_http(&server).await.unwrap()
+    config.start(&server).await.unwrap()
 }
 
 /// Launches a new server with ws only with the given modules
@@ -61,7 +61,7 @@ pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandl
     let builder = test_rpc_builder();
     let server = builder.build(TransportRpcModuleConfig::set_ws(modules));
     let mut config = RpcServerConfig::ws(Default::default()).with_http_address(test_address());
-    config.start_ws_http(&server).await.unwrap()
+    config.start(&server).await.unwrap()
 }
 
 /// Launches a new server with http and ws and with the given modules
@@ -74,7 +74,7 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
         .with_ws_address(test_address())
         .with_http(Default::default())
         .with_http_address(test_address());
-    config.start_ws_http(&server).await.unwrap()
+    config.start(&server).await.unwrap()
 }
 
 /// Launches a new server with http and ws and with the given modules on the same port.
@@ -88,7 +88,7 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
         .with_ws_address(addr)
         .with_http(Default::default())
         .with_http_address(addr);
-    config.start_ws_http(&server).await.unwrap()
+    config.start(&server).await.unwrap()
 }
 
 /// Returns an [`RpcModuleBuilder`] with testing components.
