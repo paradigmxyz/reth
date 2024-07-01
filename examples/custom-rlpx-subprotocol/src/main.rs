@@ -31,7 +31,7 @@ mod subprotocol;
 fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _args| async move {
         // launch the node
-        let NodeHandle { node, node_exit_future } =
+        let NodeHandle { node, node_exit_future, bitfinity_import: _ } =
             builder.node(EthereumNode::default()).launch().await?;
         let peer_id = node.network.peer_id();
         let peer_addr = node.network.local_addr();

@@ -30,7 +30,7 @@ fn main() {
     Cli::<BeaconSidecarConfig>::parse()
         .run(|builder, args| async move {
             // launch the node
-            let NodeHandle { node, node_exit_future } =
+            let NodeHandle { node, node_exit_future, bitfinity_import: _ } =
                 builder.node(EthereumNode::default()).launch().await?;
 
             let notifications: reth::providers::CanonStateNotificationStream =
