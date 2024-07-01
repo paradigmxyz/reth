@@ -206,23 +206,17 @@ impl<DB: Database> PipelineState<DB> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::insert_headers_into_client;
+    use crate::test_utils::{insert_headers_into_client, TestPipelineBuilder};
     use assert_matches::assert_matches;
     use futures::poll;
-    use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, BlockNumber, Header, B256};
-    use reth_provider::{
-        test_utils::create_test_provider_factory_with_chain_spec, ExecutionOutcome,
-    };
-    use reth_prune_types::PruneModes;
-    use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
+    use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;
-    use reth_static_file::StaticFileProducer;
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, future::poll_fn, sync::Arc};
-    use tokio::sync::watch;
 
     struct TestHarness {
         pipeline_sync: PipelineSync<Arc<TempDatabase<DatabaseEnv>>>,
@@ -260,52 +254,6 @@ mod tests {
             let tip = client.highest_block().expect("there should be blocks here").hash();
 
             Self { pipeline_sync, tip }
-        }
-    }
-
-    struct TestPipelineBuilder {
-        pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-        executor_results: Vec<ExecutionOutcome>,
-    }
-
-    impl TestPipelineBuilder {
-        /// Create a new [`TestPipelineBuilder`].
-        const fn new() -> Self {
-            Self { pipeline_exec_outputs: VecDeque::new(), executor_results: Vec::new() }
-        }
-
-        /// Set the pipeline execution outputs to use for the test consensus engine.
-        fn with_pipeline_exec_outputs(
-            mut self,
-            pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-        ) -> Self {
-            self.pipeline_exec_outputs = pipeline_exec_outputs;
-            self
-        }
-
-        /// Set the executor results to use for the test consensus engine.
-        #[allow(dead_code)]
-        fn with_executor_results(mut self, executor_results: Vec<ExecutionOutcome>) -> Self {
-            self.executor_results = executor_results;
-            self
-        }
-
-        /// Builds the pipeline.
-        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
-            reth_tracing::init_test_tracing();
-
-            // Setup pipeline
-            let (tip_tx, _tip_rx) = watch::channel(B256::default());
-            let pipeline = Pipeline::builder()
-                .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
-                .with_tip_sender(tip_tx);
-
-            let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
-
-            let static_file_producer =
-                StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
-
-            pipeline.build(provider_factory, static_file_producer)
         }
     }
 
