@@ -867,14 +867,18 @@ where
 
     /// Returns [`PeerInfo`] for all connected peers
     fn get_peer_infos(&self) -> Vec<PeerInfo> {
-        let peer_manager = self.swarm.state().peers();
-        let mut peers = Vec::with_capacity(peer_manager.num_known_peers());
-        for (peer_id, session) in self.swarm.sessions().active_sessions() {
-            if let Some((record, kind)) = peer_manager.peer_by_id(*peer_id) {
-                peers.push(session.peer_info(&record, kind));
-            }
-        }
-        peers
+        self.swarm
+            .sessions()
+            .active_sessions()
+            .into_iter()
+            .filter_map(|(&peer_id, session)| {
+                self.swarm
+                    .state()
+                    .peers()
+                    .peer_by_id(peer_id)
+                    .map(|(record, kind)| session.peer_info(&record, kind))
+            })
+            .collect()
     }
 
     /// Returns [`PeerInfo`] for a given peer.
