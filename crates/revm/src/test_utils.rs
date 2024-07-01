@@ -1,10 +1,9 @@
-use reth_interfaces::provider::ProviderResult;
 use reth_primitives::{
-    keccak256, trie::AccountProof, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey,
-    B256, U256,
+    keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, B256, U256,
 };
-use reth_provider::{AccountReader, BlockHashReader, StateProvider, StateRootProvider};
-use reth_trie::updates::TrieUpdates;
+use reth_storage_api::{AccountReader, BlockHashReader, StateProvider, StateRootProvider};
+use reth_storage_errors::provider::ProviderResult;
+use reth_trie::{updates::TrieUpdates, AccountProof};
 use revm::db::BundleState;
 use std::collections::HashMap;
 
@@ -31,6 +30,11 @@ impl StateProviderTest {
             self.contracts.insert(hash, Bytecode::new_raw(bytecode));
         }
         self.accounts.insert(address, (storage, account));
+    }
+
+    /// Insert a block hash.
+    pub fn insert_block_hash(&mut self, block_number: u64, block_hash: B256) {
+        self.block_hash.insert(block_number, block_hash);
     }
 }
 

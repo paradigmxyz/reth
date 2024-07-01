@@ -1,24 +1,17 @@
-use std::time::Duration;
-
-use crate::{commands::db::checksum::ChecksumViewer, utils::DbTool};
+use crate::commands::db::checksum::ChecksumViewer;
 use clap::Parser;
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
 use itertools::Itertools;
-use reth_db::{
-    database::Database, mdbx, static_file::iter_static_files, AccountChangeSets, AccountsHistory,
-    AccountsTrie, BlockBodyIndices, BlockOmmers, BlockWithdrawals, Bytecodes, CanonicalHeaders,
-    DatabaseEnv, HashedAccounts, HashedStorages, HeaderNumbers, HeaderTerminalDifficulties,
-    Headers, PlainAccountState, PlainStorageState, PruneCheckpoints, Receipts,
-    StageCheckpointProgresses, StageCheckpoints, StorageChangeSets, StoragesHistory, StoragesTrie,
-    Tables, TransactionBlocks, TransactionHashNumbers, TransactionSenders, Transactions,
-    VersionHistory,
-};
+use reth_db::{mdbx, static_file::iter_static_files, DatabaseEnv, TableViewer, Tables};
+use reth_db_api::database::Database;
+use reth_db_common::DbTool;
+use reth_fs_util as fs;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_primitives::static_file::{find_fixed_range, SegmentRangeInclusive};
 use reth_provider::providers::StaticFileProvider;
-use tracing::info;
+use reth_static_file_types::{find_fixed_range, SegmentRangeInclusive};
+use std::{sync::Arc, time::Duration};
 
 #[derive(Parser, Debug)]
 /// The arguments for the `reth db stats` command
@@ -46,7 +39,7 @@ impl Command {
     pub fn execute(
         self,
         data_dir: ChainPath<DataDirPath>,
-        tool: &DbTool<DatabaseEnv>,
+        tool: &DbTool<Arc<DatabaseEnv>>,
     ) -> eyre::Result<()> {
         if self.checksum {
             let checksum_report = self.checksum_report(tool)?;
@@ -65,7 +58,7 @@ impl Command {
         Ok(())
     }
 
-    fn db_stats_table(&self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<ComfyTable> {
+    fn db_stats_table(&self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
         table.set_header([
@@ -175,7 +168,7 @@ impl Command {
         }
 
         let static_files = iter_static_files(data_dir.static_files())?;
-        let static_file_provider = StaticFileProvider::new(data_dir.static_files())?;
+        let static_file_provider = StaticFileProvider::read_only(data_dir.static_files())?;
 
         let mut total_data_size = 0;
         let mut total_index_size = 0;
@@ -203,16 +196,16 @@ impl Command {
                 let columns = jar_provider.columns();
                 let rows = jar_provider.rows();
 
-                let data_size = reth_primitives::fs::metadata(jar_provider.data_path())
+                let data_size = fs::metadata(jar_provider.data_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let index_size = reth_primitives::fs::metadata(jar_provider.index_path())
+                let index_size = fs::metadata(jar_provider.index_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let offsets_size = reth_primitives::fs::metadata(jar_provider.offsets_path())
+                let offsets_size = fs::metadata(jar_provider.offsets_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let config_size = reth_primitives::fs::metadata(jar_provider.config_path())
+                let config_size = fs::metadata(jar_provider.config_path())
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
 
@@ -313,7 +306,7 @@ impl Command {
         Ok(table)
     }
 
-    fn checksum_report(&self, tool: &DbTool<DatabaseEnv>) -> eyre::Result<ComfyTable> {
+    fn checksum_report(&self, tool: &DbTool<Arc<DatabaseEnv>>) -> eyre::Result<ComfyTable> {
         let mut table = ComfyTable::new();
         table.load_preset(comfy_table::presets::ASCII_MARKDOWN);
         table.set_header(vec![Cell::new("Table"), Cell::new("Checksum"), Cell::new("Elapsed")]);
@@ -321,45 +314,8 @@ impl Command {
         let db_tables = Tables::ALL;
         let mut total_elapsed = Duration::default();
 
-        for db_table in db_tables {
-            info!("Calculating checksum for table: {}", db_table);
-
-            let viewer = ChecksumViewer::new(tool);
-            let (checksum, elapsed) = match db_table {
-                Tables::AccountsHistory => viewer.get_checksum::<AccountsHistory>().unwrap(),
-                Tables::AccountChangeSets => viewer.get_checksum::<AccountChangeSets>().unwrap(),
-                Tables::AccountsTrie => viewer.get_checksum::<AccountsTrie>().unwrap(),
-                Tables::BlockBodyIndices => viewer.get_checksum::<BlockBodyIndices>().unwrap(),
-                Tables::BlockOmmers => viewer.get_checksum::<BlockOmmers>().unwrap(),
-                Tables::BlockWithdrawals => viewer.get_checksum::<BlockWithdrawals>().unwrap(),
-                Tables::Bytecodes => viewer.get_checksum::<Bytecodes>().unwrap(),
-                Tables::CanonicalHeaders => viewer.get_checksum::<CanonicalHeaders>().unwrap(),
-                Tables::HashedAccounts => viewer.get_checksum::<HashedAccounts>().unwrap(),
-                Tables::HashedStorages => viewer.get_checksum::<HashedStorages>().unwrap(),
-                Tables::HeaderNumbers => viewer.get_checksum::<HeaderNumbers>().unwrap(),
-                Tables::HeaderTerminalDifficulties => {
-                    viewer.get_checksum::<HeaderTerminalDifficulties>().unwrap()
-                }
-                Tables::Headers => viewer.get_checksum::<Headers>().unwrap(),
-                Tables::PlainAccountState => viewer.get_checksum::<PlainAccountState>().unwrap(),
-                Tables::PlainStorageState => viewer.get_checksum::<PlainStorageState>().unwrap(),
-                Tables::PruneCheckpoints => viewer.get_checksum::<PruneCheckpoints>().unwrap(),
-                Tables::Receipts => viewer.get_checksum::<Receipts>().unwrap(),
-                Tables::StageCheckpointProgresses => {
-                    viewer.get_checksum::<StageCheckpointProgresses>().unwrap()
-                }
-                Tables::StageCheckpoints => viewer.get_checksum::<StageCheckpoints>().unwrap(),
-                Tables::StorageChangeSets => viewer.get_checksum::<StorageChangeSets>().unwrap(),
-                Tables::StoragesHistory => viewer.get_checksum::<StoragesHistory>().unwrap(),
-                Tables::StoragesTrie => viewer.get_checksum::<StoragesTrie>().unwrap(),
-                Tables::TransactionBlocks => viewer.get_checksum::<TransactionBlocks>().unwrap(),
-                Tables::TransactionHashNumbers => {
-                    viewer.get_checksum::<TransactionHashNumbers>().unwrap()
-                }
-                Tables::TransactionSenders => viewer.get_checksum::<TransactionSenders>().unwrap(),
-                Tables::Transactions => viewer.get_checksum::<Transactions>().unwrap(),
-                Tables::VersionHistory => viewer.get_checksum::<VersionHistory>().unwrap(),
-            };
+        for &db_table in db_tables {
+            let (checksum, elapsed) = ChecksumViewer::new(tool).view_rt(db_table).unwrap();
 
             // increment duration for final report
             total_elapsed += elapsed;
@@ -376,7 +332,7 @@ impl Command {
         let max_widths = table.column_max_content_widths();
         let mut separator = Row::new();
         for width in max_widths {
-            separator.add_cell(Cell::new(&"-".repeat(width as usize)));
+            separator.add_cell(Cell::new("-".repeat(width as usize)));
         }
         table.add_row(separator);
 

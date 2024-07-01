@@ -2,37 +2,38 @@
 
 use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
-    verify::verify_receipts,
     EthEvmConfig,
 };
+use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
+use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
     execute::{
-        BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
-        BlockExecutorProvider, Executor,
+        BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
+        BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     ConfigureEvm,
 };
-use reth_interfaces::{
-    executor::{BlockExecutionError, BlockValidationError},
-    provider::ProviderError,
-};
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    BlockNumber, BlockWithSenders, ChainSpec, GotExpected, Hardfork, Header, PruneModes, Receipt,
-    Receipts, Withdrawals, MAINNET, U256,
+    BlockNumber, BlockWithSenders, EthereumHardfork, Header, Receipt, Request, U256,
 };
+use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
-    state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
+    state_change::{
+        apply_beacon_root_contract_call, apply_blockhashes_update,
+        apply_withdrawal_requests_contract_call, post_block_balance_increments,
+    },
     Evm, State,
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState,
+    BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ResultAndState,
 };
-use std::sync::Arc;
-use tracing::debug;
 
+#[cfg(feature = "std")]
+use std::{fmt::Display, sync::Arc, vec, vec::Vec};
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
 pub struct EthExecutorProvider<EvmConfig = EthEvmConfig> {
@@ -54,7 +55,7 @@ impl EthExecutorProvider {
 
 impl<EvmConfig> EthExecutorProvider<EvmConfig> {
     /// Creates a new executor provider.
-    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         Self { chain_spec, evm_config }
     }
 }
@@ -65,7 +66,7 @@ where
 {
     fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError>>,
     {
         EthBlockExecutor::new(
             self.chain_spec.clone(),
@@ -79,20 +80,22 @@ impl<EvmConfig> BlockExecutorProvider for EthExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
-    type Executor<DB: Database<Error = ProviderError>> = EthBlockExecutor<EvmConfig, DB>;
+    type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
+        EthBlockExecutor<EvmConfig, DB>;
 
-    type BatchExecutor<DB: Database<Error = ProviderError>> = EthBatchExecutor<EvmConfig, DB>;
+    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
+        EthBatchExecutor<EvmConfig, DB>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + Display>,
     {
         self.eth_executor(db)
     }
 
     fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + Display>,
     {
         let executor = self.eth_executor(db);
         EthBatchExecutor {
@@ -101,6 +104,14 @@ where
             stats: BlockExecutorStats::default(),
         }
     }
+}
+
+/// Helper type for the output of executing a block.
+#[derive(Debug, Clone)]
+struct EthExecuteOutput {
+    receipts: Vec<Receipt>,
+    requests: Vec<Request>,
+    gas_used: u64,
 }
 
 /// Helper container type for EVM with chain spec.
@@ -116,20 +127,24 @@ impl<EvmConfig> EthEvmExecutor<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
-    /// Executes the transactions in the block and returns the receipts.
+    /// Executes the transactions in the block and returns the receipts of the transactions in the
+    /// block, the total gas used and the list of EIP-7685 [requests](Request).
     ///
-    /// This applies the pre-execution changes, and executes the transactions.
+    /// This applies the pre-execution and post-execution changes that require an [EVM](Evm), and
+    /// executes the transactions.
     ///
     /// # Note
     ///
-    /// It does __not__ apply post-execution changes.
-    fn execute_pre_and_transactions<Ext, DB>(
+    /// It does __not__ apply post-execution changes that do not require an [EVM](Evm), for that see
+    /// [`EthBlockExecutor::post_execution`].
+    fn execute_state_transitions<Ext, DB>(
         &self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError>
+    ) -> Result<EthExecuteOutput, BlockExecutionError>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database,
+        DB::Error: Into<ProviderError> + std::fmt::Display,
     {
         // apply pre execution changes
         apply_beacon_root_contract_call(
@@ -138,6 +153,13 @@ where
             block.number,
             block.parent_beacon_block_root,
             &mut evm,
+        )?;
+        apply_blockhashes_update(
+            evm.db_mut(),
+            &self.chain_spec,
+            block.timestamp,
+            block.number,
+            block.parent_hash,
         )?;
 
         // execute transactions
@@ -155,14 +177,21 @@ where
                 .into())
             }
 
-            EvmConfig::fill_tx_env(evm.tx_mut(), transaction, *sender);
+            self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
 
             // Execute transaction.
             let ResultAndState { result, state } = evm.transact().map_err(move |err| {
+                let new_err = match err {
+                    EVMError::Transaction(e) => EVMError::Transaction(e),
+                    EVMError::Header(e) => EVMError::Header(e),
+                    EVMError::Database(e) => EVMError::Database(e.into()),
+                    EVMError::Custom(e) => EVMError::Custom(e),
+                    EVMError::Precompile(e) => EVMError::Precompile(e),
+                };
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {
                     hash: transaction.recalculate_hash(),
-                    error: err.into(),
+                    error: Box::new(new_err),
                 }
             })?;
             evm.db_mut().commit(state);
@@ -185,19 +214,21 @@ where
                 },
             );
         }
-        drop(evm);
 
-        // Check if gas used matches the value set in header.
-        if block.gas_used != cumulative_gas_used {
-            let receipts = Receipts::from_block_receipt(receipts);
-            return Err(BlockValidationError::BlockGasUsed {
-                gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
-                gas_spent_by_tx: receipts.gas_spent_by_tx()?,
-            }
-            .into())
-        }
+        let requests = if self.chain_spec.is_prague_active_at_timestamp(block.timestamp) {
+            // Collect all EIP-6110 deposits
+            let deposit_requests =
+                crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
 
-        Ok((receipts, cumulative_gas_used))
+            // Collect all EIP-7685 requests
+            let withdrawal_requests = apply_withdrawal_requests_contract_call(&mut evm)?;
+
+            [deposit_requests, withdrawal_requests].concat()
+        } else {
+            vec![]
+        };
+
+        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
     }
 }
 
@@ -216,7 +247,7 @@ pub struct EthBlockExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
     /// Creates a new Ethereum block executor.
-    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
         Self { executor: EthEvmExecutor { chain_spec, evm_config }, state }
     }
 
@@ -235,7 +266,7 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + Display>,
 {
     /// Configures a new evm configuration and block environment for the given block.
     ///
@@ -258,44 +289,29 @@ where
 
     /// Execute a single block and apply the state changes to the internal state.
     ///
-    /// Returns the receipts of the transactions in the block and the total gas used.
+    /// Returns the receipts of the transactions in the block, the total gas used and the list of
+    /// EIP-7685 [requests](Request).
     ///
-    /// Returns an error if execution fails or receipt verification fails.
-    fn execute_and_verify(
+    /// Returns an error if execution fails.
+    fn execute_without_verification(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<(Vec<Receipt>, u64), BlockExecutionError> {
+    ) -> Result<EthExecuteOutput, BlockExecutionError> {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
 
         // 2. configure the evm and execute
         let env = self.evm_env_for_block(&block.header, total_difficulty);
-
-        let (receipts, gas_used) = {
+        let output = {
             let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_pre_and_transactions(block, evm)
+            self.executor.execute_state_transitions(block, evm)
         }?;
 
         // 3. apply post execution changes
         self.post_execution(block, total_difficulty)?;
 
-        // Before Byzantium, receipts contained state root that would mean that expensive
-        // operation as hashing that is required for state root got calculated in every
-        // transaction This was replaced with is_success flag.
-        // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-        if self.chain_spec().is_byzantium_active_at_block(block.header.number) {
-            if let Err(error) = verify_receipts(
-                block.header.receipts_root,
-                block.header.logs_bloom,
-                receipts.iter(),
-            ) {
-                debug!(target: "evm", %error, ?receipts, "receipts verification failed");
-                return Err(error)
-            };
-        }
-
-        Ok((receipts, gas_used))
+        Ok(output)
     }
 
     /// Apply settings before a new block is executed.
@@ -305,26 +321,18 @@ where
         self.state.set_state_clear_flag(state_clear_flag);
     }
 
-    /// Apply post execution state changes, including block rewards, withdrawals, and irregular DAO
-    /// hardfork state change.
+    /// Apply post execution state changes that do not require an [EVM](Evm), such as: block
+    /// rewards, withdrawals, and irregular DAO hardfork state change
     pub fn post_execution(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
     ) -> Result<(), BlockExecutionError> {
-        let mut balance_increments = post_block_balance_increments(
-            self.chain_spec(),
-            block.number,
-            block.difficulty,
-            block.beneficiary,
-            block.timestamp,
-            total_difficulty,
-            &block.ommers,
-            block.withdrawals.as_ref().map(Withdrawals::as_ref),
-        );
+        let mut balance_increments =
+            post_block_balance_increments(self.chain_spec(), block, total_difficulty);
 
         // Irregular state change at Ethereum DAO hardfork
-        if self.chain_spec().fork(Hardfork::Dao).transitions_at_block(block.number) {
+        if self.chain_spec().fork(EthereumHardfork::Dao).transitions_at_block(block.number) {
             // drain balances from hardcoded addresses.
             let drained_balance: u128 = self
                 .state
@@ -348,7 +356,7 @@ where
 impl<EvmConfig, DB> Executor<DB> for EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
@@ -363,12 +371,13 @@ where
     /// State changes are committed to the database.
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let (receipts, gas_used) = self.execute_and_verify(block, total_difficulty)?;
+        let EthExecuteOutput { receipts, requests, gas_used } =
+            self.execute_without_verification(block, total_difficulty)?;
 
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, gas_used })
+        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
     }
 }
 
@@ -397,15 +406,18 @@ impl<EvmConfig, DB> EthBatchExecutor<EvmConfig, DB> {
 impl<EvmConfig, DB> BatchExecutor<DB> for EthBatchExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BatchBlockExecutionOutput;
+    type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 
-    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
+    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let (receipts, _gas_used) = self.executor.execute_and_verify(block, total_difficulty)?;
+        let EthExecuteOutput { receipts, requests, gas_used: _ } =
+            self.executor.execute_without_verification(block, total_difficulty)?;
+
+        validate_block_post_execution(block, self.executor.chain_spec(), &receipts, &requests)?;
 
         // prepare the state according to the prune mode
         let retention = self.batch_record.bundle_retention(block.number);
@@ -413,6 +425,9 @@ where
 
         // store receipts in the set
         self.batch_record.save_receipts(receipts)?;
+
+        // store requests in the set
+        self.batch_record.save_requests(requests);
 
         if self.batch_record.first_block().is_none() {
             self.batch_record.set_first_block(block.number);
@@ -424,10 +439,11 @@ where
     fn finalize(mut self) -> Self::Output {
         self.stats.log_debug();
 
-        BatchBlockExecutionOutput::new(
+        ExecutionOutcome::new(
             self.executor.state.take_bundle(),
             self.batch_record.take_receipts(),
             self.batch_record.first_block().unwrap_or_default(),
+            self.batch_record.take_requests(),
         )
     }
 
@@ -443,11 +459,22 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS};
-    use reth_primitives::{keccak256, Account, Block, ChainSpecBuilder, ForkCondition, B256};
+    use alloy_eips::{
+        eip2935::HISTORY_STORAGE_ADDRESS,
+        eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
+        eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
+    };
+    use reth_chainspec::{ChainSpecBuilder, ForkCondition};
+    use reth_primitives::{
+        constants::{EMPTY_ROOT_HASH, ETH_TO_WEI},
+        keccak256, public_key_to_address, Account, Block, Transaction, TxKind, TxLegacy, B256,
+    };
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
+    use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
+    use revm_primitives::{b256, fixed_bytes, Bytes, BLOCKHASH_SERVE_WINDOW};
+    use secp256k1::{Keypair, Secp256k1};
     use std::collections::HashMap;
 
     fn create_state_provider_with_beacon_root_contract() -> StateProviderTest {
@@ -469,6 +496,25 @@ mod tests {
         db
     }
 
+    fn create_state_provider_with_withdrawal_requests_contract() -> StateProviderTest {
+        let mut db = StateProviderTest::default();
+
+        let withdrawal_requests_contract_account = Account {
+            nonce: 1,
+            balance: U256::ZERO,
+            bytecode_hash: Some(keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
+        };
+
+        db.insert_account(
+            WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
+            withdrawal_requests_contract_account,
+            Some(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
+            HashMap::new(),
+        );
+
+        db
+    }
+
     fn executor_provider(chain_spec: Arc<ChainSpec>) -> EthExecutorProvider<EthEvmConfig> {
         EthExecutorProvider { chain_spec, evm_config: Default::default() }
     }
@@ -483,7 +529,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1))
                 .build(),
         );
 
@@ -500,6 +546,7 @@ mod tests {
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
+                            requests: None,
                         },
                         senders: vec![],
                     },
@@ -523,13 +570,14 @@ mod tests {
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
-            .execute_and_verify(
+            .execute_without_verification(
                 &BlockWithSenders {
                     block: Block {
                         header: header.clone(),
                         body: vec![],
                         ommers: vec![],
                         withdrawals: None,
+                        requests: None,
                     },
                     senders: vec![],
                 },
@@ -578,7 +626,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1))
                 .build(),
         );
 
@@ -586,11 +634,17 @@ mod tests {
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         provider
-            .executor(StateProviderDatabase::new(&db))
-            .execute(
+            .batch_executor(StateProviderDatabase::new(&db), PruneModes::none())
+            .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -615,7 +669,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1))
                 .build(),
         );
 
@@ -630,16 +684,26 @@ mod tests {
             ..Header::default()
         };
 
-        let mut executor = provider.executor(StateProviderDatabase::new(&db));
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
-            .execute_and_verify(
-                &BlockWithSenders {
-                    block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
-                    senders: vec![],
-                },
-                U256::ZERO,
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
             )
             .expect(
                 "Executing a block with no transactions while cancun is active should not fail",
@@ -658,21 +722,19 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(0))
+                .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(0))
                 .build(),
         );
 
         let mut header = chain_spec.genesis_header();
-
         let provider = executor_provider(chain_spec);
-
         let mut executor =
             provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
 
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
         header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
         let _err = executor
-            .execute_one(
+            .execute_and_verify_one(
                 (
                     &BlockWithSenders {
                         block: Block {
@@ -680,6 +742,7 @@ mod tests {
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
+                            requests: None,
                         },
                         senders: vec![],
                     },
@@ -698,10 +761,16 @@ mod tests {
         // now try to process the genesis block again, this time ensuring that a system contract
         // call does not occur
         executor
-            .execute_one(
+            .execute_and_verify_one(
                 (
                     &BlockWithSenders {
-                        block: Block { header, body: vec![], ommers: vec![], withdrawals: None },
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
                         senders: vec![],
                     },
                     U256::ZERO,
@@ -740,7 +809,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(Hardfork::Cancun, ForkCondition::Timestamp(1))
+                .with_fork(EthereumHardfork::Cancun, ForkCondition::Timestamp(1))
                 .build(),
         );
 
@@ -752,7 +821,7 @@ mod tests {
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
-            .execute_one(
+            .execute_and_verify_one(
                 (
                     &BlockWithSenders {
                         block: Block {
@@ -760,6 +829,7 @@ mod tests {
                             body: vec![],
                             ommers: vec![],
                             withdrawals: None,
+                            requests: None,
                         },
                         senders: vec![],
                     },
@@ -792,5 +862,549 @@ mod tests {
             .storage(BEACON_ROOTS_ADDRESS, U256::from(parent_beacon_block_root_index))
             .unwrap();
         assert_eq!(parent_beacon_block_root_storage, U256::from(0x69));
+    }
+
+    fn create_state_provider_with_block_hashes(latest_block: u64) -> StateProviderTest {
+        let mut db = StateProviderTest::default();
+        for block_number in 0..=latest_block {
+            db.insert_block_hash(block_number, keccak256(block_number.to_string()));
+        }
+        db
+    }
+
+    #[test]
+    fn eip_2935_pre_fork() {
+        let db = create_state_provider_with_block_hashes(1);
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Never)
+                .build(),
+        );
+
+        let provider = executor_provider(chain_spec);
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+
+        // construct the header for block one
+        let header = Header { timestamp: 1, number: 1, ..Header::default() };
+
+        // attempt to execute an empty block, this should not fail
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // ensure that the block hash was *not* written to storage, since this is before the fork
+        // was activated
+        //
+        // we load the account first, which should also not exist, because revm expects it to be
+        // loaded
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        assert!(executor
+            .state_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
+            .unwrap()
+            .is_zero());
+    }
+
+    #[test]
+    fn eip_2935_fork_activation_genesis() {
+        let db = create_state_provider_with_block_hashes(0);
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
+                .build(),
+        );
+
+        let header = chain_spec.genesis_header();
+        let provider = executor_provider(chain_spec);
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+
+        // attempt to execute genesis block, this should not fail
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // ensure that the block hash was *not* written to storage, since there are no blocks
+        // preceding genesis
+        //
+        // we load the account first, which should also not exist, because revm expects it to be
+        // loaded
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        assert!(executor
+            .state_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
+            .unwrap()
+            .is_zero());
+    }
+
+    #[test]
+    fn eip_2935_fork_activation_within_window_bounds() {
+        let fork_activation_block = (BLOCKHASH_SERVE_WINDOW - 10) as u64;
+        let db = create_state_provider_with_block_hashes(fork_activation_block);
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        let header = Header {
+            parent_hash: B256::random(),
+            timestamp: 1,
+            number: fork_activation_block,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
+        let provider = executor_provider(chain_spec);
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+
+        // attempt to execute the fork activation block, this should not fail
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // the hash for the ancestor of the fork activation block should be present
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        assert_ne!(
+            executor
+                .state_mut()
+                .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block - 1))
+                .unwrap(),
+            U256::ZERO
+        );
+
+        // the hash of the block itself should not be in storage
+        assert!(executor
+            .state_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::from(fork_activation_block))
+            .unwrap()
+            .is_zero());
+    }
+
+    #[test]
+    fn eip_2935_fork_activation_outside_window_bounds() {
+        let fork_activation_block = (BLOCKHASH_SERVE_WINDOW + 256) as u64;
+        let db = create_state_provider_with_block_hashes(fork_activation_block);
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(1))
+                .build(),
+        );
+
+        let provider = executor_provider(chain_spec);
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+
+        let header = Header {
+            parent_hash: B256::random(),
+            timestamp: 1,
+            number: fork_activation_block,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
+
+        // attempt to execute the fork activation block, this should not fail
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // the hash for the ancestor of the fork activation block should be present
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        assert_ne!(
+            executor
+                .state_mut()
+                .storage(
+                    HISTORY_STORAGE_ADDRESS,
+                    U256::from(fork_activation_block % BLOCKHASH_SERVE_WINDOW as u64 - 1)
+                )
+                .unwrap(),
+            U256::ZERO
+        );
+    }
+
+    #[test]
+    fn eip_2935_state_transition_inside_fork() {
+        let db = create_state_provider_with_block_hashes(2);
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
+                .build(),
+        );
+
+        let mut header = chain_spec.genesis_header();
+        header.requests_root = Some(EMPTY_ROOT_HASH);
+        let header_hash = header.hash_slow();
+
+        let provider = executor_provider(chain_spec);
+        let mut executor =
+            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+
+        // attempt to execute the genesis block, this should not fail
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // nothing should be written as the genesis has no ancestors
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_none());
+        assert!(executor
+            .state_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::ZERO)
+            .unwrap()
+            .is_zero());
+
+        // attempt to execute block 1, this should not fail
+        let header = Header {
+            parent_hash: header_hash,
+            timestamp: 1,
+            number: 1,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
+        let header_hash = header.hash_slow();
+
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // the block hash of genesis should now be in storage, but not block 1
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        assert_ne!(
+            executor.state_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
+            U256::ZERO
+        );
+        assert!(executor
+            .state_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::from(1))
+            .unwrap()
+            .is_zero());
+
+        // attempt to execute block 2, this should not fail
+        let header = Header {
+            parent_hash: header_hash,
+            timestamp: 1,
+            number: 2,
+            requests_root: Some(EMPTY_ROOT_HASH),
+            ..Header::default()
+        };
+
+        executor
+            .execute_and_verify_one(
+                (
+                    &BlockWithSenders {
+                        block: Block {
+                            header,
+                            body: vec![],
+                            ommers: vec![],
+                            withdrawals: None,
+                            requests: None,
+                        },
+                        senders: vec![],
+                    },
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .expect(
+                "Executing a block with no transactions while Prague is active should not fail",
+            );
+
+        // the block hash of genesis and block 1 should now be in storage, but not block 2
+        assert!(executor.state_mut().basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some());
+        assert_ne!(
+            executor.state_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap(),
+            U256::ZERO
+        );
+        assert_ne!(
+            executor.state_mut().storage(HISTORY_STORAGE_ADDRESS, U256::from(1)).unwrap(),
+            U256::ZERO
+        );
+        assert!(executor
+            .state_mut()
+            .storage(HISTORY_STORAGE_ADDRESS, U256::from(2))
+            .unwrap()
+            .is_zero());
+    }
+
+    #[test]
+    fn eip_7002() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
+                .build(),
+        );
+
+        let mut db = create_state_provider_with_withdrawal_requests_contract();
+
+        let secp = Secp256k1::new();
+        let sender_key_pair = Keypair::new(&secp, &mut generators::rng());
+        let sender_address = public_key_to_address(sender_key_pair.public_key());
+
+        db.insert_account(
+            sender_address,
+            Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
+            None,
+            HashMap::new(),
+        );
+
+        // https://github.com/lightclient/7002asm/blob/e0d68e04d15f25057af7b6d180423d94b6b3bdb3/test/Contract.t.sol.in#L49-L64
+        let validator_public_key = fixed_bytes!("111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
+        let withdrawal_amount = fixed_bytes!("2222222222222222");
+        let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
+        assert_eq!(input.len(), 56);
+
+        let mut header = chain_spec.genesis_header();
+        header.gas_limit = 1_500_000;
+        header.gas_used = 134_807;
+        header.receipts_root =
+            b256!("b31a3e47b902e9211c4d349af4e4c5604ce388471e79ca008907ae4616bb0ed3");
+
+        let tx = sign_tx_with_key_pair(
+            sender_key_pair,
+            Transaction::Legacy(TxLegacy {
+                chain_id: Some(chain_spec.chain.id()),
+                nonce: 1,
+                gas_price: header.base_fee_per_gas.unwrap().into(),
+                gas_limit: 134_807,
+                to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
+                // `MIN_WITHDRAWAL_REQUEST_FEE`
+                value: U256::from(1),
+                input,
+            }),
+        );
+
+        let provider = executor_provider(chain_spec);
+
+        let executor = provider.executor(StateProviderDatabase::new(&db));
+
+        let BlockExecutionOutput { receipts, requests, .. } = executor
+            .execute(
+                (
+                    &Block {
+                        header,
+                        body: vec![tx],
+                        ommers: vec![],
+                        withdrawals: None,
+                        requests: None,
+                    }
+                    .with_recovered_senders()
+                    .unwrap(),
+                    U256::ZERO,
+                )
+                    .into(),
+            )
+            .unwrap();
+
+        let receipt = receipts.first().unwrap();
+        assert!(receipt.success);
+
+        let request = requests.first().unwrap();
+        let withdrawal_request = request.as_withdrawal_request().unwrap();
+        assert_eq!(withdrawal_request.source_address, sender_address);
+        assert_eq!(withdrawal_request.validator_pubkey, validator_public_key);
+        assert_eq!(withdrawal_request.amount, u64::from_be_bytes(withdrawal_amount.into()));
+    }
+
+    #[test]
+    fn block_gas_limit_error() {
+        // Create a chain specification with fork conditions set for Prague
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
+                .build(),
+        );
+
+        // Create a state provider with the withdrawal requests contract pre-deployed
+        let mut db = create_state_provider_with_withdrawal_requests_contract();
+
+        // Initialize Secp256k1 for key pair generation
+        let secp = Secp256k1::new();
+        // Generate a new key pair for the sender
+        let sender_key_pair = Keypair::new(&secp, &mut generators::rng());
+        // Get the sender's address from the public key
+        let sender_address = public_key_to_address(sender_key_pair.public_key());
+
+        // Insert the sender account into the state with a nonce of 1 and a balance of 1 ETH in Wei
+        db.insert_account(
+            sender_address,
+            Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
+            None,
+            HashMap::new(),
+        );
+
+        // Define the validator public key and withdrawal amount as fixed bytes
+        let validator_public_key = fixed_bytes!("111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111");
+        let withdrawal_amount = fixed_bytes!("2222222222222222");
+        // Concatenate the validator public key and withdrawal amount into a single byte array
+        let input: Bytes = [&validator_public_key[..], &withdrawal_amount[..]].concat().into();
+        // Ensure the input length is 56 bytes
+        assert_eq!(input.len(), 56);
+
+        // Create a genesis block header with a specified gas limit and gas used
+        let mut header = chain_spec.genesis_header();
+        header.gas_limit = 1_500_000;
+        header.gas_used = 134_807;
+        header.receipts_root =
+            b256!("b31a3e47b902e9211c4d349af4e4c5604ce388471e79ca008907ae4616bb0ed3");
+
+        // Create a transaction with a gas limit higher than the block gas limit
+        let tx = sign_tx_with_key_pair(
+            sender_key_pair,
+            Transaction::Legacy(TxLegacy {
+                chain_id: Some(chain_spec.chain.id()),
+                nonce: 1,
+                gas_price: header.base_fee_per_gas.unwrap().into(),
+                gas_limit: 2_500_000, // higher than block gas limit
+                to: TxKind::Call(WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS),
+                value: U256::from(1),
+                input,
+            }),
+        );
+
+        // Create an executor from the state provider
+        let executor = executor_provider(chain_spec).executor(StateProviderDatabase::new(&db));
+
+        // Execute the block and capture the result
+        let exec_result = executor.execute(
+            (
+                &Block {
+                    header,
+                    body: vec![tx],
+                    ommers: vec![],
+                    withdrawals: None,
+                    requests: None,
+                }
+                .with_recovered_senders()
+                .unwrap(),
+                U256::ZERO,
+            )
+                .into(),
+        );
+
+        // Check if the execution result is an error and assert the specific error type
+        match exec_result {
+            Ok(_) => panic!("Expected block gas limit error"),
+            Err(err) => assert_eq!(
+                *err.as_validation().unwrap(),
+                BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                    transaction_gas_limit: 2_500_000,
+                    block_available_gas: 1_500_000,
+                }
+            ),
+        }
     }
 }

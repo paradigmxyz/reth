@@ -1,14 +1,15 @@
 use crate::utils::eth_payload_attributes;
+use alloy_genesis::Genesis;
 use reth::{
     args::RpcServerArgs,
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
+use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{
     node::NodeTestContext, setup, transaction::TransactionTestContext, wallet::Wallet,
 };
 use reth_node_ethereum::EthereumNode;
-use reth_primitives::{ChainSpecBuilder, Genesis, MAINNET};
 use std::sync::Arc;
 
 #[tokio::test]
@@ -30,7 +31,7 @@ async fn can_run_eth_node() -> eyre::Result<()> {
 
     let mut node = nodes.pop().unwrap();
     let wallet = Wallet::default();
-    let raw_tx = TransactionTestContext::transfer_tx(1, wallet.inner).await;
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
 
     // make the node advance
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;
@@ -78,7 +79,7 @@ async fn can_run_eth_node_with_auth_engine_api_over_ipc() -> eyre::Result<()> {
 
     // Configure wallet from test mnemonic and create dummy transfer tx
     let wallet = Wallet::default();
-    let raw_tx = TransactionTestContext::transfer_tx(1, wallet.inner).await;
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
 
     // make the node advance
     let tx_hash = node.rpc.inject_tx(raw_tx).await?;

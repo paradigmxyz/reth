@@ -40,7 +40,7 @@ pub struct Zstd {
 
 impl Zstd {
     /// Creates new [`Zstd`].
-    pub fn new(use_dict: bool, max_dict_size: usize, columns: usize) -> Self {
+    pub const fn new(use_dict: bool, max_dict_size: usize, columns: usize) -> Self {
         Self {
             state: if use_dict { ZstdState::PendingDictionary } else { ZstdState::Ready },
             level: 0,
@@ -51,7 +51,7 @@ impl Zstd {
         }
     }
 
-    pub fn with_level(mut self, level: i32) -> Self {
+    pub const fn with_level(mut self, level: i32) -> Self {
         self.level = level;
         self
     }
@@ -321,7 +321,7 @@ pub(crate) enum ZstdDictionary<'a> {
 
 impl<'a> ZstdDictionary<'a> {
     /// Returns a reference to the expected `RawDictionary`
-    pub(crate) fn raw(&self) -> Option<&RawDictionary> {
+    pub(crate) const fn raw(&self) -> Option<&RawDictionary> {
         match self {
             ZstdDictionary::Raw(dict) => Some(dict),
             ZstdDictionary::Loaded(_) => None,
@@ -329,7 +329,7 @@ impl<'a> ZstdDictionary<'a> {
     }
 
     /// Returns a reference to the expected `DecoderDictionary`
-    pub(crate) fn loaded(&self) -> Option<&DecoderDictionary<'_>> {
+    pub(crate) const fn loaded(&self) -> Option<&DecoderDictionary<'_>> {
         match self {
             ZstdDictionary::Raw(_) => None,
             ZstdDictionary::Loaded(dict) => Some(dict),

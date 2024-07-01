@@ -1,13 +1,16 @@
 use crate::{
     recover_signer_unchecked,
-    revm_primitives::{BlockEnv, Env, TransactTo, TxEnv},
-    Address, Bytes, Chain, ChainSpec, Header, Transaction, TransactionSignedEcRecovered, TxKind,
-    B256, U256,
+    revm_primitives::{BlockEnv, Env, TxEnv},
+    Address, Bytes, Header, Transaction, TransactionSignedEcRecovered, TxKind, B256, U256,
 };
+use reth_chainspec::{Chain, ChainSpec};
 
-use alloy_eips::eip4788::BEACON_ROOTS_ADDRESS;
+use alloy_eips::{eip4788::BEACON_ROOTS_ADDRESS, eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS};
 #[cfg(feature = "optimism")]
 use revm_primitives::OptimismFields;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Fill block environment from Block.
 pub fn fill_block_env(
@@ -73,7 +76,7 @@ pub fn block_coinbase(chain_spec: &ChainSpec, header: &Header, after_merge: bool
 }
 
 /// Error type for recovering Clique signer from a header.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror_no_std::Error)]
 pub enum CliqueSignerRecoveryError {
     /// Header extradata is too short.
     #[error("Invalid extra data length")]
@@ -104,7 +107,7 @@ pub fn recover_header_signer(header: &Header) -> Result<Address, CliqueSignerRec
         .map_err(CliqueSignerRecoveryError::InvalidSignature)
 }
 
-/// Returns a new [TxEnv] filled with the transaction's data.
+/// Returns a new [`TxEnv`] filled with the transaction's data.
 pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEnv {
     let mut tx_env = TxEnv::default();
 
@@ -132,24 +135,59 @@ pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEn
 /// [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) are:
 ///
 /// At the start of processing any execution block where `block.timestamp >= FORK_TIMESTAMP` (i.e.
-/// before processing any transactions), call `BEACON_ROOTS_ADDRESS` as `SYSTEM_ADDRESS` with the
-/// 32-byte input of `header.parent_beacon_block_root`, a gas limit of `30_000_000`, and `0` value.
-/// This will trigger the `set()` routine of the beacon roots contract. This is a system operation
-/// and therefore:
+/// before processing any transactions), call [`BEACON_ROOTS_ADDRESS`] as
+/// [`SYSTEM_ADDRESS`](alloy_eips::eip4788::SYSTEM_ADDRESS) with the 32-byte input of
+/// `header.parent_beacon_block_root`. This will trigger the `set()` routine of the beacon roots
+/// contract.
+pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: B256) {
+    fill_tx_env_with_system_contract_call(
+        env,
+        alloy_eips::eip4788::SYSTEM_ADDRESS,
+        BEACON_ROOTS_ADDRESS,
+        parent_beacon_block_root.0.into(),
+    );
+}
+
+/// Fill transaction environment with the EIP-7002 withdrawal requests contract message data.
+//
+/// This requirement for the withdrawal requests contract call defined by
+/// [EIP-7002](https://eips.ethereum.org/EIPS/eip-7002) is:
+//
+/// At the end of processing any execution block where `block.timestamp >= FORK_TIMESTAMP` (i.e.
+/// after processing all transactions and after performing the block body withdrawal requests
+/// validations), call the contract as `SYSTEM_ADDRESS`.
+pub fn fill_tx_env_with_withdrawal_requests_contract_call(env: &mut Env) {
+    fill_tx_env_with_system_contract_call(
+        env,
+        alloy_eips::eip7002::SYSTEM_ADDRESS,
+        WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
+        Bytes::new(),
+    );
+}
+
+/// Fill transaction environment with the system caller and the system contract address and message
+/// data.
+///
+/// This is a system operation and therefore:
 ///  * the call must execute to completion
 ///  * the call does not count against the block’s gas limit
-///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as
-///  part of the call
-///  * if no code exists at `BEACON_ROOTS_ADDRESS`, the call must fail silently
-pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: B256) {
+///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as part
+///    of the call
+///  * if no code exists at the provided address, the call will fail silently
+fn fill_tx_env_with_system_contract_call(
+    env: &mut Env,
+    caller: Address,
+    contract: Address,
+    data: Bytes,
+) {
     env.tx = TxEnv {
-        caller: alloy_eips::eip4788::SYSTEM_ADDRESS,
-        transact_to: TransactTo::Call(BEACON_ROOTS_ADDRESS),
+        caller,
+        transact_to: TxKind::Call(contract),
         // Explicitly set nonce to None so revm does not do any nonce checks
         nonce: None,
         gas_limit: 30_000_000,
         value: U256::ZERO,
-        data: parent_beacon_block_root.0.into(),
+        data,
         // Setting the gas price to zero enforces that no value is transferred as part of the call,
         // and that the call will not count against the block's gas limit
         gas_price: U256::ZERO,
@@ -171,9 +209,6 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
             // enveloped tx size.
             enveloped_tx: Some(Bytes::default()),
         },
-        // TODO(EOF)
-        eof_initcodes: vec![],
-        eof_initcodes_hashed: Default::default(),
     };
 
     // ensure the block gas limit is >= the tx
@@ -183,13 +218,13 @@ pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_b
     env.block.basefee = U256::ZERO;
 }
 
-/// Fill transaction environment from [TransactionSignedEcRecovered].
+/// Fill transaction environment from [`TransactionSignedEcRecovered`].
 #[cfg(not(feature = "optimism"))]
 pub fn fill_tx_env_with_recovered(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovered) {
     fill_tx_env(tx_env, transaction.as_ref(), transaction.signer());
 }
 
-/// Fill transaction environment from [TransactionSignedEcRecovered] and the given envelope.
+/// Fill transaction environment from [`TransactionSignedEcRecovered`] and the given envelope.
 #[cfg(feature = "optimism")]
 pub fn fill_tx_env_with_recovered(
     tx_env: &mut TxEnv,
@@ -211,8 +246,8 @@ where
             tx_env.gas_price = U256::from(tx.gas_price);
             tx_env.gas_priority_fee = None;
             tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TransactTo::Call(to),
-                TxKind::Create => TransactTo::create(),
+                TxKind::Call(to) => TxKind::Call(to),
+                TxKind::Create => TxKind::Create,
             };
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
@@ -227,8 +262,8 @@ where
             tx_env.gas_price = U256::from(tx.gas_price);
             tx_env.gas_priority_fee = None;
             tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TransactTo::Call(to),
-                TxKind::Create => TransactTo::create(),
+                TxKind::Call(to) => TxKind::Call(to),
+                TxKind::Create => TxKind::Create,
             };
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
@@ -250,8 +285,8 @@ where
             tx_env.gas_price = U256::from(tx.max_fee_per_gas);
             tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
             tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TransactTo::Call(to),
-                TxKind::Create => TransactTo::create(),
+                TxKind::Call(to) => TxKind::Call(to),
+                TxKind::Create => TxKind::Create,
             };
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
@@ -272,10 +307,7 @@ where
             tx_env.gas_limit = tx.gas_limit;
             tx_env.gas_price = U256::from(tx.max_fee_per_gas);
             tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-            tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TransactTo::Call(to),
-                TxKind::Create => TransactTo::create(),
-            };
+            tx_env.transact_to = TxKind::Call(tx.to);
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = Some(tx.chain_id);
@@ -297,10 +329,7 @@ where
             tx_env.gas_limit = tx.gas_limit;
             tx_env.gas_price = U256::ZERO;
             tx_env.gas_priority_fee = None;
-            match tx.to {
-                TxKind::Call(to) => tx_env.transact_to = TransactTo::Call(to),
-                TxKind::Create => tx_env.transact_to = TransactTo::create(),
-            }
+            tx_env.transact_to = tx.to;
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = None;
@@ -342,7 +371,7 @@ pub fn fill_op_tx_env<T: AsRef<Transaction>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GOERLI;
+    use reth_chainspec::GOERLI;
 
     #[test]
     fn test_recover_genesis_goerli_signer() {

@@ -1,6 +1,6 @@
 //! Curates the input coming from the fuzzer for certain types.
 
-use reth_primitives::IntegerList;
+use reth_primitives_traits::IntegerList;
 use serde::{Deserialize, Serialize};
 
 /// Makes sure that the list provided by the fuzzer is not empty and pre-sorted
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct IntegerListInput(pub Vec<u64>);
 
 impl From<IntegerListInput> for IntegerList {
-    fn from(list: IntegerListInput) -> IntegerList {
+    fn from(list: IntegerListInput) -> Self {
         let mut v = list.0;
 
         // Empty lists are not supported by `IntegerList`, so we want to skip these cases.

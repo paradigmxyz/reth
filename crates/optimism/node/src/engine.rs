@@ -1,13 +1,17 @@
+use reth_chainspec::{ChainSpec, OptimismHardfork};
 use reth_node_api::{
-    engine::validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
-    EngineObjectValidationError, EngineTypes, MessageValidationKind, PayloadOrAttributes,
-    VersionSpecificValidationError,
+    payload::{
+        validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
+        EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes, PayloadTypes,
+        VersionSpecificValidationError,
+    },
+    EngineTypes,
 };
 use reth_optimism_payload_builder::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes};
-use reth_primitives::{ChainSpec, Hardfork};
 use reth_rpc_types::{
     engine::{
-        ExecutionPayloadEnvelopeV2, OptimismExecutionPayloadEnvelopeV3, OptimismPayloadAttributes,
+        ExecutionPayloadEnvelopeV2, OptimismExecutionPayloadEnvelopeV3,
+        OptimismExecutionPayloadEnvelopeV4, OptimismPayloadAttributes,
     },
     ExecutionPayloadV1,
 };
@@ -17,13 +21,17 @@ use reth_rpc_types::{
 #[non_exhaustive]
 pub struct OptimismEngineTypes;
 
-impl EngineTypes for OptimismEngineTypes {
+impl PayloadTypes for OptimismEngineTypes {
+    type BuiltPayload = OptimismBuiltPayload;
     type PayloadAttributes = OptimismPayloadAttributes;
     type PayloadBuilderAttributes = OptimismPayloadBuilderAttributes;
-    type BuiltPayload = OptimismBuiltPayload;
+}
+
+impl EngineTypes for OptimismEngineTypes {
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = OptimismExecutionPayloadEnvelopeV3;
+    type ExecutionPayloadV4 = OptimismExecutionPayloadEnvelopeV4;
 
     fn validate_version_specific_fields(
         chain_spec: &ChainSpec,
@@ -61,7 +69,7 @@ pub fn validate_withdrawals_presence(
     timestamp: u64,
     has_withdrawals: bool,
 ) -> Result<(), EngineObjectValidationError> {
-    let is_shanghai = chain_spec.fork(Hardfork::Canyon).active_at_timestamp(timestamp);
+    let is_shanghai = chain_spec.fork(OptimismHardfork::Canyon).active_at_timestamp(timestamp);
 
     match version {
         EngineApiMessageVersion::V1 => {

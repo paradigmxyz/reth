@@ -5,7 +5,7 @@ use crate::{
     EthPayloadBuilderAttributes, PayloadBuilderHandle, PayloadBuilderService, PayloadJob,
     PayloadJobGenerator,
 };
-use reth_engine_primitives::EngineTypes;
+use reth_payload_primitives::PayloadTypes;
 use reth_primitives::{Block, U256};
 use reth_provider::CanonStateNotification;
 use std::{
@@ -14,7 +14,7 @@ use std::{
     task::{Context, Poll},
 };
 
-/// Creates a new [PayloadBuilderService] for testing purposes.
+/// Creates a new [`PayloadBuilderService`] for testing purposes.
 pub fn test_payload_service<Engine>() -> (
     PayloadBuilderService<
         TestPayloadJobGenerator,
@@ -24,7 +24,7 @@ pub fn test_payload_service<Engine>() -> (
     PayloadBuilderHandle<Engine>,
 )
 where
-    Engine: EngineTypes<
+    Engine: PayloadTypes<
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
             BuiltPayload = EthBuiltPayload,
         > + 'static,
@@ -32,10 +32,10 @@ where
     PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
 }
 
-/// Creates a new [PayloadBuilderService] for testing purposes and spawns it in the background.
+/// Creates a new [`PayloadBuilderService`] for testing purposes and spawns it in the background.
 pub fn spawn_test_payload_service<Engine>() -> PayloadBuilderHandle<Engine>
 where
-    Engine: EngineTypes<
+    Engine: PayloadTypes<
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
             BuiltPayload = EthBuiltPayload,
         > + 'static,
@@ -45,7 +45,7 @@ where
     handle
 }
 
-/// A [PayloadJobGenerator] for testing purposes
+/// A [`PayloadJobGenerator`] for testing purposes
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct TestPayloadJobGenerator;
@@ -61,7 +61,7 @@ impl PayloadJobGenerator for TestPayloadJobGenerator {
     }
 }
 
-/// A [PayloadJobGenerator] for testing purposes
+/// A [`PayloadJobGenerator`] for testing purposes
 #[derive(Debug)]
 pub struct TestPayloadJob {
     attr: EthPayloadBuilderAttributes,

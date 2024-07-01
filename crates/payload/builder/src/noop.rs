@@ -2,7 +2,7 @@
 
 use crate::{service::PayloadServiceCommand, PayloadBuilderHandle};
 use futures_util::{ready, StreamExt};
-use reth_engine_primitives::{EngineTypes, PayloadBuilderAttributes};
+use reth_payload_primitives::{PayloadBuilderAttributes, PayloadTypes};
 use std::{
     future::Future,
     pin::Pin,
@@ -13,16 +13,16 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A service task that does not build any payloads.
 #[derive(Debug)]
-pub struct NoopPayloadBuilderService<Engine: EngineTypes> {
+pub struct NoopPayloadBuilderService<Engine: PayloadTypes> {
     /// Receiver half of the command channel.
     command_rx: UnboundedReceiverStream<PayloadServiceCommand<Engine>>,
 }
 
 impl<Engine> NoopPayloadBuilderService<Engine>
 where
-    Engine: EngineTypes + 'static,
+    Engine: PayloadTypes + 'static,
 {
-    /// Creates a new [NoopPayloadBuilderService].
+    /// Creates a new [`NoopPayloadBuilderService`].
     pub fn new() -> (Self, PayloadBuilderHandle<Engine>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         (
@@ -34,7 +34,7 @@ where
 
 impl<Engine> Future for NoopPayloadBuilderService<Engine>
 where
-    Engine: EngineTypes,
+    Engine: PayloadTypes,
 {
     type Output = ();
 

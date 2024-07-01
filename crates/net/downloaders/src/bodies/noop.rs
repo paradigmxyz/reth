@@ -1,12 +1,12 @@
 use futures::Stream;
-use reth_interfaces::p2p::{
+use reth_network_p2p::{
     bodies::{downloader::BodyDownloader, response::BlockResponse},
     error::{DownloadError, DownloadResult},
 };
 use reth_primitives::BlockNumber;
 use std::ops::RangeInclusive;
 
-/// A [BodyDownloader] implementation that does nothing.
+/// A [`BodyDownloader`] implementation that does nothing.
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct NoopBodiesDownloader;

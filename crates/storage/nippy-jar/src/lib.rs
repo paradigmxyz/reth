@@ -1,4 +1,8 @@
 //! Immutable data store format.
+//!
+//! *Warning*: The `NippyJar` encoding format and its implementations are
+//! designed for storing and retrieving data internally. They are not hardened
+//! to safely read potentially malicious data.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -13,7 +17,7 @@ use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
-    fs::File,
+    fs::{File, OpenOptions},
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -37,7 +41,7 @@ mod cursor;
 pub use cursor::NippyJarCursor;
 
 mod writer;
-pub use writer::NippyJarWriter;
+pub use writer::{ConsistencyFailStrategy, NippyJarWriter};
 
 const NIPPY_JAR_VERSION: usize = 1;
 
@@ -52,7 +56,7 @@ type RefRow<'a> = Vec<&'a [u8]>;
 /// Alias type for a column value wrapped in `Result`.
 pub type ColumnResult<T> = Result<T, Box<dyn StdError + Send + Sync>>;
 
-/// A trait for the user-defined header of [NippyJar].
+/// A trait for the user-defined header of [`NippyJar`].
 pub trait NippyJarHeader:
     Send + Sync + Serialize + for<'b> Deserialize<'b> + std::fmt::Debug + 'static
 {
@@ -83,15 +87,15 @@ impl<T> NippyJarHeader for T where
 /// may also produce false positives but not false negatives, necessitating subsequent data
 /// verification.
 ///
-/// Note: that the key (eg. BlockHash) passed to a filter and phf does not need to actually be
+/// Note: that the key (eg. `BlockHash`) passed to a filter and phf does not need to actually be
 /// stored.
 ///
 /// Ultimately, the `freeze` function yields two files: a data file containing both the data and its
-/// configuration, and an index file that houses the offsets and offsets_index.
+/// configuration, and an index file that houses the offsets and `offsets_index`.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct NippyJar<H = ()> {
-    /// The version of the NippyJar format.
+    /// The version of the `NippyJar` format.
     version: usize,
     /// User-defined header data.
     /// Default: zero-sized unit type: no header data
@@ -140,16 +144,16 @@ impl<H: NippyJarHeader> std::fmt::Debug for NippyJar<H> {
 impl NippyJar<()> {
     /// Creates a new [`NippyJar`] without an user-defined header data.
     pub fn new_without_header(columns: usize, path: &Path) -> Self {
-        NippyJar::<()>::new(columns, path, ())
+        Self::new(columns, path, ())
     }
 
     /// Loads the file configuration and returns [`Self`] on a jar without user-defined header data.
     pub fn load_without_header(path: &Path) -> Result<Self, NippyJarError> {
-        NippyJar::<()>::load(path)
+        Self::load(path)
     }
 
     /// Whether this [`NippyJar`] uses a [`InclusionFilters`] and [`Functions`].
-    pub fn uses_filters(&self) -> bool {
+    pub const fn uses_filters(&self) -> bool {
         self.filter.is_some() && self.phf.is_some()
     }
 }
@@ -157,7 +161,7 @@ impl NippyJar<()> {
 impl<H: NippyJarHeader> NippyJar<H> {
     /// Creates a new [`NippyJar`] with a user-defined header data.
     pub fn new(columns: usize, path: &Path, user_header: H) -> Self {
-        NippyJar {
+        Self {
             version: NIPPY_JAR_VERSION,
             user_header,
             columns,
@@ -203,17 +207,17 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Gets a reference to the user header.
-    pub fn user_header(&self) -> &H {
+    pub const fn user_header(&self) -> &H {
         &self.user_header
     }
 
     /// Gets total columns in jar.
-    pub fn columns(&self) -> usize {
+    pub const fn columns(&self) -> usize {
         self.columns
     }
 
     /// Gets total rows in jar.
-    pub fn rows(&self) -> usize {
+    pub const fn rows(&self) -> usize {
         self.rows
     }
 
@@ -228,7 +232,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
     }
 
     /// Gets a reference to the compressor.
-    pub fn compressor(&self) -> Option<&Compressors> {
+    pub const fn compressor(&self) -> Option<&Compressors> {
         self.compressor.as_ref()
     }
 
@@ -245,7 +249,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
         // Read [`Self`] located at the data file.
         let config_path = path.with_extension(CONFIG_FILE_EXTENSION);
         let config_file = File::open(&config_path)
-            .map_err(|err| reth_primitives::fs::FsPathError::open(err, config_path))?;
+            .map_err(|err| reth_fs_util::FsPathError::open(err, config_path))?;
 
         let mut obj: Self = bincode::deserialize_from(&config_file)?;
         obj.path = path.to_path_buf();
@@ -290,7 +294,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
             [self.data_path().into(), self.index_path(), self.offsets_path(), self.config_path()]
         {
             if path.exists() {
-                reth_primitives::fs::remove_file(path)?;
+                reth_fs_util::remove_file(path)?;
             }
         }
 
@@ -378,7 +382,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
         self.freeze_filters()?;
 
         // Creates the writer, data and offsets file
-        let mut writer = NippyJarWriter::new(self)?;
+        let mut writer = NippyJarWriter::new(self, ConsistencyFailStrategy::Heal)?;
 
         // Append rows to file while holding offsets in memory
         writer.append_rows(columns, total_rows)?;
@@ -428,7 +432,25 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Writes all necessary configuration to file.
     fn freeze_config(&self) -> Result<(), NippyJarError> {
-        Ok(bincode::serialize_into(File::create(self.config_path())?, &self)?)
+        // Atomic writes are hard: <https://github.com/paradigmxyz/reth/issues/8622>
+        let mut tmp_path = self.config_path();
+        tmp_path.set_extension(".tmp");
+
+        // Write to temporary file
+        let mut file = File::create(&tmp_path)?;
+        bincode::serialize_into(&mut file, &self)?;
+
+        // fsync() file
+        file.sync_all()?;
+
+        // Rename file, not move
+        reth_fs_util::rename(&tmp_path, self.config_path())?;
+
+        // fsync() dir
+        if let Some(parent) = tmp_path.parent() {
+            OpenOptions::new().read(true).open(parent)?.sync_all()?;
+        }
+        Ok(())
     }
 }
 
@@ -458,7 +480,7 @@ impl<H: NippyJarHeader> PerfectHashingFunction for NippyJar<H> {
 
 /// Manages the reading of static file data using memory-mapped files.
 ///
-/// Holds file and mmap descriptors of the data and offsets files of a static_file.
+/// Holds file and mmap descriptors of the data and offsets files of a `static_file`.
 #[derive(Debug)]
 pub struct DataReader {
     /// Data file descriptor. Needs to be kept alive as long as `data_mmap` handle.
@@ -472,7 +494,7 @@ pub struct DataReader {
     /// Mmap handle for offsets.
     offset_mmap: Mmap,
     /// Number of bytes that represent one offset.
-    offset_size: u64,
+    offset_size: u8,
 }
 
 impl DataReader {
@@ -487,11 +509,13 @@ impl DataReader {
         let offset_mmap = unsafe { Mmap::map(&offset_file)? };
 
         // First byte is the size of one offset in bytes
-        let offset_size = offset_mmap[0] as u64;
+        let offset_size = offset_mmap[0];
 
         // Ensure that the size of an offset is at most 8 bytes.
         if offset_size > 8 {
             return Err(NippyJarError::OffsetSizeTooBig { offset_size })
+        } else if offset_size == 0 {
+            return Err(NippyJarError::OffsetSizeTooSmall { offset_size })
         }
 
         Ok(Self { data_file, data_mmap, offset_file, offset_size, offset_mmap })
@@ -521,16 +545,17 @@ impl DataReader {
     /// Returns total number of offsets in the file.
     /// The size of one offset is determined by the file itself.
     pub fn offsets_count(&self) -> Result<usize, NippyJarError> {
-        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size) as usize)
+        Ok((self.offset_file.metadata()?.len().saturating_sub(1) / self.offset_size as u64)
+            as usize)
     }
 
     /// Reads one offset-sized (determined by the offset file) u64 at the provided index.
     fn offset_at(&self, index: usize) -> Result<u64, NippyJarError> {
         let mut buffer: [u8; 8] = [0; 8];
 
-        let offset_end = index + self.offset_size as usize;
+        let offset_end = index.saturating_add(self.offset_size as usize);
         if offset_end > self.offset_mmap.len() {
-            return Err(NippyJarError::OffsetOutOfBounds { index });
+            return Err(NippyJarError::OffsetOutOfBounds { index })
         }
 
         buffer[..self.offset_size as usize].copy_from_slice(&self.offset_mmap[index..offset_end]);
@@ -538,7 +563,7 @@ impl DataReader {
     }
 
     /// Returns number of bytes that represent one offset.
-    pub fn offset_size(&self) -> u64 {
+    pub const fn offset_size(&self) -> u8 {
         self.offset_size
     }
 
@@ -839,7 +864,7 @@ mod tests {
         }
     }
 
-    /// Tests NippyJar with everything enabled: compression, filter, offset list and offset index.
+    /// Tests `NippyJar` with everything enabled: compression, filter, offset list and offset index.
     #[test]
     fn test_full_nippy_jar() {
         let (col1, col2) = test_data(None);
@@ -1109,7 +1134,7 @@ mod tests {
         assert!(initial_offset_size > 0);
 
         // Appends a third row
-        let mut writer = NippyJarWriter::new(nippy).unwrap();
+        let mut writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
         writer.append_column(Some(Ok(&col2[2]))).unwrap();
 
@@ -1140,7 +1165,7 @@ mod tests {
         // Writer will execute a consistency check and verify first that the offset list on disk
         // doesn't match the nippy.rows, and prune it. Then, it will prune the data file
         // accordingly as well.
-        let writer = NippyJarWriter::new(nippy).unwrap();
+        let writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
         assert_eq!(initial_rows, writer.rows());
         assert_eq!(
             initial_offset_size,
@@ -1166,7 +1191,7 @@ mod tests {
 
         // Appends a third row, so we have an offset list in memory, which is not flushed to disk,
         // while the data has been.
-        let mut writer = NippyJarWriter::new(nippy).unwrap();
+        let mut writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
         writer.append_column(Some(Ok(&col2[2]))).unwrap();
 
@@ -1189,7 +1214,7 @@ mod tests {
 
         // Writer will execute a consistency check and verify that the data file has more data than
         // it should, and resets it to the last offset of the list (on disk here)
-        let writer = NippyJarWriter::new(nippy).unwrap();
+        let writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
         assert_eq!(initial_rows, writer.rows());
         assert_eq!(
             initial_data_size,
@@ -1205,13 +1230,15 @@ mod tests {
             assert_eq!(nippy.max_row_size, 0);
             assert_eq!(nippy.rows, 0);
 
-            let mut writer = NippyJarWriter::new(nippy).unwrap();
+            let mut writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
             assert_eq!(writer.column(), 0);
 
             writer.append_column(Some(Ok(&col1[0]))).unwrap();
             assert_eq!(writer.column(), 1);
+            assert!(writer.is_dirty());
 
             writer.append_column(Some(Ok(&col2[0]))).unwrap();
+            assert!(writer.is_dirty());
 
             // Adding last column of a row resets writer and updates jar config
             assert_eq!(writer.column(), 0);
@@ -1220,6 +1247,7 @@ mod tests {
             assert_eq!(writer.offsets().len(), 3);
             let expected_data_file_size = *writer.offsets().last().unwrap();
             writer.commit().unwrap();
+            assert!(!writer.is_dirty());
 
             assert_eq!(writer.max_row_size(), col1[0].len() + col2[0].len());
             assert_eq!(writer.rows(), 1);
@@ -1240,7 +1268,7 @@ mod tests {
             assert_eq!(nippy.max_row_size, col1[0].len() + col2[0].len());
             assert_eq!(nippy.rows, 1);
 
-            let mut writer = NippyJarWriter::new(nippy).unwrap();
+            let mut writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
             assert_eq!(writer.column(), 0);
 
             writer.append_column(Some(Ok(&col1[1]))).unwrap();
@@ -1271,11 +1299,12 @@ mod tests {
 
     fn prune_rows(num_columns: usize, file_path: &Path, col1: &[Vec<u8>], col2: &[Vec<u8>]) {
         let nippy = NippyJar::load_without_header(file_path).unwrap();
-        let mut writer = NippyJarWriter::new(nippy).unwrap();
+        let mut writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
 
         // Appends a third row, so we have an offset list in memory, which is not flushed to disk
         writer.append_column(Some(Ok(&col1[2]))).unwrap();
         writer.append_column(Some(Ok(&col2[2]))).unwrap();
+        assert!(writer.is_dirty());
 
         // This should prune from the on-memory offset list and ondisk offset list
         writer.prune_rows(2).unwrap();
@@ -1301,8 +1330,10 @@ mod tests {
         }
 
         // This should prune from the ondisk offset list and clear the jar.
-        let mut writer = NippyJarWriter::new(nippy).unwrap();
+        let mut writer = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
         writer.prune_rows(1).unwrap();
+        assert!(writer.is_dirty());
+
         assert_eq!(writer.rows(), 0);
         assert_eq!(writer.max_row_size(), 0);
         assert_eq!(File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize, 0);
@@ -1311,6 +1342,8 @@ mod tests {
             File::open(writer.offsets_path()).unwrap().metadata().unwrap().len() as usize,
             1
         );
+        writer.commit().unwrap();
+        assert!(!writer.is_dirty());
     }
 
     fn simulate_interrupted_prune(
@@ -1338,6 +1371,6 @@ mod tests {
         data_file.set_len(data_len - 32 * missing_offsets).unwrap();
 
         // runs the consistency check.
-        let _ = NippyJarWriter::new(nippy).unwrap();
+        let _ = NippyJarWriter::new(nippy, ConsistencyFailStrategy::Heal).unwrap();
     }
 }

@@ -1,7 +1,7 @@
-//! Keys of ENR [`ForkId`](reth_primitives::ForkId) kv-pair. Identifies which network stack a node
-//! belongs to.
+//! Keys of ENR [`ForkId`](reth_ethereum_forks::ForkId) kv-pair. Identifies which network stack a
+//! node belongs to.
 
-use reth_primitives::ChainSpec;
+use reth_chainspec::ChainSpec;
 
 /// Identifies which Ethereum network stack a node belongs to, on the discovery network.
 #[derive(Debug)]
@@ -20,6 +20,7 @@ impl NetworkStackId {
     /// ENR fork ID kv-pair key, for an Optimism CL node.
     pub const OPSTACK: &'static [u8] = b"opstack";
 
+    #[allow(clippy::missing_const_for_fn)]
     /// Returns the [`NetworkStackId`] that matches the given [`ChainSpec`].
     pub fn id(chain: &ChainSpec) -> Option<&'static [u8]> {
         if chain.is_optimism() {

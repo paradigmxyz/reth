@@ -1,7 +1,7 @@
 //! Traits for configuring a node.
 
 use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
-use reth_db::{
+use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
@@ -19,14 +19,40 @@ use std::marker::PhantomData;
 /// consensus layer.
 ///
 /// This trait is intended to be stateless and only define the types of the node.
-pub trait NodeTypes: Send + Sync + 'static {
+pub trait NodeTypes: Send + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives: NodePrimitives;
     /// The node's engine types, defining the interaction with the consensus engine.
     type Engine: EngineTypes;
 }
 
-/// A helper trait that is downstream of the [NodeTypes] trait and adds stateful components to the
+/// A [`NodeTypes`] type builder
+#[derive(Default, Debug)]
+pub struct AnyNodeTypes<P = (), E = ()>(PhantomData<P>, PhantomData<E>);
+
+impl<P, E> AnyNodeTypes<P, E> {
+    /// Sets the `Primitives` associated type.
+    pub const fn primitives<T>(self) -> AnyNodeTypes<T, E> {
+        AnyNodeTypes::<T, E>(PhantomData::<T>, PhantomData::<E>)
+    }
+
+    /// Sets the `Engine` associated type.
+    pub const fn engine<T>(self) -> AnyNodeTypes<P, T> {
+        AnyNodeTypes::<P, T>(PhantomData::<P>, PhantomData::<T>)
+    }
+}
+
+impl<P, E> NodeTypes for AnyNodeTypes<P, E>
+where
+    P: NodePrimitives + Send + Sync + Unpin + 'static,
+    E: EngineTypes + Send + Sync + Unpin + 'static,
+{
+    type Primitives = P;
+
+    type Engine = E;
+}
+
+/// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful components to the
 /// node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
@@ -61,11 +87,17 @@ impl<Types, DB, Provider> Default for FullNodeTypesAdapter<Types, DB, Provider> 
     }
 }
 
+impl<Types, DB, Provider> Clone for FullNodeTypesAdapter<Types, DB, Provider> {
+    fn clone(&self) -> Self {
+        Self { types: self.types, db: self.db, provider: self.provider }
+    }
+}
+
 impl<Types, DB, Provider> NodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
     Types: NodeTypes,
-    DB: Send + Sync + 'static,
-    Provider: Send + Sync + 'static,
+    DB: Send + Sync + Unpin + 'static,
+    Provider: Send + Sync + Unpin + 'static,
 {
     type Primitives = Types::Primitives;
     type Engine = Types::Engine;
@@ -82,7 +114,7 @@ where
 }
 
 /// Encapsulates all types and components of the node.
-pub trait FullNodeComponents: FullNodeTypes + 'static {
+pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// The transaction pool of the node.
     type Pool: TransactionPool + Unpin;
 

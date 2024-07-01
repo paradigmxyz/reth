@@ -1,5 +1,6 @@
 use parking_lot::RwLock;
-use reth_primitives::{BlockNumHash, BlockNumber, ChainInfo, SealedHeader};
+use reth_chainspec::ChainInfo;
+use reth_primitives::{BlockNumHash, BlockNumber, SealedHeader};
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -7,6 +8,7 @@ use std::{
     },
     time::Instant,
 };
+use tokio::sync::watch;
 
 /// Tracks the chain info: canonical head, safe block, finalized block.
 #[derive(Debug, Clone)]
@@ -17,19 +19,21 @@ pub(crate) struct ChainInfoTracker {
 impl ChainInfoTracker {
     /// Create a new chain info container for the given canonical head.
     pub(crate) fn new(head: SealedHeader) -> Self {
+        let (finalized_block, _) = watch::channel(None);
+        let (safe_block, _) = watch::channel(None);
         Self {
             inner: Arc::new(ChainInfoInner {
                 last_forkchoice_update: RwLock::new(None),
                 last_transition_configuration_exchange: RwLock::new(None),
                 canonical_head_number: AtomicU64::new(head.number),
                 canonical_head: RwLock::new(head),
-                safe_block: RwLock::new(None),
-                finalized_block: RwLock::new(None),
+                safe_block,
+                finalized_block,
             }),
         }
     }
 
-    /// Returns the [ChainInfo] for the canonical head.
+    /// Returns the [`ChainInfo`] for the canonical head.
     pub(crate) fn chain_info(&self) -> ChainInfo {
         let inner = self.inner.canonical_head.read();
         ChainInfo { best_hash: inner.hash(), best_number: inner.number }
@@ -62,12 +66,12 @@ impl ChainInfoTracker {
 
     /// Returns the safe header of the chain.
     pub(crate) fn get_safe_header(&self) -> Option<SealedHeader> {
-        self.inner.safe_block.read().clone()
+        self.inner.safe_block.borrow().clone()
     }
 
     /// Returns the finalized header of the chain.
     pub(crate) fn get_finalized_header(&self) -> Option<SealedHeader> {
-        self.inner.finalized_block.read().clone()
+        self.inner.finalized_block.borrow().clone()
     }
 
     /// Returns the canonical head of the chain.
@@ -84,14 +88,14 @@ impl ChainInfoTracker {
     /// Returns the safe header of the chain.
     #[allow(dead_code)]
     pub(crate) fn get_safe_num_hash(&self) -> Option<BlockNumHash> {
-        let h = self.inner.safe_block.read();
+        let h = self.inner.safe_block.borrow();
         h.as_ref().map(|h| h.num_hash())
     }
 
     /// Returns the finalized header of the chain.
     #[allow(dead_code)]
     pub(crate) fn get_finalized_num_hash(&self) -> Option<BlockNumHash> {
-        let h = self.inner.finalized_block.read();
+        let h = self.inner.finalized_block.borrow();
         h.as_ref().map(|h| h.num_hash())
     }
 
@@ -106,12 +110,16 @@ impl ChainInfoTracker {
 
     /// Sets the safe header of the chain.
     pub(crate) fn set_safe(&self, header: SealedHeader) {
-        self.inner.safe_block.write().replace(header);
+        self.inner.safe_block.send_modify(|h| {
+            let _ = h.replace(header);
+        });
     }
 
     /// Sets the finalized header of the chain.
     pub(crate) fn set_finalized(&self, header: SealedHeader) {
-        self.inner.finalized_block.write().replace(header);
+        self.inner.finalized_block.send_modify(|h| {
+            let _ = h.replace(header);
+        });
     }
 }
 
@@ -131,7 +139,7 @@ struct ChainInfoInner {
     /// The canonical head of the chain.
     canonical_head: RwLock<SealedHeader>,
     /// The block that the beacon node considers safe.
-    safe_block: RwLock<Option<SealedHeader>>,
+    safe_block: watch::Sender<Option<SealedHeader>>,
     /// The block that the beacon node considers finalized.
-    finalized_block: RwLock<Option<SealedHeader>>,
+    finalized_block: watch::Sender<Option<SealedHeader>>,
 }

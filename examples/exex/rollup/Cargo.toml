@@ -1,5 +1,5 @@
 [package]
-name = "exex-rollup"
+name = "example-exex-rollup"
 version = "0.0.0"
 publish = false
 edition.workspace = true
@@ -8,33 +8,32 @@ license.workspace = true
 [dependencies]
 # reth
 reth.workspace = true
-reth-cli-runner.workspace = true
+reth-chainspec.workspace = true
 reth-exex.workspace = true
-reth-interfaces.workspace = true
 reth-node-api.workspace = true
-reth-node-core.workspace = true
 reth-node-ethereum.workspace = true
 reth-primitives.workspace = true
+reth-execution-errors.workspace = true
+reth-execution-types.workspace = true
 reth-provider.workspace = true
 reth-revm.workspace = true
 reth-tracing.workspace = true
-reth-trie.workspace = true
 
 # async
-futures.workspace = true
 tokio.workspace = true
 
 # misc
 alloy-consensus = { workspace = true, features = ["kzg"] }
+alloy-genesis.workspace = true
 alloy-rlp.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
 eyre.workspace = true
-foundry-blob-explorers = { git = "https://github.com/foundry-rs/block-explorers" }
+foundry-blob-explorers = "0.1"
 once_cell.workspace = true
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 serde_json.workspace = true
 
 [dev-dependencies]
-reth-interfaces = { workspace = true, features = ["test-utils"] }
+reth-testing-utils.workspace = true
 secp256k1.workspace = true
 

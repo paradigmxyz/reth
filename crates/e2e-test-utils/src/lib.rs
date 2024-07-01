@@ -4,11 +4,11 @@ use reth::{
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
+use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
     components::NodeComponentsBuilder, FullNodeTypesAdapter, Node, NodeAdapter, RethFullAdapter,
 };
-use reth_primitives::ChainSpec;
 use reth_provider::providers::BlockchainProvider;
 use std::sync::Arc;
 use tracing::{span, Level};

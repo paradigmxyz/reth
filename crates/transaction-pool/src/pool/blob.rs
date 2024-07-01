@@ -168,7 +168,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         transactions
     }
 
-    /// Resorts the transactions in the pool based on the pool's current [PendingFees].
+    /// Resorts the transactions in the pool based on the pool's current [`PendingFees`].
     pub(crate) fn reprioritize(&mut self) {
         // mem::take to modify without allocating, then collect to rebuild the BTreeSet
         self.all = std::mem::take(&mut self.all)
@@ -190,7 +190,7 @@ impl<T: PoolTransaction> BlobTransactions<T> {
     ///  * have a `max_fee_per_blob_gas` greater than or equal to the given `blob_fee`, _and_
     ///  * have a `max_fee_per_gas` greater than or equal to the given `base_fee`
     ///
-    /// This also sets the [PendingFees] for the pool, resorting transactions based on their
+    /// This also sets the [`PendingFees`] for the pool, resorting transactions based on their
     /// updated priority.
     ///
     /// Note: the transactions are not returned in a particular order.
@@ -212,10 +212,10 @@ impl<T: PoolTransaction> BlobTransactions<T> {
         removed
     }
 
-    /// Removes transactions until the pool satisfies its [SubPoolLimit].
+    /// Removes transactions until the pool satisfies its [`SubPoolLimit`].
     ///
     /// This is done by removing transactions according to their ordering in the pool, defined by
-    /// the [BlobOrd] struct.
+    /// the [`BlobOrd`] struct.
     ///
     /// Removed transactions are returned in the order they were removed.
     pub(crate) fn truncate_pool(
@@ -407,7 +407,7 @@ pub fn blob_tx_priority(
 /// A struct used to determine the ordering for a specific blob transaction in the pool. This uses
 /// a `priority` value to determine the ordering, and uses the `submission_id` to break ties.
 ///
-/// The `priority` value is calculated using the [blob_tx_priority] function, and should be
+/// The `priority` value is calculated using the [`blob_tx_priority`] function, and should be
 /// re-calculated on each block.
 #[derive(Debug, Clone)]
 struct BlobOrd {
@@ -645,7 +645,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            for tx in txs.iter() {
+            for tx in &txs {
                 pool.add_transaction(factory.validated_arc(tx.clone()));
             }
 

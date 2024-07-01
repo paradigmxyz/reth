@@ -1,12 +1,12 @@
 use rayon::slice::ParallelSliceMut;
-use reth_db::{
+use reth_db::tables;
+use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, BlockNumberAddress},
-    tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_interfaces::db::DatabaseError;
-use reth_primitives::{revm::compat::into_reth_acc, BlockNumber, StorageEntry, B256, U256};
+use reth_primitives::{BlockNumber, StorageEntry, B256, U256};
+use reth_storage_errors::db::DatabaseError;
 use revm::db::states::{PlainStateReverts, PlainStorageRevert, RevertToSlot};
 use std::iter::Peekable;
 
@@ -23,7 +23,7 @@ impl From<PlainStateReverts> for StateReverts {
 impl StateReverts {
     /// Write reverts to database.
     ///
-    /// Note:: Reverts will delete all wiped storage from plain state.
+    /// `Note::` Reverts will delete all wiped storage from plain state.
     pub fn write_to_db<TX: DbTxMut + DbTx>(
         self,
         tx: &TX,
@@ -39,8 +39,7 @@ impl StateReverts {
             tracing::trace!(target: "provider::reverts", block_number, "Writing block change");
             // sort changes by address.
             storage_changes.par_sort_unstable_by_key(|a| a.address);
-            for PlainStorageRevert { address, wiped, storage_revert } in storage_changes.into_iter()
-            {
+            for PlainStorageRevert { address, wiped, storage_revert } in storage_changes {
                 let storage_id = BlockNumberAddress((block_number, address));
 
                 let mut storage = storage_revert
@@ -83,7 +82,7 @@ impl StateReverts {
             for (address, info) in account_block_reverts {
                 account_changeset_cursor.append_dup(
                     block_number,
-                    AccountBeforeTx { address, info: info.map(into_reth_acc) },
+                    AccountBeforeTx { address, info: info.map(Into::into) },
                 )?;
             }
         }
@@ -93,7 +92,7 @@ impl StateReverts {
 }
 
 /// Iterator over storage reverts.
-/// See [StorageRevertsIter::next] for more details.
+/// See [`StorageRevertsIter::next`] for more details.
 #[allow(missing_debug_implementations)]
 pub struct StorageRevertsIter<R: Iterator, W: Iterator> {
     reverts: Peekable<R>,

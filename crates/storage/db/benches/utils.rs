@@ -1,18 +1,18 @@
-use reth_db::{
+use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv};
+use reth_db_api::{
     database::Database,
     table::{Compress, Encode, Table, TableRow},
-    test_utils::create_test_rw_db_with_path,
     transaction::DbTxMut,
-    DatabaseEnv,
 };
-use reth_primitives::{fs, Bytes};
+use reth_fs_util as fs;
+use reth_primitives::Bytes;
 use std::{path::Path, sync::Arc};
 
 /// Path where the DB is initialized for benchmarks.
 #[allow(dead_code)]
 const BENCH_DB_PATH: &str = "/tmp/reth-benches";
 
-/// Used for RandomRead and RandomWrite benchmarks.
+/// Used for `RandomRead` and `RandomWrite` benchmarks.
 #[allow(dead_code)]
 const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 64];
 

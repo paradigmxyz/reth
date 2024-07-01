@@ -1,35 +1,30 @@
-//! Wrapper around BlockchainTree that allows for it to be shared.
+//! Wrapper around `BlockchainTree` that allows for it to be shared.
 
 use super::BlockchainTree;
 use parking_lot::RwLock;
-use reth_db::database::Database;
-use reth_evm::execute::BlockExecutorProvider;
-use reth_interfaces::{
-    blockchain_tree::{
-        error::{CanonicalError, InsertBlockError},
-        BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-        InsertPayloadOk,
-    },
-    RethResult,
+use reth_blockchain_tree_api::{
+    error::{CanonicalError, InsertBlockError},
+    BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
+    InsertPayloadOk,
 };
+use reth_db_api::database::Database;
+use reth_evm::execute::BlockExecutorProvider;
 use reth_primitives::{
     BlockHash, BlockNumHash, BlockNumber, Receipt, SealedBlock, SealedBlockWithSenders,
     SealedHeader,
 };
 use reth_provider::{
-    BlockchainTreePendingStateProvider, BundleStateDataProvider, CanonStateSubscriptions,
+    BlockchainTreePendingStateProvider, CanonStateSubscriptions, FullExecutionDataProvider,
     ProviderError,
 };
-use std::{
-    collections::{BTreeMap, HashSet},
-    sync::Arc,
-};
+use reth_storage_errors::provider::ProviderResult;
+use std::{collections::BTreeMap, sync::Arc};
 use tracing::trace;
 
-/// Shareable blockchain tree that is behind a RwLock
+/// Shareable blockchain tree that is behind a `RwLock`
 #[derive(Clone, Debug)]
 pub struct ShareableBlockchainTree<DB, E> {
-    /// BlockchainTree
+    /// `BlockchainTree`
     pub tree: Arc<RwLock<BlockchainTree<DB, E>>>,
 }
 
@@ -64,40 +59,42 @@ where
         res
     }
 
-    fn finalize_block(&self, finalized_block: BlockNumber) {
+    fn finalize_block(&self, finalized_block: BlockNumber) -> ProviderResult<()> {
         trace!(target: "blockchain_tree", finalized_block, "Finalizing block");
         let mut tree = self.tree.write();
-        tree.finalize_block(finalized_block);
+        tree.finalize_block(finalized_block)?;
         tree.update_chains_metrics();
+
+        Ok(())
     }
 
     fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
         &self,
         last_finalized_block: BlockNumber,
-    ) -> RethResult<()> {
+    ) -> Result<(), CanonicalError> {
         trace!(target: "blockchain_tree", last_finalized_block, "Connecting buffered blocks to canonical hashes and finalizing the tree");
         let mut tree = self.tree.write();
         let res =
             tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(last_finalized_block);
         tree.update_chains_metrics();
-        res
+        Ok(res?)
     }
 
     fn update_block_hashes_and_clear_buffered(
         &self,
-    ) -> RethResult<BTreeMap<BlockNumber, BlockHash>> {
+    ) -> Result<BTreeMap<BlockNumber, BlockHash>, CanonicalError> {
         let mut tree = self.tree.write();
         let res = tree.update_block_hashes_and_clear_buffered();
         tree.update_chains_metrics();
-        res
+        Ok(res?)
     }
 
-    fn connect_buffered_blocks_to_canonical_hashes(&self) -> RethResult<()> {
+    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), CanonicalError> {
         trace!(target: "blockchain_tree", "Connecting buffered blocks to canonical hashes");
         let mut tree = self.tree.write();
         let res = tree.connect_buffered_blocks_to_canonical_hashes();
         tree.update_chains_metrics();
-        res
+        Ok(res?)
     }
 
     fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
@@ -114,19 +111,14 @@ where
     DB: Database + Clone,
     E: BlockExecutorProvider,
 {
-    fn blocks(&self) -> BTreeMap<BlockNumber, HashSet<BlockHash>> {
-        trace!(target: "blockchain_tree", "Returning all blocks in blockchain tree");
-        self.tree.read().block_indices().block_number_to_block_hashes().clone()
-    }
-
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
         trace!(target: "blockchain_tree", ?hash, "Returning header by hash");
-        self.tree.read().block_by_hash(hash).map(|b| b.header.clone())
+        self.tree.read().sidechain_block_by_hash(hash).map(|b| b.header.clone())
     }
 
     fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
         trace!(target: "blockchain_tree", ?block_hash, "Returning block by hash");
-        self.tree.read().block_by_hash(block_hash).cloned()
+        self.tree.read().sidechain_block_by_hash(block_hash).cloned()
     }
 
     fn block_with_senders_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlockWithSenders> {
@@ -134,17 +126,8 @@ where
         self.tree.read().block_with_senders_by_hash(block_hash).cloned()
     }
 
-    fn buffered_block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
-        self.tree.read().get_buffered_block(&block_hash).map(|b| b.block.clone())
-    }
-
     fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader> {
         self.tree.read().get_buffered_block(&block_hash).map(|b| b.header.clone())
-    }
-
-    fn canonical_blocks(&self) -> BTreeMap<BlockNumber, BlockHash> {
-        trace!(target: "blockchain_tree", "Returning canonical blocks in tree");
-        self.tree.read().block_indices().canonical_chain().inner().clone()
     }
 
     fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {
@@ -160,11 +143,6 @@ where
     fn canonical_tip(&self) -> BlockNumHash {
         trace!(target: "blockchain_tree", "Returning canonical tip");
         self.tree.read().block_indices().canonical_tip()
-    }
-
-    fn pending_blocks(&self) -> (BlockNumber, Vec<BlockHash>) {
-        trace!(target: "blockchain_tree", "Returning all pending blocks");
-        self.tree.read().block_indices().pending_blocks()
     }
 
     fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
@@ -199,7 +177,7 @@ where
     fn find_pending_state_provider(
         &self,
         block_hash: BlockHash,
-    ) -> Option<Box<dyn BundleStateDataProvider>> {
+    ) -> Option<Box<dyn FullExecutionDataProvider>> {
         trace!(target: "blockchain_tree", ?block_hash, "Finding pending state provider");
         let provider = self.tree.read().post_state_data(block_hash)?;
         Some(Box::new(provider))

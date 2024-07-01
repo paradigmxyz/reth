@@ -1,11 +1,15 @@
 //! Helper type that represents one of two possible executor types
 
+use std::fmt::Display;
+
 use crate::execute::{
-    BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
-    BlockExecutorProvider, Executor,
+    BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
-use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
-use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt};
+use reth_execution_errors::BlockExecutionError;
+use reth_execution_types::ExecutionOutcome;
+use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_prune_types::PruneModes;
+use reth_storage_errors::provider::ProviderError;
 use revm_primitives::db::Database;
 
 // re-export Either
@@ -16,27 +20,29 @@ where
     A: BlockExecutorProvider,
     B: BlockExecutorProvider,
 {
-    type Executor<DB: Database<Error = ProviderError>> = Either<A::Executor<DB>, B::Executor<DB>>;
-    type BatchExecutor<DB: Database<Error = ProviderError>> =
+    type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
+        Either<A::Executor<DB>, B::Executor<DB>>;
+
+    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
         Either<A::BatchExecutor<DB>, B::BatchExecutor<DB>>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + Display>,
     {
         match self {
-            Either::Left(a) => Either::Left(a.executor(db)),
-            Either::Right(b) => Either::Right(b.executor(db)),
+            Self::Left(a) => Either::Left(a.executor(db)),
+            Self::Right(b) => Either::Right(b.executor(db)),
         }
     }
 
     fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + Display>,
     {
         match self {
-            Either::Left(a) => Either::Left(a.batch_executor(db, prune_modes)),
-            Either::Right(b) => Either::Right(b.batch_executor(db, prune_modes)),
+            Self::Left(a) => Either::Left(a.batch_executor(db, prune_modes)),
+            Self::Right(b) => Either::Right(b.batch_executor(db, prune_modes)),
         }
     }
 }
@@ -55,7 +61,7 @@ where
         Output = BlockExecutionOutput<Receipt>,
         Error = BlockExecutionError,
     >,
-    DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
@@ -63,8 +69,8 @@ where
 
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         match self {
-            Either::Left(a) => a.execute(input),
-            Either::Right(b) => b.execute(input),
+            Self::Left(a) => a.execute(input),
+            Self::Right(b) => b.execute(input),
         }
     }
 }
@@ -74,46 +80,46 @@ where
     A: for<'a> BatchExecutor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BatchBlockExecutionOutput,
+        Output = ExecutionOutcome,
         Error = BlockExecutionError,
     >,
     B: for<'a> BatchExecutor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        Output = BatchBlockExecutionOutput,
+        Output = ExecutionOutcome,
         Error = BlockExecutionError,
     >,
-    DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BatchBlockExecutionOutput;
+    type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 
-    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
+    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         match self {
-            Either::Left(a) => a.execute_one(input),
-            Either::Right(b) => b.execute_one(input),
+            Self::Left(a) => a.execute_and_verify_one(input),
+            Self::Right(b) => b.execute_and_verify_one(input),
         }
     }
 
     fn finalize(self) -> Self::Output {
         match self {
-            Either::Left(a) => a.finalize(),
-            Either::Right(b) => b.finalize(),
+            Self::Left(a) => a.finalize(),
+            Self::Right(b) => b.finalize(),
         }
     }
 
     fn set_tip(&mut self, tip: BlockNumber) {
         match self {
-            Either::Left(a) => a.set_tip(tip),
-            Either::Right(b) => b.set_tip(tip),
+            Self::Left(a) => a.set_tip(tip),
+            Self::Right(b) => b.set_tip(tip),
         }
     }
 
     fn size_hint(&self) -> Option<usize> {
         match self {
-            Either::Left(a) => a.size_hint(),
-            Either::Right(b) => b.size_hint(),
+            Self::Left(a) => a.size_hint(),
+            Self::Right(b) => b.size_hint(),
         }
     }
 }

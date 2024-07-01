@@ -1,5 +1,9 @@
 //! Compact codec.
 //!
+//! *Warning*: The `Compact` encoding format and its implementations are
+//! designed for storing and retrieving data internally. They are not hardened
+//! to safely read potentially malicious data.
+//!
 //! ## Feature Flags
 //!
 //! - `alloy`: [Compact] implementation for various alloy types.
@@ -10,8 +14,6 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
-#![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -67,6 +69,24 @@ pub trait Compact: Sized {
     #[inline]
     fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         Self::from_compact(buf, len)
+    }
+}
+
+/// To be used with `Option<CompactPlaceholder>` to place or replace one bit on the bitflag struct.
+pub type CompactPlaceholder = ();
+
+impl Compact for CompactPlaceholder {
+    #[inline]
+    fn to_compact<B>(self, _: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        0
+    }
+
+    #[inline]
+    fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
+        ((), buf)
     }
 }
 
@@ -131,7 +151,7 @@ where
     #[inline]
     fn from_compact(buf: &[u8], _: usize) -> (Self, &[u8]) {
         let (length, mut buf) = decode_varuint(buf);
-        let mut list = Vec::with_capacity(length);
+        let mut list = Self::with_capacity(length);
         for _ in 0..length {
             let len;
             (len, buf) = decode_varuint(buf);
@@ -162,7 +182,7 @@ where
     #[inline]
     fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let (length, mut buf) = decode_varuint(buf);
-        let mut list = Vec::with_capacity(length);
+        let mut list = Self::with_capacity(length);
 
         for _ in 0..length {
             let element;
@@ -252,13 +272,13 @@ impl Compact for U256 {
     #[inline]
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         if len == 0 {
-            return (U256::ZERO, buf)
+            return (Self::ZERO, buf)
         }
 
         let mut arr = [0; 32];
         arr[(32 - len)..].copy_from_slice(&buf[..len]);
         buf.advance(len);
-        (U256::from_be_bytes(arr), buf)
+        (Self::from_be_bytes(arr), buf)
     }
 }
 
@@ -551,7 +571,7 @@ mod tests {
 
     impl Default for TestStruct {
         fn default() -> Self {
-            TestStruct {
+            Self {
                 f_u64: 1u64,                                    // 4 bits | 1 byte
                 f_u256: U256::from(1u64),                       // 6 bits | 1 byte
                 f_bool_f: false,                                // 1 bit  | 0 bytes

@@ -1,15 +1,21 @@
 //! Ethereum Node types config.
 
 use crate::{EthEngineTypes, EthEvmConfig};
+use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
+use reth_beacon_consensus::EthBeaconConsensus;
+use reth_ethereum_engine_primitives::{
+    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
+};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ExecutorBuilder, NetworkBuilder, PayloadServiceBuilder, PoolBuilder,
+        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
+        PayloadServiceBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes},
-    BuilderContext, Node, PayloadBuilderConfig,
+    BuilderContext, Node, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
@@ -18,6 +24,7 @@ use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
     TransactionValidationTaskExecutor,
 };
+use std::sync::Arc;
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -25,16 +32,22 @@ use reth_transaction_pool::{
 pub struct EthereumNode;
 
 impl EthereumNode {
-    /// Returns a [ComponentsBuilder] configured for a regular Ethereum node.
+    /// Returns a [`ComponentsBuilder`] configured for a regular Ethereum node.
     pub fn components<Node>() -> ComponentsBuilder<
         Node,
         EthereumPoolBuilder,
         EthereumPayloadBuilder,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
+        EthereumConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<Engine = EthEngineTypes>,
+        Node: FullNodeTypes,
+        <Node as NodeTypes>::Engine: PayloadTypes<
+            BuiltPayload = EthBuiltPayload,
+            PayloadAttributes = EthPayloadAttributes,
+            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+        >,
     {
         ComponentsBuilder::default()
             .node_types::<Node>()
@@ -42,6 +55,7 @@ impl EthereumNode {
             .payload(EthereumPayloadBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
+            .consensus(EthereumConsensusBuilder::default())
     }
 }
 
@@ -60,6 +74,7 @@ where
         EthereumPayloadBuilder,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
+        EthereumConsensusBuilder,
     >;
 
     fn components_builder(self) -> Self::ComponentsBuilder {
@@ -108,11 +123,13 @@ where
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
-        let data_dir = ctx.data_dir();
+        let data_dir = ctx.config().datadir();
+        let pool_config = ctx.pool_config();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
+            .with_local_transactions_config(pool_config.local_transactions_config.clone())
             .with_additional_tasks(1)
             .build_with_tasks(
                 ctx.provider().clone(),
@@ -121,7 +138,7 @@ where
             );
 
         let transaction_pool =
-            reth_transaction_pool::Pool::eth_pool(validator, blob_store, ctx.pool_config());
+            reth_transaction_pool::Pool::eth_pool(validator, blob_store, pool_config);
         info!(target: "reth::cli", "Transaction pool initialized");
         let transactions_path = data_dir.txpool_transactions();
 
@@ -169,8 +186,13 @@ pub struct EthereumPayloadBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder
 where
-    Node: FullNodeTypes<Engine = EthEngineTypes>,
     Pool: TransactionPool + Unpin + 'static,
+    Node: FullNodeTypes,
+    <Node as NodeTypes>::Engine: PayloadTypes<
+        BuiltPayload = EthBuiltPayload,
+        PayloadAttributes = EthPayloadAttributes,
+        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+    >,
 {
     async fn spawn_payload_service(
         self,
@@ -223,5 +245,26 @@ where
         let handle = ctx.start_network(network, pool);
 
         Ok(handle)
+    }
+}
+
+/// A basic ethereum consensus builder.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct EthereumConsensusBuilder {
+    // TODO add closure to modify consensus
+}
+
+impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
+where
+    Node: FullNodeTypes,
+{
+    type Consensus = Arc<dyn reth_consensus::Consensus>;
+
+    async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
+        if ctx.is_dev() {
+            Ok(Arc::new(AutoSealConsensus::new(ctx.chain_spec())))
+        } else {
+            Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
+        }
     }
 }

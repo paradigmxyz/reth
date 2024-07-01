@@ -1,16 +1,18 @@
-use crate::result::ToRpcResult;
+use std::sync::Arc;
+
+use alloy_genesis::ChainConfig;
 use alloy_primitives::B256;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
+use reth_chainspec::ChainSpec;
 use reth_network_api::{NetworkInfo, PeerKind, Peers};
-use reth_network_types::AnyNode;
-use reth_primitives::{ChainSpec, NodeRecord};
+use reth_network_peers::{AnyNode, NodeRecord};
 use reth_rpc_api::AdminApiServer;
+use reth_rpc_server_types::ToRpcResult;
 use reth_rpc_types::{
     admin::{EthProtocolInfo, NodeInfo, Ports, ProtocolInfo},
     PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo,
 };
-use std::sync::Arc;
 
 /// `admin` API implementation.
 ///
@@ -24,8 +26,8 @@ pub struct AdminApi<N> {
 
 impl<N> AdminApi<N> {
     /// Creates a new instance of `AdminApi`.
-    pub fn new(network: N, chain_spec: Arc<ChainSpec>) -> Self {
-        AdminApi { network, chain_spec }
+    pub const fn new(network: N, chain_spec: Arc<ChainSpec>) -> Self {
+        Self { network, chain_spec }
     }
 }
 
@@ -36,7 +38,7 @@ where
 {
     /// Handler for `admin_addPeer`
     fn add_peer(&self, record: NodeRecord) -> RpcResult<bool> {
-        self.network.add_peer(record.id, record.tcp_addr());
+        self.network.add_peer_with_udp(record.id, record.tcp_addr(), record.udp_addr());
         Ok(true)
     }
 
@@ -49,7 +51,7 @@ where
     /// Handler for `admin_addTrustedPeer`
     fn add_trusted_peer(&self, record: AnyNode) -> RpcResult<bool> {
         if let Some(record) = record.node_record() {
-            self.network.add_trusted_peer(record.id, record.tcp_addr())
+            self.network.add_trusted_peer_with_udp(record.id, record.tcp_addr(), record.udp_addr())
         }
         self.network.add_trusted_peer_id(record.peer_id());
         Ok(true)
@@ -94,7 +96,14 @@ where
     async fn node_info(&self) -> RpcResult<NodeInfo> {
         let enode = self.network.local_node_record();
         let status = self.network.network_status().await.to_rpc_result()?;
-        let config = self.chain_spec.genesis().config.clone();
+        let config = ChainConfig {
+            chain_id: self.chain_spec.chain.id(),
+            terminal_total_difficulty_passed: self
+                .chain_spec
+                .get_final_paris_total_difficulty()
+                .is_some(),
+            ..self.chain_spec.genesis().config.clone()
+        };
 
         let node_info = NodeInfo {
             id: B256::from_slice(&enode.id.as_slice()[..32]),

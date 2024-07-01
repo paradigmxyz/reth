@@ -13,14 +13,17 @@ workspace = true
 
 [dependencies]
 # reth
-reth-eth-wire.workspace = true
+reth-chainspec.workspace = true
+reth-eth-wire-types.workspace = true
 reth-primitives.workspace = true
+reth-execution-types.workspace = true
+reth-fs-util.workspace = true
 reth-provider.workspace = true
 reth-tasks.workspace = true
 revm.workspace = true
+
+# ethereum
 alloy-rlp.workspace = true
-reth-revm = { workspace = true, optional = true }
-reth-network-types.workspace = true
 
 # async/futures
 futures-util.workspace = true
@@ -42,12 +45,12 @@ serde = { workspace = true, features = ["derive", "rc"], optional = true }
 bitflags.workspace = true
 auto_impl.workspace = true
 smallvec.workspace = true
-itertools.workspace = true
 
 # testing
 rand = { workspace = true, optional = true }
 paste = { workspace = true, optional = true }
 proptest = { workspace = true, optional = true }
+proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives = { workspace = true, features = ["arbitrary"] }
@@ -56,6 +59,7 @@ reth-tracing.workspace = true
 paste.workspace = true
 rand.workspace = true
 proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
 criterion.workspace = true
 pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 assert_matches.workspace = true
@@ -66,7 +70,7 @@ serde_json.workspace = true
 default = ["serde"]
 serde = ["dep:serde"]
 test-utils = ["rand", "paste", "serde"]
-arbitrary = ["proptest", "reth-primitives/arbitrary"]
+arbitrary = ["proptest", "reth-primitives/arbitrary", "proptest-arbitrary-interop"]
 
 [[bench]]
 name = "truncate"

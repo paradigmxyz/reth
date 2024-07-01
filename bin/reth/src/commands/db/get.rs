@@ -1,13 +1,16 @@
-use crate::utils::DbTool;
 use clap::Parser;
 use reth_db::{
-    database::Database,
     static_file::{ColumnSelectorOne, ColumnSelectorTwo, HeaderMask, ReceiptMask, TransactionMask},
-    table::{Decompress, DupSort, Table},
     tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
 };
-use reth_primitives::{BlockHash, Header, StaticFileSegment};
+use reth_db_api::{
+    database::Database,
+    table::{Decompress, DupSort, Table},
+};
+use reth_db_common::DbTool;
+use reth_primitives::{BlockHash, Header};
 use reth_provider::StaticFileProviderFactory;
+use reth_static_file_types::StaticFileSegment;
 use tracing::error;
 
 /// The arguments for the `reth db get` command
@@ -125,7 +128,7 @@ impl Command {
 }
 
 /// Get an instance of key for given table
-fn table_key<T: Table>(key: &str) -> Result<T::Key, eyre::Error> {
+pub(crate) fn table_key<T: Table>(key: &str) -> Result<T::Key, eyre::Error> {
     serde_json::from_str::<T::Key>(key).map_err(|e| eyre::eyre!(e))
 }
 
@@ -188,7 +191,7 @@ impl<DB: Database> TableViewer<()> for GetValueViewer<'_, DB> {
 }
 
 /// Map the user input value to json
-fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error> {
+pub(crate) fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error> {
     if serde_json::from_str::<serde::de::IgnoredAny>(value).is_ok() {
         Ok(value.to_string())
     } else {
@@ -200,10 +203,8 @@ fn maybe_json_value_parser(value: &str) -> Result<String, eyre::Error> {
 mod tests {
     use super::*;
     use clap::{Args, Parser};
-    use reth_db::{
-        models::{storage_sharded_key::StorageShardedKey, ShardedKey},
-        AccountsHistory, HashedAccounts, Headers, StageCheckpoints, StoragesHistory,
-    };
+    use reth_db::{AccountsHistory, HashedAccounts, Headers, StageCheckpoints, StoragesHistory};
+    use reth_db_api::models::{storage_sharded_key::StorageShardedKey, ShardedKey};
     use reth_primitives::{Address, B256};
     use std::str::FromStr;
 

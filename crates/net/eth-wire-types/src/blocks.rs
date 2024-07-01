@@ -2,13 +2,10 @@
 //! types.
 
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
+use reth_codecs_derive::{add_arbitrary_tests, derive_arbitrary};
+#[cfg(any(test, feature = "arbitrary"))]
+use reth_primitives::generate_valid_header;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
-
-#[cfg(any(test, feature = "arbitrary"))]
-use proptest::{collection::vec, prelude::*};
-#[cfg(any(test, feature = "arbitrary"))]
-use reth_primitives::{generate_valid_header, valid_header_strategy};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -52,18 +49,6 @@ pub struct BlockHeaders(
 );
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl proptest::arbitrary::Arbitrary for BlockHeaders {
-    type Parameters = ();
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
-        let headers_strategy = vec(valid_header_strategy(), 0..10); // Adjust the range as needed
-
-        headers_strategy.prop_map(BlockHeaders).boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let headers_count: usize = u.int_in_range(0..=10)?;
@@ -79,13 +64,13 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
             ))
         }
 
-        Ok(BlockHeaders(headers))
+        Ok(Self(headers))
     }
 }
 
 impl From<Vec<Header>> for BlockHeaders {
     fn from(headers: Vec<Header>) -> Self {
-        BlockHeaders(headers)
+        Self(headers)
     }
 }
 
@@ -100,7 +85,7 @@ pub struct GetBlockBodies(
 
 impl From<Vec<B256>> for GetBlockBodies {
     fn from(hashes: Vec<B256>) -> Self {
-        GetBlockBodies(hashes)
+        Self(hashes)
     }
 }
 
@@ -111,18 +96,12 @@ impl From<Vec<B256>> for GetBlockBodies {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct BlockBodies(
     /// The requested block bodies, each of which should correspond to a hash in the request.
-    #[cfg_attr(
-        any(test, feature = "arbitrary"),
-        proptest(
-            strategy = "proptest::collection::vec(proptest::arbitrary::any::<BlockBody>(), 0..=20)"
-        )
-    )]
     pub Vec<BlockBody>,
 );
 
 impl From<Vec<BlockBody>> for BlockBodies {
     fn from(bodies: Vec<BlockBody>) -> Self {
-        BlockBodies(bodies)
+        Self(bodies)
     }
 }
 
@@ -172,9 +151,10 @@ mod tests {
         // 0xa1 = 0x80 (start of string) + 0x21 (33, length of string)
         let long_rlp = hex!("a1ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         let decode_result = BlockHashOrNumber::decode(&mut &long_rlp[..]);
-        if decode_result.is_ok() {
-            panic!("Decoding a bytestring longer than 32 bytes should not decode successfully");
-        }
+        assert!(
+            decode_result.is_err(),
+            "Decoding a bytestring longer than 32 bytes should not decode successfully"
+        );
     }
 
     #[test]
@@ -183,9 +163,7 @@ mod tests {
         // 0x89 = 0x80 (start of string) + 0x09 (9, length of string)
         let long_number = hex!("89ffffffffffffffffff");
         let decode_result = BlockHashOrNumber::decode(&mut &long_number[..]);
-        if decode_result.is_ok() {
-            panic!("Decoding a number longer than 64 bits (but not exactly 32 bytes) should not decode successfully");
-        }
+        assert!(decode_result.is_err(), "Decoding a number longer than 64 bits (but not exactly 32 bytes) should not decode successfully");
     }
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
@@ -296,6 +274,7 @@ mod tests {
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
+                    requests_root: None
                 },
             ]),
         }.encode(&mut data);
@@ -330,6 +309,7 @@ mod tests {
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
+                    requests_root: None
                 },
             ]),
         };
@@ -430,9 +410,11 @@ mod tests {
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
+                            requests_root: None
                         },
                     ],
                     withdrawals: None,
+                    requests: None
                 }
             ]),
         };
@@ -504,9 +486,11 @@ mod tests {
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
+                            requests_root: None
                         },
                     ],
                     withdrawals: None,
+                    requests: None
                 }
             ]),
         };

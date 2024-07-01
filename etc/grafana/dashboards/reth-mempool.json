@@ -1719,6 +1719,23 @@
           "range": true,
           "refId": "C",
           "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_transaction_pool_blob_transactions_nonce_gaps{instance=~\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Blob transactions nonce gaps",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
         }
       ],
       "title": "All Transactions metrics",
@@ -2521,7 +2538,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_network_duration_poll_network_handle{instance=\"$instance\"}",
+          "expr": "reth_network_acc_duration_poll_network_handle{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2538,7 +2555,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_network_duration_poll_swarm{instance=\"$instance\"}",
+          "expr": "reth_network_acc_duration_poll_swarm{instance=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -3087,7 +3104,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_network_invalid_messages_received{instance=~\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_network_invalid_messages_received_total{instance=~\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Invalid Messages",
           "range": true,

@@ -1,5 +1,5 @@
 [package]
-name = "custom-node-components"
+name = "example-custom-node-components"
 version = "0.0.0"
 publish = false
 edition.workspace = true

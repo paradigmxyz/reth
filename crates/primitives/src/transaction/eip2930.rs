@@ -1,9 +1,8 @@
 use super::access_list::AccessList;
 use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
-use bytes::BytesMut;
+use core::mem;
 use reth_codecs::{main_codec, Compact};
-use std::mem;
 
 /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
 #[main_codec]
@@ -50,7 +49,7 @@ pub struct TxEip2930 {
 }
 
 impl TxEip2930 {
-    /// Calculates a heuristic for the in-memory size of the [TxEip2930] transaction.
+    /// Calculates a heuristic for the in-memory size of the [`TxEip2930`] transaction.
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<ChainId>() + // chain_id
@@ -63,7 +62,7 @@ impl TxEip2930 {
         self.input.len() // input
     }
 
-    /// Decodes the inner [TxEip2930] fields from RLP bytes.
+    /// Decodes the inner [`TxEip2930`] fields from RLP bytes.
     ///
     /// NOTE: This assumes a RLP header has already been decoded, and _just_ decodes the following
     /// RLP fields in the following order:
@@ -153,7 +152,7 @@ impl TxEip2930 {
     }
 
     /// Get transaction type
-    pub(crate) fn tx_type(&self) -> TxType {
+    pub(crate) const fn tx_type(&self) -> TxType {
         TxType::Eip2930
     }
 
@@ -179,7 +178,7 @@ impl TxEip2930 {
     /// Outputs the signature hash of the transaction by first encoding without a signature, then
     /// hashing.
     pub(crate) fn signature_hash(&self) -> B256 {
-        let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
+        let mut buf = Vec::with_capacity(self.payload_len_for_signature());
         self.encode_for_signing(&mut buf);
         keccak256(&buf)
     }
