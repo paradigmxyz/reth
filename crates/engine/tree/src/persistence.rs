@@ -4,9 +4,13 @@ use crate::tree::ExecutedBlock;
 use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::B256;
-use reth_provider::ProviderFactory;
+use reth_provider::{
+    bundle_state::HashedStateChanges, BlockWriter, HistoryWriter, OriginalValuesKnown,
+    ProviderFactory, StageCheckpointWriter, StateWriter,
+};
 use std::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot;
+use tracing::debug;
 
 /// Writes parts of reth's in memory tree state to the database.
 ///
@@ -34,9 +38,67 @@ impl<DB: Database> Persistence<DB> {
     }
 
     /// Writes the cloned tree state to the database
-    fn write(&self, _blocks: Vec<ExecutedBlock>) -> ProviderResult<()> {
-        let mut _rw = self.provider.provider_rw()?;
-        todo!("implement this")
+    fn write(&self, blocks: Vec<ExecutedBlock>) -> ProviderResult<()> {
+        let provider_rw = self.provider.provider_rw()?;
+
+        if blocks.is_empty() {
+            debug!(target: "tree::persistence", "Attempted to write empty block range");
+            return Ok(())
+        }
+
+        let first_number = blocks.first().unwrap().block().number;
+
+        let last = blocks.last().unwrap().block();
+        let last_block_number = last.number;
+
+        // TODO: remove all the clones and do performant / batched writes for each type of object
+        // instead of a loop over all blocks,
+        // meaning:
+        //  * blocks
+        //  * state
+        //  * hashed state
+        //  * trie updates (cannot naively extend, need helper)
+        //  * indices (already done basically)
+        // Insert the blocks
+        for block in blocks {
+            // TODO: prune modes - a bit unsure that it should be at this level of abstraction and
+            // not another
+            //
+            // ie, an external consumer of providers (or the database task) really does not care
+            // about pruning, just the node. Maybe we are the biggest user, and use it enough that
+            // we need a helper, but I'd rather make the pruning behavior more explicit then
+            let prune_modes = None;
+            let sealed_block =
+                block.block().clone().try_with_senders_unchecked(block.senders().clone()).unwrap();
+            provider_rw.insert_block(sealed_block, prune_modes)?;
+
+            // Write state and changesets to the database.
+            // Must be written after blocks because of the receipt lookup.
+            let execution_outcome = block.execution_outcome().clone();
+            execution_outcome.write_to_storage(
+                provider_rw.tx_ref(),
+                None,
+                OriginalValuesKnown::No,
+            )?;
+
+            // insert hashes and intermediate merkle nodes
+            {
+                let trie_updates = block.trie_updates().clone();
+                let hashed_state = block.hashed_state();
+                HashedStateChanges(hashed_state.clone()).write_to_db(provider_rw.tx_ref())?;
+                trie_updates.flush(provider_rw.tx_ref())?;
+            }
+
+            // update history indices
+            provider_rw.update_history_indices(first_number..=last_block_number)?;
+
+            // Update pipeline progress
+            provider_rw.update_pipeline_stages(last_block_number, false)?;
+        }
+
+        debug!(target: "tree::persistence", range = ?first_number..=last_block_number, "Appended blocks");
+
+        Ok(())
     }
 
     /// Removes the blocks above the give block number from the database, returning them.
