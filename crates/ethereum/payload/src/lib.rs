@@ -27,7 +27,6 @@ use reth_primitives::{
     },
     eip4844::calculate_excess_blob_gas,
     proofs::{self, calculate_requests_root},
-    revm::env::tx_env_with_recovered,
     Block, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH,
     U256,
 };
@@ -343,7 +342,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
-            tx_env_with_recovered(&tx),
+            evm_config.tx_env(&tx),
         );
 
         // Configure the environment for the block.
