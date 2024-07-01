@@ -755,11 +755,13 @@ impl BestTransactionsAttributes {
 
 /// Trait for transaction types used inside the pool
 pub trait PoolTransaction: fmt::Debug + Send + Sync + Sized {
-    type Source: TryInto<Self> + TryFrom<TransactionSignedEcRecovered>;
+    type Consensus: TryInto<Self> + TryFrom<TransactionSignedEcRecovered>;
     type Pooled: From<PooledTransactionsElementEcRecovered>;
 
     /// Converts from the given source type.
-    fn from_source(source: Self::Source) -> Result<Self, <Self::Source as TryInto<Self>>::Error>;
+    fn from_source(
+        tx: TransactionSignedEcRecovered,
+    ) -> Result<Self, <Self::Consensus as TryInto<Self>>::Error>;
 
     /// Converts to a recovered transaction.
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered;
@@ -987,10 +989,12 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
 }
 
 impl PoolTransaction for EthPooledTransaction {
-    type Source = TransactionSignedEcRecovered;
+    type Consensus = TransactionSignedEcRecovered;
     type Pooled = PooledTransactionsElementEcRecovered;
 
-    fn from_source(source: Self::Source) -> Result<Self, <Self::Source as TryInto<Self>>::Error> {
+    fn from_source(
+        source: Self::Consensus,
+    ) -> Result<Self, <Self::Consensus as TryInto<Self>>::Error> {
         source.try_into()
     }
 
@@ -999,7 +1003,7 @@ impl PoolTransaction for EthPooledTransaction {
     }
 
     fn from_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
-        EthPooledTransaction::from_recovered_pooled_transaction(tx)
+        Self::from(tx)
     }
 
     /// Returns hash of the transaction.

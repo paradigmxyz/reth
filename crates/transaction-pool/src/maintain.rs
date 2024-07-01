@@ -5,7 +5,7 @@ use crate::{
     error::PoolError,
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, ChangedAccount, TransactionPool, TransactionPoolExt},
-    BlockInfo,
+    BlockInfo, PoolTransaction,
 };
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
@@ -319,27 +319,19 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                     .filter(|tx| !new_mined_transactions.contains(&tx.hash))
                     .filter_map(|tx| {
                         if tx.is_eip4844() {
-                            // reorged blobs no longer include the blob, which is necessary for
-                            // validating the transaction. Even though the transaction could have
-                            // been validated previously, we still need the blob in order to
-                            // accurately set the transaction's
-                            // encoded-length which is propagated over the network.
                             pool.get_blob(tx.hash)
                                 .ok()
                                 .flatten()
                                 .and_then(|sidecar| {
                                     PooledTransactionsElementEcRecovered::try_from_blob_transaction(
                                         tx, sidecar,
-                                    )
-                                    .ok()
+                                    ).ok()
                                 })
-                                .map(
-                                    <P as TransactionPool>::Transaction::from_recovered_pooled_transaction,
-                                )
+                                .map(|pooled_tx| {
+                                    <<P as TransactionPool>::Transaction as PoolTransaction>::from_pooled_transaction(pooled_tx)
+                                })
                         } else {
-                            <P as TransactionPool>::Transaction::try_from_recovered_transaction(
-                                tx,
-                            ).ok()
+                            <<P as TransactionPool>::Transaction as PoolTransaction>::from_source(tx).ok()
                         }
                     })
                     .collect::<Vec<_>>();
@@ -593,7 +585,7 @@ where
         .filter_map(|tx| tx.try_ecrecovered())
         .filter_map(|tx| {
             // Filter out errors
-            <P as TransactionPool>::Transaction::try_from_recovered_transaction(tx).ok()
+            <<P as TransactionPool>::Transaction as PoolTransaction>::from_source(tx).ok()
         })
         .collect::<Vec<_>>();
 
