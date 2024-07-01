@@ -1,11 +1,8 @@
 //! Database debugging tool
-
-use crate::{
-    args::StageEnum,
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
-};
+use crate::args::StageEnum;
 use clap::Parser;
 use itertools::Itertools;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::{static_file::iter_static_files, tables, DatabaseEnv};
 use reth_db_api::transaction::DbTxMut;
 use reth_db_common::{

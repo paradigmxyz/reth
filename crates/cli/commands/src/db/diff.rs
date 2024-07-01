@@ -1,11 +1,11 @@
-use crate::{
-    args::DatabaseArgs,
-    dirs::{DataDirPath, PlatformPath},
-};
 use clap::Parser;
 use reth_db::{open_db_read_only, tables_to_generic, DatabaseEnv, Tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, table::Table, transaction::DbTx};
 use reth_db_common::DbTool;
+use reth_node_core::{
+    args::DatabaseArgs,
+    dirs::{DataDirPath, PlatformPath},
+};
 use std::{
     collections::HashMap,
     fmt::Debug,

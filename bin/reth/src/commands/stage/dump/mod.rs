@@ -1,11 +1,7 @@
 //! Database debugging tool
-
-use crate::{
-    args::DatadirArgs,
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
-    dirs::DataDirPath,
-};
+use crate::{args::DatadirArgs, dirs::DataDirPath};
 use clap::Parser;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::{init_db, mdbx::DatabaseArguments, tables, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, models::ClientVersion, table::TableImporter,

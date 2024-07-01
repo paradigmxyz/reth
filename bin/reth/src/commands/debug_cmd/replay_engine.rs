@@ -1,6 +1,5 @@
 use crate::{
     args::{get_secret_key, NetworkArgs},
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
 };
 use clap::Parser;
@@ -10,6 +9,7 @@ use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensusEngine, EthBeacon
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_consensus::Consensus;

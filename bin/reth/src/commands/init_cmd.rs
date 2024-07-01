@@ -1,7 +1,7 @@
 //! Command that initializes the node from a genesis file.
 
-use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_provider::BlockHashReader;
 use tracing::info;
 

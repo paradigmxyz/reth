@@ -1,4 +1,4 @@
-use crate::commands::db::checksum::ChecksumViewer;
+use crate::db::checksum::ChecksumViewer;
 use clap::Parser;
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;

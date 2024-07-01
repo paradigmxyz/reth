@@ -1,15 +1,14 @@
 //! Main `stage` command
 //!
 //! Stage debugging tool
-
 use crate::{
     args::{get_secret_key, NetworkArgs, StageEnum},
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
     prometheus_exporter,
 };
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;

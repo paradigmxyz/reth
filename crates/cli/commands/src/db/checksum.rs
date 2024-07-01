@@ -1,4 +1,4 @@
-use crate::commands::db::get::{maybe_json_value_parser, table_key};
+use crate::db::get::{maybe_json_value_parser, table_key};
 use ahash::RandomState;
 use clap::Parser;
 use reth_db::{DatabaseEnv, RawKey, RawTable, RawValue, TableViewer, Tables};
