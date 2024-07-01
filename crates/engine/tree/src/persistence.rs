@@ -105,6 +105,18 @@ impl<DB: Database> Persistence<DB> {
     fn remove_blocks_above(&self, _block_number: u64) -> Vec<ExecutedBlock> {
         todo!("implement this")
     }
+
+    /// Prunes block data before the given block hash according to the configured prune
+    /// configuration.
+    fn prune_before(&self, _block_hash: B256) {
+        todo!("implement this")
+    }
+
+    /// Removes static file related data from the database, depending on the current block height in
+    /// existing static files.
+    fn clean_static_file_duplicates(&self) {
+        todo!("implement this")
+    }
 }
 
 impl<DB> Persistence<DB>
@@ -135,7 +147,6 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove((new_tip_num, sender)) => {
-                    // spawn blocking so we can poll the thread later
                     let output = self.remove_blocks_above(new_tip_num);
                     sender.send(output).unwrap();
                 }
@@ -146,6 +157,14 @@ where
                     let last_block_hash = blocks.last().unwrap().block().hash();
                     self.write(blocks).unwrap();
                     sender.send(last_block_hash).unwrap();
+                }
+                PersistenceAction::PruneBefore((block_hash, sender)) => {
+                    self.prune_before(block_hash);
+                    sender.send(()).unwrap();
+                }
+                PersistenceAction::CleanStaticFileDuplicates(sender) => {
+                    self.clean_static_file_duplicates();
+                    sender.send(()).unwrap();
                 }
             }
         }
@@ -161,6 +180,14 @@ pub enum PersistenceAction {
 
     /// Removes the blocks above the given block number from the database.
     RemoveBlocksAbove((u64, oneshot::Sender<Vec<ExecutedBlock>>)),
+
+    /// Prune associated block data before the given hash, according to already-configured prune
+    /// modes.
+    PruneBefore((B256, oneshot::Sender<()>)),
+
+    /// Trigger a read of static file data, and delete data depending on the highest block in each
+    /// static file segment.
+    CleanStaticFileDuplicates(oneshot::Sender<()>),
 }
 
 /// A handle to the persistence task
@@ -195,6 +222,26 @@ impl PersistenceHandle {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(PersistenceAction::RemoveBlocksAbove((block_num, tx)))
+            .expect("should be able to send");
+        rx.await.expect("todo: err handling")
+    }
+
+    /// Tells the persistence task to remove block data before the given hash, according to the
+    /// configured prune config.
+    pub async fn prune_before(&self, block_hash: B256) {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(PersistenceAction::PruneBefore((block_hash, tx)))
+            .expect("should be able to send");
+        rx.await.expect("todo: err handling")
+    }
+
+    /// Tells the persistence task to read static file data, and delete data depending on the
+    /// highest block in each static file segment.
+    pub async fn clean_static_file_duplicates(&self) {
+        let (tx, rx) = oneshot::channel();
+        self.sender
+            .send(PersistenceAction::CleanStaticFileDuplicates(tx))
             .expect("should be able to send");
         rx.await.expect("todo: err handling")
     }
