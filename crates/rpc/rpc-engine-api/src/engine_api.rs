@@ -840,7 +840,7 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
-    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_ethereum_engine_primitives::EthEngine;
     use reth_testing_utils::generators::random_block;
 
     use reth_chainspec::MAINNET;
@@ -853,8 +853,7 @@ mod tests {
     use reth_tokio_util::EventSender;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
-    fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>, EthEngineTypes>)
-    {
+    fn setup_engine_api() -> (EngineApiTestHandle, EngineApi<Arc<MockEthProvider>, EthEngine>) {
         let client = ClientVersionV1 {
             code: ClientCode::RH,
             name: "Reth".to_string(),
@@ -896,7 +895,7 @@ mod tests {
     struct EngineApiTestHandle {
         chain_spec: Arc<ChainSpec>,
         provider: Arc<MockEthProvider>,
-        from_api: UnboundedReceiver<BeaconEngineMessage<EthEngineTypes>>,
+        from_api: UnboundedReceiver<BeaconEngineMessage<EthEngine>>,
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_chainspec::MAINNET;
-use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_engine_primitives::EthEngine;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
@@ -28,7 +28,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
     let config = AuthServerConfig::builder(secret).socket_addr(test_address()).build();
     let (tx, _rx) = unbounded_channel();
     let beacon_engine_handle =
-        BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx, Default::default());
+        BeaconConsensusEngineHandle::<EthEngine>::new(tx, Default::default());
     let client = ClientVersionV1 {
         code: ClientCode::RH,
         name: "Reth".to_string(),
