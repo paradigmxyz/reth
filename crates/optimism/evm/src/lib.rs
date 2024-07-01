@@ -108,7 +108,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
                 tx_env.blob_hashes.clear();
                 tx_env.max_fee_per_blob_gas.take();
             }
-            Transaction::Eip4844(tx) => {
+            Transaction::Eip4844(_) => {
                 panic!("No eip4844 tx in optimism")
             }
             Transaction::Deposit(tx) => {
@@ -127,6 +127,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
                     is_system_transaction: Some(tx.is_system_transaction),
                     enveloped_tx: Some(envelope.into()),
                 };
+                return;
             }
         }
 
