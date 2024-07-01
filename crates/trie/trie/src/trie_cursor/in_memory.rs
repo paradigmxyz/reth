@@ -1,5 +1,5 @@
 use super::{TrieCursor, TrieCursorFactory};
-use crate::updates::{TrieKey, TrieOp, TrieUpdatesSorted};
+use crate::updates::{TrieKey, TrieUpdatesSorted};
 use reth_db::DatabaseError;
 use reth_primitives::B256;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
@@ -58,10 +58,7 @@ impl<'a, C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'a, C> {
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         if let Some((trie_key, trie_op)) = self.trie_updates.find_account_node(&key) {
             self.last_key = Some(trie_key);
-            match trie_op {
-                TrieOp::Update(node) => Ok(Some((key, node))),
-                TrieOp::Delete => Ok(None),
-            }
+            Ok(trie_op.into_update().map(|node| (key, node)))
         } else {
             let result = self.cursor.seek_exact(key)?;
             self.last_key = result.as_ref().map(|(k, _)| TrieKey::AccountNode(k.clone()));
@@ -86,10 +83,7 @@ impl<'a, C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'a, C> {
                 _ => panic!("Invalid trie key"),
             };
             self.last_key = Some(trie_key);
-            match trie_op {
-                TrieOp::Update(node) => return Ok(Some((nibbles, node))),
-                TrieOp::Delete => return Ok(None),
-            }
+            return Ok(trie_op.into_update().map(|node| (nibbles, node)))
         }
 
         let result = self.cursor.seek(key)?;
@@ -132,10 +126,7 @@ impl<'a, C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'a, C> {
             self.trie_updates.find_storage_node(&self.hashed_address, &key)
         {
             self.last_key = Some(trie_key);
-            match trie_op {
-                TrieOp::Update(node) => Ok(Some((key, node))),
-                TrieOp::Delete => Ok(None),
-            }
+            Ok(trie_op.into_update().map(|node| (key, node)))
         } else {
             let result = self.cursor.seek_exact(key)?;
             self.last_key =
@@ -164,10 +155,7 @@ impl<'a, C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'a, C> {
                 _ => panic!("this should not happen!"),
             };
             self.last_key = Some(trie_key.clone());
-            match trie_op {
-                TrieOp::Update(node) => return Ok(Some((nibbles, node.clone()))),
-                TrieOp::Delete => return Ok(None),
-            }
+            return Ok(trie_op.as_update().map(|node| (nibbles, node.clone())))
         }
 
         let result = self.cursor.seek(key)?;
