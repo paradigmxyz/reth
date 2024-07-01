@@ -15,9 +15,10 @@ use reth_db::cursor::DbCursorRO;
 use reth_db::transaction::DbTx;
 use reth_db::{init_db, tables, DatabaseEnv};
 use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
-use reth_node_core::args::BitfinityResetEvmStateArgs;
+use reth_node_core::args::{BitfinityResetEvmStateArgs, DatadirArgs};
 use reth_node_core::dirs::{DataDirPath, MaybePlatformPath};
 use reth_primitives::StorageEntry;
+use reth_provider::providers::StaticFileProvider;
 use reth_provider::{BlockNumReader, BlockReader, ProviderFactory};
 use tracing::{debug, info, trace, warn};
 
@@ -61,10 +62,10 @@ impl BitfinityResetEvmStateCommandBuilder {
         );
         let executor = Arc::new(EvmCanisterResetStateExecutor::new(evm_client));
 
-        let data_dir = self.datadir.unwrap_or_chain_default(chain.chain);
+        let data_dir = self.datadir.unwrap_or_chain_default(chain.chain, DatadirArgs::default());
         let db_path = data_dir.db();
         let db = Arc::new(init_db(db_path, Default::default())?);
-        let provider_factory = ProviderFactory::new(db.clone(), chain, data_dir.static_files());
+        let provider_factory = ProviderFactory::new(db.clone(), chain, StaticFileProvider::read_write(data_dir.static_files())?);
 
         Ok(BitfinityResetEvmStateCommand::new(provider_factory, executor, self.bitfinity.parallel_requests))
     }

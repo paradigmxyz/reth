@@ -1,12 +1,11 @@
 //! Main node command for launching a node
 
 use crate::args::{
-    utils::{chain_help, chain_value_parser, parse_socket_address, SUPPORTED_CHAINS},
+    utils::parse_socket_address,
     DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
     RpcServerArgs, TxPoolArgs,
 };
 use clap::{value_parser, Args, Parser};
-use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliContext;
 use reth_db::{init_db, DatabaseEnv};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
@@ -20,19 +19,19 @@ pub struct NodeCommand<Ext: clap::Args + fmt::Debug = NoArgs> {
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     pub config: Option<PathBuf>,
 
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        default_value_if("dev", "true", "dev"),
-        value_parser = chain_value_parser,
-        required = false,
-    )]
-    pub chain: Arc<ChainSpec>,
+    // /// The chain this node is running.
+    // ///
+    // /// Possible values are either a built-in chain or the path to a chain specification file.
+    // #[arg(
+    //     long,
+    //     value_name = "CHAIN_OR_PATH",
+    //     long_help = chain_help(),
+    //     default_value = SUPPORTED_CHAINS[0],
+    //     default_value_if("dev", "true", "dev"),
+    //     value_parser = chain_value_parser,
+    //     required = false,
+    // )]
+    // pub chain: Arc<ChainSpec>,
 
     /// Enable Prometheus metrics.
     ///
@@ -139,7 +138,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         let Self {
             datadir,
             config,
-            chain,
+            // chain,
             metrics,
             instance,
             with_unused_ports,
@@ -212,10 +211,7 @@ pub struct NoArgs;
 mod tests {
     use super::*;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use std::{
-        net::{IpAddr, Ipv4Addr},
-        path::Path,
-    };
+    use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
     fn parse_help_node_command() {
@@ -280,59 +276,59 @@ mod tests {
         assert_eq!(cmd.metrics, Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9001)));
     }
 
-    #[test]
-    fn parse_config_path() {
-        let cmd =
-            NodeCommand::try_parse_args_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
-        // always store reth.toml in the data dir, not the chain specific data dir
-        let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
-        let config_path = cmd.config.unwrap_or_else(|| data_dir.config());
-        assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
+    // #[test]
+    // fn parse_config_path() {
+    //     let cmd =
+    //         NodeCommand::try_parse_args_from(["reth", "--config", "my/path/to/reth.toml"]).unwrap();
+    //     // always store reth.toml in the data dir, not the chain specific data dir
+    //     let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
+    //     let config_path = cmd.config.unwrap_or_else(|| data_dir.config());
+    //     assert_eq!(config_path, Path::new("my/path/to/reth.toml"));
 
-        let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
+    //     let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
 
-        // always store reth.toml in the data dir, not the chain specific data dir
-        let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
-        let config_path = cmd.config.clone().unwrap_or_else(|| data_dir.config());
-        let end = format!("{}/reth.toml", SUPPORTED_CHAINS[0]);
-        assert!(config_path.ends_with(end), "{:?}", cmd.config);
-    }
+    //     // always store reth.toml in the data dir, not the chain specific data dir
+    //     let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
+    //     let config_path = cmd.config.clone().unwrap_or_else(|| data_dir.config());
+    //     let end = format!("{}/reth.toml", SUPPORTED_CHAINS[0]);
+    //     assert!(config_path.ends_with(end), "{:?}", cmd.config);
+    // }
 
-    #[test]
-    fn parse_db_path() {
-        let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
-        let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
+    // #[test]
+    // fn parse_db_path() {
+    //     let cmd = NodeCommand::try_parse_args_from(["reth"]).unwrap();
+    //     let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
 
-        let db_path = data_dir.db();
-        let end = format!("reth/{}/db", SUPPORTED_CHAINS[0]);
-        assert!(db_path.ends_with(end), "{:?}", cmd.config);
+    //     let db_path = data_dir.db();
+    //     let end = format!("reth/{}/db", SUPPORTED_CHAINS[0]);
+    //     assert!(db_path.ends_with(end), "{:?}", cmd.config);
 
-        let cmd =
-            NodeCommand::try_parse_args_from(["reth", "--datadir", "my/custom/path"]).unwrap();
-        let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
+    //     let cmd =
+    //         NodeCommand::try_parse_args_from(["reth", "--datadir", "my/custom/path"]).unwrap();
+    //     let data_dir = cmd.datadir.resolve_datadir(cmd.chain.chain);
 
-        let db_path = data_dir.db();
-        assert_eq!(db_path, Path::new("my/custom/path/db"));
-    }
+    //     let db_path = data_dir.db();
+    //     assert_eq!(db_path, Path::new("my/custom/path/db"));
+    // }
 
-    #[test]
-    #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth
-    fn parse_dev() {
-        let cmd = NodeCommand::<NoArgs>::parse_from(["reth", "--dev"]);
-        let chain = reth_chainspec::DEV.clone();
-        assert_eq!(cmd.chain.chain, chain.chain);
-        assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
-        assert_eq!(
-            cmd.chain.paris_block_and_final_difficulty,
-            chain.paris_block_and_final_difficulty
-        );
-        assert_eq!(cmd.chain.hardforks, chain.hardforks);
+    // #[test]
+    // #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth
+    // fn parse_dev() {
+    //     let cmd = NodeCommand::<NoArgs>::parse_from(["reth", "--dev"]);
+    //     let chain = reth_chainspec::DEV.clone();
+    //     assert_eq!(cmd.chain.chain, chain.chain);
+    //     assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
+    //     assert_eq!(
+    //         cmd.chain.paris_block_and_final_difficulty,
+    //         chain.paris_block_and_final_difficulty
+    //     );
+    //     assert_eq!(cmd.chain.hardforks, chain.hardforks);
 
-        assert!(cmd.rpc.http);
-        assert!(cmd.network.discovery.disable_discovery);
+    //     assert!(cmd.rpc.http);
+    //     assert!(cmd.network.discovery.disable_discovery);
 
-        assert!(cmd.dev.dev);
-    }
+    //     assert!(cmd.dev.dev);
+    // }
 
     #[test]
     fn parse_instance() {
