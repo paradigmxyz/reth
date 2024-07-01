@@ -23,8 +23,7 @@ where
     /// Returns next prunable segment in ring, or `None` if iterator has walked one cycle.
     fn next(&mut self) -> Option<Self::Item> {
         // return after one cycle
-        if self.ring.prev_table().is_some() && self.ring.current_table() == self.ring.start_table()
-        {
+        if self.ring.is_cycle() {
             self.ring.reset_cycle();
             return None
         }
@@ -83,6 +82,11 @@ pub trait CycleSegments {
         self.next_cycle().filter(|segment| segment.is_some()).flatten()
     }
 
+    /// Returns `true` if the ring has completed one cycle.
+    fn is_cycle(&self) -> bool {
+        self.prev_table().is_some() && self.current_table() == self.start_table()
+    }
+
     /// Resets cycle.
     fn reset_cycle(&mut self);
 }
@@ -107,7 +111,6 @@ pub struct TableRing<DB> {
     current: TableRef,
     prev: Option<TableRef>,
     segments: Vec<Arc<dyn Segment<DB>>>,
-    static_file_start: StaticFileTableRef,
     static_file_ring: StaticFileTableRing<DB>,
 }
 
@@ -133,7 +136,6 @@ impl<DB> TableRing<DB> {
             current: start,
             prev: None,
             segments,
-            static_file_start,
             static_file_ring: StaticFileTableRing::new(provider, static_file_start),
         })
     }
@@ -159,24 +161,23 @@ where
     }
 
     fn peek_next_table(&self) -> Self::TableRef {
-        let Self { current, static_file_start, static_file_ring, segments, .. } = self;
+        let Self { current, static_file_ring, segments, .. } = self;
 
         match current {
             TableRef::StaticFiles(_) => {
-                // static files ring nested in this ring, so is one step ahead
-                let next = static_file_ring.current_table();
-                if next == *static_file_start && !segments.is_empty() {
+                if static_file_ring.is_cycle() && !segments.is_empty() {
                     TableRef::Other(0)
                 } else {
-                    TableRef::StaticFiles(next)
+                    // static files ring nested in this ring, so is one step ahead
+                    TableRef::StaticFiles(static_file_ring.current_table())
                 }
             }
             TableRef::Other(index) => {
-                if *index == segments.len() - 1 {
-                    // start next cycle
-                    TableRef::StaticFiles(StaticFileTableRef::default())
-                } else {
+                if *index < segments.len() - 1 {
                     TableRef::Other(*index + 1)
+                } else {
+                    // start next cycle
+                    TableRef::StaticFiles(static_file_ring.current_table())
                 }
             }
         }
@@ -191,7 +192,7 @@ where
         let Self { current, segments, .. } = self;
 
         let segment = match current {
-            TableRef::StaticFiles(_) => self.static_file_ring.next_cycle().next().flatten(),
+            TableRef::StaticFiles(_) => self.static_file_ring.next_segment(),
             TableRef::Other(index) => Some((segments[*index].clone(), PrunePurpose::User)),
         };
 
@@ -203,9 +204,7 @@ where
     fn reset_cycle(&mut self) {
         self.prev = None;
         self.start = self.current;
-        if matches!(self.current, TableRef::StaticFiles(_)) {
-            self.static_file_ring.reset_cycle();
-        }
+        self.static_file_ring.reset_cycle();
     }
 }
 
