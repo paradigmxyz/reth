@@ -60,9 +60,6 @@ pub trait CycleSegments {
     #[allow(clippy::type_complexity)]
     fn next_segment(&mut self) -> Option<(Arc<dyn Segment<Self::Db>>, PrunePurpose)>;
 
-    /// Resets cycle.
-    fn reset_cycle(&mut self);
-
     /// Returns an iterator cycling once over the ring of tables. Yields an item for each table,
     /// either a segment or `None`. Advances the current position in the ring.
     fn next_cycle(
@@ -85,6 +82,9 @@ pub trait CycleSegments {
 
         self.next_cycle().filter(|segment| segment.is_some()).flatten()
     }
+
+    /// Resets cycle.
+    fn reset_cycle(&mut self);
 }
 
 /// Opaque reference to a table.
@@ -203,6 +203,9 @@ where
     fn reset_cycle(&mut self) {
         self.prev = None;
         self.start = self.current;
+        if matches!(self.current, TableRef::StaticFiles(_)) {
+            self.static_file_ring.reset_cycle();
+        }
     }
 }
 
@@ -362,13 +365,14 @@ mod test {
         let mut total_segments = 0;
         for segment in ring.iter() {
             total_segments += 1;
-            trace!(target: "pruner::test", "segment: {:?}", segment.0.segment())
+            trace!(target: "pruner::test", "segment: {:?}", segment.0.segment());
         }
 
         // + 1 non-empty static file segments
         assert_eq!(segments_len + 1, total_segments);
         // back at start table
         assert_eq!(TableRef::default(), ring.current_table());
+        // cycle reset
         assert!(ring.prev_table().is_none());
     }
 
@@ -397,15 +401,8 @@ mod test {
         assert_eq!(segments_len + 3, total_segments);
         // back at start table
         assert_eq!(TableRef::default(), ring.current_table());
+        // cycle reset
         assert!(ring.prev_table().is_none());
-    }
-
-    const fn expected_prev_table(start_index: usize) -> TableRef {
-        if start_index == 0 {
-            TableRef::StaticFiles(StaticFileTableRef::Receipts)
-        } else {
-            TableRef::Other(start_index - 1)
-        }
     }
 
     #[test]
@@ -444,6 +441,7 @@ mod test {
         assert_eq!(2 * segments_len, total_segments);
         // back at start table
         assert_eq!(TableRef::default(), ring.current_table());
+        // cycle reset
         assert!(ring.prev_table().is_none());
     }
 
@@ -521,6 +519,7 @@ mod test {
         assert_eq!(segments_len + 3, total_segments);
         // back at start table
         assert_eq!(start, ring.current_table());
+        // cycle reset
         assert!(ring.prev_table().is_none());
     }
 
@@ -531,16 +530,6 @@ mod test {
             0 => Headers,
             1 => Transactions,
             _ => Receipts,
-        }
-    }
-
-    const fn expected_prev_static_files_table(table_ref: StaticFileTableRef) -> StaticFileTableRef {
-        use StaticFileTableRef::*;
-
-        match table_ref {
-            Headers => Receipts,
-            Transactions => Headers,
-            Receipts => Transactions,
         }
     }
 
@@ -565,6 +554,7 @@ mod test {
         assert_eq!(3, total_segments);
         // back at start table
         assert_eq!(start, ring.current_table());
+        // cycle reset
         assert!(ring.prev_table().is_none());
     }
 }
