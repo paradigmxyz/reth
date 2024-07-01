@@ -7,27 +7,27 @@ use ic_certificate_verification::VerifyCertificate;
 use ic_certification::{Certificate, HashTree, LookupResult};
 use itertools::Either;
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
-use reth_interfaces::p2p::{
+use reth_chainspec::{
+    BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks, ChainSpec, EthereumHardfork,
+};
+
+use alloy_rlp::Decodable;
+use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::RequestError,
     headers::client::{HeadersClient, HeadersFut, HeadersRequest},
     priority::Priority,
 };
-
-use alloy_rlp::Decodable;
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{
-    ruint::Uint, BaseFeeParams, BaseFeeParamsKind, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Chain, ChainConfig, ChainSpec, ForkCondition, Genesis, GenesisAccount, Hardfork, Header, HeadersDirection, B256, U256
+    ruint::Uint, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainConfig, ForkCondition,
+    Genesis, GenesisAccount, Header, HeadersDirection, B256, U256,
 };
 use rlp::Encodable;
 use serde_json::json;
 
-use std::{
-    self,
-    cmp::min,
-    collections::{BTreeMap, HashMap},
-};
+use std::{self, cmp::min, collections::HashMap};
 use thiserror::Error;
 
 use tracing::{debug, error, info, trace, warn};
@@ -102,7 +102,8 @@ impl BitfinityEvmClient {
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
 
-        let mut end_block = min(end_block.unwrap_or(latest_remote_block), start_block + MAX_BLOCKS - 1);
+        let mut end_block =
+            min(end_block.unwrap_or(latest_remote_block), start_block + MAX_BLOCKS - 1);
 
         if let Some(block_checker) = &block_checker {
             end_block = min(end_block, block_checker.get_block_number());
@@ -116,8 +117,7 @@ impl BitfinityEvmClient {
 
             debug!(target: "downloaders::bitfinity_evm_client", "Fetching blocks from {} to {}", begin_block, last_block);
 
-            let blocks_to_fetch =
-                (begin_block..=last_block).map(Into::into).collect::<Vec<_>>();
+            let blocks_to_fetch = (begin_block..=last_block).map(Into::into).collect::<Vec<_>>();
 
             let full_blocks = provider
                 .get_full_blocks_by_number(blocks_to_fetch, batch_size)
@@ -153,6 +153,7 @@ impl BitfinityEvmClient {
                         transactions: header.body,
                         ommers: header.ommers,
                         withdrawals: header.withdrawals,
+                        requests: header.requests,
                     },
                 );
             }
@@ -197,7 +198,8 @@ impl BitfinityEvmClient {
 
     /// Fetch Bitfinity chain spec
     pub async fn fetch_chain_spec(rpc: String) -> Result<ChainSpec> {
-        let client = ethereum_json_rpc_client::EthJsonRpcClient::new(ReqwestClient::new(rpc.clone()));
+        let client =
+            ethereum_json_rpc_client::EthJsonRpcClient::new(ReqwestClient::new(rpc.clone()));
 
         let chain_id = client.get_chain_id().await.map_err(|e| eyre::eyre!(e))?;
 
@@ -247,20 +249,20 @@ impl BitfinityEvmClient {
             genesis_hash: genesis_block.hash.map(|h| h.0.into()),
             genesis: genesis.clone(),
             paris_block_and_final_difficulty: Some((0, Uint::ZERO)),
-            hardforks: BTreeMap::from([
-                (Hardfork::Frontier, ForkCondition::Block(0)),
-                (Hardfork::Homestead, ForkCondition::Block(0)),
-                (Hardfork::Dao, ForkCondition::Block(0)),
-                (Hardfork::Tangerine, ForkCondition::Block(0)),
-                (Hardfork::SpuriousDragon, ForkCondition::Block(0)),
-                (Hardfork::Byzantium, ForkCondition::Block(0)),
-                (Hardfork::Constantinople, ForkCondition::Block(0)),
-                (Hardfork::Petersburg, ForkCondition::Block(0)),
-                (Hardfork::Istanbul, ForkCondition::Block(0)),
-                (Hardfork::Berlin, ForkCondition::Block(0)),
-                (Hardfork::London, ForkCondition::Block(0)),
+            hardforks: ChainHardforks::new(vec![
+                (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
+                (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+                (EthereumHardfork::Dao.boxed(), ForkCondition::Block(0)),
+                (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+                (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+                (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+                (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
+                (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+                (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+                (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
+                (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
                 (
-                    Hardfork::Paris,
+                    EthereumHardfork::Paris.boxed(),
                     ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
                 ),
             ]),
