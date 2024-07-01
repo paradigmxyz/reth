@@ -132,7 +132,7 @@ where
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
             prefix_sets.account_prefix_set,
         )
-        .with_updates(retain_updates);
+        .with_deletions_retained(retain_updates);
         let mut account_node_iter = TrieNodeIter::new(
             walker,
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
