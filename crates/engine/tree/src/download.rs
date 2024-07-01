@@ -20,7 +20,7 @@ use tracing::trace;
 /// A trait that can download blocks on demand.
 pub trait BlockDownloader: Send + Sync {
     /// Handle an action.
-    fn on_action(&mut self, event: DownloadAction);
+    fn on_action(&mut self, action: DownloadAction);
 
     /// Advance in progress requests if any
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<DownloadOutcome>;
@@ -65,7 +65,7 @@ where
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Create a new instance
-    pub(crate) fn new(client: Client, consensus: Arc<dyn Consensus>) -> Self {
+    pub fn new(client: Client, consensus: Arc<dyn Consensus>) -> Self {
         Self {
             full_block_client: FullBlockClient::new(client, consensus),
             inflight_full_block_requests: Vec::new(),
@@ -154,8 +154,8 @@ where
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Handles incoming download actions.
-    fn on_action(&mut self, event: DownloadAction) {
-        match event {
+    fn on_action(&mut self, action: DownloadAction) {
+        match action {
             DownloadAction::Clear => self.clear(),
             DownloadAction::Download(request) => self.download(request),
         }

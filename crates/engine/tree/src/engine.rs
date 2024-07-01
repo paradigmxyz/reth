@@ -72,10 +72,10 @@ where
                     RequestHandlerEvent::Idle => break,
                     RequestHandlerEvent::HandlerEvent(ev) => {
                         return match ev {
-                            HandlerEvent::Pipeline(target) => {
-                                // bubble up pipeline request
+                            HandlerEvent::BackfillSync(target) => {
+                                // bubble up backfill sync request request
                                 self.downloader.on_action(DownloadAction::Clear);
-                                Poll::Ready(HandlerEvent::Pipeline(target))
+                                Poll::Ready(HandlerEvent::BackfillSync(target))
                             }
                             HandlerEvent::Event(ev) => {
                                 // bubble up the event
