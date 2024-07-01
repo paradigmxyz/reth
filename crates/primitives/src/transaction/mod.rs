@@ -1479,9 +1479,9 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
         }
 
         #[cfg(feature = "optimism")]
-        /// Both `Some(0)` and `None` values are encoded as empty string byte. This introduces
-        /// ambiguity in roundtrip tests. Patch the mint value of deposit transaction here, so that
-        /// it's `None` if zero.
+        // Both `Some(0)` and `None` values are encoded as empty string byte. This introduces
+        // ambiguity in roundtrip tests. Patch the mint value of deposit transaction here, so that
+        // it's `None` if zero.
         if let Transaction::Deposit(ref mut tx_deposit) = transaction {
             if tx_deposit.mint == Some(0) {
                 tx_deposit.mint = None;
