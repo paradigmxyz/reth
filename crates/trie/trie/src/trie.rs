@@ -221,7 +221,7 @@ where
                     state.walker_stack,
                     self.prefix_sets.account_prefix_set,
                 )
-                .with_updates(retain_updates);
+                .with_deletions_retained(retain_updates);
                 let node_iter = TrieNodeIter::new(walker, hashed_account_cursor)
                     .with_last_hashed_key(state.last_account_key);
                 (hash_builder, node_iter)
@@ -229,7 +229,7 @@ where
             None => {
                 let hash_builder = HashBuilder::default().with_updates(retain_updates);
                 let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set)
-                    .with_updates(retain_updates);
+                    .with_deletions_retained(retain_updates);
                 let node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
                 (hash_builder, node_iter)
             }
@@ -286,10 +286,10 @@ where
 
                     // Decide if we need to return intermediate progress.
                     let total_updates_len = trie_updates.len() +
-                        account_node_iter.walker.updates_len() +
+                        account_node_iter.walker.deleted_keys_len() +
                         hash_builder.updates_len();
                     if retain_updates && total_updates_len as u64 >= self.threshold {
-                        let (walker_stack, walker_updates) = account_node_iter.walker.split();
+                        let (walker_stack, walker_deleted_keys) = account_node_iter.walker.split();
                         let (hash_builder, hash_builder_updates) = hash_builder.split();
 
                         let state = IntermediateStateRootState {
@@ -298,7 +298,9 @@ where
                             last_account_key: hashed_address,
                         };
 
-                        trie_updates.extend(walker_updates);
+                        trie_updates.extend(
+                            walker_deleted_keys.into_iter().map(|key| (key, TrieOp::Delete)),
+                        );
                         trie_updates.extend_with_account_updates(hash_builder_updates);
 
                         return Ok(StateRootProgress::Progress(
@@ -492,7 +494,8 @@ where
 
         let mut tracker = TrieTracker::default();
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
-        let walker = TrieWalker::new(trie_cursor, self.prefix_set).with_updates(retain_updates);
+        let walker =
+            TrieWalker::new(trie_cursor, self.prefix_set).with_deletions_retained(retain_updates);
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
 
@@ -549,7 +552,7 @@ mod tests {
         hashed_cursor::HashedPostStateCursorFactory,
         prefix_set::PrefixSetMut,
         test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
-        trie_cursor::TrieUpdatesCursorFactory,
+        trie_cursor::InMemoryTrieCursorFactory,
         BranchNodeCompact, HashedPostState, HashedStorage, TrieMask,
     };
     use proptest::{prelude::ProptestConfig, proptest};
@@ -1488,7 +1491,7 @@ mod tests {
                 tx,
                 &post_state.clone().into_sorted(),
             ))
-            .with_trie_cursor_factory(TrieUpdatesCursorFactory::new(tx, &update.sorted()))
+            .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(tx, &update.sorted()))
             .with_prefix_set(prefix_sets.storage_prefix_sets.remove(&keccak256(address)).unwrap())
             .root_with_updates()
             .unwrap();

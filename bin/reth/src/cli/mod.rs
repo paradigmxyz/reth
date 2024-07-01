@@ -6,7 +6,7 @@ use crate::{
         LogArgs,
     },
     commands::{
-        config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, init_state,
+        config_cmd, debug_cmd, dump_genesis, import, init_cmd, init_state,
         node::{self, NoArgs},
         p2p, prune, recover, stage, test_vectors,
     },
@@ -14,6 +14,7 @@ use crate::{
 };
 use clap::{value_parser, Parser, Subcommand};
 use reth_chainspec::ChainSpec;
+use reth_cli_commands::db;
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};

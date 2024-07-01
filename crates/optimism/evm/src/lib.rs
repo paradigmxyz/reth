@@ -12,8 +12,8 @@
 use reth_chainspec::ChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
-    revm::env::fill_op_tx_env,
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
+    transaction::FillTxEnv,
     Address, Head, Header, TransactionSigned, U256,
 };
 use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
@@ -35,9 +35,7 @@ pub struct OptimismEvmConfig;
 
 impl ConfigureEvmEnv for OptimismEvmConfig {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        let mut buf = Vec::with_capacity(transaction.length_without_header());
-        transaction.encode_enveloped(&mut buf);
-        fill_op_tx_env(tx_env, transaction, sender, buf.into());
+        transaction.fill_tx_env(tx_env, sender);
     }
 
     fn fill_cfg_env(

@@ -19,12 +19,13 @@ use reth::{
     tasks::TaskManager,
 };
 use reth_chainspec::{Chain, ChainSpec, Head};
+use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_primitives::{
-    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg},
-    Header, U256,
+    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
+    Address, Header, TransactionSigned, U256,
 };
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
@@ -87,6 +88,10 @@ impl ConfigureEvmEnv for MyEvmConfig {
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
         cfg_env.handler_cfg.spec_id = spec_id;
+    }
+
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        EthEvmConfig::default().fill_tx_env(tx_env, transaction, sender)
     }
 }
 

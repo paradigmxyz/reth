@@ -1,30 +1,30 @@
 use super::{TrieCursor, TrieCursorFactory};
-use crate::updates::{TrieKey, TrieOp, TrieUpdatesSorted};
+use crate::updates::{TrieKey, TrieUpdatesSorted};
 use reth_db::DatabaseError;
 use reth_primitives::B256;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
 
 /// The trie cursor factory for the trie updates.
 #[derive(Debug, Clone)]
-pub struct TrieUpdatesCursorFactory<'a, CF> {
+pub struct InMemoryTrieCursorFactory<'a, CF> {
     cursor_factory: CF,
     trie_updates: &'a TrieUpdatesSorted,
 }
 
-impl<'a, CF> TrieUpdatesCursorFactory<'a, CF> {
+impl<'a, CF> InMemoryTrieCursorFactory<'a, CF> {
     /// Create a new trie cursor factory.
     pub const fn new(cursor_factory: CF, trie_updates: &'a TrieUpdatesSorted) -> Self {
         Self { cursor_factory, trie_updates }
     }
 }
 
-impl<'a, CF: TrieCursorFactory> TrieCursorFactory for TrieUpdatesCursorFactory<'a, CF> {
-    type AccountTrieCursor = TrieUpdatesAccountTrieCursor<'a, CF::AccountTrieCursor>;
-    type StorageTrieCursor = TrieUpdatesStorageTrieCursor<'a, CF::StorageTrieCursor>;
+impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<'a, CF> {
+    type AccountTrieCursor = InMemoryAccountTrieCursor<'a, CF::AccountTrieCursor>;
+    type StorageTrieCursor = InMemoryStorageTrieCursor<'a, CF::StorageTrieCursor>;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
         let cursor = self.cursor_factory.account_trie_cursor()?;
-        Ok(TrieUpdatesAccountTrieCursor::new(cursor, self.trie_updates))
+        Ok(InMemoryAccountTrieCursor::new(cursor, self.trie_updates))
     }
 
     fn storage_trie_cursor(
@@ -32,36 +32,33 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for TrieUpdatesCursorFactory<'
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor, DatabaseError> {
         let cursor = self.cursor_factory.storage_trie_cursor(hashed_address)?;
-        Ok(TrieUpdatesStorageTrieCursor::new(cursor, hashed_address, self.trie_updates))
+        Ok(InMemoryStorageTrieCursor::new(cursor, hashed_address, self.trie_updates))
     }
 }
 
 /// The cursor to iterate over account trie updates and corresponding database entries.
 /// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
-pub struct TrieUpdatesAccountTrieCursor<'a, C> {
+pub struct InMemoryAccountTrieCursor<'a, C> {
     cursor: C,
     trie_updates: &'a TrieUpdatesSorted,
     last_key: Option<TrieKey>,
 }
 
-impl<'a, C> TrieUpdatesAccountTrieCursor<'a, C> {
+impl<'a, C> InMemoryAccountTrieCursor<'a, C> {
     const fn new(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
         Self { cursor, trie_updates, last_key: None }
     }
 }
 
-impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesAccountTrieCursor<'a, C> {
+impl<'a, C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'a, C> {
     fn seek_exact(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         if let Some((trie_key, trie_op)) = self.trie_updates.find_account_node(&key) {
             self.last_key = Some(trie_key);
-            match trie_op {
-                TrieOp::Update(node) => Ok(Some((key, node))),
-                TrieOp::Delete => Ok(None),
-            }
+            Ok(trie_op.into_update().map(|node| (key, node)))
         } else {
             let result = self.cursor.seek_exact(key)?;
             self.last_key = result.as_ref().map(|(k, _)| TrieKey::AccountNode(k.clone()));
@@ -86,10 +83,7 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesAccountTrieCursor<'a, C> {
                 _ => panic!("Invalid trie key"),
             };
             self.last_key = Some(trie_key);
-            match trie_op {
-                TrieOp::Update(node) => return Ok(Some((nibbles, node))),
-                TrieOp::Delete => return Ok(None),
-            }
+            return Ok(trie_op.into_update().map(|node| (nibbles, node)))
         }
 
         let result = self.cursor.seek(key)?;
@@ -109,7 +103,7 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesAccountTrieCursor<'a, C> {
 /// The cursor to iterate over storage trie updates and corresponding database entries.
 /// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
-pub struct TrieUpdatesStorageTrieCursor<'a, C> {
+pub struct InMemoryStorageTrieCursor<'a, C> {
     cursor: C,
     trie_update_index: usize,
     trie_updates: &'a TrieUpdatesSorted,
@@ -117,13 +111,13 @@ pub struct TrieUpdatesStorageTrieCursor<'a, C> {
     last_key: Option<TrieKey>,
 }
 
-impl<'a, C> TrieUpdatesStorageTrieCursor<'a, C> {
+impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
     const fn new(cursor: C, hashed_address: B256, trie_updates: &'a TrieUpdatesSorted) -> Self {
         Self { cursor, trie_updates, trie_update_index: 0, hashed_address, last_key: None }
     }
 }
 
-impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
+impl<'a, C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'a, C> {
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -132,10 +126,7 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
             self.trie_updates.find_storage_node(&self.hashed_address, &key)
         {
             self.last_key = Some(trie_key);
-            match trie_op {
-                TrieOp::Update(node) => Ok(Some((key, node))),
-                TrieOp::Delete => Ok(None),
-            }
+            Ok(trie_op.into_update().map(|node| (key, node)))
         } else {
             let result = self.cursor.seek_exact(key)?;
             self.last_key =
@@ -164,10 +155,7 @@ impl<'a, C: TrieCursor> TrieCursor for TrieUpdatesStorageTrieCursor<'a, C> {
                 _ => panic!("this should not happen!"),
             };
             self.last_key = Some(trie_key.clone());
-            match trie_op {
-                TrieOp::Update(node) => return Ok(Some((nibbles, node.clone()))),
-                TrieOp::Delete => return Ok(None),
-            }
+            return Ok(trie_op.as_update().map(|node| (nibbles, node.clone())))
         }
 
         let result = self.cursor.seek(key)?;

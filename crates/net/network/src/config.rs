@@ -88,6 +88,11 @@ impl NetworkConfig<()> {
     pub fn builder(secret_key: SecretKey) -> NetworkConfigBuilder {
         NetworkConfigBuilder::new(secret_key)
     }
+
+    /// Convenience method for creating the corresponding builder type with a random secret key.
+    pub fn builder_with_rng_secret_key() -> NetworkConfigBuilder {
+        NetworkConfigBuilder::with_rng_secret_key()
+    }
 }
 
 impl<C> NetworkConfig<C> {
@@ -176,6 +181,12 @@ pub struct NetworkConfigBuilder {
 
 #[allow(missing_docs)]
 impl NetworkConfigBuilder {
+    /// Create a new builder instance with a random secret key.
+    pub fn with_rng_secret_key() -> Self {
+        Self::new(rng_secret_key())
+    }
+
+    /// Create a new builder instance with the given secret key.
     pub fn new(secret_key: SecretKey) -> Self {
         Self {
             secret_key,
@@ -210,6 +221,11 @@ impl NetworkConfigBuilder {
     /// Returns the configured [`PeerId`]
     pub fn get_peer_id(&self) -> PeerId {
         pk2id(&self.secret_key.public_key(SECP256K1))
+    }
+
+    /// Returns the configured [`SecretKey`], from which the node's identity is derived.
+    pub const fn secret_key(&self) -> &SecretKey {
+        &self.secret_key
     }
 
     /// Sets the chain spec.

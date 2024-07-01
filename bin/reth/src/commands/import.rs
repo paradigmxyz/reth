@@ -1,13 +1,9 @@
 //! Command that initializes the node by importing a chain from a file.
-
-use crate::{
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
-    macros::block_executor,
-    version::SHORT_VERSION,
-};
+use crate::{macros::block_executor, version::SHORT_VERSION};
 use clap::Parser;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::tables;

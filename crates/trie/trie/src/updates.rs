@@ -76,6 +76,15 @@ impl TrieOp {
             None
         }
     }
+
+    /// Returns owned updated branch node if operation is [`Self::Update`].
+    pub fn into_update(self) -> Option<BranchNodeCompact> {
+        if let Self::Update(node) = self {
+            Some(node)
+        } else {
+            None
+        }
+    }
 }
 
 /// The aggregation of trie updates.
@@ -101,18 +110,6 @@ impl IntoIterator for TrieUpdates {
 }
 
 impl TrieUpdates {
-    /// Schedule a delete operation on a trie key.
-    ///
-    /// # Panics
-    ///
-    /// If the key already exists and the operation is an update.
-    pub fn schedule_delete(&mut self, key: TrieKey) {
-        let existing = self.trie_operations.insert(key, TrieOp::Delete);
-        if let Some(op) = existing {
-            assert!(!op.is_update(), "Tried to delete a node that was already updated");
-        }
-    }
-
     /// Extend the updates with trie updates.
     pub fn extend(&mut self, updates: impl IntoIterator<Item = (TrieKey, TrieOp)>) {
         self.trie_operations.extend(updates);
@@ -135,8 +132,8 @@ impl TrieUpdates {
         destroyed_accounts: HashSet<B256>,
     ) {
         // Add updates from trie walker.
-        let (_, walker_updates) = walker.split();
-        self.extend(walker_updates);
+        let (_, deleted_keys) = walker.split();
+        self.extend(deleted_keys.into_iter().map(|key| (key, TrieOp::Delete)));
 
         // Add account node updates from hash builder.
         let (_, hash_builder_updates) = hash_builder.split();
@@ -156,8 +153,8 @@ impl TrieUpdates {
         hash_builder: HashBuilder,
     ) {
         // Add updates from trie walker.
-        let (_, walker_updates) = walker.split();
-        self.extend(walker_updates);
+        let (_, deleted_keys) = walker.split();
+        self.extend(deleted_keys.into_iter().map(|key| (key, TrieOp::Delete)));
 
         // Add storage node updates from hash builder.
         let (_, hash_builder_updates) = hash_builder.split();

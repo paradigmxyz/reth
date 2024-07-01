@@ -67,7 +67,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         self.row = 0;
     }
 
-    /// Returns a row, searching it by a key used during [`NippyJar::prepare_index`].
+    /// Returns a row, searching it by a key.
     ///
     /// **May return false positives.**
     ///
@@ -130,7 +130,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         ))
     }
 
-    /// Returns a row, searching it by a key used during [`NippyJar::prepare_index`]  by using a
+    /// Returns a row, searching it by a key using a
     /// `mask` to only read certain columns from the row.
     ///
     /// **May return false positives.**

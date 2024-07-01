@@ -76,7 +76,7 @@ Reth implements the specification of Ethereum as defined in the [ethereum/execut
 1. We operate multiple nodes at the tip of Ethereum mainnet and various testnets.
 1. We extensively unit test, fuzz test and document all our code, while also restricting PRs with aggressive lint rules.
 
-We have completed an audit of the [Reth v1.0.0-rc.2](https://github.com/paradigmxyz/reth/releases/tag/v1.0.0-rc.2) with [Sigma Prime](https://sigmaprime.io/), the developers of [Lighthouse](https://github.com/sigp/lighthouse), the Rust Consensus Layer implementation. Find it [here](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/audit/sigma_prime_audit_v1.pdf).
+We have completed an audit of the [Reth v1.0.0-rc.2](https://github.com/paradigmxyz/reth/releases/tag/v1.0.0-rc.2) with [Sigma Prime](https://sigmaprime.io/), the developers of [Lighthouse](https://github.com/sigp/lighthouse), the Rust Consensus Layer implementation. Find it [here](https://github.com/paradigmxyz/reth/blob/main/audit/sigma_prime_audit_v2.pdf).
 
 [Revm](https://github.com/bluealloy/revm) (the EVM used in Reth) underwent an audit with [Guido Vranken](https://twitter.com/guidovranken) (#1 [Ethereum Bug Bounty](https://ethereum.org/en/bug-bounty)). We will publish the results soon.
 

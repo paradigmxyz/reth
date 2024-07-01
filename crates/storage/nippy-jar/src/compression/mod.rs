@@ -30,6 +30,7 @@ pub trait Compression: Serialize + for<'a> Deserialize<'a> {
         true
     }
 
+    #[cfg(test)]
     /// If required, prepares compression algorithm with an early pass on the data.
     fn prepare_compression(
         &mut self,
@@ -95,6 +96,7 @@ impl Compression for Compressors {
         }
     }
 
+    #[cfg(test)]
     fn prepare_compression(
         &mut self,
         columns: Vec<impl IntoIterator<Item = Vec<u8>>>,
