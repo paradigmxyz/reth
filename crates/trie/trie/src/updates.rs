@@ -133,7 +133,9 @@ impl TrieUpdates {
     ) {
         // Add updates from trie walker.
         let (_, deleted_keys) = walker.split();
-        self.extend(deleted_keys.into_iter().map(|key| (key, TrieOp::Delete)));
+        self.extend(
+            deleted_keys.into_iter().map(|nibbles| (TrieKey::AccountNode(nibbles), TrieOp::Delete)),
+        );
 
         // Add account node updates from hash builder.
         let (_, hash_builder_updates) = hash_builder.split();
@@ -154,7 +156,11 @@ impl TrieUpdates {
     ) {
         // Add updates from trie walker.
         let (_, deleted_keys) = walker.split();
-        self.extend(deleted_keys.into_iter().map(|key| (key, TrieOp::Delete)));
+        self.extend(
+            deleted_keys
+                .into_iter()
+                .map(|nibbles| (TrieKey::StorageNode(hashed_address, nibbles), TrieOp::Delete)),
+        );
 
         // Add storage node updates from hash builder.
         let (_, hash_builder_updates) = hash_builder.split();
@@ -248,11 +254,12 @@ pub struct TrieUpdatesSorted {
 
 impl TrieUpdatesSorted {
     /// Find the account node with the given nibbles.
-    pub fn find_account_node(&self, key: &Nibbles) -> Option<(TrieKey, TrieOp)> {
-        self.trie_operations
-            .iter()
-            .find(|(k, _)| matches!(k, TrieKey::AccountNode(nibbles) if nibbles == key))
-            .cloned()
+    pub fn find_account_node(&self, key: &Nibbles) -> Option<(Nibbles, TrieOp)> {
+        self.trie_operations.iter().find_map(|(k, op)| {
+            k.as_account_node_key()
+                .filter(|nibbles| nibbles == &key)
+                .map(|nibbles| (nibbles.clone(), op.clone()))
+        })
     }
 
     /// Find the storage node with the given hashed address and key.
@@ -260,9 +267,11 @@ impl TrieUpdatesSorted {
         &self,
         hashed_address: &B256,
         key: &Nibbles,
-    ) -> Option<(TrieKey, TrieOp)> {
-        self.trie_operations.iter().find(|(k, _)| {
-            matches!(k, TrieKey::StorageNode(address, nibbles) if address == hashed_address && nibbles == key)
-        }).cloned()
+    ) -> Option<(Nibbles, TrieOp)> {
+        self.trie_operations.iter().find_map(|(k, op)| {
+            k.as_storage_node_key()
+                .filter(|(address, nibbles)| address == &hashed_address && nibbles == &key)
+                .map(|(_, nibbles)| (nibbles.clone(), op.clone()))
+        })
     }
 }
