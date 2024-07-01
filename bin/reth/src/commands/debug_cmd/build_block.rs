@@ -1,9 +1,5 @@
 //! Command for debugging block building.
-
-use crate::{
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
-    macros::block_executor,
-};
+use crate::macros::block_executor;
 use alloy_rlp::Decodable;
 use clap::Parser;
 use eyre::Context;
@@ -14,6 +10,7 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_consensus::Consensus;
 use reth_db::DatabaseEnv;

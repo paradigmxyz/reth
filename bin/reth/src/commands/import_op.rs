@@ -1,14 +1,8 @@
 //! Command that initializes the node by importing OP Mainnet chain segment below Bedrock, from a
 //! file.
-
-use crate::{
-    commands::{
-        common::{AccessRights, Environment, EnvironmentArgs},
-        import::build_import_pipeline,
-    },
-    version::SHORT_VERSION,
-};
+use crate::{commands::import::build_import_pipeline, version::SHORT_VERSION};
 use clap::Parser;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_consensus::noop::NoopConsensus;
 use reth_db::tables;
 use reth_db_api::transaction::DbTx;
