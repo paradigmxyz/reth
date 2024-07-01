@@ -1608,7 +1608,7 @@ mod tests {
             TxKind, TxLegacy, PARALLEL_SENDER_RECOVERY_THRESHOLD,
         },
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
-        TransactionSignedNoHash, TxEip2930, TxEip4844, B256, U256,
+        TransactionSignedNoHash, B256, U256,
     };
     use alloy_primitives::{address, b256, bytes};
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
