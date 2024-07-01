@@ -558,22 +558,6 @@ impl MockTransaction {
 }
 
 impl PoolTransaction for MockTransaction {
-    type Consensus = TransactionSignedEcRecovered;
-    type Pooled = PooledTransactionsElementEcRecovered;
-
-    fn from_source(
-        source: Self::Consensus,
-    ) -> Result<Self, <Self::Consensus as TryInto<Self>>::Error> {
-        source.try_into()
-    }
-
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.clone()
-    }
-
-    fn from_pooled_transaction(tx: PooledTransactionsElementEcRecovered) -> Self {
-        EthPooledTransaction::from_recovered_pooled_transaction(tx)
-    }
     fn hash(&self) -> &TxHash {
         match self {
             Self::Legacy { hash, .. } |
@@ -737,18 +721,6 @@ impl PoolTransaction for MockTransaction {
             Self::Eip4844 { chain_id, .. } |
             Self::Eip2930 { chain_id, .. } => Some(*chain_id),
         }
-    }
-
-    fn to(&self) -> Option<Address> {
-        self.kind().to().copied()
-    }
-
-    fn is_eip1559(&self) -> bool {
-        self.tx_type() == EIP1559_TX_TYPE_ID
-    }
-
-    fn is_eip4844(&self) -> bool {
-        self.tx_type() == EIP4844_TX_TYPE_ID
     }
 }
 
