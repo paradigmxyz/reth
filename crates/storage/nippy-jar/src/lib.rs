@@ -28,9 +28,9 @@ pub mod filter;
 use filter::{Cuckoo, InclusionFilter, InclusionFilters};
 
 pub mod compression;
-use compression::Compressors;
 #[cfg(test)]
 use compression::Compression;
+use compression::Compressors;
 
 pub mod phf;
 pub use phf::PHFKey;

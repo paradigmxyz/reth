@@ -102,13 +102,14 @@ mod tests {
         {
             let manager = StaticFileProvider::read_write(static_files_path.path()).unwrap();
             let mut writer = manager.latest_writer(StaticFileSegment::Headers).unwrap();
+            let mut td = U256::ZERO;
 
             for header in headers.clone() {
                 td += header.header().difficulty;
                 let hash = header.hash();
                 writer.append_header(header.unseal(), td, hash).unwrap();
             }
-            writer.commit_without_sync_all().unwrap();
+            writer.commit().unwrap();
         }
 
         // Use providers to query Header data and compare if it matches
@@ -130,12 +131,12 @@ mod tests {
 
                 // Compare Header
                 assert_eq!(header, db_provider.header(&header_hash).unwrap().unwrap());
-                assert_eq!(header, jar_provider.header(&header_hash).unwrap().unwrap());
+                assert_eq!(header, jar_provider.header_by_number(header.number).unwrap().unwrap());
 
                 // Compare HeaderTerminalDifficulties
                 assert_eq!(
                     db_provider.header_td(&header_hash).unwrap().unwrap(),
-                    jar_provider.header_td(&header_hash).unwrap().unwrap()
+                    jar_provider.header_td_by_number(header.number).unwrap().unwrap()
                 );
             }
         }
