@@ -205,7 +205,34 @@ where
     }
 
     /// Handler for `getContractCreator`
-    async fn get_contract_creator(&self, _address: Address) -> RpcResult<Option<ContractCreator>> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn get_contract_creator(&self, address: Address) -> RpcResult<Option<ContractCreator>> {
+        if !self.has_code(address, None).await? {
+            return Ok(None);
+        }
+
+        // use binary search from block [1, latest block number] to find the first block where the
+        // contract was deployed
+        let mut low = 1;
+        let mut high = self.eth.block_number()?.try_into().unwrap();
+        let mut found = None;
+
+        while low < high {
+            let mid = (low + high) / 2;
+            let block_number = Some(BlockId::Number(BlockNumberOrTag::Number(mid)));
+            if self.eth.get_code(address, block_number).await?.is_empty() {
+                low = mid + 1; // not found in current block, need to search in the later blocks
+            } else {
+                high = mid - 1; // found in current block, try to find a lower block
+                found = Some(mid);
+            }
+        }
+
+        if found.is_none() {
+            return Ok(None);
+        }
+
+        let block = found.unwrap_or(0);
+        // Err(internal_rpc_err("unimplemented"))
+        Err(internal_rpc_err(format!("found block {block} for {address}")))
     }
 }
