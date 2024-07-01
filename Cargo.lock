@@ -8817,8 +8817,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "10.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "355bde4e21578c241f9379fbb344a73d254969b5007239115e094dda1511cd34"
+source = "git+https://github.com/bluealloy/revm#55070478b30b0fb60d268e89a4471e5dbe9eec99"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -8850,8 +8849,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23dfd24faa3cbbd96e0976103d1e174d6559b8036730f70415488ee21870d578"
+source = "git+https://github.com/bluealloy/revm#55070478b30b0fb60d268e89a4471e5dbe9eec99"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -8860,8 +8858,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "8.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c669c9b105dbb41133c17bf7f34d29368e358a7fee8fcc289e90dbfb024dfc4"
+source = "git+https://github.com/bluealloy/revm#55070478b30b0fb60d268e89a4471e5dbe9eec99"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -8879,9 +8876,9 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "5.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "902184a7a781550858d4b96707098da357429f1e4545806fd5b589f455555cf2"
+source = "git+https://github.com/bluealloy/revm#55070478b30b0fb60d268e89a4471e5dbe9eec99"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "auto_impl",
  "bitflags 2.6.0",

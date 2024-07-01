@@ -1,6 +1,6 @@
 use super::access_list::AccessList;
 use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
-use alloy_eips::eip7702::{AuthorizationList, SignedAuthorization};
+use alloy_eips::eip7702::SignedAuthorization;
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
@@ -202,7 +202,7 @@ impl TxEip7702 {
     }
 
     /// Get transaction type
-    pub(crate) fn tx_type(&self) -> TxType {
+    pub(crate) const fn tx_type(&self) -> TxType {
         TxType::Eip7702
     }
 
