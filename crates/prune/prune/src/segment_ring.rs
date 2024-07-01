@@ -433,19 +433,65 @@ mod test {
         for segment in ring.iter() {
             total_segments += 1;
             trace!(target: "pruner::test", "segment: {:?}", segment.0.segment());
-            println!("{:?}", segment.0.segment());
         }
 
         for segment in ring.iter() {
             total_segments += 1;
             trace!(target: "pruner::test", "segment: {:?}", segment.0.segment());
-            println!("{:?}", segment.0.segment());
         }
 
         // + 3 empty static file segments
         assert_eq!(2 * segments_len, total_segments);
         // back at start table
         assert_eq!(TableRef::default(), ring.current_table());
+        assert!(ring.prev_table().is_none());
+    }
+
+    #[test]
+    fn cycle_twice_incomplete_first_cycle() {
+        reth_tracing::init_test_tracing();
+
+        const TOTAL_SEGMENTS_FIRST_ITERATION: usize = 2;
+
+        let db = create_test_rw_db();
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
+        let provider_factory = ProviderFactory::new(
+            db,
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
+        );
+
+        let segments: Vec<Arc<dyn Segment<TempDatabase<DatabaseEnv>>>> =
+            SegmentSet::from_prune_modes(PruneModes::all()).into_vec();
+        let segments_len = segments.len();
+
+        let mut ring: TableRing<_> =
+            TableRing::new(provider_factory.static_file_provider(), TableRef::default(), segments)
+                .unwrap();
+
+        let mut total_segments = 0;
+
+        for segment in ring.iter() {
+            total_segments += 1;
+            trace!(target: "pruner::test", "segment: {:?}", segment.0.segment());
+            if total_segments == TOTAL_SEGMENTS_FIRST_ITERATION {
+                break
+            }
+        }
+
+        assert_eq!(ring.current_table(), TableRef::Other(2));
+
+        for segment in ring.iter() {
+            total_segments += 1;
+            trace!(target: "pruner::test", "segment: {:?}", segment.0.segment());
+        }
+
+        // + 3 empty static file segments
+        assert_eq!(
+            2 * segments_len - (segments_len - TOTAL_SEGMENTS_FIRST_ITERATION),
+            total_segments
+        );
+        assert_eq!(TableRef::Other(2), ring.current_table());
         assert!(ring.prev_table().is_none());
     }
 
