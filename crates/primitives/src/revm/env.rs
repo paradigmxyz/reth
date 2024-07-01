@@ -245,10 +245,7 @@ where
             tx_env.gas_limit = tx.gas_limit;
             tx_env.gas_price = U256::from(tx.gas_price);
             tx_env.gas_priority_fee = None;
-            tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TxKind::Call(to),
-                TxKind::Create => TxKind::Create,
-            };
+            tx_env.transact_to = tx.to;
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = tx.chain_id;
@@ -261,17 +258,13 @@ where
             tx_env.gas_limit = tx.gas_limit;
             tx_env.gas_price = U256::from(tx.gas_price);
             tx_env.gas_priority_fee = None;
-            tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TxKind::Call(to),
-                TxKind::Create => TxKind::Create,
-            };
+            tx_env.transact_to = tx.to;
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = Some(tx.chain_id);
             tx_env.nonce = Some(tx.nonce);
             tx_env.access_list = tx
                 .access_list
-                .0
                 .iter()
                 .map(|l| {
                     (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
@@ -284,17 +277,13 @@ where
             tx_env.gas_limit = tx.gas_limit;
             tx_env.gas_price = U256::from(tx.max_fee_per_gas);
             tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-            tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TxKind::Call(to),
-                TxKind::Create => TxKind::Create,
-            };
+            tx_env.transact_to = tx.to;
             tx_env.value = tx.value;
             tx_env.data = tx.input.clone();
             tx_env.chain_id = Some(tx.chain_id);
             tx_env.nonce = Some(tx.nonce);
             tx_env.access_list = tx
                 .access_list
-                .0
                 .iter()
                 .map(|l| {
                     (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
@@ -314,7 +303,6 @@ where
             tx_env.nonce = Some(tx.nonce);
             tx_env.access_list = tx
                 .access_list
-                .0
                 .iter()
                 .map(|l| {
                     (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
