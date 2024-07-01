@@ -49,6 +49,26 @@ impl ExecutedBlock {
     pub(crate) fn block(&self) -> &SealedBlock {
         &self.block
     }
+
+    /// Returns a reference to the block's senders
+    pub(crate) fn senders(&self) -> &Vec<Address> {
+        &self.senders
+    }
+
+    /// Returns a reference to the block's execution outcome
+    pub(crate) fn execution_outcome(&self) -> &ExecutionOutcome {
+        &self.execution_output
+    }
+
+    /// Returns a reference to the hashed state result of the execution outcome
+    pub(crate) fn hashed_state(&self) -> &HashedPostState {
+        &self.hashed_state
+    }
+
+    /// Returns a reference to the trie updates for the block
+    pub(crate) fn trie_updates(&self) -> &TrieUpdates {
+        &self.trie
+    }
 }
 
 /// Keeps track of the state of the tree.
