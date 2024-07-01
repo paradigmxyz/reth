@@ -1,45 +1,73 @@
-use crate::Compact;
-use alloy_eips::eip7702::Authorization;
-use alloy_primitives::Address;
-use bytes::{Buf, BufMut};
+use core::ops::Deref;
 
-// todo: signed auth
-impl Compact for Authorization {
-    // TODO(eip7702): actually compact this
+use crate::Compact;
+use alloy_eips::eip7702::{Authorization as AlloyAuthorization, SignedAuthorization};
+use alloy_primitives::{Address, ChainId, Signature, U256};
+use bytes::Buf;
+use reth_codecs_derive::main_codec;
+
+/// Authorization acts as bridge which simplifies Compact implementation for AlloyAuthorization.
+///
+/// Notice: Make sure this struct is 1:1 with `alloy_eips::eip7702::Authorization`
+#[main_codec]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct Authorization {
+    chain_id: ChainId,
+    address: Address,
+    nonce: Option<u64>,
+}
+
+impl Compact for AlloyAuthorization {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let mut buffer = bytes::BytesMut::new();
-        buffer.put_u64(self.chain_id);
-        buffer.put_slice(&self.address.0.as_slice());
-        if self.nonce.is_some() {
-            buffer.put_u8(1);
-            buffer.put_u64(self.nonce.unwrap());
-        } else {
-            buffer.put_u8(0);
-        }
-        /*buffer.put_u8(self.y_parity as u8);
-        buffer.put_slice(&self.r.as_le_slice());
-        buffer.put_slice(&self.s.as_le_slice());*/
-        let total_length = buffer.len();
-        buf.put(buffer);
-        total_length
+        let authorization =
+            Authorization { chain_id: self.chain_id, address: self.address, nonce: self.nonce() };
+        authorization.to_compact(buf)
     }
 
-    fn from_compact(mut buf: &[u8], _: usize) -> (Self, &[u8]) {
-        let chain_id = bytes::Buf::get_u64(&mut buf);
-        let address = Address::from_slice(&buf[0..20]);
-        buf.advance(20);
-        let has_nonce = bytes::Buf::get_u8(&mut buf);
-        let nonce = if has_nonce == 1 {
-            let nonce = bytes::Buf::get_u64(&mut buf);
-            Some(nonce)
-        } else {
-            None
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (authorization, _) = Authorization::from_compact(buf, len);
+        let alloy_authorization = AlloyAuthorization {
+            chain_id: authorization.chain_id,
+            address: authorization.address,
+            nonce: authorization.nonce.into(),
         };
-        let authorization = Authorization { chain_id, address, nonce: nonce.into() };
-        (authorization, buf)
+        (alloy_authorization, buf)
+    }
+}
+
+impl Compact for SignedAuthorization<alloy_primitives::Signature> {
+    fn to_compact<B>(self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let mut buffer = Vec::new();
+        // todo: add `SignedAuthorization::into_parts(self) -> (Auth, Signature)`
+        let (auth, signature) = (self.deref().clone(), self.signature());
+        let (v, r, s) = (signature.v(), signature.r(), signature.s());
+        auth.to_compact(&mut buffer);
+        buf.put_u8(v.y_parity_byte());
+        buf.put_slice(r.as_le_slice());
+        buf.put_slice(s.as_le_slice());
+
+        let total_len = buffer.len();
+        buf.put(buffer.as_slice());
+        total_len
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (auth, mut buf) = AlloyAuthorization::from_compact(buf, len);
+        let y = buf.get_u8() == 1;
+        let r = U256::from_le_slice(&buf[0..32]);
+        buf.advance(32);
+        let s = U256::from_le_slice(&buf[0..32]);
+        buf.advance(32);
+
+        let signature = alloy_primitives::Signature::from_rs_and_parity(r, s, y)
+            .expect("invalid authorization signature");
+        (auth.into_signed(signature), buf)
     }
 }
 
