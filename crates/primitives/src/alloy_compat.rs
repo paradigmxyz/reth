@@ -182,31 +182,34 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                         .ok_or(ConversionError::MissingMaxFeePerBlobGas)?,
                 }))
             }
-            // unsupported so far - no alloy equivalent
-            /*Some(TxType::Eip7702) => {
-            // EIP-7702
-            Ok(Transaction::Eip7702(TxEip7702 {
-                chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
-                nonce: tx.nonce,
-                max_priority_fee_per_gas: tx
-                    .max_priority_fee_per_gas
-                    .ok_or(ConversionError::MissingMaxPriorityFeePerGas)?,
-                max_fee_per_gas: tx
-                    .max_fee_per_gas
-                    .ok_or(ConversionError::MissingMaxFeePerGas)?,
-                gas_limit: tx
-                    .gas
-                    .try_into()
-                    .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
-                to: tx.to.map_or(TxKind::Create, TxKind::Call),
-                value: tx.value,
-                access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
-                authorization_list: tx
-                    .authorization_list
-                    .ok_or(ConversionError::MissingAuthorizationList)?,
-                input: tx.input,
-            }))
-            }*/
+            Some(TxType::Eip7702) => {
+                // this is currently unsupported as it is not present in alloy due to missing rpc
+                // specs
+                unimplemented!()
+                /*
+                // EIP-7702
+                Ok(Transaction::Eip7702(TxEip7702 {
+                    chain_id: tx.chain_id.ok_or(ConversionError::MissingChainId)?,
+                    nonce: tx.nonce,
+                    max_priority_fee_per_gas: tx
+                        .max_priority_fee_per_gas
+                        .ok_or(ConversionError::MissingMaxPriorityFeePerGas)?,
+                    max_fee_per_gas: tx
+                        .max_fee_per_gas
+                        .ok_or(ConversionError::MissingMaxFeePerGas)?,
+                    gas_limit: tx
+                        .gas
+                        .try_into()
+                        .map_err(|_| ConversionError::Eip2718Error(RlpError::Overflow.into()))?,
+                    to: tx.to.map_or(TxKind::Create, TxKind::Call),
+                    value: tx.value,
+                    access_list: tx.access_list.ok_or(ConversionError::MissingAccessList)?,
+                    authorization_list: tx
+                        .authorization_list
+                        .ok_or(ConversionError::MissingAuthorizationList)?,
+                    input: tx.input,
+                    }))*/
+            }
             #[cfg(feature = "optimism")]
             Some(TxType::Deposit) => {
                 let fields = tx
