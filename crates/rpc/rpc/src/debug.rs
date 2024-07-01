@@ -9,8 +9,8 @@ use reth_primitives::{
     Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
 };
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory,
-    TransactionVariant,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProvider,
+    StateProviderFactory, StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
@@ -30,13 +30,14 @@ use reth_rpc_types::{
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
-    db::CacheDB,
+    db::{states::bundle_state::BundleRetention, CacheDB, State},
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
 };
 use revm_inspectors::tracing::{
     js::{JsInspector, TransactionContext},
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig,
 };
+use revm_primitives::HashMap;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
@@ -550,6 +551,66 @@ where
             .await
     }
 
+    /// The `debug_executionWitness` method allows for re-execution of a block with the purpose of
+    /// generating an execution witness. The witness comprises of a map of all hashed trie nodes
+    /// to their preimages that were required during the execution of the block, including during
+    /// state root recomputation.
+    pub async fn debug_execution_witness(
+        &self,
+        block: BlockNumberOrTag,
+    ) -> EthResult<HashMap<B256, Bytes>> {
+        let block = match self.inner.eth_api.block(block.into()).await? {
+            None => return Err(EthApiError::UnknownBlockNumber),
+            Some(res) => res,
+        };
+        let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash().into()).await?;
+        let this = self.clone();
+
+        self.inner
+            .eth_api
+            .spawn_with_state_at_block(block.parent_hash.into(), move |state| {
+                let mut db = State::builder()
+                    .with_database(StateProviderDatabase::new(state))
+                    .with_bundle_update()
+                    .build();
+
+                // Re-execute all of the transactions in the block.
+                for tx in block.raw_transactions() {
+                    let tx_envelope = TransactionSignedEcRecovered::decode(&mut tx.as_ref())
+                        .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
+                    let env = EnvWithHandlerCfg {
+                        env: Env::boxed(
+                            cfg.cfg_env.clone(),
+                            block_env.clone(),
+                            Call::evm_config(this.eth_api()).tx_env(&tx_envelope),
+                        ),
+                        handler_cfg: cfg.handler_cfg,
+                    };
+                    let (res, _) = this.inner.eth_api.transact(&mut db, env)?;
+                    db.commit(res.state);
+                }
+
+                // Merge all transitions, retaining both plain state and reverts.
+                db.merge_transitions(BundleRetention::Reverts);
+
+                // Take the bundle state.
+                let bundle = db.take_bundle();
+
+                // Drop the DB and retrieve the original state provider.
+                let state_provider = db.database.into_inner();
+
+                // Recompute the state root, retrieving all trie updates.
+                // let proof = state_provider.proof(address, keys)
+                let (_, _trie_updates) = state_provider
+                    .state_root_with_updates(&bundle)
+                    .map_err(|_| EthApiError::InternalEthError)?;
+
+                // TODO: Change
+                Ok(Default::default())
+            })
+            .await
+    }
+
     /// Executes the configured transaction with the environment on the given database.
     ///
     /// Returns the trace frame and the state that got updated after executing the transaction.
@@ -804,6 +865,15 @@ where
         Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
+    }
+
+    /// Handler for `debug_executionWitness`
+    async fn debug_execution_witness(
+        &self,
+        block: BlockNumberOrTag,
+    ) -> RpcResult<HashMap<B256, Bytes>> {
+        let _permit = self.acquire_trace_permit().await;
+        Ok(Self::debug_execution_witness(self, block).await?)
     }
 
     /// Handler for `debug_traceCall`
