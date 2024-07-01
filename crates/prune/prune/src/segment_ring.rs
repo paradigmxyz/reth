@@ -25,8 +25,7 @@ where
         // return after one cycle
         if self.ring.prev_table().is_some() && self.ring.current_table() == self.ring.start_table()
         {
-            self.ring.next_table();
-
+            self.ring.reset_cycle();
             return None
         }
 
@@ -60,6 +59,9 @@ pub trait CycleSegments {
     /// Advances current position in ring.
     #[allow(clippy::type_complexity)]
     fn next_segment(&mut self) -> Option<(Arc<dyn Segment<Self::Db>>, PrunePurpose)>;
+
+    /// Resets cycle so it can start again from start position.
+    fn reset_cycle(&mut self);
 
     /// Returns an iterator cycling once over the ring of tables. Yields an item for each table,
     /// either a segment or `None`. Advances the current position in the ring.
@@ -193,6 +195,10 @@ where
 
         segment
     }
+
+    fn reset_cycle(&mut self) {
+        self.prev = None;
+    }
 }
 
 /// Opaque reference to a static file table.
@@ -283,7 +289,13 @@ where
                 }),
         };
 
+        self.next_table();
+
         segment.map(|sgmnt| (sgmnt, PrunePurpose::StaticFile))
+    }
+
+    fn reset_cycle(&mut self) {
+        self.prev = None;
     }
 }
 
@@ -300,6 +312,7 @@ mod test {
     use reth_primitives::{B256, U256};
     use reth_provider::{ProviderFactory, StaticFileProviderFactory, StaticFileWriter};
     use reth_prune_types::PruneModes;
+    use tracing::trace;
 
     use crate::segments::SegmentSet;
 
@@ -307,6 +320,8 @@ mod test {
 
     #[test]
     fn cycle_with_one_static_file_segment() {
+        reth_tracing::init_test_tracing();
+
         let db = create_test_rw_db();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
         let provider_factory = ProviderFactory::new(
@@ -338,13 +353,17 @@ mod test {
         let mut ring: TableRing<_> =
             TableRing::new(static_file_provider, TableRef::default(), segments).unwrap();
 
-        let total_segments = ring.iter().count();
+        let mut total_segments = 0;
+        for segment in ring.iter() {
+            total_segments += 1;
+            trace!(target: "pruner::test", "segment: {:?}", segment.0.segment())
+        }
 
         // + 1 non-empty static file segments
         assert_eq!(segments_len + 1, total_segments);
         // back at start table
         assert_eq!(TableRef::default(), ring.current_table());
-        assert_eq!(TableRef::Other(segments_len - 1), ring.prev_table().unwrap());
+        assert!(ring.prev_table().is_none());
     }
 
     #[test]
@@ -372,7 +391,7 @@ mod test {
         assert_eq!(segments_len + 3, total_segments);
         // back at start table
         assert_eq!(TableRef::default(), ring.current_table());
-        assert_eq!(TableRef::Other(segments_len - 1), ring.prev_table().unwrap());
+        assert!(ring.prev_table().is_none());
     }
 
     const fn expected_prev_table(start_index: usize) -> TableRef {
@@ -381,6 +400,47 @@ mod test {
         } else {
             TableRef::Other(start_index - 1)
         }
+    }
+
+    #[test]
+    fn cycle_twice_start_at_headers() {
+        reth_tracing::init_test_tracing();
+
+        let db = create_test_rw_db();
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
+        let provider_factory = ProviderFactory::new(
+            db,
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
+        );
+
+        let segments: Vec<Arc<dyn Segment<TempDatabase<DatabaseEnv>>>> =
+            SegmentSet::from_prune_modes(PruneModes::all()).into_vec();
+        let segments_len = segments.len();
+
+        let mut ring: TableRing<_> =
+            TableRing::new(provider_factory.static_file_provider(), TableRef::default(), segments)
+                .unwrap();
+
+        let mut total_segments = 0;
+
+        for segment in ring.iter() {
+            total_segments += 1;
+            trace!(target: "pruner::test", "segment: {:?}", segment.0.segment());
+            println!("{:?}", segment.0.segment());
+        }
+
+        for segment in ring.iter() {
+            total_segments += 1;
+            trace!(target: "pruner::test", "segment: {:?}", segment.0.segment());
+            println!("{:?}", segment.0.segment());
+        }
+
+        // + 3 empty static file segments
+        assert_eq!(2 * segments_len, total_segments);
+        // back at start table
+        assert_eq!(TableRef::default(), ring.current_table());
+        assert!(ring.prev_table().is_none());
     }
 
     #[test]
@@ -409,7 +469,7 @@ mod test {
         assert_eq!(segments_len + 3, total_segments);
         // back at start table
         assert_eq!(start, ring.current_table());
-        assert_eq!(expected_prev_table(index), ring.prev_table().unwrap());
+        assert!(ring.prev_table().is_none());
     }
 
     fn random_static_file_table_ref() -> StaticFileTableRef {
@@ -453,6 +513,6 @@ mod test {
         assert_eq!(3, total_segments);
         // back at start table
         assert_eq!(start, ring.current_table());
-        assert_eq!(expected_prev_static_files_table(start), ring.prev_table().unwrap());
+        assert!(ring.prev_table().is_none());
     }
 }
