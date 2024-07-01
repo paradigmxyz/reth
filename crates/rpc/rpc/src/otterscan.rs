@@ -6,13 +6,19 @@ use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::helpers::TraceExt;
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
-    trace::otterscan::{
-        BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
-        OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+    trace::{
+        otterscan::{
+            BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
+            OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+        },
+        parity::{Action, CreateAction},
     },
     BlockTransactions, Transaction,
 };
-use revm_inspectors::transfer::{TransferInspector, TransferKind};
+use revm_inspectors::{
+    tracing::TracingInspectorConfig,
+    transfer::{TransferInspector, TransferKind},
+};
 use revm_primitives::ExecutionResult;
 
 const API_LEVEL: u64 = 8;
@@ -214,7 +220,7 @@ where
         // contract was deployed
         let mut low = 1;
         let mut high = self.eth.block_number()?.try_into().unwrap();
-        let mut found = None;
+        let mut num = None;
 
         while low < high {
             let mid = (low + high) / 2;
@@ -223,16 +229,36 @@ where
                 low = mid + 1; // not found in current block, need to search in the later blocks
             } else {
                 high = mid - 1; // found in current block, try to find a lower block
-                found = Some(mid);
+                num = Some(mid);
             }
         }
 
-        if found.is_none() {
+        // this should not happen, only if the state of the chain is inconsistent
+        if num.is_none() {
             return Ok(None);
         }
 
-        let block = found.unwrap_or(0);
-        // Err(internal_rpc_err("unimplemented"))
-        Err(internal_rpc_err(format!("found block {block} for {address}")))
+        let mut found = None;
+        let _ = self.eth.trace_block_with(
+            num.unwrap().into(),
+            TracingInspectorConfig::default_parity(),
+            |tx_info, inspector, res, _, _| {
+                if found.is_some() {
+                    return Ok(())
+                }
+                let traces =
+                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                for trace in traces.iter() {
+                    if let Action::Create(CreateAction { from: creator, .. }) = trace.trace.action {
+                        let hash = tx_info.hash.ok_or(TxHash::default());
+                        found = Some(ContractCreator { hash, creator });
+                    }
+                }
+
+                Ok(())
+            },
+        );
+
+        Ok(found)
     }
 }
