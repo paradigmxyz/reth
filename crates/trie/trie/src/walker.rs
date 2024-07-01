@@ -1,7 +1,6 @@
 use crate::{
     prefix_set::PrefixSet,
     trie_cursor::{CursorSubNode, TrieCursor},
-    updates::TrieKey,
     BranchNodeCompact, Nibbles,
 };
 use reth_db::DatabaseError;
@@ -24,7 +23,7 @@ pub struct TrieWalker<C> {
     /// A `PrefixSet` representing the changes to be applied to the trie.
     pub changes: PrefixSet,
     /// The retained trie node keys that need to be deleted.
-    deleted_keys: Option<HashSet<TrieKey>>,
+    deleted_keys: Option<HashSet<Nibbles>>,
 }
 
 impl<C> TrieWalker<C> {
@@ -45,7 +44,7 @@ impl<C> TrieWalker<C> {
     }
 
     /// Split the walker into stack and trie updates.
-    pub fn split(mut self) -> (Vec<CursorSubNode>, HashSet<TrieKey>) {
+    pub fn split(mut self) -> (Vec<CursorSubNode>, HashSet<Nibbles>) {
         let keys = self.deleted_keys.take();
         (self.stack, keys.unwrap_or_default())
     }
