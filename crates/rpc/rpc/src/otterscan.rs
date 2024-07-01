@@ -11,7 +11,7 @@ use reth_rpc_types::{
             BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
             OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
         },
-        parity::{Action, CreateAction},
+        parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
     BlockTransactions, Transaction,
 };
@@ -242,23 +242,30 @@ where
         let _ = self.eth.trace_block_with(
             num.unwrap().into(),
             TracingInspectorConfig::default_parity(),
-            |tx_info, inspector, res, _, _| {
+            |tx_info, inspector, _, _, _| {
                 if found.is_some() {
                     return Ok(())
                 }
                 let traces =
                     inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
                 for trace in traces.iter() {
-                    if let Action::Create(CreateAction { from: creator, .. }) = trace.trace.action {
-                        let hash = tx_info.hash.ok_or(TxHash::default());
-                        found = Some(ContractCreator { hash, creator });
+                    match (trace.trace.action, trace.trace.result, trace.trace.error) {
+                        (
+                            Action::Create(CreateAction { from: creator, .. }),
+                            Some(TraceOutput::Create(CreateOutput { address: contract, .. })),
+                            None,
+                        ) if contract == address => {
+                            let hash = tx_info.hash.unwrap_or(TxHash::default());
+                            found = Some(ContractCreator { hash, creator });
+                            break;
+                        }
+                        _ => {}
                     }
                 }
 
                 Ok(())
             },
         );
-
         Ok(found)
     }
 }
