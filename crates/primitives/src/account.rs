@@ -1,55 +1,12 @@
-use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_genesis::GenesisAccount;
-use alloy_primitives::{keccak256, Bytes, B256, U256};
+use crate::revm_primitives::{Bytecode as RevmBytecode, Bytes};
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use derive_more::Deref;
-use reth_codecs::{main_codec, Compact};
-use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, JumpTable};
+use reth_codecs::Compact;
+use revm_primitives::JumpTable;
 use serde::{Deserialize, Serialize};
 
-/// An Ethereum account.
-#[main_codec]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct Account {
-    /// Account nonce.
-    pub nonce: u64,
-    /// Account balance.
-    pub balance: U256,
-    /// Hash of the account's bytecode.
-    pub bytecode_hash: Option<B256>,
-}
-
-impl Account {
-    /// Whether the account has bytecode.
-    pub const fn has_bytecode(&self) -> bool {
-        self.bytecode_hash.is_some()
-    }
-
-    /// After `SpuriousDragon` empty account is defined as account with nonce == 0 && balance == 0
-    /// && bytecode = None (or hash is [`KECCAK_EMPTY`]).
-    pub fn is_empty(&self) -> bool {
-        self.nonce == 0 &&
-            self.balance.is_zero() &&
-            self.bytecode_hash.map_or(true, |hash| hash == KECCAK_EMPTY)
-    }
-
-    /// Makes an [Account] from [`GenesisAccount`] type
-    pub fn from_genesis_account(value: &GenesisAccount) -> Self {
-        Self {
-            // nonce must exist, so we default to zero when converting a genesis account
-            nonce: value.nonce.unwrap_or_default(),
-            balance: value.balance,
-            bytecode_hash: value.code.as_ref().map(keccak256),
-        }
-    }
-
-    /// Returns an account bytecode's hash.
-    /// In case of no bytecode, returns [`KECCAK_EMPTY`].
-    pub fn get_bytecode_hash(&self) -> B256 {
-        self.bytecode_hash.unwrap_or(KECCAK_EMPTY)
-    }
-}
+pub use reth_primitives_traits::Account;
 
 /// Bytecode for an account.
 ///
@@ -128,32 +85,10 @@ impl Compact for Bytecode {
     }
 }
 
-impl From<AccountInfo> for Account {
-    fn from(revm_acc: AccountInfo) -> Self {
-        let code_hash = revm_acc.code_hash;
-        Self {
-            balance: revm_acc.balance,
-            nonce: revm_acc.nonce,
-            bytecode_hash: (code_hash != KECCAK_EMPTY).then_some(code_hash),
-        }
-    }
-}
-
-impl From<Account> for AccountInfo {
-    fn from(reth_acc: Account) -> Self {
-        Self {
-            balance: reth_acc.balance,
-            nonce: reth_acc.nonce,
-            code_hash: reth_acc.bytecode_hash.unwrap_or(KECCAK_EMPTY),
-            code: None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{hex_literal::hex, B256, U256};
+    use crate::{hex_literal::hex, B256, KECCAK_EMPTY, U256};
     use revm_primitives::LegacyAnalyzedBytecode;
 
     #[test]

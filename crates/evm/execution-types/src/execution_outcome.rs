@@ -1,13 +1,15 @@
 use reth_primitives::{
     logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests,
-    StorageEntry, B256, U256,
+    B256, U256,
 };
 use reth_trie::HashedPostState;
 use revm::{
-    db::{states::BundleState, BundleAccount},
+    db::{
+        states::{BundleBuilder, BundleState},
+        BundleAccount,
+    },
     primitives::AccountInfo,
 };
-use std::collections::HashMap;
 
 /// Represents the outcome of block execution, including post-execution changes and reverts.
 ///
@@ -35,16 +37,6 @@ pub struct ExecutionOutcome {
     pub requests: Vec<Requests>,
 }
 
-/// Type used to initialize revms bundle state.
-pub type BundleStateInit =
-    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
-
-/// Types used inside `RevertsInit` to initialize revms reverts.
-pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
-
-/// Type used to initialize revms reverts.
-pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
-
 impl ExecutionOutcome {
     /// Creates a new `ExecutionOutcome`.
     ///
@@ -63,42 +55,13 @@ impl ExecutionOutcome {
     ///
     /// This constructor initializes a new `ExecutionOutcome` instance using detailed
     /// initialization parameters.
-    pub fn new_init(
-        state_init: BundleStateInit,
-        revert_init: RevertsInit,
-        contracts_init: Vec<(B256, Bytecode)>,
+    pub fn from_state_builder(
+        state_builder: BundleBuilder,
         receipts: Receipts,
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
-        // sort reverts by block number
-        let mut reverts = revert_init.into_iter().collect::<Vec<_>>();
-        reverts.sort_unstable_by_key(|a| a.0);
-
-        // initialize revm bundle
-        let bundle = BundleState::new(
-            state_init.into_iter().map(|(address, (original, present, storage))| {
-                (
-                    address,
-                    original.map(Into::into),
-                    present.map(Into::into),
-                    storage.into_iter().map(|(k, s)| (k.into(), s)).collect(),
-                )
-            }),
-            reverts.into_iter().map(|(_, reverts)| {
-                // does not needs to be sorted, it is done when taking reverts.
-                reverts.into_iter().map(|(address, (original, storage))| {
-                    (
-                        address,
-                        original.map(|i| i.map(Into::into)),
-                        storage.into_iter().map(|entry| (entry.key.into(), entry.value)),
-                    )
-                })
-            }),
-            contracts_init.into_iter().map(|(code_hash, bytecode)| (code_hash, bytecode.0)),
-        );
-
-        Self { bundle, receipts, first_block, requests }
+        Self { bundle: state_builder.build(), receipts, first_block, requests }
     }
 
     /// Return revm bundle state.
@@ -329,103 +292,9 @@ impl ExecutionOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::{eip6110::DepositRequest, eip7002::WithdrawalRequest};
+    use alloy_eips::eip6110::DepositRequest;
     use alloy_primitives::{FixedBytes, LogData};
-    use reth_primitives::{Address, Receipts, Request, Requests, TxType, B256};
-    use std::collections::HashMap;
-
-    #[test]
-    fn test_initialisation() {
-        // Create a new BundleState object with initial data
-        let bundle = BundleState::new(
-            vec![(Address::new([2; 20]), None, Some(AccountInfo::default()), HashMap::default())],
-            vec![vec![(Address::new([2; 20]), None, vec![])]],
-            vec![],
-        );
-
-        // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 46913,
-                logs: vec![],
-                success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            })]],
-        };
-
-        // Create a Requests object with a vector of requests, including DepositRequest and
-        // WithdrawalRequest
-        let requests = vec![Requests(vec![
-            Request::DepositRequest(DepositRequest {
-                pubkey: FixedBytes::<48>::from([1; 48]),
-                withdrawal_credentials: B256::from([0; 32]),
-                amount: 1111,
-                signature: FixedBytes::<96>::from([2; 96]),
-                index: 222,
-            }),
-            Request::DepositRequest(DepositRequest {
-                pubkey: FixedBytes::<48>::from([23; 48]),
-                withdrawal_credentials: B256::from([0; 32]),
-                amount: 34343,
-                signature: FixedBytes::<96>::from([43; 96]),
-                index: 1212,
-            }),
-            Request::WithdrawalRequest(WithdrawalRequest {
-                source_address: Address::from([1; 20]),
-                validator_pubkey: FixedBytes::<48>::from([10; 48]),
-                amount: 72,
-            }),
-        ])];
-
-        // Define the first block number
-        let first_block = 123;
-
-        // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
-        // first_block
-        let exec_res = ExecutionOutcome {
-            bundle: bundle.clone(),
-            receipts: receipts.clone(),
-            requests: requests.clone(),
-            first_block,
-        };
-
-        // Assert that creating a new ExecutionOutcome using the constructor matches exec_res
-        assert_eq!(
-            ExecutionOutcome::new(bundle, receipts.clone(), first_block, requests.clone()),
-            exec_res
-        );
-
-        // Create a BundleStateInit object and insert initial data
-        let mut state_init: BundleStateInit = HashMap::new();
-        state_init
-            .insert(Address::new([2; 20]), (None, Some(Account::default()), HashMap::default()));
-
-        // Create a HashMap for account reverts and insert initial data
-        let mut revert_inner: HashMap<Address, AccountRevertInit> = HashMap::new();
-        revert_inner.insert(Address::new([2; 20]), (None, vec![]));
-
-        // Create a RevertsInit object and insert the revert_inner data
-        let mut revert_init: RevertsInit = HashMap::new();
-        revert_init.insert(123, revert_inner);
-
-        // Assert that creating a new ExecutionOutcome using the new_init method matches
-        // exec_res
-        assert_eq!(
-            ExecutionOutcome::new_init(
-                state_init,
-                revert_init,
-                vec![],
-                receipts,
-                first_block,
-                requests,
-            ),
-            exec_res
-        );
-    }
+    use reth_primitives::{Receipts, Request, Requests, TxType, B256};
 
     #[test]
     fn test_block_number_to_index() {
