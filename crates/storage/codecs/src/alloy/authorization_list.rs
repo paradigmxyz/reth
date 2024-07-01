@@ -2,7 +2,7 @@ use core::ops::Deref;
 
 use crate::Compact;
 use alloy_eips::eip7702::{Authorization as AlloyAuthorization, SignedAuthorization};
-use alloy_primitives::{Address, ChainId, Signature, U256};
+use alloy_primitives::{Address, ChainId, U256};
 use bytes::Buf;
 use reth_codecs_derive::main_codec;
 

@@ -91,7 +91,7 @@ impl TxEip7702 {
 
     /// Calculates a heuristic for the in-memory size of the [TxEip7702] transaction.
     #[inline]
-    pub const fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         mem::size_of::<ChainId>() + // chain_id
         mem::size_of::<u64>() + // nonce
         mem::size_of::<u128>() + // gas_price
@@ -99,7 +99,8 @@ impl TxEip7702 {
         self.to.size() + // to
         mem::size_of::<U256>() + // value
         self.access_list.size() + // access_list
-        self.authorization_list.size() + // authorization_list
+        mem::size_of::<SignedAuthorization<alloy_primitives::Signature>>()
+             * self.authorization_list.capacity() + // authorization_list
         self.input.len() // input
     }
 
