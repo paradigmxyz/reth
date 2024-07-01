@@ -73,6 +73,7 @@ fn fill(
     let chain_id = signed_tx.chain_id();
     let blob_versioned_hashes = signed_tx.blob_versioned_hashes();
     let access_list = signed_tx.access_list().cloned();
+    let authorization_list = signed_tx.authorization_list().cloned();
 
     let signature =
         from_primitive_signature(*signed_tx.signature(), signed_tx.tx_type(), signed_tx.chain_id());
@@ -91,6 +92,7 @@ fn fill(
         input: signed_tx.input().clone(),
         chain_id,
         access_list,
+        authorization_list,
         transaction_type: Some(signed_tx.tx_type() as u8),
 
         // These fields are set to None because they are not stored as part of the transaction
@@ -124,6 +126,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
     let chain_id = tx.transaction.chain_id();
     let access_list = tx.transaction.access_list().cloned();
     let max_fee_per_blob_gas = tx.transaction.max_fee_per_blob_gas();
+    let authorization_list = tx.transaction.authorization_list().cloned();
     let blob_versioned_hashes = tx.transaction.blob_versioned_hashes();
     let tx_type = tx.transaction.tx_type();
 
@@ -149,6 +152,7 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         access_list,
         max_fee_per_blob_gas,
         blob_versioned_hashes,
+        authorization_list,
         transaction_type: Some(tx_type.into()),
         sidecar: None,
     }

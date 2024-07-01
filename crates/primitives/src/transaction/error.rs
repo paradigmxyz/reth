@@ -29,6 +29,9 @@ pub enum InvalidTransactionError {
     /// The transaction requires EIP-4844 which is not enabled currently.
     #[error("EIP-4844 transactions are disabled")]
     Eip4844Disabled,
+    /// The transaction requires EIP-7702 which is not enabled currently.
+    #[error("EIP-7702 transactions are disabled")]
+    Eip7702Disabled,
     /// Thrown if a transaction is not supported in the current network configuration.
     #[error("transaction type not supported")]
     TxTypeNotSupported,

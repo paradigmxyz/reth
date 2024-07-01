@@ -241,7 +241,8 @@ impl InvalidPoolTransactionError {
                     }
                     InvalidTransactionError::Eip2930Disabled |
                     InvalidTransactionError::Eip1559Disabled |
-                    InvalidTransactionError::Eip4844Disabled => {
+                    InvalidTransactionError::Eip4844Disabled |
+                    InvalidTransactionError::Eip7702Disabled => {
                         // settings
                         false
                     }

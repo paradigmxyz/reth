@@ -1569,9 +1569,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.0.102"
+version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "779e6b7d17797c0b42023d417228c02889300190e700cb074c3438d9c541d332"
+checksum = "74b6a57f98764a267ff415d50a25e6e166f3831a5071af4995296ea97d210490"
 dependencies = [
  "jobserver",
  "libc",
@@ -8693,8 +8693,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "10.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "355bde4e21578c241f9379fbb344a73d254969b5007239115e094dda1511cd34"
+source = "git+https://github.com/bluealloy/revm#55070478b30b0fb60d268e89a4471e5dbe9eec99"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -8726,8 +8725,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23dfd24faa3cbbd96e0976103d1e174d6559b8036730f70415488ee21870d578"
+source = "git+https://github.com/bluealloy/revm#55070478b30b0fb60d268e89a4471e5dbe9eec99"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -8736,8 +8734,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "8.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c669c9b105dbb41133c17bf7f34d29368e358a7fee8fcc289e90dbfb024dfc4"
+source = "git+https://github.com/bluealloy/revm#55070478b30b0fb60d268e89a4471e5dbe9eec99"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -8755,9 +8752,9 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "5.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "902184a7a781550858d4b96707098da357429f1e4545806fd5b589f455555cf2"
+source = "git+https://github.com/bluealloy/revm#55070478b30b0fb60d268e89a4471e5dbe9eec99"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "auto_impl",
  "bitflags 2.6.0",
@@ -9267,9 +9264,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.118"
+version = "1.0.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d947f6b3163d8857ea16c4fa0dd4840d52f3041039a85decd46867eb1abef2e4"
+checksum = "e8eddb61f0697cc3989c5d64b452f5488e2b8a60fd7d5076a3045076ffef8cb0"
 dependencies = [
  "indexmap 2.2.6",
  "itoa",
@@ -9311,9 +9308,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.8.1"
+version = "3.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ad483d2ab0149d5a5ebcd9972a3852711e0153d863bf5a5d0391d28883c4a20"
+checksum = "079f3a42cd87588d924ed95b533f8d30a483388c4e400ab736a7058e34f16169"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -9329,9 +9326,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.8.1"
+version = "3.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65569b702f41443e8bc8bbb1c5779bd0450bbe723b56198980e80ec45780bce2"
+checksum = "bc03aad67c1d26b7de277d51c86892e7d9a0110a2fe44bf6b26cc569fba302d6"
 dependencies = [
  "darling",
  "proc-macro2",

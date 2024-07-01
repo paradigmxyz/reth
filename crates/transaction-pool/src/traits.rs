@@ -938,6 +938,9 @@ impl EthPooledTransaction {
                 blob_sidecar = EthBlobTransactionSidecar::Missing;
                 U256::from(t.max_fee_per_gas).saturating_mul(U256::from(t.gas_limit))
             }
+            Transaction::Eip7702(t) => {
+                U256::from(t.max_fee_per_gas).saturating_mul(U256::from(t.gas_limit))
+            }
             _ => U256::ZERO,
         };
         let mut cost = transaction.value();
@@ -1024,6 +1027,7 @@ impl PoolTransaction for EthPooledTransaction {
             Transaction::Eip2930(tx) => tx.gas_price,
             Transaction::Eip1559(tx) => tx.max_fee_per_gas,
             Transaction::Eip4844(tx) => tx.max_fee_per_gas,
+            Transaction::Eip7702(tx) => tx.max_fee_per_gas,
             _ => 0,
         }
     }
@@ -1041,6 +1045,7 @@ impl PoolTransaction for EthPooledTransaction {
             Transaction::Legacy(_) | Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::Eip4844(tx) => Some(tx.max_priority_fee_per_gas),
+            Transaction::Eip7702(tx) => Some(tx.max_priority_fee_per_gas),
             _ => None,
         }
     }
@@ -1125,6 +1130,7 @@ impl EthPoolTransaction for EthPooledTransaction {
 impl TryFromRecoveredTransaction for EthPooledTransaction {
     type Error = TryFromRecoveredTransactionError;
 
+    // TODO(eip7702): fix this
     fn try_from_recovered_transaction(
         tx: TransactionSignedEcRecovered,
     ) -> Result<Self, Self::Error> {

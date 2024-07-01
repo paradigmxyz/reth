@@ -73,7 +73,7 @@ pub use transaction::{
     Transaction, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
     TransactionSignedNoHash, TryFromRecoveredTransaction, TxEip1559, TxEip2930, TxEip4844,
     TxHashOrNumber, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID,
+    EIP7702_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 
 // Re-exports
