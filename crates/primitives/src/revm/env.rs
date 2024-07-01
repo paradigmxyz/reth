@@ -352,7 +352,7 @@ pub fn fill_op_tx_env<T: AsRef<Transaction>>(
         Transaction::Deposit(tx) => {
             tx_env.optimism = OptimismFields {
                 source_hash: Some(tx.source_hash),
-                mint: tx.mint,
+                mint: Some(tx.mint).filter(|m| *m != 0),
                 is_system_transaction: Some(tx.is_system_transaction),
                 enveloped_tx: Some(envelope),
             };

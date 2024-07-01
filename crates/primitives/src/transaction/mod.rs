@@ -429,7 +429,7 @@ impl Transaction {
     #[cfg(feature = "optimism")]
     pub const fn mint(&self) -> Option<u128> {
         match self {
-            Self::Deposit(TxDeposit { mint, .. }) => *mint,
+            Self::Deposit(TxDeposit { mint, .. }) => Some(*mint),
             _ => None,
         }
     }

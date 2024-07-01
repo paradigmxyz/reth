@@ -193,7 +193,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                         .ok_or_else(|| ConversionError::Custom("MissingSourceHash".to_string()))?,
                     from: tx.from,
                     to: TxKind::from(tx.to),
-                    mint: fields.mint.map(|n| n.to::<u128>()).filter(|n| *n != 0),
+                    mint: fields.mint.map(|n| n.to::<u128>()).unwrap_or_default(),
                     value: tx.value,
                     gas_limit: tx
                         .gas
@@ -317,7 +317,7 @@ mod tests {
                 deposit_tx.to,
                 TxKind::from(address!("4200000000000000000000000000000000000007"))
             );
-            assert_eq!(deposit_tx.mint, None);
+            assert_eq!(deposit_tx.mint, 0);
             assert_eq!(deposit_tx.value, U256::ZERO);
             assert_eq!(deposit_tx.gas_limit, 796584);
             assert!(!deposit_tx.is_system_transaction);
@@ -368,7 +368,7 @@ mod tests {
                 deposit_tx.to,
                 TxKind::from(address!("4200000000000000000000000000000000000007"))
             );
-            assert_eq!(deposit_tx.mint, Some(656890000000000000000));
+            assert_eq!(deposit_tx.mint, 656890000000000000000);
             assert_eq!(deposit_tx.value, U256::from(0x239c2e16a5ca590000_u128));
             assert_eq!(deposit_tx.gas_limit, 491822);
             assert!(!deposit_tx.is_system_transaction);

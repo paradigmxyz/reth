@@ -1,8 +1,5 @@
 use crate::{Address, Bytes, TxKind, TxType, B256, U256};
-use alloy_rlp::{
-    length_of_length, Decodable, Encodable, Error as DecodeError, Header, EMPTY_STRING_CODE,
-};
-use bytes::Buf;
+use alloy_rlp::{length_of_length, Decodable, Encodable, Error as DecodeError, Header};
 use reth_codecs::{main_codec, Compact};
 use std::mem;
 
@@ -18,7 +15,7 @@ pub struct TxDeposit {
     /// transaction is a contract creation.
     pub to: TxKind,
     /// The ETH value to mint on L2.
-    pub mint: Option<u128>,
+    pub mint: u128,
     ///  The ETH value to send to the recipient account.
     pub value: U256,
     /// The gas limit for the L2 transaction.
@@ -37,7 +34,7 @@ impl TxDeposit {
         mem::size_of::<B256>() + // source_hash
         mem::size_of::<Address>() + // from
         self.to.size() + // to
-        mem::size_of::<Option<u128>>() + // mint
+        mem::size_of::<u128>() + // mint
         mem::size_of::<U256>() + // value
         mem::size_of::<u64>() + // gas_limit
         mem::size_of::<bool>() + // is_system_transaction
@@ -62,12 +59,7 @@ impl TxDeposit {
             source_hash: Decodable::decode(buf)?,
             from: Decodable::decode(buf)?,
             to: Decodable::decode(buf)?,
-            mint: if *buf.first().ok_or(DecodeError::InputTooShort)? == EMPTY_STRING_CODE {
-                buf.advance(1);
-                None
-            } else {
-                Some(Decodable::decode(buf)?)
-            },
+            mint: Decodable::decode(buf)?,
             value: Decodable::decode(buf)?,
             gas_limit: Decodable::decode(buf)?,
             is_system_transaction: Decodable::decode(buf)?,
@@ -81,7 +73,7 @@ impl TxDeposit {
         self.source_hash.length() +
             self.from.length() +
             self.to.length() +
-            self.mint.map_or(1, |mint| mint.length()) +
+            self.mint.length() +
             self.value.length() +
             self.gas_limit.length() +
             self.is_system_transaction.length() +
@@ -94,11 +86,7 @@ impl TxDeposit {
         self.source_hash.encode(out);
         self.from.encode(out);
         self.to.encode(out);
-        if let Some(mint) = self.mint {
-            mint.encode(out);
-        } else {
-            out.put_u8(EMPTY_STRING_CODE);
-        }
+        self.mint.encode(out);
         self.value.encode(out);
         self.gas_limit.encode(out);
         self.is_system_transaction.encode(out);
@@ -170,7 +158,7 @@ mod tests {
             source_hash: B256::default(),
             from: Address::default(),
             to: TxKind::default(),
-            mint: Some(100),
+            mint: 100,
             value: U256::default(),
             gas_limit: 50000,
             is_system_transaction: true,
@@ -190,7 +178,7 @@ mod tests {
             source_hash: B256::default(),
             from: Address::default(),
             to: TxKind::default(),
-            mint: Some(100),
+            mint: 100,
             value: U256::default(),
             gas_limit: 50000,
             is_system_transaction: true,
@@ -212,7 +200,7 @@ mod tests {
             source_hash: B256::default(),
             from: Address::default(),
             to: TxKind::default(),
-            mint: Some(100),
+            mint: 100,
             value: U256::default(),
             gas_limit: 50000,
             is_system_transaction: true,
@@ -223,5 +211,16 @@ mod tests {
         let len_without_header = tx_deposit.payload_len_without_header();
 
         assert!(total_len > len_without_header);
+    }
+
+    #[test]
+    fn test_roundtrip_zero_mint() {
+        let mut tx = TxDeposit::default();
+        tx.to = Address::with_last_byte(0x69).into();
+        tx.value = U256::from(0x1a);
+
+        let mut buf = BytesMut::new();
+        tx.encode_fields(&mut buf);
+        assert_eq!(tx, TxDeposit::decode_inner(&mut &buf[..]).unwrap());
     }
 }
