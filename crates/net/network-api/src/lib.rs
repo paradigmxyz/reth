@@ -68,12 +68,12 @@ pub trait PeersInfo: Send + Sync {
 pub trait Peers: PeersInfo {
     /// Adds a peer to the peer set with UDP `SocketAddr`.
     fn add_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Basic, tcp_addr, None);
+        self.add_peer_kind(peer, PeerKind::Static, tcp_addr, None);
     }
 
     /// Adds a peer to the peer set with TCP and UDP `SocketAddr`.
     fn add_peer_with_udp(&self, peer: PeerId, tcp_addr: SocketAddr, udp_addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Basic, tcp_addr, Some(udp_addr));
+        self.add_peer_kind(peer, PeerKind::Static, tcp_addr, Some(udp_addr));
     }
 
     /// Adds a trusted [`PeerId`] to the peer set.
@@ -163,6 +163,8 @@ pub enum PeerKind {
     /// Basic peer kind.
     #[default]
     Basic,
+    /// Static peer, added via JSON-RPC.
+    Static,
     /// Trusted peer.
     Trusted,
 }
@@ -171,6 +173,11 @@ impl PeerKind {
     /// Returns `true` if the peer is trusted.
     pub const fn is_trusted(&self) -> bool {
         matches!(self, Self::Trusted)
+    }
+
+    /// Returns `true` if the peer is static.
+    pub const fn is_static(&self) -> bool {
+        matches!(self, Self::Static)
     }
 
     /// Returns `true` if the peer is basic.
