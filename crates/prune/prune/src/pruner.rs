@@ -1,8 +1,7 @@
 //! Support for pruning.
 
 use crate::{
-    segments,
-    segments::{PruneInput, Segment},
+    segments::{self, PruneInput, PruneOutput, Segment},
     Metrics, PrunerError, PrunerEvent,
 };
 use alloy_primitives::BlockNumber;
@@ -15,7 +14,7 @@ use reth_prune_types::{PruneLimiter, PruneMode, PruneProgress, PrunePurpose, Pru
 use reth_static_file_types::StaticFileSegment;
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
@@ -29,11 +28,16 @@ pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 
 type PrunerStats = BTreeMap<PruneSegment, (PruneProgress, usize)>;
 
+enum ControlFlow {
+    Continue(PruneOutput),
+    LimitReached,
+}
+
 /// Pruning routine. Main pruning logic happens in [`Pruner::run`].
 #[derive(Debug)]
 pub struct Pruner<DB> {
     provider_factory: ProviderFactory<DB>,
-    segments: Vec<Box<dyn Segment<DB>>>,
+    segments: VecDeque<Box<dyn Segment<DB>>>,
     /// Minimum pruning interval measured in blocks. All prune segments are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
     min_block_interval: usize,
@@ -68,7 +72,7 @@ impl<DB: Database> Pruner<DB> {
     ) -> Self {
         Self {
             provider_factory,
-            segments,
+            segments: segments.into(),
             min_block_interval,
             previous_tip_block_number: None,
             delete_limit_per_block: delete_limit,
@@ -169,80 +173,68 @@ impl<DB: Database> Pruner<DB> {
         tip_block_number: BlockNumber,
         limiter: &mut PruneLimiter,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
-        let static_file_segments = self.static_file_segments();
-        let segments = static_file_segments
-            .iter()
-            .map(|segment| (segment, PrunePurpose::StaticFile))
-            .chain(self.segments.iter().map(|segment| (segment, PrunePurpose::User)));
-
         let mut stats = PrunerStats::new();
         let mut pruned = 0;
         let mut progress = PruneProgress::Finished;
 
-        for (segment, purpose) in segments {
-            if limiter.is_limit_reached() {
-                break
-            }
+        // Prune static file segments first
+        for segment in self.static_file_segments() {
+            let result = self.prune_segment(
+                provider,
+                tip_block_number,
+                limiter,
+                &*segment,
+                PrunePurpose::StaticFile,
+            )?;
+            match result {
+                ControlFlow::Continue(output) => {
+                    progress = output.progress;
 
-            if let Some((to_block, prune_mode)) = segment
-                .mode()
-                .map(|mode| mode.prune_target_block(tip_block_number, segment.segment(), purpose))
-                .transpose()?
-                .flatten()
-            {
-                debug!(
-                    target: "pruner",
-                    segment = ?segment.segment(),
-                    ?purpose,
-                    %to_block,
-                    ?prune_mode,
-                    "Segment pruning started"
-                );
-
-                let segment_start = Instant::now();
-                let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
-                let output = segment.prune(
-                    provider,
-                    PruneInput { previous_checkpoint, to_block, limiter: limiter.clone() },
-                )?;
-                if let Some(checkpoint) = output.checkpoint {
-                    segment
-                        .save_checkpoint(provider, checkpoint.as_prune_checkpoint(prune_mode))?;
+                    if output.pruned > 0 {
+                        limiter.increment_deleted_entries_count_by(output.pruned);
+                        pruned += output.pruned;
+                        stats.insert(segment.segment(), (output.progress, output.pruned));
+                    }
                 }
-                self.metrics
-                    .get_prune_segment_metrics(segment.segment())
-                    .duration_seconds
-                    .record(segment_start.elapsed());
-                if let Some(highest_pruned_block) =
-                    output.checkpoint.and_then(|checkpoint| checkpoint.block_number)
-                {
-                    self.metrics
-                        .get_prune_segment_metrics(segment.segment())
-                        .highest_pruned_block
-                        .set(highest_pruned_block as f64);
-                }
-
-                progress = output.progress;
-
-                debug!(
-                    target: "pruner",
-                    segment = ?segment.segment(),
-                    ?purpose,
-                    %to_block,
-                    ?prune_mode,
-                    %output.pruned,
-                    "Segment pruning finished"
-                );
-
-                if output.pruned > 0 {
-                    limiter.increment_deleted_entries_count_by(output.pruned);
-                    pruned += output.pruned;
-                    stats.insert(segment.segment(), (output.progress, output.pruned));
-                }
-            } else {
-                debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
+                ControlFlow::LimitReached => break,
             }
         }
+
+        let initial_segments_len = self.segments.len();
+        let mut pruned_segments = Vec::with_capacity(self.segments.len());
+
+        // Prune other segments, taking them from the front of the queue
+        while let Some(segment) = self.segments.pop_front() {
+            let segment_name = segment.segment();
+
+            let result = self.prune_segment(
+                provider,
+                tip_block_number,
+                limiter,
+                &*segment,
+                PrunePurpose::User,
+            );
+            pruned_segments.push(segment);
+
+            match result? {
+                ControlFlow::Continue(output) => {
+                    progress = output.progress;
+
+                    if output.pruned > 0 {
+                        limiter.increment_deleted_entries_count_by(output.pruned);
+                        pruned += output.pruned;
+                        stats.insert(segment_name, (output.progress, output.pruned));
+                    }
+                }
+                ControlFlow::LimitReached => break,
+            }
+        }
+
+        // Pruned segments go in the end of the queue, in reverse order.
+        // This way, the segments that were pruned first now, will be pruned last on the next run.
+        self.segments.extend(pruned_segments.into_iter().rev());
+
+        debug_assert_eq!(self.segments.len(), initial_segments_len);
 
         Ok((stats, pruned, progress))
     }
@@ -275,6 +267,73 @@ impl<DB: Database> Pruner<DB> {
         }
 
         segments
+    }
+
+    fn prune_segment(
+        &mut self,
+        provider: &DatabaseProviderRW<DB>,
+        tip_block_number: BlockNumber,
+        limiter: &PruneLimiter,
+        segment: &dyn Segment<DB>,
+        purpose: PrunePurpose,
+    ) -> Result<ControlFlow, PrunerError> {
+        if limiter.is_limit_reached() {
+            return Ok(ControlFlow::LimitReached)
+        }
+
+        if let Some((to_block, prune_mode)) = segment
+            .mode()
+            .map(|mode| mode.prune_target_block(tip_block_number, segment.segment(), purpose))
+            .transpose()?
+            .flatten()
+        {
+            debug!(
+                target: "pruner",
+                segment = ?segment.segment(),
+                ?purpose,
+                %to_block,
+                ?prune_mode,
+                "Segment pruning started"
+            );
+
+            let segment_start = Instant::now();
+            let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
+            let output = segment.prune(
+                provider,
+                PruneInput { previous_checkpoint, to_block, limiter: limiter.clone() },
+            )?;
+            if let Some(checkpoint) = output.checkpoint {
+                segment.save_checkpoint(provider, checkpoint.as_prune_checkpoint(prune_mode))?;
+            }
+            self.metrics
+                .get_prune_segment_metrics(segment.segment())
+                .duration_seconds
+                .record(segment_start.elapsed());
+            if let Some(highest_pruned_block) =
+                output.checkpoint.and_then(|checkpoint| checkpoint.block_number)
+            {
+                self.metrics
+                    .get_prune_segment_metrics(segment.segment())
+                    .highest_pruned_block
+                    .set(highest_pruned_block as f64);
+            }
+
+            debug!(
+                target: "pruner",
+                segment = ?segment.segment(),
+                ?purpose,
+                %to_block,
+                ?prune_mode,
+                %output.pruned,
+                "Segment pruning finished"
+            );
+
+            Ok(ControlFlow::Continue(output))
+        } else {
+            debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
+
+            Ok(ControlFlow::Continue(PruneOutput::done()))
+        }
     }
 
     /// Returns `true` if the pruning is needed at the provided tip block number.
