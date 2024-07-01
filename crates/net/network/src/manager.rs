@@ -894,13 +894,7 @@ where
     ///
     /// Ignore the non-active peer.
     fn get_peer_infos_by_ids(&self, peer_ids: impl IntoIterator<Item = PeerId>) -> Vec<PeerInfo> {
-        let mut infos = Vec::new();
-        for peer_id in peer_ids {
-            if let Some(info) = self.get_peer_info_by_id(peer_id) {
-                infos.push(info)
-            }
-        }
-        infos
+        peer_ids.into_iter().filter_map(|peer_id| self.get_peer_info_by_id(peer_id)).collect()
     }
 
     /// Updates the metrics for active,established connections
