@@ -49,7 +49,7 @@ impl TrieCursor for NoopAccountTrieCursor {
     }
 
     /// Retrieves the current cursor position within the account trie.
-    fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(None)
     }
 }
@@ -77,7 +77,7 @@ impl TrieCursor for NoopStorageTrieCursor {
     }
 
     /// Retrieves the current cursor position within storage tries.
-    fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(None)
     }
 }

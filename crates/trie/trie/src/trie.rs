@@ -299,7 +299,9 @@ where
                         };
 
                         trie_updates.extend(
-                            walker_deleted_keys.into_iter().map(|key| (key, TrieOp::Delete)),
+                            walker_deleted_keys
+                                .into_iter()
+                                .map(|nibbles| (TrieKey::AccountNode(nibbles), TrieOp::Delete)),
                         );
                         trie_updates.extend_with_account_updates(hash_builder_updates);
 

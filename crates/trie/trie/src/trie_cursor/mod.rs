@@ -1,4 +1,4 @@
-use crate::{updates::TrieKey, BranchNodeCompact, Nibbles};
+use crate::{BranchNodeCompact, Nibbles};
 use reth_db::DatabaseError;
 use reth_primitives::B256;
 
@@ -51,5 +51,5 @@ pub trait TrieCursor: Send + Sync {
         -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError>;
 
     /// Get the current entry.
-    fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError>;
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError>;
 }
