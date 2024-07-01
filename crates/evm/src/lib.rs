@@ -16,8 +16,8 @@ use core::ops::Deref;
 
 use reth_chainspec::ChainSpec;
 use reth_primitives::{
-    revm::env::{fill_block_env, fill_tx_env},
-    Address, Header, TransactionSigned, TransactionSignedEcRecovered, U256,
+    revm::env::fill_block_env, Address, Header, TransactionSigned, TransactionSignedEcRecovered,
+    U256,
 };
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv};
@@ -116,9 +116,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     }
 
     /// Fill transaction environment from a [`TransactionSigned`] and the given sender address.
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        fill_tx_env(tx_env, transaction, sender)
-    }
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address);
 
     /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header
     fn fill_cfg_env(
