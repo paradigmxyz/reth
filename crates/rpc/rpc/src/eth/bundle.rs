@@ -91,7 +91,8 @@ where
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
             block_env.timestamp = U256::from(timestamp);
-        } else { // WVM: BLOKTIME
+        } else {
+            // WVM: BLOKTIME
             block_env.timestamp += U256::from(2);
         }
 

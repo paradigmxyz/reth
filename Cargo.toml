@@ -121,7 +121,13 @@ members = [
     "examples/rpc-db/",
     "examples/txpool-tracing/",
     "testing/ef-tests/",
-    "testing/testing-utils",
+    "testing/testing-utils/",
+    "wvm-apps/wvm-exexed/",
+    "wvm-apps/wvm-exexed/crates/reth-exexed/",
+    "wvm-apps/wvm-exexed/crates/repository/",
+    "wvm-apps/wvm-exexed/crates/exex-etl/",
+    "wvm-apps/wvm-exexed/crates/bigquery/",
+    "wvm-apps/wvm-exexed/crates/types/",
 ]
 default-members = ["bin/reth"]
 

@@ -1,0 +1,42 @@
+[package]
+name = "wvm-exexed"
+version = "0.1.0"
+rust-version = "1.76"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+reth.workspace = true
+reth-exex.workspace = true
+reth-node-api.workspace = true
+reth-node-ethereum.workspace = true
+reth-tracing.workspace = true
+eyre.workspace = true
+futures.workspace = true
+alloy-primitives.workspace = true
+tokio.workspace = true
+
+## bigquery dependencies
+gcp-bigquery-client = "0.17.0"
+indexmap = "2.0.0"
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+
+###
+repository = { path = "crates/repository" }
+bigquery = { path = "crates/bigquery" }
+exex-etl = { path = "crates/exex-etl" }
+types = { path = "crates/types" }
+
+[dev-dependencies]
+reth-exex-test-utils.workspace = true
+reth-testing-utils.workspace = true
+
+#[workspace]
+#members = ["crates/*"]
+
+[[bin]]
+name = "reth"
+path = "crates/reth-exexed/src/main.rs"

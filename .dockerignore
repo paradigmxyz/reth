@@ -5,6 +5,7 @@
 !/bin
 !/crates
 !/testing
+!/wvm-apps
 !book.toml
 !Cargo.lock
 !Cargo.toml

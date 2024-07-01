@@ -1,0 +1,24 @@
+[package]
+name = "bigquery"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+gcp-bigquery-client = "0.20.0"
+indexmap = "2.0.0"
+serde_json.workspace = true
+serde.workspace = true
+reth.workspace = true
+
+phf = { version = "0.11.2", features = ["macros"] }
+polars = { version = "0.33.0", features = ["dtype-datetime", "lazy", "describe", "serde", "json", "temporal", "parquet"]}
+chrono = "0.4.31"
+once_cell = "1.18.0"
+async-trait = "0.1.74"
+
+
+types = { path = "../types" }
+eyre.workspace = true
