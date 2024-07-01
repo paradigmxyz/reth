@@ -139,7 +139,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
         let Self {
             datadir,
             config,
-            // chain,
+            chain,
             metrics,
             instance,
             with_unused_ports,
@@ -197,7 +197,7 @@ impl<Ext: clap::Args + fmt::Debug> NodeCommand<Ext> {
 
         let builder = NodeBuilder::new(node_config)
             .with_database(database)
-            .with_launch_context(ctx.task_executor, data_dir);
+            .with_launch_context(ctx.task_executor);
         
         launcher(builder, ext).await
     }

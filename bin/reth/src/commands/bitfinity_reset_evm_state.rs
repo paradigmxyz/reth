@@ -64,7 +64,7 @@ impl BitfinityResetEvmStateCommandBuilder {
         let data_dir = self.datadir.unwrap_or_chain_default(chain.chain);
         let db_path = data_dir.db();
         let db = Arc::new(init_db(db_path, Default::default())?);
-        let provider_factory = ProviderFactory::new(db.clone(), chain, data_dir.static_files())?;
+        let provider_factory = ProviderFactory::new(db.clone(), chain, data_dir.static_files());
 
         Ok(BitfinityResetEvmStateCommand::new(provider_factory, executor, self.bitfinity.parallel_requests))
     }

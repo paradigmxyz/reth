@@ -233,7 +233,7 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
 
     /// Export state to EVM canister
     #[command(name = "bitfinity-reset-evm-state")]
-    BitfinityResetEvmState(bitfinity_reset_evm_state::BitfinityResetEvmStateCommandBuilder),
+    BitfinityResetEvmState(crate::commands::bitfinity_reset_evm_state::BitfinityResetEvmStateCommandBuilder),
 }
 
 #[cfg(test)]
