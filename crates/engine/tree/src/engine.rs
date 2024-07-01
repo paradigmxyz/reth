@@ -146,13 +146,23 @@ pub trait EngineRequestHandler: Send + Sync {
 #[derive(Debug)]
 pub struct EngineApiRequestHandler<T: EngineTypes> {
     /// channel to send messages to the tree to execute the payload.
-    to_tree: std::sync::mpsc::Sender<FromEngine<BeaconEngineMessage<T>>>,
+    to_tree: mpsc::Sender<FromEngine<BeaconEngineMessage<T>>>,
     /// channel to receive messages from the tree.
     from_tree: mpsc::UnboundedReceiver<EngineApiEvent>,
     // TODO add db controller
 }
 
-impl<T> EngineApiRequestHandler<T> where T: EngineTypes {}
+impl<T> EngineApiRequestHandler<T>
+where
+    T: EngineTypes,
+{
+    pub const fn new(
+        to_tree: mpsc::Sender<FromEngine<BeaconEngineMessage<T>>>,
+        from_tree: mpsc::UnboundedReceiver<EngineApiEvent>,
+    ) -> Self {
+        Self { to_tree, from_tree }
+    }
+}
 
 impl<T> EngineRequestHandler for EngineApiRequestHandler<T>
 where
@@ -162,8 +172,9 @@ where
     type Request = BeaconEngineMessage<T>;
 
     fn on_event(&mut self, event: FromEngine<Self::Request>) {
-        // delegate to the tree
-        let _ = self.to_tree.send(event);
+        // delegate to the tree, given that we are not currently using it here
+        // we explicitly drop the future to prevent warnings
+        std::mem::drop(self.to_tree.send(event));
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
