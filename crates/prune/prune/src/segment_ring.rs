@@ -60,7 +60,7 @@ pub trait CycleSegments {
     #[allow(clippy::type_complexity)]
     fn next_segment(&mut self) -> Option<(Arc<dyn Segment<Self::Db>>, PrunePurpose)>;
 
-    /// Resets cycle so it can start again from start position.
+    /// Resets cycle.
     fn reset_cycle(&mut self);
 
     /// Returns an iterator cycling once over the ring of tables. Yields an item for each table,
@@ -71,6 +71,8 @@ pub trait CycleSegments {
     where
         Self: Sized,
     {
+        self.reset_cycle();
+
         SegmentIter { ring: self }
     }
 
@@ -79,6 +81,8 @@ pub trait CycleSegments {
     where
         Self: Sized,
     {
+        self.reset_cycle();
+
         self.next_cycle().filter(|segment| segment.is_some()).flatten()
     }
 }
@@ -198,6 +202,7 @@ where
 
     fn reset_cycle(&mut self) {
         self.prev = None;
+        self.start = self.current;
     }
 }
 
@@ -296,6 +301,7 @@ where
 
     fn reset_cycle(&mut self) {
         self.prev = None;
+        self.start = self.current;
     }
 }
 
