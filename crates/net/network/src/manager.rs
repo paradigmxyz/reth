@@ -870,7 +870,7 @@ where
         self.swarm
             .sessions()
             .active_sessions()
-            .into_iter()
+            .iter()
             .filter_map(|(&peer_id, session)| {
                 self.swarm
                     .state()
