@@ -1,7 +1,7 @@
 use crate::{
     recover_signer_unchecked,
     revm_primitives::{BlockEnv, Env, TxEnv},
-    Address, Bytes, Header, Transaction, TransactionSignedEcRecovered, TxKind, B256, U256,
+    Address, Bytes, Header, TxKind, B256, U256,
 };
 use reth_chainspec::{Chain, ChainSpec};
 
@@ -107,28 +107,6 @@ pub fn recover_header_signer(header: &Header) -> Result<Address, CliqueSignerRec
         .map_err(CliqueSignerRecoveryError::InvalidSignature)
 }
 
-/// Returns a new [`TxEnv`] filled with the transaction's data.
-pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEnv {
-    let mut tx_env = TxEnv::default();
-
-    #[cfg(not(feature = "optimism"))]
-    fill_tx_env(&mut tx_env, transaction.as_ref(), transaction.signer());
-
-    #[cfg(feature = "optimism")]
-    {
-        let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
-        transaction.encode_enveloped(&mut envelope_buf);
-        fill_op_tx_env(
-            &mut tx_env,
-            transaction.as_ref(),
-            transaction.signer(),
-            envelope_buf.into(),
-        );
-    }
-
-    tx_env
-}
-
 /// Fill transaction environment with the EIP-4788 system contract message data.
 ///
 /// This requirements for the beacon root contract call defined by
@@ -216,144 +194,6 @@ fn fill_tx_env_with_system_contract_call(
 
     // disable the base fee check for this call by setting the base fee to zero
     env.block.basefee = U256::ZERO;
-}
-
-/// Fill transaction environment from [`TransactionSignedEcRecovered`].
-#[cfg(not(feature = "optimism"))]
-pub fn fill_tx_env_with_recovered(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovered) {
-    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer());
-}
-
-/// Fill transaction environment from [`TransactionSignedEcRecovered`] and the given envelope.
-#[cfg(feature = "optimism")]
-pub fn fill_tx_env_with_recovered(
-    tx_env: &mut TxEnv,
-    transaction: &TransactionSignedEcRecovered,
-    envelope: Bytes,
-) {
-    fill_op_tx_env(tx_env, transaction.as_ref(), transaction.signer(), envelope);
-}
-
-/// Fill transaction environment from a [Transaction] and the given sender address.
-pub fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address)
-where
-    T: AsRef<Transaction>,
-{
-    tx_env.caller = sender;
-    match transaction.as_ref() {
-        Transaction::Legacy(tx) => {
-            tx_env.gas_limit = tx.gas_limit;
-            tx_env.gas_price = U256::from(tx.gas_price);
-            tx_env.gas_priority_fee = None;
-            tx_env.transact_to = tx.to;
-            tx_env.value = tx.value;
-            tx_env.data = tx.input.clone();
-            tx_env.chain_id = tx.chain_id;
-            tx_env.nonce = Some(tx.nonce);
-            tx_env.access_list.clear();
-            tx_env.blob_hashes.clear();
-            tx_env.max_fee_per_blob_gas.take();
-        }
-        Transaction::Eip2930(tx) => {
-            tx_env.gas_limit = tx.gas_limit;
-            tx_env.gas_price = U256::from(tx.gas_price);
-            tx_env.gas_priority_fee = None;
-            tx_env.transact_to = tx.to;
-            tx_env.value = tx.value;
-            tx_env.data = tx.input.clone();
-            tx_env.chain_id = Some(tx.chain_id);
-            tx_env.nonce = Some(tx.nonce);
-            tx_env.access_list = tx
-                .access_list
-                .iter()
-                .map(|l| {
-                    (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
-                })
-                .collect();
-            tx_env.blob_hashes.clear();
-            tx_env.max_fee_per_blob_gas.take();
-        }
-        Transaction::Eip1559(tx) => {
-            tx_env.gas_limit = tx.gas_limit;
-            tx_env.gas_price = U256::from(tx.max_fee_per_gas);
-            tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-            tx_env.transact_to = tx.to;
-            tx_env.value = tx.value;
-            tx_env.data = tx.input.clone();
-            tx_env.chain_id = Some(tx.chain_id);
-            tx_env.nonce = Some(tx.nonce);
-            tx_env.access_list = tx
-                .access_list
-                .iter()
-                .map(|l| {
-                    (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
-                })
-                .collect();
-            tx_env.blob_hashes.clear();
-            tx_env.max_fee_per_blob_gas.take();
-        }
-        Transaction::Eip4844(tx) => {
-            tx_env.gas_limit = tx.gas_limit;
-            tx_env.gas_price = U256::from(tx.max_fee_per_gas);
-            tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-            tx_env.transact_to = TxKind::Call(tx.to);
-            tx_env.value = tx.value;
-            tx_env.data = tx.input.clone();
-            tx_env.chain_id = Some(tx.chain_id);
-            tx_env.nonce = Some(tx.nonce);
-            tx_env.access_list = tx
-                .access_list
-                .iter()
-                .map(|l| {
-                    (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
-                })
-                .collect();
-            tx_env.blob_hashes.clone_from(&tx.blob_versioned_hashes);
-            tx_env.max_fee_per_blob_gas = Some(U256::from(tx.max_fee_per_blob_gas));
-        }
-        #[cfg(feature = "optimism")]
-        Transaction::Deposit(tx) => {
-            tx_env.access_list.clear();
-            tx_env.gas_limit = tx.gas_limit;
-            tx_env.gas_price = U256::ZERO;
-            tx_env.gas_priority_fee = None;
-            tx_env.transact_to = tx.to;
-            tx_env.value = tx.value;
-            tx_env.data = tx.input.clone();
-            tx_env.chain_id = None;
-            tx_env.nonce = None;
-        }
-    }
-}
-
-/// Fill transaction environment from a [Transaction], envelope, and the given sender address.
-#[cfg(feature = "optimism")]
-#[inline(always)]
-pub fn fill_op_tx_env<T: AsRef<Transaction>>(
-    tx_env: &mut TxEnv,
-    transaction: T,
-    sender: Address,
-    envelope: Bytes,
-) {
-    fill_tx_env(tx_env, &transaction, sender);
-    match transaction.as_ref() {
-        Transaction::Deposit(tx) => {
-            tx_env.optimism = OptimismFields {
-                source_hash: Some(tx.source_hash),
-                mint: tx.mint,
-                is_system_transaction: Some(tx.is_system_transaction),
-                enveloped_tx: Some(envelope),
-            };
-        }
-        _ => {
-            tx_env.optimism = OptimismFields {
-                source_hash: None,
-                mint: None,
-                is_system_transaction: Some(false),
-                enveloped_tx: Some(envelope),
-            }
-        }
-    }
 }
 
 #[cfg(test)]

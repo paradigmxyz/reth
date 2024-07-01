@@ -32,6 +32,7 @@ pub use sidecar::generate_blob_sidecar;
 pub use sidecar::BlobTransactionValidationError;
 pub use sidecar::{BlobTransaction, BlobTransactionSidecar};
 
+pub use compat::FillTxEnv;
 pub use signature::{extract_chain_id, Signature};
 pub use tx_type::{
     TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
@@ -39,6 +40,7 @@ pub use tx_type::{
 pub use variant::TransactionSignedVariant;
 
 mod access_list;
+mod compat;
 mod eip1559;
 mod eip2930;
 mod eip4844;

@@ -1,12 +1,9 @@
 //! reth's static file database table import and access
 
-mod generation;
 use std::{
     collections::{hash_map::Entry, HashMap},
     path::Path,
 };
-
-pub use generation::*;
 
 mod cursor;
 pub use cursor::StaticFileCursor;
