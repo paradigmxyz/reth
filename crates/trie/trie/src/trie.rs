@@ -549,7 +549,7 @@ mod tests {
         hashed_cursor::HashedPostStateCursorFactory,
         prefix_set::PrefixSetMut,
         test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
-        trie_cursor::TrieUpdatesCursorFactory,
+        trie_cursor::InMemoryTrieCursorFactory,
         BranchNodeCompact, HashedPostState, HashedStorage, TrieMask,
     };
     use proptest::{prelude::ProptestConfig, proptest};
@@ -1488,7 +1488,7 @@ mod tests {
                 tx,
                 &post_state.clone().into_sorted(),
             ))
-            .with_trie_cursor_factory(TrieUpdatesCursorFactory::new(tx, &update.sorted()))
+            .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(tx, &update.sorted()))
             .with_prefix_set(prefix_sets.storage_prefix_sets.remove(&keccak256(address)).unwrap())
             .root_with_updates()
             .unwrap();

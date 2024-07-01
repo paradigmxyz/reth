@@ -228,15 +228,7 @@ impl FromReader for FileClient {
                 // add to the internal maps
                 headers.insert(block.header.number, block.header.clone());
                 hash_to_number.insert(block_hash, block.header.number);
-                bodies.insert(
-                    block_hash,
-                    BlockBody {
-                        transactions: block.body,
-                        ommers: block.ommers,
-                        withdrawals: block.withdrawals,
-                        requests: block.requests,
-                    },
-                );
+                bodies.insert(block_hash, block.into());
 
                 if log_interval == 0 {
                     trace!(target: "downloaders::file",
