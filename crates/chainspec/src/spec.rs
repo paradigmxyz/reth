@@ -951,7 +951,7 @@ impl ChainSpecBuilder {
     /// Enable Prague at genesis.
     pub fn prague_activated(mut self) -> Self {
         self = self.cancun_activated();
-        self.hardforks.insert(Hardfork::Prague, ForkCondition::Timestamp(0));
+        self.hardforks.insert(EthereumHardfork::Prague, ForkCondition::Timestamp(0));
         self
     }
 

@@ -4,7 +4,7 @@
 use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
 use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind, B256, U256};
 
-use alloy_eips::eip7702::AuthorizationList;
+use alloy_eips::eip7702::SignedAuthorization;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -260,7 +260,9 @@ impl Transaction {
     /// Returns the [AuthorizationList] of the transaction.
     ///
     /// Returns `None` if this transaction is not EIP-7702.
-    pub fn authorization_list(&self) -> Option<&AuthorizationList> {
+    pub fn authorization_list(
+        &self,
+    ) -> Option<&[SignedAuthorization<alloy_primitives::Signature>]> {
         match self {
             Self::Legacy(_) | Self::Eip2930(_) | Self::Eip1559(_) | Self::Eip4844(_) => None,
             Self::Eip7702(tx) => Some(&tx.authorization_list),

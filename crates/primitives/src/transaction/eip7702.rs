@@ -1,6 +1,6 @@
 use super::access_list::AccessList;
 use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
-use alloy_eips::eip7702::AuthorizationList;
+use alloy_eips::eip7702::{AuthorizationList, SignedAuthorization};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
@@ -61,7 +61,7 @@ pub struct TxEip7702 {
     /// Authorizations are used to temporarily set the code of its signer to
     /// the code referenced by `address`. These also include a `chain_id` (which
     /// can be set to zero and not evaluated) as well as an optional `nonce`.
-    pub authorization_list: AuthorizationList,
+    pub authorization_list: Vec<SignedAuthorization<alloy_primitives::Signature>>,
     /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
     /// Some). pub init: An unlimited size byte array specifying the
     /// EVM-code for the account initialisation procedure CREATE,
@@ -72,7 +72,7 @@ pub struct TxEip7702 {
 
 impl TxEip7702 {
     /// Returns the effective gas price for the given `base_fee`.
-    pub fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+    pub const fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         match base_fee {
             None => self.max_fee_per_gas,
             Some(base_fee) => {
@@ -91,7 +91,7 @@ impl TxEip7702 {
 
     /// Calculates a heuristic for the in-memory size of the [TxEip7702] transaction.
     #[inline]
-    pub fn size(&self) -> usize {
+    pub const fn size(&self) -> usize {
         mem::size_of::<ChainId>() + // chain_id
         mem::size_of::<u64>() + // nonce
         mem::size_of::<u128>() + // gas_price
