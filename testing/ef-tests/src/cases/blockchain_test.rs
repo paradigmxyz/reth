@@ -90,6 +90,7 @@ impl Case for BlockchainTestCase {
                     db.as_ref(),
                     Arc::new(case.network.clone().into()),
                     StaticFileProvider::read_write(static_files_dir_path).unwrap(),
+                    None,
                 )
                 .provider_rw()
                 .unwrap();
@@ -102,7 +103,6 @@ impl Case for BlockchainTestCase {
                     )
                     .try_seal_with_senders()
                     .unwrap(),
-                    None,
                 )?;
                 case.pre.write_to_db(provider.tx_ref())?;
 
@@ -121,7 +121,6 @@ impl Case for BlockchainTestCase {
                     let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
                     provider.insert_historical_block(
                         decoded.clone().try_seal_with_senders().unwrap(),
-                        None,
                     )?;
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;

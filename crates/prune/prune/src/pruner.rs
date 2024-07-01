@@ -346,6 +346,7 @@ mod tests {
             db,
             MAINNET.clone(),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
+            None,
         );
 
         let (finished_exex_height_tx, finished_exex_height_rx) =

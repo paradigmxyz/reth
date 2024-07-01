@@ -45,6 +45,7 @@ impl Default for TestStageDB {
                 create_test_rw_db(),
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
+                None,
             ),
         }
     }
@@ -60,6 +61,7 @@ impl TestStageDB {
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
+                None,
             ),
         }
     }

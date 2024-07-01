@@ -586,6 +586,7 @@ mod tests {
             factory.into_db(),
             MAINNET.clone(),
             static_file_provider,
+            None,
         ));
 
         assert_eq!(

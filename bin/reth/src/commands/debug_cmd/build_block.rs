@@ -298,7 +298,6 @@ impl Command {
                     execution_outcome,
                     hashed_post_state,
                     trie_updates,
-                    None,
                 )?;
                 info!(target: "reth::cli", "Successfully appended built block");
             }

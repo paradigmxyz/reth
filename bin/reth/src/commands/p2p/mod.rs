@@ -114,6 +114,7 @@ impl Command {
                 noop_db,
                 self.chain.clone(),
                 StaticFileProvider::read_write(data_dir.static_files())?,
+                None,
             )))
             .start_network()
             .await?;

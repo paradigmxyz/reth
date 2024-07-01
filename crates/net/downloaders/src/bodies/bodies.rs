@@ -634,6 +634,7 @@ mod tests {
                 db,
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
+                None,
             ),
         );
         downloader.set_download_range(0..=19).expect("failed to set download range");
@@ -684,6 +685,7 @@ mod tests {
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
+                    None,
                 ),
             );
         downloader.set_download_range(0..=199).expect("failed to set download range");
@@ -718,6 +720,7 @@ mod tests {
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
+                    None,
                 ),
             );
 
@@ -754,6 +757,7 @@ mod tests {
                 db,
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
+                None,
             ),
         );
 
@@ -800,6 +804,7 @@ mod tests {
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
+                    None,
                 ),
             );
 
@@ -837,6 +842,7 @@ mod tests {
                     db,
                     MAINNET.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
+                    None,
                 ),
             );
 

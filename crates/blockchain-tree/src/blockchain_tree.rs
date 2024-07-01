@@ -65,8 +65,6 @@ pub struct BlockchainTree<DB, E> {
     externals: TreeExternals<DB, E>,
     /// Tree configuration
     config: BlockchainTreeConfig,
-    /// Prune modes.
-    prune_modes: Option<PruneModes>,
     /// Broadcast channel for canon state changes notifications.
     canon_state_notification_sender: CanonStateNotificationSender,
     /// Metrics for sync stages.
@@ -115,7 +113,7 @@ where
     ///   storage space efficiently. It's important to validate this configuration to ensure it does
     ///   not lead to unintended data loss.
     pub fn new(
-        externals: TreeExternals<DB, E>,
+        mut externals: TreeExternals<DB, E>,
         config: BlockchainTreeConfig,
         prune_modes: Option<PruneModes>,
     ) -> ProviderResult<Self> {
@@ -124,6 +122,9 @@ where
         // depth at least N blocks must be sent at once.
         let (canon_state_notification_sender, _receiver) =
             tokio::sync::broadcast::channel(max_reorg_depth * 2);
+
+        // Set the prune modes argument, on the provider
+        externals.provider_factory = externals.provider_factory.with_prune_modes(prune_modes);
 
         let last_canonical_hashes =
             externals.fetch_latest_canonical_hashes(config.num_of_canonical_hashes() as usize)?;
@@ -138,7 +139,6 @@ where
                 config.max_unconnected_blocks(),
             ),
             config,
-            prune_modes,
             canon_state_notification_sender,
             sync_metrics_tx: None,
             metrics: Default::default(),
@@ -1258,7 +1258,6 @@ where
                 state,
                 hashed_state,
                 trie_updates,
-                self.prune_modes.as_ref(),
             )
             .map_err(|e| CanonicalError::CanonicalCommit(e.to_string()))?;
 
@@ -1424,7 +1423,6 @@ mod tests {
         provider
             .insert_historical_block(
                 genesis.try_seal_with_senders().expect("invalid tx signature in genesis"),
-                None,
             )
             .unwrap();
 
@@ -1545,7 +1543,6 @@ mod tests {
                     SealedBlock::new(chain_spec.sealed_genesis_header(), Default::default())
                         .try_seal_with_senders()
                         .unwrap(),
-                    None,
                 )
                 .unwrap();
             let account = Account { balance: initial_signer_balance, ..Default::default() };

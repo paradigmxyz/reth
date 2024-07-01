@@ -109,7 +109,9 @@ impl EnvironmentArgs {
         static_file_provider: StaticFileProvider,
     ) -> eyre::Result<ProviderFactory<Arc<DatabaseEnv>>> {
         let has_receipt_pruning = config.prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
-        let factory = ProviderFactory::new(db, self.chain.clone(), static_file_provider);
+        let prune_modes = config.prune.clone().map(|prune| prune.segments);
+        let factory =
+            ProviderFactory::new(db, self.chain.clone(), static_file_provider, prune_modes.clone());
 
         info!(target: "reth::cli", "Verifying storage consistency.");
 
@@ -123,14 +125,13 @@ impl EnvironmentArgs {
                 return Ok(factory)
             }
 
-            let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
-
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
             assert_ne!(unwind_target, PipelineTarget::Unwind(0), "A static file <> database inconsistency was found that would trigger an unwind to block 0");
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
+            let prune_modes = prune_modes.unwrap_or_default();
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
             // Builds and executes an unwind-only pipeline

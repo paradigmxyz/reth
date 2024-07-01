@@ -363,6 +363,7 @@ where
             self.right().clone(),
             self.chain_spec(),
             StaticFileProvider::read_write(self.data_dir().static_files())?,
+            self.prune_modes(),
         )
         .with_static_files_metrics();
 

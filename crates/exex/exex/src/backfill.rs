@@ -322,7 +322,6 @@ mod tests {
             outcome_batch,
             Default::default(),
             Default::default(),
-            None,
         )?;
         provider_rw.commit()?;
 
