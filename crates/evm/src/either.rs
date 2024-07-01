@@ -36,13 +36,13 @@ where
         }
     }
 
-    fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
+    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
         match self {
-            Self::Left(a) => Either::Left(a.batch_executor(db, prune_modes)),
-            Self::Right(b) => Either::Right(b.batch_executor(db, prune_modes)),
+            Self::Left(a) => Either::Left(a.batch_executor(db)),
+            Self::Right(b) => Either::Right(b.batch_executor(db)),
         }
     }
 }
@@ -113,6 +113,13 @@ where
         match self {
             Self::Left(a) => a.set_tip(tip),
             Self::Right(b) => b.set_tip(tip),
+        }
+    }
+
+    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+        match self {
+            Self::Left(a) => a.set_prune_modes(prune_modes),
+            Self::Right(b) => b.set_prune_modes(prune_modes),
         }
     }
 

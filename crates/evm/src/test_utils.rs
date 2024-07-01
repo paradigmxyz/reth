@@ -37,7 +37,7 @@ impl BlockExecutorProvider for MockExecutorProvider {
         self.clone()
     }
 
-    fn batch_executor<DB>(&self, _: DB, _: PruneModes) -> Self::BatchExecutor<DB>
+    fn batch_executor<DB>(&self, _: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
@@ -76,6 +76,8 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
     }
 
     fn set_tip(&mut self, _: BlockNumber) {}
+
+    fn set_prune_modes(&mut self, _: PruneModes) {}
 
     fn size_hint(&self) -> Option<usize> {
         None
