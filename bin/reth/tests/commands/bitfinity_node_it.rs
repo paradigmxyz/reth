@@ -9,6 +9,7 @@ use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use jsonrpsee::{server::{Server, ServerHandle}, Methods, RpcModule};
 use rand::RngCore;
 use reth::args::RpcServerArgs;
+use reth_consensus::Consensus;
 use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
 use reth_node_ethereum::EthereumNode;
 use reth_tasks::TaskManager;
@@ -83,7 +84,7 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
 }
 
 /// Start a local reth node
-async fn start_reth_testing_node(bitfinity_evm_url: Option<String>) -> (EthJsonRpcClient<ReqwestClient>, NodeHandle<reth_node_builder::NodeAdapter<reth_node_api::FullNodeTypesAdapter<EthereumNode, std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, reth_provider::providers::BlockchainProvider<std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>>, reth_node_builder::components::Components<reth_node_api::FullNodeTypesAdapter<EthereumNode, std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, reth_provider::providers::BlockchainProvider<std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>>, reth_transaction_pool::Pool<reth_transaction_pool::TransactionValidationTaskExecutor<reth_transaction_pool::EthTransactionValidator<reth_provider::providers::BlockchainProvider<std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>, reth_transaction_pool::EthPooledTransaction>>, reth_transaction_pool::CoinbaseTipOrdering<reth_transaction_pool::EthPooledTransaction>, reth_transaction_pool::blobstore::DiskFileBlobStore>, reth_node_ethereum::EthEvmConfig, reth_node_ethereum::EthExecutorProvider>>>) {
+async fn start_reth_testing_node(bitfinity_evm_url: Option<String>) -> (EthJsonRpcClient<ReqwestClient>, NodeHandle<reth_node_builder::NodeAdapter<reth_node_api::FullNodeTypesAdapter<EthereumNode, std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, reth_provider::providers::BlockchainProvider<std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>>, reth_node_builder::components::Components<reth_node_api::FullNodeTypesAdapter<EthereumNode, std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, reth_provider::providers::BlockchainProvider<std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>>, reth_transaction_pool::Pool<reth_transaction_pool::TransactionValidationTaskExecutor<reth_transaction_pool::EthTransactionValidator<reth_provider::providers::BlockchainProvider<std::sync::Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>, reth_transaction_pool::EthPooledTransaction>>, reth_transaction_pool::CoinbaseTipOrdering<reth_transaction_pool::EthPooledTransaction>, reth_transaction_pool::blobstore::DiskFileBlobStore>, reth_node_ethereum::EthEvmConfig, reth_node_ethereum::EthExecutorProvider, std::sync::Arc<dyn Consensus>>>>) {
     let tasks = TaskManager::current();
 
     // create node config

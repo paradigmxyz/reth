@@ -146,10 +146,11 @@ assert_matches = "1.5.0"
 
 # bitfinity dev dependencies
 dirs.workspace = true
-revm-primitives.workspace = true
-tempfile.workspace = true
+parking_lot = { workspace = true }
 reth-primitives = { workspace = true, features = ["test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
+revm-primitives.workspace = true
+tempfile.workspace = true
 
 [features]
 default = ["jemalloc"]

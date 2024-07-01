@@ -7267,6 +7267,7 @@ dependencies = [
  "libc",
  "lightspeed_scheduler",
  "metrics-process",
+ "parking_lot 0.12.3",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
