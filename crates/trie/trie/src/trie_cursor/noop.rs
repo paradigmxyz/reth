@@ -1,5 +1,5 @@
 use super::{TrieCursor, TrieCursorFactory};
-use crate::{updates::TrieKey, BranchNodeCompact, Nibbles};
+use crate::{BranchNodeCompact, Nibbles};
 use reth_db::DatabaseError;
 use reth_primitives::B256;
 
