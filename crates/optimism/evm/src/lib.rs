@@ -13,6 +13,7 @@ use reth_chainspec::ChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
+    transaction::FillTxEnv,
     Address, Head, Header, Transaction, TransactionSigned, TxKind, U256,
 };
 use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
@@ -35,99 +36,7 @@ pub struct OptimismEvmConfig;
 
 impl ConfigureEvmEnv for OptimismEvmConfig {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        let mut envelope = Vec::with_capacity(transaction.length_without_header());
-        transaction.encode_enveloped(&mut envelope);
-
-        tx_env.caller = sender;
-        match transaction.as_ref() {
-            Transaction::Legacy(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.gas_price);
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = tx.chain_id;
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clear();
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-            }
-            Transaction::Eip2930(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.gas_price);
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list = tx
-                    .access_list
-                    .iter()
-                    .map(|l| {
-                        (
-                            l.address,
-                            l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect(),
-                        )
-                    })
-                    .collect();
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-            }
-            Transaction::Eip1559(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
-                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list = tx
-                    .access_list
-                    .iter()
-                    .map(|l| {
-                        (
-                            l.address,
-                            l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect(),
-                        )
-                    })
-                    .collect();
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-            }
-            Transaction::Eip4844(_) => {
-                panic!("No eip4844 tx in optimism")
-            }
-            Transaction::Deposit(tx) => {
-                tx_env.access_list.clear();
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::ZERO;
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = None;
-                tx_env.nonce = None;
-                tx_env.optimism = OptimismFields {
-                    source_hash: Some(tx.source_hash),
-                    mint: tx.mint,
-                    is_system_transaction: Some(tx.is_system_transaction),
-                    enveloped_tx: Some(envelope.into()),
-                };
-                return;
-            }
-        }
-
-        if !transaction.is_deposit() {
-            tx_env.optimism = OptimismFields {
-                source_hash: None,
-                mint: None,
-                is_system_transaction: Some(false),
-                enveloped_tx: Some(envelope.into()),
-            }
-        }
+        transaction.fill_tx_env(tx_env, sender);
     }
 
     fn fill_cfg_env(

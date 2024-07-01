@@ -14,7 +14,7 @@ extern crate alloc;
 
 use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{Address, Header, Transaction, TransactionSigned, TxKind, U256};
+use reth_primitives::{transaction::FillTxEnv, Address, Header, Transaction, TransactionSigned, TxKind, U256};
 use reth_revm::{Database, EvmBuilder};
 use revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv};
 
@@ -59,88 +59,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        tx_env.caller = sender;
-        match transaction.as_ref() {
-            Transaction::Legacy(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.gas_price);
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = tx.chain_id;
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clear();
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-            }
-            Transaction::Eip2930(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.gas_price);
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list = tx
-                    .access_list
-                    .iter()
-                    .map(|l| {
-                        (
-                            l.address,
-                            l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect(),
-                        )
-                    })
-                    .collect();
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-            }
-            Transaction::Eip1559(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
-                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list = tx
-                    .access_list
-                    .iter()
-                    .map(|l| {
-                        (
-                            l.address,
-                            l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect(),
-                        )
-                    })
-                    .collect();
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-            }
-            Transaction::Eip4844(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
-                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-                tx_env.transact_to = TxKind::Call(tx.to);
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list = tx
-                    .access_list
-                    .iter()
-                    .map(|l| {
-                        (
-                            l.address,
-                            l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect(),
-                        )
-                    })
-                    .collect();
-                tx_env.blob_hashes.clone_from(&tx.blob_versioned_hashes);
-                tx_env.max_fee_per_blob_gas = Some(U256::from(tx.max_fee_per_blob_gas));
-            }
-        }
+        transaction.fill_tx_env(tx_env, sender);
     }
 }
 
