@@ -25,6 +25,8 @@ where
         // return after one cycle
         if self.ring.prev_table().is_some() && self.ring.current_table() == self.ring.start_table()
         {
+            self.ring.next_table();
+
             return None
         }
 
@@ -39,17 +41,26 @@ pub trait CycleSegments {
 
     /// Returns the starting position in the ring. This is needed for counting cycles in the ring.
     fn start_table(&self) -> Self::TableRef;
+
     /// Returns the current table in the ring. This table has not been pruned yet in the current
     /// cycle.
     fn current_table(&self) -> Self::TableRef;
+
     /// Returns the table corresponding to the [`Segment`] most recently returned by
     /// [`next_segment`](CycleSegments::next_segment).
     fn prev_table(&self) -> Option<Self::TableRef>;
+
     /// Returns the next position in the ring. This table will be pruned after the current table.
-    fn next_table(&self) -> Self::TableRef;
+    fn peek_next_table(&self) -> Self::TableRef;
+
+    /// Advances current position in ring.
+    fn next_table(&mut self);
+
     /// Returns the next [`Segment`] to prune, if any entries to prune for the current table.
+    /// Advances current position in ring.
     #[allow(clippy::type_complexity)]
     fn next_segment(&mut self) -> Option<(Arc<dyn Segment<Self::Db>>, PrunePurpose)>;
+
     /// Returns an iterator cycling once over the ring of tables. Yields an item for each table,
     /// either a segment or `None`. Advances the current position in the ring.
     fn next_cycle(
@@ -60,6 +71,7 @@ pub trait CycleSegments {
     {
         SegmentIter { ring: self }
     }
+
     /// Returns an iterator over prunable segments. See [`next_cycle`](CycleSegments::next_cycle).
     fn iter(&mut self) -> impl Iterator<Item = (Arc<dyn Segment<Self::Db>>, PrunePurpose)>
     where
@@ -140,7 +152,7 @@ where
         self.prev
     }
 
-    fn next_table(&self) -> Self::TableRef {
+    fn peek_next_table(&self) -> Self::TableRef {
         let Self { current, static_file_start, static_file_ring, segments, .. } = self;
 
         match current {
@@ -164,6 +176,11 @@ where
         }
     }
 
+    fn next_table(&mut self) {
+        self.prev = Some(self.current);
+        self.current = self.peek_next_table();
+    }
+
     fn next_segment(&mut self) -> Option<(Arc<dyn Segment<Self::Db>>, PrunePurpose)> {
         let Self { current, segments, .. } = self;
 
@@ -172,8 +189,7 @@ where
             TableRef::Other(index) => Some((segments[*index].clone(), PrunePurpose::User)),
         };
 
-        self.prev = Some(*current);
-        self.current = self.next_table();
+        self.next_table();
 
         segment
     }
@@ -228,7 +244,7 @@ where
         self.prev
     }
 
-    fn next_table(&self) -> Self::TableRef {
+    fn peek_next_table(&self) -> Self::TableRef {
         use StaticFileTableRef::{Headers, Receipts, Transactions};
 
         match self.current {
@@ -236,6 +252,11 @@ where
             Transactions => Receipts,
             Receipts => Headers,
         }
+    }
+
+    fn next_table(&mut self) {
+        self.prev = Some(self.current);
+        self.current = self.peek_next_table();
     }
 
     fn next_segment(&mut self) -> Option<(Arc<dyn Segment<Self::Db>>, PrunePurpose)> {
@@ -261,9 +282,6 @@ where
                         as Arc<dyn Segment<DB>>
                 }),
         };
-
-        self.prev = Some(*current);
-        self.current = self.next_table();
 
         segment.map(|sgmnt| (sgmnt, PrunePurpose::StaticFile))
     }
