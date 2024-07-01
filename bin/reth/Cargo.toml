@@ -56,7 +56,9 @@ reth-node-optimism = { workspace = true, optional = true, features = [
     "optimism",
 ] }
 reth-node-core.workspace = true
+reth-ethereum-payload-builder.workspace = true
 reth-db-common.workspace = true
+reth-node-ethereum.workspace = true
 reth-node-builder.workspace = true
 reth-node-events.workspace = true
 reth-consensus.workspace = true
