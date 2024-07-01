@@ -195,6 +195,10 @@ pub struct PeerInfo {
     pub remote_id: PeerId,
     /// The client's name and version
     pub client_version: Arc<str>,
+    /// The peer's enode
+    pub enode: String,
+    /// The peer's enr
+    pub enr: Option<String>,
     /// The peer's address we're connected to
     pub remote_addr: SocketAddr,
     /// The local address of the connection
@@ -207,6 +211,8 @@ pub struct PeerInfo {
     pub status: Arc<Status>,
     /// The timestamp when the session to that peer has been established.
     pub session_established: Instant,
+    /// The peer's connection kind
+    pub kind: PeerKind,
 }
 
 /// The direction of the connection.
