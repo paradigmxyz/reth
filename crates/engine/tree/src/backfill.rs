@@ -239,7 +239,7 @@ mod tests {
                     .build(),
             );
 
-            // force the pipeline to be "done" after 5 blocks
+            // force the pipeline to be "done" after `pipeline_done_after` blocks
             let pipeline = TestPipelineBuilder::new()
                 .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
                     checkpoint: StageCheckpoint::new(BlockNumber::from(pipeline_done_after)),

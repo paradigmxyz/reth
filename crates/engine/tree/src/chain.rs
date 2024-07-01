@@ -13,12 +13,12 @@ use std::{
 ///
 /// ## Control flow
 ///
-/// The [`ChainOrchestrator`] is responsible for controlling the pipeline sync and additional hooks.
+/// The [`ChainOrchestrator`] is responsible for controlling the backfill sync and additional hooks.
 /// It polls the given `handler`, which is responsible for advancing the chain, how is up to the
 /// handler. However, due to database restrictions (e.g. exclusive write access), following
 /// invariants apply:
 ///  - If the handler requests a backfill run (e.g. [`BackfillAction::Start`]), the handler must
-///    ensure that while the pipeline is running, no other write access is granted.
+///    ensure that while the backfill sync is running, no other write access is granted.
 ///  - At any time the [`ChainOrchestrator`] can request exclusive write access to the database
 ///    (e.g. if pruning is required), but will not do so until the handler has acknowledged the
 ///    request for write access.
@@ -35,8 +35,8 @@ where
 {
     /// The handler for advancing the chain.
     handler: T,
-    /// Controls pipeline sync.
-    pipeline: P,
+    /// Controls backfill sync.
+    backfill_sync: P,
 }
 
 impl<T, P> ChainOrchestrator<T, P>
@@ -44,9 +44,9 @@ where
     T: ChainHandler + Unpin,
     P: BackfillSync + Unpin,
 {
-    /// Creates a new [`ChainOrchestrator`] with the given handler and pipeline.
-    pub const fn new(handler: T, pipeline: P) -> Self {
-        Self { handler, pipeline }
+    /// Creates a new [`ChainOrchestrator`] with the given handler and backfill sync.
+    pub const fn new(handler: T, backfill_sync: P) -> Self {
+        Self { handler, backfill_sync }
     }
 
     /// Returns the handler
@@ -68,34 +68,34 @@ where
 
         // This loop polls the components
         //
-        // 1. Polls the pipeline to completion, if active.
+        // 1. Polls the backfill sync to completion, if active.
         // 2. Advances the chain by polling the handler.
         'outer: loop {
-            // try to poll the pipeline to completion, if active
-            match this.pipeline.poll(cx) {
-                Poll::Ready(pipeline_event) => match pipeline_event {
+            // try to poll the backfill sync to completion, if active
+            match this.backfill_sync.poll(cx) {
+                Poll::Ready(backfill_sync_event) => match backfill_sync_event {
                     BackfillEvent::Idle => {}
                     BackfillEvent::Started(_) => {
-                        // notify handler that pipeline started
-                        this.handler.on_event(FromOrchestrator::PipelineStarted);
-                        return Poll::Ready(ChainEvent::PipelineStarted);
+                        // notify handler that backfill sync started
+                        this.handler.on_event(FromOrchestrator::BackfillSyncStarted);
+                        return Poll::Ready(ChainEvent::BackfillSyncStarted);
                     }
                     BackfillEvent::Finished(res) => {
                         return match res {
                             Ok(event) => {
-                                tracing::debug!(?event, "pipeline finished");
-                                // notify handler that pipeline finished
-                                this.handler.on_event(FromOrchestrator::PipelineFinished);
-                                Poll::Ready(ChainEvent::PipelineFinished)
+                                tracing::debug!(?event, "backfill sync finished");
+                                // notify handler that backfill sync finished
+                                this.handler.on_event(FromOrchestrator::BackfillSyncFinished);
+                                Poll::Ready(ChainEvent::BackfillSyncFinished)
                             }
                             Err(err) => {
-                                tracing::error!( %err, "pipeline failed");
+                                tracing::error!( %err, "backfill sync failed");
                                 Poll::Ready(ChainEvent::FatalError)
                             }
                         }
                     }
                     BackfillEvent::TaskDropped(err) => {
-                        tracing::error!( %err, "pipeline task dropped");
+                        tracing::error!( %err, "backfill sync task dropped");
                         return Poll::Ready(ChainEvent::FatalError);
                     }
                 },
@@ -106,9 +106,9 @@ where
             match this.handler.poll(cx) {
                 Poll::Ready(handler_event) => {
                     match handler_event {
-                        HandlerEvent::Pipeline(target) => {
-                            // trigger pipeline and start polling it
-                            this.pipeline.on_action(BackfillAction::Start(target));
+                        HandlerEvent::BackfillSync(target) => {
+                            // trigger backfill sync and start polling it
+                            this.backfill_sync.on_action(BackfillAction::Start(target));
                             continue 'outer
                         }
                         HandlerEvent::Event(ev) => {
@@ -153,10 +153,10 @@ enum SyncMode {
 /// These are meant to be used for observability and debugging purposes.
 #[derive(Debug)]
 pub enum ChainEvent<T> {
-    /// Pipeline sync started
-    PipelineStarted,
-    /// Pipeline sync finished
-    PipelineFinished,
+    /// Backfill sync started
+    BackfillSyncStarted,
+    /// Backfill sync finished
+    BackfillSyncFinished,
     /// Fatal error
     FatalError,
     /// Event emitted by the handler
@@ -180,8 +180,8 @@ pub trait ChainHandler: Send + Sync {
 /// Events/Requests that the [`ChainHandler`] can emit to the [`ChainOrchestrator`].
 #[derive(Clone, Debug)]
 pub enum HandlerEvent<T> {
-    /// Request to start a pipeline sync
-    Pipeline(PipelineTarget),
+    /// Request to start a backfill sync
+    BackfillSync(PipelineTarget),
     /// Other event emitted by the handler
     Event(T),
 }
@@ -189,26 +189,26 @@ pub enum HandlerEvent<T> {
 /// Internal events issued by the [`ChainOrchestrator`].
 #[derive(Clone, Debug)]
 pub enum FromOrchestrator {
-    /// Invoked when pipeline sync finished
-    PipelineFinished,
-    /// Invoked when pipeline started
-    PipelineStarted,
+    /// Invoked when backfill sync finished
+    BackfillSyncFinished,
+    /// Invoked when backfill sync started
+    BackfillSyncStarted,
 }
 
 /// Represents the state of the chain.
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub enum OrchestratorState {
     /// Orchestrator has exclusive write access to the database.
-    PipelineActive,
+    BackfillSyncActive,
     /// Node is actively processing the chain.
     #[default]
     Idle,
 }
 
 impl OrchestratorState {
-    /// Returns `true` if the state is [`OrchestratorState::PipelineActive`].
-    pub const fn is_pipeline_active(&self) -> bool {
-        matches!(self, Self::PipelineActive)
+    /// Returns `true` if the state is [`OrchestratorState::BackfillSyncActive`].
+    pub const fn is_backfill_sync_active(&self) -> bool {
+        matches!(self, Self::BackfillSyncActive)
     }
 
     /// Returns `true` if the state is [`OrchestratorState::Idle`].
