@@ -14,7 +14,7 @@ use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     transaction::FillTxEnv,
-    Address, Head, Header, Transaction, TransactionSigned, TxKind, U256,
+    Address, Head, Header, TransactionSigned, U256,
 };
 use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 
@@ -27,7 +27,6 @@ pub use l1::*;
 
 mod error;
 pub use error::OptimismBlockExecutionError;
-use revm_primitives::OptimismFields;
 
 /// Optimism-related EVM configuration.
 #[derive(Debug, Default, Clone, Copy)]
