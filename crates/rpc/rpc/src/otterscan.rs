@@ -234,14 +234,15 @@ where
         }
 
         // this should not happen, only if the state of the chain is inconsistent
-        if num.is_none() {
-            return Ok(None);
-        }
+        let Some(num) = num else {
+            // debug log here
+            return Ok(None)
+        };
 
         let traces = self
             .eth
             .trace_block_with(
-                num.unwrap().into(),
+                num.into(),
                 TracingInspectorConfig::default_parity(),
                 |tx_info, inspector, _, _, _| {
                     Ok(inspector.into_parity_builder().into_localized_transaction_traces(tx_info))
