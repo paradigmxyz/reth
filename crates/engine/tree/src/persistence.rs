@@ -61,16 +61,9 @@ impl<DB: Database> Persistence<DB> {
         //  * indices (already done basically)
         // Insert the blocks
         for block in blocks {
-            // TODO: prune modes - a bit unsure that it should be at this level of abstraction and
-            // not another
-            //
-            // ie, an external consumer of providers (or the database task) really does not care
-            // about pruning, just the node. Maybe we are the biggest user, and use it enough that
-            // we need a helper, but I'd rather make the pruning behavior more explicit then
-            let prune_modes = None;
             let sealed_block =
                 block.block().clone().try_with_senders_unchecked(block.senders().clone()).unwrap();
-            provider_rw.insert_block(sealed_block, prune_modes)?;
+            provider_rw.insert_block(sealed_block)?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.

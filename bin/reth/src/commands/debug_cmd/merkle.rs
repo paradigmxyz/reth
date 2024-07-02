@@ -144,7 +144,7 @@ impl Command {
                 .map_err(|block| eyre::eyre!("Error sealing block with senders: {block:?}"))?;
             trace!(target: "reth::cli", block_number, "Executing block");
 
-            provider_rw.insert_block(sealed_block.clone(), None)?;
+            provider_rw.insert_block(sealed_block.clone())?;
 
             td += sealed_block.difficulty;
             let mut executor = executor_provider.batch_executor(
