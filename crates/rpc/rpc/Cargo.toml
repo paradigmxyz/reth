@@ -72,9 +72,6 @@ rand.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 
-# Bitfinity dependencies
-ethereum-json-rpc-client.workspace = true
-
 [dev-dependencies]
 reth-evm-ethereum.workspace = true
 reth-testing-utils.workspace = true

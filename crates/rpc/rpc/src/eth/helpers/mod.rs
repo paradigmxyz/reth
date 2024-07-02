@@ -3,6 +3,7 @@
 
 pub mod signer;
 
+mod bitfinity_evm_rpc;
 mod block;
 mod call;
 mod fees;

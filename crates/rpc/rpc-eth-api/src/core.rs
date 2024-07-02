@@ -16,7 +16,7 @@ use reth_rpc_types::{
 use tracing::trace;
 
 use crate::helpers::{
-    EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadReceipt, Trace,
+    bitfinity_evm_rpc::BitfinityEvmRpc, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadReceipt, Trace
 };
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
@@ -331,7 +331,8 @@ where
         + EthCall
         + EthFees
         + Trace
-        + LoadReceipt,
+        + LoadReceipt
+        + BitfinityEvmRpc,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> RpcResult<U64> {
@@ -612,13 +613,15 @@ where
     /// Handler for: `eth_gasPrice`
     async fn gas_price(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
-        return Ok(EthFees::gas_price(self).await?)
+        // return Ok(EthFees::gas_price(self).await?)
+        BitfinityEvmRpc::gas_price(self).await
     }
 
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
-        return Ok(EthFees::suggested_priority_fee(self).await?)
+        // return Ok(EthFees::suggested_priority_fee(self).await?)
+        BitfinityEvmRpc::max_priority_fee_per_gas(self).await
     }
 
     /// Handler for: `eth_blobBaseFee`
@@ -687,7 +690,8 @@ where
     /// Handler for: `eth_sendRawTransaction`
     async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransaction");
-        Ok(EthTransactions::send_raw_transaction(self, tx).await?)
+        // Ok(EthTransactions::send_raw_transaction(self, tx).await?)
+        BitfinityEvmRpc::send_raw_transaction(self, tx).await
     }
 
     /// Handler for: `eth_sign`

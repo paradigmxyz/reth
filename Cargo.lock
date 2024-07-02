@@ -2582,8 +2582,8 @@ dependencies = [
 
 [[package]]
 name = "did"
-version = "0.24.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.22.x#930721407193fd0d1d0fb4432eb0c89e7ec7bc37"
+version = "0.27.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.27.x#ecfa69f81503b71b980412cd49341d04dabaa668"
 dependencies = [
  "alloy-primitives",
  "bincode",
@@ -2975,8 +2975,8 @@ dependencies = [
 
 [[package]]
 name = "ethereum-json-rpc-client"
-version = "0.24.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.22.x#930721407193fd0d1d0fb4432eb0c89e7ec7bc37"
+version = "0.27.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.27.x#ecfa69f81503b71b980412cd49341d04dabaa668"
 dependencies = [
  "anyhow",
  "candid",
@@ -3076,8 +3076,8 @@ dependencies = [
 
 [[package]]
 name = "evm-canister-client"
-version = "0.24.0"
-source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.22.x#930721407193fd0d1d0fb4432eb0c89e7ec7bc37"
+version = "0.27.0"
+source = "git+https://github.com/bitfinity-network/bitfinity-evm-sdk?tag=v0.27.x#ecfa69f81503b71b980412cd49341d04dabaa668"
 dependencies = [
  "candid",
  "did",
@@ -9012,7 +9012,6 @@ dependencies = [
  "alloy-rlp",
  "assert_matches",
  "async-trait",
- "ethereum-json-rpc-client",
  "futures",
  "http 1.1.0",
  "http-body 1.0.0",
@@ -9173,6 +9172,7 @@ dependencies = [
  "async-trait",
  "auto_impl",
  "dyn-clone",
+ "ethereum-json-rpc-client",
  "futures",
  "jsonrpsee",
  "parking_lot 0.12.3",
