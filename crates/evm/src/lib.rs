@@ -16,7 +16,7 @@ use core::ops::Deref;
 
 use reth_chainspec::ChainSpec;
 use reth_primitives::{
-    revm::env::fill_block_env, Address, Header, TransactionSigned, TransactionSignedEcRecovered,
+    revm::env::block_coinbase, Address, Header, TransactionSigned, TransactionSignedEcRecovered,
     U256,
 };
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
@@ -126,6 +126,44 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         total_difficulty: U256,
     );
 
+    /// Fill [`BlockEnv`] field according to the chain spec and given header
+    fn fill_block_env(
+        &self,
+        block_env: &mut BlockEnv,
+        chain_spec: &ChainSpec,
+        header: &Header,
+        after_merge: bool,
+    ) {
+        let coinbase = block_coinbase(chain_spec, header, after_merge);
+        Self::fill_block_env_with_coinbase(block_env, header, after_merge, coinbase);
+    }
+
+    /// Fill block environment with coinbase.
+    fn fill_block_env_with_coinbase(
+        block_env: &mut BlockEnv,
+        header: &Header,
+        after_merge: bool,
+        coinbase: Address,
+    ) {
+        block_env.number = U256::from(header.number);
+        block_env.coinbase = coinbase;
+        block_env.timestamp = U256::from(header.timestamp);
+        if after_merge {
+            block_env.prevrandao = Some(header.mix_hash);
+            block_env.difficulty = U256::ZERO;
+        } else {
+            block_env.difficulty = header.difficulty;
+            block_env.prevrandao = None;
+        }
+        block_env.basefee = U256::from(header.base_fee_per_gas.unwrap_or_default());
+        block_env.gas_limit = U256::from(header.gas_limit);
+
+        // EIP-4844 excess blob gas of this block, introduced in Cancun
+        if let Some(excess_blob_gas) = header.excess_blob_gas {
+            block_env.set_blob_excess_gas_and_price(excess_blob_gas);
+        }
+    }
+
     /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
     /// [`fill_block_env`].
     fn fill_cfg_and_block_env(
@@ -137,6 +175,11 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     ) {
         Self::fill_cfg_env(cfg, chain_spec, header, total_difficulty);
         let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
-        fill_block_env(block_env, chain_spec, header, after_merge);
+        Self::fill_block_env_with_coinbase(
+            block_env,
+            header,
+            after_merge,
+            block_coinbase(chain_spec, header, after_merge),
+        );
     }
 }

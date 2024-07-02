@@ -1,6 +1,6 @@
 use crate::{
     recover_signer_unchecked,
-    revm_primitives::{BlockEnv, Env, TxEnv},
+    revm_primitives::{Env, TxEnv},
     Address, Bytes, Header, TxKind, B256, U256,
 };
 use reth_chainspec::{Chain, ChainSpec};
@@ -11,44 +11,6 @@ use revm_primitives::OptimismFields;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
-
-/// Fill block environment from Block.
-pub fn fill_block_env(
-    block_env: &mut BlockEnv,
-    chain_spec: &ChainSpec,
-    header: &Header,
-    after_merge: bool,
-) {
-    let coinbase = block_coinbase(chain_spec, header, after_merge);
-    fill_block_env_with_coinbase(block_env, header, after_merge, coinbase);
-}
-
-/// Fill block environment with coinbase.
-#[inline]
-pub fn fill_block_env_with_coinbase(
-    block_env: &mut BlockEnv,
-    header: &Header,
-    after_merge: bool,
-    coinbase: Address,
-) {
-    block_env.number = U256::from(header.number);
-    block_env.coinbase = coinbase;
-    block_env.timestamp = U256::from(header.timestamp);
-    if after_merge {
-        block_env.prevrandao = Some(header.mix_hash);
-        block_env.difficulty = U256::ZERO;
-    } else {
-        block_env.difficulty = header.difficulty;
-        block_env.prevrandao = None;
-    }
-    block_env.basefee = U256::from(header.base_fee_per_gas.unwrap_or_default());
-    block_env.gas_limit = U256::from(header.gas_limit);
-
-    // EIP-4844 excess blob gas of this block, introduced in Cancun
-    if let Some(excess_blob_gas) = header.excess_blob_gas {
-        block_env.set_blob_excess_gas_and_price(excess_blob_gas);
-    }
-}
 
 /// Return the coinbase address for the given header and chain spec.
 pub fn block_coinbase(chain_spec: &ChainSpec, header: &Header, after_merge: bool) -> Address {
