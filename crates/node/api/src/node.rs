@@ -11,7 +11,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Deref};
 
 /// The type that configures the essential types of an ethereum like node.
 ///
@@ -24,6 +24,15 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     type Primitives: NodePrimitives;
     /// The node's engine types, defining the interaction with the consensus engine.
     type Engine: EngineTypes;
+}
+
+impl<T, D> NodeTypes for T
+where
+    T: Deref<Target = D> + Send + Sync + Unpin + 'static,
+    D: NodeTypes,
+{
+    type Primitives = D::Primitives;
+    type Engine = D::Engine;
 }
 
 /// A [`NodeTypes`] type builder
@@ -61,6 +70,15 @@ pub trait FullNodeTypes: NodeTypes + 'static {
     type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
     /// The provider type used to interact with the node.
     type Provider: FullProvider<Self::DB>;
+}
+
+impl<T, D> FullNodeTypes for T
+where
+    T: Deref<Target = D> + NodeTypes,
+    D: FullNodeTypes,
+{
+    type DB = D::DB;
+    type Provider = D::Provider;
 }
 
 /// An adapter type that adds the builtin provider type to the user configured node types.
@@ -144,4 +162,20 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 
     /// Returns the task executor.
     fn task_executor(&self) -> &TaskExecutor;
+}
+
+pub trait FullNodeComponentsExt: FullNodeComponents {
+    type Rpc: Rpc<Self>;
+
+    /// Returns the RPC component, if installed.
+    fn rpc(&self) -> Option<&Self::Rpc>;
+}
+
+pub trait Rpc<N: FullNodeComponents>: Send + Sync {
+    type ServerHandles;
+    type Registry;
+
+    fn handles(&self) -> &Self::ServerHandles;
+
+    fn registry(&self) -> &Self::Registry;
 }

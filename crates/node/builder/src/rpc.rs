@@ -1,14 +1,18 @@
 //! Builder support for rpc components.
 
-use std::{
-    fmt,
-    ops::{Deref, DerefMut},
-};
+use std::fmt;
 
+use derive_more::{Deref, DerefMut};
 use futures::TryFutureExt;
 use reth_network::NetworkHandle;
-use reth_node_api::FullNodeComponents;
-use reth_node_core::{node_config::NodeConfig, rpc::api::EngineApiServer};
+use reth_node_api::{FullNodeComponents, FullNodeComponentsExt, Rpc};
+use reth_node_core::{
+    dirs::{ChainPath, DataDirPath},
+    exit::NodeExitFuture,
+    node_config::NodeConfig,
+    rpc::{api::EngineApiServer, eth::FullEthApiServer},
+    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
+};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_rpc::eth::EthApi;
 use reth_rpc_builder::{
@@ -19,6 +23,29 @@ use reth_rpc_builder::{
 use reth_rpc_layer::JwtSecret;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
+
+use crate::{
+    common::{ExtComponentBuilder, InitializedComponents, InstallPipeline, LaunchContextExt},
+    hooks::OnComponentsInitializedHook,
+};
+
+pub struct RpcAdapter<N: FullNodeComponents> {
+    server_handles: RethRpcServerHandles,
+    registry: RpcRegistry<N>,
+}
+
+impl<N: FullNodeComponents> Rpc<N> for RpcAdapter<N> {
+    type ServerHandles = RethRpcServerHandles;
+    type Registry = RpcRegistry<N>;
+
+    fn handles(&self) -> &Self::ServerHandles {
+        &self.server_handles
+    }
+
+    fn registry(&self) -> &Self::Registry {
+        &self.registry
+    }
+}
 
 /// Contains the handles to the spawned RPC servers.
 ///
@@ -148,7 +175,7 @@ impl<Node: FullNodeComponents> ExtendRpcModules<Node> for () {
 }
 
 /// Helper wrapper type to encapsulate the [`RpcRegistryInner`] over components trait.
-#[derive(Debug)]
+#[derive(Debug, Deref, DerefMut, Clone)]
 #[allow(clippy::type_complexity)]
 pub struct RpcRegistry<Node: FullNodeComponents> {
     pub(crate) registry: RpcRegistryInner<
@@ -159,33 +186,6 @@ pub struct RpcRegistry<Node: FullNodeComponents> {
         Node::Provider,
         EthApi<Node::Provider, Node::Pool, NetworkHandle, Node::Evm>,
     >,
-}
-
-impl<Node: FullNodeComponents> Deref for RpcRegistry<Node> {
-    type Target = RpcRegistryInner<
-        Node::Provider,
-        Node::Pool,
-        NetworkHandle,
-        TaskExecutor,
-        Node::Provider,
-        EthApi<Node::Provider, Node::Pool, NetworkHandle, Node::Evm>,
-    >;
-
-    fn deref(&self) -> &Self::Target {
-        &self.registry
-    }
-}
-
-impl<Node: FullNodeComponents> DerefMut for RpcRegistry<Node> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.registry
-    }
-}
-
-impl<Node: FullNodeComponents> Clone for RpcRegistry<Node> {
-    fn clone(&self) -> Self {
-        Self { registry: self.registry.clone() }
-    }
 }
 
 /// Helper container to encapsulate [`RpcRegistryInner`], [`TransportRpcModules`] and
@@ -327,4 +327,117 @@ where
     on_rpc_started.on_rpc_started(ctx, handles.clone())?;
 
     Ok((handles, registry))
+}
+
+/// Builds optional RPC component.
+pub trait RpcBuilder<Node: FullNodeComponentsExt>: Send {
+    /// Installs RPC on the node.
+    fn build_rpc(
+        self,
+        ctx: &mut LaunchContextExt<Box<dyn ExtComponentBuilder<Node>>>,
+        hooks: NodeAddOnsExt<Node>,
+    ) -> eyre::Result<()> {
+        let client = ClientVersionV1 {
+            code: CLIENT_CODE,
+            name: NAME_CLIENT.to_string(),
+            version: CARGO_PKG_VERSION.to_string(),
+            commit: VERGEN_GIT_SHA.to_string(),
+        };
+        let engine_api = EngineApi::new(
+            node.blockchain_db().clone(),
+            ctx.chain_spec(),
+            ctx.right().beacon_engine_handle(),
+            node.components().payload_builder().clone().into(),
+            Box::new(node.task_executor().clone()),
+            client,
+        );
+        info!(target: "reth::cli", "Engine API handler initialized");
+
+        // extract the jwt secret from the args if possible
+        let jwt_secret = ctx.auth_jwt_secret()?;
+
+        // Start RPC servers
+        let (rpc_server_handles, rpc_registry) = crate::rpc::launch_rpc_servers(
+            node.components().clone(),
+            engine_api,
+            ctx.node_config(),
+            jwt_secret,
+            hooks,
+        )
+        .await?;
+
+        // in dev mode we generate 20 random dev-signer accounts
+        if ctx.is_dev() {
+            rpc_registry.eth_api().with_dev_accounts();
+        }
+
+        // Run consensus engine to completion
+        // TODO: can safely be spawned in ExtComponentBuilder::build, i.e. after executing code
+        // below?
+        let (tx, rx) = oneshot::channel();
+        info!(target: "reth::cli", "Starting consensus engine");
+        ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
+            let res = beacon_consensus_engine.await;
+            let _ = tx.send(res);
+        });
+
+        if let Some(maybe_custom_etherscan_url) = ctx.node_config().debug.etherscan.clone() {
+            info!(target: "reth::cli", "Using etherscan as consensus client");
+
+            let chain = ctx.node_config().chain.chain;
+            let etherscan_url = maybe_custom_etherscan_url.map(Ok).unwrap_or_else(|| {
+                // If URL isn't provided, use default Etherscan URL for the chain if it is known
+                chain
+                    .etherscan_urls()
+                    .map(|urls| urls.0.to_string())
+                    .ok_or_else(|| eyre::eyre!("failed to get etherscan url for chain: {chain}"))
+            })?;
+
+            let block_provider = EtherscanBlockProvider::new(
+                etherscan_url,
+                chain.etherscan_api_key().ok_or_else(|| {
+                    eyre::eyre!(
+                        "etherscan api key not found for rpc consensus client for chain: {chain}"
+                    )
+                })?,
+            );
+            let rpc_consensus_client = DebugConsensusClient::new(
+                rpc_server_handles.auth.clone(),
+                Arc::new(block_provider),
+            );
+            ctx.task_executor().spawn_critical("etherscan consensus client", async move {
+                rpc_consensus_client.run::<Node::Engine>().await
+            });
+        }
+
+        if let Some(rpc_ws_url) = ctx.node_config().debug.rpc_consensus_ws.clone() {
+            info!(target: "reth::cli", "Using rpc provider as consensus client");
+
+            let block_provider = RpcBlockProvider::new(rpc_ws_url);
+            let rpc_consensus_client = DebugConsensusClient::new(
+                rpc_server_handles.auth.clone(),
+                Arc::new(block_provider),
+            );
+            ctx.task_executor().spawn_critical("rpc consensus client", async move {
+                rpc_consensus_client.run::<Node::Engine>().await
+            });
+        }
+
+        ctx.right().set_rpc(RpcAdapter { server_handles, registry })
+    }
+}
+
+impl<Node, F> RpcBuilder<Node> for F
+where
+    Node: FullNodeComponentsExt,
+    F: OnComponentsInitializedHook<Node> + BeaconEngineBuilder + Send,
+    Node::Rpc: Rpc<Node>,
+{
+    fn build_rpc(
+        self,
+        ctx: &mut LaunchContextExt<Node>,
+        hooks: NodeAddOnsExt<Node>,
+    ) -> eyre::Result<()> {
+        self(ctx, hooks)
+    }
 }

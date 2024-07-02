@@ -1,7 +1,8 @@
-use crate::rpc::{RethRpcServerHandles, RpcRegistry};
+use std::{marker::PhantomData, sync::Arc};
+
 use reth_chainspec::ChainSpec;
 use reth_network::NetworkHandle;
-use reth_node_api::FullNodeComponents;
+use reth_node_api::{FullNodeComponents, FullNodeComponentsExt, Rpc};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
@@ -11,15 +12,19 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::ChainSpecProvider;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
-use std::{marker::PhantomData, sync::Arc};
+
+use crate::{
+    components::NodeComponentsBuilder,
+    rpc::{RethRpcServerHandles, RpcRegistry},
+};
 
 // re-export the node api types
-use crate::components::NodeComponentsBuilder;
 pub use reth_node_api::{FullNodeTypes, NodeTypes};
 
 /// A [`crate::Node`] is a [`NodeTypes`] that comes with preconfigured components.
 ///
 /// This can be used to configure the builder with a preset of components.
+
 pub trait Node<N: FullNodeTypes>: NodeTypes + Clone {
     /// The type that builds the node's components.
     type ComponentsBuilder: NodeComponentsBuilder<N>;
@@ -70,7 +75,7 @@ where
 ///
 /// This can be used to interact with the launched node.
 #[derive(Debug, Clone)]
-pub struct FullNode<Node: FullNodeComponents> {
+pub struct FullNode<Node: FullNodeComponentsExt> {
     /// The evm configuration.
     pub evm_config: Node::Evm,
     /// The executor of the node.
@@ -86,16 +91,16 @@ pub struct FullNode<Node: FullNodeComponents> {
     /// Task executor for the node.
     pub task_executor: TaskExecutor,
     /// Handles to the node's rpc servers
-    pub rpc_server_handles: RethRpcServerHandles,
+    pub rpc_server_handles: <Node::Rpc as Rpc>::ServerHandles,
     /// The configured rpc namespaces
-    pub rpc_registry: RpcRegistry<Node>,
+    pub rpc_registry: <Node::Rpc as Rpc>::Registry,
     /// The initial node config.
     pub config: NodeConfig,
     /// The data dir of the node.
     pub data_dir: ChainPath<DataDirPath>,
 }
 
-impl<Node: FullNodeComponents> FullNode<Node> {
+impl<Node: FullNodeComponentsExt> FullNode<Node> {
     /// Returns the [`ChainSpec`] of the node.
     pub fn chain_spec(&self) -> Arc<ChainSpec> {
         self.provider.chain_spec()
