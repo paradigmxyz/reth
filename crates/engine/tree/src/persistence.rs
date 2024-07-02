@@ -8,7 +8,8 @@ use reth_provider::{
     bundle_state::HashedStateChanges, BlockWriter, HistoryWriter, OriginalValuesKnown,
     ProviderFactory, StageCheckpointWriter, StateWriter,
 };
-use std::sync::mpsc::{Receiver, Sender};
+use reth_prune::{PruneProgress, Pruner};
+use std::sync::mpsc::{Receiver, SendError, Sender};
 use tokio::sync::oneshot;
 use tracing::debug;
 
@@ -29,12 +30,18 @@ pub struct Persistence<DB> {
     provider: ProviderFactory<DB>,
     /// Incoming requests to persist stuff
     incoming: Receiver<PersistenceAction>,
+    /// The pruner
+    pruner: Pruner<DB>,
 }
 
 impl<DB: Database> Persistence<DB> {
     /// Create a new persistence task
-    const fn new(provider: ProviderFactory<DB>, incoming: Receiver<PersistenceAction>) -> Self {
-        Self { provider, incoming }
+    const fn new(
+        provider: ProviderFactory<DB>,
+        incoming: Receiver<PersistenceAction>,
+        pruner: Pruner<DB>,
+    ) -> Self {
+        Self { provider, incoming, pruner }
     }
 
     /// Writes the cloned tree state to the database
@@ -101,8 +108,13 @@ impl<DB: Database> Persistence<DB> {
 
     /// Prunes block data before the given block hash according to the configured prune
     /// configuration.
-    fn prune_before(&self, _block_hash: B256) {
-        todo!("implement this")
+    fn prune_before(&mut self, block_num: u64) {
+        let mut prune_res = self.pruner.run(block_num).expect("todo: handle errors");
+
+        // TODO: how _should_ the task handle pruning in this case?
+        while let PruneProgress::HasMoreData(reason) = prune_res {
+            prune_res = self.pruner.run(block_num).expect("todo: handle errors");
+        }
     }
 
     /// Removes static file related data from the database, depending on the current block height in
@@ -117,9 +129,9 @@ where
     DB: Database + 'static,
 {
     /// Create a new persistence task, spawning it, and returning a [`PersistenceHandle`].
-    fn spawn_new(provider: ProviderFactory<DB>) -> PersistenceHandle {
+    fn spawn_new(provider: ProviderFactory<DB>, pruner: Pruner<DB>) -> PersistenceHandle {
         let (tx, rx) = std::sync::mpsc::channel();
-        let task = Self::new(provider, rx);
+        let task = Self::new(provider, rx, pruner);
         std::thread::Builder::new()
             .name("Persistence Task".to_string())
             .spawn(|| task.run())
@@ -155,8 +167,8 @@ where
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(last_block_hash);
                 }
-                PersistenceAction::PruneBefore((block_hash, sender)) => {
-                    self.prune_before(block_hash);
+                PersistenceAction::PruneBefore((block_num, sender)) => {
+                    self.prune_before(block_num);
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(());
@@ -184,7 +196,7 @@ pub enum PersistenceAction {
 
     /// Prune associated block data before the given hash, according to already-configured prune
     /// modes.
-    PruneBefore((B256, oneshot::Sender<()>)),
+    PruneBefore((u64, oneshot::Sender<()>)),
 
     /// Trigger a read of static file data, and delete data depending on the highest block in each
     /// static file segment.
@@ -206,8 +218,11 @@ impl PersistenceHandle {
 
     /// Sends a specific [`PersistenceAction`] in the contained channel. The caller is responsible
     /// for creating any channels for the given action.
-    pub fn send_action(&self, action: PersistenceAction) {
-        self.sender.send(action).expect("should be able to send");
+    pub fn send_action(
+        &self,
+        action: PersistenceAction,
+    ) -> Result<(), SendError<PersistenceAction>> {
+        self.sender.send(action)
     }
 
     /// Tells the persistence task to save a certain list of finalized blocks. The blocks are
