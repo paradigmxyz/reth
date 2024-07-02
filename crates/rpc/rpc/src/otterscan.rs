@@ -271,7 +271,7 @@ where
                     .collect::<Vec<_>>()
             });
 
-        // A contract maybe created and then destroyed in mulitple transactions, here we
+        // A contract maybe created and then destroyed in multiple transactions, here we
         // return the first found transaction, this behavior is consistent with etherscan's
         let found = traces.and_then(|traces| traces.first().cloned());
         Ok(found)
