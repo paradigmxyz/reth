@@ -239,7 +239,7 @@ impl BodiesClient for TestFullBlockClient {
 
         // Create a future that immediately returns the result of the block body retrieval
         // operation.
-        let result = WithPeerId::new(
+        let resp = WithPeerId::new(
             PeerId::random(),
             hashes
                 .iter()
@@ -249,7 +249,7 @@ impl BodiesClient for TestFullBlockClient {
         );
         Box::pin(async move {
             sleep(Duration::from_millis(1)).await;
-            Ok(result)
+            Ok(resp)
         })
     }
 }
