@@ -19,8 +19,11 @@ use reth_primitives::{
     header::block_coinbase, Address, Header, TransactionSigned, TransactionSignedEcRecovered, U256,
 };
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, SpecId, TxEnv};
+use revm_primitives::{
+    BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv,
+};
 
+pub mod apply;
 pub mod either;
 pub mod execute;
 pub mod noop;
@@ -116,6 +119,14 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 
     /// Fill transaction environment from a [`TransactionSigned`] and the given sender address.
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address);
+
+    /// Fill transaction environment with a system contract call.
+    fn fill_tx_env_with_system_contract_call(
+        env: &mut Env,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    );
 
     /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header
     fn fill_cfg_env(

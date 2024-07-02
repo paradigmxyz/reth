@@ -11,11 +11,10 @@
 
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, post_block_withdrawal_requests_contract_call,
-    pre_block_beacon_root_contract_call, BuildArguments, BuildOutcome, PayloadBuilder,
-    PayloadConfig, WithdrawalsOutcome,
+    BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
 };
 use reth_errors::RethError;
-use reth_evm::ConfigureEvm;
+use reth_evm::{apply::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{
@@ -114,11 +113,13 @@ where
         // apply eip-4788 pre block contract call
         pre_block_beacon_root_contract_call(
             &mut db,
+            self.evm_config.clone(),
             &chain_spec,
             block_number,
             &initialized_cfg,
             &initialized_block_env,
-            &attributes,
+            attributes.timestamp,
+            attributes.parent_beacon_block_root,
         )
         .map_err(|err| {
             warn!(target: "payload_builder",
@@ -126,7 +127,7 @@ where
                 %err,
                 "failed to apply beacon root contract call for empty payload"
             );
-            err
+            PayloadBuilderError::Internal(err.into())
         })?;
 
         // apply eip-2935 blockhashes update
@@ -288,12 +289,22 @@ where
     // apply eip-4788 pre block contract call
     pre_block_beacon_root_contract_call(
         &mut db,
+        evm_config.clone(),
         &chain_spec,
         block_number,
         &initialized_cfg,
         &initialized_block_env,
-        &attributes,
-    )?;
+        attributes.timestamp,
+        attributes.parent_beacon_block_root,
+    )
+    .map_err(|err| {
+        warn!(target: "payload_builder",
+            parent_hash=%parent_block.hash(),
+            %err,
+            "failed to apply beacon root contract call for empty payload"
+        );
+        PayloadBuilderError::Internal(err.into())
+    })?;
 
     // apply eip-2935 blockhashes update
     apply_blockhashes_update(

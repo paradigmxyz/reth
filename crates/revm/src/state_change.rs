@@ -7,11 +7,8 @@ use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus_common::calc;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_primitives::{
-    revm::env::{
-        fill_tx_env_with_beacon_root_contract_call,
-        fill_tx_env_with_withdrawal_requests_contract_call,
-    },
-    Address, Block, Request, Withdrawal, Withdrawals, B256, U256,
+    revm::env::fill_tx_env_with_withdrawal_requests_contract_call, Address, Block, Request,
+    Withdrawal, Withdrawals, B256, U256,
 };
 use reth_storage_errors::provider::ProviderError;
 use revm::{
@@ -137,72 +134,6 @@ fn eip2935_block_hash_slot<DB: Database<Error: Into<ProviderError>>>(
         .map_err(|err| BlockValidationError::BlockHashAccountLoadingFailed(err.into()))?;
 
     Ok((slot, EvmStorageSlot::new_changed(current_hash, block_hash.into())))
-}
-
-/// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
-/// [`ChainSpec`], EVM.
-///
-/// If Cancun is not activated or the block is the genesis block, then this is a no-op, and no
-/// state changes are made.
-///
-/// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
-#[inline]
-pub fn apply_beacon_root_contract_call<EXT, DB: Database + DatabaseCommit>(
-    chain_spec: &ChainSpec,
-    block_timestamp: u64,
-    block_number: u64,
-    parent_beacon_block_root: Option<B256>,
-    evm: &mut Evm<'_, EXT, DB>,
-) -> Result<(), BlockExecutionError>
-where
-    DB::Error: core::fmt::Display,
-{
-    if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
-        return Ok(())
-    }
-
-    let parent_beacon_block_root =
-        parent_beacon_block_root.ok_or(BlockValidationError::MissingParentBeaconBlockRoot)?;
-
-    // if the block number is zero (genesis block) then the parent beacon block root must
-    // be 0x0 and no system transaction may occur as per EIP-4788
-    if block_number == 0 {
-        if parent_beacon_block_root != B256::ZERO {
-            return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
-                parent_beacon_block_root,
-            }
-            .into())
-        }
-        return Ok(())
-    }
-
-    // get previous env
-    let previous_env = Box::new(evm.context.env().clone());
-
-    // modify env for pre block call
-    fill_tx_env_with_beacon_root_contract_call(&mut evm.context.evm.env, parent_beacon_block_root);
-
-    let mut state = match evm.transact() {
-        Ok(res) => res.state,
-        Err(e) => {
-            evm.context.evm.env = previous_env;
-            return Err(BlockValidationError::BeaconRootContractCall {
-                parent_beacon_block_root: Box::new(parent_beacon_block_root),
-                message: e.to_string(),
-            }
-            .into())
-        }
-    };
-
-    state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
-    state.remove(&evm.block().coinbase);
-
-    evm.context.evm.db.commit(state);
-
-    // re-set the previous env
-    evm.context.evm.env = previous_env;
-
-    Ok(())
 }
 
 /// Returns a map of addresses to their balance increments if the Shanghai hardfork is active at the

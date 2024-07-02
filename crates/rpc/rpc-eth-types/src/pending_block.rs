@@ -8,10 +8,10 @@ use derive_more::Constructor;
 use reth_chainspec::ChainSpec;
 use reth_primitives::{BlockId, BlockNumberOrTag, SealedBlockWithSenders, SealedHeader, B256};
 use reth_provider::ProviderError;
-use reth_revm::state_change::{apply_beacon_root_contract_call, apply_blockhashes_update};
+use reth_revm::state_change::apply_blockhashes_update;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg,
+    BlockEnv, CfgEnvWithHandlerCfg,
 };
 
 use super::{EthApiError, EthResult};
@@ -25,45 +25,6 @@ pub struct PendingBlockEnv {
     pub block_env: BlockEnv,
     /// Origin block for the config
     pub origin: PendingBlockEnvOrigin,
-}
-
-/// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
-///
-/// This constructs a new [Evm](revm::Evm) with the given DB, and environment
-/// [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] to execute the pre block contract call.
-///
-/// This uses [`apply_beacon_root_contract_call`] to ultimately apply the beacon root contract state
-/// change.
-pub fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit>(
-    db: &mut DB,
-    chain_spec: &ChainSpec,
-    block_number: u64,
-    initialized_cfg: &CfgEnvWithHandlerCfg,
-    initialized_block_env: &BlockEnv,
-    parent_beacon_block_root: Option<B256>,
-) -> EthResult<()>
-where
-    DB::Error: fmt::Display,
-{
-    // apply pre-block EIP-4788 contract call
-    let mut evm_pre_block = revm::Evm::builder()
-        .with_db(db)
-        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-            initialized_cfg.clone(),
-            initialized_block_env.clone(),
-            Default::default(),
-        ))
-        .build();
-
-    // initialize a block from the env, because the pre block call needs the block itself
-    apply_beacon_root_contract_call(
-        chain_spec,
-        initialized_block_env.timestamp.to::<u64>(),
-        block_number,
-        parent_beacon_block_root,
-        &mut evm_pre_block,
-    )
-    .map_err(|err| EthApiError::Internal(err.into()))
 }
 
 /// Apply the [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) pre block state transitions.
