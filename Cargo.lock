@@ -7193,6 +7193,7 @@ dependencies = [
 name = "reth-evm"
 version = "1.0.0"
 dependencies = [
+ "alloy-eips",
  "auto_impl",
  "futures-util",
  "parking_lot 0.12.3",

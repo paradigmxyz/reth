@@ -7,6 +7,7 @@ use crate::{
 use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
+    apply::apply_beacon_root_contract_call,
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
@@ -22,8 +23,8 @@ use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
     state_change::{
-        apply_beacon_root_contract_call, apply_blockhashes_update,
-        apply_withdrawal_requests_contract_call, post_block_balance_increments,
+        apply_blockhashes_update, apply_withdrawal_requests_contract_call,
+        post_block_balance_increments,
     },
     Evm, State,
 };
@@ -147,7 +148,7 @@ where
         DB::Error: Into<ProviderError> + std::fmt::Display,
     {
         // apply pre execution changes
-        apply_beacon_root_contract_call(
+        apply_beacon_root_contract_call::<EvmConfig, _, _>(
             &self.chain_spec,
             block.timestamp,
             block.number,
