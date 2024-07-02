@@ -17,7 +17,8 @@ pub use receipts::Receipts;
 pub use receipts_by_logs::ReceiptsByLogs;
 use reth_db_api::database::Database;
 use reth_provider::{
-    errors::provider::ProviderResult, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
+    errors::provider::ProviderResult, BlockReader, DatabaseProviderFactory, DatabaseProviderRW,
+    ProviderFactory, PruneCheckpointWriter,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
@@ -47,7 +48,7 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
     /// Prune data for [`Self::segment`] using the provided input.
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider_factory: &ProviderFactory<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError>;
 
@@ -83,7 +84,7 @@ impl PruneInput {
     /// To get the range end: get last tx number for `to_block`.
     pub(crate) fn get_next_tx_num_range<DB: Database>(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider_factory: &ProviderFactory<DB>,
     ) -> ProviderResult<Option<RangeInclusive<TxNumber>>> {
         let from_tx_number = self.previous_checkpoint
             // Checkpoint exists, prune from the next transaction after the highest pruned one
@@ -97,19 +98,21 @@ impl PruneInput {
             // No checkpoint exists, prune from genesis
             .unwrap_or(0);
 
-        let to_tx_number = match provider.block_body_indices(self.to_block)? {
-            Some(body) => {
-                let last_tx = body.last_tx_num();
-                if last_tx + body.tx_count() == 0 {
-                    // Prevents a scenario where the pruner correctly starts at a finalized block,
-                    // but the first transaction (tx_num = 0) only appears on an non-finalized one.
-                    // Should only happen on a test/hive scenario.
-                    return Ok(None)
+        let to_tx_number =
+            match provider_factory.database_provider_ro()?.block_body_indices(self.to_block)? {
+                Some(body) => {
+                    let last_tx = body.last_tx_num();
+                    if last_tx + body.tx_count() == 0 {
+                        // Prevents a scenario where the pruner correctly starts at a finalized
+                        // block, but the first transaction (tx_num = 0)
+                        // only appears on an non-finalized one. Should only
+                        // happen on a test/hive scenario.
+                        return Ok(None)
+                    }
+                    last_tx
                 }
-                last_tx
-            }
-            None => return Ok(None),
-        };
+                None => return Ok(None),
+            };
 
         let range = from_tx_number..=to_tx_number;
         if range.is_empty() {

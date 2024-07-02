@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::segments::{
     AccountHistory, Receipts, ReceiptsByLogs, Segment, SenderRecovery, StorageHistory,
     TransactionLookup,
@@ -8,7 +10,7 @@ use reth_prune_types::PruneModes;
 /// Collection of [Segment]. Thread-safe, allocated on the heap.
 #[derive(Debug)]
 pub struct SegmentSet<DB: Database> {
-    inner: Vec<Box<dyn Segment<DB>>>,
+    inner: Vec<Arc<dyn Segment<DB>>>,
 }
 
 impl<DB: Database> SegmentSet<DB> {
@@ -19,7 +21,7 @@ impl<DB: Database> SegmentSet<DB> {
 
     /// Adds new [Segment] to collection.
     pub fn segment<S: Segment<DB> + 'static>(mut self, segment: S) -> Self {
-        self.inner.push(Box::new(segment));
+        self.inner.push(Arc::new(segment));
         self
     }
 
@@ -31,8 +33,8 @@ impl<DB: Database> SegmentSet<DB> {
         self
     }
 
-    /// Consumes [`SegmentSet`] and returns a [Vec].
-    pub fn into_vec(self) -> Vec<Box<dyn Segment<DB>>> {
+    /// Consumes [`SegmentSet`] and returns a [`Vec`].
+    pub fn into_vec(self) -> Vec<Arc<dyn Segment<DB>>> {
         self.inner
     }
 

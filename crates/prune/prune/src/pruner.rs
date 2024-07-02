@@ -1,25 +1,26 @@
 //! Support for pruning.
 
-use crate::{
-    segments,
-    segments::{PruneInput, Segment},
-    Metrics, PrunerError, PrunerEvent,
+use std::{
+    collections::BTreeMap,
+    sync::Arc,
+    time::{Duration, Instant},
 };
+
 use alloy_primitives::BlockNumber;
 use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
 use reth_provider::{
-    DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
+    DatabaseProviderFactory, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
 };
-use reth_prune_types::{PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment};
-use reth_static_file_types::StaticFileSegment;
+use reth_prune_types::{PruneLimiter, PruneProgress, PruneSegment};
 use reth_tokio_util::{EventSender, EventStream};
-use std::{
-    collections::BTreeMap,
-    time::{Duration, Instant},
-};
 use tokio::sync::watch;
 use tracing::debug;
+
+use crate::{
+    segments::PruneInput, CycleSegments, Metrics, PrunerError, PrunerEvent, Segment, TableRef,
+    TableRing,
+};
 
 /// Result of [`Pruner::run`] execution.
 pub type PrunerResult = Result<PruneProgress, PrunerError>;
@@ -33,7 +34,8 @@ type PrunerStats = BTreeMap<PruneSegment, (PruneProgress, usize)>;
 #[derive(Debug)]
 pub struct Pruner<DB> {
     provider_factory: ProviderFactory<DB>,
-    segments: Vec<Box<dyn Segment<DB>>>,
+    /// Ring abstraction over tables to prune, provides the next segment to prune.
+    segments: TableRing<DB>,
     /// Minimum pruning interval measured in blocks. All prune segments are checked and, if needed,
     /// pruned, when the chain advances by the specified number of blocks.
     min_block_interval: usize,
@@ -59,13 +61,17 @@ impl<DB: Database> Pruner<DB> {
     /// Creates a new [Pruner].
     pub fn new(
         provider_factory: ProviderFactory<DB>,
-        segments: Vec<Box<dyn Segment<DB>>>,
+        segments: Vec<Arc<dyn Segment<DB>>>,
         min_block_interval: usize,
         delete_limit: usize,
         prune_max_blocks_per_run: usize,
         timeout: Option<Duration>,
         finished_exex_height: watch::Receiver<FinishedExExHeight>,
     ) -> Self {
+        let segments =
+            TableRing::new(provider_factory.static_file_provider(), TableRef::default(), segments)
+                .expect("default start always exists");
+
         Self {
             provider_factory,
             segments,
@@ -127,10 +133,8 @@ impl<DB: Database> Pruner<DB> {
             limiter = limiter.set_time_limit(timeout);
         };
 
-        let provider = self.provider_factory.provider_rw()?;
         let (stats, deleted_entries, progress) =
-            self.prune_segments(&provider, tip_block_number, &mut limiter)?;
-        provider.commit()?;
+            self.prune_segments(tip_block_number, &mut limiter)?;
 
         self.previous_tip_block_number = Some(tip_block_number);
 
@@ -165,24 +169,20 @@ impl<DB: Database> Pruner<DB> {
     /// Returns [`PrunerStats`], total number of entries pruned, and [`PruneProgress`].
     fn prune_segments(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
         tip_block_number: BlockNumber,
         limiter: &mut PruneLimiter,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
-        let static_file_segments = self.static_file_segments();
-        let segments = static_file_segments
-            .iter()
-            .map(|segment| (segment, PrunePurpose::StaticFile))
-            .chain(self.segments.iter().map(|segment| (segment, PrunePurpose::User)));
-
         let mut stats = PrunerStats::new();
         let mut pruned = 0;
         let mut progress = PruneProgress::Finished;
 
-        for (segment, purpose) in segments {
+        let mut segment_iter = self.segments.iter();
+        loop {
             if limiter.is_limit_reached() {
                 break
             }
+
+            let Some((segment, purpose)) = segment_iter.next() else { break };
 
             if let Some((to_block, prune_mode)) = segment
                 .mode()
@@ -200,15 +200,15 @@ impl<DB: Database> Pruner<DB> {
                 );
 
                 let segment_start = Instant::now();
-                let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
+                let previous_checkpoint = self
+                    .provider_factory
+                    .database_provider_ro()?
+                    .get_prune_checkpoint(segment.segment())?;
                 let output = segment.prune(
-                    provider,
+                    &self.provider_factory,
                     PruneInput { previous_checkpoint, to_block, limiter: limiter.clone() },
                 )?;
-                if let Some(checkpoint) = output.checkpoint {
-                    segment
-                        .save_checkpoint(provider, checkpoint.as_prune_checkpoint(prune_mode))?;
-                }
+
                 self.metrics
                     .get_prune_segment_metrics(segment.segment())
                     .duration_seconds
@@ -245,36 +245,6 @@ impl<DB: Database> Pruner<DB> {
         }
 
         Ok((stats, pruned, progress))
-    }
-
-    /// Returns pre-configured segments that needs to be pruned according to the highest
-    /// `static_files` for [`PruneSegment::Transactions`], [`PruneSegment::Headers`] and
-    /// [`PruneSegment::Receipts`].
-    fn static_file_segments(&self) -> Vec<Box<dyn Segment<DB>>> {
-        let mut segments = Vec::<Box<dyn Segment<DB>>>::new();
-
-        let static_file_provider = self.provider_factory.static_file_provider();
-
-        if let Some(to_block) =
-            static_file_provider.get_highest_static_file_block(StaticFileSegment::Transactions)
-        {
-            segments
-                .push(Box::new(segments::Transactions::new(PruneMode::before_inclusive(to_block))))
-        }
-
-        if let Some(to_block) =
-            static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers)
-        {
-            segments.push(Box::new(segments::Headers::new(PruneMode::before_inclusive(to_block))))
-        }
-
-        if let Some(to_block) =
-            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts)
-        {
-            segments.push(Box::new(segments::Receipts::new(PruneMode::before_inclusive(to_block))))
-        }
-
-        segments
     }
 
     /// Returns `true` if the pruning is needed at the provided tip block number.

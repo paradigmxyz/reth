@@ -13,7 +13,7 @@ use reth_db_api::{
 };
 
 use alloy_primitives::BlockNumber;
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{DatabaseProviderRW, ProviderFactory};
 use reth_prune_types::{PruneLimiter, PruneMode, PruneProgress, PruneSegment};
 use tracing::{instrument, trace};
 
@@ -40,10 +40,10 @@ impl<DB: Database> Segment<DB> for Headers {
         Some(self.mode)
     }
 
-    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
+    #[instrument(level = "trace", target = "pruner", skip(self, provider_factory), ret)]
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider_factory: &ProviderFactory<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         let (block_range_start, block_range_end) = match input.get_next_block_range() {
@@ -59,6 +59,8 @@ impl<DB: Database> Segment<DB> for Headers {
 
         let range = last_pruned_block.map_or(0, |block| block + 1)..=block_range_end;
 
+        let provider = provider_factory.provider_rw()?;
+
         let mut headers_cursor = provider.tx_ref().cursor_write::<tables::Headers>()?;
         let mut header_tds_cursor =
             provider.tx_ref().cursor_write::<tables::HeaderTerminalDifficulties>()?;
@@ -70,7 +72,7 @@ impl<DB: Database> Segment<DB> for Headers {
         );
 
         let tables_iter = HeaderTablesIter::new(
-            provider,
+            &provider,
             &mut limiter,
             headers_cursor.walk_range(range.clone())?,
             header_tds_cursor.walk_range(range.clone())?,
@@ -85,17 +87,16 @@ impl<DB: Database> Segment<DB> for Headers {
             pruned += entries_pruned;
         }
 
+        let checkpoint = PruneOutputCheckpoint { block_number: last_pruned_block, tx_number: None };
+
+        self.save_checkpoint(&provider, checkpoint.as_prune_checkpoint(self.mode))?;
+
+        provider.commit()?;
+
         let done = last_pruned_block.map_or(false, |block| block == block_range_end);
         let progress = PruneProgress::new(done, &limiter);
 
-        Ok(PruneOutput {
-            progress,
-            pruned,
-            checkpoint: Some(PruneOutputCheckpoint {
-                block_number: last_pruned_block,
-                tx_number: None,
-            }),
-        })
+        Ok(PruneOutput { progress, pruned, checkpoint: Some(checkpoint) })
     }
 }
 
@@ -248,8 +249,7 @@ mod tests {
                 .map(|block_number| block_number + 1)
                 .unwrap_or_default();
 
-            let provider = db.factory.provider_rw().unwrap();
-            let result = segment.prune(&provider, input.clone()).unwrap();
+            let result = segment.prune(&db.factory, input.clone()).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
             trace!(target: "pruner::test",
                 expected_prune_progress=?expected_result.0,
@@ -263,13 +263,6 @@ mod tests {
                 PruneOutput {progress, pruned, checkpoint: Some(_)}
                     if (progress, pruned) == expected_result
             );
-            segment
-                .save_checkpoint(
-                    &provider,
-                    result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
-                )
-                .unwrap();
-            provider.commit().expect("commit");
 
             let last_pruned_block_number = to_block.min(
                 next_block_number_to_prune +
@@ -320,8 +313,7 @@ mod tests {
             limiter,
         };
 
-        let provider = db.factory.provider_rw().unwrap();
-        let result = segment.prune(&provider, input).unwrap();
+        let result = segment.prune(&db.factory, input).unwrap();
         assert_eq!(
             result,
             PruneOutput::not_done(

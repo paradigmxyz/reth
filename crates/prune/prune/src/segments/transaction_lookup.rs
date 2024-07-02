@@ -5,7 +5,7 @@ use crate::{
 use rayon::prelude::*;
 use reth_db::tables;
 use reth_db_api::database::Database;
-use reth_provider::{DatabaseProviderRW, TransactionsProvider};
+use reth_provider::{DatabaseProviderFactory, ProviderFactory, TransactionsProvider};
 use reth_prune_types::{PruneMode, PruneProgress, PruneSegment};
 use tracing::{instrument, trace};
 
@@ -29,13 +29,13 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         Some(self.mode)
     }
 
-    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
+    #[instrument(level = "trace", target = "pruner", skip(self, provider_factory), ret)]
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider_factory: &ProviderFactory<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
-        let (start, end) = match input.get_next_tx_num_range(provider)? {
+        let (start, end) = match input.get_next_tx_num_range(provider_factory)? {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transaction lookup entries to prune");
@@ -50,7 +50,8 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         let tx_range_end = *tx_range.end();
 
         // Retrieve transactions in the range and calculate their hashes in parallel
-        let hashes = provider
+        let hashes = provider_factory
+            .database_provider_ro()?
             .transactions_by_tx_range(tx_range.clone())?
             .into_par_iter()
             .map(|transaction| transaction.hash())
@@ -67,6 +68,9 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         let mut limiter = input.limiter;
 
         let mut last_pruned_transaction = None;
+
+        let provider = provider_factory.provider_rw()?;
+
         let (pruned, done) = provider.prune_table_with_iterator::<tables::TransactionHashNumbers>(
             hashes,
             &mut limiter,
@@ -75,10 +79,9 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             },
         )?;
 
-        let done = done && tx_range_end == end;
-        trace!(target: "pruner", %pruned, %done, "Pruned transaction lookup");
-
         let last_pruned_transaction = last_pruned_transaction.unwrap_or(tx_range_end);
+
+        let done = done && tx_range_end == end;
 
         let last_pruned_block = provider
             .transaction_block(last_pruned_transaction)?
@@ -88,16 +91,20 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
             // run.
             .checked_sub(if done { 0 } else { 1 });
 
+        let checkpoint = PruneOutputCheckpoint {
+            block_number: last_pruned_block,
+            tx_number: Some(last_pruned_transaction),
+        };
+
+        self.save_checkpoint(&provider, checkpoint.as_prune_checkpoint(self.mode))?;
+
+        provider.commit()?;
+
+        trace!(target: "pruner", %pruned, %done, "Pruned transaction lookup");
+
         let progress = PruneProgress::new(done, &limiter);
 
-        Ok(PruneOutput {
-            progress,
-            pruned,
-            checkpoint: Some(PruneOutputCheckpoint {
-                block_number: last_pruned_block,
-                tx_number: Some(last_pruned_transaction),
-            }),
-        })
+        Ok(PruneOutput { progress, pruned, checkpoint: Some(checkpoint) })
     }
 }
 
@@ -194,8 +201,7 @@ mod tests {
                 .into_inner()
                 .0;
 
-            let provider = db.factory.provider_rw().unwrap();
-            let result = segment.prune(&provider, input).unwrap();
+            let result = segment.prune(&db.factory, input).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 
             assert_matches!(
@@ -203,14 +209,6 @@ mod tests {
                 PruneOutput {progress, pruned, checkpoint: Some(_)}
                     if (progress, pruned) == expected_result
             );
-
-            segment
-                .save_checkpoint(
-                    &provider,
-                    result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
-                )
-                .unwrap();
-            provider.commit().expect("commit");
 
             let last_pruned_block_number = last_pruned_block_number
                 .checked_sub(if result.progress.is_finished() { 0 } else { 1 });
