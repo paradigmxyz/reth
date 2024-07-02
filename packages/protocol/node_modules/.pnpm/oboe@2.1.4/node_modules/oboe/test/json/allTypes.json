@@ -1,9 +1,0 @@
-{
-   "string": "ABCD"
-,  "number": 12345
-,  "object": {}
-,  "array" : []
-,  "true"  : true
-,  "false" : false
-,  "null"  : null
-}

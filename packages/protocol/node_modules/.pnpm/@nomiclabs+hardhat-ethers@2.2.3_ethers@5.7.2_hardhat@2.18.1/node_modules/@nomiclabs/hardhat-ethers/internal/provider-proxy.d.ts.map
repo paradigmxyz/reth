@@ -1,1 +1,0 @@
-{"version":3,"file":"provider-proxy.d.ts","sourceRoot":"","sources":["../src/internal/provider-proxy.ts"],"names":[],"mappings":"AAIA,OAAO,EAAE,gBAAgB,EAAE,MAAM,eAAe,CAAC;AAEjD,OAAO,EAAE,qBAAqB,EAAE,MAAM,2BAA2B,CAAC;AAGlE;;;;;;GAMG;AACH,wBAAgB,mBAAmB,CACjC,eAAe,EAAE,gBAAgB,GAChC,qBAAqB,CAcvB"}

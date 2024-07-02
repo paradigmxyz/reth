@@ -1,6 +1,0 @@
---recursive
---bail
---inline-diffs
---reporter spec
---check-leaks
---ui tdd

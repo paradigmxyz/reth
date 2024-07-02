@@ -1,1 +1,0 @@
-{"version":3,"file":"updatable-target-proxy.d.ts","sourceRoot":"","sources":["../src/internal/updatable-target-proxy.ts"],"names":[],"mappings":"AAAA;;;GAGG;AACH,wBAAgB,0BAA0B,CAAC,CAAC,SAAS,MAAM,EACzD,aAAa,EAAE,CAAC,GACf;IACD,KAAK,EAAE,CAAC,CAAC;IACT,SAAS,EAAE,CAAC,MAAM,EAAE,CAAC,KAAK,IAAI,CAAC;CAChC,CAgGA"}

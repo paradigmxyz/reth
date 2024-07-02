@@ -1,9 +1,0 @@
-{
-  "name": "testrpc",
-  "version": "0.0.1",
-  "main": "index.js",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/trufflesuite/ganache-cli"
-  }
-}

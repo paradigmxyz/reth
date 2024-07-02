@@ -1,9 +1,0 @@
-{
-  "extends": "solium:all",
-  "rules": {
-    "indentation": ["error", 4],
-    "quotes": ["error", "double"],
-    "arg-overflow": "off",
-    "blank-lines": "off"
-  }
-}

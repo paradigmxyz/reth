@@ -1,1 +1,0 @@
-{"version":3,"file":"uriresolver.js","sourceRoot":"","sources":["../../src/resolvers/uriresolver.ts"],"names":[],"mappings":";;;;;;;;;;;;;AAAA,oDAA2B;AAI3B,SAAgB,WAAW;IACzB,OAAO,SAAe,IAAI,CAAC,GAAW,EAAE,GAAY;;YAClD,IAAI,CAAC,gBAAK,CAAC,GAAG,CAAC,EAAE;gBACf,OAAO,IAAI,CAAC;aACb;YACD,OAAO,IAAI,GAAG,CAAC,GAAG,CAAC,CAAC,IAAI,CAAC;QAC3B,CAAC;KAAA,CAAC;AACJ,CAAC;AAPD,kCAOC"}

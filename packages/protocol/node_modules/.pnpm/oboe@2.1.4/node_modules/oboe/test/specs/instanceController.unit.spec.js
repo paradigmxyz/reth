@@ -1,6 +1,0 @@
-
-
-describe('instance controller',function(){
- 
-
-});

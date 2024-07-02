@@ -1,3 +1,0 @@
-[submodule "test/jsonTests"]
-	path = test/jsonTests
-	url = https://github.com/ethereum/tests
