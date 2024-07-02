@@ -1,11 +1,8 @@
-use crate::{
-    traits::{BlockSource, ReceiptProvider},
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PruneCheckpointReader,
-    ReceiptProviderIdExt, RequestsProvider, StageCheckpointReader, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
-    WithdrawalsProvider,
+use std::{
+    ops::{RangeBounds, RangeInclusive},
+    sync::Arc,
 };
+
 use reth_chainspec::{ChainInfo, ChainSpec, MAINNET};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
@@ -23,9 +20,17 @@ use revm::{
     db::BundleState,
     primitives::{BlockEnv, CfgEnvWithHandlerCfg},
 };
-use std::{
-    ops::{RangeBounds, RangeInclusive},
-    sync::Arc,
+use tokio::sync::broadcast;
+
+use crate::{
+    providers::StaticFileProvider,
+    traits::{BlockSource, ReceiptProvider},
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    EvmEnvProvider, HeaderProvider, PruneCheckpointReader, ReceiptProviderIdExt, RequestsProvider,
+    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory,
+    StateRootProvider, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    WithdrawalsProvider,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -463,5 +468,17 @@ impl PruneCheckpointReader for NoopProvider {
         _segment: PruneSegment,
     ) -> ProviderResult<Option<PruneCheckpoint>> {
         Ok(None)
+    }
+}
+
+impl StaticFileProviderFactory for NoopProvider {
+    fn static_file_provider(&self) -> StaticFileProvider {
+        StaticFileProvider::default()
+    }
+}
+
+impl CanonStateSubscriptions for NoopProvider {
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
+        broadcast::channel(1).1
     }
 }

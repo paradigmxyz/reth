@@ -26,7 +26,9 @@ pub use cache::{
 };
 pub use error::{EthApiError, EthResult, RevertError, RpcInvalidTransactionError, SignError};
 pub use fee_history::{FeeHistoryCache, FeeHistoryCacheConfig, FeeHistoryEntry};
-pub use gas_oracle::{GasCap, GasPriceOracle, GasPriceOracleConfig, GasPriceOracleResult};
+pub use gas_oracle::{
+    GasCap, GasPriceOracle, GasPriceOracleConfig, GasPriceOracleResult, RPC_DEFAULT_GAS_CAP,
+};
 pub use id_provider::EthSubscriptionIdProvider;
 pub use logs_utils::EthFilterError;
 pub use pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};

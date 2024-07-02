@@ -8,7 +8,7 @@ use reth_rpc_server_types::constants::cache::{
 };
 
 /// Settings for the [`EthStateCache`](super::EthStateCache).
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EthStateCacheConfig {
     /// Max number of blocks in cache.
