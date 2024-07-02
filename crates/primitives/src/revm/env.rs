@@ -12,63 +12,6 @@ use revm_primitives::OptimismFields;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-/// Return the coinbase address for the given header and chain spec.
-pub fn block_coinbase(chain_spec: &ChainSpec, header: &Header, after_merge: bool) -> Address {
-    // Clique consensus fills the EXTRA_SEAL (last 65 bytes) of the extra data with the
-    // signer's signature.
-    //
-    // On the genesis block, the extra data is filled with zeros, so we should not attempt to
-    // recover the signer on the genesis block.
-    //
-    // From EIP-225:
-    //
-    // * `EXTRA_SEAL`: Fixed number of extra-data suffix bytes reserved for signer seal.
-    //   * 65 bytes fixed as signatures are based on the standard `secp256k1` curve.
-    //   * Filled with zeros on genesis block.
-    if chain_spec.chain == Chain::goerli() && !after_merge && header.number > 0 {
-        recover_header_signer(header).unwrap_or_else(|err| {
-            panic!(
-                "Failed to recover goerli Clique Consensus signer from header ({}, {}) using extradata {}: {:?}",
-                header.number, header.hash_slow(), header.extra_data, err
-            )
-        })
-    } else {
-        header.beneficiary
-    }
-}
-
-/// Error type for recovering Clique signer from a header.
-#[derive(Debug, thiserror_no_std::Error)]
-pub enum CliqueSignerRecoveryError {
-    /// Header extradata is too short.
-    #[error("Invalid extra data length")]
-    InvalidExtraData,
-    /// Recovery failed.
-    #[error("Invalid signature: {0}")]
-    InvalidSignature(#[from] secp256k1::Error),
-}
-
-/// Recover the account from signed header per clique consensus rules.
-pub fn recover_header_signer(header: &Header) -> Result<Address, CliqueSignerRecoveryError> {
-    let extra_data_len = header.extra_data.len();
-    // Fixed number of extra-data suffix bytes reserved for signer signature.
-    // 65 bytes fixed as signatures are based on the standard secp256k1 curve.
-    // Filled with zeros on genesis block.
-    let signature_start_byte = extra_data_len - 65;
-    let signature: [u8; 65] = header.extra_data[signature_start_byte..]
-        .try_into()
-        .map_err(|_| CliqueSignerRecoveryError::InvalidExtraData)?;
-    let seal_hash = {
-        let mut header_to_seal = header.clone();
-        header_to_seal.extra_data = Bytes::from(header.extra_data[..signature_start_byte].to_vec());
-        header_to_seal.hash_slow()
-    };
-
-    // TODO: this is currently unchecked recovery, does this need to be checked w.r.t EIP-2?
-    recover_signer_unchecked(&signature, &seal_hash.0)
-        .map_err(CliqueSignerRecoveryError::InvalidSignature)
-}
-
 /// Fill transaction environment with the EIP-4788 system contract message data.
 ///
 /// This requirements for the beacon root contract call defined by
@@ -156,19 +99,4 @@ fn fill_tx_env_with_system_contract_call(
 
     // disable the base fee check for this call by setting the base fee to zero
     env.block.basefee = U256::ZERO;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_chainspec::GOERLI;
-
-    #[test]
-    fn test_recover_genesis_goerli_signer() {
-        // just ensures that `block_coinbase` does not panic on the genesis block
-        let chain_spec = GOERLI.clone();
-        let header = chain_spec.genesis_header();
-        let block_coinbase = block_coinbase(&chain_spec, &header, false);
-        assert_eq!(block_coinbase, header.beneficiary);
-    }
 }

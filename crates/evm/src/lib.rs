@@ -16,7 +16,7 @@ use core::ops::Deref;
 
 use reth_chainspec::ChainSpec;
 use reth_primitives::{
-    revm::env::block_coinbase, Address, Header, TransactionSigned, TransactionSignedEcRecovered,
+    header::block_coinbase, Address, Header, TransactionSigned, TransactionSignedEcRecovered,
     U256,
 };
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
