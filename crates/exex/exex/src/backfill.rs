@@ -3,7 +3,7 @@ use reth_evm::execute::{BatchExecutor, BlockExecutionError, BlockExecutorProvide
 use reth_node_api::FullNodeComponents;
 use reth_primitives::{Block, BlockNumber};
 use reth_primitives_traits::format_gas_throughput;
-use reth_provider::{Chain, FullProvider, ProviderError, TransactionVariant};
+use reth_provider::{Chain, ExecutionOutcome, FullProvider, ProviderError, TransactionVariant};
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ExecutionStageThresholds;
@@ -193,6 +193,39 @@ where
         let chain = Chain::new(blocks, executor.finalize(), None);
         Ok(chain)
     }
+
+    /// Returns an iterator that executes each block in the range separately and yields the
+    /// resulting [`Block`] and [`ExecutionOutcome`].
+    pub fn into_single_blocks(
+        &self,
+    ) -> impl Iterator<Item = Result<(Block, ExecutionOutcome), BlockExecutionError>> + '_ {
+        self.range.clone().map(|block_number| {
+            let td = self
+                .provider
+                .header_td_by_number(block_number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+
+            // Fetch the block with senders for execution.
+            let block_with_senders = self
+                .provider
+                .block_with_senders(block_number.into(), TransactionVariant::WithHash)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
+
+            // Configure the executor to use the previous block's state.
+            let mut executor = self.executor.batch_executor(
+                StateProviderDatabase::new(
+                    self.provider.history_by_block_number(block_number.saturating_sub(1))?,
+                ),
+            );
+
+            trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body.len(), "Executing block");
+
+            executor
+                .execute_and_verify_one((&block_with_senders, td).into())?;
+
+            Ok((block_with_senders.block, executor.finalize()))
+        })
+    }
 }
 
 #[cfg(test)]
@@ -200,33 +233,28 @@ mod tests {
     use crate::BackfillJobFactory;
     use eyre::OptionExt;
     use reth_blockchain_tree::noop::NoopBlockchainTree;
-    use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, MAINNET};
+    use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET};
     use reth_db_common::init::init_genesis;
-    use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+    use reth_evm::execute::{BlockExecutionInput, BlockExecutorProvider, Executor};
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives::{
-        b256, constants::ETH_TO_WEI, public_key_to_address, Address, Block, Genesis,
-        GenesisAccount, Header, Transaction, TxEip2930, TxKind, U256,
+        b256, constants::ETH_TO_WEI, public_key_to_address, Address, Block, BlockWithSenders,
+        Genesis, GenesisAccount, Header, Requests, SealedBlockWithSenders, Transaction, TxEip2930,
+        TxKind, U256,
     };
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-        BlockWriter, LatestStateProviderRef,
+        BlockWriter, ExecutionOutcome, LatestStateProviderRef, ProviderFactory,
     };
     use reth_revm::database::StateProviderDatabase;
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
     use secp256k1::Keypair;
     use std::sync::Arc;
 
-    #[tokio::test]
-    async fn test_backfill() -> eyre::Result<()> {
-        reth_tracing::init_test_tracing();
-
-        // Create a key pair for the sender
-        let key_pair = Keypair::new_global(&mut generators::rng());
-        let address = public_key_to_address(key_pair.public_key());
-
-        // Create a chain spec with a genesis state that contains the sender
-        let chain_spec = Arc::new(
+    fn chain_spec(address: Address) -> Arc<ChainSpec> {
+        // Create a chain spec with a genesis state that contains the
+        // provided sender
+        Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
                 .genesis(Genesis {
@@ -239,16 +267,58 @@ mod tests {
                 })
                 .paris_activated()
                 .build(),
-        );
+        )
+    }
 
-        let executor = EthExecutorProvider::ethereum(chain_spec.clone());
-        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
-        init_genesis(provider_factory.clone())?;
-        let blockchain_db = BlockchainProvider::new(
-            provider_factory.clone(),
-            Arc::new(NoopBlockchainTree::default()),
+    fn execute_block_and_commit_to_database<DB>(
+        provider_factory: &ProviderFactory<DB>,
+        chain_spec: Arc<ChainSpec>,
+        block: &BlockWithSenders,
+    ) -> eyre::Result<ExecutionOutcome>
+    where
+        DB: reth_db_api::database::Database,
+    {
+        let provider = provider_factory.provider()?;
+
+        // Execute both blocks on top of the genesis state
+        let block_execution_output = EthExecutorProvider::ethereum(chain_spec)
+            .executor(StateProviderDatabase::new(LatestStateProviderRef::new(
+                provider.tx_ref(),
+                provider.static_file_provider().clone(),
+            )))
+            .execute(BlockExecutionInput { block, total_difficulty: U256::ZERO })?;
+
+        // Convert the block execution output to an execution outcome
+        let mut execution_outcome = ExecutionOutcome {
+            bundle: block_execution_output.state,
+            receipts: block_execution_output.receipts.into(),
+            first_block: block.number,
+            requests: vec![Requests(block_execution_output.requests)],
+        };
+        execution_outcome.bundle.reverts.sort();
+
+        // Commit the block to the database
+        let provider_rw = provider_factory.provider_rw()?;
+        let block = block.clone().seal_slow();
+        provider_rw.append_blocks_with_state(
+            vec![block],
+            execution_outcome.clone(),
+            Default::default(),
+            Default::default(),
         )?;
+        provider_rw.commit()?;
 
+        Ok(execution_outcome)
+    }
+
+    fn blocks_and_execution_outcomes<DB>(
+        provider_factory: ProviderFactory<DB>,
+        chain_spec: Arc<ChainSpec>,
+        key_pair: Keypair,
+    ) -> eyre::Result<Vec<(SealedBlockWithSenders, ExecutionOutcome)>>
+    where
+        DB: reth_db_api::database::Database,
+    {
         // First block has a transaction that transfers some ETH to zero address
         let block1 = Block {
             header: Header {
@@ -279,52 +349,68 @@ mod tests {
         .with_recovered_senders()
         .ok_or_eyre("failed to recover senders")?;
 
-        // Second block has no state changes
+        // Second block has resend the same transaction with increased nonce
         let block2 = Block {
             header: Header {
-                parent_hash: block1.hash_slow(),
+                parent_hash: block1.header.hash_slow(),
+                receipts_root: b256!(
+                    "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
+                ),
                 difficulty: chain_spec.fork(EthereumHardfork::Paris).ttd().expect("Paris TTD"),
                 number: 2,
+                gas_limit: 21000,
+                gas_used: 21000,
                 ..Default::default()
             },
+            body: vec![sign_tx_with_key_pair(
+                key_pair,
+                Transaction::Eip2930(TxEip2930 {
+                    chain_id: chain_spec.chain.id(),
+                    nonce: 1,
+                    gas_limit: 21000,
+                    gas_price: 1_500_000_000,
+                    to: TxKind::Call(Address::ZERO),
+                    value: U256::from(0.1 * ETH_TO_WEI as f64),
+                    ..Default::default()
+                }),
+            )],
             ..Default::default()
         }
         .with_recovered_senders()
         .ok_or_eyre("failed to recover senders")?;
 
-        let provider = provider_factory.provider()?;
-        // Execute only the first block on top of genesis state
-        let mut outcome_single = EthExecutorProvider::ethereum(chain_spec.clone())
-            .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(
-                provider.tx_ref(),
-                provider.static_file_provider().clone(),
-            )))
-            .execute_and_verify_batch([(&block1, U256::ZERO).into()])?;
-        outcome_single.bundle.reverts.sort();
-        // Execute both blocks on top of the genesis state
-        let outcome_batch = EthExecutorProvider::ethereum(chain_spec)
-            .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(
-                provider.tx_ref(),
-                provider.static_file_provider().clone(),
-            )))
-            .execute_and_verify_batch([
-                (&block1, U256::ZERO).into(),
-                (&block2, U256::ZERO).into(),
-            ])?;
-        drop(provider);
+        let outcome1 =
+            execute_block_and_commit_to_database(&provider_factory, chain_spec.clone(), &block1)?;
+        let outcome2 =
+            execute_block_and_commit_to_database(&provider_factory, chain_spec, &block2)?;
 
         let block1 = block1.seal_slow();
         let block2 = block2.seal_slow();
 
-        // Update the state with the execution results of both blocks
-        let provider_rw = provider_factory.provider_rw()?;
-        provider_rw.append_blocks_with_state(
-            vec![block1.clone(), block2],
-            outcome_batch,
-            Default::default(),
-            Default::default(),
+        Ok(vec![(block1, outcome1), (block2, outcome2)])
+    }
+
+    #[test]
+    fn test_backfill() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
+        // Create a key pair for the sender
+        let key_pair = Keypair::new_global(&mut generators::rng());
+        let address = public_key_to_address(key_pair.public_key());
+
+        let chain_spec = chain_spec(address);
+
+        let executor = EthExecutorProvider::ethereum(chain_spec.clone());
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        init_genesis(provider_factory.clone())?;
+        let blockchain_db = BlockchainProvider::new(
+            provider_factory.clone(),
+            Arc::new(NoopBlockchainTree::default()),
         )?;
-        provider_rw.commit()?;
+
+        let blocks_and_execution_outcomes =
+            blocks_and_execution_outcomes(provider_factory, chain_spec, key_pair)?;
+        let (block1, outcome_single) = blocks_and_execution_outcomes.first().unwrap().clone();
 
         // Backfill the first block
         let factory = BackfillJobFactory::new(executor, blockchain_db);
@@ -338,6 +424,53 @@ mod tests {
         chain.execution_outcome_mut().bundle.reverts.sort();
         assert_eq!(chain.blocks(), &[(1, block1)].into());
         assert_eq!(chain.execution_outcome(), &outcome_single);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_into_single_blocks() -> eyre::Result<()> {
+        reth_tracing::init_test_tracing();
+
+        // Create a key pair for the sender
+        let key_pair = Keypair::new_global(&mut generators::rng());
+        let address = public_key_to_address(key_pair.public_key());
+
+        let chain_spec = chain_spec(address);
+
+        let executor = EthExecutorProvider::ethereum(chain_spec.clone());
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        init_genesis(provider_factory.clone())?;
+        let blockchain_db = BlockchainProvider::new(
+            provider_factory.clone(),
+            Arc::new(NoopBlockchainTree::default()),
+        )?;
+
+        let blocks_and_execution_outcomes =
+            blocks_and_execution_outcomes(provider_factory, chain_spec, key_pair)?;
+
+        // Backfill the first block
+        let factory = BackfillJobFactory::new(executor, blockchain_db);
+        let job = factory.backfill(1..=1);
+        let block_execution_it = job.into_single_blocks();
+
+        // Assert that the backfill job only produces a single block
+        let blocks_and_outcomes = block_execution_it.collect::<Vec<_>>();
+        assert_eq!(blocks_and_outcomes.len(), 1);
+
+        // Assert that the backfill job single block iterator produces the same output for each
+        // block
+        for (i, res) in blocks_and_outcomes.into_iter().enumerate() {
+            let (block, mut outcome) = res?;
+            outcome.bundle.reverts.sort();
+
+            let sealed_block_with_senders = blocks_and_execution_outcomes[i].0.clone();
+            let expected_block = sealed_block_with_senders.unseal().block;
+            let expected_outcome = &blocks_and_execution_outcomes[i].1;
+
+            assert_eq!(block, expected_block);
+            assert_eq!(outcome, expected_outcome.clone());
+        }
 
         Ok(())
     }
