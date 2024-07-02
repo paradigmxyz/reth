@@ -104,10 +104,7 @@ where
             .spawn_trace_transaction_in_block(
                 tx_hash,
                 TracingInspectorConfig::default_parity(),
-                move |_tx_info, inspector, _, _| {
-                    let traces = inspector.into_traces().into_nodes();
-                    Ok(traces)
-                },
+                move |_tx_info, inspector, _, _| Ok(inspector.into_traces().into_nodes()),
             )
             .await?
             .map(|traces| {
