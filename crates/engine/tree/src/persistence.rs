@@ -108,13 +108,9 @@ impl<DB: Database> Persistence<DB> {
 
     /// Prunes block data before the given block hash according to the configured prune
     /// configuration.
-    fn prune_before(&mut self, block_num: u64) {
-        let mut prune_res = self.pruner.run(block_num).expect("todo: handle errors");
-
-        // TODO: how _should_ the task handle pruning in this case?
-        while let PruneProgress::HasMoreData(reason) = prune_res {
-            prune_res = self.pruner.run(block_num).expect("todo: handle errors");
-        }
+    fn prune_before(&mut self, block_num: u64) -> PruneProgress {
+        // TODO: doing this properly depends on pruner segment changes
+        self.pruner.run(block_num).expect("todo: handle errors")
     }
 
     /// Removes static file related data from the database, depending on the current block height in
@@ -147,7 +143,7 @@ where
 {
     /// This is the main loop, that will listen to persistence events and perform the requested
     /// database actions
-    fn run(self) {
+    fn run(mut self) {
         // If the receiver errors then senders have disconnected, so the loop should then end.
         while let Ok(action) = self.incoming.recv() {
             match action {
@@ -168,10 +164,10 @@ where
                     let _ = sender.send(last_block_hash);
                 }
                 PersistenceAction::PruneBefore((block_num, sender)) => {
-                    self.prune_before(block_num);
+                    let res = self.prune_before(block_num);
 
                     // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(());
+                    let _ = sender.send(res);
                 }
                 PersistenceAction::CleanStaticFileDuplicates(sender) => {
                     self.clean_static_file_duplicates();
@@ -196,7 +192,7 @@ pub enum PersistenceAction {
 
     /// Prune associated block data before the given hash, according to already-configured prune
     /// modes.
-    PruneBefore((u64, oneshot::Sender<()>)),
+    PruneBefore((u64, oneshot::Sender<PruneProgress>)),
 
     /// Trigger a read of static file data, and delete data depending on the highest block in each
     /// static file segment.
@@ -250,10 +246,10 @@ impl PersistenceHandle {
 
     /// Tells the persistence task to remove block data before the given hash, according to the
     /// configured prune config.
-    pub async fn prune_before(&self, block_hash: B256) {
+    pub async fn prune_before(&self, block_num: u64) -> PruneProgress {
         let (tx, rx) = oneshot::channel();
         self.sender
-            .send(PersistenceAction::PruneBefore((block_hash, tx)))
+            .send(PersistenceAction::PruneBefore((block_num, tx)))
             .expect("should be able to send");
         rx.await.expect("todo: err handling")
     }
