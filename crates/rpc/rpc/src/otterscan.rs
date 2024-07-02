@@ -7,20 +7,14 @@ use reth_rpc_eth_api::helpers::TraceExt;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
-    trace::{
-        otterscan::{
-            BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
-            OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
-        },
-        parity::{
-            Action, CallAction, CallOutput, CreateAction, CreateOutput, RewardAction,
-            SelfdestructAction, TraceOutput, CallType,
-        },
+    trace::otterscan::{
+        BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
+        OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
     },
     BlockTransactions, Header, Transaction,
 };
 use revm_inspectors::{
-    tracing::TracingInspectorConfig,
+    tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
 };
 use revm_primitives::ExecutionResult;
@@ -111,7 +105,7 @@ where
                 tx_hash,
                 TracingInspectorConfig::default_parity(),
                 move |_tx_info, inspector, _, _| {
-                    let traces = inspector.into_parity_builder().into_transaction_traces();
+                    let traces = inspector.into_traces().into_nodes();
                     Ok(traces)
                 },
             )
@@ -119,53 +113,18 @@ where
             .map(|traces| {
                 traces
                     .into_iter()
-                    .map(|trace| {
-                        let depth = trace.trace_address.len() as u32;
-
-                        let (typ, from, to, value, input) = match trace.action {
-                            Action::Call(CallAction {
-                                from, to, value, input, call_type, ..
-                            }) => {
-                                let typ = match call_type {
-                                    CallType::Call => "call",
-                                    CallType::DelegateCall => 
-                                    CallType::StaticCall => 
-                                };
-                            ("call", from, to, value, input),
-                            }
-                            Action::Create(CreateAction { from, value, init, .. }) => {
-                                let to = match trace.result {
-                                    Some(TraceOutput::Create(CreateOutput {
-                                        address: to, ..
-                                    })) => to,
-                                    _ => Default::default(),
-                                };
-                                ("create", from, to, value, init)
-                            }
-                            Action::Reward(RewardAction { author, value, .. }) => {
-                                ("reward", Address::default(), author, value, Default::default())
-                            }
-                            Action::Selfdestruct(SelfdestructAction {
-                                address,
-                                balance,
-                                refund_address,
-                            }) => ("suicide", address, refund_address, balance, Default::default()),
-                        };
-
-                        let output = match trace.result {
-                            Some(TraceOutput::Call(CallOutput { output, .. })) => output,
-                            Some(TraceOutput::Create(CreateOutput { code, .. })) => code,
-                            _ => Default::default(),
-                        };
-                        TraceEntry {
-                            r#type: typ.to_uppercase(),
-                            depth,
-                            from,
-                            to,
-                            value,
-                            input,
-                            output,
-                        }
+                    .map(|CallTraceNode { trace, .. }| TraceEntry {
+                        r#type: if trace.is_selfdestruct() {
+                            "SELFDESTRUCT".to_string()
+                        } else {
+                            trace.kind.to_string()
+                        },
+                        depth: trace.depth as u32,
+                        from: trace.caller,
+                        to: trace.address,
+                        value: trace.value,
+                        input: trace.data,
+                        output: trace.output,
                     })
                     .collect::<Vec<_>>()
             });
