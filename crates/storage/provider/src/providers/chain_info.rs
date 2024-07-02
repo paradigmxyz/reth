@@ -18,9 +18,10 @@ pub(crate) struct ChainInfoTracker {
 
 impl ChainInfoTracker {
     /// Create a new chain info container for the given canonical head.
-    pub(crate) fn new(head: SealedHeader) -> Self {
-        let (finalized_block, _) = watch::channel(None);
-        let (safe_block, _) = watch::channel(None);
+    pub(crate) fn new(head: SealedHeader, finalized: SealedHeader) -> Self {
+        let (finalized_block, _) = watch::channel(Some(finalized.clone()));
+        let (safe_block, _) = watch::channel(Some(finalized));
+
         Self {
             inner: Arc::new(ChainInfoInner {
                 last_forkchoice_update: RwLock::new(None),
