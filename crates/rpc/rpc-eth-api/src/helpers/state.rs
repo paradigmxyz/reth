@@ -212,7 +212,7 @@ pub trait LoadState {
             self.evm_config().fill_block_env(
                 &mut block_env,
                 &LoadPendingBlock::provider(self).chain_spec(),
-                &header,
+                header,
                 after_merge,
             );
 
