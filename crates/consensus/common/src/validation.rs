@@ -231,6 +231,21 @@ pub fn validate_against_parent_timestamp(
     Ok(())
 }
 
+/// Validates the timestamp against the parent to make sure it is in the past or present.
+#[inline]
+pub fn validate_against_parent_timestamp_inclusive(
+    header: &SealedHeader,
+    parent: &SealedHeader,
+) -> Result<(), ConsensusError> {
+    if header.is_timestamp_in_past_inclusive(parent.timestamp) {
+        return Err(ConsensusError::TimestampIsInPast {
+            parent_timestamp: parent.timestamp,
+            timestamp: header.timestamp,
+        })
+    }
+    Ok(())
+}
+
 /// Validates that the EIP-4844 header fields are correct with respect to the parent block. This
 /// ensures that the `blob_gas_used` and `excess_blob_gas` fields exist in the child header, and
 /// that the `excess_blob_gas` field matches the expected `excess_blob_gas` calculated from the

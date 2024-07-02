@@ -193,6 +193,13 @@ impl Header {
         self.timestamp <= parent_timestamp
     }
 
+    /// Checks if the block's timestamp is in the past or present compared to the parent block's timestamp.
+    ///
+    /// Note: This check is relevant only pre-merge.
+    pub const fn is_timestamp_in_past_inclusive(&self, parent_timestamp: u64) -> bool {
+        self.timestamp < parent_timestamp
+    }
+
     /// Checks if the block's timestamp is in the future based on the present timestamp.
     ///
     /// Clock can drift but this can be consensus issue.

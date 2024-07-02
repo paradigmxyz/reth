@@ -113,6 +113,7 @@ struct EthExecuteOutput {
     receipts: Vec<Receipt>,
     requests: Vec<Request>,
     gas_used: u64,
+    valid_transaction_indices: Vec<usize>,
 }
 
 /// Helper container type for EVM with chain spec.
@@ -169,6 +170,7 @@ where
         // execute transactions
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.len());
+        let mut valid_transaction_indices = Vec::new();
         for (idx, (sender, transaction)) in block.transactions_with_sender().enumerate() {
             let is_anchor = is_taiko && idx == 0;
 
@@ -269,6 +271,9 @@ where
                     ..Default::default()
                 },
             );
+
+            // Add the tx to the list of valid transactions
+            valid_transaction_indices.push(idx);
         }
 
         let requests = if self.chain_spec.is_prague_active_at_timestamp(block.timestamp) {
@@ -284,7 +289,7 @@ where
             vec![]
         };
 
-        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
+        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used, valid_transaction_indices })
     }
 }
 
@@ -451,13 +456,13 @@ where
     /// State changes are committed to the database.
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let EthExecuteOutput { receipts, requests, gas_used } =
+        let EthExecuteOutput { receipts, requests, gas_used, valid_transaction_indices } =
             self.execute_without_verification(block, total_difficulty)?;
 
         // NOTE: we need to merge keep the reverts for the bundle retention
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used, db: self.state })
+        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used, db: self.state, valid_transaction_indices })
     }
 }
 
@@ -494,7 +499,7 @@ where
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let EthExecuteOutput { receipts, requests, gas_used: _ } =
+        let EthExecuteOutput { receipts, requests, gas_used: _, valid_transaction_indices: _ } =
             self.executor.execute_without_verification(block, total_difficulty)?;
 
         validate_block_post_execution(block, self.executor.chain_spec(), &receipts, &requests)?;

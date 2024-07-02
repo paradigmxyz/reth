@@ -13,8 +13,8 @@ use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
     validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
-    validate_against_parent_timestamp, validate_block_pre_execution, validate_header_base_fee,
-    validate_header_extradata, validate_header_gas,
+    validate_against_parent_timestamp, validate_against_parent_timestamp_inclusive,
+    validate_block_pre_execution, validate_header_base_fee, validate_header_extradata, validate_header_gas
 };
 use reth_primitives::{
     constants::MINIMUM_GAS_LIMIT, BlockWithSenders, Header, SealedBlock, SealedHeader,
@@ -130,13 +130,17 @@ impl Consensus for EthBeaconConsensus {
     ) -> Result<(), ConsensusError> {
         validate_against_parent_hash_number(header, parent)?;
 
-        validate_against_parent_timestamp(header, parent)?;
+        if self.chain_spec.is_taiko() {
+            validate_against_parent_timestamp_inclusive(header, parent)?;
+        } else {
+            validate_against_parent_timestamp(header, parent)?;
 
-        // TODO Check difficulty increment between parent and self
-        // Ace age did increment it by some formula that we need to follow.
-        self.validate_against_parent_gas_limit(header, parent)?;
+            // TODO Check difficulty increment between parent and self
+            // Ace age did increment it by some formula that we need to follow.
+            self.validate_against_parent_gas_limit(header, parent)?;
 
-        validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
+            validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
+        }
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {

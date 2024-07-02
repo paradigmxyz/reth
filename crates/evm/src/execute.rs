@@ -104,6 +104,8 @@ pub struct BlockExecutionOutput<T, DB> {
     pub gas_used: u64,
     /// The full state.
     pub db: State<DB>,
+    /// The indices of valid transactions.
+    pub valid_transaction_indices: Vec<usize>,
 }
 
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.
