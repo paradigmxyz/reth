@@ -92,8 +92,6 @@ where
     let previous_env = Box::new(evm.context.env().clone());
 
     // modify env for pre block call
-    // EvmConfig::fill_tx_env_with_beacon_root_contract_call(&mut evm.context.evm.env,
-    // parent_beacon_block_root);
     EvmConfig::fill_tx_env_with_system_contract_call(
         &mut evm.context.evm.env,
         alloy_eips::eip4788::SYSTEM_ADDRESS,
