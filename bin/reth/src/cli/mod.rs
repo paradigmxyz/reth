@@ -18,6 +18,9 @@ use reth_cli_commands::db;
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
+use reth_optimism_cli::commands::{
+    import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand,
+};
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
@@ -197,11 +200,11 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
     #[cfg(feature = "optimism")]
     #[command(name = "import-op")]
-    ImportOp(crate::commands::import_op::ImportOpCommand),
+    ImportOp(ImportOpCommand),
     /// This imports RLP encoded receipts from a file.
     #[cfg(feature = "optimism")]
     #[command(name = "import-receipts-op")]
-    ImportReceiptsOp(crate::commands::import_receipts_op::ImportReceiptsOpCommand),
+    ImportReceiptsOp(ImportReceiptsOpCommand),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand),
     /// Database debugging utilities
