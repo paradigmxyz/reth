@@ -14,9 +14,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{
-    BlockNumber, BlockWithSenders, EthereumHardfork, Header, Receipt, Request, U256,
-};
+use reth_primitives::{BlockNumber, BlockWithSenders, EthereumHardfork, Header, Receipt, U256};
 use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
@@ -106,14 +104,6 @@ where
     }
 }
 
-/// Helper type for the output of executing a block.
-#[derive(Debug, Clone)]
-struct EthExecuteOutput {
-    receipts: Vec<Receipt>,
-    requests: Vec<Request>,
-    gas_used: u64,
-}
-
 /// Helper container type for EVM with chain spec.
 #[derive(Debug, Clone)]
 struct EthEvmExecutor<EvmConfig> {
@@ -128,7 +118,7 @@ where
     EvmConfig: ConfigureEvm,
 {
     /// Executes the transactions in the block and returns the receipts of the transactions in the
-    /// block, the total gas used and the list of EIP-7685 [requests](Request).
+    /// block, the total gas used and the list of EIP-7685 [requests](reth_primitives::Request).
     ///
     /// This applies the pre-execution and post-execution changes that require an [EVM](Evm), and
     /// executes the transactions.
@@ -141,7 +131,7 @@ where
         &self,
         block: &BlockWithSenders,
         mut evm: Evm<'_, Ext, &mut State<DB>>,
-    ) -> Result<EthExecuteOutput, BlockExecutionError>
+    ) -> Result<BlockExecutionOutput<Receipt>, BlockExecutionError>
     where
         DB: Database,
         DB::Error: Into<ProviderError> + std::fmt::Display,
@@ -228,7 +218,12 @@ where
             vec![]
         };
 
-        Ok(EthExecuteOutput { receipts, requests, gas_used: cumulative_gas_used })
+        Ok(BlockExecutionOutput {
+            receipts,
+            requests,
+            gas_used: cumulative_gas_used,
+            state: Default::default(),
+        })
     }
 }
 
@@ -290,14 +285,14 @@ where
     /// Execute a single block and apply the state changes to the internal state.
     ///
     /// Returns the receipts of the transactions in the block, the total gas used and the list of
-    /// EIP-7685 [requests](Request).
+    /// EIP-7685 [requests](reth_primitives::Request).
     ///
     /// Returns an error if execution fails.
     fn execute_without_verification(
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<EthExecuteOutput, BlockExecutionError> {
+    ) -> Result<BlockExecutionOutput<Receipt>, BlockExecutionError> {
         // 1. prepare state on new block
         self.on_new_block(&block.header);
 
@@ -371,13 +366,13 @@ where
     /// State changes are committed to the database.
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let EthExecuteOutput { receipts, requests, gas_used } =
-            self.execute_without_verification(block, total_difficulty)?;
-
-        // NOTE: we need to merge keep the reverts for the bundle retention
+        let mut output = self.execute_without_verification(block, total_difficulty)?;
         self.state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
+        // NOTE: we need to merge keep the reverts for the bundle retention
+        output.state = self.state.take_bundle();
+
+        Ok(output)
     }
 }
 
@@ -414,7 +409,7 @@ where
 
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
-        let EthExecuteOutput { receipts, requests, gas_used: _ } =
+        let BlockExecutionOutput { receipts, requests, .. } =
             self.executor.execute_without_verification(block, total_difficulty)?;
 
         validate_block_post_execution(block, self.executor.chain_spec(), &receipts, &requests)?;
