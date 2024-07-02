@@ -148,7 +148,9 @@ where
             match action {
                 PersistenceAction::RemoveBlocksAbove((new_tip_num, sender)) => {
                     let output = self.remove_blocks_above(new_tip_num);
-                    sender.send(output).unwrap();
+
+                    // we ignore the error because the caller may or may not care about the result
+                    let _ = sender.send(output);
                 }
                 PersistenceAction::SaveBlocks((blocks, sender)) => {
                     if blocks.is_empty() {
@@ -156,15 +158,21 @@ where
                     }
                     let last_block_hash = blocks.last().unwrap().block().hash();
                     self.write(blocks).unwrap();
-                    sender.send(last_block_hash).unwrap();
+
+                    // we ignore the error because the caller may or may not care about the result
+                    let _ = sender.send(last_block_hash);
                 }
                 PersistenceAction::PruneBefore((block_hash, sender)) => {
                     self.prune_before(block_hash);
-                    sender.send(()).unwrap();
+
+                    // we ignore the error because the caller may or may not care about the result
+                    let _ = sender.send(());
                 }
                 PersistenceAction::CleanStaticFileDuplicates(sender) => {
                     self.clean_static_file_duplicates();
-                    sender.send(()).unwrap();
+
+                    // we ignore the error because the caller may or may not care about the result
+                    let _ = sender.send(());
                 }
             }
         }
@@ -201,6 +209,12 @@ impl PersistenceHandle {
     /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
     pub const fn new(sender: Sender<PersistenceAction>) -> Self {
         Self { sender }
+    }
+
+    /// Sends a specific [`PersistenceAction`] in the contained channel. The caller is responsible
+    /// for creating any channels for the given action.
+    pub fn send_action(&self, action: PersistenceAction) {
+        self.sender.send(action).expect("should be able to send");
     }
 
     /// Tells the persistence task to save a certain list of finalized blocks. The blocks are
