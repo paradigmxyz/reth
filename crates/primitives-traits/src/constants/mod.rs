@@ -3,7 +3,7 @@
 use alloy_primitives::{address, b256, Address, B256, U256};
 use core::time::Duration;
 
-/// Gas units, for example [`GIGAGAS`](gas_units::GIGAGAS).
+/// Gas units, for example [`GIGAGAS`].
 pub mod gas_units;
 pub use gas_units::{GIGAGAS, KILOGAS, MEGAGAS};
 
