@@ -6,7 +6,7 @@
 
 pragma solidity ^0.8.20;
 
-import "lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "../../common/EssentialContract.sol";
 import "../../thirdparty/LibBytesUtils.sol";
 import "../TaikoData.sol";

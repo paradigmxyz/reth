@@ -6,8 +6,8 @@
 
 pragma solidity ^0.8.20;
 
-import "lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import "lib/openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
 import "forge-std/console2.sol";
 import "forge-std/Script.sol";

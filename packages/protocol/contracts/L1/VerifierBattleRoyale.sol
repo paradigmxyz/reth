@@ -14,7 +14,7 @@ import "./verifiers/IVerifier.sol";
 import "./VerifierRegistry.sol";
 import "./TaikoData.sol";
 
-import "lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @title VerifierBattleRoyale
 /// @notice A permissionless bounty to claim a reward for breaking a prover

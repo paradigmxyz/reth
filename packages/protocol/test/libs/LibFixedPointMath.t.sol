@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 // Some of the tests are taken from:
 // https://github.com/recmo/experiment-solexp/blob/main/src/test/FixedPointMathLib.t.sol
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
 import "../TaikoTest.sol";
 
@@ -10,18 +10,18 @@ contract LibFixedPointMathTest is TaikoTest {
         assertEq(LibFixedPointMath.exp(-1e18), 367_879_441_171_442_321);
     }
 
-    function testExpSmallest() public view {
+    function testExpSmallest() public pure {
         int256 y = LibFixedPointMath.exp(-42_139_678_854_452_767_550);
 
         console2.log("LibFixedPointMath.exp(-42139678854452767550)=", uint256(y));
     }
 
-    function testExpLargest() public view {
+    function testExpLargest() public pure {
         int256 y = LibFixedPointMath.exp(int256(uint256(LibFixedPointMath.MAX_EXP_INPUT)));
         console2.log("LibFixedPointMath.exp(135305999368893231588)=", uint256(y));
     }
 
-    function testExpSome() public view {
+    function testExpSome() public pure {
         int256 y = LibFixedPointMath.exp(5e18);
         console2.log("LibFixedPointMath.exp(5e18)=", uint256(y));
     }

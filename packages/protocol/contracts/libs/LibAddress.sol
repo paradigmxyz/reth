@@ -6,10 +6,10 @@
 
 pragma solidity ^0.8.20;
 
-import "lib/openzeppelin-contracts/contracts/utils/Address.sol";
-import "lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
-import "lib/openzeppelin-contracts/contracts/utils/introspection/IERC165.sol";
-import "lib/openzeppelin-contracts/contracts/interfaces/IERC1271.sol";
+import "@openzeppelin/contracts/utils/Address.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import "@openzeppelin/contracts/interfaces/IERC1271.sol";
 
 /// @title LibAddress
 /// @dev Provides utilities for address-related operations.

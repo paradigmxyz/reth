@@ -6,7 +6,7 @@
 
 pragma solidity ^0.8.20;
 
-import "lib/openzeppelin-contracts/contracts/utils/Strings.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
 /*
 import "../contracts/L1/TaikoToken.sol";
 import "../contracts/L1/TaikoL1.sol";

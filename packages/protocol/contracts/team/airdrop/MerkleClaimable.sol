@@ -7,7 +7,7 @@
 pragma solidity ^0.8.20;
 
 import { MerkleProofUpgradeable } from
-    "lib/openzeppelin-contracts-upgradeable/contracts/utils/cryptography/MerkleProofUpgradeable.sol";
+    "@openzeppelin/contracts-upgradeable/utils/cryptography/MerkleProofUpgradeable.sol";
 import "../../common/EssentialContract.sol";
 
 /// @title MerkleClaimable

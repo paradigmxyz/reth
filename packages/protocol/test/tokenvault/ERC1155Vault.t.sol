@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "lib/openzeppelin-contracts/contracts/token/ERC1155/ERC1155.sol";
+import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
 import "../TaikoTest.sol";
 
 contract TestTokenERC1155 is ERC1155 {

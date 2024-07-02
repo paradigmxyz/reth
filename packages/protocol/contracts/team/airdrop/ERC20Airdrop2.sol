@@ -6,7 +6,7 @@
 
 pragma solidity ^0.8.20;
 
-import "lib/openzeppelin-contracts-upgradeable/contracts/token/ERC20/ERC20Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import "../../libs/LibMath.sol";
 import "./MerkleClaimable.sol";
 
