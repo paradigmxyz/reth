@@ -236,7 +236,7 @@ jobs:
       
       - name: Parse hive output
         run: |
-          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" -exec python .github/assets/parse.py {} --exclusion .github/assets/hive_exclusion.json +
+          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/assets/parse.py {} --exclusion .github/assets/hive_exclusion.json
 
       - name: Print simulator output
         if: ${{ failure() }}
