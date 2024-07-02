@@ -280,7 +280,7 @@ mod tests {
     {
         let provider = provider_factory.provider()?;
 
-        // Execute both blocks on top of the genesis state
+        // Execute the block to produce a block execution output
         let block_execution_output = EthExecutorProvider::ethereum(chain_spec)
             .executor(StateProviderDatabase::new(LatestStateProviderRef::new(
                 provider.tx_ref(),
@@ -297,7 +297,7 @@ mod tests {
         };
         execution_outcome.bundle.reverts.sort();
 
-        // Commit the block to the database
+        // Commit the block's execution outcome to the database
         let provider_rw = provider_factory.provider_rw()?;
         let block = block.clone().seal_slow();
         provider_rw.append_blocks_with_state(
@@ -349,7 +349,7 @@ mod tests {
         .with_recovered_senders()
         .ok_or_eyre("failed to recover senders")?;
 
-        // Second block has resend the same transaction with increased nonce
+        // Second block resends the same transaction with increased nonce
         let block2 = Block {
             header: Header {
                 parent_hash: block1.header.hash_slow(),
@@ -458,7 +458,7 @@ mod tests {
         let blocks_and_outcomes = block_execution_it.collect::<Vec<_>>();
         assert_eq!(blocks_and_outcomes.len(), 1);
 
-        // Assert that the backfill job single block iterator produces the same output for each
+        // Assert that the backfill job single block iterator produces the expected output for each
         // block
         for (i, res) in blocks_and_outcomes.into_iter().enumerate() {
             let (block, mut outcome) = res?;
