@@ -20,6 +20,13 @@ pub struct TrieUpdates {
 }
 
 impl TrieUpdates {
+    /// Returns `true` if the updates are empty.
+    pub fn is_empty(&self) -> bool {
+        self.account_nodes.is_empty() &&
+            self.removed_nodes.is_empty() &&
+            self.storage_tries.is_empty()
+    }
+
     /// Returns reference to updated account nodes.
     pub const fn account_nodes_ref(&self) -> &HashMap<Nibbles, BranchNodeCompact> {
         &self.account_nodes
@@ -78,19 +85,27 @@ impl TrieUpdates {
         self,
         tx: &(impl DbTx + DbTxMut),
     ) -> Result<usize, reth_db::DatabaseError> {
-        if self.account_nodes.is_empty() &&
-            self.removed_nodes.is_empty() &&
-            self.storage_tries.is_empty()
-        {
+        if self.is_empty() {
             return Ok(0)
         }
 
+        // Track the number of inserted entries.
         let mut num_entries = 0;
-        let mut account_updates =
-            Vec::from_iter(self.removed_nodes.into_iter().map(|nibbles| (nibbles, None)).chain(
-                self.account_nodes.into_iter().map(|(nibbles, node)| (nibbles, Some(node))),
-            ));
+
+        // Merge updated and removed nodes. Updated nodes must take precedence.
+        let capacity = self.removed_nodes.len() + self.account_nodes.len();
+        let mut account_updates = Vec::with_capacity(capacity);
+        for nibbles in self.removed_nodes {
+            if !self.account_nodes.contains_key(&nibbles) {
+                account_updates.push((nibbles, None));
+            }
+        }
+        for (nibbles, node) in self.account_nodes {
+            account_updates.push((nibbles, Some(node)))
+        }
+        // Sort trie node updates.
         account_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
         let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
         for (key, updated_node) in account_updates {
             let nibbles = StoredNibbles(key);
@@ -147,12 +162,12 @@ impl StorageTrieUpdates {
 
     /// Returns the length of updated nodes.
     pub fn len(&self) -> usize {
-        self.storage_nodes.len() + self.removed_nodes.len()
+        (self.is_deleted as usize) + self.storage_nodes.len() + self.removed_nodes.len()
     }
 
     /// Returns `true` if storage updates are empty.
     pub fn is_empty(&self) -> bool {
-        self.storage_nodes.is_empty() && self.removed_nodes.is_empty()
+        !self.is_deleted && self.storage_nodes.is_empty() && self.removed_nodes.is_empty()
     }
 
     /// Sets `deleted` flag on the storage trie.
@@ -188,6 +203,10 @@ impl StorageTrieUpdates {
         tx: &(impl DbTx + DbTxMut),
         hashed_address: B256,
     ) -> Result<usize, reth_db::DatabaseError> {
+        if self.is_empty() {
+            return Ok(0)
+        }
+
         let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
         self.write_with_cursor(&mut cursor, hashed_address)
     }
@@ -213,12 +232,21 @@ impl StorageTrieUpdates {
             cursor.delete_current_duplicates()?;
         }
 
-        let mut num_entries = 0;
+        // Merge updated and removed nodes. Updated nodes must take precedence.
         let mut storage_updates =
-            Vec::from_iter(self.removed_nodes.into_iter().map(|nibbles| (nibbles, None)).chain(
-                self.storage_nodes.into_iter().map(|(nibbles, node)| (nibbles, Some(node))),
-            ));
+            Vec::with_capacity(self.removed_nodes.len() + self.storage_nodes.len());
+        for nibbles in self.removed_nodes {
+            if !self.storage_nodes.contains_key(&nibbles) {
+                storage_updates.push((nibbles, None))
+            }
+        }
+        for (nibbles, node) in self.storage_nodes {
+            storage_updates.push((nibbles, Some(node)));
+        }
+        // Sort trie node updates.
         storage_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        let mut num_entries = 0;
         for (nibbles, maybe_updated) in storage_updates {
             if !nibbles.is_empty() {
                 num_entries += 1;
