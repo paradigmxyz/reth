@@ -109,7 +109,10 @@ impl EnvironmentArgs {
         static_file_provider: StaticFileProvider,
     ) -> eyre::Result<ProviderFactory<Arc<DatabaseEnv>>> {
         let has_receipt_pruning = config.prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
-        let factory = ProviderFactory::new(db, self.chain.clone(), static_file_provider);
+        let prune_modes =
+            config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default();
+        let factory = ProviderFactory::new(db, self.chain.clone(), static_file_provider)
+            .with_prune_modes(prune_modes.clone());
 
         info!(target: "reth::cli", "Verifying storage consistency.");
 
@@ -122,8 +125,6 @@ impl EnvironmentArgs {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
                 return Ok(factory)
             }
-
-            let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.

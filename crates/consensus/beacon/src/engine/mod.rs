@@ -2159,7 +2159,6 @@ mod tests {
                 provider
                     .insert_block(
                         b.clone().try_seal_with_senders().expect("invalid tx signature in block"),
-                        None,
                     )
                     .map(drop)
             })

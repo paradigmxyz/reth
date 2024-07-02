@@ -631,7 +631,6 @@ mod tests {
                 ExecutionOutcome::default(),
                 HashedPostState::default(),
                 TrieUpdates::default(),
-                None,
             )
             .unwrap();
         provider.commit().unwrap();

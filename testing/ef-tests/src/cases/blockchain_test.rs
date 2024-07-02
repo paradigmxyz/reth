@@ -102,7 +102,6 @@ impl Case for BlockchainTestCase {
                     )
                     .try_seal_with_senders()
                     .unwrap(),
-                    None,
                 )?;
                 case.pre.write_to_db(provider.tx_ref())?;
 
@@ -121,7 +120,6 @@ impl Case for BlockchainTestCase {
                     let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
                     provider.insert_historical_block(
                         decoded.clone().try_seal_with_senders().unwrap(),
-                        None,
                     )?;
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;
