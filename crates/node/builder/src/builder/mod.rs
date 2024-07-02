@@ -38,7 +38,7 @@ use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
 pub use states::*;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 mod states;
 
@@ -509,12 +509,16 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             "p2p network task",
             |shutdown| {
                 network.run_until_graceful_shutdown(shutdown, |network| {
-                    match network.write_peers_to_file(known_peers_file) {
-                        Ok(_) => {
-                            info!(target: "reth::cli", "Successfully wrote network peers to file");
-                        }
-                        Err(err) => {
-                            warn!(target: "reth::cli", %err, "Failed to write network peers to file");
+                    if let Some(peers_file) = known_peers_file {
+                        let known_peers = network.all_peers().collect::<Vec<_>>();
+                        trace!(target: "reth::cli", peers_file =?peers_file, num_peers=%known_peers.len(), "Saving current peers");
+                        match network.write_peers_to_file(peers_file) {
+                            Ok(_) => {
+                                info!(target: "reth::cli", "Wrote network peers to file");
+                            }
+                            Err(err) => {
+                                warn!(target: "reth::cli", %err, "Failed to write network peers to file");
+                            }
                         }
                     }
                 })
