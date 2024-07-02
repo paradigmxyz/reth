@@ -58,7 +58,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Run no_std checks
-        run: .github/scripts/check_no_std.sh
+        run: .github/assets/check_no_std.sh
 
   crate-checks:
     runs-on: ubuntu-latest
