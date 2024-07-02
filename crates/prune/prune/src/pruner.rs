@@ -176,10 +176,13 @@ impl<DB: Database> Pruner<DB> {
         let mut pruned = 0;
         let mut progress = PruneProgress::Finished;
 
-        for (segment, purpose) in self.segments.iter() {
+        let mut segment_iter = self.segments.iter();
+        loop {
             if limiter.is_limit_reached() {
                 break
             }
+
+            let Some((segment, purpose)) = segment_iter.next() else { break };
 
             if let Some((to_block, prune_mode)) = segment
                 .mode()
