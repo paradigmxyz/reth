@@ -61,7 +61,7 @@ pub struct Pruner<DB> {
     event_sender: EventSender<PrunerEvent>,
 }
 
-impl<DB: Database + 'static> Pruner<DB> {
+impl<DB: Database> Pruner<DB> {
     /// Creates a new [Pruner].
     pub fn new(
         provider_factory: ProviderFactory<DB>,
