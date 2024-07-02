@@ -1266,8 +1266,7 @@ mod tests {
 
         let root = hb.root();
         let (_, updates) = hb.split();
-        let mut trie_updates = StorageTrieUpdates::default();
-        trie_updates.storage_nodes = updates;
+        let trie_updates = StorageTrieUpdates { storage_nodes: updates, ..Default::default() };
         (root, trie_updates)
     }
 

@@ -188,9 +188,9 @@ impl Command {
         // Compare updates
         let mut in_mem_mismatched = Vec::new();
         let mut incremental_mismatched = Vec::new();
-        let mut in_mem_updates_iter = in_memory_updates.account_nodes_ref().into_iter().peekable();
+        let mut in_mem_updates_iter = in_memory_updates.account_nodes_ref().iter().peekable();
         let mut incremental_updates_iter =
-            incremental_trie_updates.account_nodes_ref().into_iter().peekable();
+            incremental_trie_updates.account_nodes_ref().iter().peekable();
 
         while in_mem_updates_iter.peek().is_some() || incremental_updates_iter.peek().is_some() {
             match (in_mem_updates_iter.next(), incremental_updates_iter.next()) {
