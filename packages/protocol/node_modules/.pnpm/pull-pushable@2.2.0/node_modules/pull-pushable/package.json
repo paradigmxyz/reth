@@ -1,0 +1,20 @@
+{
+  "name": "pull-pushable",
+  "description": "pull-stream with a push interface",
+  "version": "2.2.0",
+  "homepage": "https://github.com/dominictarr/pull-pushable",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/dominictarr/pull-pushable.git"
+  },
+  "devDependencies": {
+    "pull-stream": "^3.0.1",
+    "standard": "^7.1.2",
+    "tape": "^4.6.0"
+  },
+  "scripts": {
+    "test": "standard && tape test/*.js"
+  },
+  "author": "Dominic Tarr <dominic.tarr@gmail.com> (http://dominictarr.com)",
+  "license": "MIT"
+}

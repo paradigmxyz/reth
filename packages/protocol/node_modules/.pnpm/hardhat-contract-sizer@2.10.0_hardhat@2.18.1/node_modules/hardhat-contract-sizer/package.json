@@ -1,0 +1,34 @@
+{
+  "name": "hardhat-contract-sizer",
+  "version": "2.10.0",
+  "license": "MIT",
+  "description": "Output Solidity contract sizes with Hardhat",
+  "keywords": [
+    "hardhat",
+    "buidler",
+    "abi",
+    "solidity",
+    "solc",
+    "smart-contracts",
+    "ethereum",
+    "blockchain",
+    "wow",
+    "bytecode"
+  ],
+  "repository": "https://github.com/ItsNickBarry/hardhat-contract-sizer",
+  "author": "Nick Barry",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "peerDependencies": {
+    "hardhat": "^2.0.0"
+  },
+  "devDependencies": {
+    "eslint": "^7.6.0",
+    "hardhat": "^2.0.0"
+  },
+  "dependencies": {
+    "chalk": "^4.0.0",
+    "cli-table3": "^0.6.0",
+    "strip-ansi": "^6.0.0"
+  }
+}

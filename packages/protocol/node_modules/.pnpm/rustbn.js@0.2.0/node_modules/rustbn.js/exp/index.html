@@ -1,0 +1,75 @@
+<html>
+    <head>
+        <script>
+            console.log('running main.');
+            function bodyOnloadHandler() {
+                console.log("body onload");
+                main();
+            }
+            function overwriteConsoleLog () {
+              var old = console.log;
+              var logger = document.getElementById('log');
+              console.log = function (message) {
+                if (typeof message == 'object') {
+                  logger.innerHTML += (JSON && JSON.stringify ? JSON.stringify(message) : message) + '<br />';
+                } else {
+                  logger.innerHTML += message + '<br />';
+                }
+              }
+            }
+
+            /*
+            // for wasm
+            var Module = {
+                wasmBinaryFile: "rustbn.wasm",
+                onRuntimeInitialized: main,
+            }
+            */
+
+            function main() {
+              overwriteConsoleLog();
+
+              const ecMul = Module.cwrap('ec_mul', 'string', ['string']);
+              const ecAdd = Module.cwrap('ec_add', 'string', ['string']);
+              const ecPairing = Module.cwrap('ec_pairing', 'string', ['string']);
+
+              // TODO: more test cases
+
+              //let points_input = p1 + p2;
+              //let points_input = '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000';
+
+              let p1 = '00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'
+              let p2 = '30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001'
+
+              let ecMul_points_input = p1 + p2;
+              try {
+                let ecMul_result = ecMul(ecMul_points_input);
+                console.log('ecMul_result: ' + ecMul_result);
+              } catch (e) {
+                console.log('ecMul_result caught error.');
+                console.log(e);
+              }
+
+              //let ecAdd_points_input = '0f25929bcb43d5a57391564615c9e70a992b10eafa4db109709649cf48c50dd216da2f5cb6be7a0aa72c440c53c9bbdfec6c36c7d515536431b3a865468acbba0f25919bcb43d5a57391564615c9e70a992b10eafa4db109709649cf48c50dd216da2f5cb6be7a0aa72c440c53c9bbdfec6c36c7d515536431b3a865468acbba';
+              //let ecAdd_points_input = '000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000';
+              let add_p1 = '00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002';
+              let add_p2 = '00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002';
+
+              let ecAdd_points_input = add_p1 + add_p2;
+              try {
+                let ecAdd_result = ecAdd(ecAdd_points_input);
+                console.log('ecAdd_result: ' + ecAdd_result);
+                // 030644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd315ed738c0e0a7c92e7845f96b2ae9c0a68a6a449e3538fc7ff3ebf7a5a18a2c4
+              } catch (e) {
+                console.log('ecAdd caught error.');
+                console.log(e);
+              }
+
+            }
+        </script>
+        <script src="../lib/index.asm.js"></script>
+    </head>
+    <body onload="bodyOnloadHandler()">
+      <div id="log"></div>
+    </body>
+</html>

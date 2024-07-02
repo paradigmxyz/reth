@@ -1,0 +1,552 @@
+{
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "implementationContract",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "previousAdmin",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "newAdmin",
+          "type": "address"
+        }
+      ],
+      "name": "AdminChanged",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "address",
+          "name": "implementation",
+          "type": "address"
+        }
+      ],
+      "name": "Upgraded",
+      "type": "event"
+    },
+    {
+      "stateMutability": "payable",
+      "type": "fallback"
+    },
+    {
+      "inputs": [],
+      "name": "admin",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "newAdmin",
+          "type": "address"
+        }
+      ],
+      "name": "changeAdmin",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "implementation",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "newImplementation",
+          "type": "address"
+        }
+      ],
+      "name": "upgradeTo",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "newImplementation",
+          "type": "address"
+        },
+        {
+          "internalType": "bytes",
+          "name": "data",
+          "type": "bytes"
+        }
+      ],
+      "name": "upgradeToAndCall",
+      "outputs": [],
+      "stateMutability": "payable",
+      "type": "function"
+    }
+  ],
+  "bytecode": {
+    "object": "0x608060405234801561001057600080fd5b506040516108a93803806108a98339818101604052602081101561003357600080fd5b5051808061004081610051565b5061004a336100c3565b5050610123565b610064816100e760201b61042a1760201c565b61009f5760405162461bcd60e51b815260040180806020018281038252603b81526020018061086e603b913960400191505060405180910390fd5b7f7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c355565b7f10d6a54a4754c8869d6886b5f5d7fbfa5b4522237ea5c60d11bc4e7a1ff9390b55565b6000813f7fc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a47081811480159061011b57508115155b949350505050565b61073c806101326000396000f3fe60806040526004361061005a5760003560e01c80635c60da1b116100435780635c60da1b146101315780638f2839701461016f578063f851a440146101af5761005a565b80633659cfe6146100645780634f1ef286146100a4575b6100626101c4565b005b34801561007057600080fd5b506100626004803603602081101561008757600080fd5b503573ffffffffffffffffffffffffffffffffffffffff166101de565b610062600480360360408110156100ba57600080fd5b73ffffffffffffffffffffffffffffffffffffffff82351691908101906040810160208201356401000000008111156100f257600080fd5b82018360208201111561010457600080fd5b8035906020019184600183028401116401000000008311171561012657600080fd5b509092509050610232565b34801561013d57600080fd5b50610146610309565b6040805173ffffffffffffffffffffffffffffffffffffffff9092168252519081900360200190f35b34801561017b57600080fd5b506100626004803603602081101561019257600080fd5b503573ffffffffffffffffffffffffffffffffffffffff16610318565b3480156101bb57600080fd5b50610146610420565b6101cc610466565b6101dc6101d76104fa565b61051f565b565b6101e6610543565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614156102275761022281610568565b61022f565b61022f6101c4565b50565b61023a610543565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614156102fc5761027683610568565b60003073ffffffffffffffffffffffffffffffffffffffff16348484604051808383808284376040519201945060009350909150508083038185875af1925050503d80600081146102e3576040519150601f19603f3d011682016040523d82523d6000602084013e6102e8565b606091505b50509050806102f657600080fd5b50610304565b6103046101c4565b505050565b60006103136104fa565b905090565b610320610543565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614156102275773ffffffffffffffffffffffffffffffffffffffff81166103bf576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004018080602001828103825260368152602001806106966036913960400191505060405180910390fd5b7f7e644d79422f17c01e4894b5f4f588d331ebfa28653d42ae832dc59e38c9798f6103e8610543565b6040805173ffffffffffffffffffffffffffffffffffffffff928316815291841660208301528051918290030190a1610222816105bd565b6000610313610543565b6000813f7fc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a47081811480159061045e57508115155b949350505050565b61046e610543565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614156104f2576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004018080602001828103825260328152602001806106646032913960400191505060405180910390fd5b6101dc6101dc565b7f7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c35490565b3660008037600080366000845af43d6000803e80801561053e573d6000f35b3d6000fd5b7f10d6a54a4754c8869d6886b5f5d7fbfa5b4522237ea5c60d11bc4e7a1ff9390b5490565b610571816105e1565b6040805173ffffffffffffffffffffffffffffffffffffffff8316815290517fbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b9181900360200190a150565b7f10d6a54a4754c8869d6886b5f5d7fbfa5b4522237ea5c60d11bc4e7a1ff9390b55565b6105ea8161042a565b61063f576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040180806020018281038252603b8152602001806106cc603b913960400191505060405180910390fd5b7f7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c35556fe43616e6e6f742063616c6c2066616c6c6261636b2066756e6374696f6e2066726f6d207468652070726f78792061646d696e43616e6e6f74206368616e6765207468652061646d696e206f6620612070726f787920746f20746865207a65726f206164647265737343616e6e6f742073657420612070726f787920696d706c656d656e746174696f6e20746f2061206e6f6e2d636f6e74726163742061646472657373a264697066735822122001b610efbebc57927addec087895f40a32b15707f9bbcd4d028e2ffcc8cd241f64736f6c634300060c003343616e6e6f742073657420612070726f787920696d706c656d656e746174696f6e20746f2061206e6f6e2d636f6e74726163742061646472657373",
+    "sourceMap": "1385:182:20:-:0;;;1443:122;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;-1:-1:-1;1443:122:20;;;2686:42:19;2705:22;2686:18;:42::i;:::-;-1:-1:-1;3044:21:17::1;3054:10;3044:9;:21::i;:::-;2847:225:::0;1443:122:20;1385:182;;3492:342:19;3586:37;3605:17;3586:18;;;;;:37;;:::i;:::-;3565:143;;;;-1:-1:-1;;;3565:143:19;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;2298:66;3787:31;3773:55::o;5448:153:17:-;2256:66;5563:22;5549:46::o;718:610:21:-;778:4;1239:20;;1084:66;1278:23;;;;;;:42;;-1:-1:-1;1305:15:21;;;1278:42;1270:51;718:610;-1:-1:-1;;;;718:610:21:o;1385:182:20:-;;;;;;;",
+    "linkReferences": {}
+  },
+  "deployedBytecode": {
+    "object": "0x60806040526004361061005a5760003560e01c80635c60da1b116100435780635c60da1b146101315780638f2839701461016f578063f851a440146101af5761005a565b80633659cfe6146100645780634f1ef286146100a4575b6100626101c4565b005b34801561007057600080fd5b506100626004803603602081101561008757600080fd5b503573ffffffffffffffffffffffffffffffffffffffff166101de565b610062600480360360408110156100ba57600080fd5b73ffffffffffffffffffffffffffffffffffffffff82351691908101906040810160208201356401000000008111156100f257600080fd5b82018360208201111561010457600080fd5b8035906020019184600183028401116401000000008311171561012657600080fd5b509092509050610232565b34801561013d57600080fd5b50610146610309565b6040805173ffffffffffffffffffffffffffffffffffffffff9092168252519081900360200190f35b34801561017b57600080fd5b506100626004803603602081101561019257600080fd5b503573ffffffffffffffffffffffffffffffffffffffff16610318565b3480156101bb57600080fd5b50610146610420565b6101cc610466565b6101dc6101d76104fa565b61051f565b565b6101e6610543565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614156102275761022281610568565b61022f565b61022f6101c4565b50565b61023a610543565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614156102fc5761027683610568565b60003073ffffffffffffffffffffffffffffffffffffffff16348484604051808383808284376040519201945060009350909150508083038185875af1925050503d80600081146102e3576040519150601f19603f3d011682016040523d82523d6000602084013e6102e8565b606091505b50509050806102f657600080fd5b50610304565b6103046101c4565b505050565b60006103136104fa565b905090565b610320610543565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614156102275773ffffffffffffffffffffffffffffffffffffffff81166103bf576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004018080602001828103825260368152602001806106966036913960400191505060405180910390fd5b7f7e644d79422f17c01e4894b5f4f588d331ebfa28653d42ae832dc59e38c9798f6103e8610543565b6040805173ffffffffffffffffffffffffffffffffffffffff928316815291841660208301528051918290030190a1610222816105bd565b6000610313610543565b6000813f7fc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a47081811480159061045e57508115155b949350505050565b61046e610543565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614156104f2576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004018080602001828103825260328152602001806106646032913960400191505060405180910390fd5b6101dc6101dc565b7f7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c35490565b3660008037600080366000845af43d6000803e80801561053e573d6000f35b3d6000fd5b7f10d6a54a4754c8869d6886b5f5d7fbfa5b4522237ea5c60d11bc4e7a1ff9390b5490565b610571816105e1565b6040805173ffffffffffffffffffffffffffffffffffffffff8316815290517fbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b9181900360200190a150565b7f10d6a54a4754c8869d6886b5f5d7fbfa5b4522237ea5c60d11bc4e7a1ff9390b55565b6105ea8161042a565b61063f576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040180806020018281038252603b8152602001806106cc603b913960400191505060405180910390fd5b7f7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c35556fe43616e6e6f742063616c6c2066616c6c6261636b2066756e6374696f6e2066726f6d207468652070726f78792061646d696e43616e6e6f74206368616e6765207468652061646d696e206f6620612070726f787920746f20746865207a65726f206164647265737343616e6e6f742073657420612070726f787920696d706c656d656e746174696f6e20746f2061206e6f6e2d636f6e74726163742061646472657373a264697066735822122001b610efbebc57927addec087895f40a32b15707f9bbcd4d028e2ffcc8cd241f64736f6c634300060c0033",
+    "sourceMap": "1385:182:20:-:0;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;1836:11:18;:9;:11::i;:::-;1385:182:20;4049:109:17;;;;;;;;;;;;;;;;;;;;;;;;;;-1:-1:-1;4049:109:17;;;;:::i;4702:406::-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;-1:-1:-1;4702:406:17;;-1:-1:-1;4702:406:17;-1:-1:-1;4702:406:17;:::i;3294:99::-;;;;;;;;;;;;;:::i;:::-;;;;;;;;;;;;;;;;;;;3581:272;;;;;;;;;;;;;;;;;;;;;;;;;;-1:-1:-1;3581:272:17;;;;:::i;3141:81::-;;;;;;;;;;;;;:::i;3688:100:18:-;3728:15;:13;:15::i;:::-;3753:28;3763:17;:15;:17::i;:::-;3753:9;:28::i;:::-;3688:100::o;4049:109:17:-;2571:8;:6;:8::i;:::-;2557:22;;:10;:22;;;2553:96;;;4122:29:::1;4133:17;4122:10;:29::i;:::-;2553:96:::0;;;2627:11;:9;:11::i;:::-;4049:109;:::o;4702:406::-;2571:8;:6;:8::i;:::-;2557:22;;:10;:22;;;2553:96;;;4839:29:::1;4850:17;4839:10;:29::i;:::-;4965:12;4990:4;4982:18;;5008:9;5019:4;;4982:42;;;;;;;;;;::::0;;::::1;::::0;-1:-1:-1;4982:42:17::1;::::0;-1:-1:-1;4982:42:17;;-1:-1:-1;;4982:42:17;;::::1;::::0;;;::::1;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;4964:60;;;5093:7;5085:16;;;::::0;::::1;;2595:1;2553:96:::0;;;2627:11;:9;:11::i;:::-;4702:406;;;:::o;3294:99::-;3343:7;3369:17;:15;:17::i;:::-;3362:24;;3294:99;:::o;3581:272::-;2571:8;:6;:8::i;:::-;2557:22;;:10;:22;;;2553:96;;;3668:22:::1;::::0;::::1;3647:123;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;3785:32;3798:8;:6;:8::i;:::-;3785:32;::::0;;::::1;::::0;;::::1;::::0;;;;::::1;;::::0;::::1;::::0;;;;;;;;;::::1;3827:19;3837:8;3827:9;:19::i;3141:81::-:0;3181:7;3207:8;:6;:8::i;718:610:21:-;778:4;1239:20;;1084:66;1278:23;;;;;;:42;;-1:-1:-1;1305:15:21;;;1278:42;1270:51;718:610;-1:-1:-1;;;;718:610:21:o;5684:210:17:-;5772:8;:6;:8::i;:::-;5758:22;;:10;:22;;;;5737:119;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;5866:21;:19;:21::i;2863:185:19:-;2298:66;3021:11;;2999:43::o;2293:1025:18:-;2623:14;2620:1;2617;2604:34;2934:1;2915;2883:14;2864:1;2832:14;2809:5;2779:170;3023:16;3020:1;3017;3002:38;3061:6;3136:74;;;;3267:16;3264:1;3257:27;3136:74;3175:16;3172:1;3165:27;5165:157:17;2256:66;5295:11;;5274:42::o;3193:152:19:-;3259:37;3278:17;3259:18;:37::i;:::-;3311:27;;;;;;;;;;;;;;;;;;;3193:152;:::o;5448:153:17:-;2256:66;5563:22;5549:46::o;3492:342:19:-;3586:37;3605:17;3586:18;:37::i;:::-;3565:143;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;2298:66;3787:31;3773:55::o",
+    "linkReferences": {}
+  },
+  "methodIdentifiers": {
+    "admin()": "f851a440",
+    "changeAdmin(address)": "8f283970",
+    "implementation()": "5c60da1b",
+    "upgradeTo(address)": "3659cfe6",
+    "upgradeToAndCall(address,bytes)": "4f1ef286"
+  },
+  "rawMetadata": "{\"compiler\":{\"version\":\"0.6.12+commit.27d51765\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"implementationContract\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"previousAdmin\",\"type\":\"address\"},{\"indexed\":false,\"internalType\":\"address\",\"name\":\"newAdmin\",\"type\":\"address\"}],\"name\":\"AdminChanged\",\"type\":\"event\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"implementation\",\"type\":\"address\"}],\"name\":\"Upgraded\",\"type\":\"event\"},{\"stateMutability\":\"payable\",\"type\":\"fallback\"},{\"inputs\":[],\"name\":\"admin\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"newAdmin\",\"type\":\"address\"}],\"name\":\"changeAdmin\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"implementation\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}],\"stateMutability\":\"view\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"newImplementation\",\"type\":\"address\"}],\"name\":\"upgradeTo\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"newImplementation\",\"type\":\"address\"},{\"internalType\":\"bytes\",\"name\":\"data\",\"type\":\"bytes\"}],\"name\":\"upgradeToAndCall\",\"outputs\":[],\"stateMutability\":\"payable\",\"type\":\"function\"}],\"devdoc\":{\"details\":\"This contract proxies FiatToken calls and enables FiatToken upgrades\",\"kind\":\"dev\",\"methods\":{\"admin()\":{\"returns\":{\"_0\":\"The address of the proxy admin.\"}},\"changeAdmin(address)\":{\"details\":\"Changes the admin of the proxy. Only the current admin can call this function.\",\"params\":{\"newAdmin\":\"Address to transfer proxy administration to.\"}},\"implementation()\":{\"returns\":{\"_0\":\"The address of the implementation.\"}},\"upgradeTo(address)\":{\"details\":\"Upgrade the backing implementation of the proxy. Only the admin can call this function.\",\"params\":{\"newImplementation\":\"Address of the new implementation.\"}},\"upgradeToAndCall(address,bytes)\":{\"details\":\"Upgrade the backing implementation of the proxy and call a function on the new implementation. This is useful to initialize the proxied contract.\",\"params\":{\"data\":\"Data to send as msg.data in the low level call. It should include the signature and the parameters of the function to be called, as described in https://solidity.readthedocs.io/en/develop/abi-spec.html#function-selector-and-argument-encoding.\",\"newImplementation\":\"Address of the new implementation.\"}}},\"title\":\"FiatTokenProxy\",\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{},\"version\":1}},\"settings\":{\"compilationTarget\":{\"src/FiatTokenProxy/centre-tokens/contracts/v1/FiatTokenProxy.sol\":\"FiatTokenProxy\"},\"evmVersion\":\"istanbul\",\"libraries\":{},\"metadata\":{\"bytecodeHash\":\"ipfs\"},\"optimizer\":{\"enabled\":true,\"runs\":10000000},\"remappings\":[\":ds-test/=lib/forge-std/lib/ds-test/src/\",\":forge-std/=lib/forge-std/src/\"]},\"sources\":{\"src/FiatTokenProxy/centre-tokens/contracts/upgradeability/AdminUpgradeabilityProxy.sol\":{\"keccak256\":\"0xc93cb352d8b777ea96e743124af5386eeee32a9fdef0b2fbd89623988e66caad\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://d0407b40cd936bdf6f6ae141fef3da54824a786affc9a459cd6cd83478043683\",\"dweb:/ipfs/QmQh2LjAVdU2HKc7w1fXxuPEfFvTcBifHiYzgdrZtDB9rk\"]},\"src/FiatTokenProxy/centre-tokens/contracts/upgradeability/Proxy.sol\":{\"keccak256\":\"0x6cc252e2b80c8ecaf6d29b950ba3591e4366caf06c3ccba89a8f9cbd2ee807e3\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://d60d210ae173d21b90b989e69c50789fb09dc27ccb0736b41907471248ee3087\",\"dweb:/ipfs/QmQbijUGm48UDyqnefEJExWsxBViKj1M5TAWY82Jn6sJW7\"]},\"src/FiatTokenProxy/centre-tokens/contracts/upgradeability/UpgradeabilityProxy.sol\":{\"keccak256\":\"0x3086b8904fb474eb3d8d701f8ec6991796c5e8a7345ace9c3aabc140973f6c85\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://cde7d942bb42ee3fb09ed643751151bc192522a1dc9ccb5d28aff7fdadf8b9e6\",\"dweb:/ipfs/QmQBVbxYcZjRFH66R1ZByXx8rQym3Sx7jjFtFKRWhLXxdg\"]},\"src/FiatTokenProxy/centre-tokens/contracts/v1/FiatTokenProxy.sol\":{\"keccak256\":\"0x7e640892ac0fd6efafe4a9dc08cbc7ba5e825dafe8a6a8ebf717e7026b8fb69f\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://2e84a985f3271652e16eec4df9be1829f042a98b5723db5b87aeeb8eadc9c207\",\"dweb:/ipfs/QmU4JWGMzd3rA64BiDVejhnapKRJG4WHLuw3g866hFPLTx\"]},\"src/FiatTokenProxy/openzeppelin/contracts/utils/Address.sol\":{\"keccak256\":\"0xdfb4f812600ba4ce6738c35584ceb8c9433472583051b48ba5b1f66cb758a498\",\"license\":\"MIT\",\"urls\":[\"bzz-raw://df02dffe1c1de089d9b4f6192f0dcf464526f2230f420b3deec4645e0cdd2bff\",\"dweb:/ipfs/QmcqXGAU3KJqwrgUVoGJ2W8osomhSJ4R5kdsRpbuW3fELS\"]}},\"version\":1}",
+  "metadata": {
+    "compiler": {
+      "version": "0.6.12+commit.27d51765"
+    },
+    "language": "Solidity",
+    "output": {
+      "abi": [
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "implementationContract",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "constructor"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "previousAdmin",
+              "type": "address",
+              "indexed": false
+            },
+            {
+              "internalType": "address",
+              "name": "newAdmin",
+              "type": "address",
+              "indexed": false
+            }
+          ],
+          "type": "event",
+          "name": "AdminChanged",
+          "anonymous": false
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "implementation",
+              "type": "address",
+              "indexed": false
+            }
+          ],
+          "type": "event",
+          "name": "Upgraded",
+          "anonymous": false
+        },
+        {
+          "inputs": [],
+          "stateMutability": "payable",
+          "type": "fallback"
+        },
+        {
+          "inputs": [],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "admin",
+          "outputs": [
+            {
+              "internalType": "address",
+              "name": "",
+              "type": "address"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "newAdmin",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "changeAdmin"
+        },
+        {
+          "inputs": [],
+          "stateMutability": "view",
+          "type": "function",
+          "name": "implementation",
+          "outputs": [
+            {
+              "internalType": "address",
+              "name": "",
+              "type": "address"
+            }
+          ]
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "newImplementation",
+              "type": "address"
+            }
+          ],
+          "stateMutability": "nonpayable",
+          "type": "function",
+          "name": "upgradeTo"
+        },
+        {
+          "inputs": [
+            {
+              "internalType": "address",
+              "name": "newImplementation",
+              "type": "address"
+            },
+            {
+              "internalType": "bytes",
+              "name": "data",
+              "type": "bytes"
+            }
+          ],
+          "stateMutability": "payable",
+          "type": "function",
+          "name": "upgradeToAndCall"
+        }
+      ],
+      "devdoc": {
+        "kind": "dev",
+        "methods": {
+          "admin()": {
+            "returns": {
+              "_0": "The address of the proxy admin."
+            }
+          },
+          "changeAdmin(address)": {
+            "details": "Changes the admin of the proxy. Only the current admin can call this function.",
+            "params": {
+              "newAdmin": "Address to transfer proxy administration to."
+            }
+          },
+          "implementation()": {
+            "returns": {
+              "_0": "The address of the implementation."
+            }
+          },
+          "upgradeTo(address)": {
+            "details": "Upgrade the backing implementation of the proxy. Only the admin can call this function.",
+            "params": {
+              "newImplementation": "Address of the new implementation."
+            }
+          },
+          "upgradeToAndCall(address,bytes)": {
+            "details": "Upgrade the backing implementation of the proxy and call a function on the new implementation. This is useful to initialize the proxied contract.",
+            "params": {
+              "data": "Data to send as msg.data in the low level call. It should include the signature and the parameters of the function to be called, as described in https://solidity.readthedocs.io/en/develop/abi-spec.html#function-selector-and-argument-encoding.",
+              "newImplementation": "Address of the new implementation."
+            }
+          }
+        },
+        "version": 1
+      },
+      "userdoc": {
+        "kind": "user",
+        "methods": {},
+        "version": 1
+      }
+    },
+    "settings": {
+      "remappings": [
+        "ds-test/=lib/forge-std/lib/ds-test/src/",
+        "forge-std/=lib/forge-std/src/"
+      ],
+      "optimizer": {
+        "enabled": true,
+        "runs": 10000000
+      },
+      "metadata": {
+        "bytecodeHash": "ipfs"
+      },
+      "compilationTarget": {
+        "src/FiatTokenProxy/centre-tokens/contracts/v1/FiatTokenProxy.sol": "FiatTokenProxy"
+      },
+      "libraries": {}
+    },
+    "sources": {
+      "src/FiatTokenProxy/centre-tokens/contracts/upgradeability/AdminUpgradeabilityProxy.sol": {
+        "keccak256": "0xc93cb352d8b777ea96e743124af5386eeee32a9fdef0b2fbd89623988e66caad",
+        "urls": [
+          "bzz-raw://d0407b40cd936bdf6f6ae141fef3da54824a786affc9a459cd6cd83478043683",
+          "dweb:/ipfs/QmQh2LjAVdU2HKc7w1fXxuPEfFvTcBifHiYzgdrZtDB9rk"
+        ],
+        "license": "MIT"
+      },
+      "src/FiatTokenProxy/centre-tokens/contracts/upgradeability/Proxy.sol": {
+        "keccak256": "0x6cc252e2b80c8ecaf6d29b950ba3591e4366caf06c3ccba89a8f9cbd2ee807e3",
+        "urls": [
+          "bzz-raw://d60d210ae173d21b90b989e69c50789fb09dc27ccb0736b41907471248ee3087",
+          "dweb:/ipfs/QmQbijUGm48UDyqnefEJExWsxBViKj1M5TAWY82Jn6sJW7"
+        ],
+        "license": "MIT"
+      },
+      "src/FiatTokenProxy/centre-tokens/contracts/upgradeability/UpgradeabilityProxy.sol": {
+        "keccak256": "0x3086b8904fb474eb3d8d701f8ec6991796c5e8a7345ace9c3aabc140973f6c85",
+        "urls": [
+          "bzz-raw://cde7d942bb42ee3fb09ed643751151bc192522a1dc9ccb5d28aff7fdadf8b9e6",
+          "dweb:/ipfs/QmQBVbxYcZjRFH66R1ZByXx8rQym3Sx7jjFtFKRWhLXxdg"
+        ],
+        "license": "MIT"
+      },
+      "src/FiatTokenProxy/centre-tokens/contracts/v1/FiatTokenProxy.sol": {
+        "keccak256": "0x7e640892ac0fd6efafe4a9dc08cbc7ba5e825dafe8a6a8ebf717e7026b8fb69f",
+        "urls": [
+          "bzz-raw://2e84a985f3271652e16eec4df9be1829f042a98b5723db5b87aeeb8eadc9c207",
+          "dweb:/ipfs/QmU4JWGMzd3rA64BiDVejhnapKRJG4WHLuw3g866hFPLTx"
+        ],
+        "license": "MIT"
+      },
+      "src/FiatTokenProxy/openzeppelin/contracts/utils/Address.sol": {
+        "keccak256": "0xdfb4f812600ba4ce6738c35584ceb8c9433472583051b48ba5b1f66cb758a498",
+        "urls": [
+          "bzz-raw://df02dffe1c1de089d9b4f6192f0dcf464526f2230f420b3deec4645e0cdd2bff",
+          "dweb:/ipfs/QmcqXGAU3KJqwrgUVoGJ2W8osomhSJ4R5kdsRpbuW3fELS"
+        ],
+        "license": "MIT"
+      }
+    },
+    "version": 1
+  },
+  "ast": {
+    "absolutePath": "src/FiatTokenProxy/centre-tokens/contracts/v1/FiatTokenProxy.sol",
+    "id": 40713,
+    "exportedSymbols": {
+      "FiatTokenProxy": [40712]
+    },
+    "nodeType": "SourceUnit",
+    "src": "1154:414:20",
+    "nodes": [
+      {
+        "id": 40697,
+        "nodeType": "PragmaDirective",
+        "src": "1154:23:20",
+        "nodes": [],
+        "literals": ["solidity", "0.6", ".12"]
+      },
+      {
+        "id": 40699,
+        "nodeType": "ImportDirective",
+        "src": "1179:94:20",
+        "nodes": [],
+        "absolutePath": "src/FiatTokenProxy/centre-tokens/contracts/upgradeability/AdminUpgradeabilityProxy.sol",
+        "file": "../upgradeability/AdminUpgradeabilityProxy.sol",
+        "scope": 40713,
+        "sourceUnit": 40566,
+        "symbolAliases": [
+          {
+            "foreign": {
+              "argumentTypes": null,
+              "id": 40698,
+              "name": "AdminUpgradeabilityProxy",
+              "nodeType": "Identifier",
+              "overloadedDeclarations": [],
+              "referencedDeclaration": null,
+              "src": "1192:24:20",
+              "typeDescriptions": {
+                "typeIdentifier": null,
+                "typeString": null
+              }
+            },
+            "local": null
+          }
+        ],
+        "unitAlias": ""
+      },
+      {
+        "id": 40712,
+        "nodeType": "ContractDefinition",
+        "src": "1385:182:20",
+        "nodes": [
+          {
+            "id": 40711,
+            "nodeType": "FunctionDefinition",
+            "src": "1443:122:20",
+            "nodes": [],
+            "body": {
+              "id": 40710,
+              "nodeType": "Block",
+              "src": "1563:2:20",
+              "nodes": [],
+              "statements": []
+            },
+            "documentation": null,
+            "implemented": true,
+            "kind": "constructor",
+            "modifiers": [
+              {
+                "arguments": [
+                  {
+                    "argumentTypes": null,
+                    "id": 40707,
+                    "name": "implementationContract",
+                    "nodeType": "Identifier",
+                    "overloadedDeclarations": [],
+                    "referencedDeclaration": 40704,
+                    "src": "1535:22:20",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  }
+                ],
+                "id": 40708,
+                "modifierName": {
+                  "argumentTypes": null,
+                  "id": 40706,
+                  "name": "AdminUpgradeabilityProxy",
+                  "nodeType": "Identifier",
+                  "overloadedDeclarations": [],
+                  "referencedDeclaration": 40565,
+                  "src": "1510:24:20",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_type$_t_contract$_AdminUpgradeabilityProxy_$40565_$",
+                    "typeString": "type(contract AdminUpgradeabilityProxy)"
+                  }
+                },
+                "nodeType": "ModifierInvocation",
+                "src": "1510:48:20"
+              }
+            ],
+            "name": "",
+            "overrides": null,
+            "parameters": {
+              "id": 40705,
+              "nodeType": "ParameterList",
+              "parameters": [
+                {
+                  "constant": false,
+                  "id": 40704,
+                  "mutability": "mutable",
+                  "name": "implementationContract",
+                  "nodeType": "VariableDeclaration",
+                  "overrides": null,
+                  "scope": 40711,
+                  "src": "1455:30:20",
+                  "stateVariable": false,
+                  "storageLocation": "default",
+                  "typeDescriptions": {
+                    "typeIdentifier": "t_address",
+                    "typeString": "address"
+                  },
+                  "typeName": {
+                    "id": 40703,
+                    "name": "address",
+                    "nodeType": "ElementaryTypeName",
+                    "src": "1455:7:20",
+                    "stateMutability": "nonpayable",
+                    "typeDescriptions": {
+                      "typeIdentifier": "t_address",
+                      "typeString": "address"
+                    }
+                  },
+                  "value": null,
+                  "visibility": "internal"
+                }
+              ],
+              "src": "1454:32:20"
+            },
+            "returnParameters": {
+              "id": 40709,
+              "nodeType": "ParameterList",
+              "parameters": [],
+              "src": "1563:0:20"
+            },
+            "scope": 40712,
+            "stateMutability": "nonpayable",
+            "virtual": false,
+            "visibility": "public"
+          }
+        ],
+        "abstract": false,
+        "baseContracts": [
+          {
+            "arguments": null,
+            "baseName": {
+              "contractScope": null,
+              "id": 40701,
+              "name": "AdminUpgradeabilityProxy",
+              "nodeType": "UserDefinedTypeName",
+              "referencedDeclaration": 40565,
+              "src": "1412:24:20",
+              "typeDescriptions": {
+                "typeIdentifier": "t_contract$_AdminUpgradeabilityProxy_$40565",
+                "typeString": "contract AdminUpgradeabilityProxy"
+              }
+            },
+            "id": 40702,
+            "nodeType": "InheritanceSpecifier",
+            "src": "1412:24:20"
+          }
+        ],
+        "contractDependencies": [40565, 40609, 40695],
+        "contractKind": "contract",
+        "documentation": {
+          "id": 40700,
+          "nodeType": "StructuredDocumentation",
+          "src": "1275:109:20",
+          "text": " @title FiatTokenProxy\n @dev This contract proxies FiatToken calls and enables FiatToken upgrades"
+        },
+        "fullyImplemented": true,
+        "linearizedBaseContracts": [40712, 40565, 40695, 40609],
+        "name": "FiatTokenProxy",
+        "scope": 40713
+      }
+    ],
+    "license": "MIT"
+  },
+  "id": 20
+}

@@ -1,0 +1,38 @@
+{
+  "name": "swarm-js",
+  "version": "0.1.42",
+  "description": "Swarm tools for JavaScript.",
+  "main": "lib/api-node.js",
+  "browser": "lib/api-browser.js",
+  "scripts": {
+    "build": "npm run babel",
+    "babel": "babel src --out-dir=lib",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "MaiaVictor",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/maiavictor/swarm-js"
+  },
+  "dependencies": {
+    "bluebird": "^3.5.0",
+    "buffer": "^5.0.5",
+    "eth-lib": "^0.1.26",
+    "fs-extra": "^4.0.2",
+    "got": "^11.8.5",
+    "mime-types": "^2.1.16",
+    "mkdirp-promise": "^5.0.1",
+    "mock-fs": "^4.1.0",
+    "setimmediate": "^1.0.5",
+    "tar": "^4.0.2",
+    "xhr-request": "^1.0.1"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.0.0",
+    "@babel/core": "^7.0.0",
+    "@babel/preset-env": "^7.0.0",
+    "decompress": "^4.0.0",
+    "xml2js": "^0.4.19"
+  }
+}

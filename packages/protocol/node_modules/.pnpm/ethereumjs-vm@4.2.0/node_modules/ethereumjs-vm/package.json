@@ -1,0 +1,119 @@
+{
+  "name": "ethereumjs-vm",
+  "version": "4.2.0",
+  "description": "An Ethereum VM implementation",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/**/*"
+  ],
+  "scripts": {
+    "build": "ethereumjs-config-build",
+    "prepublishOnly": "npm run lint && npm run build && npm run test:buildIntegrity",
+    "coverage": "nyc npm run coverage:test && nyc report --reporter=lcov",
+    "coverage:test": "npm run build && tape './tests/api/**/*.js' ./tests/tester.js --state --dist",
+    "docs:build": "typedoc lib",
+    "test:vm": "node ./tests/tester --vm",
+    "test:state": "ts-node ./tests/tester --state",
+    "test:state:allForks": "npm run test:state -- --fork=Byzantium && npm run test:state -- --fork=Constantinople && npm run test:state -- --fork=Petersburg && npm run test:state -- --fork=Istanbul && npm run test:state -- --fork=MuirGlacier",
+    "test:state:selectedForks": "npm run test:state -- --fork=Petersburg && npm run test:state -- --fork=Istanbul && npm run test:state -- --fork=MuirGlacier",
+    "test:state:slow": "npm run test:state -- --runSkipped=slow",
+    "test:buildIntegrity": "npm run test:state -- --test='stackOverflow'",
+    "test:blockchain": "node -r ts-node/register --stack-size=1500 ./tests/tester --blockchain",
+    "test:API": "npm run build && ts-node ./node_modules/tape/bin/tape './tests/api/**/*.js'",
+    "test:API:browser": "npm run build && karma start karma.conf.js",
+    "test": "echo \"[INFO] Generic test cmd not used. See package.json for more specific test run cmds.\"",
+    "tslint": "ethereumjs-config-tslint",
+    "tslint:fix": "ethereumjs-config-tslint-fix",
+    "lint": "ethereumjs-config-lint",
+    "lint:fix": "ethereumjs-config-lint-fix",
+    "format": "ethereumjs-config-format",
+    "format:fix": "ethereumjs-config-format-fix",
+    "formatTest": "node ./scripts/formatTest",
+    "tsc": "ethereumjs-config-tsc"
+  },
+  "husky": {
+    "hooks": {
+      "pre-push": "npm run lint"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ethereumjs/ethereumjs-vm.git"
+  },
+  "keywords": [
+    "ethereum",
+    "VM"
+  ],
+  "dependencies": {
+    "async": "^2.1.2",
+    "async-eventemitter": "^0.2.2",
+    "core-js-pure": "^3.0.1",
+    "ethereumjs-account": "^3.0.0",
+    "ethereumjs-block": "^2.2.2",
+    "ethereumjs-blockchain": "^4.0.3",
+    "ethereumjs-common": "^1.5.0",
+    "ethereumjs-tx": "^2.1.2",
+    "ethereumjs-util": "^6.2.0",
+    "fake-merkle-patricia-tree": "^1.0.1",
+    "functional-red-black-tree": "^1.0.1",
+    "merkle-patricia-tree": "^2.3.2",
+    "rustbn.js": "~0.2.0",
+    "safe-buffer": "^5.1.1",
+    "util.promisify": "^1.0.0"
+  },
+  "devDependencies": {
+    "@ethereumjs/config-nyc": "^1.1.1",
+    "@ethereumjs/config-prettier": "^1.1.1",
+    "@ethereumjs/config-tsc": "^1.1.1",
+    "@ethereumjs/config-tslint": "^1.1.1",
+    "@types/bn.js": "^4.11.5",
+    "@types/core-js": "^2.5.0",
+    "@types/lru-cache": "^5.1.0",
+    "@types/node": "^11.13.4",
+    "@types/tape": "^4.2.33",
+    "browserify": "^16.2.3",
+    "ethereumjs-testing": "git+https://github.com/ethereumjs/ethereumjs-testing.git#v1.3.0",
+    "husky": "^2.1.0",
+    "karma": "^4.0.1",
+    "karma-browserify": "^6.0.0",
+    "karma-chrome-launcher": "^2.2.0",
+    "karma-firefox-launcher": "^1.1.0",
+    "karma-tap": "^4.1.4",
+    "level": "^6.0.0",
+    "level-mem": "^3.0.1",
+    "minimist": "^1.1.1",
+    "nyc": "^12.0.2",
+    "prettier": "^1.16.4",
+    "rlp": "^2.2.3",
+    "standard": "^10.0.0",
+    "tap-spec": "^5.0.0",
+    "tape": "4.6.3",
+    "ts-node": "^8.6.2",
+    "tslint": "^5.16.0",
+    "typedoc": "^0.14.2",
+    "typedoc-plugin-markdown": "^1.2.1",
+    "typescript": "^3.4.3",
+    "typestrict": "^1.0.2"
+  },
+  "author": "mjbecze <mjbecze@gmail.com>",
+  "contributors": [
+    "Alex Beregszaszi <alex@rtfs.hu>"
+  ],
+  "license": "MPL-2.0",
+  "bugs": {
+    "url": "https://github.com/ethereumjs/ethereumjs-vm/issues"
+  },
+  "homepage": "https://github.com/ethereumjs/ethereumjs-vm",
+  "nyc": {
+    "exclude": [
+      "tests"
+    ]
+  },
+  "standard": {
+    "ignore": [
+      "dist/**",
+      "examples/runcode-browserify.js"
+    ]
+  }
+}

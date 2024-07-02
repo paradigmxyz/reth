@@ -1,0 +1,24 @@
+{
+  "name": "lru-cache",
+  "description": "A cache object that deletes the least-recently-used items.",
+  "version": "3.2.0",
+  "author": "Isaac Z. Schlueter <i@izs.me>",
+  "keywords": [
+    "mru",
+    "lru",
+    "cache"
+  ],
+  "scripts": {
+    "test": "tap test --gc"
+  },
+  "main": "lib/lru-cache.js",
+  "repository": "git://github.com/isaacs/node-lru-cache.git",
+  "devDependencies": {
+    "tap": "^1.2.0",
+    "weak": ""
+  },
+  "license": "ISC",
+  "dependencies": {
+    "pseudomap": "^1.0.1"
+  }
+}

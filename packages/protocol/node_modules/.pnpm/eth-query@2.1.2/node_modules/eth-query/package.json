@@ -1,0 +1,24 @@
+{
+  "name": "eth-query",
+  "version": "2.1.2",
+  "description": "like web3 but for minimalists",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "json-rpc-random-id": "^1.0.0",
+    "xtend": "^4.0.1"
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ethereumjs/eth-query.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ethereumjs/eth-query/issues"
+  },
+  "homepage": "https://github.com/ethereumjs/eth-query#readme"
+}

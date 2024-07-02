@@ -1,0 +1,73 @@
+{
+  "name": "classic-level",
+  "version": "1.4.1",
+  "description": "An abstract-level database backed by LevelDB",
+  "license": "MIT",
+  "main": "index.js",
+  "types": "./index.d.ts",
+  "scripts": {
+    "install": "node-gyp-build",
+    "test": "standard && (nyc -s tape test/*-test.js | faucet) && nyc report",
+    "test-gc": "node --expose-gc test/gc.js",
+    "test-electron": "electron test/electron.js",
+    "test-prebuild": "cross-env PREBUILDS_ONLY=1 npm t",
+    "coverage": "nyc report -r lcovonly",
+    "rebuild": "npm run install --build-from-source",
+    "prebuild": "prebuildify -t 8.14.0 --napi --strip",
+    "download-prebuilds": "prebuildify-ci download",
+    "hallmark": "hallmark --fix",
+    "dependency-check": "dependency-check --no-dev -i napi-macros . test/*.js",
+    "prepublishOnly": "npm run dependency-check",
+    "prebuild-linux-arm": "prebuildify-cross -i linux-armv6 -i linux-armv7 -i linux-arm64-lts -t 8.14.0 --napi --strip",
+    "prebuild-android-arm": "prebuildify-cross -i android-armv7 -i android-arm64 -t 8.14.0 --napi --strip",
+    "prebuild-linux-x64": "prebuildify-cross -i centos7-devtoolset7 -i alpine -t 8.14.0 --napi --strip",
+    "prebuild-darwin-x64+arm64": "prebuildify -t 8.14.0 --napi --strip --arch x64+arm64",
+    "prebuild-win32-x86": "prebuildify -t 8.14.0 --napi --strip",
+    "prebuild-win32-x64": "prebuildify -t 8.14.0 --napi --strip"
+  },
+  "dependencies": {
+    "abstract-level": "^1.0.2",
+    "catering": "^2.1.0",
+    "module-error": "^1.0.1",
+    "napi-macros": "^2.2.2",
+    "node-gyp-build": "^4.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@voxpelli/tsconfig": "^4.0.0",
+    "async-each": "^1.0.3",
+    "cross-env": "^7.0.3",
+    "delayed": "^2.0.0",
+    "dependency-check": "^4.1.0",
+    "du": "^1.0.0",
+    "electron": "^21.0.1",
+    "faucet": "^0.0.3",
+    "glob": "^8.0.1",
+    "hallmark": "^4.1.0",
+    "mkfiletree": "^2.0.0",
+    "node-gyp": "^9.0.0",
+    "nyc": "^15.0.0",
+    "prebuildify": "^5.0.0",
+    "prebuildify-ci": "^1.0.4",
+    "prebuildify-cross": "^5.0.0",
+    "readfiletree": "^1.0.0",
+    "rimraf": "^3.0.0",
+    "standard": "^17.0.0",
+    "tape": "^5.5.0",
+    "tempy": "^1.0.1",
+    "typescript": "^4.5.5"
+  },
+  "gypfile": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Level/classic-level.git"
+  },
+  "homepage": "https://github.com/Level/classic-level",
+  "keywords": [
+    "leveldb",
+    "level"
+  ],
+  "engines": {
+    "node": ">=12"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@resolver-engine/imports",
+  "version": "0.3.3",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "repository": "git@github.com:Crypto-Punkers/resolver-engine.git",
+  "author": "Crypto Punkers <hello@punkers.co>",
+  "license": "LGPL-3.0-or-later",
+  "scripts": {
+    "build": "tsc",
+    "tsc": "tsc",
+    "clean": "rimraf build/ ./tsconfig.tsbuildinfo",
+    "test": "jest",
+    "lint": "tslint -c ../../tslint.json -p ./"
+  },
+  "dependencies": {
+    "@resolver-engine/core": "^0.3.3",
+    "debug": "^3.1.0",
+    "hosted-git-info": "^2.6.0",
+    "path-browserify": "^1.0.0",
+    "url": "^0.11.0"
+  },
+  "gitHead": "3ed2ef955ffe9e4be32646c317a33b72ff709fe2"
+}

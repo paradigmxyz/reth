@@ -1,0 +1,47 @@
+{
+  "name": "semaphore-async-await",
+  "version": "1.5.1",
+  "author": {
+    "name": "Jan Soendermann",
+    "email": "jan.soendermann+npm@gmail.com"
+  },
+  "homepage": "https://github.com/jsoendermann/semaphore-async-await",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:jsoendermann/semaphore-async-await.git"
+  },
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "generate-docs": "typedoc --tsconfig ./tsconfig-typedoc.json --theme minimal --mode file --module system --out docs ./Semaphore.ts",
+    "prepublish": "npm run build",
+    "test": "jest",
+    "lint": "tslint 'src/**/*.ts'",
+    "prepush": "npm run lint"
+  },
+  "engines": {
+    "node": ">=4.1"
+  },
+  "main": "./dist/index.js",
+  "typings": "./dist/index.d.ts",
+  "devDependencies": {
+    "@types/jest": "^19.2.2",
+    "husky": "^0.13.2",
+    "jest": "^19.0.2",
+    "ts-jest": "^19.0.2",
+    "tslint": "^4.5.1",
+    "typedoc": "^0.5.7",
+    "typescript": "^2.2.1"
+  },
+  "jest": {
+    "transform": {
+      ".(ts|tsx)": "<rootDir>/node_modules/ts-jest/preprocessor.js"
+    },
+    "testRegex": "(/__tests__/.*|\\.(test|spec))\\.(ts|tsx|js)$",
+    "moduleFileExtensions": [
+      "ts",
+      "tsx",
+      "js"
+    ]
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "name": "level-supports",
+  "version": "4.0.1",
+  "description": "Create a manifest describing the abilities of an abstract-level database",
+  "license": "MIT",
+  "scripts": {
+    "test": "standard && ts-standard *.ts && hallmark && (nyc -s node test/self.js | faucet) && nyc report",
+    "test-browsers-local": "airtap --coverage test/self.js && nyc report",
+    "coverage": "nyc report -r lcovonly",
+    "hallmark": "hallmark --fix"
+  },
+  "types": "./index.d.ts",
+  "files": [
+    "test",
+    "CHANGELOG.md",
+    "index.js",
+    "index.d.ts"
+  ],
+  "devDependencies": {
+    "@types/node": "^17.0.6",
+    "@voxpelli/tsconfig": "^3.1.0",
+    "airtap": "^4.0.4",
+    "airtap-playwright": "^1.0.1",
+    "faucet": "^0.0.1",
+    "hallmark": "^4.0.0",
+    "nyc": "^15.1.0",
+    "standard": "^16.0.3",
+    "tape": "^5.4.0",
+    "ts-standard": "^11.0.0",
+    "typescript": "^4.5.4"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Level/supports.git"
+  },
+  "homepage": "https://github.com/Level/supports",
+  "keywords": [
+    "abstract-leveldown",
+    "database",
+    "db",
+    "level",
+    "levelup",
+    "manifest"
+  ],
+  "engines": {
+    "node": ">=12"
+  }
+}

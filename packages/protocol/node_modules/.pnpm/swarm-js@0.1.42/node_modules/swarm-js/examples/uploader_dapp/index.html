@@ -1,0 +1,49 @@
+<html>
+  <head>
+    <title>Swarm.js Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="ethereum_icon.png">
+    <script src="swarm.min.js"></script>
+    <script src="index.js"></script>
+    <style> 
+      * { font-family: helvetica; }
+      input { width: 160px; }
+    </style>
+  <head>
+  <body>
+    <h3><img src="ethereum_icon.png"/> Swarm.js Demo</h3>
+
+    <p>Provider:
+      <input type="text" id="provider" value="http://swarm-gateways.net" onkeyup="setProvider()">
+      </input>
+    </p>
+
+    <p>
+      <button onclick="download()">Download</button>
+      <button onclick="upload()">Upload a File</button>
+      <button onclick="upload(true)">Upload a Directory</button>
+      <button onclick="upload(new Buffer(prompt('Text:')))">Upload a String</button>
+    </p>
+    
+    <div id="output"></div>
+
+    <div>
+      <p><strong>Downloads to try:</strong></p>
+      <table>
+        <tr>
+          <td>Demo text</td>
+          <td>62cb02b7d506e24f347ba0e8029e24bac12c4c2edd80498c9cbe64c30b97b96b</td>
+        </tr>
+        <tr>
+          <td>Demo image</td>
+          <td>76b9b41b169cbe78cf92f4fa413065536051588db5b1dd052ed12c78754d1008</td>
+        </tr>
+        <tr>
+          <td>Demo directory</td>
+          <td>4531d4d568f9f164cb0426bb826fc612fc83329c2b5fb21601a2f457ddcccaf6</td>
+        </tr>
+      </table>
+      <p>This demo only interprets PNG, JPG and text. Any other binary is shown as a hex string.</p>
+    </div>
+  <body>
+</html>

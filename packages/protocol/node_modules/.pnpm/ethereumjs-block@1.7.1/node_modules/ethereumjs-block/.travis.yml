@@ -1,0 +1,36 @@
+language: node_js
+node_js:
+  - "7"
+  - "8"
+env:
+  - CXX=g++-4.8
+addons:
+  firefox: latest
+  apt:
+    sources:
+    - ubuntu-toolchain-r-test
+    packages:
+    - g++-4.8
+before_install:
+  - sh -e /etc/init.d/xvfb start
+env:
+  global:
+    - DISPLAY=:99.0
+  matrix:
+    - CXX=g++-4.8 TEST_SUITE=test:node
+matrix:
+  fast_finish: true
+  include:
+    - os: linux
+      node_js: "8"
+      env: CXX=g++-4.8 TEST_SUITE=coveralls
+    - os: linux
+      node_js: "8"
+      env: CXX=g++-4.8 TEST_SUITE=lint
+    - os: linux
+      node_js: "7"
+      env: CXX=g++-4.8 TEST_SUITE=test:node
+    - os: linux
+      node_js: "8"
+      env: CXX=g++-4.8 TEST_SUITE=test:node
+script: npm run $TEST_SUITE

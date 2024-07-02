@@ -1,0 +1,43 @@
+{
+  "name": "promise-to-callback",
+  "version": "1.0.0",
+  "description": "Convert promise to callback interface",
+  "license": "MIT",
+  "repository": "stevemao/promise-to-callback",
+  "author": {
+    "name": "Steve Mao",
+    "email": "maochenyan@gmail.com",
+    "url": "github.com/stevemao"
+  },
+  "engines": {
+    "node": ">=0.10.0"
+  },
+  "scripts": {
+    "test": "xo && mocha"
+  },
+  "files": [
+    "index.js"
+  ],
+  "keywords": [
+    "promise",
+    "convert",
+    "callback"
+  ],
+  "dependencies": {
+    "is-fn": "^1.0.0",
+    "set-immediate-shim": "^1.0.1"
+  },
+  "devDependencies": {
+    "bluebird": "^2.9.34",
+    "mocha": "^2.3.0",
+    "pinkie-promise": "^1.0.0",
+    "q": "^1.4.1",
+    "xo": "^0.7.1"
+  },
+  "xo": {
+    "envs": [
+      "node",
+      "mocha"
+    ]
+  }
+}

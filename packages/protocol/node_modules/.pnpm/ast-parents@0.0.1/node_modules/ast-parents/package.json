@@ -1,0 +1,28 @@
+{
+  "name": "ast-parents",
+  "description": "Walks a JavaScript AST and adds a \"parent\" property to each node",
+  "version": "0.0.1",
+  "main": "index.js",
+  "browser": "index.js",
+  "dependencies": {},
+  "devDependencies": {},
+  "scripts": {},
+  "author": "Hugh Kennedy <hughskennedy@gmail.com> (http://hughsk.io/)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/hughsk/ast-parents"
+  },
+  "bugs": {
+    "url": "https://github.com/hughsk/ast-parents/issues"
+  },
+  "homepage": "https://github.com/hughsk/ast-parents",
+  "keywords": [
+    "ast",
+    "walk",
+    "parents",
+    "node",
+    "syntax",
+    "parse"
+  ]
+}

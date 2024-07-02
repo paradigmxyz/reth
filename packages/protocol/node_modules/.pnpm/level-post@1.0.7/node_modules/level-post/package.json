@@ -1,0 +1,23 @@
+{
+  "name": "level-post",
+  "description": "",
+  "version": "1.0.7",
+  "homepage": "https://github.com/dominictarr/level-post",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/dominictarr/level-post.git"
+  },
+  "dependencies": {
+    "ltgt": "^2.1.2"
+  },
+  "devDependencies": {
+    "bytewise": "~0.7.1",
+    "level-test": "^2.0.2",
+    "tape": "^2.13.3"
+  },
+  "scripts": {
+    "test": "set -e; for t in test/*.js; do node $t; done"
+  },
+  "author": "Dominic Tarr <dominic.tarr@gmail.com> (http://dominictarr.com)",
+  "license": "MIT"
+}

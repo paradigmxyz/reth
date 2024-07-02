@@ -1,0 +1,38 @@
+{
+  "name": "rustbn.js",
+  "version": "0.2.0",
+  "description": "Javascript bindings for https://github.com/paritytech/bn (using asm.js)",
+  "main": "index.js",
+  "scripts": {
+    "test": "tape ./tests/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ethereumjs/rustbn.js.git"
+  },
+  "keywords": [
+    "ethereum",
+    "ecc",
+    "bn128",
+    "pairing"
+  ],
+  "author": "cdetrio <cdetrio@gmail.com>",
+  "contributors": [
+    {
+      "name": "holgerd77",
+      "email": "Holger.Drewes@gmail.com"
+    },
+    {
+      "name": "Alex Beregszaszi",
+      "email": "alex@rtfs.hu"
+    }
+  ],
+  "license": "(MIT OR Apache-2.0)",
+  "bugs": {
+    "url": "https://github.com/ethereumjs/rustbn.js/issues"
+  },
+  "homepage": "https://github.com/ethereumjs/rustbn.js#readme",
+  "devDependencies": {
+    "tape": "^4.8.0"
+  }
+}

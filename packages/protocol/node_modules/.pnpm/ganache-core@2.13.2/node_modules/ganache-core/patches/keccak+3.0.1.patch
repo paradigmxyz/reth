@@ -1,0 +1,11 @@
+diff --git a/node_modules/keccak/index.js b/node_modules/keccak/index.js
+index 24fb71a..bb62b01 100644
+--- a/node_modules/keccak/index.js
++++ b/node_modules/keccak/index.js
+@@ -1,5 +1 @@
+-try {
+-  module.exports = require('./bindings')
+-} catch (err) {
+-  module.exports = require('./js')
+-}
++module.exports = require('./js')

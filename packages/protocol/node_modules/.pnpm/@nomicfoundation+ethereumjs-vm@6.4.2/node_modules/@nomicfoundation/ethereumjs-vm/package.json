@@ -1,0 +1,92 @@
+{
+  "name": "@nomicfoundation/ethereumjs-vm",
+  "version": "6.4.2",
+  "description": "An Ethereum VM implementation",
+  "keywords": [
+    "ethereum",
+    "VM"
+  ],
+  "homepage": "https://github.com/ethereumjs/ethereumjs-monorepo/tree/master/packages/vm#readme",
+  "bugs": {
+    "url": "https://github.com/ethereumjs/ethereumjs-monorepo/issues?q=is%3Aissue+label%3A%22package%3A+vm%22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ethereumjs/ethereumjs-monorepo.git"
+  },
+  "license": "MPL-2.0",
+  "author": "mjbecze <mjbecze@gmail.com>",
+  "contributors": [
+    "Alex Beregszaszi <alex@rtfs.hu>"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "benchmarks": "node --max-old-space-size=4096 ./benchmarks/run.js benchmarks mainnetBlocks:10",
+    "build": "../../config/cli/ts-build.sh",
+    "build:benchmarks": "npm run build && tsc -p tsconfig.benchmarks.json",
+    "clean": "../../config/cli/clean-package.sh",
+    "coverage": "c8 --all --reporter=lcov --reporter=text --reporter=text-lcov npm run coverage:test",
+    "coverage:test": "npm run test:API",
+    "docs:build": "typedoc --options typedoc.js",
+    "examples": "ts-node ../../scripts/examples-runner.ts -- vm",
+    "formatTest": "node ./scripts/formatTest",
+    "lint": "../../config/cli/lint.sh",
+    "lint:diff": "../../config/cli/lint-diff.sh",
+    "lint:fix": "../../config/cli/lint-fix.sh",
+    "profiling": "0x ./benchmarks/run.js profiling",
+    "tape": "tape -r ts-node/register --stack-size=1500",
+    "test": "echo \"[INFO] Generic test cmd not used. See package.json for more specific test run cmds.\"",
+    "test:API": "npm run tape -- './tests/api/**/*.spec.ts'",
+    "test:API:browser": "karma start karma.conf.js",
+    "test:blockchain": "npm run tester -- --blockchain",
+    "test:blockchain:allForks": "echo 'Chainstart Homestead dao TangerineWhistle SpuriousDragon Byzantium Constantinople Petersburg Istanbul MuirGlacier Berlin London ByzantiumToConstantinopleFixAt5 EIP158ToByzantiumAt5 FrontierToHomesteadAt5 HomesteadToDaoAt5 HomesteadToEIP150At5 BerlinToLondonAt5' | xargs -n1 | xargs -I v1 npm run tester -- --blockchain --fork=v1 --verify-test-amount-alltests",
+    "test:blockchain:transitionForks": "echo 'ByzantiumToConstantinopleFixAt5 EIP158ToByzantiumAt5 FrontierToHomesteadAt5 HomesteadToDaoAt5 HomesteadToEIP150At5 BerlinToLondonAt5' | xargs -n1 | xargs -I v1 npm run tester -- --blockchain --fork=v1 --verify-test-amount-alltests",
+    "test:buildIntegrity": "npm run test:state -- --test='stackOverflow'",
+    "test:state": "npm run tester -- --state",
+    "test:state:allForks": "echo 'Chainstart Homestead dao TangerineWhistle SpuriousDragon Byzantium Constantinople Petersburg Istanbul MuirGlacier Berlin London ByzantiumToConstantinopleFixAt5 EIP158ToByzantiumAt5 FrontierToHomesteadAt5 HomesteadToDaoAt5 HomesteadToEIP150At5 BerlinToLondonAt5' | xargs -n1 | xargs -I v1 npm run test:state -- --fork=v1 --verify-test-amount-alltests",
+    "test:state:selectedForks": "echo 'Homestead TangerineWhistle SpuriousDragon Petersburg Berlin London' | xargs -n1 | xargs -I v1 npm run test:state -- --fork=v1 --verify-test-amount-alltests",
+    "test:state:slow": "npm run test:state -- --runSkipped=slow",
+    "tester": "ts-node ./tests/tester --stack-size=1500",
+    "tsc": "../../config/cli/ts-compile.sh"
+  },
+  "dependencies": {
+    "@nomicfoundation/ethereumjs-block": "4.2.2",
+    "@nomicfoundation/ethereumjs-blockchain": "6.2.2",
+    "@nomicfoundation/ethereumjs-common": "3.1.2",
+    "@nomicfoundation/ethereumjs-evm": "1.3.2",
+    "@nomicfoundation/ethereumjs-rlp": "4.0.3",
+    "@nomicfoundation/ethereumjs-statemanager": "1.0.5",
+    "@nomicfoundation/ethereumjs-trie": "5.0.5",
+    "@nomicfoundation/ethereumjs-tx": "4.1.2",
+    "@nomicfoundation/ethereumjs-util": "8.0.6",
+    "@types/async-eventemitter": "^0.2.1",
+    "async-eventemitter": "^0.2.4",
+    "debug": "^4.3.3",
+    "ethereum-cryptography": "0.1.3",
+    "functional-red-black-tree": "^1.0.1",
+    "mcl-wasm": "^0.7.1",
+    "rustbn.js": "~0.2.0"
+  },
+  "devDependencies": {
+    "@ethersproject/abi": "^5.0.12",
+    "@types/benchmark": "^1.0.33",
+    "@types/core-js": "^2.5.0",
+    "@types/lru-cache": "^5.1.0",
+    "@types/minimist": "^1.2.2",
+    "@types/node-dir": "^0.0.34",
+    "benchmark": "^2.1.4",
+    "level": "^8.0.0",
+    "memory-level": "^1.0.0",
+    "minimist": "^1.2.5",
+    "node-dir": "^0.1.17",
+    "solc": "^0.8.1"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}

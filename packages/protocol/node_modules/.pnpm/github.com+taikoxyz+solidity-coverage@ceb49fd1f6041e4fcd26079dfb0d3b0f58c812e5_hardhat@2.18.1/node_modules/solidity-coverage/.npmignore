@@ -1,0 +1,4 @@
+test/
+.circleci/
+docs/
+.nyc_output/

@@ -1,0 +1,72 @@
+{
+  "name": "multicodec",
+  "version": "1.0.4",
+  "description": "JavaScript implementation of the multicodec specification",
+  "leadMaintainer": "Henrique Dias <hacdias@gmail.com>",
+  "main": "src/index.js",
+  "scripts": {
+    "lint": "aegir lint",
+    "test": "aegir test",
+    "test:node": "aegir test --target node",
+    "test:browser": "aegir test --target browser",
+    "build": "aegir build",
+    "docs": "aegir docs",
+    "release": "aegir release",
+    "release-minor": "aegir release --type minor",
+    "release-major": "aegir release --type major",
+    "coverage": "aegir coverage",
+    "coverage-publish": "aegir coverage --provider coveralls",
+    "update-table": "node tools/update-table.js"
+  },
+  "pre-push": [
+    "lint",
+    "test"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/multiformats/js-multicodec.git"
+  },
+  "keywords": [
+    "IPFS",
+    "multiformats",
+    "multicodec",
+    "binary",
+    "packed",
+    "the",
+    "data!"
+  ],
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/multiformats/js-multicodec/issues"
+  },
+  "homepage": "https://github.com/multiformats/js-multicodec#readme",
+  "dependencies": {
+    "buffer": "^5.6.0",
+    "varint": "^5.0.0"
+  },
+  "devDependencies": {
+    "aegir": "^23.0.0",
+    "bent": "^7.3.4",
+    "chai": "^4.2.0",
+    "dirty-chai": "^2.0.1",
+    "pre-push": "~0.1.1"
+  },
+  "contributors": [
+    "David Dias <daviddias.p@gmail.com>",
+    "Henrique Dias <hacdias@gmail.com>",
+    "Volker Mische <volker.mische@gmail.com>",
+    "Mikeal Rogers <mikeal.rogers@gmail.com>",
+    "Richard Littauer <richard.littauer@gmail.com>",
+    "wanderer <mjbecze@gmail.com>",
+    "Friedel Ziegelmayer <dignifiedquire@gmail.com>",
+    "Rod Vagg <rod@vagg.org>",
+    "ᴠɪᴄᴛᴏʀ ʙᴊᴇʟᴋʜᴏʟᴍ <victorbjelkholm@gmail.com>",
+    "Filip Š <filip.stamcar@hotmail.com>",
+    "Hugo Dias <hugomrdias@gmail.com>",
+    "Joel Thorstensson <oed@3box.io>",
+    "Marcin Rataj <lidel@lidel.org>",
+    "Vasco Santos <vasco.santos@moxy.studio>",
+    "achingbrain <alex@achingbrain.net>",
+    "Carson Farmer <carson.farmer@gmail.com>"
+  ]
+}

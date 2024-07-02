@@ -1,0 +1,38 @@
+{
+  "name": "@openzeppelin/defender-admin-client",
+  "version": "1.54.6",
+  "description": "",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "scripts": {
+    "build": "rm -rf lib && tsc",
+    "test": "yarn test:unit",
+    "test:unit": "jest --verbose --passWithNoTests",
+    "watch": "tsc -w",
+    "prepare": "yarn build"
+  },
+  "files": [
+    "lib",
+    "!*.test.js",
+    "!*.test.js.map",
+    "!*.test.d.ts",
+    "!*__mocks__"
+  ],
+  "author": "Santiago Palladino <santiago@openzeppelin.com>",
+  "license": "MIT",
+  "dependencies": {
+    "@openzeppelin/defender-base-client": "1.54.6",
+    "axios": "^1.4.0",
+    "ethers": "^5.7.2",
+    "lodash": "^4.17.19",
+    "node-fetch": "^2.6.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OpenZeppelin/defender-client.git"
+  },
+  "gitHead": "9eea3f7d413b8647b20e7b77a1c4ecd4186e4ed3"
+}

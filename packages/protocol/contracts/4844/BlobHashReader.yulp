@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: MIT
+//  _____     _ _         _         _
+// |_   _|_ _(_) |_____  | |   __ _| |__ ___
+//   | |/ _` | | / / _ \ | |__/ _` | '_ (_-<
+//   |_|\__,_|_|_\_\___/ |____\__,_|_.__/__/
+
+// An implemenatation of IBlobHashReader
+object "BlobHashReader" {
+   code {
+      datacopy(0, dataoffset("runtime"), datasize("runtime"))
+      return(0, datasize("runtime"))
+   }
+   object "runtime" {
+      code {
+         // Match against the keccak of the ABI function signature needed.
+         switch shr(0xe0,calldataload(0))
+            // bytes4(keccak("function getFirstBlobHash()"))
+            // Returns the versioned hash for the first blob in this transaction.
+            case 0xfd122ecf {
+                // DATAHASH opcode has hex value 0x49
+                let hash := verbatim_1i_1o(hex"49", 0)
+                mstore(0, hash)
+                return(0, 32)
+            }
+      }
+   }
+}

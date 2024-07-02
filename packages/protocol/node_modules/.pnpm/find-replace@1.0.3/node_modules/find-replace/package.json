@@ -1,0 +1,31 @@
+{
+  "name": "find-replace",
+  "author": "Lloyd Brookes <75pound@gmail.com>",
+  "version": "1.0.3",
+  "description": "Find and either replace or remove items from an array",
+  "repository": "https://github.com/75lb/find-replace.git",
+  "license": "MIT",
+  "main": "./lib/find-replace.js",
+  "keywords": [
+    "find",
+    "replace",
+    "array",
+    "remove",
+    "splice"
+  ],
+  "engines": {
+    "node": ">=4.0.0"
+  },
+  "scripts": {
+    "test": "test-runner test/*.js",
+    "docs": "jsdoc2md -t jsdoc2md/README.hbs lib/*.js > README.md; echo"
+  },
+  "devDependencies": {
+    "jsdoc-to-markdown": "^2.0.1",
+    "test-runner": "^0.3.0"
+  },
+  "dependencies": {
+    "array-back": "^1.0.4",
+    "test-value": "^2.1.0"
+  }
+}

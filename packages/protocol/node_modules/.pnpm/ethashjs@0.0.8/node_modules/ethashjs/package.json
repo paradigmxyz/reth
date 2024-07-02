@@ -1,0 +1,49 @@
+{
+  "name": "ethashjs",
+  "version": "0.0.8",
+  "description": "an ethash implementation in JS",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "coverage": "nyc --reporter=lcov npm run test",
+    "lint": "standard",
+    "test": "node ./tests/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ethereumjs/ethashjs.git"
+  },
+  "keywords": [
+    "ethash",
+    "ethereum",
+    "POW"
+  ],
+  "author": "mjbecze <mjbecze@gmail.com>",
+  "license": "MPL-2.0",
+  "bugs": {
+    "url": "https://github.com/ethereumjs/ethashjs/issues"
+  },
+  "homepage": "https://github.com/ethereumjs/ethashjs#readme",
+  "dependencies": {
+    "async": "^2.1.2",
+    "buffer-xor": "^2.0.1",
+    "ethereumjs-util": "^7.0.2",
+    "miller-rabin": "^4.0.0"
+  },
+  "devDependencies": {
+    "ethereumjs-block": "^2.2.2",
+    "nyc": "^15.0.1",
+    "levelup": "^1.3.0",
+    "memdown": "^1.1.0",
+    "standard": "^14.3.4",
+    "tape": "^4.2.2"
+  },
+  "standard": {
+    "globals": [
+      "describe",
+      "it"
+    ]
+  }
+}

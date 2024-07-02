@@ -1,0 +1,34 @@
+{
+  "name": "eth-ens-namehash",
+  "version": "2.0.8",
+  "description": "A simple module for generating ENS namehashes per spec https://github.com/ethereum/EIPs/issues/137",
+  "main": "index.js",
+  "scripts": {
+    "bundle": "browserify index.js -o dist/index.js",
+    "test": "node test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/danfinlay/eth-ens-namehash.git"
+  },
+  "keywords": [
+    "Ethereum",
+    "ENS"
+  ],
+  "author": "Dan Finlay <dan@danfinlay.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/danfinlay/eth-ens-namehash/issues"
+  },
+  "homepage": "https://github.com/danfinlay/eth-ens-namehash#readme",
+  "devDependencies": {
+    "tape": "^4.6.3",
+    "babel-preset-es2015": "^6.24.1",
+    "babel-preset-stage-0": "^6.24.1",
+    "browserify": "^14.0.0"
+  },
+  "dependencies": {
+    "idna-uts46-hx": "^2.3.1",
+    "js-sha3": "^0.5.7"
+  }
+}

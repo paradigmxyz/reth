@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Content Hash Calculator</title>
+
+		<!-- <script type="text/javascript" src="../dist/index.js"></script> -->
+		<script type="text/javascript" src="https://unpkg.com/content-hash/dist/index.js"></script>
+
+		<script type="text/javascript" src="main.js"></script>
+		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.7.2/css/bulma.min.css">
+		<link rel="icon" href="gear.png" size="32x32">
+	</head>
+	<body>
+		<h1 class="title is-size-1 has-text-centered">Content Hash Calculator</h1>
+		<p class="has-text-centered">A simple tool to encode/decode content hashes for <a href="https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1577.md" target="_blank">EIP 1577</a> compliant <a href="https://ens.readthedocs.io/en/latest/introduction.html" target="_blank">ENS Resolvers</a>.</p>
+		<p class="has-text-centered">You can find content-hash resolvers here :</p>
+		<p class="has-text-centered">MainNet <a href="https://etherscan.io/address/0xd3ddccdd3b25a8a7423b5bee360a42146eb4baf3" target="_blank">0xd3ddccdd3b25a8a7423b5bee360a42146eb4baf3</a></p>
+		<p class="has-text-centered">Ropsten <a href="https://ropsten.etherscan.io/address/0xde469c7106a9fbc3fb98912bb00be983a89bddca" target="_blank">0xde469c7106a9fbc3fb98912bb00be983a89bddca</a></p>
+		<p class="has-text-centered">Open the console to use the 'contentHash' object !</p>
+		<div class="section">
+			<h3 class="title">IPFS -> content hash</h3>
+			<input id="ipfs-input" class="level-item input" type="text" value="QmRcDsEJUdpg6EDaVeZGFJHU1WYCKHXaUXBCzHHuCZLNXw">
+			<button id="ipfs-encode" class="button is-primary">Encode</button>
+			<p id="ipfs-result"></p>
+		</div>
+		<div class="section">
+			<h3 class="title">Swarm -> content hash</h3>
+			<input id="swarm-input" class="input" type="text" value="d1de9994b4d039f6548d191eb26786769f580809256b4685ef316805265ea162">
+			<button id="swarm-encode" class="button is-primary">Encode</button>
+			<p id="swarm-result"></p>
+		</div>
+		<div class="section">
+			<h3 class="title">Decode Content hash</h3>
+			<input id="content-input" class="input" type="text" value="e40101701b20d1de9994b4d039f6548d191eb26786769f580809256b4685ef316805265ea162">
+			<button id="content-decode" class="button is-primary">Decode</button>
+			<p id="codec-result"></p>
+			<a href="#" target="_blank" id="content-result"></a>
+		</div>
+		<footer class="footer">
+			<div class="content has-text-centered">
+				<p><strong>content-hash</strong> by <a href="https://twitter.com/pldespaigne" target="_blank">@pldespaigne</a></p>
+				<p>Get the code on <a href="https://github.com/pldespaigne/content-hash" target="_blank">Github</a> or download the <a href="https://www.npmjs.com/package/content-hash" target="_blank">NPM package</a> !</p>
+			</div>
+		</footer>
+	</body>
+</html>

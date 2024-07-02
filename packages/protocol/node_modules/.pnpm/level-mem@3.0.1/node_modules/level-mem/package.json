@@ -1,0 +1,38 @@
+{
+  "name": "level-mem",
+  "description": "A convenience package bundling LevelUP & MemDOWN",
+  "version": "3.0.1",
+  "contributors": [
+    "Rod Vagg <r@va.gg> (https://github.com/rvagg)"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Level/mem.git"
+  },
+  "homepage": "https://github.com/Level/mem",
+  "keywords": [
+    "leveldb",
+    "stream",
+    "database",
+    "db",
+    "store",
+    "storage",
+    "json"
+  ],
+  "main": "level-mem.js",
+  "dependencies": {
+    "memdown": "~3.0.0",
+    "level-packager": "~4.0.0"
+  },
+  "devDependencies": {
+    "standard": "^11.0.1",
+    "tape": "^4.9.0"
+  },
+  "scripts": {
+    "test": "standard && node test.js"
+  },
+  "engines": {
+    "node": ">=6"
+  },
+  "license": "MIT"
+}

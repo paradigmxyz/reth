@@ -1,0 +1,56 @@
+{
+  "name": "eth-sig-util",
+  "version": "3.0.0",
+  "description": "A few useful functions for signing ethereum data",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "utils/"
+  ],
+  "scripts": {
+    "build": "tsc --project .",
+    "lint": "eslint . --ext .ts,.js",
+    "test": "yarn build && node test/index.js",
+    "test:browser": "yarn build && browserify test/index.js > test/bundle.js && echo ';window.close();' >> test/bundle.js && cat test/bundle.js | smokestack",
+    "prepublishOnly": "yarn build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/MetaMask/eth-sig-util.git"
+  },
+  "keywords": [
+    "ethereum",
+    "signature"
+  ],
+  "author": "Dan Finlay",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/MetaMask/eth-sig-util/issues"
+  },
+  "homepage": "https://github.com/MetaMask/eth-sig-util#readme",
+  "resolutions": {
+    "smokestack/minimist": "^1.2.5",
+    "smokestack/shoe/sockjs/node-uuid": "^1.4.4"
+  },
+  "dependencies": {
+    "buffer": "^5.2.1",
+    "elliptic": "^6.4.0",
+    "ethereumjs-abi": "0.6.5",
+    "ethereumjs-util": "^5.1.1",
+    "tweetnacl": "^1.0.0",
+    "tweetnacl-util": "^0.15.0"
+  },
+  "devDependencies": {
+    "@metamask/eslint-config": "^2.0.0",
+    "@types/node": "^10.17.13",
+    "@typescript-eslint/eslint-plugin": "^2.20.0",
+    "@typescript-eslint/parser": "^2.20.0",
+    "browserify": "^16.5.1",
+    "eslint": "^6.8.0",
+    "eslint-plugin-import": "^2.20.1",
+    "smokestack": "^3.6.0",
+    "tape": "^4.9.1",
+    "typescript": "^3.9.2"
+  }
+}

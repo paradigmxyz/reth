@@ -1,0 +1,22 @@
+name: Install and build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+jobs:
+  install-and-build:
+    name: Run npm install and build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 16
+
+      - name: Run npm ci and build
+        run: npm ci && npm run build

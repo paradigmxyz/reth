@@ -1,0 +1,79 @@
+{
+    "name": "@types/underscore",
+    "version": "1.11.15",
+    "description": "TypeScript definitions for underscore",
+    "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/underscore",
+    "license": "MIT",
+    "contributors": [
+        {
+            "name": "Boris Yankov",
+            "githubUsername": "borisyankov",
+            "url": "https://github.com/borisyankov"
+        },
+        {
+            "name": "Josh Baldwin",
+            "githubUsername": "jbaldwin",
+            "url": "https://github.com/jbaldwin"
+        },
+        {
+            "name": "Christopher Currens",
+            "githubUsername": "ccurrens",
+            "url": "https://github.com/ccurrens"
+        },
+        {
+            "name": "Ard Timmerman",
+            "githubUsername": "confususs",
+            "url": "https://github.com/confususs"
+        },
+        {
+            "name": "Julian Gonggrijp",
+            "githubUsername": "jgonggrijp",
+            "url": "https://github.com/jgonggrijp"
+        },
+        {
+            "name": "Florian Imdahl",
+            "githubUsername": "ffflorian",
+            "url": "https://github.com/ffflorian"
+        },
+        {
+            "name": "Regev Brody",
+            "githubUsername": "regevbr",
+            "url": "https://github.com/regevbr"
+        },
+        {
+            "name": "Piotr Błażejewicz",
+            "githubUsername": "peterblazejewicz",
+            "url": "https://github.com/peterblazejewicz"
+        },
+        {
+            "name": "Michael Ness",
+            "githubUsername": "reubenrybnik",
+            "url": "https://github.com/reubenrybnik"
+        },
+        {
+            "name": "Luke Tsekouras",
+            "githubUsername": "LukeGT",
+            "url": "https://github.com/LukeGT"
+        }
+    ],
+    "main": "",
+    "types": "index.d.ts",
+    "exports": {
+        ".": {
+            "types": {
+                "import": "./index.d.mts",
+                "default": "./index.d.ts"
+            }
+        },
+        "./package.json": "./package.json"
+    },
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
+        "directory": "types/underscore"
+    },
+    "scripts": {},
+    "dependencies": {},
+    "typesPublisherContentHash": "6f602b464b2200e616bd38006da6a441c36645959457772b346346823bf7f683",
+    "typeScriptVersion": "4.5"
+}

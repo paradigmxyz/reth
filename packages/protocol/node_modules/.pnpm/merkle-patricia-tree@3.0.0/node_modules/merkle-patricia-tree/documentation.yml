@@ -1,0 +1,18 @@
+toc:
+  - SecureTrie
+  - Trie
+  - name: Merkle Proof
+    description: |
+      Static functions for creating/verifying a merkle proof.
+    children:
+      - prove
+      - verifyProof
+  - name: Internal Util Functions
+    description: |
+      These are not exposed.
+    children:
+      - addHexPrefix
+      - asyncFirstSeries
+      - callTogether
+      - doKeysMatch
+      - matchingNibbleLength

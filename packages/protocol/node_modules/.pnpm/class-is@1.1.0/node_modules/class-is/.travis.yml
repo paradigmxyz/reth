@@ -1,0 +1,8 @@
+language: node_js
+node_js:
+  - "node"
+  - "lts/*"
+# Report coverage
+after_success:
+  - "npm i codecov"
+  - "node_modules/.bin/codecov"

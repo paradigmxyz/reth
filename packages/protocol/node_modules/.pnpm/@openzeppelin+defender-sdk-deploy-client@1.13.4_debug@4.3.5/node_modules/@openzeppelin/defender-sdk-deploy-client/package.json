@@ -1,0 +1,32 @@
+{
+  "name": "@openzeppelin/defender-sdk-deploy-client",
+  "version": "1.13.4",
+  "description": "Client library for managing Defender Deployments",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "files": [
+    "lib",
+    "!*.test.js",
+    "!*.test.js.map",
+    "!*.test.d.ts",
+    "!*__mocks__"
+  ],
+  "author": "Dylan Kilkenny <dylan@openzeppelin.com>",
+  "license": "MIT",
+  "dependencies": {
+    "@openzeppelin/defender-sdk-base-client": "^1.13.4",
+    "axios": "^1.6.8",
+    "lodash": "^4.17.21"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "gitHead": "daddff62731a4b55075b57905d8c5b8c4eb3b80e",
+  "scripts": {
+    "build": "rm -rf lib && tsc",
+    "test": "npm run test:unit",
+    "test:unit": "jest --verbose --passWithNoTests --forceExit",
+    "watch": "tsc -w",
+    "test:clean": "jest --clearCache"
+  }
+}

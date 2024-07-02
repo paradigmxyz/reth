@@ -1,0 +1,21 @@
+{
+  "name": "cachedown",
+  "version": "1.0.0",
+  "description": "leveldown implementation that proxies to underlying leveldown instance with lru cache",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test/test"
+  },
+  "author": "Mark Vayngrib <mark.vayngrib@lablz.com> (http://github.com/mvayngrib)",
+  "license": "MIT",
+  "dependencies": {
+    "abstract-leveldown": "^2.4.1",
+    "lru-cache": "^3.2.0"
+  },
+  "devDependencies": {
+    "levelup": "^1.3.1",
+    "memdown": "^1.1.0",
+    "rimraf": "^2.4.4",
+    "tape": "^4.2.2"
+  }
+}

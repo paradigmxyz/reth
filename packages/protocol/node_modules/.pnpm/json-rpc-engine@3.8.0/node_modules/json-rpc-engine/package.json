@@ -1,0 +1,58 @@
+{
+  "name": "json-rpc-engine",
+  "version": "3.8.0",
+  "description": "a tool for processing JSON RPC",
+  "main": "src/index.js",
+  "scripts": {
+    "lint": "aegir lint",
+    "build": "aegir build",
+    "test": "npm run test:node",
+    "test:node": "aegir test --target node",
+    "test:browser": "aegir test --target browser",
+    "release": "aegir release",
+    "release-minor": "aegir release --type minor",
+    "release-major": "aegir release --type major",
+    "coverage": "aegir coverage",
+    "coverage-publish": "aegir coverage --provider coveralls"
+  },
+  "author": "kumavis",
+  "license": "ISC",
+  "dependencies": {
+    "async": "^2.0.1",
+    "babel-preset-env": "^1.7.0",
+    "babelify": "^7.3.0",
+    "json-rpc-error": "^2.0.0",
+    "promise-to-callback": "^1.0.0",
+    "safe-event-emitter": "^1.0.1"
+  },
+  "browserify": {
+    "transform": [
+      [
+        "babelify",
+        {
+          "presets": [
+            "env"
+          ]
+        }
+      ]
+    ]
+  },
+  "devDependencies": {
+    "aegir": "^12.0.8",
+    "browserify": "^14.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kumavis/json-rpc-engine.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kumavis/json-rpc-engine/issues"
+  },
+  "homepage": "https://github.com/kumavis/json-rpc-engine#readme",
+  "directories": {
+    "test": "test"
+  },
+  "contributors": [
+    "kumavis <aaron@kumavis.me>"
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "name": "ethereumjs-block",
+  "version": "1.7.1",
+  "description": "Provides Block serialization and help functions",
+  "main": "index.js",
+  "scripts": {
+    "coverage": "istanbul cover ./tests/index.js",
+    "coveralls": "npm run coverage && coveralls < coverage/lcov.info",
+    "lint": "standard",
+    "test": "npm run test:node && npm run test:browser",
+    "test:browser": "karma start karma.conf.js",
+    "test:node": "node tests/index.js",
+    "build:docs": "documentation build ./index.js --format md --shallow > ./docs/index.md && documentation build ./from-rpc.js --format md --shallow  > ./docs/fromRpc.md"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ethereumjs/ethereumjs-block.git"
+  },
+  "keywords": [
+    "ethereum",
+    "block"
+  ],
+  "author": "mjbecze (mb@ethdev.com)",
+  "license": "MPL-2.0",
+  "bugs": {
+    "url": "https://github.com/ethereumjs/ethereumjs-block/issues"
+  },
+  "homepage": "https://github.com/ethereumjs/ethereumjs-block#readme",
+  "dependencies": {
+    "async": "^2.0.1",
+    "ethereum-common": "0.2.0",
+    "ethereumjs-tx": "^1.2.2",
+    "ethereumjs-util": "^5.0.0",
+    "merkle-patricia-tree": "^2.1.2"
+  },
+  "devDependencies": {
+    "babelify": "^8.0.0",
+    "babel-preset-env": "^1.6.1",
+    "browserify": "^15.0.0",
+    "coveralls": "^2.11.6",
+    "documentation": "4.0.0-beta16",
+    "ethereumjs-testing": "~1.0.0",
+    "istanbul": "^0.4.2",
+    "karma": "^2.0.0",
+    "karma-browserify": "^5.1.0",
+    "karma-chrome-launcher": "^2.2.0",
+    "karma-detect-browsers": "^2.2.5",
+    "karma-env-preprocessor": "^0.1.1",
+    "karma-firefox-launcher": "^1.1.0",
+    "karma-tap": "^4.0.0",
+    "standard": "^8.4.0",
+    "tape": "^4.2.0"
+  }
+}

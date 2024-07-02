@@ -1,0 +1,43 @@
+{
+  "name": "@openzeppelin/defender-base-client",
+  "version": "1.54.6",
+  "description": "",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "scripts": {
+    "build": "rm -rf lib && tsc",
+    "test": "yarn test:unit",
+    "test:unit": "jest --verbose",
+    "watch": "tsc -w",
+    "prepare": "yarn build"
+  },
+  "files": [
+    "lib",
+    "!*.test.js",
+    "!*.test.js.map",
+    "!*.test.d.ts",
+    "!*__mocks__"
+  ],
+  "author": "OpenZeppelin Defender <defender@openzeppelin.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@aws-sdk/client-lambda": "^3.563.0",
+    "@types/async-retry": "^1.4.4",
+    "aws-sdk": "^2.1366.0"
+  },
+  "dependencies": {
+    "amazon-cognito-identity-js": "^6.0.1",
+    "async-retry": "^1.3.3",
+    "axios": "^1.4.0",
+    "lodash": "^4.17.19",
+    "node-fetch": "^2.6.0"
+  },
+  "gitHead": "9eea3f7d413b8647b20e7b77a1c4ecd4186e4ed3",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OpenZeppelin/defender-client.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

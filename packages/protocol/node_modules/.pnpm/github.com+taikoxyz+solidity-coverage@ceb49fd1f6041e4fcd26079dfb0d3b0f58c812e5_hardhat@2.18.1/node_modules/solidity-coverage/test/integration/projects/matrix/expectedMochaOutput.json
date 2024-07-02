@@ -1,0 +1,99 @@
+{
+ "stats": {
+  "suites": 2,
+  "tests": 6,
+  "passes": 6,
+  "pending": 0,
+  "failures": 0
+ },
+ "tests": [
+  {
+   "title": "sends",
+   "fullTitle": "Contract: MatrixA sends",
+   "file": "test/matrix_a.js",
+   "currentRetry": 0,
+   "err": {}
+  },
+  {
+   "title": "calls",
+   "fullTitle": "Contract: MatrixA calls",
+   "file": "test/matrix_a.js",
+   "currentRetry": 0,
+   "err": {}
+  },
+  {
+   "title": "sends to A",
+   "fullTitle": "Contract: Matrix A and B sends to A",
+   "file": "test/matrix_a_b.js",
+   "currentRetry": 0,
+   "err": {}
+  },
+  {
+   "title": "sends to A",
+   "fullTitle": "Contract: Matrix A and B sends to A",
+   "file": "test/matrix_a_b.js",
+   "currentRetry": 0,
+   "err": {}
+  },
+  {
+   "title": "calls B",
+   "fullTitle": "Contract: Matrix A and B calls B",
+   "file": "test/matrix_a_b.js",
+   "currentRetry": 0,
+   "err": {}
+  },
+  {
+   "title": "sends to B",
+   "fullTitle": "Contract: Matrix A and B sends to B",
+   "file": "test/matrix_a_b.js",
+   "currentRetry": 0,
+   "err": {}
+  }
+ ],
+ "failures": [],
+ "passes": [
+  {
+   "title": "sends",
+   "fullTitle": "Contract: MatrixA sends",
+   "file": "test/matrix_a.js",
+   "currentRetry": 0,
+   "err": {}
+  },
+  {
+   "title": "calls",
+   "fullTitle": "Contract: MatrixA calls",
+   "file": "test/matrix_a.js",
+   "currentRetry": 0,
+   "err": {}
+  },
+  {
+   "title": "sends to A",
+   "fullTitle": "Contract: Matrix A and B sends to A",
+   "file": "test/matrix_a_b.js",
+   "currentRetry": 0,
+   "err": {}
+  },
+  {
+   "title": "sends to A",
+   "fullTitle": "Contract: Matrix A and B sends to A",
+   "file": "test/matrix_a_b.js",
+   "currentRetry": 0,
+   "err": {}
+  },
+  {
+   "title": "calls B",
+   "fullTitle": "Contract: Matrix A and B calls B",
+   "file": "test/matrix_a_b.js",
+   "currentRetry": 0,
+   "err": {}
+  },
+  {
+   "title": "sends to B",
+   "fullTitle": "Contract: Matrix A and B sends to B",
+   "file": "test/matrix_a_b.js",
+   "currentRetry": 0,
+   "err": {}
+  }
+ ]
+}
+

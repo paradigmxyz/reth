@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<title>IDNA UTS#46 Mocha tests</title>
+<link rel="stylesheet" href="../node_modules/mocha/mocha.css"/>
+<script src="../node_modules/chai/chai.js"></script>
+<script src="../node_modules/mocha/mocha.js"></script>
+<script src="../node_modules/requirejs-browser/require.js"></script>
+<script src="node_fs_shim.js"></script>
+<script type="module">
+import punycode from "../node_modules/punycode/punycode.es6.js";
+
+define('punycode', [], function () {
+  return punycode;
+});
+
+mocha.setup('tdd');
+
+define('assert', [], function () {
+  return chai.assert;
+});
+
+var idnaData = null;
+define('fs', [], function () {
+  return {
+    readFileSync: function () { return idnaData; }
+  };
+});
+
+function runScript() {
+  fs.readFile('IdnaTest.txt', {encoding: 'UTF-8'}, function (err, data) {
+    idnaData = data;
+    require(['assert', 'fs', '../uts46'], function () {
+      require(['test-uts46', 'test-idna-vector'], function () {
+        mocha.run();
+      });
+    });
+  });
+}
+window.runScript = runScript;
+</script>
+</head>
+<body onload="runScript()">
+<div id="mocha"></div>
+</body>
+</html>

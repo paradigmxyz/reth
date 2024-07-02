@@ -1,0 +1,55 @@
+{
+  "name": "ethereum-waffle",
+  "description": "Sweeter, faster and simpler than truffle.",
+  "version": "3.4.4",
+  "author": "Marek Kirejczyk <account@ethworks.io> (http://ethworks.io)",
+  "repository": "git@github.com:EthWorks/Waffle.git",
+  "private": false,
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "ethereum",
+    "smart-contracts",
+    "solidity",
+    "compiler",
+    "testing",
+    "javascript",
+    "typescript",
+    "library"
+  ],
+  "homepage": "https://github.com/EthWorks/Waffle",
+  "bugs": {
+    "url": "https://github.com/EthWorks/Waffle/issues"
+  },
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.ts",
+  "types": "dist/esm/index.d.ts",
+  "bin": {
+    "waffle": "./bin/waffle"
+  },
+  "scripts": {
+    "prepublishOnly": "yarn build",
+    "test:buildonly": "ts-node -T buildTestContracts",
+    "test:nobuild": "mocha",
+    "test": "yarn test:buildonly && yarn test:nobuild",
+    "lint": "eslint '{src,test}/**/*.ts'",
+    "lint:fix": "eslint --fix '{src,test}/**/*.ts'",
+    "build": "rimraf ./dist && yarn build:esm && yarn build:cjs",
+    "build:esm": "tsc -p tsconfig.build.json --outDir dist/esm --module ES6",
+    "build:cjs": "tsc -p tsconfig.build.json --outDir dist/cjs --declaration false",
+    "clean": "rimraf ./dist ./test/example/build"
+  },
+  "engines": {
+    "node": ">=10.0"
+  },
+  "dependencies": {
+    "@ethereum-waffle/chai": "^3.4.4",
+    "@ethereum-waffle/compiler": "^3.4.4",
+    "@ethereum-waffle/mock-contract": "^3.4.4",
+    "@ethereum-waffle/provider": "^3.4.4",
+    "ethers": "^5.0.1"
+  },
+  "devDependencies": {}
+}

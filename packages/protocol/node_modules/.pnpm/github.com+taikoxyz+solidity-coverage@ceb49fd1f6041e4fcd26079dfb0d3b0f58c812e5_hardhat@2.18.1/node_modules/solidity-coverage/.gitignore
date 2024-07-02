@@ -1,0 +1,9 @@
+coverage.json
+coverage/
+node_modules/
+.changelog
+.DS_Store
+test/artifacts
+test/cache
+temp
+.nyc_output/

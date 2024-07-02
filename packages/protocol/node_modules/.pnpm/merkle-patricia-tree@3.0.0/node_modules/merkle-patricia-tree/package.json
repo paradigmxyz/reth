@@ -1,0 +1,77 @@
+{
+  "name": "merkle-patricia-tree",
+  "version": "3.0.0",
+  "description": "This is an implementation of the modified merkle patricia tree as specified in the Ethereum's yellow paper.",
+  "main": "index.js",
+  "scripts": {
+    "test": "npm run test:node && npm run test:browser",
+    "coverage": "istanbul cover tape ./test/*.js",
+    "coveralls": "npm run coverage && coveralls <coverage/lcov.info",
+    "lint": "standard",
+    "prepublishOnly": "npm run build",
+    "test:browser": "karma start karma.conf.js",
+    "test:node": "babel-tape-runner ./test/*.js",
+    "babel": "npx babel src --out-dir ./",
+    "build": "npm run babel && mkdir -p dist && browserify --s Trie index.js -o dist/trie.js -t [ babelify --presets [ @babel/preset-env ] ]",
+    "build:docs": "documentation build ./src/** -f md --shallow ./src/index.js ./src/secure.js ./src/proof.js > ./docs/index.md --github --config documentation.yml --markdown-toc false"
+  },
+  "author": {
+    "name": "mjbecze",
+    "email": "mjbecze@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ethereumjs/merkle-patricia-tree.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ethereumjs/merkle-patricia-tree/issues"
+  },
+  "keywords": [
+    "merkle",
+    "radix",
+    "trie",
+    "ethereum"
+  ],
+  "license": "MPL-2.0",
+  "dependencies": {
+    "async": "^2.6.1",
+    "ethereumjs-util": "^5.2.0",
+    "level-mem": "^3.0.1",
+    "level-ws": "^1.0.0",
+    "readable-stream": "^3.0.6",
+    "rlp": "^2.0.0",
+    "semaphore": ">=1.0.1"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.1.5",
+    "@babel/core": "^7.1.2",
+    "@babel/plugin-proposal-class-properties": "^7.1.0",
+    "@babel/preset-env": "^7.1.0",
+    "babel-tape-runner": "^3.0.0",
+    "babelify": "^10.0.0",
+    "browserify": "^13.0.0",
+    "coveralls": "^2.11.6",
+    "documentation": "^8.1.2",
+    "ethereumjs-testing": "0.0.1",
+    "istanbul": "^0.4.1",
+    "karma": "^1.7.1",
+    "karma-browserify": "^5.0.0",
+    "karma-chrome-launcher": "^2.2.0",
+    "karma-detect-browsers": "^2.0.2",
+    "karma-env-preprocessor": "^0.1.1",
+    "karma-firefox-launcher": "^1.0.1",
+    "karma-tap": "^1.0.3",
+    "standard": "^5.3.1",
+    "tape": "^4.4.0"
+  },
+  "standard": {
+    "ignore": [
+      "dist/**",
+      "package-init.js",
+      "package.js"
+    ]
+  },
+  "contributors": [
+    "Aaron Kumavis <http://aaron.kumavis.me/> (https://github.com/kumavis)"
+  ]
+}

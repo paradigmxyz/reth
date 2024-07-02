@@ -1,0 +1,30 @@
+{
+  "name": "murmur-128",
+  "version": "0.2.1",
+  "license": "MIT",
+  "repository": "LinusU/murmur-128",
+  "scripts": {
+    "test": "standard && node test"
+  },
+  "dependencies": {
+    "encode-utf8": "^1.0.2",
+    "fmix": "^0.1.0",
+    "imul": "^1.0.0"
+  },
+  "devDependencies": {
+    "arraybuffer-equal": "^1.0.4",
+    "hex-to-array-buffer": "^1.1.0",
+    "standard": "^14.3.1"
+  },
+  "keywords": [
+    "digest",
+    "fast",
+    "hash",
+    "murmur hash",
+    "murmur",
+    "murmur3",
+    "murmurhash",
+    "murmurhash3",
+    "quick"
+  ]
+}

@@ -1,0 +1,46 @@
+{
+ "contracts/MatrixA.sol": {
+  "10": [
+   {
+    "title": "sends",
+    "file": "test/matrix_a.js"
+   },
+   {
+    "title": "sends to A",
+    "file": "test/matrix_a_b.js"
+   }
+  ],
+  "14": [
+   {
+    "title": "calls",
+    "file": "test/matrix_a.js"
+   }
+  ],
+  "15": [
+   {
+    "title": "calls",
+    "file": "test/matrix_a.js"
+   }
+  ]
+ },
+ "contracts/MatrixB.sol": {
+  "10": [
+   {
+    "title": "sends to B",
+    "file": "test/matrix_a_b.js"
+   }
+  ],
+  "14": [
+   {
+    "title": "calls B",
+    "file": "test/matrix_a_b.js"
+   }
+  ],
+  "15": [
+   {
+    "title": "calls B",
+    "file": "test/matrix_a_b.js"
+   }
+  ]
+ }
+}

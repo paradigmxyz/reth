@@ -1,0 +1,54 @@
+{
+  "name": "idna-uts46-hx",
+  "version": "2.3.1",
+  "description": "A UTS #46 processing algorithm for IDNA2008 strings",
+  "main": "uts46.js",
+  "keywords": [
+    "unicode",
+    "idn",
+    "idna",
+    "domain"
+  ],
+  "nyc": {
+    "reporter": [
+      "html",
+      "text"
+    ],
+    "exclude": [
+      "**/*.spec.js",
+      "idna-map.js"
+    ]
+  },
+  "scripts": {
+    "test": "npm run test-COVERAGE --silent",
+    "test-MOCHA": "./node_modules/.bin/_mocha --opts mocha.opts $(find ./test -type f -name '*.spec.js')",
+    "test-COVERAGE": "cross-env NODE_ENV=development nyc npm run test-MOCHA --silent"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hexonet/idna-uts46"
+  },
+  "author": {
+    "name": "Kai Schwarz",
+    "email": "kschwarz@hexonet.net"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/hexonet/idna-uts46/issues"
+  },
+  "homepage": "https://github.com/hexonet/idna-uts46",
+  "dependencies": {
+    "punycode": "2.1.0"
+  },
+  "devDependencies": {
+    "chai": "3.5.0",
+    "cross-env": "4.0.0",
+    "istanbul": "0.4.5",
+    "mocha": "3.2.0",
+    "nyc": "10.2.0",
+    "requirejs-browser": "2.1.9"
+  },
+  "engines": {
+    "node": ">=4.0.0"
+  }
+}

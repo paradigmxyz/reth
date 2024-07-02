@@ -1,0 +1,38 @@
+{
+  "name": "catering",
+  "version": "2.1.1",
+  "description": "Simple utility to allow your module to be consumed with a callback or promise",
+  "license": "MIT",
+  "author": "Vincent Weevers",
+  "scripts": {
+    "test": "standard && node test.js",
+    "test-browsers-local": "airtap test.js"
+  },
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "next-tick.js",
+    "next-tick-browser.js"
+  ],
+  "browser": {
+    "./next-tick.js": "./next-tick-browser.js"
+  },
+  "devDependencies": {
+    "airtap": "^4.0.4",
+    "airtap-playwright": "^1.0.1",
+    "standard": "^16.0.4",
+    "tape": "^5.4.0"
+  },
+  "keywords": [
+    "callback",
+    "promise",
+    "promisify"
+  ],
+  "engines": {
+    "node": ">=6"
+  },
+  "repository": "vweevers/catering",
+  "bugs": "https://github.com/vweevers/catering/issues",
+  "homepage": "https://github.com/vweevers/catering"
+}

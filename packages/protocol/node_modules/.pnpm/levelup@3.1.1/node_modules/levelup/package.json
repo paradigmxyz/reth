@@ -1,0 +1,88 @@
+{
+  "name": "levelup",
+  "description": "Fast & simple storage - a Node.js-style LevelDB wrapper",
+  "version": "3.1.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/level/levelup.git"
+  },
+  "homepage": "https://github.com/level/levelup",
+  "keywords": [
+    "leveldb",
+    "stream",
+    "database",
+    "db",
+    "store",
+    "storage",
+    "json"
+  ],
+  "main": "lib/levelup.js",
+  "dependencies": {
+    "deferred-leveldown": "~4.0.0",
+    "level-errors": "~2.0.0",
+    "level-iterator-stream": "~3.0.0",
+    "xtend": "~4.0.0"
+  },
+  "devDependencies": {
+    "after": "^0.8.2",
+    "airtap": "0.1.0",
+    "async": "^2.5.0",
+    "bl": "^2.0.0",
+    "browserify": "^16.0.0",
+    "bustermove": "~1.0.0",
+    "concat-stream": "~1.6.0",
+    "coveralls": "~3.0.2",
+    "delayed": "~1.0.1",
+    "encoding-down": "^5.0.0",
+    "level-community": "~3.0.0",
+    "memdown": "^3.0.0",
+    "nyc": "~12.0.2",
+    "pinkie": "~2.0.4",
+    "referee": "~1.2.0",
+    "remark-cli": "^5.0.0",
+    "remark-collapse": "~0.1.2",
+    "remark-git-contributors": "~0.2.1",
+    "remark-github": "~7.0.3",
+    "remark-toc": "~5.0.0",
+    "safe-buffer": "^5.1.0",
+    "standard": "^11.0.0",
+    "tape": "^4.7.0",
+    "trickle": "0.0.2"
+  },
+  "scripts": {
+    "test": "standard && nyc node test",
+    "coverage": "nyc report --reporter=text-lcov | coveralls",
+    "test-browsers": "airtap --loopback airtap.local test/index.js",
+    "test-browser-local": "airtap --local test/index.js",
+    "remark": "remark README.md CHANGELOG.md UPGRADING.md CONTRIBUTORS.md -o"
+  },
+  "remarkConfig": {
+    "plugins": [
+      [
+        "remark-git-contributors",
+        "level-community"
+      ],
+      [
+        "remark-github"
+      ],
+      [
+        "remark-toc",
+        {
+          "maxDepth": 2,
+          "tight": true
+        }
+      ],
+      [
+        "remark-collapse",
+        {
+          "test": "Table of Contents",
+          "summary": "Click to expand"
+        }
+      ]
+    ]
+  },
+  "engines": {
+    "node": ">=6"
+  },
+  "license": "MIT"
+}

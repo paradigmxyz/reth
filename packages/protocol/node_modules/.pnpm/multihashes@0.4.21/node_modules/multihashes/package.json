@@ -1,0 +1,68 @@
+{
+  "name": "multihashes",
+  "version": "0.4.21",
+  "description": "multihash implementation",
+  "leadMaintainer": "David Dias <daviddias@ipfs.io>",
+  "main": "src/index.js",
+  "scripts": {
+    "lint": "aegir lint",
+    "test:browser": "aegir test --target browser",
+    "test:node": "aegir test --target node",
+    "build": "aegir build",
+    "test": "aegir test",
+    "docs": "aegir docs",
+    "release": "aegir release --docs",
+    "release-minor": "aegir release --type minor --docs",
+    "release-major": "aegir release --type major --docs",
+    "coverage": "aegir coverage",
+    "coverage-publish": "aegir coverage --provider coveralls"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/multiformats/js-multihash.git"
+  },
+  "keywords": [
+    "multihash"
+  ],
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/multiformats/js-multihash/issues"
+  },
+  "dependencies": {
+    "buffer": "^5.5.0",
+    "multibase": "^0.7.0",
+    "varint": "^5.0.0"
+  },
+  "devDependencies": {
+    "aegir": "^21.4.4",
+    "chai": "^4.1.2",
+    "dirty-chai": "^2.0.1",
+    "pre-commit": "^1.2.2"
+  },
+  "contributors": [
+    "David Dias <daviddias.p@gmail.com>",
+    "Juan Benet <juan@benet.ai>",
+    "Jacob Heun <jacobheun@gmail.com>",
+    "Friedel Ziegelmayer <dignifiedquire@gmail.com>",
+    "Richard Littauer <richard.littauer@gmail.com>",
+    "Hugo Dias <hugomrdias@gmail.com>",
+    "ᴠɪᴄᴛᴏʀ ʙᴊᴇʟᴋʜᴏʟᴍ <victorbjelkholm@gmail.com>",
+    "Rod Vagg <rod@vagg.org>",
+    "Pedro Teixeira <i@pgte.me>",
+    "kumavis <aaron@kumavis.me>",
+    "Alan Shaw <alan@tableflip.io>",
+    "Fil <fil@rezo.net>",
+    "Donald Tsang <brandonknlee@gmail.com>",
+    "Trond Arne Bråthen <tabrath@gmail.com>",
+    "Vasco Santos <vasco.santos@moxy.studio>",
+    "Volker Mische <volker.mische@gmail.com>",
+    "William Cotton <williamcotton@gmail.com>",
+    "nginnever <ginneversource@gmail.com>",
+    "Linus Unnebäck <linus@folkdatorn.se>",
+    "Nate Foss <npfoss@gmail.com>"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "name": "multibase",
+  "version": "0.7.0",
+  "description": "JavaScript implementation of the multibase specification",
+  "leadMaintainer": "Oli Evans <oli@tableflip.io>",
+  "main": "src/index.js",
+  "scripts": {
+    "lint": "aegir lint",
+    "test": "aegir test",
+    "test:node": "aegir test -t node",
+    "test:browser": "aegir test -t browser",
+    "build": "aegir build",
+    "docs": "aegir docs",
+    "release": "aegir release --docs",
+    "release-minor": "aegir release --type minor --docs",
+    "release-major": "aegir release --type major --docs",
+    "coverage": "aegir coverage",
+    "coverage-publish": "aegir coverage publish"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/multiformats/js-multibase.git"
+  },
+  "keywords": [
+    "IPFS",
+    "multiformats",
+    "multibase",
+    "encode",
+    "decode",
+    "formats"
+  ],
+  "devDependencies": {
+    "aegir": "^21.3.0",
+    "chai": "^4.1.2",
+    "dirty-chai": "^2.0.1",
+    "pre-commit": "^1.2.2"
+  },
+  "dependencies": {
+    "base-x": "^3.0.8",
+    "buffer": "^5.5.0"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/multiformats/js-multibase/issues"
+  },
+  "homepage": "https://github.com/multiformats/js-multibase#readme",
+  "contributors": [
+    "David Dias <daviddias.p@gmail.com>",
+    "Oli Evans <oli@tableflip.io>",
+    "Hugo Dias <hugomrdias@gmail.com>",
+    "Friedel Ziegelmayer <dignifiedquire@gmail.com>",
+    "Alan Shaw <alan.shaw@protocol.ai>",
+    "victorbjelkholm <victorbjelkholm@gmail.com>",
+    "achingbrain <alex@achingbrain.net>",
+    "theobat <theophile.batoz@gmail.com>",
+    "Bora M. Alper <boramalper@gmail.com>",
+    "Henrique Dias <hacdias@gmail.com>",
+    "Richard Littauer <richard.littauer@gmail.com>"
+  ]
+}

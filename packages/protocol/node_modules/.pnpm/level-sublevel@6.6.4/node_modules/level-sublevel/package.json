@@ -1,0 +1,54 @@
+{
+  "name": "level-sublevel",
+  "description": "partition levelup databases",
+  "version": "6.6.4",
+  "homepage": "https://github.com/dominictarr/level-sublevel",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/dominictarr/level-sublevel.git"
+  },
+  "dependencies": {
+    "bytewise": "~1.1.0",
+    "level-codec": "^9.0.0",
+    "level-errors": "^2.0.0",
+    "level-iterator-stream": "^2.0.3",
+    "ltgt": "~2.1.1",
+    "pull-defer": "^0.2.2",
+    "pull-level": "^2.0.3",
+    "pull-stream": "^3.6.8",
+    "typewiselite": "~1.0.0",
+    "xtend": "~4.0.0"
+  },
+  "devDependencies": {
+    "level": "^3.0.1",
+    "level-test": "^3.0.0",
+    "monotonic-timestamp": "0.0.8",
+    "rimraf": "~2.1.4",
+    "shasum": "0.0.2",
+    "stream-to-pull-stream": "~1.2.0",
+    "tape": "^4.9.1",
+    "through": "~2.3.4"
+  },
+  "scripts": {
+    "test": "node test-runner.js"
+  },
+  "author": "Dominic Tarr <dominic.tarr@gmail.com> (http://dominictarr.com)",
+  "license": "MIT",
+  "stability": "unstable",
+  "testling": {
+    "files": "test/*.js",
+    "browsers": [
+      "ie/8..latest",
+      "firefox/17..latest",
+      "firefox/nightly",
+      "chrome/22..latest",
+      "chrome/canary",
+      "opera/12..latest",
+      "opera/next",
+      "safari/5.1..latest",
+      "ipad/6.0..latest",
+      "iphone/6.0..latest",
+      "android-browser/4.2..latest"
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "array-back",
+  "author": "Lloyd Brookes <75pound@gmail.com>",
+  "version": "1.0.4",
+  "description": "Guarantees an array back",
+  "repository": "https://github.com/75lb/array-back.git",
+  "license": "MIT",
+  "main": "./lib/array-back.js",
+  "keywords": [
+    "to",
+    "convert",
+    "return",
+    "array",
+    "arrayify"
+  ],
+  "engines": {
+    "node": ">=0.12.0"
+  },
+  "scripts": {
+    "test": "test-runner test/*.js",
+    "docs": "jsdoc2md -t jsdoc2md/README.hbs lib/*.js  > README.md; echo"
+  },
+  "dependencies": {
+    "typical": "^2.6.0"
+  },
+  "devDependencies": {
+    "core-assert": "^0.2.1",
+    "jsdoc-to-markdown": "^2.0.1",
+    "test-runner": "^0.3.0"
+  }
+}

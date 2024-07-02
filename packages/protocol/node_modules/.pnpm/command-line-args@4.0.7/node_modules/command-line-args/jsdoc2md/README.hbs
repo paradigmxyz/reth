@@ -1,0 +1,135 @@
+[![view on npm](https://img.shields.io/npm/v/command-line-args.svg)](https://www.npmjs.org/package/command-line-args)
+[![npm module downloads](https://img.shields.io/npm/dt/command-line-args.svg)](https://www.npmjs.org/package/command-line-args)
+[![Build Status](https://travis-ci.org/75lb/command-line-args.svg?branch=master)](https://travis-ci.org/75lb/command-line-args)
+[![Coverage Status](https://coveralls.io/repos/github/75lb/command-line-args/badge.svg?branch=master)](https://coveralls.io/github/75lb/command-line-args?branch=master)
+[![Dependency Status](https://david-dm.org/75lb/command-line-args.svg)](https://david-dm.org/75lb/command-line-args)
+[![js-standard-style](https://img.shields.io/badge/code%20style-standard-brightgreen.svg)](https://github.com/feross/standard)
+[![Join the chat at https://gitter.im/75lb/command-line-args](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/75lb/command-line-args?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
+# command-line-args
+A mature, feature-complete library to parse command-line options.
+
+*If your app requires a git-like command interface, consider using [command-line-commands](https://github.com/75lb/command-line-commands).*
+
+## Synopsis
+You can set options using the main notation standards (getopt, getopt_long, etc.). These commands are all equivalent, setting the same values:
+```
+$ example --verbose --timeout=1000 --src one.js --src two.js
+$ example --verbose --timeout 1000 --src one.js two.js
+$ example -vt 1000 --src one.js two.js
+$ example -vt 1000 one.js two.js
+```
+
+To access the values, first describe the options your app accepts (see [option definitions](#optiondefinition-)).
+```js
+const commandLineArgs = require('command-line-args')
+
+const optionDefinitions = [
+  { name: 'verbose', alias: 'v', type: Boolean },
+  { name: 'src', type: String, multiple: true, defaultOption: true },
+  { name: 'timeout', alias: 't', type: Number }
+]
+```
+The [`type`](#optiontype--function) property is a setter function (the value supplied is passed through this), giving you full control over the value received.
+
+Next, parse the options using [commandLineArgs()](#commandlineargsdefinitions-argv--object-):
+```js
+const options = commandLineArgs(optionDefinitions)
+```
+
+`options` now looks like this:
+```js
+{
+  files: [
+    'one.js',
+    'two.js'
+  ],
+  verbose: true,
+  timeout: 1000
+}
+```
+
+When dealing with large amounts of options it often makes sense to [group](#optiongroup--string--arraystring) them.
+
+A usage guide can be generated using [command-line-usage](https://github.com/75lb/command-line-usage), for example:
+
+![usage](https://raw.githubusercontent.com/75lb/command-line-usage/master/example/screens/footer.png)
+
+### Notation rules
+
+Notation rules for setting command-line options.
+
+* Argument order is insignificant. Whether you set `--example` at the beginning or end of the arg list makes no difference.
+* Options with a [type](#optiontype--function) of `Boolean` do not need to supply a value. Setting `--flag` or `-f` will set that option's value to `true`. This is the only [type](#optiontype--function) with special behaviour.
+* Three ways to set an option value
+  * `--option value`
+  * `--option=value`
+  * `-o value`
+* Two ways to a set list of values (on options with [multiple](#optionmultiple--boolean) set)
+  * `--list one two three`
+  * `--list one --list two --list three`
+* Short options ([alias](#optionalias--string)) can be set in groups. The following are equivalent:
+  * `-a -b -c`
+  * `-abc`
+
+### Ambiguous values
+
+Imagine we are using "grep-tool" to search for the string `'-f'`:
+
+```
+$ grep-tool --search -f
+```
+
+We have an issue here: command-line-args will assume we are setting two options (`--search` and `-f`). In actuality, we are passing one option (`--search`) and one value (`-f`). In cases like this, avoid ambiguity by using `--option=value` notation:
+
+```
+$ grep-tool --search=-f
+```
+
+### Partial parsing
+
+By default, if the user sets an option without a valid [definition](#exp_module_definition--OptionDefinition) an `UNKNOWN_OPTION` exception is thrown. However, in some cases you may only be interested in a subset of the options wishing to pass the remainder to another library. See [here](https://github.com/75lb/command-line-args/blob/master/example/mocha.js) for a example showing where this might be necessary.
+
+To enable partial parsing, set `partial: true` in the method options:
+
+```js
+const optionDefinitions = [
+  { name: 'value', type: Number }
+]
+const options = commandLineArgs(optionDefinitions, { partial: true })
+```
+
+Now, should any unknown args be passed at the command line:
+
+```
+$ example --milk --value 2 --bread cheese
+```
+
+They will be returned in the `_unknown` property of the `commandLineArgs` output with no exceptions thrown:
+
+```js
+{
+  value: 2,
+  _unknown: [ '--milk', '--bread', 'cheese']
+}
+```
+
+
+## Install
+
+```sh
+$ npm install command-line-args --save
+```
+
+# API Reference
+{{#module name="command-line-args"}}
+{{>body~}}
+{{>member-index~}}
+{{>separator~}}
+{{>members~}}
+{{/module}}
+{{#class name="OptionDefinition"}}{{>docs}}{{/class}}
+
+* * *
+
+&copy; 2014-17 Lloyd Brookes \<75pound@gmail.com\>. Documented by [jsdoc-to-markdown](https://github.com/75lb/jsdoc-to-markdown).

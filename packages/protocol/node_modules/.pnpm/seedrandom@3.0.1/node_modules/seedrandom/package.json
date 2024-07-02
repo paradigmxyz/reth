@@ -1,0 +1,58 @@
+{
+  "name": "seedrandom",
+  "version": "3.0.1",
+  "description": "Seeded random number generator for Javascript.",
+  "main": "index.js",
+  "keywords": [
+    "seed",
+    "random",
+    "crypto"
+  ],
+  "scripts": {
+    "test": "grunt travis"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/davidbau/seedrandom.git"
+  },
+  "author": "David Bau",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/davidbau/seedrandom/issues"
+  },
+  "homepage": "http://davidbau.com/archives/2010/01/30/random_seeds_coded_hints_and_quintillions.html",
+  "config": {
+    "blanket": {
+      "pattern": [
+        "seedrandom.js",
+        "lib/alea.js",
+        "lib/xor128.js",
+        "lib/xorwow.js",
+        "lib/xorshift7.js",
+        "lib/tychei.js",
+        "lib/xor4096.js"
+      ]
+    }
+  },
+  "browser": {
+    "crypto": false
+  },
+  "devDependencies": {
+    "blanket": "latest",
+    "coveralls": "latest",
+    "grunt": "latest",
+    "grunt-browserify": "latest",
+    "grunt-release": "davidbau/grunt-release",
+    "grunt-cli": "latest",
+    "grunt-contrib-connect": "latest",
+    "grunt-contrib-copy": "latest",
+    "grunt-contrib-qunit": "latest",
+    "grunt-contrib-uglify": "latest",
+    "grunt-mocha-nyc": "latest",
+    "mocha": "latest",
+    "nyc": "latest",
+    "proxyquire": "latest",
+    "qunit": "latest",
+    "requirejs": "latest"
+  }
+}

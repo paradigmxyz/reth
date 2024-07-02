@@ -1,0 +1,31 @@
+{
+  "name": "ethereum-common",
+  "version": "0.2.0",
+  "description": "Resources common to all Ethereum implementations",
+  "main": "index.js",
+  "scripts": {
+    "test": "node tests/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ethereumjs/common.git"
+  },
+  "keywords": [
+    "ethereum"
+  ],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ethereumjs/common/issues"
+  },
+  "homepage": "https://github.com/ethereumjs/common",
+  "devDependencies": {
+    "tape": "^4.2.0"
+  },
+  "maintainers": [
+    {
+      "name": "null_radix",
+      "email": "mjbecze@gmail.com"
+    }
+  ]
+}

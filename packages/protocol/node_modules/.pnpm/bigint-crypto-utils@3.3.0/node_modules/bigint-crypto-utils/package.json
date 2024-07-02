@@ -1,0 +1,169 @@
+{
+  "name": "bigint-crypto-utils",
+  "version": "3.3.0",
+  "description": "Arbitrary precision modular arithmetic, cryptographically secure random numbers and strong probable prime generation/testing. It works in modern browsers, Angular, React, Node.js, etc. since it uses the native JS implementation of BigInt",
+  "keywords": [
+    "modular arithmetics",
+    "crypto",
+    "prime",
+    "random",
+    "rng",
+    "prng",
+    "primality test",
+    "BigInt",
+    "angular",
+    "react"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Juan Hernández Serrano",
+    "email": "j.hernandez@upc.edu",
+    "url": "https://github.com/juanelas"
+  },
+  "repository": "github:juanelas/bigint-crypto-utils",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "type": "module",
+  "main": "./dist/index.node.cjs",
+  "browser": "./dist/index.browser.esm.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "node": {
+        "module": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.node.esm.js"
+        },
+        "import": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.node.esm.js"
+        },
+        "require": {
+          "types": "./dist/index.d.ts",
+          "default": "./dist/index.node.cjs"
+        }
+      },
+      "script": "./dist/bundle.iife.js",
+      "default": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.browser.esm.js"
+      }
+    },
+    "./esm-browser-bundle": "./dist/bundle.esm.min.js",
+    "./esm-browser-bundle-nomin": "./dist/bundle.esm.js",
+    "./iife-browser-bundle": "./dist/bundle.iife.js",
+    "./umd-browser-bundle": "./dist/bundle.umd.js",
+    "./types": "./dist/index.d.ts"
+  },
+  "imports": {
+    "#pkg": {
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.node.cjs"
+      },
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.node.esm.js"
+      },
+      "default": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/index.browser.esm.js"
+      }
+    }
+  },
+  "directories": {
+    "build": "./build",
+    "dist": "./dist",
+    "docs": "./docs",
+    "src": "./src",
+    "test": "./test",
+    "benchmark": "./benchmark",
+    "mocha-ts": "./.mocha-ts"
+  },
+  "scripts": {
+    "build": "run-s lint:src build:js lint:test docs",
+    "build:js": "rollup -c build/rollup.config.js",
+    "postbuild:js": "rimraf .types",
+    "clean": "rimraf .mocha-ts coverage dist .types docs",
+    "coverage": "c8 --clean --check-coverage --exclude \"{src/ts/**/*.spec.ts,test,test-vectors,build}\" --exclude-after-remap --reporter=text --reporter=lcov node ./build/bin/mocha-ts.cjs --commonjs ",
+    "docs": "node build/build.docs.cjs",
+    "git:add": "git add -A",
+    "lint": "ts-standard --fix",
+    "lint:src": "ts-standard --fix \"src/**/!(*.spec).ts\"",
+    "lint:test": "ts-standard --fix \"{test/**/*.ts,src/**/*.spec.ts}\"",
+    "mocha-ts": "node --experimental-modules --experimental-json-modules --es-module-specifier-resolution=node ./build/bin/mocha-ts.cjs ",
+    "mocha-ts:cjs": "node ./build/bin/mocha-ts.cjs --commonjs ",
+    "mocha-ts:watch": "npm run mocha-ts:cjs -- --watch ",
+    "mocha-ts:browser": "node build/testing/browser/index.cjs ",
+    "mocha-ts:browser-headless": "node build/testing/browser/index.cjs headless ",
+    "preversion": "run-s clean lint:src build:js lint:test coverage test:browser-headless",
+    "version": "run-s docs git:add",
+    "postversion": "git push --follow-tags",
+    "test": "run-s test:node test:browser-headless",
+    "test:browser": "npm run mocha-ts:browser",
+    "test:browser-headless": "npm run mocha-ts:browser-headless",
+    "test:node": "run-s test:node-cjs test:node-esm",
+    "test:node-cjs": "npm run mocha-ts:cjs ",
+    "test:node-esm": "npm run mocha-ts ",
+    "watch": "npm run mocha-ts:watch "
+  },
+  "ts-standard": {
+    "project": "tsconfig.json",
+    "env": [
+      "mocha"
+    ],
+    "globals": [
+      "IS_BROWSER",
+      "browser",
+      "page",
+      "chai"
+    ],
+    "ignore": [
+      "dist/**/*",
+      "examples/**/*",
+      "types/**/*",
+      "benchmark/**/*"
+    ]
+  },
+  "nodeBrowserSkel": {
+    "badges": {
+      "workflow": true,
+      "coveralls": true
+    },
+    "git": {
+      "branch": "main"
+    }
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^25.0.2",
+    "@rollup/plugin-inject": "^5.0.3",
+    "@rollup/plugin-json": "^6.0.0",
+    "@rollup/plugin-multi-entry": "^6.0.0",
+    "@rollup/plugin-node-resolve": "^15.0.1",
+    "@rollup/plugin-replace": "^5.0.1",
+    "@rollup/plugin-terser": "^0.4.0",
+    "@rollup/plugin-typescript": "^11.1.0",
+    "@types/chai": "^4.2.22",
+    "@types/mocha": "^10.0.0",
+    "bigint-mod-arith": "^3.3.1",
+    "c8": "^8.0.0",
+    "chai": "^4.3.3",
+    "dotenv": "^16.0.3",
+    "glob": "^10.0.0",
+    "json5": "^2.2.0",
+    "minimatch": "^9.0.0",
+    "mocha": "^10.0.0",
+    "npm-run-all": "^4.1.5",
+    "pirates": "^4.0.1",
+    "puppeteer": "^20.7.3",
+    "rimraf": "^5.0.0",
+    "rollup": "^3.20.2",
+    "rollup-plugin-dts": "^5.3.0",
+    "ts-standard": "^12.0.2",
+    "tslib": "^2.3.1",
+    "typedoc": "~0.23.0",
+    "typedoc-plugin-markdown": "~3.14.0",
+    "typescript": "^4.4.3"
+  }
+}

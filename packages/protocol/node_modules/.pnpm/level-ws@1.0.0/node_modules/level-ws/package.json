@@ -1,0 +1,39 @@
+{
+  "name": "level-ws",
+  "description": "A basic WriteStream implementation for LevelUP",
+  "version": "1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Level/level-ws.git"
+  },
+  "homepage": "https://github.com/Level/level-ws",
+  "keywords": [
+    "leveldb",
+    "stream",
+    "levelup"
+  ],
+  "main": "level-ws.js",
+  "dependencies": {
+    "inherits": "^2.0.3",
+    "readable-stream": "^2.2.8",
+    "xtend": "^4.0.1"
+  },
+  "devDependencies": {
+    "coveralls": "~3.0.1",
+    "level": "^4.0.0",
+    "level-concat-iterator": "^2.0.0",
+    "nyc": "~12.0.2",
+    "secret-event-listener": "~1.0.0",
+    "standard": "^11.0.1",
+    "tape": "^4.9.0",
+    "tempy": "^0.2.1"
+  },
+  "scripts": {
+    "test": "standard && nyc node test.js",
+    "coverage": "nyc report --reporter=text-lcov | coveralls"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=6"
+  }
+}

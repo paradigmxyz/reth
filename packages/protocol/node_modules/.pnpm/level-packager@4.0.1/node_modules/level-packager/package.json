@@ -1,0 +1,51 @@
+{
+  "name": "level-packager",
+  "description": "LevelUP package helper for distributing with a LevelDOWN-compatible back-end",
+  "version": "4.0.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Level/packager.git"
+  },
+  "scripts": {
+    "test": "standard && node test.js",
+    "remark": "remark README.md CHANGELOG.md CONTRIBUTORS.md UPGRADING.md -o"
+  },
+  "remarkConfig": {
+    "plugins": [
+      [
+        "remark-git-contributors",
+        "level-community"
+      ],
+      [
+        "remark-github"
+      ]
+    ]
+  },
+  "homepage": "https://github.com/Level/packager",
+  "keywords": [
+    "leveldb",
+    "stream",
+    "database",
+    "db",
+    "store",
+    "storage",
+    "json"
+  ],
+  "main": "level-packager.js",
+  "dependencies": {
+    "encoding-down": "~5.0.0",
+    "levelup": "^3.0.0"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "level-community": "^3.0.0",
+    "remark-cli": "^5.0.0",
+    "remark-git-contributors": "^0.2.2",
+    "remark-github": "^7.0.3",
+    "standard": "^11.0.0",
+    "tape": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=6"
+  }
+}

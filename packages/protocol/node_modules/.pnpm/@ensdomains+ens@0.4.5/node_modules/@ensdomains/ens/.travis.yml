@@ -1,0 +1,20 @@
+sudo: required
+
+dist: trusty
+
+language: node_js
+
+node_js:
+  - "8"
+env:
+  - TASK=test
+  - TASK=lint
+matrix:
+  fast_finish: true
+  allow_failures:
+    - env: TASK=lint
+script:
+  - npm run $TASK
+
+notifications:
+  email: false

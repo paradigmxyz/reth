@@ -1,0 +1,26 @@
+language: node_js
+node_js:
+  - "6"
+  - "7"
+  - "8"
+env:
+  - CXX=g++-4.8
+addons:
+  apt:
+    sources:
+    - ubuntu-toolchain-r-test
+    packages:
+    - g++-4.8
+env:
+  matrix:
+    - CXX=g++-4.8 TEST_SUITE=test
+matrix:
+  fast_finish: true
+  include:
+    - os: linux
+      node_js: "6"
+      env: CXX=g++-4.8 TEST_SUITE=coveralls
+    - os: linux
+      node_js: "6"
+      env: CXX=g++-4.8 TEST_SUITE=lint
+script: npm run $TEST_SUITE

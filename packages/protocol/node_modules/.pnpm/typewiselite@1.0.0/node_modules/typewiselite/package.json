@@ -1,0 +1,42 @@
+{
+  "name": "typewiselite",
+  "version": "1.0.0",
+  "description": "comparison for sensible javascript objects",
+  "devDependencies": {
+    "tape": "~2.14.0"
+  },
+  "scripts": {
+    "test": "node test/compare.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dominictarr/typewiselite.git"
+  },
+  "keywords": [
+    "sort",
+    "order",
+    "collation",
+    "leveldb",
+    "indexeddb",
+    "couchdb"
+  ],
+  "author": "Dean Landolt <dean@deanlandolt.com>",
+  "license": "MIT",
+  "readmeFilename": "README.md",
+  "testling": {
+    "files": "test/*.js",
+    "browsers": [
+      "ie/8..latest",
+      "firefox/17..latest",
+      "firefox/nightly",
+      "chrome/22..latest",
+      "chrome/canary",
+      "opera/12..latest",
+      "opera/next",
+      "safari/5.1..latest",
+      "ipad/6.0..latest",
+      "iphone/6.0..latest",
+      "android-browser/4.2..latest"
+    ]
+  }
+}
