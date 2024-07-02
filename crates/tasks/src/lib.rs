@@ -27,7 +27,7 @@ use std::{
     pin::{pin, Pin},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
     task::{ready, Context, Poll},
 };
@@ -44,6 +44,8 @@ pub mod shutdown;
 
 #[cfg(feature = "rayon")]
 pub mod pool;
+
+static EXECUTOR: OnceLock<TaskExecutor> = OnceLock::new();
 
 /// A type that can spawn tasks.
 ///
@@ -148,20 +150,12 @@ impl TaskSpawner for TokioTaskExecutor {
 #[derive(Debug)]
 #[must_use = "TaskManager must be polled to monitor critical tasks"]
 pub struct TaskManager {
-    /// Handle to the tokio runtime this task manager is associated with.
-    ///
-    /// See [`Handle`] docs.
-    handle: Handle,
-    /// Sender half for sending panic signals to this type
-    panicked_tasks_tx: UnboundedSender<PanickedTaskError>,
     /// Listens for panicked tasks
     panicked_tasks_rx: UnboundedReceiver<PanickedTaskError>,
     /// The [Signal] to fire when all tasks should be shutdown.
     ///
     /// This is fired when dropped.
     signal: Option<Signal>,
-    /// Receiver of the shutdown signal.
-    on_shutdown: Shutdown,
     /// How many [`GracefulShutdown`] tasks are currently active
     graceful_tasks: Arc<AtomicUsize>,
 }
@@ -180,29 +174,38 @@ impl TaskManager {
     }
 
     /// Create a new instance connected to the given handle's tokio runtime.
+    /// Install the static [`TaskExecutor`] for this runtime.
+    ///
+    /// # Panics
+    ///
+    /// This will panic if called more than once.
     pub fn new(handle: Handle) -> Self {
         let (panicked_tasks_tx, panicked_tasks_rx) = unbounded_channel();
         let (signal, on_shutdown) = signal();
-        Self {
+        let graceful_tasks = Arc::new(AtomicUsize::new(0));
+
+        // Set the static executor
+        let executor = TaskExecutor {
             handle,
-            panicked_tasks_tx,
-            panicked_tasks_rx,
-            signal: Some(signal),
             on_shutdown,
-            graceful_tasks: Arc::new(AtomicUsize::new(0)),
-        }
+            panicked_tasks_tx,
+            metrics: Default::default(),
+            graceful_tasks: graceful_tasks.clone(),
+        };
+        EXECUTOR.set(executor).expect(
+            "TaskExecutor should not already be set. A TaskManager should only be created once.",
+        );
+
+        Self { panicked_tasks_rx, signal: Some(signal), graceful_tasks }
     }
 
     /// Returns a new [`TaskExecutor`] that can spawn new tasks onto the tokio runtime this type is
     /// connected to.
     pub fn executor(&self) -> TaskExecutor {
-        TaskExecutor {
-            handle: self.handle.clone(),
-            on_shutdown: self.on_shutdown.clone(),
-            panicked_tasks_tx: self.panicked_tasks_tx.clone(),
-            metrics: Default::default(),
-            graceful_tasks: Arc::clone(&self.graceful_tasks),
-        }
+        return EXECUTOR
+            .get()
+            .expect("TaskExecutor should be set. TaskManager should be created first.")
+            .clone();
     }
 
     /// Fires the shutdown signal and awaits until all tasks are shutdown.
