@@ -892,7 +892,7 @@ mod tests {
             }
 
             let (_, updates) = StateRoot::from_tx(tx).root_with_updates().unwrap();
-            updates.flush(tx).unwrap();
+            updates.write_to_database(tx).unwrap();
         })
         .unwrap();
 

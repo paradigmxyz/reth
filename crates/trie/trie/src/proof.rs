@@ -226,7 +226,7 @@ mod tests {
         let (root, updates) = StateRoot::from_tx(provider.tx_ref())
             .root_with_updates()
             .map_err(Into::<reth_db::DatabaseError>::into)?;
-        updates.flush(provider.tx_mut())?;
+        updates.write_to_database(provider.tx_mut())?;
 
         provider.commit()?;
 

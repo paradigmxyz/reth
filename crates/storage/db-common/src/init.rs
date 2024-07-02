@@ -464,19 +464,17 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
             .root_with_progress()?
         {
             StateRootProgress::Progress(state, _, updates) => {
-                let updates_len = updates.len();
+                let updated_len = updates.write_to_database(tx)?;
+                total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
                     last_account_key = %state.last_account_key,
-                    updates_len,
+                    updated_len,
                     total_flushed_updates,
                     "Flushing trie updates"
                 );
 
                 intermediate_state = Some(*state);
-                updates.flush(tx)?;
-
-                total_flushed_updates += updates_len;
 
                 if total_flushed_updates % SOFT_LIMIT_COUNT_FLUSHED_UPDATES == 0 {
                     info!(target: "reth::cli",
@@ -486,15 +484,12 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
                 }
             }
             StateRootProgress::Complete(root, _, updates) => {
-                let updates_len = updates.len();
-
-                updates.flush(tx)?;
-
-                total_flushed_updates += updates_len;
+                let updated_len = updates.write_to_database(tx)?;
+                total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
                     %root,
-                    updates_len = updates_len,
+                    updated_len,
                     total_flushed_updates,
                     "State root has been computed"
                 );

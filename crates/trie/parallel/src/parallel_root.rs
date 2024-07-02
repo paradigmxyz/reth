@@ -148,7 +148,7 @@ where
                     };
 
                     if retain_updates {
-                        trie_updates.extend(updates.into_iter());
+                        trie_updates.insert_storage_updates(hashed_address, updates);
                     }
 
                     account_rlp.clear();
@@ -161,7 +161,7 @@ where
 
         let root = hash_builder.root();
 
-        trie_updates.finalize_state_updates(
+        trie_updates.finalize(
             account_node_iter.walker,
             hash_builder,
             prefix_sets.destroyed_accounts,
