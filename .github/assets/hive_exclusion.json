@@ -63,5 +63,8 @@
         "Withdrawals Fork on Canonical Block 8 / Side Block 9 - 10 Block Re-Org (Paris) (reth)",
         "Withdrawals Fork on Canonical Block 8 / Side Block 9 - 10 Block Re-Org Sync (Paris) (reth)"
 
+    ],
+    "sync": [
+        "sync reth -> reth"
     ]
 }
