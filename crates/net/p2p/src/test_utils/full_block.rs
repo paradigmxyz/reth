@@ -9,7 +9,7 @@ use futures::Future;
 use parking_lot::Mutex;
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives::{
-    revm_primitives::FixedBytes, Block, BlockBody, BlockHashOrNumber, BlockNumHash, Header,
+    revm_primitives::FixedBytes, BlockBody, BlockHashOrNumber, BlockNumHash, Header,
     HeadersDirection, SealedBlock, SealedHeader, B256,
 };
 use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
