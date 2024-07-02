@@ -85,7 +85,11 @@ impl<DB: Database> Pruner<DB> {
         self.event_sender.new_listener()
     }
 
-    /// Run the pruner
+    /// Run the pruner. This will only prune data up to the highest finished `ExEx` height, if there
+    /// are no `ExEx`s, .
+    ///
+    /// Returns a [`PruneProgress`](crate::PruneProgress), indicating whether pruning is finished,
+    /// or there is more data to prune.
     pub fn run(&mut self, tip_block_number: BlockNumber) -> PrunerResult {
         let Some(tip_block_number) =
             self.adjust_tip_block_number_to_finished_exex_height(tip_block_number)
@@ -306,8 +310,8 @@ impl<DB: Database> Pruner<DB> {
 
     /// Adjusts the tip block number to the finished `ExEx` height. This is needed to not prune more
     /// data than `ExExs` have processed. Depending on the height:
-    /// - [`FinishedExExHeight::NoExExs`] returns the tip block number as is as no adjustment for
-    ///   `ExExs` is needed.
+    /// - [`FinishedExExHeight::NoExExs`] returns the tip block number as no adjustment for `ExExs`
+    ///   is needed.
     /// - [`FinishedExExHeight::NotReady`] returns `None` as not all `ExExs` have emitted a
     ///   `FinishedHeight` event yet.
     /// - [`FinishedExExHeight::Height`] returns the finished `ExEx` height.
