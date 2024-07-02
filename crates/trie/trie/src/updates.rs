@@ -125,6 +125,7 @@ impl TrieUpdates {
 
 /// Trie updates for storage trie of a single account.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageTrieUpdates {
     /// Flag indicating whether the trie was deleted.
     pub(crate) is_deleted: bool,
