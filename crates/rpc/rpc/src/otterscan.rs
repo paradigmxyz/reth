@@ -6,13 +6,22 @@ use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::helpers::TraceExt;
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
-    trace::otterscan::{
-        BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
-        OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+    trace::{
+        otterscan::{
+            BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
+            OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+        },
+        parity::{
+            Action, CallAction, CreateAction, CreateOutput, RewardAction, SelfdestructAction,
+            TraceOutput,
+        },
     },
     BlockTransactions, Transaction,
 };
-use revm_inspectors::transfer::{TransferInspector, TransferKind};
+use revm_inspectors::{
+    tracing::TracingInspectorConfig,
+    transfer::{TransferInspector, TransferKind},
+};
 use revm_primitives::ExecutionResult;
 
 const API_LEVEL: u64 = 8;
@@ -89,8 +98,50 @@ where
     }
 
     /// Handler for `ots_traceTransaction`
-    async fn trace_transaction(&self, _tx_hash: TxHash) -> RpcResult<TraceEntry> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<Option<Vec<TraceEntry>>> {
+        let traces = self
+            .eth
+            .spawn_trace_transaction_in_block(
+                tx_hash,
+                TracingInspectorConfig::default_parity(),
+                move |_tx_info, inspector, _, _| {
+                    let traces = inspector.into_parity_builder().into_transaction_traces();
+                    Ok(traces)
+                },
+            )
+            .await?
+            .map(|traces| {
+                traces
+                    .into_iter()
+                    .map(|trace| {
+                        let depth = trace.trace_address.len() as u32;
+                        let (typ, from, to, value, input) = match trace.action {
+                            Action::Call(CallAction { from, to, value, input, .. }) => {
+                                ("call", from, to, value, input)
+                            }
+                            Action::Create(CreateAction { from, value, init, .. }) => {
+                                let to = match trace.result {
+                                    Some(TraceOutput::Create(CreateOutput {
+                                        address: to, ..
+                                    })) => to,
+                                    _ => Address::default(),
+                                };
+                                ("create", from, to, value, init)
+                            }
+                            Action::Reward(RewardAction { author, value, .. }) => {
+                                ("reward", Address::default(), author, value, Default::default())
+                            }
+                            Action::Selfdestruct(SelfdestructAction {
+                                address,
+                                balance,
+                                refund_address,
+                            }) => ("suicide", address, refund_address, balance, Default::default()),
+                        };
+                        TraceEntry { r#type: typ.to_uppercase(), depth, from, to, value, input }
+                    })
+                    .collect::<Vec<_>>()
+            });
+        Ok(traces)
     }
 
     /// Handler for `ots_getBlockDetails`
