@@ -5,6 +5,7 @@ use core::time::Duration;
 
 /// Gas units, for example [`GIGAGAS`](gas_units::GIGAGAS).
 pub mod gas_units;
+pub use gas_units::{GIGAGAS, KILOGAS, MEGAGAS};
 
 /// The client version: `reth/v{major}.{minor}.{patch}`
 pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"));
@@ -97,9 +98,6 @@ pub const FINNEY_TO_WEI: u128 = (GWEI_TO_WEI as u128) * 1_000_000;
 
 /// Multiplier for converting ether to wei.
 pub const ETH_TO_WEI: u128 = FINNEY_TO_WEI * 1000;
-
-/// Multiplier for converting mgas to gas.
-pub const MGAS_TO_GAS: u64 = 1_000_000u64;
 
 /// The Ethereum mainnet genesis hash:
 /// `0x0d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3`

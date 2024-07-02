@@ -2,10 +2,11 @@ use reth_db_api::database::Database;
 use reth_evm::execute::{BatchExecutor, BlockExecutionError, BlockExecutorProvider};
 use reth_node_api::FullNodeComponents;
 use reth_primitives::{Block, BlockNumber};
+use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{Chain, FullProvider, ProviderError, TransactionVariant};
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
-use reth_stages_api::{format_gas_throughput, ExecutionStageThresholds};
+use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::{debug, trace};
 use std::{
     marker::PhantomData,
