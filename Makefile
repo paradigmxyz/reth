@@ -59,11 +59,11 @@ install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
 
 .PHONY: build
 build: ## Build the reth binary into `target` directory.
-	$(MAKE) build-native-$(shell rustc -Vv | grep host | cut -d ' ' -f2)
+	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
 
 .PHONY: build-op
 build-op: ## Build the op-reth binary into `target` directory.
-	$(MAKE) op-build-native-$(shell rustc -Vv | grep host | cut -d ' ' -f2)
+	cargo build --bin op-reth --features "optimism,$(FEATURES)" --profile "$(PROFILE)"
 
 # Builds the reth binary natively.
 build-native-%:
@@ -303,8 +303,7 @@ db-tools: ## Compile MDBX debugging tools.
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
 
 .PHONY: update-book-cli
-update-book-cli: ## Update book cli documentation.
-	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
+update-book-cli: build ## Update book cli documentation.
 	@echo "Updating book cli doc..."
 	@./book/cli/update.sh $(BUILD_PATH)/$(PROFILE)/reth
 
@@ -357,7 +356,7 @@ lint-other-targets:
 	-- -D warnings
 
 lint-codespell: ensure-codespell
-	codespell
+	codespell --skip "*.json"
 
 ensure-codespell:
 	@if ! command -v codespell &> /dev/null; then \
@@ -414,9 +413,9 @@ fix-lint-other-targets:
 	-- -D warnings
 
 fix-lint:
-	make lint-reth && \
-	make lint-op-reth && \
-	make lint-other-targets && \
+	make fix-lint-reth && \
+	make fix-lint-op-reth && \
+	make fix-lint-other-targets && \
 	make fmt
 
 .PHONY: rustdocs
@@ -467,11 +466,7 @@ test:
 	make test-doc && \
 	make test-other-targets
 
-cfg-check:
-	cargo +nightly -Zcheck-cfg c
-
 pr:
-	make cfg-check && \
 	make lint && \
-	make docs && \
+	make update-book-cli && \
 	make test

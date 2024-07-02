@@ -1,4 +1,4 @@
-//! RLPx ECIES framed transport protocol.
+//! `RLPx` ECIES framed transport protocol.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -16,9 +16,9 @@ pub mod util;
 mod error;
 pub use error::ECIESError;
 
-mod codec;
+pub mod codec;
 
-use reth_primitives::{
+use alloy_primitives::{
     bytes::{Bytes, BytesMut},
     B512 as PeerId,
 };

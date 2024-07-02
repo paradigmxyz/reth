@@ -13,12 +13,13 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
-reth-net-common.workspace = true
+reth-net-banlist.workspace = true
+reth-ethereum-forks.workspace = true
 reth-net-nat.workspace = true
-reth-network-types.workspace = true
+reth-network-peers = { workspace = true, features = ["secp256k1"] }
 
 # ethereum
+alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
 discv5.workspace = true
 secp256k1 = { workspace = true, features = [
@@ -28,19 +29,22 @@ secp256k1 = { workspace = true, features = [
     "serde",
 ] }
 enr.workspace = true
+
 # async/futures
 tokio = { workspace = true, features = ["io-util", "net", "time"] }
 tokio-stream.workspace = true
 
 # misc
+schnellru.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
 rand = { workspace = true, optional = true }
-generic-array = "0.14"
+generic-array.workspace = true
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-chainspec.workspace = true
 assert_matches.workspace = true
 rand.workspace = true
 tokio = { workspace = true, features = ["macros"] }
@@ -48,5 +52,5 @@ reth-tracing.workspace = true
 
 [features]
 default = ["serde"]
-test-utils = ["dep:rand"]
 serde = ["dep:serde"]
+test-utils = ["dep:rand"]

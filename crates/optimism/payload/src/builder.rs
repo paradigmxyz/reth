@@ -5,17 +5,16 @@ use crate::{
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
 use reth_basic_payload_builder::*;
+use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::ConfigureEvm;
+use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
     constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
     eip4844::calculate_excess_blob_gas,
-    proofs,
-    revm::env::tx_env_with_recovered,
-    Block, ChainSpec, Hardfork, Header, IntoRecoveredTransaction, Receipt, Receipts, TxType,
-    EMPTY_OMMER_ROOT_HASH, U256,
+    proofs, Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH, U256,
 };
-use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
+use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{
@@ -34,29 +33,29 @@ pub struct OptimismPayloadBuilder<EvmConfig> {
     compute_pending_block: bool,
     /// The rollup's chain spec.
     chain_spec: Arc<ChainSpec>,
-
+    /// The type responsible for creating the evm.
     evm_config: EvmConfig,
 }
 
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
-    /// OptimismPayloadBuilder constructor.
-    pub fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+    /// `OptimismPayloadBuilder` constructor.
+    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
         Self { compute_pending_block: true, chain_spec, evm_config }
     }
 
     /// Sets the rollup's compute pending block configuration option.
-    pub fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
+    pub const fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
         self.compute_pending_block = compute_pending_block;
         self
     }
 
     /// Enables the rollup's compute pending block configuration option.
-    pub fn compute_pending_block(self) -> Self {
+    pub const fn compute_pending_block(self) -> Self {
         self.set_compute_pending_block(true)
     }
 
     /// Returns the rollup's compute pending block configuration option.
-    pub fn is_compute_pending_block(&self) -> bool {
+    pub const fn is_compute_pending_block(&self) -> bool {
         self.compute_pending_block
     }
 
@@ -67,7 +66,7 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     }
 }
 
-/// Implementation of the [PayloadBuilder] trait for [OptimismPayloadBuilder].
+/// Implementation of the [`PayloadBuilder`] trait for [`OptimismPayloadBuilder`].
 impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBuilder<EvmConfig>
 where
     Client: StateProviderFactory,
@@ -86,23 +85,15 @@ where
 
     fn on_missing_payload(
         &self,
-        args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
-    ) -> Option<OptimismBuiltPayload> {
-        // In Optimism, the PayloadAttributes can specify a `no_tx_pool` option that implies we
-        // should not pull transactions from the tx pool. In this case, we build the payload
-        // upfront with the list of transactions sent in the attributes without caring about
-        // the results of the polling job, if a best payload has not already been built.
-        if args.config.attributes.no_tx_pool {
-            if let Ok(BuildOutcome::Better { payload, .. }) = self.try_build(args) {
-                trace!(target: "payload_builder", "[OPTIMISM] Forced best payload");
-                return Some(payload)
-            }
-        }
-
-        None
+        _args: BuildArguments<Pool, Client, OptimismPayloadBuilderAttributes, OptimismBuiltPayload>,
+    ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
+        // we want to await the job that's already in progress because that should be returned as
+        // is, there's no benefit in racing another job
+        MissingPayloadBehaviour::AwaitInProgress
     }
 
     fn build_empty_payload(
+        &self,
         client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<OptimismBuiltPayload, PayloadBuilderError> {
@@ -217,9 +208,10 @@ where
             blob_gas_used,
             excess_blob_gas,
             parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
+            requests_root: None,
         };
 
-        let block = Block { header, body: vec![], ommers: vec![], withdrawals };
+        let block = Block { header, body: vec![], ommers: vec![], withdrawals, requests: None };
         let sealed_block = block.seal_slow();
 
         Ok(OptimismBuiltPayload::new(
@@ -286,8 +278,10 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
-    let is_regolith = chain_spec
-        .is_fork_active_at_timestamp(Hardfork::Regolith, attributes.payload_attributes.timestamp);
+    let is_regolith = chain_spec.is_fork_active_at_timestamp(
+        OptimismHardfork::Regolith,
+        attributes.payload_attributes.timestamp,
+    );
 
     // apply eip-4788 pre block contract call
     pre_block_beacon_root_contract_call(
@@ -328,7 +322,7 @@ where
         }
 
         // Convert the transaction to a [TransactionSignedEcRecovered]. This is
-        // purely for the purposes of utilizing the [tx_env_with_recovered] function.
+        // purely for the purposes of utilizing the `evm_config.tx_env`` function.
         // Deposit transactions do not have signatures, so if the tx is a deposit, this
         // will just pull in its `from` address.
         let sequencer_tx = sequencer_tx.clone().try_into_ecrecovered().map_err(|_| {
@@ -355,7 +349,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
-            tx_env_with_recovered(&sequencer_tx),
+            evm_config.tx_env(&sequencer_tx),
         );
 
         let mut evm = evm_config.evm_with_env(&mut db, env);
@@ -398,7 +392,7 @@ where
             // ensures this is only set for post-Canyon deposit transactions.
             deposit_receipt_version: chain_spec
                 .is_fork_active_at_timestamp(
-                    Hardfork::Canyon,
+                    OptimismHardfork::Canyon,
                     attributes.payload_attributes.timestamp,
                 )
                 .then_some(1),
@@ -434,7 +428,7 @@ where
             let env = EnvWithHandlerCfg::new_with_cfg_env(
                 initialized_cfg.clone(),
                 initialized_block_env.clone(),
-                tx_env_with_recovered(&tx),
+                evm_config.tx_env(&tx),
             );
 
             // Configure the environment for the block.
@@ -513,24 +507,21 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let bundle = BundleStateWithReceipts::new(
-        db.take_bundle(),
-        Receipts::from_vec(vec![receipts]),
-        block_number,
-    );
-    let receipts_root = bundle
+    let execution_outcome =
+        ExecutionOutcome::new(db.take_bundle(), vec![receipts].into(), block_number, Vec::new());
+    let receipts_root = execution_outcome
         .optimism_receipts_root_slow(
             block_number,
             chain_spec.as_ref(),
             attributes.payload_attributes.timestamp,
         )
         .expect("Number is in range");
-    let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
+    let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
     let state_root = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root(bundle.state())?
+        state_provider.db.state_root(execution_outcome.state())?
     };
 
     // create the block header
@@ -577,10 +568,11 @@ where
         parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
         blob_gas_used,
         excess_blob_gas,
+        requests_root: None,
     };
 
     // seal the block
-    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals };
+    let block = Block { header, body: executed_txs, ommers: vec![], withdrawals, requests: None };
 
     let sealed_block = block.seal_slow();
     debug!(target: "payload_builder", ?sealed_block, "sealed built block");

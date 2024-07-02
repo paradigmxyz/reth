@@ -4,15 +4,13 @@
 //! generic over it.
 
 use crate::{
-    NetworkError, NetworkInfo, PeerInfo, PeerKind, Peers, PeersInfo, Reputation,
-    ReputationChangeKind,
+    NetworkError, NetworkInfo, NetworkStatus, PeerId, PeerInfo, PeerKind, Peers, PeersInfo,
+    Reputation, ReputationChangeKind,
 };
+use alloy_rpc_types_admin::EthProtocolInfo;
 use enr::{secp256k1::SecretKey, Enr};
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_eth_wire::{DisconnectReason, ProtocolVersion};
-use reth_network_types::PeerId;
-use reth_primitives::{Chain, NodeRecord};
-use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
+use reth_network_peers::NodeRecord;
 use std::net::{IpAddr, SocketAddr};
 
 /// A type that implements all network trait that does nothing.
@@ -24,7 +22,7 @@ pub struct NoopNetwork;
 
 impl NetworkInfo for NoopNetwork {
     fn local_addr(&self) -> SocketAddr {
-        (IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), DEFAULT_DISCOVERY_PORT).into()
+        (IpAddr::from(std::net::Ipv4Addr::UNSPECIFIED), 30303).into()
     }
 
     async fn network_status(&self) -> Result<NetworkStatus, NetworkError> {
@@ -42,7 +40,8 @@ impl NetworkInfo for NoopNetwork {
     }
 
     fn chain_id(&self) -> u64 {
-        Chain::mainnet().into()
+        // mainnet
+        1
     }
 
     fn is_syncing(&self) -> bool {
@@ -72,7 +71,14 @@ impl PeersInfo for NoopNetwork {
 impl Peers for NoopNetwork {
     fn add_trusted_peer_id(&self, _peer: PeerId) {}
 
-    fn add_peer_kind(&self, _peer: PeerId, _kind: PeerKind, _addr: SocketAddr) {}
+    fn add_peer_kind(
+        &self,
+        _peer: PeerId,
+        _kind: PeerKind,
+        _tcp_addr: SocketAddr,
+        _udp_addr: Option<SocketAddr>,
+    ) {
+    }
 
     async fn get_peers_by_kind(&self, _kind: PeerKind) -> Result<Vec<PeerInfo>, NetworkError> {
         Ok(vec![])

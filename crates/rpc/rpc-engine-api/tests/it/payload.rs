@@ -2,12 +2,8 @@
 
 use alloy_rlp::{Decodable, Error as RlpError};
 use assert_matches::assert_matches;
-use reth_interfaces::test_utils::generators::{
-    self, random_block, random_block_range, random_header, Rng,
-};
 use reth_primitives::{
-    bytes::{Bytes, BytesMut},
-    proofs, Block, SealedBlock, TransactionSigned, Withdrawals, B256, U256,
+    proofs, Block, Bytes, SealedBlock, TransactionSigned, Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadV1, PayloadError,
@@ -16,6 +12,7 @@ use reth_rpc_types_compat::engine::payload::{
     block_to_payload, block_to_payload_v1, convert_to_payload_body_v1, try_into_sealed_block,
     try_payload_v1_to_block,
 };
+use reth_testing_utils::generators::{self, random_block, random_block_range, random_header, Rng};
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
     let unsealed = src.unseal();
@@ -28,7 +25,9 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
         body: transformed.body,
         ommers: transformed.ommers,
         withdrawals: transformed.withdrawals,
+        requests: transformed.requests,
     })
+    .0
 }
 
 #[test]
@@ -59,20 +58,19 @@ fn payload_validation() {
 
     // Valid extra data
     let block_with_valid_extra_data = transform_block(block.clone(), |mut b| {
-        b.header.extra_data = BytesMut::zeroed(32).freeze().into();
+        b.header.extra_data = Bytes::from_static(&[0; 32]);
         b
     });
 
     assert_matches!(try_into_sealed_block(block_with_valid_extra_data, None), Ok(_));
 
     // Invalid extra data
-    let block_with_invalid_extra_data: Bytes = BytesMut::zeroed(33).freeze();
+    let block_with_invalid_extra_data = Bytes::from_static(&[0; 33]);
     let invalid_extra_data_block = transform_block(block.clone(), |mut b| {
-        b.header.extra_data = block_with_invalid_extra_data.clone().into();
+        b.header.extra_data = block_with_invalid_extra_data.clone();
         b
     });
     assert_matches!(
-
         try_into_sealed_block(invalid_extra_data_block,None),
         Err(PayloadError::ExtraData(data)) if data == block_with_invalid_extra_data
     );
@@ -92,7 +90,7 @@ fn payload_validation() {
     let mut payload_with_invalid_txs: ExecutionPayloadV1 = block_to_payload_v1(block.clone());
 
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
-        *tx = Bytes::new().into();
+        *tx = Bytes::new();
     });
     let payload_with_invalid_txs = try_payload_v1_to_block(payload_with_invalid_txs);
     assert_matches!(payload_with_invalid_txs, Err(PayloadError::Decode(RlpError::InputTooShort)));

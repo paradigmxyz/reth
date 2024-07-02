@@ -4,7 +4,7 @@
 #[derive(Debug, thiserror::Error)]
 pub enum OptimismPayloadBuilderError {
     /// Thrown when a transaction fails to convert to a
-    /// [reth_primitives::TransactionSignedEcRecovered].
+    /// [`reth_primitives::TransactionSignedEcRecovered`].
     #[error("failed to convert deposit transaction to TransactionSignedEcRecovered")]
     TransactionEcRecoverFailed,
     /// Thrown when the L1 block info could not be parsed from the calldata of the

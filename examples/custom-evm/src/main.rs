@@ -2,25 +2,31 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_genesis::Genesis;
 use reth::{
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     primitives::{
         address,
-        revm_primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
-        Address, Bytes, U256,
+        revm_primitives::{Env, PrecompileResult},
+        Bytes,
     },
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,
-        precompile::{Precompile, PrecompileSpecId, Precompiles},
-        Database, Evm, EvmBuilder, GetInspector,
+        precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
+        ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
 };
+use reth_chainspec::{Chain, ChainSpec, Head};
+use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
-use reth_primitives::{Chain, ChainSpec, Genesis, Header, TransactionSigned};
+use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
+use reth_primitives::{
+    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
+    Address, Header, TransactionSigned, U256,
+};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
 
@@ -45,33 +51,47 @@ impl MyEvmConfig {
 
         // install the precompiles
         handler.pre_execution.load_precompiles = Arc::new(move || {
-            let mut precompiles = Precompiles::new(PrecompileSpecId::from_spec_id(spec_id)).clone();
-            precompiles.inner.insert(
+            let mut precompiles = ContextPrecompiles::new(PrecompileSpecId::from_spec_id(spec_id));
+            precompiles.extend([(
                 address!("0000000000000000000000000000000000000999"),
-                Precompile::Env(Self::my_precompile),
-            );
-            precompiles.into()
+                Precompile::Env(Self::my_precompile).into(),
+            )]);
+            precompiles
         });
     }
 
     /// A custom precompile that does nothing
     fn my_precompile(_data: &Bytes, _gas: u64, _env: &Env) -> PrecompileResult {
-        Ok((0, Bytes::new()))
+        Ok(PrecompileOutput::new(0, Bytes::new()))
     }
 }
 
 impl ConfigureEvmEnv for MyEvmConfig {
-    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        EthEvmConfig::fill_tx_env(tx_env, transaction, sender)
-    }
-
     fn fill_cfg_env(
         cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
-        EthEvmConfig::fill_cfg_env(cfg_env, chain_spec, header, total_difficulty)
+        let spec_id = reth_evm_ethereum::revm_spec(
+            chain_spec,
+            &Head {
+                number: header.number,
+                timestamp: header.timestamp,
+                difficulty: header.difficulty,
+                total_difficulty,
+                hash: Default::default(),
+            },
+        );
+
+        cfg_env.chain_id = chain_spec.chain().id();
+        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
+
+        cfg_env.handler_cfg.spec_id = spec_id;
+    }
+
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        EthEvmConfig::default().fill_tx_env(tx_env, transaction, sender)
     }
 }
 
@@ -130,7 +150,7 @@ async fn main() -> eyre::Result<()> {
 
     let tasks = TaskManager::current();
 
-    // create optimism genesis with canyon at block 2
+    // create a custom chain spec
     let spec = ChainSpec::builder()
         .chain(Chain::mainnet())
         .genesis(Genesis::default())
@@ -145,7 +165,9 @@ async fn main() -> eyre::Result<()> {
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
+        // configure the node with regular ethereum types
         .with_types::<EthereumNode>()
+        // use default ethereum components but with our executor
         .with_components(EthereumNode::components().executor(MyExecutorBuilder::default()))
         .launch()
         .await

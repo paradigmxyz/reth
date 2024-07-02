@@ -14,16 +14,19 @@ macro_rules! impl_fuzzer_with_input {
             #[allow(non_snake_case)]
             #[cfg(any(test, feature = "bench"))]
             pub mod $name {
-                use crate::table;
+                use reth_db_api::table;
 
                 #[allow(unused_imports)]
                 use reth_primitives::*;
 
                 #[allow(unused_imports)]
+                use reth_primitives_traits::*;
+
+                #[allow(unused_imports)]
                 use super::inputs::*;
 
                 #[allow(unused_imports)]
-                use crate::tables::models::*;
+                use reth_db_api::models::*;
 
                 /// Encodes and decodes table types returning its encoded size and the decoded object.
                 /// This method is used for benchmarking, so its parameter should be the actual type that is being tested.

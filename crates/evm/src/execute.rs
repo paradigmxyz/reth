@@ -1,12 +1,22 @@
 //! Traits for execution.
 
-use reth_interfaces::{executor::BlockExecutionError, provider::ProviderError};
-use reth_primitives::{BlockNumber, BlockWithSenders, PruneModes, Receipt, Receipts, U256};
+use reth_execution_types::ExecutionOutcome;
+use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Request, U256};
+use reth_prune_types::PruneModes;
 use revm::db::BundleState;
 use revm_primitives::db::Database;
+use std::fmt::Display;
 
-/// A general purpose executor trait that executes on an input (e.g. blocks) and produces an output
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
+pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+pub use reth_storage_errors::provider::ProviderError;
+
+/// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
+///
+/// This executor does not validate the output, see [`BatchExecutor`] for that.
 pub trait Executor<DB> {
     /// The input type for the executor.
     type Input<'a>;
@@ -17,12 +27,17 @@ pub trait Executor<DB> {
 
     /// Consumes the type and executes the block.
     ///
-    /// Returns the output of the block execution.
+    /// # Note
+    /// Execution happens without any validation of the output. To validate the output, use the
+    /// [`BatchExecutor`].
+    ///
+    /// # Returns
+    /// The output of the block execution.
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
 }
 
-/// A general purpose executor that can execute multiple inputs in sequence and keep track of the
-/// state over the entire batch.
+/// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,
+/// and keep track of the state over the entire batch.
 pub trait BatchExecutor<DB> {
     /// The input type for the executor.
     type Input<'a>;
@@ -31,27 +46,34 @@ pub trait BatchExecutor<DB> {
     /// The error type returned by the executor.
     type Error;
 
-    /// Executes the next block in the batch and update the state internally.
-    fn execute_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
+    /// Executes the next block in the batch, verifies the output and updates the state internally.
+    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
 
-    /// Executes multiple inputs in the batch and update the state internally.
-    fn execute_many<'a, I>(&mut self, inputs: I) -> Result<(), Self::Error>
+    /// Executes multiple inputs in the batch, verifies the output, and updates the state
+    /// internally.
+    ///
+    /// This method is a convenience function for calling [`BatchExecutor::execute_and_verify_one`]
+    /// for each input.
+    fn execute_and_verify_many<'a, I>(&mut self, inputs: I) -> Result<(), Self::Error>
     where
         I: IntoIterator<Item = Self::Input<'a>>,
     {
         for input in inputs {
-            self.execute_one(input)?;
+            self.execute_and_verify_one(input)?;
         }
         Ok(())
     }
 
-    /// Executes the entire batch and return the final state.
-    fn execute_batch<'a, I>(mut self, batch: I) -> Result<Self::Output, Self::Error>
+    /// Executes the entire batch, verifies the output, and returns the final state.
+    ///
+    /// This method is a convenience function for calling [`BatchExecutor::execute_and_verify_many`]
+    /// and [`BatchExecutor::finalize`].
+    fn execute_and_verify_batch<'a, I>(mut self, batch: I) -> Result<Self::Output, Self::Error>
     where
         I: IntoIterator<Item = Self::Input<'a>>,
         Self: Sized,
     {
-        self.execute_many(batch)?;
+        self.execute_and_verify_many(batch)?;
         Ok(self.finalize())
     }
 
@@ -73,37 +95,17 @@ pub trait BatchExecutor<DB> {
 ///
 /// Contains the state changes, transaction receipts, and total gas used in the block.
 ///
-/// TODO(mattsse): combine with BundleStateWithReceipts
+/// TODO(mattsse): combine with `ExecutionOutcome`
 #[derive(Debug)]
 pub struct BlockExecutionOutput<T> {
     /// The changed state of the block after execution.
     pub state: BundleState,
     /// All the receipts of the transactions in the block.
     pub receipts: Vec<T>,
+    /// All the EIP-7685 requests of the transactions in the block.
+    pub requests: Vec<Request>,
     /// The total gas used by the block.
     pub gas_used: u64,
-}
-
-/// The output of a batch of ethereum blocks.
-#[derive(Debug)]
-pub struct BatchBlockExecutionOutput {
-    /// Bundle state with reverts.
-    pub bundle: BundleState,
-    /// The collection of receipts.
-    /// Outer vector stores receipts for each block sequentially.
-    /// The inner vector stores receipts ordered by transaction number.
-    ///
-    /// If receipt is None it means it is pruned.
-    pub receipts: Receipts,
-    /// First block of bundle state.
-    pub first_block: BlockNumber,
-}
-
-impl BatchBlockExecutionOutput {
-    /// Create Bundle State.
-    pub fn new(bundle: BundleState, receipts: Receipts, first_block: BlockNumber) -> Self {
-        Self { bundle, receipts, first_block }
-    }
 }
 
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.
@@ -117,7 +119,7 @@ pub struct BlockExecutionInput<'a, Block> {
 
 impl<'a, Block> BlockExecutionInput<'a, Block> {
     /// Creates a new input.
-    pub fn new(block: &'a Block, total_difficulty: U256) -> Self {
+    pub const fn new(block: &'a Block, total_difficulty: U256) -> Self {
         Self { block, total_difficulty }
     }
 }
@@ -134,14 +136,14 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     ///
     /// # Verification
     ///
-    /// The on [Executor::execute] the executor is expected to validate the execution output of the
-    /// input, this includes:
+    /// The on [`Executor::execute`] the executor is expected to validate the execution output of
+    /// the input, this includes:
     /// - Cumulative gas used must match the input's gas used.
     /// - Receipts must match the input's receipts root.
     ///
     /// It is not expected to validate the state trie root, this must be done by the caller using
     /// the returned state.
-    type Executor<DB: Database<Error = ProviderError>>: for<'a> Executor<
+    type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
         Output = BlockExecutionOutput<Receipt>,
@@ -149,11 +151,10 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     >;
 
     /// An executor that can execute a batch of blocks given a database.
-    type BatchExecutor<DB: Database<Error = ProviderError>>: for<'a> BatchExecutor<
+    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        // TODO: change to bundle state with receipts
-        Output = BatchBlockExecutionOutput,
+        Output = ExecutionOutcome,
         Error = BlockExecutionError,
     >;
 
@@ -162,7 +163,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// This is used to execute a single block and get the changed state.
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error = ProviderError>;
+        DB: Database<Error: Into<ProviderError> + Display>;
 
     /// Creates a new batch executor with the given database and pruning modes.
     ///
@@ -173,7 +174,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// execution.
     fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error = ProviderError>;
+        DB: Database<Error: Into<ProviderError> + Display>;
 }
 
 #[cfg(test)]
@@ -187,19 +188,19 @@ mod tests {
     struct TestExecutorProvider;
 
     impl BlockExecutorProvider for TestExecutorProvider {
-        type Executor<DB: Database<Error = ProviderError>> = TestExecutor<DB>;
-        type BatchExecutor<DB: Database<Error = ProviderError>> = TestExecutor<DB>;
+        type Executor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
+        type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
 
         fn executor<DB>(&self, _db: DB) -> Self::Executor<DB>
         where
-            DB: Database<Error = ProviderError>,
+            DB: Database<Error: Into<ProviderError> + Display>,
         {
             TestExecutor(PhantomData)
         }
 
         fn batch_executor<DB>(&self, _db: DB, _prune_modes: PruneModes) -> Self::BatchExecutor<DB>
         where
-            DB: Database<Error = ProviderError>,
+            DB: Database<Error: Into<ProviderError> + Display>,
         {
             TestExecutor(PhantomData)
         }
@@ -213,16 +214,16 @@ mod tests {
         type Error = BlockExecutionError;
 
         fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-            Err(BlockExecutionError::UnavailableForTest)
+            Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
     }
 
     impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
         type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-        type Output = BatchBlockExecutionOutput;
+        type Output = ExecutionOutcome;
         type Error = BlockExecutionError;
 
-        fn execute_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {
+        fn execute_and_verify_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {
             Ok(())
         }
 
@@ -244,8 +245,13 @@ mod tests {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
         let executor = provider.executor(db);
-        let block =
-            Block { header: Default::default(), body: vec![], ommers: vec![], withdrawals: None };
+        let block = Block {
+            header: Default::default(),
+            body: vec![],
+            ommers: vec![],
+            withdrawals: None,
+            requests: None,
+        };
         let block = BlockWithSenders::new(block, Default::default()).unwrap();
         let _ = executor.execute(BlockExecutionInput::new(&block, U256::ZERO));
     }

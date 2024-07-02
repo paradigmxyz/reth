@@ -2,7 +2,7 @@
 //! transaction deserialized from the json input of an RPC call. Depending on what fields are set,
 //! it can be converted into the container type [`TypedTransactionRequest`].
 
-use alloy_primitives::{Bytes, TxKind, B256, U256};
+use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use alloy_rpc_types::{AccessList, BlobTransactionSidecar};
 
 /// Container type for various Ethereum transaction requests
@@ -100,8 +100,8 @@ pub struct EIP4844TransactionRequest {
     pub max_fee_per_gas: U256,
     /// The gas limit for the transaction
     pub gas_limit: U256,
-    /// The kind of transaction (e.g., Call, Create)
-    pub kind: TxKind,
+    /// The recipient of the transaction
+    pub to: Address,
     /// The value of the transaction
     pub value: U256,
     /// The input data for the transaction

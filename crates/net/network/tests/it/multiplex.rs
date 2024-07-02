@@ -10,10 +10,9 @@ use reth_network::{
     protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler},
     test_utils::Testnet,
 };
-use reth_network_api::Direction;
+use reth_network_api::{Direction, PeerId};
 use reth_primitives::BytesMut;
 use reth_provider::test_utils::MockEthProvider;
-use reth_rpc_types::PeerId;
 use std::{
     net::SocketAddr,
     pin::Pin,
@@ -54,17 +53,17 @@ mod proto {
 
     impl PingPongProtoMessage {
         /// Returns the capability for the `ping` protocol.
-        pub fn capability() -> Capability {
+        pub const fn capability() -> Capability {
             Capability::new_static("ping", 1)
         }
 
         /// Returns the protocol for the `test` protocol.
-        pub fn protocol() -> Protocol {
+        pub const fn protocol() -> Protocol {
             Protocol::new(Self::capability(), 4)
         }
 
         /// Creates a ping message
-        pub fn ping() -> Self {
+        pub const fn ping() -> Self {
             Self {
                 message_type: PingPongProtoMessageId::Ping,
                 message: PingPongProtoMessageKind::Ping,
@@ -72,7 +71,7 @@ mod proto {
         }
 
         /// Creates a pong message
-        pub fn pong() -> Self {
+        pub const fn pong() -> Self {
             Self {
                 message_type: PingPongProtoMessageId::Pong,
                 message: PingPongProtoMessageKind::Pong,
@@ -99,11 +98,8 @@ mod proto {
             let mut buf = BytesMut::new();
             buf.put_u8(self.message_type as u8);
             match &self.message {
-                PingPongProtoMessageKind::Ping => {}
-                PingPongProtoMessageKind::Pong => {}
-                PingPongProtoMessageKind::PingMessage(msg) => {
-                    buf.put(msg.as_bytes());
-                }
+                PingPongProtoMessageKind::Ping | PingPongProtoMessageKind::Pong => {}
+                PingPongProtoMessageKind::PingMessage(msg) |
                 PingPongProtoMessageKind::PongMessage(msg) => {
                     buf.put(msg.as_bytes());
                 }

@@ -6,9 +6,8 @@ use futures::Stream;
 use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
-use reth_network_api::Direction;
+use reth_network_api::{Direction, PeerId};
 use reth_primitives::BytesMut;
-use reth_rpc_types::PeerId;
 use std::{
     fmt,
     net::SocketAddr,
@@ -39,19 +38,19 @@ pub trait ProtocolHandler: fmt::Debug + Send + Sync + 'static {
     ) -> Option<Self::ConnectionHandler>;
 }
 
-/// A trait that allows to authenticate a protocol after the RLPx connection was established.
+/// A trait that allows to authenticate a protocol after the `RLPx` connection was established.
 pub trait ConnectionHandler: Send + Sync + 'static {
     /// The connection that yields messages to send to the remote.
     ///
     /// The connection will be closed when this stream resolves.
     type Connection: Stream<Item = BytesMut> + Send + 'static;
 
-    /// Returns the protocol to announce when the RLPx connection will be established.
+    /// Returns the protocol to announce when the `RLPx` connection will be established.
     ///
     /// This will be negotiated with the remote peer.
     fn protocol(&self) -> Protocol;
 
-    /// Invoked when the RLPx connection has been established by the peer does not share the
+    /// Invoked when the `RLPx` connection has been established by the peer does not share the
     /// protocol.
     fn on_unsupported_by_peer(
         self,
@@ -60,7 +59,7 @@ pub trait ConnectionHandler: Send + Sync + 'static {
         peer_id: PeerId,
     ) -> OnNotSupported;
 
-    /// Invoked when the RLPx connection was established.
+    /// Invoked when the `RLPx` connection was established.
     ///
     /// The returned future should resolve when the connection should disconnect.
     fn into_connection(
@@ -81,13 +80,13 @@ pub enum OnNotSupported {
     Disconnect,
 }
 
-/// A wrapper type for a RLPx sub-protocol.
+/// A wrapper type for a `RLPx` sub-protocol.
 #[derive(Debug)]
 pub struct RlpxSubProtocol(Box<dyn DynProtocolHandler>);
 
-/// A helper trait to convert a [ProtocolHandler] into a dynamic type
+/// A helper trait to convert a [`ProtocolHandler`] into a dynamic type
 pub trait IntoRlpxSubProtocol {
-    /// Converts the type into a [RlpxSubProtocol].
+    /// Converts the type into a [`RlpxSubProtocol`].
     fn into_rlpx_sub_protocol(self) -> RlpxSubProtocol;
 }
 

@@ -12,18 +12,28 @@ workspace = true
 
 [dependencies]
 # Reth
+reth-chainspec.workspace = true
+reth-ethereum-forks.workspace = true
 reth-evm.workspace = true
 reth-primitives.workspace = true
 reth-revm.workspace = true
-reth-interfaces.workspace = true
+reth-ethereum-consensus.workspace = true
+reth-prune-types.workspace = true
+reth-execution-types.workspace = true
 
 # Ethereum
 revm-primitives.workspace = true
 
-# misc
-tracing.workspace = true
+# Alloy
+alloy-eips.workspace = true
+alloy-sol-types.workspace = true
 
 [dev-dependencies]
+reth-testing-utils.workspace = true
 reth-revm = { workspace = true, features = ["test-utils"] }
-alloy-eips.workspace = true
+secp256k1.workspace = true
+serde_json.workspace = true
 
+[features]
+default = ["std"]
+std = []

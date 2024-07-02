@@ -1,12 +1,13 @@
 use std::{
-    fmt::{Debug, Formatter},
+    fmt::{Debug, Display, Formatter},
     path::PathBuf,
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time,
 };
 
 use lightspeed_scheduler::JobExecutor;
+use parking_lot::Mutex;
 use reth::{
     args::{BitfinityImportArgs, IC_MAINNET_KEY},
     commands::bitfinity_import::BitfinityImportCommand,
@@ -14,18 +15,20 @@ use reth::{
 };
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals};
+use reth_chainspec::ChainSpec;
 use reth_db::{init_db, DatabaseEnv};
+use reth_db_common::init::init_genesis;
 use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
+use reth_errors::BlockExecutionError;
 use reth_evm::execute::{
-    BatchBlockExecutionOutput, BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
+    BatchExecutor, BlockExecutionInput, BlockExecutionOutput,
     BlockExecutorProvider, Executor,
 };
-use reth_interfaces::executor::BlockExecutionError;
-use reth_node_core::init::init_genesis;
-use reth_primitives::{BlockNumber, BlockWithSenders, ChainSpec, PruneModes, Receipt};
+use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_provider::{
-    providers::BlockchainProvider, BlockNumReader, ProviderError, ProviderFactory,
+    providers::{BlockchainProvider, StaticFileProvider}, BlockNumReader, ExecutionOutcome, ProviderError, ProviderFactory
 };
+use reth_prune::PruneModes;
 use reth_tracing::{FileWorkerGuard, LayerInfo, LogFormat, RethTracer, Tracer};
 use revm_primitives::db::Database;
 use tempfile::TempDir;
@@ -106,13 +109,13 @@ pub async fn bitfinity_import_config_data(
     let data_dir = data_dir.unwrap_or(temp_dir.path().to_path_buf());
     let data_dir: PlatformPath<DataDirPath> =
         PlatformPath::from_str(data_dir.as_os_str().to_str().unwrap())?;
-    let data_dir = ChainPath::new(data_dir, chain.chain.clone());
+    let data_dir = ChainPath::new(data_dir, chain.chain.clone(), Default::default());
 
     let db_path = data_dir.db();
 
     let db = Arc::new(init_db(db_path, Default::default())?);
     let provider_factory =
-        ProviderFactory::new(db.clone(), chain.clone(), data_dir.static_files())?;
+        ProviderFactory::new(db.clone(), chain.clone(), StaticFileProvider::read_write(data_dir.static_files())?);
 
     init_genesis(provider_factory.clone())?;
 
@@ -178,26 +181,27 @@ pub fn get_dfx_local_port() -> u16 {
 }
 
 /// A [BlockExecutorProvider] that returns mocked execution results.
+/// Original code taken from ./crates/evm/src/test_utils.rs
 #[derive(Clone, Debug, Default)]
 struct MockExecutorProvider {
-    exec_results: Arc<Mutex<Vec<BatchBlockExecutionOutput>>>,
+    exec_results: Arc<Mutex<Vec<ExecutionOutcome>>>,
 }
 
 impl BlockExecutorProvider for MockExecutorProvider {
-    type Executor<DB: Database<Error = ProviderError>> = Self;
+    type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
-    type BatchExecutor<DB: Database<Error = ProviderError>> = Self;
+    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
     fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + Display>,
     {
         self.clone()
     }
 
     fn batch_executor<DB>(&self, _: DB, _: PruneModes) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + Display>,
     {
         self.clone()
     }
@@ -209,11 +213,12 @@ impl<DB> Executor<DB> for MockExecutorProvider {
     type Error = BlockExecutionError;
 
     fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        let BatchBlockExecutionOutput { bundle, receipts, .. } =
-            self.exec_results.lock().unwrap().pop().unwrap();
+        let ExecutionOutcome { bundle, receipts, requests, first_block: _ } =
+        self.exec_results.lock().pop().unwrap();
         Ok(BlockExecutionOutput {
             state: bundle,
             receipts: receipts.into_iter().flatten().flatten().collect(),
+            requests: requests.into_iter().flatten().collect(),
             gas_used: 0,
         })
     }
@@ -221,15 +226,15 @@ impl<DB> Executor<DB> for MockExecutorProvider {
 
 impl<DB> BatchExecutor<DB> for MockExecutorProvider {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-    type Output = BatchBlockExecutionOutput;
+    type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 
-    fn execute_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
+    fn execute_and_verify_one(&mut self, _: Self::Input<'_>) -> Result<(), Self::Error> {
         Ok(())
     }
 
     fn finalize(self) -> Self::Output {
-        self.exec_results.lock().unwrap().pop().unwrap()
+        self.exec_results.lock().pop().unwrap()
     }
 
     fn set_tip(&mut self, _: BlockNumber) {}

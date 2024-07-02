@@ -6,6 +6,7 @@ use crate::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
+use reth_chainspec::ChainSpec;
 use reth_config::config::StageConfig;
 use reth_consensus::{test_utils::TestConsensus, Consensus};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
@@ -16,18 +17,19 @@ use reth_downloaders::{
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm::{either::Either, test_utils::MockExecutorProvider};
 use reth_evm_ethereum::execute::EthExecutorProvider;
-use reth_interfaces::{
-    p2p::{bodies::client::BodiesClient, headers::client::HeadersClient},
-    sync::NoopSyncStateUpdater,
+use reth_exex_types::FinishedExExHeight;
+use reth_network_p2p::{
+    bodies::client::BodiesClient, headers::client::HeadersClient, sync::NoopSyncStateUpdater,
     test_utils::NoopFullBlockClient,
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, FinishedExExHeight, PruneModes, B256};
+use reth_primitives::{BlockNumber, B256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-    BundleStateWithReceipts, HeaderSyncMode, StaticFileProviderFactory,
+    ExecutionOutcome,
 };
 use reth_prune::Pruner;
+use reth_prune_types::PruneModes;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, ForkchoiceUpdated, PayloadStatus,
 };
@@ -56,7 +58,7 @@ pub struct TestEnv<DB> {
 }
 
 impl<DB> TestEnv<DB> {
-    fn new(
+    const fn new(
         db: DB,
         tip_rx: watch::Receiver<B256>,
         engine_handle: BeaconConsensusEngineHandle<EthEngineTypes>,
@@ -141,7 +143,7 @@ impl Default for TestPipelineConfig {
 #[derive(Debug)]
 enum TestExecutorConfig {
     /// Test executor results.
-    Test(Vec<BundleStateWithReceipts>),
+    Test(Vec<ExecutionOutcome>),
     /// Real executor configuration.
     Real,
 }
@@ -187,13 +189,13 @@ impl TestConsensusEngineBuilder {
     }
 
     /// Set the executor results to use for the test consensus engine.
-    pub fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
+    pub fn with_executor_results(mut self, executor_results: Vec<ExecutionOutcome>) -> Self {
         self.executor_config = TestExecutorConfig::Test(executor_results);
         self
     }
 
     /// Sets the max block for the pipeline to run.
-    pub fn with_max_block(mut self, max_block: BlockNumber) -> Self {
+    pub const fn with_max_block(mut self, max_block: BlockNumber) -> Self {
         self.max_block = Some(max_block);
         self
     }
@@ -211,21 +213,24 @@ impl TestConsensusEngineBuilder {
     }
 
     /// Uses a real consensus engine instead of a test consensus engine.
-    pub fn with_real_consensus(mut self) -> Self {
+    pub const fn with_real_consensus(mut self) -> Self {
         self.consensus = TestConsensusConfig::Real;
         self
     }
 
     /// Disables blockchain tree driven sync. This is the same as setting the pipeline run
     /// threshold to 0.
-    pub fn disable_blockchain_tree_sync(mut self) -> Self {
+    pub const fn disable_blockchain_tree_sync(mut self) -> Self {
         self.pipeline_run_threshold = Some(0);
         self
     }
 
     /// Sets the client to use for network operations.
     #[allow(dead_code)]
-    pub fn with_client<Client>(self, client: Client) -> NetworkedTestConsensusEngineBuilder<Client>
+    pub const fn with_client<Client>(
+        self,
+        client: Client,
+    ) -> NetworkedTestConsensusEngineBuilder<Client>
     where
         Client: HeadersClient + BodiesClient + 'static,
     {
@@ -268,14 +273,14 @@ where
 
     /// Set the executor results to use for the test consensus engine.
     #[allow(dead_code)]
-    pub fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
+    pub fn with_executor_results(mut self, executor_results: Vec<ExecutionOutcome>) -> Self {
         self.base_config.executor_config = TestExecutorConfig::Test(executor_results);
         self
     }
 
     /// Sets the max block for the pipeline to run.
     #[allow(dead_code)]
-    pub fn with_max_block(mut self, max_block: BlockNumber) -> Self {
+    pub const fn with_max_block(mut self, max_block: BlockNumber) -> Self {
         self.base_config.max_block = Some(max_block);
         self
     }
@@ -297,7 +302,7 @@ where
     /// Disables blockchain tree driven sync. This is the same as setting the pipeline run
     /// threshold to 0.
     #[allow(dead_code)]
-    pub fn disable_blockchain_tree_sync(mut self) -> Self {
+    pub const fn disable_blockchain_tree_sync(mut self) -> Self {
         self.base_config.pipeline_run_threshold = Some(0);
         self
     }
@@ -347,11 +352,8 @@ where
             }
         };
 
-        let static_file_producer = StaticFileProducer::new(
-            provider_factory.clone(),
-            provider_factory.static_file_provider(),
-            PruneModes::default(),
-        );
+        let static_file_producer =
+            StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 
         // Setup pipeline
         let (tip_tx, tip_rx) = watch::channel(B256::default());
@@ -370,7 +372,7 @@ where
 
                 Pipeline::builder().add_stages(DefaultStages::new(
                     provider_factory.clone(),
-                    HeaderSyncMode::Tip(tip_rx.clone()),
+                    tip_rx.clone(),
                     Arc::clone(&consensus),
                     header_downloader,
                     body_downloader,
@@ -417,7 +419,6 @@ where
             Box::<TokioTaskExecutor>::default(),
             Box::<NoopSyncStateUpdater>::default(),
             None,
-            false,
             payload_builder,
             None,
             self.base_config.pipeline_run_threshold.unwrap_or(MIN_BLOCKS_FOR_PIPELINE_RUN),

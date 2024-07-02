@@ -1,17 +1,15 @@
-use std::collections::HashSet;
-
+use arbitrary::Arbitrary;
 use eyre::Result;
 use proptest::{
-    arbitrary::Arbitrary,
-    prelude::{any_with, ProptestConfig},
+    prelude::ProptestConfig,
     strategy::{Strategy, ValueTree},
     test_runner::TestRunner,
 };
-use reth_db::{
-    table::{DupSort, Table, TableRow},
-    tables,
-};
-use reth_primitives::fs;
+use proptest_arbitrary_interop::arb;
+use reth_db::tables;
+use reth_db_api::table::{DupSort, Table, TableRow};
+use reth_fs_util as fs;
+use std::collections::HashSet;
 use tracing::error;
 
 const VECTORS_FOLDER: &str = "testdata/micro/db";
@@ -75,21 +73,14 @@ pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
 /// Generates test-vectors for normal tables. Keys are sorted and not repeated.
 fn generate_table_vector<T>(runner: &mut TestRunner, per_table: usize) -> Result<()>
 where
-    T::Key: Arbitrary + serde::Serialize + Ord + std::hash::Hash,
-    T::Value: Arbitrary + serde::Serialize,
     T: Table,
+    T::Key: for<'a> Arbitrary<'a> + serde::Serialize + Ord + std::hash::Hash + Clone,
+    T::Value: for<'a> Arbitrary<'a> + serde::Serialize + Clone,
 {
     let mut rows = vec![];
     let mut seen_keys = HashSet::new();
-    let strategy = proptest::collection::vec(
-        any_with::<TableRow<T>>((
-            <T::Key as Arbitrary>::Parameters::default(),
-            <T::Value as Arbitrary>::Parameters::default(),
-        )),
-        per_table - rows.len(),
-    )
-    .no_shrink()
-    .boxed();
+    let strategy =
+        proptest::collection::vec(arb::<TableRow<T>>(), per_table - rows.len()).no_shrink().boxed();
 
     while rows.len() < per_table {
         // Generate all `per_table` rows: (Key, Value)
@@ -113,23 +104,17 @@ where
 fn generate_dupsort_vector<T>(runner: &mut TestRunner, per_table: usize) -> Result<()>
 where
     T: Table + DupSort,
-    T::Key: Arbitrary + serde::Serialize + Ord + std::hash::Hash,
-    T::Value: Arbitrary + serde::Serialize + Ord,
+    T::Key: for<'a> Arbitrary<'a> + serde::Serialize + Ord + std::hash::Hash + Clone,
+    T::Value: for<'a> Arbitrary<'a> + serde::Serialize + Ord + Clone,
 {
     let mut rows = vec![];
 
     // We want to control our repeated keys
     let mut seen_keys = HashSet::new();
 
-    let strat_values = proptest::collection::vec(
-        any_with::<T::Value>(<T::Value as Arbitrary>::Parameters::default()),
-        100..300,
-    )
-    .no_shrink()
-    .boxed();
+    let strat_values = proptest::collection::vec(arb::<T::Value>(), 100..300).no_shrink().boxed();
 
-    let strat_keys =
-        any_with::<T::Key>(<T::Key as Arbitrary>::Parameters::default()).no_shrink().boxed();
+    let strat_keys = arb::<T::Key>().no_shrink().boxed();
 
     while rows.len() < per_table {
         let key: T::Key = strat_keys.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();

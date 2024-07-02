@@ -1,0 +1,15 @@
+[package]
+name = "reth-exex-types"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Commonly used types for exex usage in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true

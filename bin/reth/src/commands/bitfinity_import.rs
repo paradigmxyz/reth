@@ -1,30 +1,34 @@
 //! Command that initializes the node by importing a chain from a remote EVM node.
 
-use crate::{
-    commands::import::load_config, dirs::DataDirPath, macros::block_executor, version::SHORT_VERSION
-};
+use crate::{dirs::DataDirPath, macros::block_executor, version::SHORT_VERSION};
 use futures::{Stream, StreamExt};
 use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_chainspec::ChainSpec;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::DatabaseEnv;
 
+use reth_consensus::Consensus;
 use reth_db::database::Database;
 use reth_downloaders::{
+    bitfinity_evm_client::{BitfinityEvmClient, CertificateCheckSettings},
     bodies::bodies::BodiesDownloaderBuilder,
-    headers::reverse_headers::ReverseHeadersDownloaderBuilder, bitfinity_evm_client::{CertificateCheckSettings, BitfinityEvmClient},
+    headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_consensus::Consensus;
 use reth_exex::ExExManagerHandle;
 use reth_node_core::{args::BitfinityImportArgs, dirs::ChainPath};
 use reth_node_events::node::NodeEvent;
-use reth_primitives::{ChainSpec, PruneModes, B256};
+use reth_primitives::B256;
 use reth_provider::providers::BlockchainProvider;
-use reth_provider::{BlockNumReader, CanonChainTracker, ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, HeaderSyncMode, ProviderError, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{
+    BlockNumReader, CanonChainTracker, ChainSpecProvider, DatabaseProviderFactory, HeaderProvider,
+    ProviderError, ProviderFactory,
+};
+use reth_prune::PruneModes;
 use reth_stages::{
     prelude::*,
-    stages::{ExecutionStage, ExecutionStageThresholds, SenderRecoveryStage},
-    Pipeline, StageSet,
+    stages::{ExecutionStage, SenderRecoveryStage},
+    ExecutionStageThresholds, Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -34,7 +38,6 @@ use tracing::{debug, info};
 /// Syncs RLP encoded blocks from a file.
 #[derive(Clone)]
 pub struct BitfinityImportCommand {
-
     config: Config,
 
     datadir: ChainPath<DataDirPath>,
@@ -65,7 +68,6 @@ impl std::fmt::Debug for BitfinityImportCommand {
 }
 
 impl BitfinityImportCommand {
-
     /// Create a new `ImportCommand` with the given arguments.
     pub fn new(
         config: Option<PathBuf>,
@@ -75,12 +77,12 @@ impl BitfinityImportCommand {
         provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
         blockchain_provider: BlockchainProvider<Arc<DatabaseEnv>>,
     ) -> Self {
-
         // add network name to data dir
         let config_path = config.clone().unwrap_or(datadir.config());
 
-        let mut config: Config = load_config(config_path.clone()).expect("Failed to load BitfinityImportCommand configuration");
         info!(target: "reth::cli - BitfinityImportCommand", path = ?config_path, "Configuration loaded");
+        let mut config: Config = confy::load_path(config_path)
+            .expect("Failed to load BitfinityImportCommand configuration");
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
         if config.stages.etl.dir.is_none() {
@@ -91,38 +93,37 @@ impl BitfinityImportCommand {
     }
 
     /// Schedule the import job and return a handle to it.
-    pub async fn schedule_execution(self) -> eyre::Result<(JobExecutor, tokio::task::JoinHandle<()>)> {
+    pub async fn schedule_execution(
+        self,
+    ) -> eyre::Result<(JobExecutor, tokio::task::JoinHandle<()>)> {
         info!(target: "reth::cli - BitfinityImportCommand", "reth {} starting", SHORT_VERSION);
 
         let job_executor = JobExecutor::new_with_local_tz();
-        
+
         // Schedule the import job
         {
             let interval = Duration::from_secs(self.bitfinity.import_interval);
             job_executor
-            .add_job_with_scheduler(
-                Scheduler::Interval { interval_duration: interval, execute_at_startup: true },
-                Job::new("import", "block importer", None, move || {
-                    let import = self.clone();
-                    Box::pin(async move {
-                        import.single_execution().await?;
-                        import.update_chain_info()?;
-                        Ok(())
-                    })
-                }),
-            )
-            .await;
+                .add_job_with_scheduler(
+                    Scheduler::Interval { interval_duration: interval, execute_at_startup: true },
+                    Job::new("import", "block importer", None, move || {
+                        let import = self.clone();
+                        Box::pin(async move {
+                            import.single_execution().await?;
+                            import.update_chain_info()?;
+                            Ok(())
+                        })
+                    }),
+                )
+                .await;
         }
-        
+
         let job_handle = job_executor.run().await?;
         Ok((job_executor, job_handle))
     }
 
     /// Execute the import job.
-    async fn single_execution(
-        &self,
-    ) -> eyre::Result<()>
-    {
+    async fn single_execution(&self) -> eyre::Result<()> {
         let consensus = Arc::new(EthBeaconConsensus::new(self.chain.clone()));
         debug!(target: "reth::cli - BitfinityImportCommand", "Consensus engine initialized");
         let provider_factory = self.provider_factory.clone();
@@ -138,7 +139,7 @@ impl BitfinityImportCommand {
                 start_block,
                 self.bitfinity.end_block,
                 self.bitfinity.batch_size,
-                Some(CertificateCheckSettings{
+                Some(CertificateCheckSettings {
                     evmc_principal: self.bitfinity.evmc_principal.clone(),
                     ic_root_key: self.bitfinity.ic_root_key.clone(),
                 }),
@@ -161,11 +162,7 @@ impl BitfinityImportCommand {
             provider_factory.clone(),
             &consensus,
             remote_client,
-            StaticFileProducer::new(
-                provider_factory.clone(),
-                provider_factory.static_file_provider(),
-                PruneModes::default(),
-            ),
+            StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
         )?;
 
         // override the tip
@@ -192,7 +189,6 @@ impl BitfinityImportCommand {
             None => Err(ProviderError::HeaderNotFound(chain_info.best_number.into()))?,
         }
     }
-
 
     fn build_import_pipeline<DB, C>(
         &self,
@@ -222,14 +218,14 @@ impl BitfinityImportCommand {
         let executor = block_executor!(provider_factory.chain_spec());
 
         let max_block = remote_client.max_block().unwrap_or(0);
-        let mut pipeline = Pipeline::builder()
+        let pipeline = Pipeline::builder()
             .with_tip_sender(tip_tx)
             // we want to sync all blocks the file client provides or 0 if empty
             .with_max_block(max_block)
             .add_stages(
                 DefaultStages::new(
                     provider_factory.clone(),
-                    HeaderSyncMode::Tip(tip_rx),
+                    tip_rx,
                     consensus.clone(),
                     header_downloader,
                     body_downloader,
@@ -264,5 +260,4 @@ impl BitfinityImportCommand {
 
         Ok((pipeline, events))
     }
-
 }

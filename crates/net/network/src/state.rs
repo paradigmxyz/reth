@@ -9,7 +9,7 @@ use crate::{
         BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
         PeerResponseResult,
     },
-    peers::{PeerAction, PeersManager},
+    peers::{PeerAction, PeerAddr, PeersManager},
     FetchClient,
 };
 use rand::seq::SliceRandom;
@@ -18,13 +18,12 @@ use reth_eth_wire::{
     capability::Capabilities, BlockHashNumber, DisconnectReason, NewBlockHashes, Status,
 };
 use reth_network_api::PeerKind;
-use reth_network_types::PeerId;
+use reth_network_peers::PeerId;
 use reth_primitives::{ForkId, B256};
 use reth_provider::BlockNumReader;
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},
-    num::NonZeroUsize,
     sync::{
         atomic::{AtomicU64, AtomicUsize},
         Arc,
@@ -35,7 +34,7 @@ use tokio::sync::oneshot;
 use tracing::{debug, trace};
 
 /// Cache limit of blocks to keep track of for a single peer.
-const PEER_BLOCK_CACHE_LIMIT: usize = 512;
+const PEER_BLOCK_CACHE_LIMIT: u32 = 512;
 
 /// The [`NetworkState`] keeps track of the state of all peers in the network.
 ///
@@ -64,8 +63,9 @@ pub struct NetworkState<C> {
     discovery: Discovery,
     /// The type that handles requests.
     ///
-    /// The fetcher streams RLPx related requests on a per-peer basis to this type. This type will
-    /// then queue in the request and notify the fetcher once the result has been received.
+    /// The fetcher streams `RLPx` related requests on a per-peer basis to this type. This type
+    /// will then queue in the request and notify the fetcher once the result has been
+    /// received.
     state_fetcher: StateFetcher,
 }
 
@@ -102,7 +102,7 @@ where
     }
 
     /// Returns access to the [`PeersManager`]
-    pub(crate) fn peers(&self) -> &PeersManager {
+    pub(crate) const fn peers(&self) -> &PeersManager {
         &self.peers_manager
     }
 
@@ -142,7 +142,7 @@ where
                 capabilities,
                 request_tx,
                 pending_response: None,
-                blocks: LruCache::new(NonZeroUsize::new(PEER_BLOCK_CACHE_LIMIT).unwrap()),
+                blocks: LruCache::new(PEER_BLOCK_CACHE_LIMIT),
             },
         );
     }
@@ -175,7 +175,7 @@ where
         let mut peers: Vec<_> = self.active_peers.iter_mut().collect();
         peers.shuffle(&mut rand::thread_rng());
 
-        for (peer_id, peer) in peers.into_iter() {
+        for (peer_id, peer) in peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
                 continue
@@ -208,7 +208,7 @@ where
     pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage) {
         let number = msg.block.block.header.number;
         let hashes = NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]);
-        for (peer_id, peer) in self.active_peers.iter_mut() {
+        for (peer_id, peer) in &mut self.active_peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
                 continue
@@ -274,13 +274,14 @@ where
     }
 
     /// Adds a peer and its address with the given kind to the peerset.
-    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: SocketAddr) {
+    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: PeerAddr) {
         self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
     }
 
-    pub(crate) fn remove_peer(&mut self, peer_id: PeerId, kind: PeerKind) {
+    /// Removes a peer and its address with the given kind from the peerset.
+    pub(crate) fn remove_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind) {
         match kind {
-            PeerKind::Basic => self.peers_manager.remove_peer(peer_id),
+            PeerKind::Basic | PeerKind::Static => self.peers_manager.remove_peer(peer_id),
             PeerKind::Trusted => self.peers_manager.remove_peer_from_trusted_set(peer_id),
         }
     }
@@ -288,14 +289,10 @@ where
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {
-            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
-                peer_id,
-                socket_addr,
-                fork_id,
-            }) => {
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued { peer_id, addr, fork_id }) => {
                 self.queued_messages.push_back(StateAction::DiscoveredNode {
                     peer_id,
-                    socket_addr,
+                    addr,
                     fork_id,
                 });
             }
@@ -316,10 +313,7 @@ where
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason });
             }
-            PeerAction::DisconnectBannedIncoming { peer_id } => {
-                self.state_fetcher.on_pending_disconnect(&peer_id);
-                self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
-            }
+            PeerAction::DisconnectBannedIncoming { peer_id } |
             PeerAction::DisconnectUntrustedIncoming { peer_id } => {
                 self.state_fetcher.on_pending_disconnect(&peer_id);
                 self.queued_messages.push_back(StateAction::Disconnect { peer_id, reason: None });
@@ -334,8 +328,7 @@ where
             PeerAction::PeerRemoved(peer_id) => {
                 self.queued_messages.push_back(StateAction::PeerRemoved(peer_id))
             }
-            PeerAction::BanPeer { .. } => {}
-            PeerAction::UnBanPeer { .. } => {}
+            PeerAction::BanPeer { .. } | PeerAction::UnBanPeer { .. } => {}
         }
     }
 
@@ -380,7 +373,7 @@ where
     /// Invoked when received a response from a connected peer.
     ///
     /// Delegates the response result to the fetcher which may return an outcome specific
-    /// instruction that needs to be handled in [Self::on_block_response_outcome]. This could be
+    /// instruction that needs to be handled in [`Self::on_block_response_outcome`]. This could be
     /// a follow-up request or an instruction to slash the peer's reputation.
     fn on_eth_response(&mut self, peer: PeerId, resp: PeerResponseResult) -> Option<StateAction> {
         match resp {
@@ -421,7 +414,7 @@ where
             let mut received_responses = Vec::new();
 
             // poll all connected peers for responses
-            for (id, peer) in self.active_peers.iter_mut() {
+            for (id, peer) in &mut self.active_peers {
                 if let Some(mut response) = peer.pending_response.take() {
                     match response.poll(cx) {
                         Poll::Ready(res) => {
@@ -519,8 +512,8 @@ pub(crate) enum StateAction {
         /// The reported [`ForkId`] by this peer.
         fork_id: ForkId,
     },
-    /// A new node was found through the discovery, possibly with a ForkId
-    DiscoveredNode { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
+    /// A new node was found through the discovery, possibly with a `ForkId`
+    DiscoveredNode { peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId> },
     /// A peer was added
     PeerAdded(PeerId),
     /// A peer was dropped
@@ -537,8 +530,8 @@ mod tests {
         capability::{Capabilities, Capability},
         BlockBodies, EthVersion,
     };
-    use reth_interfaces::p2p::{bodies::client::BodiesClient, error::RequestError};
-    use reth_network_types::PeerId;
+    use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
+    use reth_network_peers::PeerId;
     use reth_primitives::{BlockBody, Header, B256};
     use reth_provider::test_utils::NoopProvider;
     use std::{
@@ -548,7 +541,7 @@ mod tests {
     use tokio::sync::mpsc;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
-    /// Returns a testing instance of the [NetworkState].
+    /// Returns a testing instance of the [`NetworkState`].
     fn state() -> NetworkState<NoopProvider> {
         let peers = PeersManager::default();
         let handle = peers.handle();

@@ -5,23 +5,21 @@
 
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
-use reth_consensus::{Consensus, ConsensusError};
-use reth_db::database::Database;
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
-use reth_interfaces::{
-    blockchain_tree::{
-        error::{BlockchainTreeError, InsertBlockErrorKind},
-        BlockAttachment, BlockValidationKind,
-    },
-    RethResult,
+use reth_blockchain_tree_api::{
+    error::{BlockchainTreeError, InsertBlockErrorKind},
+    BlockAttachment, BlockValidationKind,
 };
+use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
+use reth_db_api::database::Database;
+use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_execution_errors::BlockExecutionError;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
-    BlockHash, BlockNumber, ForkBlock, GotExpected, Receipts, SealedBlockWithSenders, SealedHeader,
-    U256,
+    BlockHash, BlockNumber, ForkBlock, GotExpected, SealedBlockWithSenders, SealedHeader, U256,
 };
 use reth_provider::{
     providers::{BundleStateProvider, ConsistentDbView},
-    BundleStateDataProvider, BundleStateWithReceipts, Chain, ProviderError, StateRootProvider,
+    FullExecutionDataProvider, ProviderError, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_trie::updates::TrieUpdates;
@@ -55,7 +53,7 @@ impl DerefMut for AppendableChain {
 
 impl AppendableChain {
     /// Create a new appendable chain from a given chain.
-    pub fn new(chain: Chain) -> Self {
+    pub const fn new(chain: Chain) -> Self {
         Self { chain }
     }
 
@@ -66,8 +64,8 @@ impl AppendableChain {
 
     /// Create a new chain that forks off of the canonical chain.
     ///
-    /// if [BlockValidationKind::Exhaustive] is specified, the method will verify the state root of
-    /// the block.
+    /// if [`BlockValidationKind::Exhaustive`] is specified, the method will verify the state root
+    /// of the block.
     pub fn new_canonical_fork<DB, E>(
         block: SealedBlockWithSenders,
         parent_header: &SealedHeader,
@@ -81,11 +79,11 @@ impl AppendableChain {
         DB: Database + Clone,
         E: BlockExecutorProvider,
     {
-        let state = BundleStateWithReceipts::default();
+        let execution_outcome = ExecutionOutcome::default();
         let empty = BTreeMap::new();
 
         let state_provider = BundleStateDataRef {
-            state: &state,
+            execution_outcome: &execution_outcome,
             sidechain_block_hashes: &empty,
             canonical_block_hashes,
             canonical_fork,
@@ -105,7 +103,7 @@ impl AppendableChain {
 
     /// Create a new chain that forks off of an existing sidechain.
     ///
-    /// This differs from [AppendableChain::new_canonical_fork] in that this starts a new fork.
+    /// This differs from [`AppendableChain::new_canonical_fork`] in that this starts a new fork.
     pub(crate) fn new_chain_fork<DB, E>(
         &self,
         block: SealedBlockWithSenders,
@@ -125,14 +123,14 @@ impl AppendableChain {
             BlockchainTreeError::BlockNumberNotFoundInChain { block_number: parent_number },
         )?;
 
-        let mut state = self.state().clone();
+        let mut execution_outcome = self.execution_outcome().clone();
 
         // Revert state to the state after execution of the parent block
-        state.revert_to(parent.number);
+        execution_outcome.revert_to(parent.number);
 
         // Revert changesets to get the state of the parent that we need to apply the change.
         let bundle_state_data = BundleStateDataRef {
-            state: &state,
+            execution_outcome: &execution_outcome,
             sidechain_block_hashes: &side_chain_block_hashes,
             canonical_block_hashes,
             canonical_fork,
@@ -147,38 +145,38 @@ impl AppendableChain {
         )?;
         // extending will also optimize few things, mostly related to selfdestruct and wiping of
         // storage.
-        state.extend(block_state);
+        execution_outcome.extend(block_state);
 
         // remove all receipts and reverts (except the last one), as they belong to the chain we
         // forked from and not the new chain we are creating.
-        let size = state.receipts().len();
-        state.receipts_mut().drain(0..size - 1);
-        state.state_mut().take_n_reverts(size - 1);
-        state.set_first_block(block.number);
+        let size = execution_outcome.receipts().len();
+        execution_outcome.receipts_mut().drain(0..size - 1);
+        execution_outcome.state_mut().take_n_reverts(size - 1);
+        execution_outcome.set_first_block(block.number);
 
         // If all is okay, return new chain back. Present chain is not modified.
-        Ok(Self { chain: Chain::from_block(block, state, None) })
+        Ok(Self { chain: Chain::from_block(block, execution_outcome, None) })
     }
 
     /// Validate and execute the given block that _extends the canonical chain_, validating its
     /// state root after execution if possible and requested.
     ///
     /// Note: State root validation is limited to blocks that extend the canonical chain and is
-    /// optional, see [BlockValidationKind]. So this function takes two parameters to determine
+    /// optional, see [`BlockValidationKind`]. So this function takes two parameters to determine
     /// if the state can and should be validated.
-    ///   - [BlockAttachment] represents if the block extends the canonical chain, and thus we can
+    ///   - [`BlockAttachment`] represents if the block extends the canonical chain, and thus we can
     ///     cache the trie state updates.
-    ///   - [BlockValidationKind] determines if the state root __should__ be validated.
-    fn validate_and_execute<BSDP, DB, E>(
+    ///   - [`BlockValidationKind`] determines if the state root __should__ be validated.
+    fn validate_and_execute<EDP, DB, E>(
         block: SealedBlockWithSenders,
         parent_block: &SealedHeader,
-        bundle_state_data_provider: BSDP,
+        bundle_state_data_provider: EDP,
         externals: &TreeExternals<DB, E>,
         block_attachment: BlockAttachment,
         block_validation_kind: BlockValidationKind,
-    ) -> RethResult<(BundleStateWithReceipts, Option<TrieUpdates>)>
+    ) -> Result<(ExecutionOutcome, Option<TrieUpdates>), BlockExecutionError>
     where
-        BSDP: BundleStateDataProvider,
+        EDP: FullExecutionDataProvider,
         DB: Database + Clone,
         E: BlockExecutorProvider,
     {
@@ -210,13 +208,15 @@ impl AppendableChain {
         let executor = externals.executor_factory.executor(db);
         let block_hash = block.hash();
         let block = block.unseal();
+
         let state = executor.execute((&block, U256::MAX).into())?;
-        let BlockExecutionOutput { state, receipts, .. } = state;
-        let bundle_state = BundleStateWithReceipts::new(
-            state,
-            Receipts::from_block_receipt(receipts),
-            block.number,
-        );
+        let BlockExecutionOutput { state, receipts, requests, .. } = state;
+        externals
+            .consensus
+            .validate_block_post_execution(&block, PostExecutionInput::new(&receipts, &requests))?;
+
+        let initial_execution_outcome =
+            ExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
 
         // check state root if the block extends the canonical chain __and__ if state root
         // validation was requested.
@@ -224,15 +224,16 @@ impl AppendableChain {
             // calculate and check state root
             let start = Instant::now();
             let (state_root, trie_updates) = if block_attachment.is_canonical() {
-                let mut state = provider.bundle_state_data_provider.state().clone();
-                state.extend(bundle_state.clone());
-                let hashed_state = state.hash_state_slow();
+                let mut execution_outcome =
+                    provider.block_execution_data_provider.execution_outcome().clone();
+                execution_outcome.extend(initial_execution_outcome.clone());
+                let hashed_state = execution_outcome.hash_state_slow();
                 ParallelStateRoot::new(consistent_view, hashed_state)
                     .incremental_root_with_updates()
                     .map(|(root, updates)| (root, Some(updates)))
                     .map_err(ProviderError::from)?
             } else {
-                (provider.state_root(bundle_state.state())?, None)
+                (provider.state_root(initial_execution_outcome.state())?, None)
             };
             if block.state_root != state_root {
                 return Err(ConsensusError::BodyStateRootDiff(
@@ -249,9 +250,9 @@ impl AppendableChain {
                 "Validated state root"
             );
 
-            Ok((bundle_state, trie_updates))
+            Ok((initial_execution_outcome, trie_updates))
         } else {
-            Ok((bundle_state, None))
+            Ok((initial_execution_outcome, None))
         }
     }
 
@@ -285,7 +286,7 @@ impl AppendableChain {
         let parent_block = self.chain.tip();
 
         let bundle_state_data = BundleStateDataRef {
-            state: self.state(),
+            execution_outcome: self.execution_outcome(),
             sidechain_block_hashes: &side_chain_block_hashes,
             canonical_block_hashes,
             canonical_fork,

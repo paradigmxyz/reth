@@ -7,19 +7,27 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
+use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{
-    revm::{config::revm_spec, env::fill_tx_env},
-    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Address, ChainSpec, Head, Header, TransactionSigned, U256,
-};
+use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned, U256};
 use reth_revm::{Database, EvmBuilder};
+use revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv};
+
+mod config;
+pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};
+
 pub mod execute;
-pub mod verify;
 
 /// Ethereum DAO hardfork state change data.
 pub mod dao_fork;
+
+/// [EIP-6110](https://eips.ethereum.org/EIPS/eip-6110) handling.
+pub mod eip6110;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone, Copy, Default)]
@@ -27,19 +35,15 @@ pub mod dao_fork;
 pub struct EthEvmConfig;
 
 impl ConfigureEvmEnv for EthEvmConfig {
-    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        fill_tx_env(tx_env, transaction, sender)
-    }
-
     fn fill_cfg_env(
         cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
-        let spec_id = revm_spec(
+        let spec_id = config::revm_spec(
             chain_spec,
-            Head {
+            &Head {
                 number: header.number,
                 timestamp: header.timestamp,
                 difficulty: header.difficulty,
@@ -52,6 +56,10 @@ impl ConfigureEvmEnv for EthEvmConfig {
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
         cfg_env.handler_cfg.spec_id = spec_id;
+    }
+
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        transaction.fill_tx_env(tx_env, sender);
     }
 }
 
@@ -69,7 +77,12 @@ impl ConfigureEvm for EthEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::revm_primitives::{BlockEnv, CfgEnv, SpecId};
+    use reth_chainspec::ChainSpec;
+    use reth_primitives::{
+        revm_primitives::{BlockEnv, CfgEnv, SpecId},
+        Header, U256,
+    };
+    use revm_primitives::CfgEnvWithHandlerCfg;
 
     #[test]
     #[ignore]

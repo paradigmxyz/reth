@@ -1,5 +1,5 @@
 [package]
-name = "node-custom-rpc"
+name = "example-node-custom-rpc"
 version = "0.0.0"
 publish = false
 edition.workspace = true
@@ -12,7 +12,6 @@ reth-node-ethereum.workspace = true
 
 clap = { workspace = true, features = ["derive"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
-eyre.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

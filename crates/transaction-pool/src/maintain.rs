@@ -11,14 +11,16 @@ use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
+use reth_execution_types::ExecutionOutcome;
+use reth_fs_util::FsPathError;
 use reth_primitives::{
-    fs::FsPathError, Address, BlockHash, BlockNumber, BlockNumberOrTag,
-    FromRecoveredPooledTransaction, IntoRecoveredTransaction, PooledTransactionsElementEcRecovered,
-    TransactionSigned, TryFromRecoveredTransaction,
+    Address, BlockHash, BlockNumber, BlockNumberOrTag, FromRecoveredPooledTransaction,
+    IntoRecoveredTransaction, PooledTransactionsElementEcRecovered, TransactionSigned,
+    TryFromRecoveredTransaction,
 };
 use reth_provider::{
-    BlockReaderIdExt, BundleStateWithReceipts, CanonStateNotification, ChainSpecProvider,
-    ProviderError, StateProviderFactory,
+    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, ProviderError,
+    StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
 use std::{
@@ -484,11 +486,11 @@ impl MaintainedPoolState {
     /// Returns `true` if the pool is assumed to be out of sync with the current state.
     #[inline]
     const fn is_drifted(&self) -> bool {
-        matches!(self, MaintainedPoolState::Drifted)
+        matches!(self, Self::Drifted)
     }
 }
 
-/// A unique ChangedAccount identified by its address that can be used for deduplication
+/// A unique `ChangedAccount` identified by its address that can be used for deduplication
 #[derive(Eq)]
 struct ChangedAccountEntry(ChangedAccount);
 
@@ -553,11 +555,11 @@ where
     Ok(res)
 }
 
-/// Extracts all changed accounts from the BundleState
+/// Extracts all changed accounts from the `BundleState`
 fn changed_accounts_iter(
-    state: &BundleStateWithReceipts,
+    execution_outcome: &ExecutionOutcome,
 ) -> impl Iterator<Item = ChangedAccount> + '_ {
-    state
+    execution_outcome
         .accounts_iter()
         .filter_map(|(addr, acc)| acc.map(|acc| (addr, acc)))
         .map(|(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance })
@@ -578,7 +580,7 @@ where
     }
 
     debug!(target: "txpool", txs_file =?file_path, "Check local persistent storage for saved transactions");
-    let data = reth_primitives::fs::read(file_path)?;
+    let data = reth_fs_util::read(file_path)?;
 
     if data.is_empty() {
         return Ok(())
@@ -598,7 +600,7 @@ where
     let outcome = pool.add_transactions(crate::TransactionOrigin::Local, pool_transactions).await;
 
     info!(target: "txpool", txs_file =?file_path, num_txs=%outcome.len(), "Successfully reinserted local transactions from file");
-    reth_primitives::fs::remove_file(file_path)?;
+    reth_fs_util::remove_file(file_path)?;
     Ok(())
 }
 
@@ -623,7 +625,7 @@ where
     info!(target: "txpool", txs_file =?file_path, num_txs=%num_txs, "Saving current local transactions");
     let parent_dir = file_path.parent().map(std::fs::create_dir_all).transpose();
 
-    match parent_dir.map(|_| reth_primitives::fs::write(file_path, buf)) {
+    match parent_dir.map(|_| reth_fs_util::write(file_path, buf)) {
         Ok(_) => {
             info!(target: "txpool", txs_file=?file_path, "Wrote local transactions to file");
         }
@@ -680,7 +682,9 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, PoolTransaction, TransactionOrigin,
     };
-    use reth_primitives::{fs, hex, PooledTransactionsElement, MAINNET, U256};
+    use reth_chainspec::MAINNET;
+    use reth_fs_util as fs;
+    use reth_primitives::{hex, PooledTransactionsElement, U256};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 

@@ -4,11 +4,11 @@ use reth::{
     builder::{NodeBuilder, NodeConfig, NodeHandle},
     tasks::TaskManager,
 };
+use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
     components::NodeComponentsBuilder, FullNodeTypesAdapter, Node, NodeAdapter, RethFullAdapter,
 };
-use reth_primitives::ChainSpec;
 use reth_provider::providers::BlockchainProvider;
 use std::sync::Arc;
 use tracing::{span, Level};
@@ -58,15 +58,12 @@ where
     let mut nodes: Vec<NodeTestContext<_>> = Vec::with_capacity(num_nodes);
 
     for idx in 0..num_nodes {
-        let mut node_config = NodeConfig::test()
+        let node_config = NodeConfig::test()
             .with_chain(chain_spec.clone())
             .with_network(network_config.clone())
             .with_unused_ports()
-            .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
-
-        if is_dev {
-            node_config = node_config.dev();
-        }
+            .with_rpc(RpcServerArgs::default().with_unused_ports().with_http())
+            .set_dev(is_dev);
 
         let span = span!(Level::INFO, "node", idx);
         let _enter = span.enter();

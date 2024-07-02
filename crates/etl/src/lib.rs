@@ -22,7 +22,7 @@ use std::{
 };
 
 use rayon::prelude::*;
-use reth_db::table::{Compress, Encode, Key, Value};
+use reth_db_api::table::{Compress, Encode, Key, Value};
 use tempfile::{NamedTempFile, TempDir};
 
 /// An ETL (extract, transform, load) data collector.
@@ -271,7 +271,7 @@ impl EtlFile {
 
 #[cfg(test)]
 mod tests {
-    use reth_primitives::{TxHash, TxNumber};
+    use alloy_primitives::{TxHash, TxNumber};
 
     use super::*;
 

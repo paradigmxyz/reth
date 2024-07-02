@@ -8,7 +8,7 @@ use std::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Settings for the [DnsDiscoveryService](crate::DnsDiscoveryService).
+/// Settings for the [`DnsDiscoveryService`](crate::DnsDiscoveryService).
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DnsDiscoveryConfig {

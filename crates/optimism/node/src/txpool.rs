@@ -1,7 +1,8 @@
 //! OP transaction pool types
 use parking_lot::RwLock;
+use reth_chainspec::ChainSpec;
 use reth_evm_optimism::RethL1BlockInfo;
-use reth_primitives::{Block, ChainSpec, GotExpected, InvalidTransactionError, SealedBlock};
+use reth_primitives::{Block, GotExpected, InvalidTransactionError, SealedBlock};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_revm::L1BlockInfo;
 use reth_transaction_pool::{
@@ -47,7 +48,7 @@ where
     Client: StateProviderFactory + BlockReaderIdExt,
     Tx: EthPoolTransaction,
 {
-    /// Create a new [OpTransactionValidator].
+    /// Create a new [`OpTransactionValidator`].
     pub fn new(inner: EthTransactionValidator<Client, Tx>) -> Self {
         let this = Self::with_block_info(inner, OpL1BlockInfo::default());
         if let Ok(Some(block)) =
@@ -65,7 +66,7 @@ where
         this
     }
 
-    /// Create a new [OpTransactionValidator] with the given [OpL1BlockInfo].
+    /// Create a new [`OpTransactionValidator`] with the given [`OpL1BlockInfo`].
     pub fn with_block_info(
         inner: EthTransactionValidator<Client, Tx>,
         block_info: OpL1BlockInfo,
@@ -83,9 +84,9 @@ where
 
     /// Validates a single transaction.
     ///
-    /// See also [TransactionValidator::validate_transaction]
+    /// See also [`TransactionValidator::validate_transaction`]
     ///
-    /// This behaves the same as [EthTransactionValidator::validate_one], but in addition, ensures
+    /// This behaves the same as [`EthTransactionValidator::validate_one`], but in addition, ensures
     /// that the account has enough balance to cover the L1 gas cost.
     pub fn validate_one(
         &self,
@@ -153,7 +154,7 @@ where
     ///
     /// Returns all outcomes for the given transactions in the same order.
     ///
-    /// See also [Self::validate_one]
+    /// See also [`Self::validate_one`]
     pub fn validate_all(
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
@@ -202,9 +203,10 @@ pub struct OpL1BlockInfo {
 #[cfg(test)]
 mod tests {
     use crate::txpool::OpTransactionValidator;
+    use reth_chainspec::MAINNET;
     use reth_primitives::{
         Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxDeposit, TxKind,
-        MAINNET, U256,
+        U256,
     };
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{

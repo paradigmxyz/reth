@@ -1,24 +1,26 @@
 //! CLI definition and entrypoint to executable
 
-#[cfg(feature = "optimism")]
-use crate::commands::import_op;
 use crate::{
     args::{
-        utils::{chain_help, genesis_value_parser, SUPPORTED_CHAINS},
+        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
         LogArgs,
     },
     commands::{
-        bitfinity_reset_evm_state, config_cmd, db, debug_cmd, dump_genesis, import, import_receipts, init_cmd, init_state, node::{self, NoArgs}, p2p, recover, stage, test_vectors
+        config_cmd, debug_cmd, dump_genesis, import, init_cmd, init_state,
+        node::{self, NoArgs},
+        p2p, prune, recover, stage, test_vectors,
     },
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
+use reth_chainspec::ChainSpec;
+use reth_cli_commands::db;
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_primitives::ChainSpec;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
+use tracing::info;
 
 /// Re-export of the `reth_node_core` types specifically in the `cli` module.
 ///
@@ -45,7 +47,7 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = SUPPORTED_CHAINS[0],
-        value_parser = genesis_value_parser,
+        value_parser = chain_value_parser,
         global = true,
     )]
     chain: Arc<ChainSpec>,
@@ -59,10 +61,10 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// port numbers that conflict with each other.
     ///
     /// Changes to the following port numbers:
-    /// - DISCOVERY_PORT: default + `instance` - 1
-    /// - AUTH_PORT: default + `instance` * 100 - 100
-    /// - HTTP_RPC_PORT: default - `instance` + 1
-    /// - WS_RPC_PORT: default + `instance` * 2 - 2
+    /// - `DISCOVERY_PORT`: default + `instance` - 1
+    /// - `AUTH_PORT`: default + `instance` * 100 - 100
+    /// - `HTTP_RPC_PORT`: default - `instance` + 1
+    /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
     #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
     instance: u16,
 
@@ -82,7 +84,7 @@ impl Cli {
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
-        Cli::try_parse_from(itr)
+        Self::try_parse_from(itr)
     }
 }
 
@@ -90,7 +92,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the
-    /// [NodeCommand](node::NodeCommand).
+    /// [`NodeCommand`](node::NodeCommand).
     ///
     ///
     /// # Example
@@ -139,6 +141,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             self.logs.log_file_directory.join(self.chain.chain.to_string());
 
         let _guard = self.init_tracing()?;
+        info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
         let runner = CliRunner::default();
         match self.command {
@@ -148,11 +151,12 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::ImportReceipts(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute())
-            }
             #[cfg(feature = "optimism")]
             Commands::ImportOp(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            #[cfg(feature = "optimism")]
+            Commands::ImportReceiptsOp(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute())
+            }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
@@ -161,6 +165,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::Recover(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::BitfinityResetEvmState(builder) => runner.run_until_ctrl_c(async move {
                 builder.build().await.unwrap().execute().await
             }),
@@ -192,13 +197,14 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// This syncs RLP encoded blocks from a file.
     #[command(name = "import")]
     Import(import::ImportCommand),
-    /// This imports RLP encoded receipts from a file.
-    #[command(name = "import-receipts")]
-    ImportReceipts(import_receipts::ImportReceiptsCommand),
     /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
     #[cfg(feature = "optimism")]
     #[command(name = "import-op")]
-    ImportOp(import_op::ImportOpCommand),
+    ImportOp(crate::commands::import_op::ImportOpCommand),
+    /// This imports RLP encoded receipts from a file.
+    #[cfg(feature = "optimism")]
+    #[command(name = "import-receipts-op")]
+    ImportReceiptsOp(crate::commands::import_receipts_op::ImportReceiptsOpCommand),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand),
     /// Database debugging utilities
@@ -222,10 +228,13 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Scripts for node recovery
     #[command(name = "recover")]
     Recover(recover::Command),
+    /// Prune according to the configuration without any limits
+    #[command(name = "prune")]
+    Prune(prune::PruneCommand),
 
     /// Export state to EVM canister
     #[command(name = "bitfinity-reset-evm-state")]
-    BitfinityResetEvmState(bitfinity_reset_evm_state::BitfinityResetEvmStateCommandBuilder),
+    BitfinityResetEvmState(crate::commands::bitfinity_reset_evm_state::BitfinityResetEvmStateCommandBuilder),
 }
 
 #[cfg(test)]

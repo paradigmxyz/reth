@@ -1,6 +1,9 @@
 use std::{cell::RefCell, thread_local};
 use zstd::bulk::{Compressor, Decompressor};
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// Compression/Decompression dictionary for `Receipt`.
 pub static RECEIPT_DICTIONARY: &[u8] = include_bytes!("./receipt_dictionary.bin");
 /// Compression/Decompression dictionary for `Transaction`.
@@ -57,9 +60,11 @@ impl ReusableDecompressor {
         let mut reserved_upper_bound = false;
         while let Err(err) = self.decompressor.decompress_to_buffer(src, &mut self.buf) {
             let err = err.to_string();
-            if !err.contains("Destination buffer is too small") {
-                panic!("Failed to decompress {} bytes: {err}", src.len());
-            }
+            assert!(
+                err.contains("Destination buffer is too small"),
+                "Failed to decompress {} bytes: {err}",
+                src.len()
+            );
 
             let additional = 'b: {
                 // Try to get the upper bound of the decompression for the given source.
@@ -69,7 +74,7 @@ impl ReusableDecompressor {
                     reserved_upper_bound = true;
                     if let Some(upper_bound) = Decompressor::upper_bound(src) {
                         if let Some(additional) = upper_bound.checked_sub(self.buf.capacity()) {
-                            break 'b additional;
+                            break 'b additional
                         }
                     }
                 }
