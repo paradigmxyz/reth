@@ -262,7 +262,7 @@ where
                                 })),
                                 None,
                             ) if contract == address => Some(ContractCreator {
-                                hash: tx_trace.transaction_hash.unwrap_or(TxHash::default()),
+                                hash: tx_trace.transaction_hash.unwrap_or_default(),
                                 creator,
                             }),
                             _ => None,
@@ -270,7 +270,7 @@ where
                     })
                     .collect::<Vec<_>>()
             });
-        let found = traces.map(|traces| traces.last().cloned()).flatten();
+        let found = traces.and_then(|traces| traces.last().cloned());
         Ok(found)
     }
 }
