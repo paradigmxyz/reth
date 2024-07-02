@@ -96,7 +96,7 @@ where
         self
     }
 
-    fn with_pipeline_container(
+    fn with_pipeline_and_spawner(
         mut self,
         pipeline: Pipeline<DB>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
@@ -226,7 +226,7 @@ mod tests {
             .with_client(client)
             .with_incoming_requests(incoming_requests)
             .with_tree_channels(to_tree_tx, from_tree_rx)
-            .with_pipeline_container(pipeline, pipeline_task_spawner)
+            .with_pipeline_and_spawner(pipeline, pipeline_task_spawner)
             .build()
             .unwrap();
     }
