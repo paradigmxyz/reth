@@ -20,6 +20,7 @@ use revm_inspectors::{
     transfer::{TransferInspector, TransferKind},
 };
 use revm_primitives::ExecutionResult;
+use tracing::debug;
 
 const API_LEVEL: u64 = 8;
 
@@ -219,7 +220,7 @@ where
         // use binary search from block [1, latest block number] to find the first block where the
         // contract was deployed
         let mut low = 1;
-        let mut high = self.eth.block_number()?.try_into().unwrap();
+        let mut high = self.eth.block_number()?.saturating_to::<u64>();
         let mut num = None;
 
         while low < high {
@@ -235,7 +236,7 @@ where
 
         // this should not happen, only if the state of the chain is inconsistent
         let Some(num) = num else {
-            // debug log here
+            debug!(target: "rpc::otterscan", address = ?address, "Contract not found in history state");
             return Ok(None)
         };
 
