@@ -184,6 +184,10 @@ jobs:
     permissions:
       issues: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -233,7 +237,7 @@ jobs:
       #       -f title='Hive Test Failure: ${{ matrix.sim }}' \
       #       -f body="!!!!!!! This is an automated issue created by the hive test failure !!!!!!!<br /><br />The hive test for ${{ matrix.sim }} failed. Please investigate and fix the issue.<br /><br />[Link to the failed run](https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }})" \
       #       -f "labels[]=C-hivetest"
-      
+
       - name: Parse hive output
         run: |
           find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/assets/parse.py {} --exclusion .github/assets/hive_exclusion.json
