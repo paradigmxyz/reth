@@ -19,10 +19,7 @@ use reth_ethereum_forks::{
 };
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::{
-    constants::{
-        EIP1559_INITIAL_BASE_FEE, EMPTY_OMMER_ROOT_HASH, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
-        EMPTY_WITHDRAWALS,
-    },
+    constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS},
     Header, SealedHeader,
 };
 use reth_trie_common::root::state_root_ref_unhashed;
@@ -451,12 +448,6 @@ impl ChainSpec {
         };
 
         Header {
-            parent_hash: B256::ZERO,
-            number: 0,
-            transactions_root: EMPTY_TRANSACTIONS,
-            ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            receipts_root: EMPTY_RECEIPTS,
-            logs_bloom: Default::default(),
             gas_limit: self.genesis.gas_limit as u64,
             difficulty: self.genesis.difficulty,
             nonce: self.genesis.nonce,
@@ -465,13 +456,13 @@ impl ChainSpec {
             timestamp: self.genesis.timestamp,
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,
-            gas_used: Default::default(),
             base_fee_per_gas,
             withdrawals_root,
             parent_beacon_block_root,
             blob_gas_used,
             excess_blob_gas,
             requests_root,
+            ..Default::default()
         }
     }
 

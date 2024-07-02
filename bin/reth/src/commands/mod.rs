@@ -3,7 +3,6 @@
 pub mod bitfinity_reset_evm_state;
 pub mod bitfinity_import;
 pub mod config_cmd;
-pub mod db;
 pub mod debug_cmd;
 pub mod dump_genesis;
 pub mod import;
@@ -17,5 +16,3 @@ pub mod prune;
 pub mod recover;
 pub mod stage;
 pub mod test_vectors;
-
-pub mod common;

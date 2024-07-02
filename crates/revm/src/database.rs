@@ -1,6 +1,6 @@
 use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue};
 use core::ops::{Deref, DerefMut};
-use reth_primitives::{Account, Address, B256, KECCAK_EMPTY, U256};
+use reth_primitives::{Account, Address, B256, U256};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{
     db::DatabaseRef,
@@ -134,12 +134,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(self.basic_account(address)?.map(|account| AccountInfo {
-            balance: account.balance,
-            nonce: account.nonce,
-            code_hash: account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
-            code: None,
-        }))
+        Ok(self.basic_account(address)?.map(Into::into))
     }
 
     /// Retrieves the bytecode associated with a given code hash.
@@ -160,13 +155,10 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
     fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
-        // Attempt to convert U256 to u64
-        let block_number = match number.try_into() {
-            Ok(value) => value,
-            Err(_) => return Err(Self::Error::BlockNumberOverflow(number)),
-        };
-
-        // Get the block hash or default hash
-        Ok(self.0.block_hash(block_number)?.unwrap_or_default())
+        // Get the block hash or default hash with an attempt to convert U256 block number to u64
+        Ok(self
+            .0
+            .block_hash(number.try_into().map_err(|_| Self::Error::BlockNumberOverflow(number))?)?
+            .unwrap_or_default())
     }
 }

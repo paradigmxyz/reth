@@ -212,15 +212,17 @@ impl PeersManager {
         })
     }
 
-    /// Returns the [`NodeRecord`] for the given peer id
-    #[allow(dead_code)]
-    fn peer_by_id(&self, peer_id: PeerId) -> Option<NodeRecord> {
+    /// Returns the `NodeRecord` and `PeerKind` for the given peer id
+    pub(crate) fn peer_by_id(&self, peer_id: PeerId) -> Option<(NodeRecord, PeerKind)> {
         self.peers.get(&peer_id).map(|v| {
-            NodeRecord::new_with_ports(
-                v.addr.tcp.ip(),
-                v.addr.tcp.port(),
-                v.addr.udp.map(|addr| addr.port()),
-                peer_id,
+            (
+                NodeRecord::new_with_ports(
+                    v.addr.tcp.ip(),
+                    v.addr.tcp.port(),
+                    v.addr.udp.map(|addr| addr.port()),
+                    peer_id,
+                ),
+                v.kind,
             )
         })
     }
@@ -1378,7 +1380,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        let record = peers.peer_by_id(peer).unwrap();
+        let (record, _) = peers.peer_by_id(peer).unwrap();
         assert_eq!(record.tcp_addr(), socket_addr);
         assert_eq!(record.udp_addr(), socket_addr);
     }
@@ -1405,7 +1407,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        let record = peers.peer_by_id(peer).unwrap();
+        let (record, _) = peers.peer_by_id(peer).unwrap();
         assert_eq!(record.tcp_addr(), tcp_addr);
         assert_eq!(record.udp_addr(), udp_addr);
     }

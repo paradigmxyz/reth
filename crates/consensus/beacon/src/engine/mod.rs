@@ -53,7 +53,7 @@ pub use error::{
 };
 
 mod invalid_headers;
-use invalid_headers::InvalidHeaderCache;
+pub use invalid_headers::InvalidHeaderCache;
 
 mod event;
 pub use event::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
@@ -62,13 +62,12 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
-pub use forkchoice::ForkchoiceStatus;
-use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker};
+pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
 
 mod metrics;
 use metrics::EngineMetrics;
 
-pub(crate) mod sync;
+pub mod sync;
 use sync::{EngineSyncController, EngineSyncEvent};
 
 /// Hooks for running during the main loop of

@@ -14,9 +14,9 @@ extern crate alloc;
 
 use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{Header, U256};
+use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned, U256};
 use reth_revm::{Database, EvmBuilder};
-use revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg};
+use revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv};
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};
@@ -56,6 +56,10 @@ impl ConfigureEvmEnv for EthEvmConfig {
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
         cfg_env.handler_cfg.spec_id = spec_id;
+    }
+
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        transaction.fill_tx_env(tx_env, sender);
     }
 }
 

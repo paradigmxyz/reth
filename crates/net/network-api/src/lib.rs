@@ -68,12 +68,12 @@ pub trait PeersInfo: Send + Sync {
 pub trait Peers: PeersInfo {
     /// Adds a peer to the peer set with UDP `SocketAddr`.
     fn add_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Basic, tcp_addr, None);
+        self.add_peer_kind(peer, PeerKind::Static, tcp_addr, None);
     }
 
     /// Adds a peer to the peer set with TCP and UDP `SocketAddr`.
     fn add_peer_with_udp(&self, peer: PeerId, tcp_addr: SocketAddr, udp_addr: SocketAddr) {
-        self.add_peer_kind(peer, PeerKind::Basic, tcp_addr, Some(udp_addr));
+        self.add_peer_kind(peer, PeerKind::Static, tcp_addr, Some(udp_addr));
     }
 
     /// Adds a trusted [`PeerId`] to the peer set.
@@ -163,6 +163,8 @@ pub enum PeerKind {
     /// Basic peer kind.
     #[default]
     Basic,
+    /// Static peer, added via JSON-RPC.
+    Static,
     /// Trusted peer.
     Trusted,
 }
@@ -171,6 +173,11 @@ impl PeerKind {
     /// Returns `true` if the peer is trusted.
     pub const fn is_trusted(&self) -> bool {
         matches!(self, Self::Trusted)
+    }
+
+    /// Returns `true` if the peer is static.
+    pub const fn is_static(&self) -> bool {
+        matches!(self, Self::Static)
     }
 
     /// Returns `true` if the peer is basic.
@@ -188,6 +195,10 @@ pub struct PeerInfo {
     pub remote_id: PeerId,
     /// The client's name and version
     pub client_version: Arc<str>,
+    /// The peer's enode
+    pub enode: String,
+    /// The peer's enr
+    pub enr: Option<String>,
     /// The peer's address we're connected to
     pub remote_addr: SocketAddr,
     /// The local address of the connection
@@ -200,6 +211,8 @@ pub struct PeerInfo {
     pub status: Arc<Status>,
     /// The timestamp when the session to that peer has been established.
     pub session_established: Instant,
+    /// The peer's connection kind
+    pub kind: PeerKind,
 }
 
 /// The direction of the connection.

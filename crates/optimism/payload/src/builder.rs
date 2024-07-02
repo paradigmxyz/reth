@@ -12,9 +12,7 @@ use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
     constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
     eip4844::calculate_excess_blob_gas,
-    proofs,
-    revm::env::tx_env_with_recovered,
-    Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH, U256,
+    proofs, Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
@@ -324,7 +322,7 @@ where
         }
 
         // Convert the transaction to a [TransactionSignedEcRecovered]. This is
-        // purely for the purposes of utilizing the [tx_env_with_recovered] function.
+        // purely for the purposes of utilizing the `evm_config.tx_env`` function.
         // Deposit transactions do not have signatures, so if the tx is a deposit, this
         // will just pull in its `from` address.
         let sequencer_tx = sequencer_tx.clone().try_into_ecrecovered().map_err(|_| {
@@ -351,7 +349,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
-            tx_env_with_recovered(&sequencer_tx),
+            evm_config.tx_env(&sequencer_tx),
         );
 
         let mut evm = evm_config.evm_with_env(&mut db, env);
@@ -430,7 +428,7 @@ where
             let env = EnvWithHandlerCfg::new_with_cfg_env(
                 initialized_cfg.clone(),
                 initialized_block_env.clone(),
-                tx_env_with_recovered(&tx),
+                evm_config.tx_env(&tx),
             );
 
             // Configure the environment for the block.

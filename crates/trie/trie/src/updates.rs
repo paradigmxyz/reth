@@ -76,6 +76,15 @@ impl TrieOp {
             None
         }
     }
+
+    /// Returns owned updated branch node if operation is [`Self::Update`].
+    pub fn into_update(self) -> Option<BranchNodeCompact> {
+        if let Self::Update(node) = self {
+            Some(node)
+        } else {
+            None
+        }
+    }
 }
 
 /// The aggregation of trie updates.
@@ -101,18 +110,6 @@ impl IntoIterator for TrieUpdates {
 }
 
 impl TrieUpdates {
-    /// Schedule a delete operation on a trie key.
-    ///
-    /// # Panics
-    ///
-    /// If the key already exists and the operation is an update.
-    pub fn schedule_delete(&mut self, key: TrieKey) {
-        let existing = self.trie_operations.insert(key, TrieOp::Delete);
-        if let Some(op) = existing {
-            assert!(!op.is_update(), "Tried to delete a node that was already updated");
-        }
-    }
-
     /// Extend the updates with trie updates.
     pub fn extend(&mut self, updates: impl IntoIterator<Item = (TrieKey, TrieOp)>) {
         self.trie_operations.extend(updates);
@@ -135,8 +132,10 @@ impl TrieUpdates {
         destroyed_accounts: HashSet<B256>,
     ) {
         // Add updates from trie walker.
-        let (_, walker_updates) = walker.split();
-        self.extend(walker_updates);
+        let (_, deleted_keys) = walker.split();
+        self.extend(
+            deleted_keys.into_iter().map(|nibbles| (TrieKey::AccountNode(nibbles), TrieOp::Delete)),
+        );
 
         // Add account node updates from hash builder.
         let (_, hash_builder_updates) = hash_builder.split();
@@ -156,8 +155,12 @@ impl TrieUpdates {
         hash_builder: HashBuilder,
     ) {
         // Add updates from trie walker.
-        let (_, walker_updates) = walker.split();
-        self.extend(walker_updates);
+        let (_, deleted_keys) = walker.split();
+        self.extend(
+            deleted_keys
+                .into_iter()
+                .map(|nibbles| (TrieKey::StorageNode(hashed_address, nibbles), TrieOp::Delete)),
+        );
 
         // Add storage node updates from hash builder.
         let (_, hash_builder_updates) = hash_builder.split();
@@ -251,11 +254,12 @@ pub struct TrieUpdatesSorted {
 
 impl TrieUpdatesSorted {
     /// Find the account node with the given nibbles.
-    pub fn find_account_node(&self, key: &Nibbles) -> Option<(TrieKey, TrieOp)> {
-        self.trie_operations
-            .iter()
-            .find(|(k, _)| matches!(k, TrieKey::AccountNode(nibbles) if nibbles == key))
-            .cloned()
+    pub fn find_account_node(&self, key: &Nibbles) -> Option<(Nibbles, TrieOp)> {
+        self.trie_operations.iter().find_map(|(k, op)| {
+            k.as_account_node_key()
+                .filter(|nibbles| nibbles == &key)
+                .map(|nibbles| (nibbles.clone(), op.clone()))
+        })
     }
 
     /// Find the storage node with the given hashed address and key.
@@ -263,9 +267,11 @@ impl TrieUpdatesSorted {
         &self,
         hashed_address: &B256,
         key: &Nibbles,
-    ) -> Option<(TrieKey, TrieOp)> {
-        self.trie_operations.iter().find(|(k, _)| {
-            matches!(k, TrieKey::StorageNode(address, nibbles) if address == hashed_address && nibbles == key)
-        }).cloned()
+    ) -> Option<(Nibbles, TrieOp)> {
+        self.trie_operations.iter().find_map(|(k, op)| {
+            k.as_storage_node_key()
+                .filter(|(address, nibbles)| address == &hashed_address && nibbles == &key)
+                .map(|(_, nibbles)| (nibbles.clone(), op.clone()))
+        })
     }
 }

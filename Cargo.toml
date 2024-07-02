@@ -26,6 +26,7 @@ members = [
     "crates/ethereum-forks/",
     "crates/e2e-test-utils/",
     "crates/engine/primitives/",
+    "crates/engine/tree/",
     "crates/engine/util/",
     "crates/errors/",
     "crates/ethereum-forks/",
@@ -205,6 +206,7 @@ zero_sized_map_values = "warn"
 single_char_pattern = "warn"
 needless_continue = "warn"
 enum_glob_use = "warn"
+iter_without_into_iter = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
@@ -287,6 +289,7 @@ reth-downloaders = { path = "crates/net/downloaders" }
 reth-e2e-test-utils = { path = "crates/e2e-test-utils" }
 reth-ecies = { path = "crates/net/ecies" }
 reth-engine-primitives = { path = "crates/engine/primitives" }
+reth-engine-tree = { path = "crates/engine/tree" }
 reth-engine-util = { path = "crates/engine/util" }
 reth-errors = { path = "crates/errors" }
 reth-eth-wire = { path = "crates/net/eth-wire" }

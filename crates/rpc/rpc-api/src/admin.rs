@@ -1,6 +1,6 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_network_peers::{AnyNode, NodeRecord};
-use reth_rpc_types::{admin::NodeInfo, PeerInfo};
+use reth_rpc_types::admin::{NodeInfo, PeerInfo};
 
 /// Admin namespace rpc interface that gives access to several non-standard RPC methods.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "admin"))]
