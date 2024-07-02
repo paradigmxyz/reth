@@ -238,34 +238,39 @@ where
             return Ok(None);
         }
 
-        let mut found = None;
-        let _ = self.eth.trace_block_with(
-            num.unwrap().into(),
-            TracingInspectorConfig::default_parity(),
-            |tx_info, inspector, _, _, _| {
-                if found.is_some() {
-                    return Ok(())
-                }
-                let traces =
-                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-                for trace in traces.iter() {
-                    match (trace.trace.action, trace.trace.result, trace.trace.error) {
-                        (
-                            Action::Create(CreateAction { from: creator, .. }),
-                            Some(TraceOutput::Create(CreateOutput { address: contract, .. })),
-                            None,
-                        ) if contract == address => {
-                            let hash = tx_info.hash.unwrap_or(TxHash::default());
-                            found = Some(ContractCreator { hash, creator });
-                            break;
+        let traces = self
+            .eth
+            .trace_block_with(
+                num.unwrap().into(),
+                TracingInspectorConfig::default_parity(),
+                |tx_info, inspector, _, _, _| {
+                    Ok(inspector.into_parity_builder().into_localized_transaction_traces(tx_info))
+                },
+            )
+            .await?
+            .map(|traces| {
+                traces
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|tx_trace| {
+                        let trace = tx_trace.trace;
+                        match (trace.action, trace.result, trace.error) {
+                            (
+                                Action::Create(CreateAction { from: creator, .. }),
+                                Some(TraceOutput::Create(CreateOutput {
+                                    address: contract, ..
+                                })),
+                                None,
+                            ) if contract == address => Some(ContractCreator {
+                                hash: tx_trace.transaction_hash.unwrap_or(TxHash::default()),
+                                creator,
+                            }),
+                            _ => None,
                         }
-                        _ => {}
-                    }
-                }
-
-                Ok(())
-            },
-        );
+                    })
+                    .collect::<Vec<_>>()
+            });
+        let found = traces.map(|traces| traces.last().cloned()).flatten();
         Ok(found)
     }
 }
