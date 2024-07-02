@@ -6,7 +6,7 @@ use crate::{
 };
 use reth_db::tables;
 use reth_db_api::{database::Database, models::ShardedKey};
-use reth_provider::DatabaseProviderRW;
+use reth_provider::ProviderFactory;
 use reth_prune_types::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
 use tracing::{instrument, trace};
 
@@ -36,10 +36,10 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         Some(self.mode)
     }
 
-    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
+    #[instrument(level = "trace", target = "pruner", skip(self, provider_factory), ret)]
     fn prune(
         &self,
-        provider: &DatabaseProviderRW<DB>,
+        provider_factory: &ProviderFactory<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
         let range = match input.get_next_block_range() {
@@ -64,6 +64,9 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         }
 
         let mut last_changeset_pruned_block = None;
+
+        let provider = provider_factory.provider_rw()?;
+
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::AccountChangeSets>(
                 range,
@@ -80,11 +83,21 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             .unwrap_or(range_end);
 
         let (processed, pruned_indices) = prune_history_indices::<DB, tables::AccountsHistory, _>(
-            provider,
+            &provider,
             last_changeset_pruned_block,
             |a, b| a.key == b.key,
             |key| ShardedKey::last(key.key),
         )?;
+
+        let checkpoint = PruneOutputCheckpoint {
+            block_number: Some(last_changeset_pruned_block),
+            tx_number: None,
+        };
+
+        self.save_checkpoint(&provider, checkpoint.as_prune_checkpoint(self.mode))?;
+
+        provider.commit()?;
+
         trace!(target: "pruner", %processed, pruned = %pruned_indices, %done, "Pruned account history (history)");
 
         let progress = PruneProgress::new(done, &limiter);
@@ -92,10 +105,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         Ok(PruneOutput {
             progress,
             pruned: pruned_changesets + pruned_indices,
-            checkpoint: Some(PruneOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block),
-                tx_number: None,
-            }),
+            checkpoint: Some(checkpoint),
         })
     }
 }
@@ -174,8 +184,7 @@ mod tests {
                 };
                 let segment = AccountHistory::new(prune_mode);
 
-                let provider = db.factory.provider_rw().unwrap();
-                let result = segment.prune(&provider, input).unwrap();
+                let result = segment.prune(&db.factory, input).unwrap();
                 limiter.increment_deleted_entries_count_by(result.pruned);
 
                 assert_matches!(
@@ -183,14 +192,6 @@ mod tests {
                     PruneOutput {progress, pruned, checkpoint: Some(_)}
                         if (progress, pruned) == expected_result
                 );
-
-                segment
-                    .save_checkpoint(
-                        &provider,
-                        result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
-                    )
-                    .unwrap();
-                provider.commit().expect("commit");
 
                 let changesets = changesets
                     .iter()
