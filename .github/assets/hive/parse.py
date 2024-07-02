@@ -39,4 +39,4 @@ if unexpected_failures or unexpected_passes:
         print("Unexpected Passes:", unexpected_passes)
     sys.exit(1)
 
-print("All tests passed or expected failures/passes as per the exclusion list.")
+print("Success.")
