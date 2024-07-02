@@ -12,7 +12,10 @@ use reth_rpc_types::{
             BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
             OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
         },
-        parity::{Action, CreateAction, CreateOutput, TraceOutput},
+        parity::{
+            Action, CallAction, CreateAction, CreateOutput, RewardAction, SelfdestructAction,
+            TraceOutput,
+        },
     },
     BlockTransactions, Header, Transaction,
 };
@@ -101,8 +104,50 @@ where
     }
 
     /// Handler for `ots_traceTransaction`
-    async fn trace_transaction(&self, _tx_hash: TxHash) -> RpcResult<TraceEntry> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<Option<Vec<TraceEntry>>> {
+        let traces = self
+            .eth
+            .spawn_trace_transaction_in_block(
+                tx_hash,
+                TracingInspectorConfig::default_parity(),
+                move |_tx_info, inspector, _, _| {
+                    let traces = inspector.into_parity_builder().into_transaction_traces();
+                    Ok(traces)
+                },
+            )
+            .await?
+            .map(|traces| {
+                traces
+                    .into_iter()
+                    .map(|trace| {
+                        let depth = trace.trace_address.len() as u32;
+                        let (typ, from, to, value, input) = match trace.action {
+                            Action::Call(CallAction { from, to, value, input, .. }) => {
+                                ("call", from, to, value, input)
+                            }
+                            Action::Create(CreateAction { from, value, init, .. }) => {
+                                let to = match trace.result {
+                                    Some(TraceOutput::Create(CreateOutput {
+                                        address: to, ..
+                                    })) => to,
+                                    _ => Address::default(),
+                                };
+                                ("create", from, to, value, init)
+                            }
+                            Action::Reward(RewardAction { author, value, .. }) => {
+                                ("reward", Address::default(), author, value, Default::default())
+                            }
+                            Action::Selfdestruct(SelfdestructAction {
+                                address,
+                                balance,
+                                refund_address,
+                            }) => ("suicide", address, refund_address, balance, Default::default()),
+                        };
+                        TraceEntry { r#type: typ.to_uppercase(), depth, from, to, value, input }
+                    })
+                    .collect::<Vec<_>>()
+            });
+        Ok(traces)
     }
 
     /// Handler for `ots_getBlockDetails`
