@@ -6,13 +6,19 @@ use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::helpers::TraceExt;
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
-    trace::otterscan::{
-        BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
-        OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+    trace::{
+        otterscan::{
+            BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
+            OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+        },
+        parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
     BlockTransactions, Transaction,
 };
-use revm_inspectors::transfer::{TransferInspector, TransferKind};
+use revm_inspectors::{
+    tracing::TracingInspectorConfig,
+    transfer::{TransferInspector, TransferKind},
+};
 use revm_primitives::ExecutionResult;
 
 const API_LEVEL: u64 = 8;
@@ -205,7 +211,70 @@ where
     }
 
     /// Handler for `getContractCreator`
-    async fn get_contract_creator(&self, _address: Address) -> RpcResult<Option<ContractCreator>> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn get_contract_creator(&self, address: Address) -> RpcResult<Option<ContractCreator>> {
+        if !self.has_code(address, None).await? {
+            return Ok(None);
+        }
+
+        // use binary search from block [1, latest block number] to find the first block where the
+        // contract was deployed
+        let mut low = 1;
+        let mut high = self.eth.block_number()?.try_into().unwrap();
+        let mut num = None;
+
+        while low < high {
+            let mid = (low + high) / 2;
+            let block_number = Some(BlockId::Number(BlockNumberOrTag::Number(mid)));
+            if self.eth.get_code(address, block_number).await?.is_empty() {
+                low = mid + 1; // not found in current block, need to search in the later blocks
+            } else {
+                high = mid - 1; // found in current block, try to find a lower block
+                num = Some(mid);
+            }
+        }
+
+        // this should not happen, only if the state of the chain is inconsistent
+        let Some(num) = num else {
+            // debug log here
+            return Ok(None)
+        };
+
+        let traces = self
+            .eth
+            .trace_block_with(
+                num.into(),
+                TracingInspectorConfig::default_parity(),
+                |tx_info, inspector, _, _, _| {
+                    Ok(inspector.into_parity_builder().into_localized_transaction_traces(tx_info))
+                },
+            )
+            .await?
+            .map(|traces| {
+                traces
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|tx_trace| {
+                        let trace = tx_trace.trace;
+                        match (trace.action, trace.result, trace.error) {
+                            (
+                                Action::Create(CreateAction { from: creator, .. }),
+                                Some(TraceOutput::Create(CreateOutput {
+                                    address: contract, ..
+                                })),
+                                None,
+                            ) if contract == address => Some(ContractCreator {
+                                hash: tx_trace.transaction_hash.unwrap_or_default(),
+                                creator,
+                            }),
+                            _ => None,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            });
+
+        // A contract maybe created and then destroyed in multiple transactions, here we
+        // return the first found transaction, this behavior is consistent with etherscan's
+        let found = traces.and_then(|traces| traces.first().cloned());
+        Ok(found)
     }
 }
