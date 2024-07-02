@@ -744,7 +744,8 @@ mod tests {
     use super::*;
     use crate::test_utils::TestFullBlockClient;
     use futures::StreamExt;
-    use std::ops::Range;
+    use std::{ops::Range, time::Duration};
+    use tokio::time::timeout;
 
     #[tokio::test]
     async fn download_single_full_block() {
@@ -807,6 +808,30 @@ mod tests {
             let expected_number = header.number - i as u64;
             assert_eq!(block.header.number, expected_number);
         }
+    }
+
+    #[tokio::test]
+    async fn download_full_block_with_bad_block() {
+        let full_block_client = TestFullBlockClient::default();
+        let (header, _) = insert_headers_into_client(&full_block_client, 0..50);
+
+        // successfully get block
+        let client = FullBlockClient::test_client(full_block_client.clone());
+        let received = client.get_full_block_range(header.hash(), 10).await;
+        assert_eq!(received.len(), 10);
+
+        // insert fake block
+        let fake_header = Header { parent_hash: B256::random(), ..Default::default() };
+        let fake_body =
+            BlockBody { transactions: vec![], ommers: vec![], withdrawals: None, requests: None };
+        let hash = header.hash();
+        full_block_client.insert_with_hash(hash, fake_header.seal(hash), fake_body);
+
+        // the task should timeout with bad block
+        let client = FullBlockClient::test_client(full_block_client.clone());
+        let task = client.get_full_block_range(header.hash(), 10);
+        let result = timeout(Duration::from_secs(2), task).await;
+        assert!(result.is_err(), "getting bad block should timeout")
     }
 
     #[tokio::test]
