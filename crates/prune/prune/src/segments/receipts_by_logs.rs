@@ -31,6 +31,10 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
         None
     }
 
+    fn purpose(&self) -> PrunePurpose {
+        PrunePurpose::User
+    }
+
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(
         &self,

@@ -7,7 +7,9 @@ use crate::{
 use reth_db::tables;
 use reth_db_api::{database::Database, models::ShardedKey};
 use reth_provider::DatabaseProviderRW;
-use reth_prune_types::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
+use reth_prune_types::{
+    PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
+};
 use tracing::{instrument, trace};
 
 /// Number of account history tables to prune in one step.
@@ -34,6 +36,10 @@ impl<DB: Database> Segment<DB> for AccountHistory {
 
     fn mode(&self) -> Option<PruneMode> {
         Some(self.mode)
+    }
+
+    fn purpose(&self) -> PrunePurpose {
+        PrunePurpose::User
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]

@@ -10,7 +10,9 @@ use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
 };
 use reth_provider::DatabaseProviderRW;
-use reth_prune_types::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
+use reth_prune_types::{
+    PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
+};
 use tracing::{instrument, trace};
 
 /// Number of storage history tables to prune in one step
@@ -37,6 +39,10 @@ impl<DB: Database> Segment<DB> for StorageHistory {
 
     fn mode(&self) -> Option<PruneMode> {
         Some(self.mode)
+    }
+
+    fn purpose(&self) -> PrunePurpose {
+        PrunePurpose::User
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]

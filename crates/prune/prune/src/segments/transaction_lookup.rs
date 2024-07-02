@@ -6,7 +6,7 @@ use rayon::prelude::*;
 use reth_db::tables;
 use reth_db_api::database::Database;
 use reth_provider::{DatabaseProviderRW, TransactionsProvider};
-use reth_prune_types::{PruneMode, PruneProgress, PruneSegment};
+use reth_prune_types::{PruneMode, PruneProgress, PrunePurpose, PruneSegment};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -27,6 +27,10 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
 
     fn mode(&self) -> Option<PruneMode> {
         Some(self.mode)
+    }
+
+    fn purpose(&self) -> PrunePurpose {
+        PrunePurpose::User
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
