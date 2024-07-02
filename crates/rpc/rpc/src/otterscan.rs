@@ -237,7 +237,7 @@ where
         // this should not happen, only if the state of the chain is inconsistent
         let Some(num) = num else {
             debug!(target: "rpc::otterscan", address = ?address, "Contract not found in history state");
-            return Ok(None)
+            return Err(internal_rpc_err("contract not found in hitory state"))
         };
 
         let traces = self
