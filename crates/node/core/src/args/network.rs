@@ -50,7 +50,7 @@ pub struct NetworkArgs {
     ///
     /// Will fall back to a network-specific default if not specified.
     #[arg(long, value_delimiter = ',')]
-    pub bootnodes: Option<Vec<TrustedPeer>>,
+    pub bootnodes: Option<Vec<NodeRecord>>,
 
     /// Amount of DNS resolution requests retries to perform when peering.
     #[arg(long, default_value_t = 0)]
@@ -130,7 +130,10 @@ impl NetworkArgs {
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
-        let chain_bootnodes = chain_spec.bootnodes().unwrap_or_else(mainnet_nodes);
+        let chain_bootnodes = self
+            .bootnodes
+            .clone()
+            .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
