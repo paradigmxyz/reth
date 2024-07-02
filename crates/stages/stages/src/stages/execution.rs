@@ -7,6 +7,7 @@ use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_primitives::{BlockNumber, Header, StaticFileSegment};
+use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     BlockReader, DatabaseProviderRW, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
@@ -15,9 +16,9 @@ use reth_provider::{
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
-    format_gas_throughput, BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput,
-    ExecOutput, ExecutionCheckpoint, ExecutionStageThresholds, MetricEvent, MetricEventsSender,
-    Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
+    BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
+    ExecutionCheckpoint, ExecutionStageThresholds, MetricEvent, MetricEventsSender, Stage,
+    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use std::{
     cmp::Ordering,
@@ -640,7 +641,7 @@ mod tests {
         StaticFileProviderFactory,
     };
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
-    use reth_stages_api::{format_gas_throughput, StageUnitCheckpoint};
+    use reth_stages_api::StageUnitCheckpoint;
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthExecutorProvider> {
@@ -659,22 +660,6 @@ mod tests {
             PruneModes::none(),
             ExExManagerHandle::empty(),
         )
-    }
-
-    #[test]
-    fn test_gas_throughput_fmt() {
-        let duration = Duration::from_secs(1);
-        let gas = 100_000;
-        let throughput = format_gas_throughput(gas, duration);
-        assert_eq!(throughput, "100 Kgas/second");
-
-        let gas = 100_000_000;
-        let throughput = format_gas_throughput(gas, duration);
-        assert_eq!(throughput, "100 Mgas/second");
-
-        let gas = 100_000_000_000;
-        let throughput = format_gas_throughput(gas, duration);
-        assert_eq!(throughput, "100 Ggas/second");
     }
 
     #[test]
