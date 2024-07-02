@@ -12,8 +12,8 @@ mod transactions;
 use crate::PrunerError;
 pub use account_history::AccountHistory;
 use alloy_primitives::{BlockNumber, TxNumber};
-pub use headers::Headers;
-pub use receipts::Receipts;
+pub use headers::{Headers, StaticFileHeaders};
+pub use receipts::{Receipts, StaticFileReceipts};
 pub use receipts_by_logs::ReceiptsByLogs;
 use reth_db_api::database::Database;
 use reth_provider::{
@@ -28,7 +28,7 @@ use std::{fmt::Debug, ops::RangeInclusive};
 pub use storage_history::StorageHistory;
 use tracing::error;
 pub use transaction_lookup::TransactionLookup;
-pub use transactions::Transactions;
+pub use transactions::{StaticFileTransactions, Transactions};
 
 /// A segment represents a pruning of some portion of the data.
 ///

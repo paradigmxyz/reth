@@ -4,8 +4,9 @@ use crate::{
 };
 use reth_db::tables;
 use reth_db_api::database::Database;
-use reth_provider::{DatabaseProviderRW, TransactionsProvider};
+use reth_provider::{providers::StaticFileProvider, DatabaseProviderRW, TransactionsProvider};
 use reth_prune_types::{PruneMode, PruneProgress, PruneSegment};
+use reth_static_file_types::StaticFileSegment;
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -34,43 +35,83 @@ impl<DB: Database> Segment<DB> for Transactions {
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
-        let tx_range = match input.get_next_tx_num_range(provider)? {
-            Some(range) => range,
-            None => {
-                trace!(target: "pruner", "No transactions to prune");
-                return Ok(PruneOutput::done())
-            }
-        };
-
-        let mut limiter = input.limiter;
-
-        let mut last_pruned_transaction = *tx_range.end();
-        let (pruned, done) = provider.prune_table_with_range::<tables::Transactions>(
-            tx_range,
-            &mut limiter,
-            |_| false,
-            |row| last_pruned_transaction = row.0,
-        )?;
-        trace!(target: "pruner", %pruned, %done, "Pruned transactions");
-
-        let last_pruned_block = provider
-            .transaction_block(last_pruned_transaction)?
-            .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
-            // If there's more transactions to prune, set the checkpoint block number to previous,
-            // so we could finish pruning its transactions on the next run.
-            .checked_sub(if done { 0 } else { 1 });
-
-        let progress = PruneProgress::new(done, &limiter);
-
-        Ok(PruneOutput {
-            progress,
-            pruned,
-            checkpoint: Some(PruneOutputCheckpoint {
-                block_number: last_pruned_block,
-                tx_number: Some(last_pruned_transaction),
-            }),
-        })
+        prune(provider, input)
     }
+}
+
+#[derive(Debug)]
+pub struct StaticFileTransactions {
+    static_file_provider: StaticFileProvider,
+}
+
+impl StaticFileTransactions {
+    pub const fn new(static_file_provider: StaticFileProvider) -> Self {
+        Self { static_file_provider }
+    }
+}
+
+impl<DB: Database> Segment<DB> for StaticFileTransactions {
+    fn segment(&self) -> PruneSegment {
+        PruneSegment::Transactions
+    }
+
+    fn mode(&self) -> Option<PruneMode> {
+        Some(PruneMode::before_inclusive(
+            self.static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::Transactions)
+                .unwrap_or_default(),
+        ))
+    }
+
+    fn prune(
+        &self,
+        provider: &DatabaseProviderRW<DB>,
+        input: PruneInput,
+    ) -> Result<PruneOutput, PrunerError> {
+        prune(provider, input)
+    }
+}
+
+fn prune<DB: Database>(
+    provider: &DatabaseProviderRW<DB>,
+    input: PruneInput,
+) -> Result<PruneOutput, PrunerError> {
+    let tx_range = match input.get_next_tx_num_range(provider)? {
+        Some(range) => range,
+        None => {
+            trace!(target: "pruner", "No transactions to prune");
+            return Ok(PruneOutput::done())
+        }
+    };
+
+    let mut limiter = input.limiter;
+
+    let mut last_pruned_transaction = *tx_range.end();
+    let (pruned, done) = provider.prune_table_with_range::<tables::Transactions>(
+        tx_range,
+        &mut limiter,
+        |_| false,
+        |row| last_pruned_transaction = row.0,
+    )?;
+    trace!(target: "pruner", %pruned, %done, "Pruned transactions");
+
+    let last_pruned_block = provider
+        .transaction_block(last_pruned_transaction)?
+        .ok_or(PrunerError::InconsistentData("Block for transaction is not found"))?
+        // If there's more transactions to prune, set the checkpoint block number to previous,
+        // so we could finish pruning its transactions on the next run.
+        .checked_sub(if done { 0 } else { 1 });
+
+    let progress = PruneProgress::new(done, &limiter);
+
+    Ok(PruneOutput {
+        progress,
+        pruned,
+        checkpoint: Some(PruneOutputCheckpoint {
+            block_number: last_pruned_block,
+            tx_number: Some(last_pruned_transaction),
+        }),
+    })
 }
 
 #[cfg(test)]

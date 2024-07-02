@@ -13,8 +13,9 @@ use reth_db_api::{
 };
 
 use alloy_primitives::BlockNumber;
-use reth_provider::DatabaseProviderRW;
+use reth_provider::{providers::StaticFileProvider, DatabaseProviderRW};
 use reth_prune_types::{PruneLimiter, PruneMode, PruneProgress, PruneSegment};
+use reth_static_file_types::StaticFileSegment;
 use tracing::{instrument, trace};
 
 /// Number of header tables to prune in one step
@@ -46,57 +47,96 @@ impl<DB: Database> Segment<DB> for Headers {
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
     ) -> Result<PruneOutput, PrunerError> {
-        let (block_range_start, block_range_end) = match input.get_next_block_range() {
-            Some(range) => (*range.start(), *range.end()),
-            None => {
-                trace!(target: "pruner", "No headers to prune");
-                return Ok(PruneOutput::done())
-            }
-        };
-
-        let last_pruned_block =
-            if block_range_start == 0 { None } else { Some(block_range_start - 1) };
-
-        let range = last_pruned_block.map_or(0, |block| block + 1)..=block_range_end;
-
-        let mut headers_cursor = provider.tx_ref().cursor_write::<tables::Headers>()?;
-        let mut header_tds_cursor =
-            provider.tx_ref().cursor_write::<tables::HeaderTerminalDifficulties>()?;
-        let mut canonical_headers_cursor =
-            provider.tx_ref().cursor_write::<tables::CanonicalHeaders>()?;
-
-        let mut limiter = input.limiter.floor_deleted_entries_limit_to_multiple_of(
-            NonZeroUsize::new(HEADER_TABLES_TO_PRUNE).unwrap(),
-        );
-
-        let tables_iter = HeaderTablesIter::new(
-            provider,
-            &mut limiter,
-            headers_cursor.walk_range(range.clone())?,
-            header_tds_cursor.walk_range(range.clone())?,
-            canonical_headers_cursor.walk_range(range)?,
-        );
-
-        let mut last_pruned_block: Option<u64> = None;
-        let mut pruned = 0;
-        for res in tables_iter {
-            let HeaderTablesIterItem { pruned_block, entries_pruned } = res?;
-            last_pruned_block = Some(pruned_block);
-            pruned += entries_pruned;
-        }
-
-        let done = last_pruned_block.map_or(false, |block| block == block_range_end);
-        let progress = PruneProgress::new(done, &limiter);
-
-        Ok(PruneOutput {
-            progress,
-            pruned,
-            checkpoint: Some(PruneOutputCheckpoint {
-                block_number: last_pruned_block,
-                tx_number: None,
-            }),
-        })
+        prune(provider, input)
     }
+}
+
+#[derive(Debug)]
+pub struct StaticFileHeaders {
+    static_file_provider: StaticFileProvider,
+}
+
+impl StaticFileHeaders {
+    pub const fn new(static_file_provider: StaticFileProvider) -> Self {
+        Self { static_file_provider }
+    }
+}
+
+impl<DB: Database> Segment<DB> for StaticFileHeaders {
+    fn segment(&self) -> PruneSegment {
+        PruneSegment::Headers
+    }
+
+    fn mode(&self) -> Option<PruneMode> {
+        Some(PruneMode::before_inclusive(
+            self.static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::Headers)
+                .unwrap_or_default(),
+        ))
+    }
+
+    fn prune(
+        &self,
+        provider: &DatabaseProviderRW<DB>,
+        input: PruneInput,
+    ) -> Result<PruneOutput, PrunerError> {
+        prune(provider, input)
+    }
+}
+
+fn prune<DB: Database>(
+    provider: &DatabaseProviderRW<DB>,
+    input: PruneInput,
+) -> Result<PruneOutput, PrunerError> {
+    let (block_range_start, block_range_end) = match input.get_next_block_range() {
+        Some(range) => (*range.start(), *range.end()),
+        None => {
+            trace!(target: "pruner", "No headers to prune");
+            return Ok(PruneOutput::done())
+        }
+    };
+
+    let last_pruned_block = if block_range_start == 0 { None } else { Some(block_range_start - 1) };
+
+    let range = last_pruned_block.map_or(0, |block| block + 1)..=block_range_end;
+
+    let mut headers_cursor = provider.tx_ref().cursor_write::<tables::Headers>()?;
+    let mut header_tds_cursor =
+        provider.tx_ref().cursor_write::<tables::HeaderTerminalDifficulties>()?;
+    let mut canonical_headers_cursor =
+        provider.tx_ref().cursor_write::<tables::CanonicalHeaders>()?;
+
+    let mut limiter = input.limiter.floor_deleted_entries_limit_to_multiple_of(
+        NonZeroUsize::new(HEADER_TABLES_TO_PRUNE).unwrap(),
+    );
+
+    let tables_iter = HeaderTablesIter::new(
+        provider,
+        &mut limiter,
+        headers_cursor.walk_range(range.clone())?,
+        header_tds_cursor.walk_range(range.clone())?,
+        canonical_headers_cursor.walk_range(range)?,
+    );
+
+    let mut last_pruned_block: Option<u64> = None;
+    let mut pruned = 0;
+    for res in tables_iter {
+        let HeaderTablesIterItem { pruned_block, entries_pruned } = res?;
+        last_pruned_block = Some(pruned_block);
+        pruned += entries_pruned;
+    }
+
+    let done = last_pruned_block.map_or(false, |block| block == block_range_end);
+    let progress = PruneProgress::new(done, &limiter);
+
+    Ok(PruneOutput {
+        progress,
+        pruned,
+        checkpoint: Some(PruneOutputCheckpoint {
+            block_number: last_pruned_block,
+            tx_number: None,
+        }),
+    })
 }
 
 type Walker<'a, DB, T> = RangeWalker<'a, T, <<DB as Database>::TXMut as DbTxMut>::CursorMut<T>>;
