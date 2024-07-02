@@ -88,7 +88,7 @@ impl Command {
         let tree = BlockchainTree::new(
             tree_externals,
             BlockchainTreeConfig::default(),
-            PruneModes::default(),
+            PruneModes::none(),
         )?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
@@ -148,7 +148,7 @@ impl Command {
             network_client,
             Pipeline::builder().build(
                 provider_factory.clone(),
-                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::none()),
             ),
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),

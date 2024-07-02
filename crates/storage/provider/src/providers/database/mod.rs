@@ -57,12 +57,7 @@ impl<DB> ProviderFactory<DB> {
         chain_spec: Arc<ChainSpec>,
         static_file_provider: StaticFileProvider,
     ) -> Self {
-        Self {
-            db: Arc::new(db),
-            chain_spec,
-            static_file_provider,
-            prune_modes: PruneModes::default(),
-        }
+        Self { db: Arc::new(db), chain_spec, static_file_provider, prune_modes: PruneModes::none() }
     }
 
     /// Enables metrics on the static file provider.
@@ -102,7 +97,7 @@ impl ProviderFactory<DatabaseEnv> {
             db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
-            prune_modes: PruneModes::default(),
+            prune_modes: PruneModes::none(),
         })
     }
 }

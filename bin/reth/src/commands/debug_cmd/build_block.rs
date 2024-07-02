@@ -126,7 +126,7 @@ impl Command {
         let tree = BlockchainTree::new(
             tree_externals,
             BlockchainTreeConfig::default(),
-            PruneModes::default(),
+            PruneModes::none(),
         )?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
