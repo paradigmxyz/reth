@@ -41,7 +41,7 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason, EthVersion, Status,
 };
-use reth_fs_util as fs;
+use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{EthProtocolInfo, NetworkStatus, PeerInfo, ReputationChangeKind};
 use reth_network_peers::{NodeRecord, PeerId};
@@ -346,15 +346,14 @@ where
     }
 
     /// Collect the peers from the [`NetworkManager`] and write them to the given
-    /// `persistent_peers_file`, if configured.
-    pub fn write_peers_to_file(&self, persistent_peers_file: Option<PathBuf>) -> eyre::Result<()> {
-        if let Some(file_path) = persistent_peers_file {
-            let known_peers = self.all_peers().collect::<Vec<_>>();
-            let known_peers = serde_json::to_string_pretty(&known_peers)?;
-            trace!(target: "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
-            file_path.parent().map(fs::create_dir_all).transpose()?;
-            fs::write(&file_path, known_peers)?;
-        }
+    /// `persistent_peers_file`.
+    pub fn write_peers_to_file(&self, persistent_peers_file: PathBuf) -> Result<(), FsPathError> {
+        let known_peers = self.all_peers().collect::<Vec<_>>();
+        let known_peers = serde_json::to_string_pretty(&known_peers).map_err(|e| {
+            FsPathError::WriteJson { source: e, path: persistent_peers_file.clone() }
+        })?;
+        persistent_peers_file.parent().map(fs::create_dir_all).transpose()?;
+        fs::write(&persistent_peers_file, known_peers)?;
         Ok(())
     }
 
