@@ -79,8 +79,6 @@ pub trait CycleSegments {
     where
         Self: Sized,
     {
-        self.reset_cycle();
-
         self.next_cycle().filter(|segment| segment.is_some()).flatten()
     }
 
