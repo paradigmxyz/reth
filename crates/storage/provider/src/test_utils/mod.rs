@@ -30,6 +30,5 @@ pub fn create_test_provider_factory_with_chain_spec(
         db,
         chain_spec,
         StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
-        None,
     )
 }

@@ -105,7 +105,7 @@ pub struct DatabaseProvider<TX> {
     /// Static File provider
     static_file_provider: StaticFileProvider,
     /// Pruning configuration
-    prune_modes: Option<PruneModes>,
+    prune_modes: PruneModes,
 }
 
 impl<TX> DatabaseProvider<TX> {
@@ -121,7 +121,7 @@ impl<TX: DbTxMut> DatabaseProvider<TX> {
         tx: TX,
         chain_spec: Arc<ChainSpec>,
         static_file_provider: StaticFileProvider,
-        prune_modes: Option<PruneModes>,
+        prune_modes: PruneModes,
     ) -> Self {
         Self { tx, chain_spec, static_file_provider, prune_modes }
     }
@@ -258,7 +258,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         tx: TX,
         chain_spec: Arc<ChainSpec>,
         static_file_provider: StaticFileProvider,
-        prune_modes: Option<PruneModes>,
+        prune_modes: PruneModes,
     ) -> Self {
         Self { tx, chain_spec, static_file_provider, prune_modes }
     }
@@ -2682,8 +2682,8 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
             if self
                 .prune_modes
+                .sender_recovery
                 .as_ref()
-                .and_then(|modes| modes.sender_recovery)
                 .filter(|prune_mode| prune_mode.is_full())
                 .is_none()
             {
@@ -2709,8 +2709,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
             if self
                 .prune_modes
-                .as_ref()
-                .and_then(|modes| modes.transaction_lookup)
+                .transaction_lookup
                 .filter(|prune_mode| prune_mode.is_full())
                 .is_none()
             {

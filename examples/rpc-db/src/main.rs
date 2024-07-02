@@ -53,7 +53,6 @@ async fn main() -> eyre::Result<()> {
         db.clone(),
         spec.clone(),
         StaticFileProvider::read_only(db_path.join("static_files"))?,
-        None,
     );
 
     // 2. Setup the blockchain provider using only the database provider and a noop for the tree to

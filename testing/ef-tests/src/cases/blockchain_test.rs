@@ -90,7 +90,6 @@ impl Case for BlockchainTestCase {
                     db.as_ref(),
                     Arc::new(case.network.clone().into()),
                     StaticFileProvider::read_write(static_files_dir_path).unwrap(),
-                    None,
                 )
                 .provider_rw()
                 .unwrap();

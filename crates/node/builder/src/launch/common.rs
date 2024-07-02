@@ -320,9 +320,9 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
         self.toml_config().prune.clone().or_else(|| self.node_config().prune_config())
     }
 
-    /// Returns the configured [`PruneModes`]
-    pub fn prune_modes(&self) -> Option<PruneModes> {
-        self.prune_config().map(|config| config.segments)
+    /// Returns the configured [`PruneModes`], returning the default if no config was available.
+    pub fn prune_modes(&self) -> PruneModes {
+        self.prune_config().map(|config| config.segments).unwrap_or_default()
     }
 
     /// Returns an initialized [`PrunerBuilder`] based on the configured [`PruneConfig`]
@@ -363,8 +363,8 @@ where
             self.right().clone(),
             self.chain_spec(),
             StaticFileProvider::read_write(self.data_dir().static_files())?,
-            self.prune_modes(),
         )
+        .with_prune_modes(self.prune_modes())
         .with_static_files_metrics();
 
         let has_receipt_pruning =
@@ -396,14 +396,11 @@ where
                     NoopBodiesDownloader::default(),
                     NoopBlockExecutorProvider::default(),
                     self.toml_config().stages.clone(),
-                    self.prune_modes().unwrap_or_default(),
+                    self.prune_modes(),
                 ))
                 .build(
                     factory.clone(),
-                    StaticFileProducer::new(
-                        factory.clone(),
-                        self.prune_modes().unwrap_or_default(),
-                    ),
+                    StaticFileProducer::new(factory.clone(), self.prune_modes()),
                 );
 
             // Unwinds to block
@@ -706,10 +703,7 @@ where
 
     /// Creates a new [`StaticFileProducer`] with the attached database.
     pub fn static_file_producer(&self) -> StaticFileProducer<DB> {
-        StaticFileProducer::new(
-            self.provider_factory().clone(),
-            self.prune_modes().unwrap_or_default(),
-        )
+        StaticFileProducer::new(self.provider_factory().clone(), self.prune_modes())
     }
 
     /// Returns the current head block.

@@ -2232,7 +2232,6 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                    None,
                 ),
                 [&genesis, &block1].into_iter(),
             );
@@ -2293,7 +2292,6 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                    None,
                 ),
                 [&genesis, &block1].into_iter(),
             );
@@ -2318,7 +2316,6 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                    None,
                 ),
                 std::iter::once(&next_head),
             );
@@ -2363,7 +2360,6 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                    None,
                 ),
                 [&genesis, &block1].into_iter(),
             );
@@ -2419,7 +2415,6 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                    None,
                 ),
                 [&genesis, &block1, &block2, &block3].into_iter(),
             );
@@ -2469,7 +2464,6 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(temp_dir_path).unwrap(),
-                    None,
                 ),
                 [&genesis, &block1].into_iter(),
             );
@@ -2574,7 +2568,6 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                    None,
                 ),
                 [&genesis, &block1, &block2].into_iter(),
             );
@@ -2647,7 +2640,6 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                    None,
                 ),
                 [&genesis, &block1].into_iter(),
             );
@@ -2695,7 +2687,6 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                    None,
                 ),
                 std::iter::once(&genesis),
             );
@@ -2763,7 +2754,6 @@ mod tests {
                     env.db.as_ref(),
                     chain_spec.clone(),
                     StaticFileProvider::read_write(static_dir_path).unwrap(),
-                    None,
                 ),
                 [&data.genesis, &block1].into_iter(),
             );

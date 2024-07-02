@@ -35,7 +35,6 @@ pub(crate) async fn dump_hashing_account_stage<DB: Database>(
                 output_db,
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
-                None,
             ),
             to,
             from,

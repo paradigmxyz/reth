@@ -47,7 +47,7 @@ pub struct ProviderFactory<DB> {
     /// Static File Provider
     static_file_provider: StaticFileProvider,
     /// Optional pruning configuration
-    prune_modes: Option<PruneModes>,
+    prune_modes: PruneModes,
 }
 
 impl<DB> ProviderFactory<DB> {
@@ -56,9 +56,13 @@ impl<DB> ProviderFactory<DB> {
         db: DB,
         chain_spec: Arc<ChainSpec>,
         static_file_provider: StaticFileProvider,
-        prune_modes: Option<PruneModes>,
     ) -> Self {
-        Self { db: Arc::new(db), chain_spec, static_file_provider, prune_modes }
+        Self {
+            db: Arc::new(db),
+            chain_spec,
+            static_file_provider,
+            prune_modes: PruneModes::default(),
+        }
     }
 
     /// Enables metrics on the static file provider.
@@ -68,7 +72,7 @@ impl<DB> ProviderFactory<DB> {
     }
 
     /// Sets the pruning configuration for an existing [`ProviderFactory`].
-    pub fn with_prune_modes(mut self, prune_modes: Option<PruneModes>) -> Self {
+    pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
         self.prune_modes = prune_modes;
         self
     }
@@ -93,13 +97,12 @@ impl ProviderFactory<DatabaseEnv> {
         chain_spec: Arc<ChainSpec>,
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider,
-        prune_modes: Option<PruneModes>,
     ) -> RethResult<Self> {
         Ok(Self {
             db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
-            prune_modes,
+            prune_modes: PruneModes::default(),
         })
     }
 }
@@ -658,7 +661,6 @@ mod tests {
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
-            None,
         )
         .unwrap();
 
@@ -690,11 +692,11 @@ mod tests {
         }
 
         {
-            let prune_modes = Some(PruneModes {
+            let prune_modes = PruneModes {
                 sender_recovery: Some(PruneMode::Full),
                 transaction_lookup: Some(PruneMode::Full),
                 ..PruneModes::none()
-            });
+            };
             let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
             assert_matches!(
                 provider.insert_block(block.clone().try_seal_with_senders().unwrap(),),

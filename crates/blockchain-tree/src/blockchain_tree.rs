@@ -115,7 +115,7 @@ where
     pub fn new(
         mut externals: TreeExternals<DB, E>,
         config: BlockchainTreeConfig,
-        prune_modes: Option<PruneModes>,
+        prune_modes: PruneModes,
     ) -> ProviderResult<Self> {
         let max_reorg_depth = config.max_reorg_depth() as usize;
         // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
@@ -1644,7 +1644,7 @@ mod tests {
         let mut tree = BlockchainTree::new(
             TreeExternals::new(provider_factory, consensus, executor_provider),
             BlockchainTreeConfig::default(),
-            None,
+            PruneModes::default(),
         )
         .expect("failed to create tree");
 
@@ -1724,7 +1724,8 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, config, PruneModes::default())
+            .expect("failed to create tree");
         // genesis block 10 is already canonical
         tree.make_canonical(B256::ZERO).unwrap();
 
@@ -1800,7 +1801,8 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, config, PruneModes::default())
+            .expect("failed to create tree");
         // genesis block 10 is already canonical
         tree.make_canonical(B256::ZERO).unwrap();
 
@@ -1885,7 +1887,8 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, config, PruneModes::default())
+            .expect("failed to create tree");
         // genesis block 10 is already canonical
         tree.make_canonical(B256::ZERO).unwrap();
 
@@ -1983,7 +1986,8 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, config, PruneModes::default())
+            .expect("failed to create tree");
 
         let mut canon_notif = tree.subscribe_canon_state();
         // genesis block 10 is already canonical
@@ -2376,7 +2380,8 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, config, PruneModes::default())
+            .expect("failed to create tree");
 
         assert_eq!(
             tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
@@ -2396,8 +2401,8 @@ mod tests {
         tree.make_canonical(block2.hash()).unwrap();
 
         // restart
-        let mut tree =
-            BlockchainTree::new(cloned_externals_1, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(cloned_externals_1, config, PruneModes::default())
+            .expect("failed to create tree");
         assert_eq!(tree.block_indices().last_finalized_block(), 0);
 
         let mut block1a = block1;
@@ -2413,8 +2418,8 @@ mod tests {
         tree.finalize_block(block1a.number).unwrap();
 
         // restart
-        let tree =
-            BlockchainTree::new(cloned_externals_2, config, None).expect("failed to create tree");
+        let tree = BlockchainTree::new(cloned_externals_2, config, PruneModes::default())
+            .expect("failed to create tree");
 
         assert_eq!(tree.block_indices().last_finalized_block(), block1a.number);
     }
