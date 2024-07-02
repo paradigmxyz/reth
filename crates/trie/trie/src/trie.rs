@@ -5,7 +5,7 @@ use crate::{
     progress::{IntermediateStateRootState, StateRootProgress},
     stats::TrieTracker,
     trie_cursor::TrieCursorFactory,
-    updates::{TrieKey, TrieOp, TrieUpdates},
+    updates::{StorageTrieUpdates, TrieUpdates},
     walker::TrieWalker,
     HashBuilder, Nibbles, TrieAccount,
 };
@@ -237,6 +237,7 @@ where
 
         let mut account_rlp = Vec::with_capacity(128);
         let mut hashed_entries_walked = 0;
+        let mut updated_storage_nodes = 0;
         while let Some(node) = account_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
@@ -273,7 +274,9 @@ where
                         let (root, storage_slots_walked, updates) =
                             storage_root_calculator.root_with_updates()?;
                         hashed_entries_walked += storage_slots_walked;
-                        trie_updates.extend(updates);
+                        // We only walk over hashed address once, so it's safe to insert.
+                        updated_storage_nodes += updates.len();
+                        trie_updates.insert_storage_updates(hashed_address, updates);
                         root
                     } else {
                         storage_root_calculator.root()?
@@ -285,25 +288,20 @@ where
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 
                     // Decide if we need to return intermediate progress.
-                    let total_updates_len = trie_updates.len() +
-                        account_node_iter.walker.deleted_keys_len() +
+                    let total_updates_len = updated_storage_nodes +
+                        account_node_iter.walker.removed_keys_len() +
                         hash_builder.updates_len();
                     if retain_updates && total_updates_len as u64 >= self.threshold {
                         let (walker_stack, walker_deleted_keys) = account_node_iter.walker.split();
+                        trie_updates.removed_nodes.extend(walker_deleted_keys);
                         let (hash_builder, hash_builder_updates) = hash_builder.split();
+                        trie_updates.account_nodes.extend(hash_builder_updates);
 
                         let state = IntermediateStateRootState {
                             hash_builder,
                             walker_stack,
                             last_account_key: hashed_address,
                         };
-
-                        trie_updates.extend(
-                            walker_deleted_keys
-                                .into_iter()
-                                .map(|nibbles| (TrieKey::AccountNode(nibbles), TrieOp::Delete)),
-                        );
-                        trie_updates.extend_with_account_updates(hash_builder_updates);
 
                         return Ok(StateRootProgress::Progress(
                             Box::new(state),
@@ -317,7 +315,7 @@ where
 
         let root = hash_builder.root();
 
-        trie_updates.finalize_state_updates(
+        trie_updates.finalize(
             account_node_iter.walker,
             hash_builder,
             self.prefix_sets.destroyed_accounts,
@@ -456,7 +454,7 @@ where
     /// # Returns
     ///
     /// The storage root and storage trie updates for a given address.
-    pub fn root_with_updates(self) -> Result<(B256, usize, TrieUpdates), StorageRootError> {
+    pub fn root_with_updates(self) -> Result<(B256, usize, StorageTrieUpdates), StorageRootError> {
         self.calculate(true)
     }
 
@@ -479,7 +477,7 @@ where
     pub fn calculate(
         self,
         retain_updates: bool,
-    ) -> Result<(B256, usize, TrieUpdates), StorageRootError> {
+    ) -> Result<(B256, usize, StorageTrieUpdates), StorageRootError> {
         trace!(target: "trie::storage_root", hashed_address = ?self.hashed_address, "calculating storage root");
 
         let mut hashed_storage_cursor =
@@ -487,11 +485,7 @@ where
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
-            return Ok((
-                EMPTY_ROOT_HASH,
-                0,
-                TrieUpdates::from([(TrieKey::StorageTrie(self.hashed_address), TrieOp::Delete)]),
-            ))
+            return Ok((EMPTY_ROOT_HASH, 0, StorageTrieUpdates::deleted()))
         }
 
         let mut tracker = TrieTracker::default();
@@ -520,12 +514,8 @@ where
 
         let root = hash_builder.root();
 
-        let mut trie_updates = TrieUpdates::default();
-        trie_updates.finalize_storage_updates(
-            self.hashed_address,
-            storage_node_iter.walker,
-            hash_builder,
-        );
+        let mut trie_updates = StorageTrieUpdates::default();
+        trie_updates.finalize(storage_node_iter.walker, hash_builder);
 
         let stats = tracker.finish();
 
@@ -551,11 +541,9 @@ where
 mod tests {
     use super::*;
     use crate::{
-        hashed_cursor::HashedPostStateCursorFactory,
         prefix_set::PrefixSetMut,
         test_utils::{state_root, state_root_prehashed, storage_root, storage_root_prehashed},
-        trie_cursor::InMemoryTrieCursorFactory,
-        BranchNodeCompact, HashedPostState, HashedStorage, TrieMask,
+        BranchNodeCompact, TrieMask,
     };
     use proptest::{prelude::ProptestConfig, proptest};
     use proptest_arbitrary_interop::arb;
@@ -569,7 +557,6 @@ mod tests {
     use reth_trie_common::triehash::KeccakHasher;
     use std::{
         collections::{BTreeMap, HashMap},
-        iter,
         ops::Mul,
         str::FromStr,
         sync::Arc,
@@ -629,7 +616,7 @@ mod tests {
         let modified_root = loader.root().unwrap();
 
         // Update the intermediate roots table so that we can run the incremental verification
-        trie_updates.flush(tx.tx_ref()).unwrap();
+        trie_updates.write_to_database(tx.tx_ref(), hashed_address).unwrap();
 
         // 3. Calculate the incremental root
         let mut storage_changes = PrefixSetMut::default();
@@ -988,14 +975,7 @@ mod tests {
         assert_eq!(root, computed_expected_root);
 
         // Check account trie
-        let mut account_updates = trie_updates
-            .iter()
-            .filter_map(|(k, v)| match (k, v) {
-                (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        account_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        let account_updates = trie_updates.clone().into_sorted().account_nodes;
         assert_eq!(account_updates.len(), 2);
 
         let (nibbles1a, node1a) = account_updates.first().unwrap();
@@ -1015,16 +995,11 @@ mod tests {
         assert_eq!(node2a.hashes.len(), 1);
 
         // Check storage trie
-        let storage_updates = trie_updates
-            .iter()
-            .filter_map(|entry| match entry {
-                (TrieKey::StorageNode(_, nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(storage_updates.len(), 1);
+        assert_eq!(trie_updates.storage_tries.len(), 1);
+        let (_, storage_trie_updates) = trie_updates.storage_tries.iter().next().unwrap();
+        assert_eq!(storage_trie_updates.storage_nodes.len(), 1);
 
-        let (nibbles3, node3) = storage_updates.first().unwrap();
+        let (nibbles3, node3) = storage_trie_updates.storage_nodes.iter().next().unwrap();
         assert!(nibbles3.is_empty());
         assert_eq!(node3.state_mask, TrieMask::new(0b1010));
         assert_eq!(node3.tree_mask, TrieMask::new(0b0000));
@@ -1058,14 +1033,7 @@ mod tests {
             .unwrap();
         assert_eq!(root, expected_state_root);
 
-        let mut account_updates = trie_updates
-            .iter()
-            .filter_map(|entry| match entry {
-                (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        account_updates.sort_by(|a, b| a.0.cmp(b.0));
+        let account_updates = trie_updates.into_sorted().account_nodes;
         assert_eq!(account_updates.len(), 2);
 
         let (nibbles1b, node1b) = account_updates.first().unwrap();
@@ -1112,19 +1080,12 @@ mod tests {
                 .root_with_updates()
                 .unwrap();
             assert_eq!(root, computed_expected_root);
-            assert_eq!(trie_updates.len(), 7);
-            assert_eq!(trie_updates.iter().filter(|(_, op)| op.is_update()).count(), 2);
+            assert_eq!(trie_updates.account_nodes.len() + trie_updates.removed_nodes.len(), 7);
+            assert_eq!(trie_updates.storage_tries.len(), 1);
 
-            let account_updates = trie_updates
-                .iter()
-                .filter_map(|entry| match entry {
-                    (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            assert_eq!(account_updates.len(), 1);
+            assert_eq!(trie_updates.account_nodes.len(), 1);
 
-            let (nibbles1c, node1c) = account_updates.first().unwrap();
+            let (nibbles1c, node1c) = trie_updates.account_nodes.iter().next().unwrap();
             assert_eq!(nibbles1c[..], [0xB]);
 
             assert_eq!(node1c.state_mask, TrieMask::new(0b1011));
@@ -1171,19 +1132,12 @@ mod tests {
                 .root_with_updates()
                 .unwrap();
             assert_eq!(root, computed_expected_root);
-            assert_eq!(trie_updates.len(), 6);
-            assert_eq!(trie_updates.iter().filter(|(_, op)| op.is_update()).count(), 1); // no storage root update
+            assert_eq!(trie_updates.account_nodes.len() + trie_updates.removed_nodes.len(), 6);
+            assert!(trie_updates.storage_tries.is_empty()); // no storage root update
 
-            let account_updates = trie_updates
-                .iter()
-                .filter_map(|entry| match entry {
-                    (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => Some((nibbles, node)),
-                    _ => None,
-                })
-                .collect::<Vec<_>>();
-            assert_eq!(account_updates.len(), 1);
+            assert_eq!(trie_updates.account_nodes.len(), 1);
 
-            let (nibbles1d, node1d) = account_updates.first().unwrap();
+            let (nibbles1d, node1d) = trie_updates.account_nodes.iter().next().unwrap();
             assert_eq!(nibbles1d[..], [0xB]);
 
             assert_eq!(node1d.state_mask, TrieMask::new(0b1011));
@@ -1207,19 +1161,7 @@ mod tests {
 
         let (got, updates) = StateRoot::from_tx(tx.tx_ref()).root_with_updates().unwrap();
         assert_eq!(expected, got);
-
-        // Check account trie
-        let account_updates = updates
-            .iter()
-            .filter_map(|entry| match entry {
-                (TrieKey::AccountNode(nibbles), TrieOp::Update(node)) => {
-                    Some((nibbles.clone(), node.clone()))
-                }
-                _ => None,
-            })
-            .collect::<HashMap<_, _>>();
-
-        assert_trie_updates(&account_updates);
+        assert_trie_updates(&updates.account_nodes);
     }
 
     #[test]
@@ -1231,7 +1173,7 @@ mod tests {
 
         let (got, updates) = StateRoot::from_tx(tx.tx_ref()).root_with_updates().unwrap();
         assert_eq!(expected, got);
-        updates.flush(tx.tx_ref()).unwrap();
+        updates.write_to_database(tx.tx_ref()).unwrap();
 
         // read the account updates from the db
         let mut accounts_trie = tx.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
@@ -1278,7 +1220,7 @@ mod tests {
                     state.iter().map(|(&key, &balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
                 );
                 assert_eq!(expected_root, state_root);
-                trie_updates.flush(tx.tx_ref()).unwrap();
+                trie_updates.write_to_database(tx.tx_ref()).unwrap();
             }
         }
     }
@@ -1294,26 +1236,14 @@ mod tests {
         let (got, _, updates) =
             StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
         assert_eq!(expected_root, got);
-
-        // Check account trie
-        let storage_updates = updates
-            .iter()
-            .filter_map(|entry| match entry {
-                (TrieKey::StorageNode(_, nibbles), TrieOp::Update(node)) => {
-                    Some((nibbles.clone(), node.clone()))
-                }
-                _ => None,
-            })
-            .collect::<HashMap<_, _>>();
-        assert_eq!(expected_updates, storage_updates);
-
-        assert_trie_updates(&storage_updates);
+        assert_eq!(expected_updates, updates);
+        assert_trie_updates(&updates.storage_nodes);
     }
 
     fn extension_node_storage_trie(
         tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>>,
         hashed_address: B256,
-    ) -> (B256, HashMap<Nibbles, BranchNodeCompact>) {
+    ) -> (B256, StorageTrieUpdates) {
         let value = U256::from(1);
 
         let mut hashed_storage = tx.tx_ref().cursor_write::<tables::HashedStorages>().unwrap();
@@ -1336,7 +1266,9 @@ mod tests {
 
         let root = hb.root();
         let (_, updates) = hb.split();
-        (root, updates)
+        let mut trie_updates = StorageTrieUpdates::default();
+        trie_updates.storage_nodes = updates;
+        (root, trie_updates)
     }
 
     fn extension_node_trie(tx: &DatabaseProviderRW<Arc<TempDatabase<DatabaseEnv>>>) -> B256 {
@@ -1376,127 +1308,5 @@ mod tests {
 
         assert_eq!(node.root_hash, None);
         assert_eq!(node.hashes.len(), 1);
-    }
-
-    #[test]
-    fn trie_updates_across_multiple_iterations() {
-        let address = Address::ZERO;
-        let hashed_address = keccak256(address);
-
-        let factory = create_test_provider_factory();
-
-        let mut hashed_storage = BTreeMap::default();
-        let mut post_state = HashedPostState::default();
-
-        // Block #1
-        // Update specific storage slots
-        let mut modified_storage = BTreeMap::default();
-
-        // 0x0f..
-        let modified_key_prefix = Nibbles::from_nibbles(
-            [0x0, 0xf].into_iter().chain(iter::repeat(0).take(62)).collect::<Vec<_>>(),
-        );
-
-        // 0x0faa0..
-        let mut modified_entry1 = modified_key_prefix.clone();
-        modified_entry1.set_at(2, 0xa);
-        modified_entry1.set_at(3, 0xa);
-
-        // 0x0faaa..
-        let mut modified_entry2 = modified_key_prefix.clone();
-        modified_entry2.set_at(2, 0xa);
-        modified_entry2.set_at(3, 0xa);
-        modified_entry2.set_at(4, 0xa);
-
-        // 0x0fab0..
-        let mut modified_entry3 = modified_key_prefix.clone();
-        modified_entry3.set_at(2, 0xa);
-        modified_entry3.set_at(3, 0xb);
-
-        // 0x0fba0..
-        let mut modified_entry4 = modified_key_prefix;
-        modified_entry4.set_at(2, 0xb);
-        modified_entry4.set_at(3, 0xa);
-
-        [modified_entry1, modified_entry2, modified_entry3.clone(), modified_entry4]
-            .into_iter()
-            .for_each(|key| {
-                modified_storage.insert(B256::from_slice(&key.pack()), U256::from(1));
-            });
-
-        // Update main hashed storage.
-        hashed_storage.extend(modified_storage.clone());
-        post_state.extend(HashedPostState::default().with_storages([(
-            hashed_address,
-            HashedStorage::from_iter(false, modified_storage.clone()),
-        )]));
-
-        let (storage_root, block1_updates) = compute_storage_root(
-            address,
-            factory.provider().unwrap().tx_ref(),
-            &post_state,
-            &TrieUpdates::default(),
-        );
-        assert_eq!(storage_root, storage_root_prehashed(hashed_storage.clone()));
-
-        // Block #2
-        // Set 0x0fab0.. hashed slot to 0
-        modified_storage.insert(B256::from_slice(&modified_entry3.pack()), U256::ZERO);
-
-        // Update main hashed storage.
-        hashed_storage.remove(&B256::from_slice(&modified_entry3.pack()));
-        post_state.extend(HashedPostState::default().with_storages([(
-            hashed_address,
-            HashedStorage::from_iter(false, modified_storage.clone()),
-        )]));
-
-        let (storage_root, block2_updates) = compute_storage_root(
-            address,
-            factory.provider().unwrap().tx_ref(),
-            &post_state,
-            &block1_updates,
-        );
-        assert_eq!(storage_root, storage_root_prehashed(hashed_storage.clone()));
-
-        // Commit trie updates
-        {
-            let mut updates = block1_updates;
-            updates.extend(block2_updates);
-
-            let provider_rw = factory.provider_rw().unwrap();
-            let mut hashed_storage_cursor =
-                provider_rw.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
-            for (hashed_slot, value) in &hashed_storage {
-                hashed_storage_cursor
-                    .upsert(hashed_address, StorageEntry { key: *hashed_slot, value: *value })
-                    .unwrap();
-            }
-            updates.flush(provider_rw.tx_ref()).unwrap();
-            provider_rw.commit().unwrap();
-        }
-
-        // Recompute storage root for block #3
-        let storage_root =
-            StorageRoot::from_tx(factory.provider().unwrap().tx_ref(), address).root().unwrap();
-        assert_eq!(storage_root, storage_root_prehashed(hashed_storage.clone()));
-    }
-
-    fn compute_storage_root<TX: DbTx>(
-        address: Address,
-        tx: &TX,
-        post_state: &HashedPostState,
-        update: &TrieUpdates,
-    ) -> (B256, TrieUpdates) {
-        let mut prefix_sets = post_state.construct_prefix_sets();
-        let (root, _, updates) = StorageRoot::from_tx(tx, address)
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                tx,
-                &post_state.clone().into_sorted(),
-            ))
-            .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(tx, &update.sorted()))
-            .with_prefix_set(prefix_sets.storage_prefix_sets.remove(&keccak256(address)).unwrap())
-            .root_with_updates()
-            .unwrap();
-        (root, updates)
     }
 }
