@@ -21,7 +21,7 @@ pub struct TrieUpdates {
 
 impl TrieUpdates {
     /// Returns reference to updated account nodes.
-    pub fn account_nodes_ref(&self) -> &HashMap<Nibbles, BranchNodeCompact> {
+    pub const fn account_nodes_ref(&self) -> &HashMap<Nibbles, BranchNodeCompact> {
         &self.account_nodes
     }
 
