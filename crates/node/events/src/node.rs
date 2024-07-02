@@ -10,6 +10,7 @@ use reth_db_api::{database::Database, database_metrics::DatabaseMetadata};
 use reth_network::{NetworkEvent, NetworkHandle};
 use reth_network_api::PeersInfo;
 use reth_primitives::{constants, BlockNumber, B256};
+use reth_primitives_traits::{format_gas, format_gas_throughput};
 use reth_prune::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
 use reth_static_file::StaticFileProducerEvent;
@@ -279,8 +280,8 @@ impl<DB> NodeState<DB> {
                     hash=?block.hash(),
                     peers=self.num_connected_peers(),
                     txs=block.body.len(),
-                    mgas=%format!("{:.3}MGas", block.header.gas_used as f64 / constants::MGAS_TO_GAS as f64),
-                    mgas_throughput=%format!("{:.3}MGas/s", block.header.gas_used as f64 / elapsed.as_secs_f64() / constants::MGAS_TO_GAS as f64),
+                    gas=format_gas(block.header.gas_used),
+                    gas_throughput=format_gas_throughput(block.header.gas_used, elapsed),
                     full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
                     base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas.unwrap_or(0) as f64 / constants::GWEI_TO_WEI as f64),
                     blobs=block.header.blob_gas_used.unwrap_or(0) / constants::eip4844::DATA_GAS_PER_BLOB,
