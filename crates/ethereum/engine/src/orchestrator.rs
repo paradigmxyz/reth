@@ -188,11 +188,8 @@ mod tests {
     use reth_engine_tree::test_utils::TestPipelineBuilder;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::BlockNumber;
-    use reth_stages::ExecOutput;
-    use reth_stages_api::StageCheckpoint;
     use reth_tasks::TokioTaskExecutor;
-    use std::{collections::VecDeque, sync::Arc};
+    use std::sync::Arc;
 
     #[test]
     fn eth_chain_orchestrator_build() {
@@ -209,13 +206,7 @@ mod tests {
         let (_tx, rx) = mpsc::unbounded_channel::<BeaconEngineMessage<EthEngineTypes>>();
         let incoming_requests = UnboundedReceiverStream::new(rx);
 
-        const PIPELINE_DONE_AFTER: u64 = 5;
-        let pipeline = TestPipelineBuilder::new()
-            .with_pipeline_exec_outputs(VecDeque::from([Ok(ExecOutput {
-                checkpoint: StageCheckpoint::new(BlockNumber::from(PIPELINE_DONE_AFTER)),
-                done: true,
-            })]))
-            .build(chain_spec.clone());
+        let pipeline = TestPipelineBuilder::new().build(chain_spec.clone());
         let pipeline_task_spawner = Box::<TokioTaskExecutor>::default();
 
         let (to_tree_tx, _to_tree_rx) = mpsc::channel(32);
