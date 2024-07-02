@@ -1,6 +1,5 @@
 //! Command that initializes the node by importing OP Mainnet chain segment below Bedrock, from a
 //! file.
-use crate::{commands::import::build_import_pipeline, version::SHORT_VERSION};
 use clap::Parser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_consensus::noop::NoopConsensus;
@@ -9,6 +8,7 @@ use reth_db_api::transaction::DbTx;
 use reth_downloaders::file_client::{
     ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
 };
+use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_primitives::bedrock_import::is_dup_tx;
 use reth_provider::StageCheckpointReader;
 use reth_prune::PruneModes;
@@ -16,6 +16,8 @@ use reth_stages::StageId;
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tracing::{debug, error, info};
+
+use crate::commands::build_pipeline::build_import_pipeline;
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Debug, Parser)]

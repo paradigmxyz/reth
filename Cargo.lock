@@ -6324,6 +6324,7 @@ dependencies = [
  "reth-node-ethereum",
  "reth-node-events",
  "reth-node-optimism",
+ "reth-optimism-cli",
  "reth-optimism-primitives",
  "reth-payload-builder",
  "reth-payload-primitives",
@@ -6340,6 +6341,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-stages",
+ "reth-stages-api",
  "reth-static-file",
  "reth-static-file-types",
  "reth-tasks",
@@ -7814,6 +7816,34 @@ dependencies = [
 [[package]]
 name = "reth-optimism-cli"
 version = "1.0.0"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "eyre",
+ "futures-util",
+ "reth-cli-commands",
+ "reth-config",
+ "reth-consensus",
+ "reth-db",
+ "reth-db-api",
+ "reth-downloaders",
+ "reth-errors",
+ "reth-evm-optimism",
+ "reth-execution-types",
+ "reth-network-p2p",
+ "reth-node-core",
+ "reth-node-events",
+ "reth-optimism-primitives",
+ "reth-primitives",
+ "reth-provider",
+ "reth-prune",
+ "reth-stages",
+ "reth-stages-types",
+ "reth-static-file",
+ "reth-static-file-types",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "reth-optimism-consensus"
