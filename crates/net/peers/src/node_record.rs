@@ -8,10 +8,12 @@ use std::{
     str::FromStr,
 };
 
-use crate::{pk2id, PeerId};
+use crate::PeerId;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use enr::Enr;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
+
+#[cfg(feature = "secp256k1")]
+use enr::Enr;
 
 /// Represents a ENR in discovery.
 ///
@@ -40,7 +42,10 @@ pub struct NodeRecord {
 }
 
 impl NodeRecord {
-    /// Derive the [`NodeRecord`] from the secret key and addr
+    /// Derive the [`NodeRecord`] from the secret key and addr.
+    ///
+    /// Note: this will set both the TCP and UDP ports to the port of the addr.
+    #[cfg(feature = "secp256k1")]
     pub fn from_secret_key(addr: SocketAddr, sk: &secp256k1::SecretKey) -> Self {
         let pk = secp256k1::PublicKey::from_secret_key(secp256k1::SECP256K1, sk);
         let id = PeerId::from_slice(&pk.serialize_uncompressed()[1..]);
@@ -70,10 +75,32 @@ impl NodeRecord {
         self
     }
 
+    /// Sets the tcp port
+    pub const fn with_tcp_port(mut self, port: u16) -> Self {
+        self.tcp_port = port;
+        self
+    }
+
+    /// Sets the udp port
+    pub const fn with_udp_port(mut self, port: u16) -> Self {
+        self.udp_port = port;
+        self
+    }
+
     /// Creates a new record from a socket addr and peer id.
-    #[allow(dead_code)]
     pub const fn new(addr: SocketAddr, id: PeerId) -> Self {
         Self { address: addr.ip(), tcp_port: addr.port(), udp_port: addr.port(), id }
+    }
+
+    /// Creates a new record from an ip address and ports.
+    pub fn new_with_ports(
+        ip_addr: IpAddr,
+        tcp_port: u16,
+        udp_port: Option<u16>,
+        id: PeerId,
+    ) -> Self {
+        let udp_port = udp_port.unwrap_or(tcp_port);
+        Self { address: ip_addr, tcp_port, udp_port, id }
     }
 
     /// The TCP socket address of this node
@@ -169,6 +196,7 @@ impl FromStr for NodeRecord {
     }
 }
 
+#[cfg(feature = "secp256k1")]
 impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
     type Error = NodeRecordParseError;
 
@@ -186,7 +214,7 @@ impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
             return Err(NodeRecordParseError::InvalidUrl("tcp port missing".to_string()))
         };
 
-        let id = pk2id(&enr.public_key());
+        let id = crate::pk2id(&enr.public_key());
 
         Ok(Self { address, tcp_port, udp_port, id }.into_ipv4_mapped())
     }

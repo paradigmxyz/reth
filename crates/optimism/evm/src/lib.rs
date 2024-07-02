@@ -9,14 +9,17 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+use reth_chainspec::ChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
-    revm::{config::revm_spec, env::fill_op_tx_env},
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Address, ChainSpec, Head, Header, TransactionSigned, U256,
+    transaction::FillTxEnv,
+    Address, Head, Header, TransactionSigned, U256,
 };
 use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 
+mod config;
+pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
 mod execute;
 pub use execute::*;
 pub mod l1;
@@ -31,10 +34,8 @@ pub use error::OptimismBlockExecutionError;
 pub struct OptimismEvmConfig;
 
 impl ConfigureEvmEnv for OptimismEvmConfig {
-    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        let mut buf = Vec::with_capacity(transaction.length_without_header());
-        transaction.encode_enveloped(&mut buf);
-        fill_op_tx_env(tx_env, transaction, sender, buf.into());
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        transaction.fill_tx_env(tx_env, sender);
     }
 
     fn fill_cfg_env(
@@ -45,7 +46,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
     ) {
         let spec_id = revm_spec(
             chain_spec,
-            Head {
+            &Head {
                 number: header.number,
                 timestamp: header.timestamp,
                 difficulty: header.difficulty,

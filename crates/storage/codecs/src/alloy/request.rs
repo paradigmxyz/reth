@@ -26,10 +26,11 @@ impl Compact for Request {
 mod tests {
     use super::*;
     use proptest::proptest;
+    use proptest_arbitrary_interop::arb;
 
     proptest! {
         #[test]
-        fn roundtrip(request: Request) {
+        fn roundtrip(request in arb::<Request>()) {
             let mut buf = Vec::<u8>::new();
             request.to_compact(&mut buf);
             let (decoded, _) = Request::from_compact(&buf, buf.len());

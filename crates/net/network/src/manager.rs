@@ -26,7 +26,7 @@ use crate::{
     message::{NewBlockMessage, PeerMessage, PeerRequest, PeerRequestSender},
     metrics::{DisconnectMetrics, NetworkMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE},
     network::{NetworkHandle, NetworkHandleMessage},
-    peers::{PeersHandle, PeersManager},
+    peers::{PeerAddr, PeersHandle, PeersManager},
     poll_nested_stream_with_budget,
     protocol::IntoRlpxSubProtocol,
     session::SessionManager,
@@ -42,11 +42,10 @@ use reth_eth_wire::{
     DisconnectReason, EthVersion, Status,
 };
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
-use reth_network_api::ReputationChangeKind;
-use reth_network_peers::PeerId;
-use reth_primitives::{ForkId, NodeRecord};
+use reth_network_api::{EthProtocolInfo, NetworkStatus, PeerInfo, ReputationChangeKind};
+use reth_network_peers::{NodeRecord, PeerId};
+use reth_primitives::ForkId;
 use reth_provider::{BlockNumReader, BlockReader};
-use reth_rpc_types::{admin::EthProtocolInfo, NetworkStatus};
 use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventSender;
 use secp256k1::SecretKey;
@@ -197,7 +196,9 @@ where
         let incoming = ConnectionListener::bind(listener_addr).await.map_err(|err| {
             NetworkError::from_io_error(err, ServiceKind::Listener(listener_addr))
         })?;
-        let listener_address = Arc::new(Mutex::new(incoming.local_address()));
+
+        // retrieve the tcp address of the socket
+        let listener_addr = incoming.local_address();
 
         // resolve boot nodes
         let mut resolved_boot_nodes = vec![];
@@ -214,6 +215,7 @@ where
         });
 
         let discovery = Discovery::new(
+            listener_addr,
             discovery_v4_addr,
             secret_key,
             discovery_v4_config,
@@ -248,7 +250,7 @@ where
 
         let handle = NetworkHandle::new(
             Arc::clone(&num_active_peers),
-            listener_address,
+            Arc::new(Mutex::new(listener_addr)),
             to_manager_tx,
             secret_key,
             local_peer_id,
@@ -279,7 +281,7 @@ where
     ///
     /// ```
     /// use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
-    /// use reth_primitives::mainnet_nodes;
+    /// use reth_network_peers::mainnet_nodes;
     /// use reth_provider::test_utils::NoopProvider;
     /// use reth_transaction_pool::TransactionPool;
     /// async fn launch<Pool: TransactionPool>(pool: Pool) {
@@ -314,7 +316,7 @@ where
         NetworkBuilder { network: self, transactions: (), request_handler: () }
     }
 
-    /// Returns the [`SocketAddr`] that listens for incoming connections.
+    /// Returns the [`SocketAddr`] that listens for incoming tcp connections.
     pub const fn local_addr(&self) -> SocketAddr {
         self.swarm.listener().local_address()
     }
@@ -560,7 +562,7 @@ where
                 }
             }
             NetworkHandleMessage::RemovePeer(peer_id, kind) => {
-                self.swarm.state_mut().remove_peer(peer_id, kind);
+                self.swarm.state_mut().remove_peer_kind(peer_id, kind);
             }
             NetworkHandleMessage::DisconnectPeer(peer_id, reason) => {
                 self.swarm.sessions_mut().disconnect(peer_id, reason);
@@ -602,17 +604,17 @@ where
                 }
             }
             NetworkHandleMessage::GetPeerInfos(tx) => {
-                let _ = tx.send(self.swarm.sessions_mut().get_peer_info());
+                let _ = tx.send(self.get_peer_infos());
             }
             NetworkHandleMessage::GetPeerInfoById(peer_id, tx) => {
-                let _ = tx.send(self.swarm.sessions_mut().get_peer_info_by_id(peer_id));
+                let _ = tx.send(self.get_peer_info_by_id(peer_id));
             }
             NetworkHandleMessage::GetPeerInfosByIds(peer_ids, tx) => {
-                let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peer_ids));
+                let _ = tx.send(self.get_peer_infos_by_ids(peer_ids));
             }
             NetworkHandleMessage::GetPeerInfosByPeerKind(kind, tx) => {
-                let peers = self.swarm.state().peers().peers_by_kind(kind);
-                let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peers));
+                let peer_ids = self.swarm.state().peers().peers_by_kind(kind);
+                let _ = tx.send(self.get_peer_infos_by_ids(peer_ids));
             }
             NetworkHandleMessage::AddRlpxSubProtocol(proto) => self.add_rlpx_sub_protocol(proto),
             NetworkHandleMessage::GetTransactionsHandle(tx) => {
@@ -863,6 +865,42 @@ where
         }
     }
 
+    /// Returns [`PeerInfo`] for all connected peers
+    fn get_peer_infos(&self) -> Vec<PeerInfo> {
+        self.swarm
+            .sessions()
+            .active_sessions()
+            .iter()
+            .filter_map(|(&peer_id, session)| {
+                self.swarm
+                    .state()
+                    .peers()
+                    .peer_by_id(peer_id)
+                    .map(|(record, kind)| session.peer_info(&record, kind))
+            })
+            .collect()
+    }
+
+    /// Returns [`PeerInfo`] for a given peer.
+    ///
+    /// Returns `None` if there's no active session to the peer.
+    fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
+        self.swarm.sessions().active_sessions().get(&peer_id).and_then(|session| {
+            self.swarm
+                .state()
+                .peers()
+                .peer_by_id(peer_id)
+                .map(|(record, kind)| session.peer_info(&record, kind))
+        })
+    }
+
+    /// Returns [`PeerInfo`] for a given peers.
+    ///
+    /// Ignore the non-active peer.
+    fn get_peer_infos_by_ids(&self, peer_ids: impl IntoIterator<Item = PeerId>) -> Vec<PeerInfo> {
+        peer_ids.into_iter().filter_map(|peer_id| self.get_peer_info_by_id(peer_id)).collect()
+    }
+
     /// Updates the metrics for active,established connections
     #[inline]
     fn update_active_connection_metrics(&self) {
@@ -1028,7 +1066,7 @@ pub enum NetworkEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscoveredEvent {
-    EventQueued { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
+    EventQueued { peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId> },
 }
 
 #[derive(Debug, Default)]

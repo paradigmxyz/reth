@@ -118,19 +118,35 @@ pub trait BlockReader:
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<BlockWithSenders>>;
 
+    /// Returns the sealed block with senders with matching number or hash from database.
+    ///
+    /// Returns the block's transactions in the requested variant.
+    ///
+    /// Returns `None` if block is not found.
+    fn sealed_block_with_senders(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>>;
+
     /// Returns all blocks in the given inclusive range.
     ///
     /// Note: returns only available blocks
     fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>>;
 
-    /// retrieves a range of blocks from the database, along with the senders of each
+    /// Returns a range of blocks from the database, along with the senders of each
     /// transaction in the blocks.
-    ///
-    /// The `transaction_kind` parameter determines whether to return its hash
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockWithSenders>>;
+
+    /// Returns a range of sealed blocks from the database, along with the senders of each
+    /// transaction in the blocks.
+    fn sealed_block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<SealedBlockWithSenders>>;
 }
 
 /// Trait extension for `BlockReader`, for types that implement `BlockId` conversion.

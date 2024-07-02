@@ -1,9 +1,14 @@
 //! Traits for execution.
 
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Receipts, Request, Requests, U256};
+use reth_execution_types::ExecutionOutcome;
+use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Request, U256};
 use reth_prune_types::PruneModes;
 use revm::db::BundleState;
 use revm_primitives::db::Database;
+use std::fmt::Display;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_storage_errors::provider::ProviderError;
@@ -90,7 +95,7 @@ pub trait BatchExecutor<DB> {
 ///
 /// Contains the state changes, transaction receipts, and total gas used in the block.
 ///
-/// TODO(mattsse): combine with `BundleStateWithReceipts`
+/// TODO(mattsse): combine with `ExecutionOutcome`
 #[derive(Debug)]
 pub struct BlockExecutionOutput<T> {
     /// The changed state of the block after execution.
@@ -101,40 +106,6 @@ pub struct BlockExecutionOutput<T> {
     pub requests: Vec<Request>,
     /// The total gas used by the block.
     pub gas_used: u64,
-}
-
-/// The output of a batch of ethereum blocks.
-#[derive(Debug)]
-pub struct BatchBlockExecutionOutput {
-    /// Bundle state with reverts.
-    pub bundle: BundleState,
-    /// The collection of receipts.
-    /// Outer vector stores receipts for each block sequentially.
-    /// The inner vector stores receipts ordered by transaction number.
-    ///
-    /// If receipt is None it means it is pruned.
-    pub receipts: Receipts,
-    /// The collection of EIP-7685 requests.
-    /// Outer vector stores requests for each block sequentially.
-    /// The inner vector stores requests ordered by transaction number.
-    ///
-    /// A transaction may have zero or more requests, so the length of the inner vector is not
-    /// guaranteed to be the same as the number of transactions.
-    pub requests: Vec<Requests>,
-    /// First block of bundle state.
-    pub first_block: BlockNumber,
-}
-
-impl BatchBlockExecutionOutput {
-    /// Create Bundle State.
-    pub fn new(
-        bundle: BundleState,
-        receipts: Receipts,
-        requests: Vec<Requests>,
-        first_block: BlockNumber,
-    ) -> Self {
-        Self { bundle, receipts, requests, first_block }
-    }
 }
 
 /// A helper type for ethereum block inputs that consists of a block and the total difficulty.
@@ -172,7 +143,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     ///
     /// It is not expected to validate the state trie root, this must be done by the caller using
     /// the returned state.
-    type Executor<DB: Database<Error = ProviderError>>: for<'a> Executor<
+    type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
         Output = BlockExecutionOutput<Receipt>,
@@ -180,11 +151,10 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     >;
 
     /// An executor that can execute a batch of blocks given a database.
-    type BatchExecutor<DB: Database<Error = ProviderError>>: for<'a> BatchExecutor<
+    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
-        // TODO: change to bundle state with receipts
-        Output = BatchBlockExecutionOutput,
+        Output = ExecutionOutcome,
         Error = BlockExecutionError,
     >;
 
@@ -193,7 +163,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// This is used to execute a single block and get the changed state.
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error = ProviderError>;
+        DB: Database<Error: Into<ProviderError> + Display>;
 
     /// Creates a new batch executor with the given database and pruning modes.
     ///
@@ -204,7 +174,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// execution.
     fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error = ProviderError>;
+        DB: Database<Error: Into<ProviderError> + Display>;
 }
 
 #[cfg(test)]
@@ -218,19 +188,19 @@ mod tests {
     struct TestExecutorProvider;
 
     impl BlockExecutorProvider for TestExecutorProvider {
-        type Executor<DB: Database<Error = ProviderError>> = TestExecutor<DB>;
-        type BatchExecutor<DB: Database<Error = ProviderError>> = TestExecutor<DB>;
+        type Executor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
+        type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
 
         fn executor<DB>(&self, _db: DB) -> Self::Executor<DB>
         where
-            DB: Database<Error = ProviderError>,
+            DB: Database<Error: Into<ProviderError> + Display>,
         {
             TestExecutor(PhantomData)
         }
 
         fn batch_executor<DB>(&self, _db: DB, _prune_modes: PruneModes) -> Self::BatchExecutor<DB>
         where
-            DB: Database<Error = ProviderError>,
+            DB: Database<Error: Into<ProviderError> + Display>,
         {
             TestExecutor(PhantomData)
         }
@@ -250,7 +220,7 @@ mod tests {
 
     impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
         type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
-        type Output = BatchBlockExecutionOutput;
+        type Output = ExecutionOutcome;
         type Error = BlockExecutionError;
 
         fn execute_and_verify_one(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {

@@ -447,11 +447,6 @@ Builder:
           [default: 3]
 
 Debug:
-      --debug.continuous
-          Prompt the downloader to download blocks one at a time.
-
-          NOTE: This is for testing purposes only.
-
       --debug.terminate
           Flag indicating whether the node should be terminated after the pipeline sync
 
@@ -462,6 +457,12 @@ Debug:
 
       --debug.max-block <MAX_BLOCK>
           Runs the sync only up to the specified block
+
+      --debug.etherscan [<ETHERSCAN_API_URL>]
+          Runs a fake consensus client that advances the chain using recent block hashes on Etherscan. If specified, requires an `ETHERSCAN_API_KEY` environment variable
+
+      --debug.rpc-consensus-ws <RPC_CONSENSUS_WS>
+          Runs a fake consensus client using blocks fetched from an RPC `WebSocket` endpoint
 
       --debug.skip-fcu <SKIP_FCU>
           If provided, the engine will skip `n` consecutive FCUs

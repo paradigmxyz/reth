@@ -3,26 +3,22 @@
 use crate::{
     args::{
         get_secret_key,
-        utils::{chain_help, chain_spec_value_parser, hash_or_num_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, DiscoveryArgs, NetworkArgs,
+        utils::{chain_help, chain_value_parser, hash_or_num_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, NetworkArgs,
     },
     utils::get_single_header,
 };
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
-use discv5::ListenConfig;
+use reth_chainspec::ChainSpec;
 use reth_config::Config;
 use reth_db::create_db;
 use reth_network::NetworkConfigBuilder;
 use reth_network_p2p::bodies::client::BodiesClient;
 use reth_node_core::args::DatadirArgs;
-use reth_primitives::{BlockHashOrNumber, ChainSpec};
+use reth_primitives::BlockHashOrNumber;
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
-use std::{
-    net::{IpAddr, SocketAddrV4, SocketAddrV6},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{path::PathBuf, sync::Arc};
 
 /// `reth p2p` command
 #[derive(Debug, Parser)]
@@ -39,7 +35,7 @@ pub struct Command {
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
         default_value = SUPPORTED_CHAINS[0],
-        value_parser = chain_spec_value_parser
+        value_parser = chain_value_parser
     )]
     chain: Arc<ChainSpec>,
 
@@ -112,47 +108,7 @@ impl Command {
             .disable_discv4_discovery_if(self.chain.chain.is_optimism())
             .boot_nodes(boot_nodes.clone())
             .apply(|builder| {
-                self.network
-                    .discovery
-                    .apply_to_builder(builder, rlpx_socket)
-                    .map_discv5_config_builder(|builder| {
-                        let DiscoveryArgs {
-                            discv5_addr,
-                            discv5_addr_ipv6,
-                            discv5_port,
-                            discv5_port_ipv6,
-                            discv5_lookup_interval,
-                            discv5_bootstrap_lookup_interval,
-                            discv5_bootstrap_lookup_countdown,
-                            ..
-                        } = self.network.discovery;
-
-                        // Use rlpx address if none given
-                        let discv5_addr_ipv4 = discv5_addr.or(match self.network.addr {
-                            IpAddr::V4(ip) => Some(ip),
-                            IpAddr::V6(_) => None,
-                        });
-                        let discv5_addr_ipv6 = discv5_addr_ipv6.or(match self.network.addr {
-                            IpAddr::V4(_) => None,
-                            IpAddr::V6(ip) => Some(ip),
-                        });
-
-                        builder
-                            .discv5_config(
-                                discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
-                                    discv5_addr_ipv4
-                                        .map(|addr| SocketAddrV4::new(addr, discv5_port)),
-                                    discv5_addr_ipv6.map(|addr| {
-                                        SocketAddrV6::new(addr, discv5_port_ipv6, 0, 0)
-                                    }),
-                                ))
-                                .build(),
-                            )
-                            .add_unsigned_boot_nodes(boot_nodes.into_iter())
-                            .lookup_interval(discv5_lookup_interval)
-                            .bootstrap_lookup_interval(discv5_bootstrap_lookup_interval)
-                            .bootstrap_lookup_countdown(discv5_bootstrap_lookup_countdown)
-                    })
+                self.network.discovery.apply_to_builder(builder, rlpx_socket, boot_nodes)
             })
             .build(Arc::new(ProviderFactory::new(
                 noop_db,

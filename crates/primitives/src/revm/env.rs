@@ -1,13 +1,16 @@
 use crate::{
     recover_signer_unchecked,
-    revm_primitives::{BlockEnv, Env, TransactTo, TxEnv},
-    Address, Bytes, Chain, ChainSpec, Header, Transaction, TransactionSignedEcRecovered, TxKind,
-    B256, U256,
+    revm_primitives::{BlockEnv, Env, TxEnv},
+    Address, Bytes, Header, TxKind, B256, U256,
 };
+use reth_chainspec::{Chain, ChainSpec};
 
 use alloy_eips::{eip4788::BEACON_ROOTS_ADDRESS, eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS};
 #[cfg(feature = "optimism")]
 use revm_primitives::OptimismFields;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Fill block environment from Block.
 pub fn fill_block_env(
@@ -73,7 +76,7 @@ pub fn block_coinbase(chain_spec: &ChainSpec, header: &Header, after_merge: bool
 }
 
 /// Error type for recovering Clique signer from a header.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror_no_std::Error)]
 pub enum CliqueSignerRecoveryError {
     /// Header extradata is too short.
     #[error("Invalid extra data length")]
@@ -102,28 +105,6 @@ pub fn recover_header_signer(header: &Header) -> Result<Address, CliqueSignerRec
     // TODO: this is currently unchecked recovery, does this need to be checked w.r.t EIP-2?
     recover_signer_unchecked(&signature, &seal_hash.0)
         .map_err(CliqueSignerRecoveryError::InvalidSignature)
-}
-
-/// Returns a new [`TxEnv`] filled with the transaction's data.
-pub fn tx_env_with_recovered(transaction: &TransactionSignedEcRecovered) -> TxEnv {
-    let mut tx_env = TxEnv::default();
-
-    #[cfg(not(feature = "optimism"))]
-    fill_tx_env(&mut tx_env, transaction.as_ref(), transaction.signer());
-
-    #[cfg(feature = "optimism")]
-    {
-        let mut envelope_buf = Vec::with_capacity(transaction.length_without_header());
-        transaction.encode_enveloped(&mut envelope_buf);
-        fill_op_tx_env(
-            &mut tx_env,
-            transaction.as_ref(),
-            transaction.signer(),
-            envelope_buf.into(),
-        );
-    }
-
-    tx_env
 }
 
 /// Fill transaction environment with the EIP-4788 system contract message data.
@@ -179,7 +160,7 @@ fn fill_tx_env_with_system_contract_call(
 ) {
     env.tx = TxEnv {
         caller,
-        transact_to: TransactTo::Call(contract),
+        transact_to: TxKind::Call(contract),
         // Explicitly set nonce to None so revm does not do any nonce checks
         nonce: None,
         gas_limit: 30_000_000,
@@ -215,163 +196,10 @@ fn fill_tx_env_with_system_contract_call(
     env.block.basefee = U256::ZERO;
 }
 
-/// Fill transaction environment from [`TransactionSignedEcRecovered`].
-#[cfg(not(feature = "optimism"))]
-pub fn fill_tx_env_with_recovered(tx_env: &mut TxEnv, transaction: &TransactionSignedEcRecovered) {
-    fill_tx_env(tx_env, transaction.as_ref(), transaction.signer());
-}
-
-/// Fill transaction environment from [`TransactionSignedEcRecovered`] and the given envelope.
-#[cfg(feature = "optimism")]
-pub fn fill_tx_env_with_recovered(
-    tx_env: &mut TxEnv,
-    transaction: &TransactionSignedEcRecovered,
-    envelope: Bytes,
-) {
-    fill_op_tx_env(tx_env, transaction.as_ref(), transaction.signer(), envelope);
-}
-
-/// Fill transaction environment from a [Transaction] and the given sender address.
-pub fn fill_tx_env<T>(tx_env: &mut TxEnv, transaction: T, sender: Address)
-where
-    T: AsRef<Transaction>,
-{
-    tx_env.caller = sender;
-    match transaction.as_ref() {
-        Transaction::Legacy(tx) => {
-            tx_env.gas_limit = tx.gas_limit;
-            tx_env.gas_price = U256::from(tx.gas_price);
-            tx_env.gas_priority_fee = None;
-            tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TransactTo::Call(to),
-                TxKind::Create => TransactTo::create(),
-            };
-            tx_env.value = tx.value;
-            tx_env.data = tx.input.clone();
-            tx_env.chain_id = tx.chain_id;
-            tx_env.nonce = Some(tx.nonce);
-            tx_env.access_list.clear();
-            tx_env.blob_hashes.clear();
-            tx_env.max_fee_per_blob_gas.take();
-        }
-        Transaction::Eip2930(tx) => {
-            tx_env.gas_limit = tx.gas_limit;
-            tx_env.gas_price = U256::from(tx.gas_price);
-            tx_env.gas_priority_fee = None;
-            tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TransactTo::Call(to),
-                TxKind::Create => TransactTo::create(),
-            };
-            tx_env.value = tx.value;
-            tx_env.data = tx.input.clone();
-            tx_env.chain_id = Some(tx.chain_id);
-            tx_env.nonce = Some(tx.nonce);
-            tx_env.access_list = tx
-                .access_list
-                .0
-                .iter()
-                .map(|l| {
-                    (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
-                })
-                .collect();
-            tx_env.blob_hashes.clear();
-            tx_env.max_fee_per_blob_gas.take();
-        }
-        Transaction::Eip1559(tx) => {
-            tx_env.gas_limit = tx.gas_limit;
-            tx_env.gas_price = U256::from(tx.max_fee_per_gas);
-            tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-            tx_env.transact_to = match tx.to {
-                TxKind::Call(to) => TransactTo::Call(to),
-                TxKind::Create => TransactTo::create(),
-            };
-            tx_env.value = tx.value;
-            tx_env.data = tx.input.clone();
-            tx_env.chain_id = Some(tx.chain_id);
-            tx_env.nonce = Some(tx.nonce);
-            tx_env.access_list = tx
-                .access_list
-                .0
-                .iter()
-                .map(|l| {
-                    (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
-                })
-                .collect();
-            tx_env.blob_hashes.clear();
-            tx_env.max_fee_per_blob_gas.take();
-        }
-        Transaction::Eip4844(tx) => {
-            tx_env.gas_limit = tx.gas_limit;
-            tx_env.gas_price = U256::from(tx.max_fee_per_gas);
-            tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-            tx_env.transact_to = TransactTo::Call(tx.to);
-            tx_env.value = tx.value;
-            tx_env.data = tx.input.clone();
-            tx_env.chain_id = Some(tx.chain_id);
-            tx_env.nonce = Some(tx.nonce);
-            tx_env.access_list = tx
-                .access_list
-                .0
-                .iter()
-                .map(|l| {
-                    (l.address, l.storage_keys.iter().map(|k| U256::from_be_bytes(k.0)).collect())
-                })
-                .collect();
-            tx_env.blob_hashes.clone_from(&tx.blob_versioned_hashes);
-            tx_env.max_fee_per_blob_gas = Some(U256::from(tx.max_fee_per_blob_gas));
-        }
-        #[cfg(feature = "optimism")]
-        Transaction::Deposit(tx) => {
-            tx_env.access_list.clear();
-            tx_env.gas_limit = tx.gas_limit;
-            tx_env.gas_price = U256::ZERO;
-            tx_env.gas_priority_fee = None;
-            match tx.to {
-                TxKind::Call(to) => tx_env.transact_to = TransactTo::Call(to),
-                TxKind::Create => tx_env.transact_to = TransactTo::create(),
-            }
-            tx_env.value = tx.value;
-            tx_env.data = tx.input.clone();
-            tx_env.chain_id = None;
-            tx_env.nonce = None;
-        }
-    }
-}
-
-/// Fill transaction environment from a [Transaction], envelope, and the given sender address.
-#[cfg(feature = "optimism")]
-#[inline(always)]
-pub fn fill_op_tx_env<T: AsRef<Transaction>>(
-    tx_env: &mut TxEnv,
-    transaction: T,
-    sender: Address,
-    envelope: Bytes,
-) {
-    fill_tx_env(tx_env, &transaction, sender);
-    match transaction.as_ref() {
-        Transaction::Deposit(tx) => {
-            tx_env.optimism = OptimismFields {
-                source_hash: Some(tx.source_hash),
-                mint: tx.mint,
-                is_system_transaction: Some(tx.is_system_transaction),
-                enveloped_tx: Some(envelope),
-            };
-        }
-        _ => {
-            tx_env.optimism = OptimismFields {
-                source_hash: None,
-                mint: None,
-                is_system_transaction: Some(false),
-                enveloped_tx: Some(envelope),
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GOERLI;
+    use reth_chainspec::GOERLI;
 
     #[test]
     fn test_recover_genesis_goerli_signer() {

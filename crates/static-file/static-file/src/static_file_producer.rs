@@ -1,12 +1,17 @@
 //! Support for producing static files.
 
 use crate::{segments, segments::Segment, StaticFileProducerEvent};
+use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use reth_db_api::database::Database;
-use reth_primitives::{static_file::HighestStaticFiles, BlockNumber};
-use reth_provider::{providers::StaticFileWriter, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{
+    providers::StaticFileWriter, ProviderFactory, StageCheckpointReader as _,
+    StaticFileProviderFactory,
+};
 use reth_prune_types::PruneModes;
+use reth_stages_types::StageId;
+use reth_static_file_types::HighestStaticFiles;
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
@@ -55,7 +60,7 @@ pub struct StaticFileProducerInner<DB> {
     event_sender: EventSender<StaticFileProducerEvent>,
 }
 
-/// Static File targets, per data part, measured in [`BlockNumber`].
+/// Static File targets, per data segment, measured in [`BlockNumber`].
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct StaticFileTargets {
     headers: Option<RangeInclusive<BlockNumber>>,
@@ -166,6 +171,28 @@ impl<DB: Database> StaticFileProducerInner<DB> {
         Ok(targets)
     }
 
+    /// Copies data from database to static files according to
+    /// [stage checkpoints](reth_stages_types::StageCheckpoint).
+    ///
+    /// Returns highest block numbers for all static file segments.
+    pub fn copy_to_static_files(&self) -> ProviderResult<HighestStaticFiles> {
+        let provider = self.provider_factory.provider()?;
+        let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
+            .into_iter()
+            .map(|stage| provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number)))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let highest_static_files = HighestStaticFiles {
+            headers: stages_checkpoints[0],
+            receipts: stages_checkpoints[1],
+            transactions: stages_checkpoints[2],
+        };
+        let targets = self.get_static_file_targets(highest_static_files)?;
+        self.run(targets)?;
+
+        Ok(highest_static_files)
+    }
+
     /// Returns a static file targets at the provided finalized block numbers per segment.
     /// The target is determined by the check against highest `static_files` using
     /// [`reth_provider::providers::StaticFileProvider::get_highest_static_files`].
@@ -228,15 +255,16 @@ mod tests {
     use crate::static_file_producer::{
         StaticFileProducer, StaticFileProducerInner, StaticFileTargets,
     };
+    use alloy_primitives::{B256, U256};
     use assert_matches::assert_matches;
     use reth_db::{test_utils::TempDatabase, DatabaseEnv};
     use reth_db_api::{database::Database, transaction::DbTx};
-    use reth_primitives::{static_file::HighestStaticFiles, StaticFileSegment, B256, U256};
     use reth_provider::{
         providers::StaticFileWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
     };
     use reth_prune_types::PruneModes;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
+    use reth_static_file_types::{HighestStaticFiles, StaticFileSegment};
     use reth_testing_utils::{
         generators,
         generators::{random_block_range, random_receipt},

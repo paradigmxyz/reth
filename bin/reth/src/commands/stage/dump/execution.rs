@@ -1,13 +1,13 @@
 use super::setup;
-use crate::{macros::block_executor, utils::DbTool};
+use crate::macros::block_executor;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::TableImporter, transaction::DbTx,
 };
+use reth_db_common::DbTool;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_primitives::stage::StageCheckpoint;
 use reth_provider::{providers::StaticFileProvider, ChainSpecProvider, ProviderFactory};
-use reth_stages::{stages::ExecutionStage, Stage, UnwindInput};
+use reth_stages::{stages::ExecutionStage, Stage, StageCheckpoint, UnwindInput};
 use tracing::info;
 
 pub(crate) async fn dump_execution_stage<DB: Database>(

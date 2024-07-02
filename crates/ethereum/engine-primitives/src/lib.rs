@@ -10,14 +10,13 @@
 
 mod payload;
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
-
+use reth_chainspec::ChainSpec;
 use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::{
     validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    PayloadOrAttributes,
+    PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives::ChainSpec;
-use reth_rpc_types::{
+pub use reth_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
         PayloadAttributes as EthPayloadAttributes,
@@ -30,10 +29,13 @@ use reth_rpc_types::{
 #[non_exhaustive]
 pub struct EthEngineTypes;
 
-impl EngineTypes for EthEngineTypes {
+impl PayloadTypes for EthEngineTypes {
+    type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = EthPayloadAttributes;
     type PayloadBuilderAttributes = EthPayloadBuilderAttributes;
-    type BuiltPayload = EthBuiltPayload;
+}
+
+impl EngineTypes for EthEngineTypes {
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;

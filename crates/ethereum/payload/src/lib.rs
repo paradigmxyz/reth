@@ -17,6 +17,7 @@ use reth_basic_payload_builder::{
 use reth_errors::RethError;
 use reth_evm::ConfigureEvm;
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
+use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
 };
@@ -26,10 +27,10 @@ use reth_primitives::{
     },
     eip4844::calculate_excess_blob_gas,
     proofs::{self, calculate_requests_root},
-    revm::env::tx_env_with_recovered,
-    Block, Header, IntoRecoveredTransaction, Receipt, Receipts, EMPTY_OMMER_ROOT_HASH, U256,
+    Block, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH,
+    U256,
 };
-use reth_provider::{BundleStateWithReceipts, StateProviderFactory};
+use reth_provider::StateProviderFactory;
 use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{
@@ -341,7 +342,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
-            tx_env_with_recovered(&tx),
+            evm_config.tx_env(&tx),
         );
 
         // Configure the environment for the block.
@@ -444,18 +445,20 @@ where
     // and 4788 contract call
     db.merge_transitions(BundleRetention::PlainState);
 
-    let bundle = BundleStateWithReceipts::new(
+    let execution_outcome = ExecutionOutcome::new(
         db.take_bundle(),
-        Receipts::from_vec(vec![receipts]),
+        vec![receipts].into(),
         block_number,
+        vec![requests.clone().unwrap_or_default()],
     );
-    let receipts_root = bundle.receipts_root_slow(block_number).expect("Number is in range");
-    let logs_bloom = bundle.block_logs_bloom(block_number).expect("Number is in range");
+    let receipts_root =
+        execution_outcome.receipts_root_slow(block_number).expect("Number is in range");
+    let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
 
     // calculate the state root
     let state_root = {
         let state_provider = db.database.0.inner.borrow_mut();
-        state_provider.db.state_root(bundle.state())?
+        state_provider.db.state_root(execution_outcome.state())?
     };
 
     // create the block header

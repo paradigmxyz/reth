@@ -1,6 +1,5 @@
 use super::AuthValidator;
-use http::{Request, Response};
-use http_body::Body;
+use jsonrpsee_http_client::{HttpRequest, HttpResponse};
 use pin_project::pin_project;
 use std::{
     future::Future,
@@ -65,7 +64,7 @@ where
 
 /// This type is the actual implementation of the middleware. It follows the [`Service`]
 /// specification to correctly proxy Http requests to its inner service after headers validation.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct AuthService<S, V> {
     /// Performs auth validation logics
     validator: V,
@@ -73,16 +72,15 @@ pub struct AuthService<S, V> {
     inner: S,
 }
 
-impl<ReqBody, ResBody, S, V> Service<Request<ReqBody>> for AuthService<S, V>
+impl<S, V> Service<HttpRequest> for AuthService<S, V>
 where
-    S: Service<Request<ReqBody>, Response = Response<ResBody>>,
-    V: AuthValidator<ResponseBody = ResBody>,
-    ReqBody: Body,
-    ResBody: Body,
+    S: Service<HttpRequest, Response = HttpResponse>,
+    V: AuthValidator,
+    Self: Clone,
 {
-    type Response = Response<ResBody>;
+    type Response = HttpResponse;
     type Error = S::Error;
-    type Future = ResponseFuture<S::Future, ResBody>;
+    type Future = ResponseFuture<S::Future>;
 
     /// If we get polled it means that we dispatched an authorized Http request to the inner layer.
     /// So we just poll the inner layer ourselves.
@@ -96,7 +94,7 @@ where
     /// Returns a future that wraps either:
     /// - The inner service future for authorized requests
     /// - An error Http response in case of authorization errors
-    fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
+    fn call(&mut self, req: HttpRequest) -> Self::Future {
         match self.validator.validate(req.headers()) {
             Ok(_) => ResponseFuture::future(self.inner.call(req)),
             Err(res) => ResponseFuture::invalid_auth(res),
@@ -106,39 +104,35 @@ where
 
 #[pin_project]
 #[allow(missing_debug_implementations)]
-pub struct ResponseFuture<F, B> {
+pub struct ResponseFuture<F> {
     #[pin]
-    kind: Kind<F, B>,
+    kind: Kind<F>,
 }
 
-impl<F, B> ResponseFuture<F, B>
-where
-    B: Body,
-{
+impl<F> ResponseFuture<F> {
     const fn future(future: F) -> Self {
         Self { kind: Kind::Future { future } }
     }
 
-    const fn invalid_auth(err_res: Response<B>) -> Self {
+    const fn invalid_auth(err_res: HttpResponse) -> Self {
         Self { kind: Kind::Error { response: Some(err_res) } }
     }
 }
 
 #[pin_project(project = KindProj)]
-enum Kind<F, B> {
+enum Kind<F> {
     Future {
         #[pin]
         future: F,
     },
     Error {
-        response: Option<Response<B>>,
+        response: Option<HttpResponse>,
     },
 }
 
-impl<F, B, E> Future for ResponseFuture<F, B>
+impl<F, E> Future for ResponseFuture<F>
 where
-    F: Future<Output = Result<Response<B>, E>>,
-    B: Body,
+    F: Future<Output = Result<HttpResponse, E>>,
 {
     type Output = F::Output;
 
@@ -158,12 +152,11 @@ mod tests {
     use super::*;
     use crate::JwtAuthValidator;
     use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
-    use http::{header, Method, Request, StatusCode};
-    use hyper::{body, Body};
     use jsonrpsee::{
         server::{RandomStringIdProvider, ServerBuilder, ServerHandle},
         RpcModule,
     };
+    use reqwest::{header, StatusCode};
     use std::{
         net::SocketAddr,
         time::{SystemTime, UNIX_EPOCH},
@@ -234,25 +227,20 @@ mod tests {
 
     async fn send_request(jwt: Option<String>) -> (StatusCode, String) {
         let server = spawn_server().await;
-        let client = hyper::Client::new();
+        let client =
+            reqwest::Client::builder().timeout(std::time::Duration::from_secs(1)).build().unwrap();
 
-        let jwt = jwt.unwrap_or_default();
-        let address = format!("http://{AUTH_ADDR}:{AUTH_PORT}");
-        let bearer = format!("Bearer {jwt}");
         let body = r#"{"jsonrpc": "2.0", "method": "greet_melkor", "params": [], "id": 1}"#;
-
-        let req = Request::builder()
-            .method(Method::POST)
-            .header(header::AUTHORIZATION, bearer)
+        let response = client
+            .post(&format!("http://{AUTH_ADDR}:{AUTH_PORT}"))
+            .bearer_auth(jwt.unwrap_or_default())
+            .body(body)
             .header(header::CONTENT_TYPE, "application/json")
-            .uri(address)
-            .body(Body::from(body))
+            .send()
+            .await
             .unwrap();
-
-        let res = client.request(req).await.unwrap();
-        let status = res.status();
-        let body_bytes = body::to_bytes(res.into_body()).await.unwrap();
-        let body = String::from_utf8(body_bytes.to_vec()).expect("response was not valid utf-8");
+        let status = response.status();
+        let body = response.text().await.unwrap();
 
         server.stop().unwrap();
         server.stopped().await;
@@ -278,7 +266,7 @@ mod tests {
 
         // Create a mock rpc module
         let mut module = RpcModule::new(());
-        module.register_method("greet_melkor", |_, _| "You are the dark lord").unwrap();
+        module.register_method("greet_melkor", |_, _, _| "You are the dark lord").unwrap();
 
         server.start(module)
     }

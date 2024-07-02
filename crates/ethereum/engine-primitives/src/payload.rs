@@ -1,10 +1,12 @@
 //! Contains types required for building a payload.
 
 use alloy_rlp::Encodable;
+use reth_chainspec::ChainSpec;
+use reth_evm_ethereum::revm_spec_by_timestamp_after_merge;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
-    constants::EIP1559_INITIAL_BASE_FEE, revm::config::revm_spec_by_timestamp_after_merge, Address,
-    BlobTransactionSidecar, ChainSpec, Hardfork, Header, SealedBlock, Withdrawals, B256, U256,
+    constants::EIP1559_INITIAL_BASE_FEE, Address, BlobTransactionSidecar, EthereumHardfork, Header,
+    SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
@@ -39,7 +41,7 @@ pub struct EthBuiltPayload {
 
 impl EthBuiltPayload {
     /// Initializes the payload with the given initial block.
-    pub fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
+    pub const fn new(id: PayloadId, block: SealedBlock, fees: U256) -> Self {
         Self { id, block, fees, sidecars: Vec::new() }
     }
 
@@ -265,7 +267,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
 
         // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
         // elasticity multiplier to get the new gas limit.
-        if chain_spec.fork(Hardfork::London).transitions_at_block(parent.number + 1) {
+        if chain_spec.fork(EthereumHardfork::London).transitions_at_block(parent.number + 1) {
             let elasticity_multiplier =
                 chain_spec.base_fee_params_at_timestamp(self.timestamp()).elasticity_multiplier;
 

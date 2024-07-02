@@ -2,29 +2,31 @@
 
 use crate::{
     args::{get_secret_key, NetworkArgs},
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
     utils::{get_single_body, get_single_header},
 };
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_db::DatabaseEnv;
 use reth_errors::BlockValidationError;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_execution_types::ExecutionOutcome;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
-use reth_primitives::{stage::StageId, BlockHashOrNumber, Receipts};
+use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    AccountExtReader, BundleStateWithReceipts, ChainSpecProvider, HashingWriter, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StateWriter, StaticFileProviderFactory, StorageReader,
+    AccountExtReader, ChainSpecProvider, HashingWriter, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateWriter,
+    StaticFileProviderFactory, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
+use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
 use reth_trie::{updates::TrieKey, StateRoot};
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tracing::*;
 
 /// `reth debug in-memory-merkle` command
@@ -62,11 +64,6 @@ impl Command {
             .network
             .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::new(self.network.addr, self.network.port))
-            .discovery_addr(SocketAddr::new(
-                self.network.discovery.addr,
-                self.network.discovery.port,
-            ))
             .build(provider_factory)
             .start_network()
             .await?;
@@ -135,7 +132,7 @@ impl Command {
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
-        let BlockExecutionOutput { state, receipts, .. } = executor.execute(
+        let BlockExecutionOutput { state, receipts, requests, .. } = executor.execute(
             (
                 &block
                     .clone()
@@ -146,15 +143,12 @@ impl Command {
             )
                 .into(),
         )?;
-        let block_state = BundleStateWithReceipts::new(
-            state,
-            Receipts::from_block_receipt(receipts),
-            block.number,
-        );
+        let execution_outcome =
+            ExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
 
         // Unpacked `BundleState::state_root_slow` function
         let (in_memory_state_root, in_memory_updates) =
-            block_state.hash_state_slow().state_root_with_updates(provider.tx_ref())?;
+            execution_outcome.hash_state_slow().state_root_with_updates(provider.tx_ref())?;
 
         if in_memory_state_root == block.state_root {
             info!(target: "reth::cli", state_root = ?in_memory_state_root, "Computed in-memory state root matches");
@@ -171,7 +165,7 @@ impl Command {
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
             None,
         )?;
-        block_state.write_to_storage(provider_rw.tx_ref(), None, OriginalValuesKnown::No)?;
+        execution_outcome.write_to_storage(provider_rw.tx_ref(), None, OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;
@@ -202,7 +196,7 @@ impl Command {
                 (Some(in_mem), Some(incr)) => {
                     similar_asserts::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
                     if in_mem.1 != incr.1 &&
-                        matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.0.len() > self.skip_node_depth.unwrap_or_default())
+                        matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.len() > self.skip_node_depth.unwrap_or_default())
                     {
                         in_mem_mismatched.push(in_mem);
                         incremental_mismatched.push(incr);

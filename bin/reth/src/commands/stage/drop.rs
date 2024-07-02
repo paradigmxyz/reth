@@ -1,17 +1,17 @@
 //! Database debugging tool
-
-use crate::{
-    args::StageEnum,
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
-    utils::DbTool,
-};
+use crate::args::StageEnum;
 use clap::Parser;
 use itertools::Itertools;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::{static_file::iter_static_files, tables, DatabaseEnv};
 use reth_db_api::transaction::DbTxMut;
-use reth_db_common::init::{insert_genesis_header, insert_genesis_history, insert_genesis_state};
-use reth_primitives::{stage::StageId, static_file::find_fixed_range, StaticFileSegment};
+use reth_db_common::{
+    init::{insert_genesis_header, insert_genesis_history, insert_genesis_state},
+    DbTool,
+};
 use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
+use reth_stages::StageId;
+use reth_static_file_types::{find_fixed_range, StaticFileSegment};
 
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]

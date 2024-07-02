@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-storage-errors.workspace = true
 reth-execution-errors.workspace = true
@@ -35,4 +36,8 @@ tracing.workspace = true
 reth-trie.workspace = true
 
 [features]
+default = ["std", "c-kzg"]
+std = []
+c-kzg = ["revm/c-kzg"]
 test-utils = ["dep:reth-trie"]
+optimism = ["revm/optimism"]

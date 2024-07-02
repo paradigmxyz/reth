@@ -84,6 +84,7 @@ pub mod pool;
 /// ```
 ///
 /// The [`TaskSpawner`] trait is [`DynClone`] so `Box<dyn TaskSpawner>` are also `Clone`.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait TaskSpawner: Send + Sync + Unpin + std::fmt::Debug + DynClone {
     /// Spawns the task onto the runtime.
     /// See also [`Handle::spawn`].
@@ -464,7 +465,7 @@ impl TaskExecutor {
                 error!("{task_error}");
                 let _ = panicked_tasks_tx.send(task_error);
             })
-            .map(|_| ())
+            .map(drop)
             .in_current_span();
 
         self.handle.spawn(task)
@@ -513,7 +514,7 @@ impl TaskExecutor {
                 error!("{task_error}");
                 let _ = panicked_tasks_tx.send(task_error);
             })
-            .map(|_| ())
+            .map(drop)
             .in_current_span();
 
         self.handle.spawn(task)
@@ -580,6 +581,7 @@ impl TaskSpawner for TaskExecutor {
 }
 
 /// `TaskSpawner` with extended behaviour
+#[auto_impl::auto_impl(&, Arc)]
 pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
     /// This spawns a critical task onto the runtime.
     ///

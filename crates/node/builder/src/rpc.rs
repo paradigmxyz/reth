@@ -3,18 +3,13 @@
 use futures::TryFutureExt;
 use reth_network::NetworkHandle;
 use reth_node_api::FullNodeComponents;
-use reth_node_core::{
-    cli::config::RethRpcConfig,
-    node_config::NodeConfig,
-    rpc::{
-        api::EngineApiServer,
-        builder::{
-            auth::{AuthRpcModule, AuthServerHandle},
-            RethModuleRegistry, RpcModuleBuilder, RpcServerHandle, TransportRpcModules,
-        },
-    },
-};
+use reth_node_core::{node_config::NodeConfig, rpc::api::EngineApiServer};
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_rpc_builder::{
+    auth::{AuthRpcModule, AuthServerHandle},
+    config::RethRpcServerConfig,
+    RethModuleRegistry, RpcModuleBuilder, RpcServerHandle, TransportRpcModules,
+};
 use reth_rpc_layer::JwtSecret;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
@@ -194,8 +189,9 @@ impl<Node: FullNodeComponents> Clone for RpcRegistry<Node> {
 /// [`AuthRpcModule`].
 ///
 /// This can be used to access installed modules, or create commonly used handlers like
-/// [`reth_rpc::EthApi`], and ultimately merge additional rpc handler into the configured transport
-/// modules [`TransportRpcModules`] as well as configured authenticated methods [`AuthRpcModule`].
+/// [`reth_rpc::eth::EthApi`], and ultimately merge additional rpc handler into the configured
+/// transport modules [`TransportRpcModules`] as well as configured authenticated methods
+/// [`AuthRpcModule`].
 #[allow(missing_debug_implementations)]
 pub struct RpcContext<'a, Node: FullNodeComponents> {
     /// The node components.

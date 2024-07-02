@@ -1,7 +1,9 @@
 //! Unwinding a certain block range
 
+use crate::macros::block_executor;
 use clap::{Parser, Subcommand};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db_api::database::Database;
@@ -11,23 +13,18 @@ use reth_node_core::args::NetworkArgs;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, FinalizedBlockReader,
-    FinalizedBlockWriter, HeaderSyncMode, ProviderFactory, StaticFileProviderFactory,
+    FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
 };
-use reth_prune_types::PruneModes;
+use reth_prune::PruneModes;
 use reth_stages::{
-    sets::DefaultStages,
-    stages::{ExecutionStage, ExecutionStageThresholds},
-    Pipeline, StageSet,
+    sets::{DefaultStages, OfflineStages},
+    stages::ExecutionStage,
+    ExecutionStageThresholds, Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use std::{ops::RangeInclusive, sync::Arc};
 use tokio::sync::watch;
 use tracing::info;
-
-use crate::{
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
-    macros::block_executor,
-};
 
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
@@ -40,6 +37,11 @@ pub struct Command {
 
     #[command(subcommand)]
     command: Subcommands,
+
+    /// If this is enabled, then all stages except headers, bodies, and sender recovery will be
+    /// unwound.
+    #[arg(long)]
+    offline: bool,
 }
 
 impl Command {
@@ -52,16 +54,30 @@ impl Command {
             eyre::bail!("Cannot unwind genesis block")
         }
 
-        // Only execute a pipeline unwind if the start of the range overlaps the existing static
-        // files. If that's the case, then copy all available data from MDBX to static files, and
-        // only then, proceed with the unwind.
-        if let Some(highest_static_block) = provider_factory
+        let highest_static_file_block = provider_factory
             .static_file_provider()
             .get_highest_static_files()
             .max()
-            .filter(|highest_static_file_block| highest_static_file_block >= range.start())
-        {
-            info!(target: "reth::cli", ?range, ?highest_static_block, "Executing a pipeline unwind.");
+            .filter(|highest_static_file_block| highest_static_file_block >= range.start());
+
+        // Execute a pipeline unwind if the start of the range overlaps the existing static
+        // files. If that's the case, then copy all available data from MDBX to static files, and
+        // only then, proceed with the unwind.
+        //
+        // We also execute a pipeline unwind if `offline` is specified, because we need to only
+        // unwind the data associated with offline stages.
+        if highest_static_file_block.is_some() || self.offline {
+            if self.offline {
+                info!(target: "reth::cli", "Performing an unwind for offline-only data!");
+            }
+
+            if let Some(highest_static_file_block) = highest_static_file_block {
+                info!(target: "reth::cli", ?range, ?highest_static_file_block, "Executing a pipeline unwind.");
+            } else {
+                info!(target: "reth::cli", ?range, "Executing a pipeline unwind.");
+            }
+
+            // This will build an offline-only pipeline if the `offline` flag is enabled
             let mut pipeline = self.build_pipeline(config, provider_factory.clone()).await?;
 
             // Move all applicable data from database to static files.
@@ -87,7 +103,7 @@ impl Command {
             provider.commit()?;
         }
 
-        println!("Unwound {} blocks", range.count());
+        info!(target: "reth::cli", range=?range.clone(), count=range.count(), "Unwound blocks");
 
         Ok(())
     }
@@ -105,13 +121,17 @@ impl Command {
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
         let executor = block_executor!(provider_factory.chain_spec());
 
-        let header_mode = HeaderSyncMode::Tip(tip_rx);
-        let pipeline = Pipeline::builder()
-            .with_tip_sender(tip_tx)
-            .add_stages(
+        let builder = if self.offline {
+            Pipeline::builder().add_stages(
+                OfflineStages::new(executor, config.stages, PruneModes::default())
+                    .builder()
+                    .disable(reth_stages::StageId::SenderRecovery),
+            )
+        } else {
+            Pipeline::builder().with_tip_sender(tip_tx).add_stages(
                 DefaultStages::new(
                     provider_factory.clone(),
-                    header_mode,
+                    tip_rx,
                     Arc::clone(&consensus),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
@@ -132,10 +152,12 @@ impl Command {
                     ExExManagerHandle::empty(),
                 )),
             )
-            .build(
-                provider_factory.clone(),
-                StaticFileProducer::new(provider_factory, PruneModes::default()),
-            );
+        };
+
+        let pipeline = builder.build(
+            provider_factory.clone(),
+            StaticFileProducer::new(provider_factory, PruneModes::default()),
+        );
         Ok(pipeline)
     }
 }

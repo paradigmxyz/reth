@@ -2,6 +2,7 @@ use crate::{metrics::EngineApiMetrics, EngineApiError, EngineApiResult};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
+use reth_chainspec::ChainSpec;
 use reth_engine_primitives::EngineTypes;
 use reth_evm::provider::EvmEnvProvider;
 use reth_payload_builder::PayloadStore;
@@ -9,7 +10,7 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, PayloadAttributes,
     PayloadBuilderAttributes, PayloadOrAttributes,
 };
-use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, ChainSpec, Hardfork, B256, U64};
+use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, EthereumHardfork, B256, U64};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
@@ -456,7 +457,7 @@ where
         let merge_terminal_td = self
             .inner
             .chain_spec
-            .fork(Hardfork::Paris)
+            .fork(EthereumHardfork::Paris)
             .ttd()
             .expect("the engine API should not be running for chains w/o paris");
 
@@ -804,6 +805,7 @@ where
         self.inner.metrics.latency.exchange_transition_configuration.record(start.elapsed());
         Ok(res?)
     }
+
     /// Handler for `engine_getClientVersionV1`
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md>
@@ -841,8 +843,9 @@ mod tests {
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_testing_utils::generators::random_block;
 
+    use reth_chainspec::MAINNET;
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_primitives::{SealedBlock, B256, MAINNET};
+    use reth_primitives::{SealedBlock, B256};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
@@ -1033,7 +1036,11 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap() +
+                terminal_total_difficulty: handle
+                    .chain_spec
+                    .fork(EthereumHardfork::Paris)
+                    .ttd()
+                    .unwrap() +
                     U256::from(1),
                 ..Default::default()
             };
@@ -1043,7 +1050,7 @@ mod tests {
             assert_matches!(
                 res,
                 Err(EngineApiError::TerminalTD { execution, consensus })
-                    if execution == handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap() && consensus == U256::from(transition_config.terminal_total_difficulty)
+                    if execution == handle.chain_spec.fork(EthereumHardfork::Paris).ttd().unwrap() && consensus == U256::from(transition_config.terminal_total_difficulty)
             );
         }
 
@@ -1060,7 +1067,11 @@ mod tests {
                 random_block(&mut rng, terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
+                terminal_total_difficulty: handle
+                    .chain_spec
+                    .fork(EthereumHardfork::Paris)
+                    .ttd()
+                    .unwrap(),
                 terminal_block_hash: consensus_terminal_block.hash(),
                 terminal_block_number: U64::from(terminal_block_number),
             };
@@ -1098,7 +1109,11 @@ mod tests {
                 random_block(&mut generators::rng(), terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
+                terminal_total_difficulty: handle
+                    .chain_spec
+                    .fork(EthereumHardfork::Paris)
+                    .ttd()
+                    .unwrap(),
                 terminal_block_hash: terminal_block.hash(),
                 terminal_block_number: U64::from(terminal_block_number),
             };

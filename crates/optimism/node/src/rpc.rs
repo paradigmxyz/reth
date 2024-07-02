@@ -1,20 +1,16 @@
 //! Helpers for optimism specific RPC implementations.
 
-use jsonrpsee::types::ErrorObject;
-use reqwest::Client;
-use reth_rpc::eth::{
-    error::{EthApiError, EthResult},
-    traits::RawTransactionForwarder,
-};
-use reth_rpc_types::ToRpcError;
 use std::sync::{atomic::AtomicUsize, Arc};
+
+use jsonrpsee_types::error::{ErrorObject, INTERNAL_ERROR_CODE};
+use reqwest::Client;
+use reth_rpc_eth_api::RawTransactionForwarder;
+use reth_rpc_eth_types::error::{EthApiError, EthResult};
+use reth_rpc_types::ToRpcError;
 
 /// Error type when interacting with the Sequencer
 #[derive(Debug, thiserror::Error)]
 pub enum SequencerRpcError {
-    /// Wrapper around a [`hyper::Error`].
-    #[error(transparent)]
-    HyperError(#[from] hyper::Error),
     /// Wrapper around an [`reqwest::Error`].
     #[error(transparent)]
     HttpError(#[from] reqwest::Error),
@@ -25,11 +21,7 @@ pub enum SequencerRpcError {
 
 impl ToRpcError for SequencerRpcError {
     fn to_rpc_error(&self) -> ErrorObject<'static> {
-        ErrorObject::owned(
-            jsonrpsee::types::error::INTERNAL_ERROR_CODE,
-            self.to_string(),
-            None::<String>,
-        )
+        ErrorObject::owned(INTERNAL_ERROR_CODE, self.to_string(), None::<String>)
     }
 }
 

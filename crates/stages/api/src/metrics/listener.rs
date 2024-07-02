@@ -1,9 +1,6 @@
-use crate::metrics::SyncMetrics;
-use reth_primitives::{
-    constants::MGAS_TO_GAS,
-    stage::{StageCheckpoint, StageId},
-    BlockNumber,
-};
+use crate::{metrics::SyncMetrics, StageCheckpoint, StageId};
+use alloy_primitives::BlockNumber;
+use reth_primitives_traits::constants::MGAS_TO_GAS;
 use std::{
     future::Future,
     pin::Pin,

@@ -1,5 +1,6 @@
 use crate::BlockHashReader;
-use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, ChainInfo, B256};
+use reth_chainspec::ChainInfo;
+use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, B256};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Client trait for getting important block numbers (such as the latest block number), converting

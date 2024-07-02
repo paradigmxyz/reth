@@ -11,9 +11,6 @@
 //!
 //! TODO(onbjerg): Find appropriate format for this...
 
-// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
-#![allow(unknown_lints, non_local_definitions)]
-
 pub mod codecs;
 
 mod raw;
@@ -32,12 +29,13 @@ use reth_db_api::{
     table::{Decode, DupSort, Encode, Table},
 };
 use reth_primitives::{
-    stage::StageCheckpoint,
-    trie::{StorageTrieEntry, StoredBranchNode, StoredNibbles, StoredNibblesSubKey},
-    Account, Address, BlockHash, BlockNumber, Bytecode, Header, IntegerList, Receipt, Requests,
-    StorageEntry, TransactionSignedNoHash, TxHash, TxNumber, B256,
+    Account, Address, BlockHash, BlockNumber, Bytecode, Header, Receipt, Requests, StorageEntry,
+    TransactionSignedNoHash, TxHash, TxNumber, B256,
 };
+use reth_primitives_traits::IntegerList;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
+use reth_stages_types::StageCheckpoint;
+use reth_trie_common::{StorageTrieEntry, StoredBranchNode, StoredNibbles, StoredNibblesSubKey};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

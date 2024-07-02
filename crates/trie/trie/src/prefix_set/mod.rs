@@ -1,4 +1,5 @@
-use reth_primitives::{trie::Nibbles, B256};
+use crate::Nibbles;
+use reth_primitives::B256;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -37,8 +38,7 @@ pub struct TriePrefixSets {
 /// # Examples
 ///
 /// ```
-/// use reth_primitives::trie::Nibbles;
-/// use reth_trie::prefix_set::PrefixSetMut;
+/// use reth_trie::{prefix_set::PrefixSetMut, Nibbles};
 ///
 /// let mut prefix_set = PrefixSetMut::default();
 /// prefix_set.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb]));
@@ -174,6 +174,14 @@ impl PrefixSet {
     /// Returns `true` if the set is empty.
     pub fn is_empty(&self) -> bool {
         self.keys.is_empty()
+    }
+}
+
+impl<'a> IntoIterator for &'a PrefixSet {
+    type IntoIter = std::slice::Iter<'a, reth_trie_common::Nibbles>;
+    type Item = &'a reth_trie_common::Nibbles;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 

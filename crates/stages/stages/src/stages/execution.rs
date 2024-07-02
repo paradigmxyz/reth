@@ -3,25 +3,21 @@ use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
-use reth_evm::execute::{BatchBlockExecutionOutput, BatchExecutor, BlockExecutorProvider};
+use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification};
-use reth_primitives::{
-    stage::{
-        CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint, StageCheckpoint, StageId,
-    },
-    BlockNumber, Header, StaticFileSegment,
-};
+use reth_primitives::{BlockNumber, Header, StaticFileSegment};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
-    BlockReader, BundleStateWithReceipts, Chain, DatabaseProviderRW, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter, StatsReader,
-    TransactionVariant,
+    BlockReader, DatabaseProviderRW, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderError, StateWriter, StatsReader, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
-    BlockErrorKind, ExecInput, ExecOutput, MetricEvent, MetricEventsSender, Stage, StageError,
-    UnwindInput, UnwindOutput,
+    format_gas_throughput, BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput,
+    ExecOutput, ExecutionCheckpoint, ExecutionStageThresholds, MetricEvent, MetricEventsSender,
+    Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use std::{
     cmp::Ordering,
@@ -75,6 +71,14 @@ pub struct ExecutionStage<E> {
     external_clean_threshold: u64,
     /// Pruning configuration.
     prune_modes: PruneModes,
+    /// Input for the post execute commit hook.
+    /// Set after every [`ExecutionStage::execute`] and cleared after
+    /// [`ExecutionStage::post_execute_commit`].
+    post_execute_commit_input: Option<Chain>,
+    /// Input for the post unwind commit hook.
+    /// Set after every [`ExecutionStage::unwind`] and cleared after
+    /// [`ExecutionStage::post_unwind_commit`].
+    post_unwind_commit_input: Option<Chain>,
     /// Handle to communicate with `ExEx` manager.
     exex_manager_handle: ExExManagerHandle,
 }
@@ -94,6 +98,8 @@ impl<E> ExecutionStage<E> {
             executor_provider,
             thresholds,
             prune_modes,
+            post_execute_commit_input: None,
+            post_unwind_commit_input: None,
             exex_manager_handle,
         }
     }
@@ -163,12 +169,28 @@ impl<E> ExecutionStage<E> {
     }
 }
 
-impl<E> ExecutionStage<E>
+impl<E, DB> Stage<DB> for ExecutionStage<E>
 where
+    DB: Database,
     E: BlockExecutorProvider,
 {
-    /// Execute the stage.
-    pub fn execute_inner<DB: Database>(
+    /// Return the id of the stage
+    fn id(&self) -> StageId {
+        StageId::Execution
+    }
+
+    fn poll_execute_ready(
+        &mut self,
+        cx: &mut Context<'_>,
+        _: ExecInput,
+    ) -> Poll<Result<(), StageError>> {
+        ready!(self.exex_manager_handle.poll_ready(cx));
+
+        Poll::Ready(Ok(()))
+    }
+
+    /// Execute the stage
+    fn execute(
         &mut self,
         provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
@@ -256,7 +278,7 @@ where
             stage_progress = block_number;
             stage_checkpoint.progress.processed += block.gas_used;
 
-            // If we have ExEx's we need to save the block in memory for later
+            // If we have ExExes we need to save the block in memory for later
             if self.exex_manager_handle.has_exexs() {
                 blocks.push(block);
             }
@@ -272,29 +294,41 @@ where
                 break
             }
         }
+
+        // prepare execution output for writing
         let time = Instant::now();
-        let BatchBlockExecutionOutput { bundle, receipts, requests: _, first_block } =
-            executor.finalize();
-        let state = BundleStateWithReceipts::new(bundle, receipts, first_block);
+        let ExecutionOutcome { bundle, receipts, requests, first_block } = executor.finalize();
+        let state = ExecutionOutcome::new(bundle, receipts, first_block, requests);
         let write_preparation_duration = time.elapsed();
 
-        // Check if we should send a [`ExExNotification`] to execution extensions.
+        // log the gas per second for the range we just executed
+        debug!(
+            target: "sync::stages::execution",
+            start = start_block,
+            end = stage_progress,
+            throughput = format_gas_throughput(cumulative_gas, execution_duration),
+            "Finished executing block range"
+        );
+
+        // Prepare the input for post execute commit hook, where an `ExExNotification` will be sent.
         //
-        // Note: Since we only write to `blocks` if there are any ExEx's we don't need to perform
+        // Note: Since we only write to `blocks` if there are any ExExes, we don't need to perform
         // the `has_exexs` check here as well
         if !blocks.is_empty() {
-            let chain = Arc::new(Chain::new(
-                blocks.into_iter().map(|block| {
-                    let hash = block.header.hash_slow();
-                    block.seal(hash)
-                }),
-                state.clone(),
-                None,
-            ));
+            let blocks = blocks.into_iter().map(|block| {
+                let hash = block.header.hash_slow();
+                block.seal(hash)
+            });
 
-            // NOTE: We can ignore the error here, since an error means that the channel is closed,
-            // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = self.exex_manager_handle.send(ExExNotification::ChainCommitted { new: chain });
+            let previous_input =
+                self.post_execute_commit_input.replace(Chain::new(blocks, state.clone(), None));
+            debug_assert!(
+                previous_input.is_none(),
+                "Previous post execute commit input wasn't processed"
+            );
+            if let Some(previous_input) = previous_input {
+                tracing::debug!(target: "sync::stages::execution", ?previous_input, "Previous post execute commit input wasn't processed");
+            }
         }
 
         let time = Instant::now();
@@ -320,6 +354,102 @@ where
                 .with_execution_stage_checkpoint(stage_checkpoint),
             done,
         })
+    }
+
+    fn post_execute_commit(&mut self) -> Result<(), StageError> {
+        let Some(chain) = self.post_execute_commit_input.take() else { return Ok(()) };
+
+        // NOTE: We can ignore the error here, since an error means that the channel is closed,
+        // which means the manager has died, which then in turn means the node is shutting down.
+        let _ = self
+            .exex_manager_handle
+            .send(ExExNotification::ChainCommitted { new: Arc::new(chain) });
+
+        Ok(())
+    }
+
+    /// Unwind the stage.
+    fn unwind(
+        &mut self,
+        provider: &DatabaseProviderRW<DB>,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, StageError> {
+        let (range, unwind_to, _) =
+            input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
+        if range.is_empty() {
+            return Ok(UnwindOutput {
+                checkpoint: input.checkpoint.with_block_number(input.unwind_to),
+            })
+        }
+
+        // Unwind account and storage changesets, as well as receipts.
+        //
+        // This also updates `PlainStorageState` and `PlainAccountState`.
+        let bundle_state_with_receipts = provider.unwind_or_peek_state::<true>(range.clone())?;
+
+        // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
+        if self.exex_manager_handle.has_exexs() {
+            // Get the blocks for the unwound range.
+            let blocks = provider.sealed_block_with_senders_range(range.clone())?;
+            let previous_input = self.post_unwind_commit_input.replace(Chain::new(
+                blocks,
+                bundle_state_with_receipts,
+                None,
+            ));
+
+            debug_assert!(
+                previous_input.is_none(),
+                "Previous post unwind commit input wasn't processed"
+            );
+            if let Some(previous_input) = previous_input {
+                tracing::debug!(target: "sync::stages::execution", ?previous_input, "Previous post unwind commit input wasn't processed");
+            }
+        }
+
+        // Unwind all receipts for transactions in the block range
+        if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
+            // We only use static files for Receipts, if there is no receipt pruning of any kind.
+
+            // prepare_static_file_producer does a consistency check that will unwind static files
+            // if the expected highest receipt in the files is higher than the database.
+            // Which is essentially what happens here when we unwind this stage.
+            let _static_file_producer = prepare_static_file_producer(provider, *range.start())?;
+        } else {
+            // If there is any kind of receipt pruning/filtering we use the database, since static
+            // files do not support filters.
+            //
+            // If we hit this case, the receipts have already been unwound by the call to
+            // `unwind_or_peek_state`.
+        }
+
+        // Update the checkpoint.
+        let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
+        if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
+            for block_number in range {
+                stage_checkpoint.progress.processed -= provider
+                    .block_by_number(block_number)?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
+                    .gas_used;
+            }
+        }
+        let checkpoint = if let Some(stage_checkpoint) = stage_checkpoint {
+            StageCheckpoint::new(unwind_to).with_execution_stage_checkpoint(stage_checkpoint)
+        } else {
+            StageCheckpoint::new(unwind_to)
+        };
+
+        Ok(UnwindOutput { checkpoint })
+    }
+
+    fn post_unwind_commit(&mut self) -> Result<(), StageError> {
+        let Some(chain) = self.post_unwind_commit_input.take() else { return Ok(()) };
+
+        // NOTE: We can ignore the error here, since an error means that the channel is closed,
+        // which means the manager has died, which then in turn means the node is shutting down.
+        let _ =
+            self.exex_manager_handle.send(ExExNotification::ChainReverted { old: Arc::new(chain) });
+
+        Ok(())
     }
 }
 
@@ -413,163 +543,6 @@ fn calculate_gas_used_from_headers(
     Ok(gas_total)
 }
 
-impl<E, DB> Stage<DB> for ExecutionStage<E>
-where
-    DB: Database,
-    E: BlockExecutorProvider,
-{
-    /// Return the id of the stage
-    fn id(&self) -> StageId {
-        StageId::Execution
-    }
-
-    fn poll_execute_ready(
-        &mut self,
-        cx: &mut Context<'_>,
-        _: ExecInput,
-    ) -> Poll<Result<(), StageError>> {
-        ready!(self.exex_manager_handle.poll_ready(cx));
-
-        Poll::Ready(Ok(()))
-    }
-
-    /// Execute the stage
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
-        self.execute_inner(provider, input)
-    }
-
-    /// Unwind the stage.
-    fn unwind(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
-        let (range, unwind_to, _) =
-            input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
-        if range.is_empty() {
-            return Ok(UnwindOutput {
-                checkpoint: input.checkpoint.with_block_number(input.unwind_to),
-            })
-        }
-
-        // Unwind account and storage changesets, as well as receipts.
-        //
-        // This also updates `PlainStorageState` and `PlainAccountState`.
-        let bundle_state_with_receipts = provider.unwind_or_peek_state::<true>(range.clone())?;
-
-        // Construct a `ExExNotification` if we have ExEx's installed.
-        if self.exex_manager_handle.has_exexs() {
-            // Get the blocks for the unwound range. This is needed for `ExExNotification`.
-            let blocks = provider.get_take_block_range::<false>(range.clone())?;
-            let chain = Chain::new(blocks, bundle_state_with_receipts, None);
-
-            // NOTE: We can ignore the error here, since an error means that the channel is closed,
-            // which means the manager has died, which then in turn means the node is shutting down.
-            let _ = self
-                .exex_manager_handle
-                .send(ExExNotification::ChainReverted { old: Arc::new(chain) });
-        }
-
-        // Unwind all receipts for transactions in the block range
-        if self.prune_modes.receipts.is_none() && self.prune_modes.receipts_log_filter.is_empty() {
-            // We only use static files for Receipts, if there is no receipt pruning of any kind.
-
-            // prepare_static_file_producer does a consistency check that will unwind static files
-            // if the expected highest receipt in the files is higher than the database.
-            // Which is essentially what happens here when we unwind this stage.
-            let _static_file_producer = prepare_static_file_producer(provider, *range.start())?;
-        } else {
-            // If there is any kind of receipt pruning/filtering we use the database, since static
-            // files do not support filters.
-            //
-            // If we hit this case, the receipts have already been unwound by the call to
-            // `unwind_or_peek_state`.
-        }
-
-        // Update the checkpoint.
-        let mut stage_checkpoint = input.checkpoint.execution_stage_checkpoint();
-        if let Some(stage_checkpoint) = stage_checkpoint.as_mut() {
-            for block_number in range {
-                stage_checkpoint.progress.processed -= provider
-                    .block_by_number(block_number)?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
-                    .gas_used;
-            }
-        }
-        let checkpoint = if let Some(stage_checkpoint) = stage_checkpoint {
-            StageCheckpoint::new(unwind_to).with_execution_stage_checkpoint(stage_checkpoint)
-        } else {
-            StageCheckpoint::new(unwind_to)
-        };
-
-        Ok(UnwindOutput { checkpoint })
-    }
-}
-
-/// The thresholds at which the execution stage writes state changes to the database.
-///
-/// If either of the thresholds (`max_blocks` and `max_changes`) are hit, then the execution stage
-/// commits all pending changes to the database.
-///
-/// A third threshold, `max_changesets`, can be set to periodically write changesets to the
-/// current database transaction, which frees up memory.
-#[derive(Debug, Clone)]
-pub struct ExecutionStageThresholds {
-    /// The maximum number of blocks to execute before the execution stage commits.
-    pub max_blocks: Option<u64>,
-    /// The maximum number of state changes to keep in memory before the execution stage commits.
-    pub max_changes: Option<u64>,
-    /// The maximum cumulative amount of gas to process before the execution stage commits.
-    pub max_cumulative_gas: Option<u64>,
-    /// The maximum spent on blocks processing before the execution stage commits.
-    pub max_duration: Option<Duration>,
-}
-
-impl Default for ExecutionStageThresholds {
-    fn default() -> Self {
-        Self {
-            max_blocks: Some(500_000),
-            max_changes: Some(5_000_000),
-            // 50k full blocks of 30M gas
-            max_cumulative_gas: Some(30_000_000 * 50_000),
-            // 10 minutes
-            max_duration: Some(Duration::from_secs(10 * 60)),
-        }
-    }
-}
-
-impl ExecutionStageThresholds {
-    /// Check if the batch thresholds have been hit.
-    #[inline]
-    pub fn is_end_of_batch(
-        &self,
-        blocks_processed: u64,
-        changes_processed: u64,
-        cumulative_gas_used: u64,
-        elapsed: Duration,
-    ) -> bool {
-        blocks_processed >= self.max_blocks.unwrap_or(u64::MAX) ||
-            changes_processed >= self.max_changes.unwrap_or(u64::MAX) ||
-            cumulative_gas_used >= self.max_cumulative_gas.unwrap_or(u64::MAX) ||
-            elapsed >= self.max_duration.unwrap_or(Duration::MAX)
-    }
-}
-
-impl From<ExecutionConfig> for ExecutionStageThresholds {
-    fn from(config: ExecutionConfig) -> Self {
-        Self {
-            max_blocks: config.max_blocks,
-            max_changes: config.max_changes,
-            max_cumulative_gas: config.max_cumulative_gas,
-            max_duration: config.max_duration,
-        }
-    }
-}
-
 /// Returns a `StaticFileProviderRWRefMut` static file producer after performing a consistency
 /// check.
 ///
@@ -654,18 +627,20 @@ mod tests {
     use crate::test_utils::TestStageDB;
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
+    use reth_chainspec::ChainSpecBuilder;
     use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_execution_errors::BlockValidationError;
     use reth_primitives::{
-        address, hex_literal::hex, keccak256, stage::StageUnitCheckpoint, Account, Address,
-        Bytecode, ChainSpecBuilder, SealedBlock, StorageEntry, B256, U256,
+        address, hex_literal::hex, keccak256, Account, Address, Bytecode, SealedBlock,
+        StorageEntry, B256, U256,
     };
     use reth_provider::{
         test_utils::create_test_provider_factory, AccountReader, ReceiptProvider,
         StaticFileProviderFactory,
     };
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
+    use reth_stages_api::{format_gas_throughput, StageUnitCheckpoint};
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthExecutorProvider> {
@@ -684,6 +659,22 @@ mod tests {
             PruneModes::none(),
             ExExManagerHandle::empty(),
         )
+    }
+
+    #[test]
+    fn test_gas_throughput_fmt() {
+        let duration = Duration::from_secs(1);
+        let gas = 100_000;
+        let throughput = format_gas_throughput(gas, duration);
+        assert_eq!(throughput, "100 Kgas/second");
+
+        let gas = 100_000_000;
+        let throughput = format_gas_throughput(gas, duration);
+        assert_eq!(throughput, "100 Mgas/second");
+
+        let gas = 100_000_000_000;
+        let throughput = format_gas_throughput(gas, duration);
+        assert_eq!(throughput, "100 Ggas/second");
     }
 
     #[test]

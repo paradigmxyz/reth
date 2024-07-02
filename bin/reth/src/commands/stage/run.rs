@@ -1,29 +1,29 @@
 //! Main `stage` command
 //!
 //! Stage debugging tool
-
 use crate::{
     args::{get_secret_key, NetworkArgs, StageEnum},
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
     prometheus_exporter,
 };
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
 use reth_provider::{
     ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
+    StaticFileWriter,
 };
 use reth_stages::{
     stages::{
-        AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TransactionLookupStage,
+        AccountHashingStage, BodyStage, ExecutionStage, IndexAccountHistoryStage,
+        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
+        TransactionLookupStage,
     },
-    ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
+    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
 use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
 use tracing::*;
@@ -253,7 +253,12 @@ impl Command {
                 }
 
                 if self.commit {
+                    // For unwinding it makes more sense to commit the database first, since if
+                    // this function is interrupted before the static files commit, we can just
+                    // truncate the static files according to the
+                    // checkpoints on the next start-up.
                     provider_rw.commit()?;
+                    provider_factory.static_file_provider().commit()?;
                     provider_rw = provider_factory.provider_rw()?;
                 }
             }
@@ -276,6 +281,7 @@ impl Command {
                 provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
             }
             if self.commit {
+                provider_factory.static_file_provider().commit()?;
                 provider_rw.commit()?;
                 provider_rw = provider_factory.provider_rw()?;
             }

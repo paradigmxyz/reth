@@ -17,6 +17,9 @@
 /// The container indicates when the trie has been modified.
 pub mod prefix_set;
 
+/// The implementation of forward-only in-memory cursor.
+pub mod forward_cursor;
+
 /// The cursor implementations for navigating account and storage tries.
 pub mod trie_cursor;
 
@@ -49,6 +52,9 @@ pub use progress::{IntermediateStateRootState, StateRootProgress};
 
 /// Trie calculation stats.
 pub mod stats;
+
+// re-export for convenience
+pub use reth_trie_common::*;
 
 /// Trie calculation metrics.
 #[cfg(feature = "metrics")]

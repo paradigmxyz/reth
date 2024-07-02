@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-codecs.workspace = true
 reth-primitives.workspace = true
 reth-ecies.workspace = true
@@ -38,11 +39,8 @@ snap = "1.0.5"
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
-proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-net-common.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-tracing.workspace = true
 
@@ -57,19 +55,18 @@ secp256k1 = { workspace = true, features = [
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
 proptest-derive.workspace = true
 async-stream.workspace = true
 
 [features]
 default = ["serde"]
-serde = ["dep:serde"]
 arbitrary = [
     "reth-primitives/arbitrary",
     "dep:arbitrary",
-    "dep:proptest",
-    "dep:proptest-derive",
 ]
 optimism = ["reth-primitives/optimism"]
+serde = ["dep:serde"]
 
 [[test]]
 name = "fuzz_roundtrip"

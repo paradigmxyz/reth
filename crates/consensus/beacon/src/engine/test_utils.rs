@@ -6,6 +6,7 @@ use crate::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
+use reth_chainspec::ChainSpec;
 use reth_config::config::StageConfig;
 use reth_consensus::{test_utils::TestConsensus, Consensus};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
@@ -22,10 +23,10 @@ use reth_network_p2p::{
     test_utils::NoopFullBlockClient,
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, B256};
+use reth_primitives::{BlockNumber, B256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-    BundleStateWithReceipts, HeaderSyncMode,
+    ExecutionOutcome,
 };
 use reth_prune::Pruner;
 use reth_prune_types::PruneModes;
@@ -57,7 +58,7 @@ pub struct TestEnv<DB> {
 }
 
 impl<DB> TestEnv<DB> {
-    fn new(
+    const fn new(
         db: DB,
         tip_rx: watch::Receiver<B256>,
         engine_handle: BeaconConsensusEngineHandle<EthEngineTypes>,
@@ -142,7 +143,7 @@ impl Default for TestPipelineConfig {
 #[derive(Debug)]
 enum TestExecutorConfig {
     /// Test executor results.
-    Test(Vec<BundleStateWithReceipts>),
+    Test(Vec<ExecutionOutcome>),
     /// Real executor configuration.
     Real,
 }
@@ -188,7 +189,7 @@ impl TestConsensusEngineBuilder {
     }
 
     /// Set the executor results to use for the test consensus engine.
-    pub fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
+    pub fn with_executor_results(mut self, executor_results: Vec<ExecutionOutcome>) -> Self {
         self.executor_config = TestExecutorConfig::Test(executor_results);
         self
     }
@@ -272,7 +273,7 @@ where
 
     /// Set the executor results to use for the test consensus engine.
     #[allow(dead_code)]
-    pub fn with_executor_results(mut self, executor_results: Vec<BundleStateWithReceipts>) -> Self {
+    pub fn with_executor_results(mut self, executor_results: Vec<ExecutionOutcome>) -> Self {
         self.base_config.executor_config = TestExecutorConfig::Test(executor_results);
         self
     }
@@ -371,7 +372,7 @@ where
 
                 Pipeline::builder().add_stages(DefaultStages::new(
                     provider_factory.clone(),
-                    HeaderSyncMode::Tip(tip_rx.clone()),
+                    tip_rx.clone(),
                     Arc::clone(&consensus),
                     header_downloader,
                     body_downloader,
@@ -418,7 +419,6 @@ where
             Box::<TokioTaskExecutor>::default(),
             Box::<NoopSyncStateUpdater>::default(),
             None,
-            false,
             payload_builder,
             None,
             self.base_config.pipeline_run_threshold.unwrap_or(MIN_BLOCKS_FOR_PIPELINE_RUN),

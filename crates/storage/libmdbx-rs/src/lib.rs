@@ -8,6 +8,8 @@
 #![allow(missing_docs, clippy::needless_pass_by_ref_mut)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+pub extern crate reth_mdbx_sys as ffi;
+
 pub use crate::{
     codec::*,
     cursor::{Cursor, Iter, IterDup},
@@ -20,9 +22,6 @@ pub use crate::{
     flags::*,
     transaction::{CommitLatency, Transaction, TransactionKind, RO, RW},
 };
-pub mod ffi {
-    pub use ffi::{MDBX_dbi as DBI, MDBX_log_level_t as LogLevel};
-}
 
 #[cfg(feature = "read-tx-timeouts")]
 pub use crate::environment::read_transactions::MaxReadTransactionDuration;

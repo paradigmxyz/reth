@@ -1,13 +1,9 @@
 //! Command that initializes the node by importing a chain from a file.
-
-use crate::{
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
-    macros::block_executor,
-    version::SHORT_VERSION,
-};
+use crate::{macros::block_executor, version::SHORT_VERSION};
 use clap::Parser;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::tables;
@@ -22,13 +18,13 @@ use reth_network_p2p::{
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
 use reth_node_events::node::NodeEvent;
-use reth_primitives::{stage::StageId, B256};
+use reth_primitives::B256;
 use reth_provider::{
-    BlockNumReader, ChainSpecProvider, HeaderProvider, HeaderSyncMode, ProviderError,
-    ProviderFactory, StageCheckpointReader,
+    BlockNumReader, ChainSpecProvider, HeaderProvider, ProviderError, ProviderFactory,
+    StageCheckpointReader,
 };
-use reth_prune_types::PruneModes;
-use reth_stages::{prelude::*, Pipeline, StageSet};
+use reth_prune::PruneModes;
+use reth_stages::{prelude::*, Pipeline, StageId, StageSet};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
@@ -208,7 +204,7 @@ where
         .add_stages(
             DefaultStages::new(
                 provider_factory.clone(),
-                HeaderSyncMode::Tip(tip_rx),
+                tip_rx,
                 consensus.clone(),
                 header_downloader,
                 body_downloader,
@@ -237,7 +233,7 @@ mod tests {
             let args: ImportCommand = ImportCommand::parse_from(["reth", "--chain", chain, "."]);
             assert_eq!(
                 Ok(args.env.chain.chain),
-                chain.parse::<reth_primitives::Chain>(),
+                chain.parse::<reth_chainspec::Chain>(),
                 "failed to parse chain {chain}"
             );
         }

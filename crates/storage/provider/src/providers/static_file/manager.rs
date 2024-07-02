@@ -9,6 +9,7 @@ use crate::{
 };
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use parking_lot::RwLock;
+use reth_chainspec::ChainInfo;
 use reth_db::{
     lockfile::StorageLock,
     static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
@@ -23,13 +24,13 @@ use reth_db_api::{
 use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     keccak256,
-    stage::{PipelineTarget, StageId},
     static_file::{find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive},
-    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
+    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Header, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
+use reth_stages_types::{PipelineTarget, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
@@ -1456,6 +1457,15 @@ impl BlockReader for StaticFileProvider {
         Err(ProviderError::UnsupportedProvider)
     }
 
+    fn sealed_block_with_senders(
+        &self,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+        // Required data not present in static_files
+        Err(ProviderError::UnsupportedProvider)
+    }
+
     fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
@@ -1465,6 +1475,13 @@ impl BlockReader for StaticFileProvider {
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<BlockWithSenders>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn sealed_block_with_senders_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
         Err(ProviderError::UnsupportedProvider)
     }
 }

@@ -22,7 +22,9 @@ use std::convert::Infallible;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use alloy_genesis::Genesis;
 use reth::{
+    api::PayloadTypes,
     builder::{
         components::{ComponentsBuilder, PayloadServiceBuilder},
         node::NodeTypes,
@@ -37,19 +39,20 @@ use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
     PayloadBuilder, PayloadConfig,
 };
+use reth_chainspec::{Chain, ChainSpec};
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
     validate_version_specific_fields, EngineTypes, PayloadAttributes, PayloadBuilderAttributes,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::node::{
-    EthereumExecutorBuilder, EthereumNetworkBuilder, EthereumPoolBuilder,
+    EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder, EthereumPoolBuilder,
 };
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
     PayloadBuilderService,
 };
-use reth_primitives::{Address, Chain, ChainSpec, Genesis, Header, Withdrawals, B256};
+use reth_primitives::{Address, Header, Withdrawals, B256};
 use reth_rpc_types::{
     engine::{
         ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
@@ -162,10 +165,13 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
 #[non_exhaustive]
 pub struct CustomEngineTypes;
 
-impl EngineTypes for CustomEngineTypes {
+impl PayloadTypes for CustomEngineTypes {
+    type BuiltPayload = EthBuiltPayload;
     type PayloadAttributes = CustomPayloadAttributes;
     type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
-    type BuiltPayload = EthBuiltPayload;
+}
+
+impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadV1 = ExecutionPayloadV1;
     type ExecutionPayloadV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadV3 = ExecutionPayloadEnvelopeV3;
@@ -204,6 +210,7 @@ where
         CustomPayloadServiceBuilder,
         EthereumNetworkBuilder,
         EthereumExecutorBuilder,
+        EthereumConsensusBuilder,
     >;
 
     fn components_builder(self) -> Self::ComponentsBuilder {
@@ -213,6 +220,7 @@ where
             .payload(CustomPayloadServiceBuilder::default())
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
+            .consensus(EthereumConsensusBuilder::default())
     }
 }
 

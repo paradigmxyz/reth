@@ -1,12 +1,12 @@
 use super::setup;
-use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, table::TableImporter};
+use reth_db_common::DbTool;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_primitives::{stage::StageCheckpoint, BlockNumber};
+use reth_primitives::BlockNumber;
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
-use reth_stages::{stages::AccountHashingStage, Stage, UnwindInput};
+use reth_stages::{stages::AccountHashingStage, Stage, StageCheckpoint, UnwindInput};
 use tracing::info;
 
 pub(crate) async fn dump_hashing_account_stage<DB: Database>(

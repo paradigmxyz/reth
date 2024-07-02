@@ -9,3 +9,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 pub mod init;
+
+mod db_tool;
+pub use db_tool::*;
