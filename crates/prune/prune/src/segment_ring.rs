@@ -60,7 +60,8 @@ pub trait CycleSegments {
     fn next_segment(&mut self) -> Option<(Arc<dyn Segment<Self::Db>>, PrunePurpose)>;
 
     /// Returns an iterator cycling once over the ring of tables. Yields an item for each table,
-    /// either a segment or `None`. Advances the current position in the ring.
+    /// either a segment or `None` if there is currently nothing to prune for the table. Advances
+    /// the current position in the ring.
     fn next_cycle(
         &mut self,
     ) -> impl Iterator<Item = Option<(Arc<dyn Segment<Self::Db>>, PrunePurpose)>>
@@ -72,7 +73,8 @@ pub trait CycleSegments {
         SegmentIter { ring: self }
     }
 
-    /// Returns an iterator over prunable segments. See [`next_cycle`](CycleSegments::next_cycle).
+    /// Returns an iterator over prunable segments. Unlike
+    /// [`next_cycle`](CycleSegments::next_cycle), skips tables that currently have nothing to
     fn iter(&mut self) -> impl Iterator<Item = (Arc<dyn Segment<Self::Db>>, PrunePurpose)>
     where
         Self: Sized,
