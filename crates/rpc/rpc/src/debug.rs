@@ -4,13 +4,15 @@ use alloy_rlp::{Decodable, Encodable};
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
+use reth_errors::ProviderError;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
     Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
 };
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProvider,
-    StateProviderFactory, StateRootProvider, TransactionVariant,
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
+    HistoricalStateProviderRef, StateProofProvider, StateProvider, StateProviderFactory,
+    StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
@@ -29,15 +31,16 @@ use reth_rpc_types::{
     BlockError, Bundle, RichBlock, StateContext, TransactionRequest,
 };
 use reth_tasks::pool::BlockingTaskGuard;
+use reth_trie::{proof::Proof, HashedPostState};
 use revm::{
-    db::{states::bundle_state::BundleRetention, CacheDB, State},
+    db::{states::bundle_state::BundleRetention, BundleState, CacheDB, State},
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
 };
 use revm_inspectors::tracing::{
     js::{JsInspector, TransactionContext},
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig,
 };
-use revm_primitives::HashMap;
+use revm_primitives::{keccak256, HashMap};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
@@ -569,12 +572,10 @@ where
         self.inner
             .eth_api
             .spawn_with_state_at_block(block.parent_hash.into(), move |state| {
-                let mut db = State::builder()
-                    .with_database(StateProviderDatabase::new(state))
-                    .with_bundle_update()
-                    .build();
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-                // Re-execute all of the transactions in the block.
+                // Re-execute all of the transactions in the block to load all touched accounts into
+                // the cache DB.
                 for tx in block.raw_transactions() {
                     let tx_envelope = TransactionSignedEcRecovered::decode(&mut tx.as_ref())
                         .map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
@@ -586,27 +587,61 @@ where
                         ),
                         handler_cfg: cfg.handler_cfg,
                     };
+
                     let (res, _) = this.inner.eth_api.transact(&mut db, env)?;
                     db.commit(res.state);
                 }
 
-                // Merge all transitions, retaining both plain state and reverts.
-                db.merge_transitions(BundleRetention::Reverts);
+                // Destruct the cache database to retrieve the state provider.
+                let state = db.db.into_inner();
 
-                // Take the bundle state.
-                let bundle = db.take_bundle();
+                // Grab all account proofs for the data accessed during block execution.
+                let account_proofs = db
+                    .accounts
+                    .into_iter()
+                    .map(|(addr, db_acc)| {
+                        let storage_keys = db_acc
+                            .storage
+                            .into_iter()
+                            .map(|(storage_key, _)| storage_key.into())
+                            .collect::<Vec<_>>();
 
-                // Drop the DB and retrieve the original state provider.
-                let state_provider = db.database.into_inner();
+                        let account_proof =
+                            state.proof(&BundleState::default(), addr, &storage_keys)?;
+                        Ok(account_proof)
+                    })
+                    .collect::<Result<Vec<_>, ProviderError>>()?;
 
-                // Recompute the state root, retrieving all trie updates.
-                // let proof = state_provider.proof(address, keys)
-                let (_, _trie_updates) = state_provider
-                    .state_root_with_updates(&bundle)
-                    .map_err(|_| EthApiError::InternalEthError)?;
+                // Compute the total number of trie nodes in the account proof witnesses.
+                let total_nodes = account_proofs.iter().fold(0, |acc, proof| {
+                    let account_proof_size = proof.proof.len();
+                    let storage_proofs_size =
+                        proof.storage_proofs.iter().map(|p| p.proof.len()).sum::<usize>();
+                    acc + account_proof_size + storage_proofs_size
+                });
 
-                // TODO: Change
-                Ok(Default::default())
+                // Generate the witness by re-hashing all intermediate nodes.
+                let mut witness = HashMap::with_capacity(total_nodes);
+                for proof in account_proofs {
+                    // First, add all account proof nodes.
+                    for node in proof.proof.into_iter() {
+                        let hash = keccak256(node.as_ref());
+                        witness.insert(hash, node);
+                    }
+
+                    // Next, add all storage proof nodes.
+                    for storage_proof in proof.storage_proofs.into_iter() {
+                        for node in storage_proof.proof.into_iter() {
+                            let hash = keccak256(node.as_ref());
+                            witness.insert(hash, node);
+                        }
+                    }
+                }
+
+                // TODO: Also need blinded sibling nodes accessed during deletion, to allow for
+                // state root recomputation. As is, this is only sufficient for
+                // executing the block.
+                Ok(witness)
             })
             .await
     }
