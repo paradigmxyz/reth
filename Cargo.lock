@@ -7138,8 +7138,6 @@ dependencies = [
  "reth-engine-tree",
  "reth-ethereum-engine-primitives",
  "reth-network-p2p",
- "reth-primitives",
- "reth-stages",
  "reth-stages-api",
  "reth-tasks",
  "tokio",

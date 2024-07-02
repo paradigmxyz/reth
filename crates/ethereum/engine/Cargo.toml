@@ -33,5 +33,3 @@ eyre.workspace = true
 
 [dev-dependencies]
 reth-engine-tree = { workspace = true, features = ["test-utils"] }
-reth-primitives.workspace = true
-reth-stages.workspace = true
