@@ -744,7 +744,8 @@ mod tests {
     use super::*;
     use crate::test_utils::TestFullBlockClient;
     use futures::StreamExt;
-    use std::ops::Range;
+    use std::{ops::Range, time::Duration};
+    use tokio::time::timeout;
 
     #[tokio::test]
     async fn download_single_full_block() {
@@ -811,21 +812,26 @@ mod tests {
 
     #[tokio::test]
     async fn download_full_block_with_bad_block() {
-        let client = TestFullBlockClient { bad_block_body: true, ..Default::default() };
+        let full_block_client = TestFullBlockClient::default();
+        let (header, _) = insert_headers_into_client(&full_block_client, 0..50);
 
-        let (header, body) = insert_headers_into_client(&client, 0..50);
-        let client = FullBlockClient::test_client(client);
+        // successfully get block
+        let client = FullBlockClient::test_client(full_block_client.clone());
+        let received = client.get_full_block_range(header.hash(), 10).await;
+        assert_eq!(received.len(), 10);
 
-        let received = client.get_full_block_range(header.hash(), 1).await;
-        let received = received.first().expect("response should include a block");
-        assert_eq!(*received, SealedBlock::new(header.clone(), body));
+        // insert fake block
+        let fake_header = Header { parent_hash: B256::random(), ..Default::default() };
+        let fake_body =
+            BlockBody { transactions: vec![], ommers: vec![], withdrawals: None, requests: None };
+        let hash = header.hash();
+        full_block_client.insert_with_hash(hash, fake_header.seal(hash), fake_body);
 
-        let received = client.get_full_block_range(header.hash(), 40).await;
-        assert_eq!(received.len(), 40);
-        for (i, block) in received.iter().enumerate() {
-            let expected_number: u64 = header.number - i as u64;
-            assert_eq!(block.header.number, expected_number);
-        }
+        // the task should timeout with bad block
+        let client = FullBlockClient::test_client(full_block_client.clone());
+        let task = client.get_full_block_range(header.hash(), 10);
+        let result = timeout(Duration::from_secs(2), task).await;
+        assert!(result.is_err(), "getting bad block should timeout")
     }
 
     #[tokio::test]

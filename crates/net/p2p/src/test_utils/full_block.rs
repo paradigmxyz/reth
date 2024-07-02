@@ -5,13 +5,15 @@ use crate::{
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
 };
+use futures::Future;
 use parking_lot::Mutex;
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives::{
-    BlockBody, BlockHashOrNumber, BlockNumHash, Header, HeadersDirection, SealedBlock,
-    SealedHeader, B256,
+    revm_primitives::FixedBytes, Block, BlockBody, BlockHashOrNumber, BlockNumHash, Header,
+    HeadersDirection, SealedBlock, SealedHeader, B256,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
+use tokio::time::sleep;
 
 /// A headers+bodies client implementation that does nothing.
 #[derive(Debug, Default, Clone)]
@@ -97,14 +99,10 @@ impl HeadersClient for NoopFullBlockClient {
 /// This full block client can be [Clone]d and shared between multiple tasks.
 #[derive(Clone, Debug)]
 pub struct TestFullBlockClient {
-    /// Headers in memory
-    pub headers: Arc<Mutex<HashMap<B256, Header>>>,
-    /// Bodies in memory
-    pub bodies: Arc<Mutex<HashMap<B256, BlockBody>>>,
-    /// Soft response limit, max number of bodies to respond with
-    pub soft_limit: usize,
-    /// Whether return bad block body
-    pub bad_block_body: bool,
+    headers: Arc<Mutex<HashMap<B256, Header>>>,
+    bodies: Arc<Mutex<HashMap<B256, BlockBody>>>,
+    // soft response limit, max number of bodies to respond with
+    soft_limit: usize,
 }
 
 impl Default for TestFullBlockClient {
@@ -113,7 +111,6 @@ impl Default for TestFullBlockClient {
             headers: Arc::new(Mutex::new(HashMap::new())),
             bodies: Arc::new(Mutex::new(HashMap::new())),
             soft_limit: 20,
-            bad_block_body: false,
         }
     }
 }
@@ -122,6 +119,12 @@ impl TestFullBlockClient {
     /// Insert a header and body into the client maps.
     pub fn insert(&self, header: SealedHeader, body: BlockBody) {
         let hash = header.hash();
+        self.headers.lock().insert(hash, header.unseal());
+        self.bodies.lock().insert(hash, body);
+    }
+
+    /// Insert a header and body into the client maps with specific hash.
+    pub fn insert_with_hash(&self, hash: FixedBytes<32>, header: SealedHeader, body: BlockBody) {
         self.headers.lock().insert(hash, header.unseal());
         self.bodies.lock().insert(hash, body);
     }
@@ -159,7 +162,7 @@ impl DownloadClient for TestFullBlockClient {
 /// Implements the `HeadersClient` trait for the `TestFullBlockClient` struct.
 impl HeadersClient for TestFullBlockClient {
     /// Specifies the associated output type.
-    type Output = futures::future::Ready<PeerRequestResult<Vec<Header>>>;
+    type Output = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>> + Send + Sync>>;
 
     /// Retrieves headers with a given priority level.
     ///
@@ -205,15 +208,17 @@ impl HeadersClient for TestFullBlockClient {
             .collect::<Vec<_>>();
 
         // Returns a future containing the retrieved headers with a random peer ID.
-        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), resp)))
+        Box::pin(async move {
+            sleep(Duration::from_millis(1)).await;
+            Ok(WithPeerId::new(PeerId::random(), resp))
+        })
     }
 }
 
 /// Implements the `BodiesClient` trait for the `TestFullBlockClient` struct.
 impl BodiesClient for TestFullBlockClient {
     /// Defines the output type of the function.
-    type Output = futures::future::Ready<PeerRequestResult<Vec<BlockBody>>>;
-
+    type Output = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<BlockBody>>> + Send + Sync>>;
     /// Retrieves block bodies corresponding to provided hashes with a given priority.
     ///
     /// # Arguments
@@ -232,27 +237,19 @@ impl BodiesClient for TestFullBlockClient {
         // Acquire a lock on the bodies.
         let bodies = self.bodies.lock();
 
-        let mut block_bodies: Vec<_> = hashes
-            .iter()
-            .filter_map(|hash| bodies.get(hash).cloned())
-            .take(self.soft_limit)
-            .collect();
-
-        // To avoid halting the client forever, do not create bad block body when
-        // requesting only one block body.
-        if self.bad_block_body && hashes.len() > 1 {
-            let header = Header { parent_hash: B256::random(), ..Default::default() };
-            // Create one bad block body
-            block_bodies[0] = BlockBody {
-                transactions: vec![],
-                ommers: vec![header],
-                withdrawals: None,
-                requests: None,
-            }
-        }
-
         // Create a future that immediately returns the result of the block body retrieval
         // operation.
-        futures::future::ready(Ok(WithPeerId::new(PeerId::random(), block_bodies)))
+        let result = WithPeerId::new(
+            PeerId::random(),
+            hashes
+                .iter()
+                .filter_map(|hash| bodies.get(hash).cloned())
+                .take(self.soft_limit)
+                .collect(),
+        );
+        Box::pin(async move {
+            sleep(Duration::from_millis(1)).await;
+            Ok(result)
+        })
     }
 }
