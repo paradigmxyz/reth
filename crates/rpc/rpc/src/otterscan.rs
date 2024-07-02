@@ -13,8 +13,8 @@ use reth_rpc_types::{
             OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
         },
         parity::{
-            Action, CallAction, CreateAction, CreateOutput, RewardAction, SelfdestructAction,
-            TraceOutput,
+            Action, CallAction, CallOutput, CreateAction, CreateOutput, RewardAction,
+            SelfdestructAction, TraceOutput, CallType,
         },
     },
     BlockTransactions, Header, Transaction,
@@ -121,16 +121,24 @@ where
                     .into_iter()
                     .map(|trace| {
                         let depth = trace.trace_address.len() as u32;
+
                         let (typ, from, to, value, input) = match trace.action {
-                            Action::Call(CallAction { from, to, value, input, .. }) => {
-                                ("call", from, to, value, input)
+                            Action::Call(CallAction {
+                                from, to, value, input, call_type, ..
+                            }) => {
+                                let typ = match call_type {
+                                    CallType::Call => "call",
+                                    CallType::DelegateCall => 
+                                    CallType::StaticCall => 
+                                };
+                            ("call", from, to, value, input),
                             }
                             Action::Create(CreateAction { from, value, init, .. }) => {
                                 let to = match trace.result {
                                     Some(TraceOutput::Create(CreateOutput {
                                         address: to, ..
                                     })) => to,
-                                    _ => Address::default(),
+                                    _ => Default::default(),
                                 };
                                 ("create", from, to, value, init)
                             }
@@ -143,7 +151,21 @@ where
                                 refund_address,
                             }) => ("suicide", address, refund_address, balance, Default::default()),
                         };
-                        TraceEntry { r#type: typ.to_uppercase(), depth, from, to, value, input }
+
+                        let output = match trace.result {
+                            Some(TraceOutput::Call(CallOutput { output, .. })) => output,
+                            Some(TraceOutput::Create(CreateOutput { code, .. })) => code,
+                            _ => Default::default(),
+                        };
+                        TraceEntry {
+                            r#type: typ.to_uppercase(),
+                            depth,
+                            from,
+                            to,
+                            value,
+                            input,
+                            output,
+                        }
                     })
                     .collect::<Vec<_>>()
             });
