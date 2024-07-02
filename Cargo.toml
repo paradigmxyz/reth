@@ -31,6 +31,7 @@ members = [
     "crates/errors/",
     "crates/ethereum-forks/",
     "crates/ethereum/consensus/",
+    "crates/ethereum/engine/",
     "crates/ethereum/engine-primitives/",
     "crates/ethereum/evm",
     "crates/ethereum/node",
