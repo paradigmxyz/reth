@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256};
 use reth_rpc_types::{
@@ -9,6 +7,7 @@ use reth_rpc_types::{
     },
     Bundle, RichBlock, StateContext, TransactionRequest,
 };
+use std::collections::HashMap;
 
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
