@@ -1,7 +1,52 @@
 [profile.default]
-src = "src"
+src = "contracts"
 out = "out"
-libs = ["node_modules"]
-remappings = ["hardhat/=node_modules/hardhat/"]
+test = "test"
+script = "script"
+gas_price = 10_000_000_000 # 10 Gwei
+gas_limit = "18446744073709551615" # u64::MAX
+optimizer = true
+optimizer_runs = 200
+ffi = true
+memory_limit = 2_073_741_824
+solc_version = "0.8.24"
+evm_version = "cancun"
+remappings = [
+  "@openzeppelin/contracts-upgradeable/=node_modules/@openzeppelin/contracts-upgradeable/",
+  "@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/",
+  "solady/=node_modules/solady/",
+  "forge-std/=node_modules/forge-std/",
+  "ds-test/=node_modules/ds-test/src/",
+  "p256-verifier/=node_modules/p256-verifier/",
+]
 
-# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
+# Do not change the block_gas_limit value, TaikoL2.t.sol depends on it.
+# For mainnet_mock tokenomics test we need a huge value to run lots of iterations.
+# Use 30M for TaikoL2.t.sol related tests, only use this number with mainnet simulation.
+block_gas_limit = 80_000_000
+
+fs_permissions = [
+  { access = "read", path = "./out" },
+  { access = "read-write", path = "./deployments" },
+  { access = "read", path = "./test" },
+  { access = "read", path = "./genesis" },
+]
+
+# 2394: Transient storage warning
+# 3860: Contract initcode size is xxx bytes and exceeds 49152 bytes
+# 5574: Contract code size is xxx bytes and exceeds 24576 byte
+# 5740: Unreachable code
+ignored_error_codes = [2394, 3860, 5574, 5740]
+
+[fuzz]
+runs = 200
+
+[fmt]
+bracket_spacing = true
+line_length = 100
+multiline_func_header = "all"
+number_underscore = "thousands"
+wrap_comments = true
+
+[profile.genesis]
+test = "genesis"
