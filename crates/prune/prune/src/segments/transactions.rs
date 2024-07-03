@@ -60,11 +60,9 @@ impl<DB: Database> Segment<DB> for StaticFileTransactions {
     }
 
     fn mode(&self) -> Option<PruneMode> {
-        Some(PruneMode::before_inclusive(
-            self.static_file_provider
-                .get_highest_static_file_block(StaticFileSegment::Transactions)
-                .unwrap_or_default(),
-        ))
+        self.static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Transactions)
+            .map(PruneMode::before_inclusive)
     }
 
     fn purpose(&self) -> PrunePurpose {
