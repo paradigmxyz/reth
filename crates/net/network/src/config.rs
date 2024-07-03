@@ -14,7 +14,7 @@ use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_primitives::{ForkFilter, Head};
-use reth_storage_api::{BlockReader, HeaderProvider};
+use reth_storage_api::{BlockNumReader, BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
@@ -116,6 +116,16 @@ impl<C> NetworkConfig<C> {
     /// Returns the address for the incoming `RLPx` connection listener.
     pub const fn listener_addr(&self) -> &SocketAddr {
         &self.listener_addr
+    }
+}
+
+impl<C> NetworkConfig<C>
+where
+    C: BlockNumReader,
+{
+    /// Convenience method for calling [`NetworkManager::new`].
+    pub async fn manager(self) -> Result<NetworkManager<C>, NetworkError> {
+        NetworkManager::new(self).await
     }
 }
 
