@@ -25,7 +25,8 @@ reth-eth-wire.workspace = true
 reth-ecies.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
-reth-provider.workspace = true
+reth-storage-api.workspace = true
+reth-provider = { workspace = true, optional = true }
 reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-network-peers.workspace = true
@@ -98,7 +99,7 @@ criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 default = ["serde"]
 geth-tests = []
 serde = ["dep:serde", "dep:humantime-serde", "secp256k1/serde", "enr/serde", "dep:serde_json", "reth-network-types/serde"]
-test-utils = ["reth-provider/test-utils", "dep:tempfile", "reth-transaction-pool/test-utils", "reth-network-types/test-utils"]
+test-utils = ["dep:reth-provider", "reth-provider?/test-utils", "dep:tempfile", "reth-transaction-pool/test-utils", "reth-network-types/test-utils"]
 
 [[bench]]
 name = "bench"
