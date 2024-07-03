@@ -68,6 +68,7 @@ mod tests {
     use reth_rpc_eth_types::{
         EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
     };
+    use reth_rpc_server_types::constants::DEFAULT_ETH_PROOF_WINDOW;
     use reth_tasks::pool::BlockingTaskPool;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
 
@@ -91,7 +92,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(noop_provider, Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
-            0,
+            DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
             evm_config,
