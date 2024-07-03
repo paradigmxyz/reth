@@ -107,7 +107,7 @@ impl<E> ExecutionStage<E> {
 
     /// Create an execution stage with the provided executor.
     ///
-    /// The commit threshold will be set to `10_000`.
+    /// The commit threshold will be set to [`MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD`].
     pub fn new_with_executor(executor_provider: E) -> Self {
         Self::new(
             executor_provider,
