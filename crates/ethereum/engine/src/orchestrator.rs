@@ -1,4 +1,4 @@
-use futures::StreamExt;
+use futures::{ready, StreamExt};
 use pin_project::pin_project;
 use reth_beacon_consensus::{BeaconEngineMessage, EthBeaconConsensus};
 use reth_chainspec::ChainSpec;
@@ -79,10 +79,9 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // Call poll on the inner orchestrator.
-        match self.project().orchestrator.poll_next_unpin(cx) {
-            Poll::Ready(Some(_event)) => Poll::Ready(Ok(())),
-            Poll::Ready(None) => Poll::Ready(Ok(())),
-            Poll::Pending => Poll::Pending,
+        match ready!(self.project().orchestrator.poll_next_unpin(cx)) {
+            Some(_event) => Poll::Ready(Ok(())),
+            None => Poll::Ready(Ok(())),
         }
     }
 }
