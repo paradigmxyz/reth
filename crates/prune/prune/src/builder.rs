@@ -3,7 +3,7 @@ use reth_chainspec::MAINNET;
 use reth_config::PruneConfig;
 use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
-use reth_provider::ProviderFactory;
+use reth_provider::{ProviderFactory, StaticFileProviderFactory};
 use reth_prune_types::PruneModes;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -82,7 +82,10 @@ impl PrunerBuilder {
 
     /// Builds a [Pruner] from the current configuration.
     pub fn build<DB: Database>(self, provider_factory: ProviderFactory<DB>) -> Pruner<DB> {
-        let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
+        let segments = SegmentSet::<DB>::from_components(
+            provider_factory.static_file_provider(),
+            self.segments,
+        );
 
         Pruner::new(
             provider_factory,

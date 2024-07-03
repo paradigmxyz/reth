@@ -1,17 +1,13 @@
 //! Support for pruning.
 
 use crate::{
-    segments::{
-        PruneInput, Segment, StaticFileHeaders, StaticFileReceipts, StaticFileTransactions,
-    },
+    segments::{PruneInput, Segment},
     Metrics, PrunerError, PrunerEvent,
 };
 use alloy_primitives::BlockNumber;
 use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
-use reth_provider::{
-    DatabaseProviderRW, ProviderFactory, PruneCheckpointReader, StaticFileProviderFactory,
-};
+use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
 use reth_prune_types::{PruneLimiter, PruneProgress, PruneSegment};
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
@@ -66,12 +62,6 @@ impl<DB: Database> Pruner<DB> {
         timeout: Option<Duration>,
         finished_exex_height: watch::Receiver<FinishedExExHeight>,
     ) -> Self {
-        let static_file_segments: [Box<dyn Segment<DB>>; 3] = [
-            Box::new(StaticFileHeaders::new(provider_factory.static_file_provider())),
-            Box::new(StaticFileReceipts::new(provider_factory.static_file_provider())),
-            Box::new(StaticFileTransactions::new(provider_factory.static_file_provider())),
-        ];
-        let segments = static_file_segments.into_iter().chain(segments).collect();
         Self {
             provider_factory,
             segments,
