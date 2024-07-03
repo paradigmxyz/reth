@@ -15,7 +15,6 @@ workspace = true
 reth-beacon-consensus.workspace = true
 reth-chainspec.workspace = true
 reth-db-api.workspace = true
-reth-engine-primitives.workspace = true
 reth-engine-tree.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-network-p2p.workspace = true
@@ -27,9 +26,6 @@ futures.workspace = true
 pin-project.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
-
-## misc
-eyre.workspace = true
 
 [dev-dependencies]
 reth-engine-tree = { workspace = true, features = ["test-utils"] }
