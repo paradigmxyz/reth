@@ -1,6 +1,6 @@
 FROM ubuntu
 
-COPY artifacts/reth /usr/local/bin
+COPY dist/reth /usr/local/bin
 
 COPY LICENSE-* ./
 
