@@ -172,9 +172,8 @@ where
     type Request = BeaconEngineMessage<T>;
 
     fn on_event(&mut self, event: FromEngine<Self::Request>) {
-        // delegate to the tree, given that we are not currently using it here
-        // we explicitly drop the future to prevent warnings
-        std::mem::drop(self.to_tree.send(event));
+        // delegate to the tree
+        let _ = self.to_tree.send(event);
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
