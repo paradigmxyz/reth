@@ -8,6 +8,7 @@ use reth_db_api::{
 };
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError};
 use reth_trie::StateRoot;
+use reth_trie_db::trie::StateRootDb;
 use tracing::*;
 
 /// `reth recover storage-tries` command

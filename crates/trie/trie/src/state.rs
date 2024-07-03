@@ -1,20 +1,10 @@
 use crate::{
-    hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    proof::Proof,
-    updates::TrieUpdates,
-    Nibbles, StateRoot,
+    trie_cursor::{TrieRangeWalker, TrieRangeWalkerFactory},
+    Nibbles,
 };
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_db::{tables, DatabaseError};
-use reth_db_api::{
-    cursor::DbCursorRO,
-    models::{AccountBeforeTx, BlockNumberAddress},
-    transaction::DbTx,
-};
-use reth_execution_errors::StateRootError;
 use reth_primitives::{keccak256, Account, Address, BlockNumber, B256, U256};
-use reth_trie_common::AccountProof;
 use revm::db::BundleAccount;
 use std::{
     collections::{hash_map, HashMap, HashSet},
@@ -67,15 +57,15 @@ impl HashedPostState {
     ///
     /// NOTE: In order to have the resulting [`HashedPostState`] be a correct
     /// overlay of the plain state, the end of the range must be the current tip.
-    pub fn from_revert_range<TX: DbTx>(
-        tx: &TX,
+    pub fn from_revert_range<T: TrieRangeWalkerFactory>(
+        tx: &T,
         range: RangeInclusive<BlockNumber>,
-    ) -> Result<Self, DatabaseError> {
+    ) -> Result<Self, T::Err> {
         // Iterate over account changesets and record value before first occurring account change.
         let mut accounts = HashMap::<Address, Option<Account>>::default();
-        let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
+        let mut account_changesets_cursor = tx.account_change_sets()?;
         for entry in account_changesets_cursor.walk_range(range.clone())? {
-            let (_, AccountBeforeTx { address, info }) = entry?;
+            let (address, info) = entry?;
             if let hash_map::Entry::Vacant(entry) = accounts.entry(address) {
                 entry.insert(info);
             }
@@ -83,12 +73,12 @@ impl HashedPostState {
 
         // Iterate over storage changesets and record value before first occurring storage change.
         let mut storages = HashMap::<Address, HashMap<B256, U256>>::default();
-        let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
-        for entry in storage_changesets_cursor.walk_range(BlockNumberAddress::range(range))? {
-            let (BlockNumberAddress((_, address)), storage) = entry?;
+        let mut storage_changesets_cursor = tx.storage_change_sets()?;
+        for entry in storage_changesets_cursor.walk_range(range)? {
+            let (address, key, value) = entry?;
             let account_storage = storages.entry(address).or_default();
-            if let hash_map::Entry::Vacant(entry) = account_storage.entry(storage.key) {
-                entry.insert(storage.value);
+            if let hash_map::Entry::Vacant(entry) = account_storage.entry(key) {
+                entry.insert(value);
             }
         }
 
@@ -201,74 +191,6 @@ impl HashedPostState {
 
         TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
     }
-
-    /// Calculate the state root for this [`HashedPostState`].
-    /// Internally, this method retrieves prefixsets and uses them
-    /// to calculate incremental state root.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use reth_db::test_utils::create_test_rw_db;
-    /// use reth_db_api::database::Database;
-    /// use reth_primitives::{Account, U256};
-    /// use reth_trie::HashedPostState;
-    ///
-    /// // Initialize the database
-    /// let db = create_test_rw_db();
-    ///
-    /// // Initialize hashed post state
-    /// let mut hashed_state = HashedPostState::default();
-    /// hashed_state.accounts.insert(
-    ///     [0x11; 32].into(),
-    ///     Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
-    /// );
-    ///
-    /// // Calculate the state root
-    /// let tx = db.tx().expect("failed to create transaction");
-    /// let state_root = hashed_state.state_root(&tx);
-    /// ```
-    ///
-    /// # Returns
-    ///
-    /// The state root for this [`HashedPostState`].
-    pub fn state_root<TX: DbTx>(&self, tx: &TX) -> Result<B256, StateRootError> {
-        let sorted = self.clone().into_sorted();
-        let prefix_sets = self.construct_prefix_sets().freeze();
-        StateRoot::from_tx(tx)
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
-            .with_prefix_sets(prefix_sets)
-            .root()
-    }
-
-    /// Calculates the state root for this [`HashedPostState`] and returns it alongside trie
-    /// updates. See [`Self::state_root`] for more info.
-    pub fn state_root_with_updates<TX: DbTx>(
-        &self,
-        tx: &TX,
-    ) -> Result<(B256, TrieUpdates), StateRootError> {
-        let sorted = self.clone().into_sorted();
-        let prefix_sets = self.construct_prefix_sets().freeze();
-        StateRoot::from_tx(tx)
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
-            .with_prefix_sets(prefix_sets)
-            .root_with_updates()
-    }
-
-    /// Generates the state proof for target account and slots on top of this [`HashedPostState`].
-    pub fn account_proof<TX: DbTx>(
-        &self,
-        tx: &TX,
-        address: Address,
-        slots: &[B256],
-    ) -> Result<AccountProof, StateRootError> {
-        let sorted = self.clone().into_sorted();
-        let prefix_sets = self.construct_prefix_sets();
-        Proof::from_tx(tx)
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
-            .with_prefix_sets_mut(prefix_sets)
-            .account_proof(address, slots)
-    }
 }
 
 /// Representation of in-memory hashed storage.
@@ -347,120 +269,4 @@ pub struct HashedStorageSorted {
     pub(crate) zero_valued_slots: HashSet<B256>,
     /// Flag indicating hether the storage was wiped or not.
     pub(crate) wiped: bool,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use reth_db::test_utils::create_test_rw_db;
-    use reth_db_api::database::Database;
-    use reth_primitives::hex;
-    use revm::{
-        db::states::BundleState,
-        primitives::{AccountInfo, HashMap},
-    };
-
-    #[test]
-    fn hashed_state_wiped_extension() {
-        let hashed_address = B256::default();
-        let hashed_slot = B256::with_last_byte(64);
-        let hashed_slot2 = B256::with_last_byte(65);
-
-        // Initialize post state storage
-        let original_slot_value = U256::from(123);
-        let mut hashed_state = HashedPostState::default().with_storages([(
-            hashed_address,
-            HashedStorage::from_iter(
-                false,
-                [(hashed_slot, original_slot_value), (hashed_slot2, original_slot_value)],
-            ),
-        )]);
-
-        // Update single slot value
-        let updated_slot_value = U256::from(321);
-        let extension = HashedPostState::default().with_storages([(
-            hashed_address,
-            HashedStorage::from_iter(false, [(hashed_slot, updated_slot_value)]),
-        )]);
-        hashed_state.extend(extension);
-
-        let account_storage = hashed_state.storages.get(&hashed_address);
-        assert_eq!(
-            account_storage.and_then(|st| st.storage.get(&hashed_slot)),
-            Some(&updated_slot_value)
-        );
-        assert_eq!(
-            account_storage.and_then(|st| st.storage.get(&hashed_slot2)),
-            Some(&original_slot_value)
-        );
-        assert_eq!(account_storage.map(|st| st.wiped), Some(false));
-
-        // Wipe account storage
-        let wiped_extension =
-            HashedPostState::default().with_storages([(hashed_address, HashedStorage::new(true))]);
-        hashed_state.extend(wiped_extension);
-
-        let account_storage = hashed_state.storages.get(&hashed_address);
-        assert_eq!(account_storage.map(|st| st.storage.is_empty()), Some(true));
-        assert_eq!(account_storage.map(|st| st.wiped), Some(true));
-
-        // Reinitialize single slot value
-        hashed_state.extend(HashedPostState::default().with_storages([(
-            hashed_address,
-            HashedStorage::from_iter(false, [(hashed_slot, original_slot_value)]),
-        )]));
-        let account_storage = hashed_state.storages.get(&hashed_address);
-        assert_eq!(
-            account_storage.and_then(|st| st.storage.get(&hashed_slot)),
-            Some(&original_slot_value)
-        );
-        assert_eq!(account_storage.and_then(|st| st.storage.get(&hashed_slot2)), None);
-        assert_eq!(account_storage.map(|st| st.wiped), Some(true));
-
-        // Reinitialize single slot value
-        hashed_state.extend(HashedPostState::default().with_storages([(
-            hashed_address,
-            HashedStorage::from_iter(false, [(hashed_slot2, updated_slot_value)]),
-        )]));
-        let account_storage = hashed_state.storages.get(&hashed_address);
-        assert_eq!(
-            account_storage.and_then(|st| st.storage.get(&hashed_slot)),
-            Some(&original_slot_value)
-        );
-        assert_eq!(
-            account_storage.and_then(|st| st.storage.get(&hashed_slot2)),
-            Some(&updated_slot_value)
-        );
-        assert_eq!(account_storage.map(|st| st.wiped), Some(true));
-    }
-
-    #[test]
-    fn from_bundle_state_with_rayon() {
-        let address1 = Address::with_last_byte(1);
-        let address2 = Address::with_last_byte(2);
-        let slot1 = U256::from(1015);
-        let slot2 = U256::from(2015);
-
-        let account1 = AccountInfo { nonce: 1, ..Default::default() };
-        let account2 = AccountInfo { nonce: 2, ..Default::default() };
-
-        let bundle_state = BundleState::builder(2..=2)
-            .state_present_account_info(address1, account1)
-            .state_present_account_info(address2, account2)
-            .state_storage(address1, HashMap::from([(slot1, (U256::ZERO, U256::from(10)))]))
-            .state_storage(address2, HashMap::from([(slot2, (U256::ZERO, U256::from(20)))]))
-            .build();
-        assert_eq!(bundle_state.reverts.len(), 1);
-
-        let post_state = HashedPostState::from_bundle_state(&bundle_state.state);
-        assert_eq!(post_state.accounts.len(), 2);
-        assert_eq!(post_state.storages.len(), 2);
-
-        let db = create_test_rw_db();
-        let tx = db.tx().expect("failed to create transaction");
-        assert_eq!(
-            post_state.state_root(&tx).unwrap(),
-            hex!("b464525710cafcf5d4044ac85b72c08b1e76231b8d91f288fe438cc41d8eaafd")
-        );
-    }
 }

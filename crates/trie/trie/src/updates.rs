@@ -1,11 +1,7 @@
 use crate::{
-    walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles, StorageTrieEntry,
-    StoredBranchNode, StoredNibbles, StoredNibblesSubKey,
-};
-use reth_db::tables;
-use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    transaction::{DbTx, DbTxMut},
+    trie_cursor::{TrieCursor, TrieCursorMut, TrieCursorRwFactory, TrieDupCursorRw},
+    walker::TrieWalker,
+    BranchNodeCompact, HashBuilder, Nibbles,
 };
 use reth_primitives::B256;
 use std::collections::{HashMap, HashSet};
@@ -17,6 +13,19 @@ pub struct TrieUpdates {
     pub(crate) account_nodes: HashMap<Nibbles, BranchNodeCompact>,
     pub(crate) removed_nodes: HashSet<Nibbles>,
     pub(crate) storage_tries: HashMap<B256, StorageTrieUpdates>,
+}
+
+#[cfg(feature = "test-utils")]
+impl TrieUpdates {
+    /// Changed storage tries.
+    pub const fn storage_tries(&self) -> &HashMap<B256, StorageTrieUpdates> {
+        &self.storage_tries
+    }
+
+    /// Nodes removed from the trie.
+    pub const fn removed_nodes(&self) -> &HashSet<Nibbles> {
+        &self.removed_nodes
+    }
 }
 
 impl TrieUpdates {
@@ -90,9 +99,9 @@ impl TrieUpdates {
     /// # Returns
     ///
     /// The number of storage trie entries updated in the database.
-    pub fn write_to_database<TX>(self, tx: &TX) -> Result<usize, reth_db::DatabaseError>
+    pub fn write_to_database<F>(self, factory: &F) -> Result<usize, F::Err>
     where
-        TX: DbTx + DbTxMut,
+        F: TrieCursorRwFactory,
     {
         if self.is_empty() {
             return Ok(0)
@@ -112,14 +121,13 @@ impl TrieUpdates {
         // Sort trie node updates.
         account_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-        let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
-        for (key, updated_node) in account_updates {
-            let nibbles = StoredNibbles(key);
+        let mut account_trie_cursor = factory.account_trie_cursor()?;
+        for (nibbles, updated_node) in account_updates {
             match updated_node {
                 Some(node) => {
-                    if !nibbles.0.is_empty() {
+                    if !nibbles.is_empty() {
                         num_entries += 1;
-                        account_trie_cursor.upsert(nibbles, StoredBranchNode(node))?;
+                        account_trie_cursor.upsert(nibbles, node)?;
                     }
                 }
                 None => {
@@ -133,7 +141,7 @@ impl TrieUpdates {
 
         let mut storage_tries = Vec::from_iter(self.storage_tries);
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
+        let mut storage_trie_cursor = factory.storage_trie_cursor()?;
         for (hashed_address, storage_trie_updates) in storage_tries {
             let updated_storage_entries =
                 storage_trie_updates.write_with_cursor(&mut storage_trie_cursor, hashed_address)?;
@@ -154,6 +162,24 @@ pub struct StorageTrieUpdates {
     pub(crate) storage_nodes: HashMap<Nibbles, BranchNodeCompact>,
     /// Collection of removed storage trie nodes.
     pub(crate) removed_nodes: HashSet<Nibbles>,
+}
+
+#[cfg(feature = "test-utils")]
+impl StorageTrieUpdates {
+    /// Creates a new storage trie updates that are not marked as deleted.
+    pub fn new(updates: HashMap<Nibbles, BranchNodeCompact>) -> Self {
+        Self { storage_nodes: updates, ..Default::default() }
+    }
+
+    /// Changed storage nodes.
+    pub const fn storage_nodes(&self) -> &HashMap<Nibbles, BranchNodeCompact> {
+        &self.storage_nodes
+    }
+
+    /// Removed storage nodes.
+    pub const fn removed_nodes(&self) -> &HashSet<Nibbles> {
+        &self.removed_nodes
+    }
 }
 
 impl StorageTrieUpdates {
@@ -219,19 +245,15 @@ impl StorageTrieUpdates {
     }
 
     /// Initializes a storage trie cursor and writes updates to database.
-    pub fn write_to_database<TX>(
-        self,
-        tx: &TX,
-        hashed_address: B256,
-    ) -> Result<usize, reth_db::DatabaseError>
+    pub fn write_to_database<F>(self, factory: &F, hashed_address: B256) -> Result<usize, F::Err>
     where
-        TX: DbTx + DbTxMut,
+        F: TrieCursorRwFactory,
     {
         if self.is_empty() {
             return Ok(0)
         }
 
-        let mut cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
+        let mut cursor = factory.storage_trie_cursor()?;
         self.write_with_cursor(&mut cursor, hashed_address)
     }
 
@@ -240,16 +262,9 @@ impl StorageTrieUpdates {
     /// # Returns
     ///
     /// The number of storage trie entries updated in the database.
-    fn write_with_cursor<C>(
-        self,
-        cursor: &mut C,
-        hashed_address: B256,
-    ) -> Result<usize, reth_db::DatabaseError>
+    fn write_with_cursor<C, Err>(self, cursor: &mut C, hashed_address: B256) -> Result<usize, Err>
     where
-        C: DbCursorRO<tables::StoragesTrie>
-            + DbCursorRW<tables::StoragesTrie>
-            + DbDupCursorRO<tables::StoragesTrie>
-            + DbDupCursorRW<tables::StoragesTrie>,
+        C: TrieDupCursorRw<Err, Err>,
     {
         // The storage trie for this account has to be deleted.
         if self.is_deleted && cursor.seek_exact(hashed_address)?.is_some() {
@@ -270,11 +285,10 @@ impl StorageTrieUpdates {
         let mut num_entries = 0;
         for (nibbles, maybe_updated) in storage_updates.into_iter().filter(|(n, _)| !n.is_empty()) {
             num_entries += 1;
-            let nibbles = StoredNibblesSubKey(nibbles);
             // Delete the old entry if it exists.
             if cursor
                 .seek_by_key_subkey(hashed_address, nibbles.clone())?
-                .filter(|e| e.nibbles == nibbles)
+                .filter(|(key, _)| *key == nibbles)
                 .is_some()
             {
                 cursor.delete_current()?;
@@ -282,7 +296,7 @@ impl StorageTrieUpdates {
 
             // There is an updated version of this node, insert new entry.
             if let Some(node) = maybe_updated {
-                cursor.upsert(hashed_address, StorageTrieEntry { nibbles, node })?;
+                cursor.upsert(hashed_address, nibbles, node)?;
             }
         }
 

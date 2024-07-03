@@ -20,6 +20,7 @@ use reth_provider::{
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
+use reth_trie_db::{trie::StateRootDb, TxRefWrapper};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -464,7 +465,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
             .root_with_progress()?
         {
             StateRootProgress::Progress(state, _, updates) => {
-                let updated_len = updates.write_to_database(tx)?;
+                let updated_len = updates.write_to_database(&TxRefWrapper::from(tx))?;
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
@@ -484,7 +485,7 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
                 }
             }
             StateRootProgress::Complete(root, _, updates) => {
-                let updated_len = updates.write_to_database(tx)?;
+                let updated_len = updates.write_to_database(&TxRefWrapper::from(tx))?;
                 total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",

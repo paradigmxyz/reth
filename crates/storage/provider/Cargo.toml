@@ -27,6 +27,7 @@ reth-db-api.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
+reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-evm.workspace = true

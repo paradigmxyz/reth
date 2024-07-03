@@ -6376,6 +6376,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie",
+ "reth-trie-db",
  "serde",
  "serde_json",
  "similar-asserts",
@@ -6555,6 +6556,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-testing-utils",
  "reth-trie",
+ "reth-trie-db",
  "reth-trie-parallel",
  "tokio",
  "tracing",
@@ -6651,6 +6653,7 @@ dependencies = [
  "reth-static-file",
  "reth-static-file-types",
  "reth-trie",
+ "reth-trie-db",
  "serde",
  "serde_json",
  "tokio",
@@ -6858,6 +6861,7 @@ dependencies = [
  "reth-provider",
  "reth-stages-types",
  "reth-trie",
+ "reth-trie-db",
  "serde",
  "serde_json",
  "thiserror",
@@ -7088,6 +7092,7 @@ dependencies = [
  "reth-tokio-util",
  "reth-tracing",
  "reth-trie",
+ "reth-trie-db",
  "revm",
  "tokio",
  "tokio-stream",
@@ -8167,6 +8172,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-testing-utils",
  "reth-trie",
+ "reth-trie-db",
  "revm",
  "strum",
  "tempfile",
@@ -8582,6 +8588,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-testing-utils",
  "reth-trie",
+ "reth-trie-db",
  "serde_json",
  "tempfile",
  "thiserror",
@@ -8799,8 +8806,6 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rayon",
  "reth-chainspec",
- "reth-db",
- "reth-db-api",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives",
@@ -8848,6 +8853,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-trie-db"
+version = "1.0.1"
+dependencies = [
+ "alloy-rlp",
+ "auto_impl",
+ "criterion",
+ "derive_more",
+ "metrics",
+ "once_cell",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rayon",
+ "reth-chainspec",
+ "reth-db",
+ "reth-db-api",
+ "reth-execution-errors",
+ "reth-metrics",
+ "reth-primitives",
+ "reth-provider",
+ "reth-stages-types",
+ "reth-storage-errors",
+ "reth-trie",
+ "reth-trie-common",
+ "revm",
+ "serde",
+ "serde_json",
+ "similar-asserts",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "triehash",
+]
+
+[[package]]
 name = "reth-trie-parallel"
 version = "1.0.1"
 dependencies = [
@@ -8868,6 +8907,7 @@ dependencies = [
  "reth-provider",
  "reth-tasks",
  "reth-trie",
+ "reth-trie-db",
  "thiserror",
  "tokio",
  "tracing",

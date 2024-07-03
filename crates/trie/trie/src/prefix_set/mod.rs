@@ -5,9 +5,6 @@ use std::{
     sync::Arc,
 };
 
-mod loader;
-pub use loader::PrefixSetLoader;
-
 /// Collection of mutable prefix sets.
 #[derive(Default, Debug)]
 pub struct TriePrefixSetsMut {

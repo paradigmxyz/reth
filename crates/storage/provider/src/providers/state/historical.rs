@@ -16,6 +16,10 @@ use reth_primitives::{
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
+use reth_trie_db::{
+    state::{account_proof, state_root, state_root_with_updates},
+    TxRefWrapper,
+};
 use revm::db::BundleState;
 use std::fmt::Debug;
 
@@ -131,7 +135,10 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             );
         }
 
-        Ok(HashedPostState::from_revert_range(self.tx, self.block_number..=tip)?)
+        Ok(HashedPostState::from_revert_range(
+            &TxRefWrapper::from(self.tx),
+            self.block_number..=tip,
+        )?)
     }
 
     fn history_info<T, K>(
@@ -260,14 +267,15 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
     fn state_root(&self, state: &BundleState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(HashedPostState::from_bundle_state(&state.state));
-        revert_state.state_root(self.tx).map_err(|err| ProviderError::Database(err.into()))
+
+        state_root(revert_state, self.tx).map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn state_root_with_updates(&self, state: &BundleState) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(HashedPostState::from_bundle_state(&state.state));
-        revert_state
-            .state_root_with_updates(self.tx)
+
+        state_root_with_updates(revert_state, self.tx)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
@@ -282,8 +290,7 @@ impl<'b, TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'b, TX> {
     ) -> ProviderResult<AccountProof> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(HashedPostState::from_bundle_state(&state.state));
-        revert_state
-            .account_proof(self.tx, address, slots)
+        account_proof(revert_state, self.tx, address, slots)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }

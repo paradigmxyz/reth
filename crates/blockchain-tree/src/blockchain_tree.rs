@@ -26,6 +26,7 @@ use reth_provider::{
 use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
+use reth_trie_db::state::state_root_with_updates;
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::Arc,
@@ -1233,9 +1234,9 @@ where
                     // State root calculation can take a while, and we're sure no write transaction
                     // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/6168.
                     .disable_long_read_transaction_safety();
-                let (state_root, trie_updates) = hashed_state
-                    .state_root_with_updates(provider.tx_ref())
-                    .map_err(Into::<BlockValidationError>::into)?;
+                let (state_root, trie_updates) =
+                    state_root_with_updates(hashed_state.clone(), provider.tx_ref())
+                        .map_err(Into::<BlockValidationError>::into)?;
                 let tip = blocks.tip();
                 if state_root != tip.state_root {
                     return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
@@ -1393,6 +1394,7 @@ mod tests {
     };
     use reth_stages_api::StageCheckpoint;
     use reth_trie::{root::state_root_unhashed, StateRoot};
+    use reth_trie_db::trie::StateRootDb;
     use std::collections::HashMap;
 
     fn setup_externals(

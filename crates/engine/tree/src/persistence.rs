@@ -9,6 +9,7 @@ use reth_provider::{
     ProviderFactory, StageCheckpointWriter, StateWriter,
 };
 use reth_prune::{PruneProgress, Pruner};
+use reth_trie_db::TxRefWrapper;
 use std::sync::mpsc::{Receiver, SendError, Sender};
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -86,7 +87,7 @@ impl<DB: Database> Persistence<DB> {
                 let trie_updates = block.trie_updates().clone();
                 let hashed_state = block.hashed_state();
                 HashedStateChanges(hashed_state.clone()).write_to_db(provider_rw.tx_ref())?;
-                trie_updates.write_to_database(provider_rw.tx_ref())?;
+                trie_updates.write_to_database(&TxRefWrapper::from(provider_rw.tx_ref()))?;
             }
 
             // update history indices

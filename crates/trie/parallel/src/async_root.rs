@@ -1,3 +1,5 @@
+#[cfg(feature = "metrics")]
+use crate::metrics::ParallelStateRootMetrics;
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
@@ -14,12 +16,10 @@ use reth_trie::{
     walker::TrieWalker,
     HashBuilder, HashedPostState, Nibbles, StorageRoot, TrieAccount,
 };
+use reth_trie_db::TxRefWrapper;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use tracing::*;
-
-#[cfg(feature = "metrics")]
-use crate::metrics::ParallelStateRootMetrics;
 
 /// Async state root calculator.
 ///
@@ -107,9 +107,10 @@ where
             let handle =
                 self.blocking_pool.spawn_fifo(move || -> Result<_, AsyncStateRootError> {
                     let provider = view.provider_ro()?;
+                    let factory = TxRefWrapper::from(provider.tx_ref());
                     Ok(StorageRoot::new_hashed(
-                        provider.tx_ref(),
-                        HashedPostStateCursorFactory::new(provider.tx_ref(), &hashed_state_sorted),
+                        factory,
+                        HashedPostStateCursorFactory::new(factory, &hashed_state_sorted),
                         hashed_address,
                         #[cfg(feature = "metrics")]
                         metrics,
@@ -124,7 +125,7 @@ where
         let mut trie_updates = TrieUpdates::default();
 
         let provider_ro = self.view.provider_ro()?;
-        let tx = provider_ro.tx_ref();
+        let tx = TxRefWrapper::from(provider_ro.tx_ref());
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(tx, &hashed_state_sorted);
         let trie_cursor_factory = tx;
 

@@ -13,6 +13,7 @@ use reth_primitives::{
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
+use reth_trie_db::state::{account_proof, state_root, state_root_with_updates};
 use revm::db::BundleState;
 
 /// State provider over latest state that takes tx reference.
@@ -76,8 +77,7 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
 
 impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
     fn state_root(&self, bundle_state: &BundleState) -> ProviderResult<B256> {
-        HashedPostState::from_bundle_state(&bundle_state.state)
-            .state_root(self.tx)
+        state_root(HashedPostState::from_bundle_state(&bundle_state.state), self.tx)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -85,8 +85,7 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
         &self,
         bundle_state: &BundleState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        HashedPostState::from_bundle_state(&bundle_state.state)
-            .state_root_with_updates(self.tx)
+        state_root_with_updates(HashedPostState::from_bundle_state(&bundle_state.state), self.tx)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
@@ -98,9 +97,13 @@ impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        Ok(HashedPostState::from_bundle_state(&bundle_state.state)
-            .account_proof(self.tx, address, slots)
-            .map_err(Into::<reth_db::DatabaseError>::into)?)
+        Ok(account_proof(
+            HashedPostState::from_bundle_state(&bundle_state.state),
+            self.tx,
+            address,
+            slots,
+        )
+        .map_err(Into::<reth_db::DatabaseError>::into)?)
     }
 }
 

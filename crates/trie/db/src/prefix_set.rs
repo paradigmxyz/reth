@@ -1,4 +1,6 @@
-use super::{PrefixSetMut, TriePrefixSets};
+//! The implementation of a container for storing intermediate changes to a trie.
+//! The container indicates when the trie has been modified.
+
 use crate::Nibbles;
 use derive_more::Deref;
 use reth_db::tables;
@@ -9,6 +11,7 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_primitives::{keccak256, BlockNumber, StorageEntry, B256};
+use reth_trie::prefix_set::{PrefixSetMut, TriePrefixSets};
 use std::{
     collections::{HashMap, HashSet},
     ops::RangeInclusive,

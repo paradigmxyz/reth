@@ -38,6 +38,7 @@ reth-static-file.workspace = true
 reth-tasks.workspace = true
 reth-tokio-util.workspace = true
 reth-trie.workspace = true
+reth-trie-db.workspace = true
 revm.workspace = true
 
 # common
@@ -71,8 +72,8 @@ assert_matches.workspace = true
 
 [features]
 test-utils = [
-  "reth-db/test-utils",
-  "reth-network-p2p/test-utils",
-  "reth-stages/test-utils",
-  "reth-tracing"
+    "reth-db/test-utils",
+    "reth-network-p2p/test-utils",
+    "reth-stages/test-utils",
+    "reth-tracing"
 ]

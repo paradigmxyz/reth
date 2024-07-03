@@ -12,6 +12,7 @@ use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
 };
+use reth_trie_db::{trie::StateRootDb, TxRefWrapper};
 use reth_trie_parallel::{async_root::AsyncStateRoot, parallel_root::ParallelStateRoot};
 use std::collections::HashMap;
 
@@ -30,7 +31,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
             HashedStateChanges(db_state).write_to_db(provider_rw.tx_ref()).unwrap();
             let (_, updates) =
                 StateRoot::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
-            updates.write_to_database(provider_rw.tx_ref()).unwrap();
+            updates.write_to_database(&TxRefWrapper::from(provider_rw.tx_ref())).unwrap();
             provider_rw.commit().unwrap();
         }
 
@@ -48,7 +49,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
                 |(provider, sorted_state, prefix_sets)| async move {
                     StateRoot::from_tx(provider.tx_ref())
                         .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                            provider.tx_ref(),
+                            TxRefWrapper::from(provider.tx_ref()),
                             &sorted_state,
                         ))
                         .with_prefix_sets(prefix_sets)

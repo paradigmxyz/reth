@@ -26,6 +26,7 @@ mod constants;
 mod account_hashing;
 pub use account_hashing::*;
 use reth_stages_api::{ExecInput, Stage, UnwindInput};
+use reth_trie_db::{trie::StateRootDb, TxRefWrapper};
 
 pub(crate) type StageRange = (ExecInput, UnwindInput);
 
@@ -140,7 +141,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
 
         db.insert_changesets(transitions, None).unwrap();
         db.commit(|tx| {
-            updates.write_to_database(tx)?;
+            updates.write_to_database(&TxRefWrapper::from(tx))?;
             Ok(())
         })
         .unwrap();
