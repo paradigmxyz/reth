@@ -19,8 +19,7 @@ jobs:
   prepare:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: mkdir artifacts
@@ -178,8 +177,7 @@ jobs:
             include: [frontier/]
     needs: prepare
     name: run
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     permissions:
       issues: write
     steps:
