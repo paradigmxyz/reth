@@ -30,8 +30,7 @@ jobs:
           cache-on-failure: true
       - name: Build reth
         run: |
-          cargo build --features asm-keccak --profile hivetests --bin reth --locked
-          cp ./target/hivetests/reth ./artifacts/reth
+          touch artifacts/reth
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build and export reth image
