@@ -276,7 +276,7 @@ where
             })?;
             execution_duration += execute_start.elapsed();
 
-            // Log execution speed
+            // Log execution throughput
             if execution_duration - last_duration >= log_speed_duration {
                 info!(
                     target: "sync::stages::execution",
