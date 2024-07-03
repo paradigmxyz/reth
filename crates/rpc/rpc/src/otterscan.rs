@@ -1,6 +1,6 @@
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
-use jsonrpsee::core::RpcResult;
+use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::helpers::TraceExt;
@@ -237,7 +237,7 @@ where
         // this should not happen, only if the state of the chain is inconsistent
         let Some(num) = num else {
             debug!(target: "rpc::otterscan", address = ?address, "Contract not found in history state");
-            return Err(internal_rpc_err("contract not found in hitory state"))
+            return Err(internal_rpc_err("contract not found in history state"))
         };
 
         let traces = self
@@ -254,9 +254,9 @@ where
                 traces
                     .into_iter()
                     .flatten()
-                    .filter_map(|tx_trace| {
+                    .map(|tx_trace| {
                         let trace = tx_trace.trace;
-                        match (trace.action, trace.result, trace.error) {
+                        Ok(match (trace.action, trace.result, trace.error) {
                             (
                                 Action::Create(CreateAction { from: creator, .. }),
                                 Some(TraceOutput::Create(CreateOutput {
@@ -264,14 +264,18 @@ where
                                 })),
                                 None,
                             ) if contract == address => Some(ContractCreator {
-                                hash: tx_trace.transaction_hash.unwrap_or_default(),
+                                hash: tx_trace.transaction_hash.ok_or_else(|| {
+                                    internal_rpc_err("transaction hash is missing")
+                                })?,
                                 creator,
                             }),
                             _ => None,
-                        }
+                        })
                     })
-                    .collect::<Vec<_>>()
-            });
+                    .filter_map(Result::transpose)
+                    .collect::<Result<Vec<_>, ErrorObjectOwned>>()
+            })
+            .transpose()?;
 
         // A contract maybe created and then destroyed in multiple transactions, here we
         // return the first found transaction, this behavior is consistent with etherscan's
