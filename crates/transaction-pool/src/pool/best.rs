@@ -464,8 +464,8 @@ mod tests {
 
         pool.add_transaction(Arc::new(f.validated(tx1.clone())), 0);
         pool.add_transaction(Arc::new(f.validated(tx2.clone())), 0);
-        pool.add_transaction(Arc::new(f.validated(tx3.clone())), 0);
-        pool.add_transaction(Arc::new(f.validated(tx4.clone())), 0);
+        pool.add_transaction(Arc::new(f.validated(tx3)), 0);
+        pool.add_transaction(Arc::new(f.validated(tx4)), 0);
 
         let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
 
