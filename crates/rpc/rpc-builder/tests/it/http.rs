@@ -336,10 +336,10 @@ where
             .err()
             .unwrap()
     ));
-    OtterscanClient::get_transaction_by_sender_and_nonce(client, sender, nonce)
+    assert!(OtterscanClient::get_transaction_by_sender_and_nonce(client, sender, nonce)
         .await
         .err()
-        .unwrap();
+        .is_none());
     assert!(is_unimplemented(
         OtterscanClient::get_contract_creator(client, address).await.err().unwrap()
     ));
@@ -552,7 +552,7 @@ async fn test_eth_logs_args() {
     let client = handle.http_client().unwrap();
 
     let mut params = ArrayParams::default();
-    params.insert( serde_json::json!({"blockHash":"0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"})).unwrap();
+    params.insert(serde_json::json!({"blockHash":"0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"})).unwrap();
 
     let resp = client.request::<Vec<Log>, _>("eth_getLogs", params).await;
     // block does not exist
