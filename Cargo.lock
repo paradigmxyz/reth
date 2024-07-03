@@ -7116,6 +7116,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-ethereum-cli"
+version = "1.0.0"
+
+[[package]]
 name = "reth-ethereum-consensus"
 version = "1.0.0"
 dependencies = [
