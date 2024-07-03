@@ -14,7 +14,7 @@ use reth_rpc_types::{
         },
         parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
-    BlockTransactions, Header, Transaction,
+    BlockTransactions, Header,
 };
 use revm_inspectors::{
     tracing::TracingInspectorConfig,
@@ -208,9 +208,9 @@ where
     /// Handler for `getTransactionBySenderAndNonce`
     async fn get_transaction_by_sender_and_nonce(
         &self,
-        _sender: Address,
-        _nonce: u64,
-    ) -> RpcResult<Option<Transaction>> {
+        sender: Address,
+        nonce: u64,
+    ) -> RpcResult<Option<TxHash>> {
         Err(internal_rpc_err("unimplemented"))
     }
 

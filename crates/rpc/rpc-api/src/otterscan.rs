@@ -5,7 +5,7 @@ use reth_rpc_types::{
         BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
         TransactionsWithReceipts,
     },
-    Header, Transaction,
+    Header,
 };
 
 /// Otterscan rpc interface.
@@ -87,7 +87,7 @@ pub trait Otterscan {
         &self,
         sender: Address,
         nonce: u64,
-    ) -> RpcResult<Option<Transaction>>;
+    ) -> RpcResult<Option<TxHash>>;
 
     /// Gets the transaction hash and the address who created a contract.
     #[method(name = "getContractCreator")]
