@@ -1,20 +1,20 @@
-import json
+import yaml
 import sys
 import argparse
 
 # Argument parser setup
 parser = argparse.ArgumentParser(description="Check for unexpected test results based on an exclusion list.")
-parser.add_argument("main_json", help="Path to the main JSON file.")
-parser.add_argument("--exclusion", required=True, help="Path to the exclusion JSON file.")
+parser.add_argument("main_yaml", help="Path to the main YAML file.")
+parser.add_argument("--exclusion", required=True, help="Path to the exclusion YAML file.")
 args = parser.parse_args()
 
-# Load main JSON
-with open(args.main_json, 'r') as file:
-    main_data = json.load(file)
+# Load main YAML
+with open(args.main_yaml, 'r') as file:
+    main_data = yaml.safe_load(file)
 
-# Load exclusion JSON
+# Load exclusion YAML
 with open(args.exclusion, 'r') as file:
-    exclusion_data = json.load(file)
+    exclusion_data = yaml.safe_load(file)
     exclusions = exclusion_data.get(main_data['name'], [])
 
 # Collect unexpected failures and passes
