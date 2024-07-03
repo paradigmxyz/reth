@@ -70,8 +70,22 @@ pub const LONG_VERSION: &str = const_format::concatcp!(
     env!("VERGEN_CARGO_FEATURES"),
     "\n",
     "Build Profile: ",
-    build_profile_name()
+    BUILD_PROFILE_NAME
 );
+
+pub(crate) const BUILD_PROFILE_NAME: &str = {
+    // Derived from https://stackoverflow.com/questions/73595435/how-to-get-profile-from-cargo-toml-in-build-rs-or-at-runtime
+    // We split on the path separator of the *host* machine, which may be different from
+    // `std::path::MAIN_SEPARATOR_STR`.
+    const OUT_DIR: &str = env!("OUT_DIR");
+    let unix_parts = const_format::str_split!(OUT_DIR, '/');
+    if unix_parts.len() >= 4 {
+        unix_parts[unix_parts.len() - 4]
+    } else {
+        let win_parts = const_format::str_split!(OUT_DIR, '\\');
+        win_parts[win_parts.len() - 4]
+    }
+};
 
 /// The version information for reth formatted for P2P (devp2p).
 ///
@@ -113,20 +127,6 @@ pub fn default_client_version() -> ClientVersion {
         version: CARGO_PKG_VERSION.to_string(),
         git_sha: VERGEN_GIT_SHA.to_string(),
         build_timestamp: VERGEN_BUILD_TIMESTAMP.to_string(),
-    }
-}
-
-pub(crate) const fn build_profile_name() -> &'static str {
-    // Derived from https://stackoverflow.com/questions/73595435/how-to-get-profile-from-cargo-toml-in-build-rs-or-at-runtime
-    // We split on the path separator of the *host* machine, which may be different from
-    // `std::path::MAIN_SEPARATOR_STR`.
-    const OUT_DIR: &str = env!("OUT_DIR");
-    let unix_parts = const_format::str_split!(OUT_DIR, '/');
-    if unix_parts.len() >= 4 {
-        unix_parts[unix_parts.len() - 4]
-    } else {
-        let win_parts = const_format::str_split!(OUT_DIR, '\\');
-        win_parts[win_parts.len() - 4]
     }
 }
 
