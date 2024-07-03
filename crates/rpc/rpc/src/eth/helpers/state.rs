@@ -13,8 +13,8 @@ where
     Self: LoadState + SpawnBlocking,
     Provider: BlockReaderIdExt + ChainSpecProvider,
 {
-    fn maximum_proof_lookback(&self) -> u64 {
-        self.max_proof_lookback()
+    fn max_proof_window(&self) -> u64 {
+        self.eth_proof_window()
     }
 }
 

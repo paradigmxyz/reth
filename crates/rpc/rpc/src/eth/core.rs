@@ -53,7 +53,7 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
-        max_proof_lookback: u64,
+        eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
@@ -66,7 +66,7 @@ where
             eth_cache,
             gas_oracle,
             gas_cap.into().into(),
-            max_proof_lookback,
+            eth_proof_window,
             Box::<TokioTaskExecutor>::default(),
             blocking_task_pool,
             fee_history_cache,
@@ -84,7 +84,7 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: u64,
-        max_proof_lookback: u64,
+        eth_proof_window: u64,
         task_spawner: Box<dyn TaskSpawner>,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
@@ -107,7 +107,7 @@ where
             eth_cache,
             gas_oracle,
             gas_cap,
-            max_proof_lookback,
+            eth_proof_window,
             starting_block: U256::from(latest_block),
             task_spawner,
             pending_block: Default::default(),
@@ -136,8 +136,8 @@ where
     }
 
     /// The maximum number of blocks into the past for generating state proofs.
-    pub fn max_proof_lookback(&self) -> u64 {
-        self.inner.max_proof_lookback
+    pub fn eth_proof_window(&self) -> u64 {
+        self.inner.eth_proof_window
     }
 
     /// Returns the inner `Provider`
@@ -218,7 +218,7 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     gas_cap: u64,
     /// The maximum number of blocks into the past for generating state proofs.
-    max_proof_lookback: u64,
+    eth_proof_window: u64,
     /// The block number at which the node started
     starting_block: U256,
     /// The type that can spawn tasks which would otherwise block.

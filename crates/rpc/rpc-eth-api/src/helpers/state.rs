@@ -20,7 +20,7 @@ use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
     /// Returns the maximum number of blocks into the past for generating state proofs.
-    fn maximum_proof_lookback(&self) -> u64;
+    fn max_proof_window(&self) -> u64;
 
     /// Returns the number of transactions sent from an address at the given block identifier.
     ///
@@ -93,11 +93,14 @@ pub trait EthState: LoadState + SpawnBlocking {
         let chain_info = self.chain_info()?;
         let block_id = block_id.unwrap_or_default();
 
-        // Check whether the distance to the block exceeds the maximum configured lookback.
-        let block_number = self.provider().block_number_for_id(block_id)?;
-        let max_lookback = self.maximum_proof_lookback();
-        if chain_info.best_number.saturating_sub(block_number.unwrap_or_default()) > max_lookback {
-            return Err(EthApiError::ExceedsMaxProofLookback)
+        // Check whether the distance to the block exceeds the maximum configured window.
+        let block_number = self
+            .provider()
+            .block_number_for_id(block_id)?
+            .ok_or(EthApiError::UnknownBlockNumber)?;
+        let max_window = self.max_proof_window();
+        if chain_info.best_number.saturating_sub(block_number) > max_window {
+            return Err(EthApiError::ExceedsMaxProofWindow)
         }
 
         Ok(self.spawn_tracing(move |this| {

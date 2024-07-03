@@ -156,9 +156,11 @@ pub struct RpcServerArgs {
     )]
     pub rpc_gas_cap: u64,
 
-    /// The maximum proof lookback for historical proof generation.
-    #[arg(long = "rpc.max-proof-lookback", default_value_t = 0)]
-    pub rpc_max_proof_lookback: u64,
+    /// The maximum proof window for historical proof generation.
+    /// This value allows for generating historical proofs up to
+    /// configured number of blocks from current tip (up to `tip - window`).
+    #[arg(long = "rpc.eth-proof-window", default_value_t = constants::DEFAULT_ETH_PROOF_WINDOW)]
+    pub rpc_eth_proof_window: u64,
 
     /// State cache configuration.
     #[command(flatten)]
@@ -290,7 +292,7 @@ impl Default for RpcServerArgs {
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
-            rpc_max_proof_lookback: 0,
+            rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
         }
