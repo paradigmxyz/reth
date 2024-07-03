@@ -21,7 +21,6 @@ use revm_inspectors::{
     transfer::{TransferInspector, TransferKind},
 };
 use revm_primitives::ExecutionResult;
-use tracing::debug;
 
 const API_LEVEL: u64 = 8;
 
@@ -217,20 +216,22 @@ where
             return Ok(None)
         }
 
-        // Quick check if the nonce is too high
-        let higest_nonce =
+        let higest =
             EthApiServer::transaction_count(&self.eth, sender, None).await?.saturating_to::<u64>();
-        if nonce > higest_nonce {
+
+        // If the nonce is higher than the highest nonce, the transaction is pending or not exists
+        if nonce >= higest {
             return Ok(None)
         }
 
-        // use binary search from block [1, latest block number] to find the first block where the
-        // contract was deployed
+        // To find the first block where the sender's nonce is equal to the given one, we can use
+        // binary search within the range of blocks starting from block 1 up to the latest block
+        // number.
         let mut low = 1;
         let mut high = self.eth.block_number()?.saturating_to::<u64>();
-        let mut num = None;
+        let mut num = high;
 
-        while low < high {
+        while low <= high {
             let mid = (low + high) / 2;
             let mid_nonce = EthApiServer::transaction_count(
                 &self.eth,
@@ -239,24 +240,25 @@ where
             )
             .await?
             .saturating_to::<u64>();
-            if mid_nonce < nonce {
+
+            // The `transaction_count` returns the `nonce` after the transaction was executed, which
+            // is the state of the account after the block, and we need to find the
+            // transaction whose nonce is the pre-state, so need to compare with
+            // `nonce+1`.
+            if mid_nonce < nonce + 1 {
                 low = mid + 1; // not found in current block, need to search in the later blocks
             } else {
                 high = mid - 1; // found in current block, try to find a lower block
-                num = Some(mid);
+                num = mid;
             }
         }
-
-        let Some(num) = num else {
-            debug!(target: "rpc::otterscan", ?sender, "Nonce not found in history state");
-            return Err(internal_rpc_err("nonce not found in history state"))
-        };
 
         let Some(BlockTransactions::Full(transactions)) =
             self.eth.block_by_number(num.into(), true).await?.map(|block| block.inner.transactions)
         else {
             return Err(internal_rpc_err("block is not full"));
         };
+
         Ok(transactions
             .into_iter()
             .find(|tx| tx.from == sender && tx.nonce == nonce)
