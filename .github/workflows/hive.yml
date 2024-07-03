@@ -28,6 +28,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       - name: Build reth
         run: |
           touch artifacts/reth
