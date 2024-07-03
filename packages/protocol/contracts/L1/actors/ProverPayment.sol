@@ -60,7 +60,7 @@ contract ProverPayment {
 
         // Check assignment validity
         require((assignment.metaHash != 0 || keccak256(abi.encode(_block)) != assignment.metaHash)
-            && (assignment.maxBlockId != 0 || _block.id > assignment.maxBlockId)
+            && (assignment.maxBlockId != 0 || _block.l2BlockNumber > assignment.maxBlockId)
             && (assignment.maxProposedIn != 0 || block.number > assignment.maxProposedIn),
             "unexpected block"
         );

@@ -25,14 +25,14 @@ library TaikoData {
         bytes32 blockHash;
         bytes32 parentMetaHash;
         bytes32 l1Hash;
-        uint difficulty;
+        uint256 difficulty;
         bytes32 blobHash;
         bytes32 extraData;
         address coinbase;
-        uint64 id;
+        uint64 l2BlockNumber;
         uint32 gasLimit;
+        uint32 l1StateBlockNumber;
         uint64 timestamp;
-        uint64 l1Height;
         uint24 txListByteOffset;
         uint24 txListByteSize;
         bool blobUsed;
@@ -57,8 +57,8 @@ library TaikoData {
         bytes32 blockHash;
         bytes32 metaHash;
         uint64 blockId;
-        uint64 proposedAt;
-        uint64 proposedIn;
+        uint64 timestamp;
+        uint32 l1StateBlockNumber;
     }
 
     /// @dev Struct holding the state variables for the {TaikoL1} contract.

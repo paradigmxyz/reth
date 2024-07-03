@@ -75,7 +75,7 @@ contract BasedOperator is EssentialContract {
         require(_isProposerPermitted(_block), "proposer not allowed");
 
         // Store who paid for proving the block
-        blocks[_block.id] = Block({
+        blocks[_block.l2BlockNumber] = Block({
             assignedProver: prover,
             bond: uint96(PROVER_BOND)
         });
@@ -94,9 +94,9 @@ contract BasedOperator is EssentialContract {
         ProofBatch memory proofBatch = abi.decode(data, (ProofBatch));
 
         // Check who can prove the block
-        TaikoData.Block memory taikoBlock = taiko.getBlock(proofBatch._block.id);
-        if (block.timestamp < taikoBlock.proposedAt + PROVING_WINDOW) {
-            require(proofBatch.prover == blocks[proofBatch._block.id].assignedProver, "assigned prover not the prover");
+        TaikoData.Block memory taikoBlock = taiko.getBlock(proofBatch._block.l2BlockNumber);
+        if (block.timestamp < taikoBlock.timestamp + PROVING_WINDOW) {
+            require(proofBatch.prover == blocks[proofBatch._block.l2BlockNumber].assignedProver, "assigned prover not the prover");
         }
 
         // Verify the proofs
@@ -118,7 +118,7 @@ contract BasedOperator is EssentialContract {
 
         // Only allow an already proven block to be overwritten when the verifiers used are now invalid
         // Get the currently stored transition
-        TaikoData.TransitionState memory storedTransition = taiko.getTransition(proofBatch._block.id, proofBatch.transition.parentHash);
+        TaikoData.TransitionState memory storedTransition = taiko.getTransition(proofBatch._block.l2BlockNumber, proofBatch.transition.parentHash);
         if (storedTransition.blockHash != proofBatch.transition.blockHash) {
             // TODO(Brecht): Check that one of the verifiers is now poissoned
         } else {
@@ -170,7 +170,7 @@ contract BasedOperator is EssentialContract {
         view
         returns (bool)
     {
-        if (_block.id == 1) {
+        if (_block.l2BlockNumber == 1) {
             // Only proposer_one can propose the first block after genesis
             address proposerOne = resolve("proposer_one", true);
             if (proposerOne != address(0) && msg.sender != proposerOne) {

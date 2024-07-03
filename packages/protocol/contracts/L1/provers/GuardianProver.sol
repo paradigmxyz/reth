@@ -29,7 +29,7 @@ contract GuardianProver is Guardians {
         returns (bool approved)
     {
         bytes32 hash = keccak256(abi.encode(meta, tran));
-        approved = approve(meta.id, hash);
+        approved = approve(meta.l2BlockNumber, hash);
 
         if (approved) {
             deleteApproval(hash);
