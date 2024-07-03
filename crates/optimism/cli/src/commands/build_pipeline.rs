@@ -22,12 +22,6 @@ use reth_static_file::StaticFileProducer;
 use std::sync::Arc;
 use tokio::sync::watch;
 
-macro_rules! block_executor {
-    ($chain_spec:expr) => {
-        OpExecutorProvider::optimism($chain_spec)
-    };
-}
-
 /// Builds import pipeline.
 ///
 /// If configured to execute, all stages will run. Otherwise, only stages that don't require state
@@ -72,7 +66,7 @@ where
         .expect("failed to set download range");
 
     let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-    let executor = block_executor!(provider_factory.chain_spec());
+    let executor = OpExecutorProvider::optimism(provider_factory.chain_spec());
 
     let max_block = file_client.max_block().unwrap_or(0);
 

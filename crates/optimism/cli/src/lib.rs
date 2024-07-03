@@ -7,6 +7,9 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+// The `optimism` feature must be enabled to use this crate.
+#![cfg(feature = "optimism")]
 
 /// Optimism CLI commands.
 pub mod commands;
+pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
