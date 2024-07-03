@@ -79,9 +79,12 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // Call poll on the inner orchestrator.
-        match ready!(self.project().orchestrator.poll_next_unpin(cx)) {
-            Some(_event) => Poll::Ready(Ok(())),
-            None => Poll::Ready(Ok(())),
+        let mut orchestrator = self.project().orchestrator;
+        loop {
+            match ready!(StreamExt::poll_next_unpin(&mut orchestrator, cx)) {
+                Some(_event) => continue,
+                None => return Poll::Ready(Ok(())),
+            }
         }
     }
 }
