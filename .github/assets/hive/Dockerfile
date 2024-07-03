@@ -1,4 +1,4 @@
-FROM ubuntu AS runtime
+FROM ubuntu
 
 COPY artifacts/reth /usr/local/bin
 
