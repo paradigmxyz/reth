@@ -113,51 +113,14 @@ where
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
-    /// Sets a forwarder for `eth_sendRawTransaction`
-    ///
-    /// Note: this might be removed in the future in favor of a more generic approach.
-    pub fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
-        self.inner.raw_transaction_forwarder.write().replace(forwarder);
-    }
-
-    /// Returns the state cache frontend
-    pub fn cache(&self) -> &EthStateCache {
-        &self.inner.eth_cache
-    }
-
-    /// Returns the gas oracle frontend
-    pub fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
-        &self.inner.gas_oracle
-    }
-
-    /// Returns the configured gas limit cap for `eth_call` and tracing related calls
-    pub fn gas_cap(&self) -> u64 {
-        self.inner.gas_cap
-    }
-
     /// The maximum number of blocks into the past for generating state proofs.
     pub fn eth_proof_window(&self) -> u64 {
         self.inner.eth_proof_window
     }
 
-    /// Returns the inner `Provider`
-    pub fn provider(&self) -> &Provider {
-        &self.inner.provider
-    }
-
     /// Returns the inner `Network`
     pub fn network(&self) -> &Network {
         &self.inner.network
-    }
-
-    /// Returns the inner `Pool`
-    pub fn pool(&self) -> &Pool {
-        &self.inner.pool
-    }
-
-    /// Returns fee history cache
-    pub fn fee_history_cache(&self) -> &FeeHistoryCache {
-        &self.inner.fee_history_cache
     }
 }
 
