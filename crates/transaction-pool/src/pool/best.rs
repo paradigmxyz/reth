@@ -49,17 +49,13 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
         // find the next transaction that satisfies the base fee
         loop {
             let best = self.best.next()?;
-            // Check if the transaction satisfies the base fee requirement
-            let valid_base_fee = best.transaction.max_fee_per_gas() >= self.base_fee as u128;
-            // Check if the transaction satisfies the blob fee requirement (if applicable -
-            // EIP-4844)
-            let valid_blob_fee = best
-                .transaction
-                .max_fee_per_blob_gas()
-                .map_or(true, |fee| fee >= self.base_fee_per_blob_gas as u128);
-
-            // If both the base fee and blob fee are satisfied, return the transaction
-            if valid_base_fee && valid_blob_fee {
+            // If both the base fee and blob fee (if applicable for EIP-4844) are satisfied, return
+            // the transaction
+            if best.transaction.max_fee_per_gas() >= self.base_fee as u128 &&
+                best.transaction
+                    .max_fee_per_blob_gas()
+                    .map_or(true, |fee| fee >= self.base_fee_per_blob_gas as u128)
+            {
                 return Some(best);
             } else {
                 crate::traits::BestTransactions::mark_invalid(self, &best);
