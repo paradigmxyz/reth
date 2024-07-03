@@ -7485,6 +7485,7 @@ dependencies = [
  "reth-network-types",
  "reth-primitives",
  "reth-provider",
+ "reth-storage-api",
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
