@@ -336,13 +336,13 @@ where
             .err()
             .unwrap()
     ));
+    OtterscanClient::get_transaction_by_sender_and_nonce(client, sender, nonce)
+        .await
+        .err()
+        .unwrap();
     assert!(is_unimplemented(
-        OtterscanClient::get_transaction_by_sender_and_nonce(client, sender, nonce,)
-            .await
-            .err()
-            .unwrap()
+        OtterscanClient::get_contract_creator(client, address).await.err().unwrap()
     ));
-    assert!(OtterscanClient::get_contract_creator(client, address).await.unwrap().is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]

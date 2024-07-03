@@ -21,6 +21,7 @@ use revm_inspectors::{
     transfer::{TransferInspector, TransferKind},
 };
 use revm_primitives::ExecutionResult;
+use tracing::debug;
 
 const API_LEVEL: u64 = 8;
 
@@ -211,7 +212,53 @@ where
         sender: Address,
         nonce: u64,
     ) -> RpcResult<Option<TxHash>> {
-        Err(internal_rpc_err("unimplemented"))
+        // Check if the sender is a contract
+        if self.has_code(sender, None).await? {
+            return Ok(None)
+        }
+
+        // Quick check if the nonce is too high
+        if EthApiServer::transaction_count(&self.eth, sender, None).await?.saturating_to::<u64>() <
+            nonce
+        {
+            return Ok(None)
+        }
+
+        // use binary search from block [1, latest block number] to find the first block where the
+        // contract was deployed
+        let mut low = 1;
+        let mut high = self.eth.block_number()?.saturating_to::<u64>();
+        let mut num = None;
+
+        while low < high {
+            let mid = (low + high) / 2;
+            let block_number = Some(BlockId::Number(BlockNumberOrTag::Number(mid)));
+            if EthApiServer::transaction_count(&self.eth, sender, block_number)
+                .await?
+                .saturating_to::<u64>() <
+                nonce
+            {
+                low = mid + 1; // not found in current block, need to search in the later blocks
+            } else {
+                high = mid - 1; // found in current block, try to find a lower block
+                num = Some(mid);
+            }
+        }
+
+        let Some(num) = num else {
+            debug!(target: "rpc::otterscan", ?sender, "Nonce not found in history state");
+            return Err(internal_rpc_err("nonce not found in history state"))
+        };
+
+        let Some(BlockTransactions::Full(transactions)) =
+            self.eth.block_by_number(num.into(), true).await?.map(|block| block.inner.transactions)
+        else {
+            return Err(internal_rpc_err("block is not full"));
+        };
+        Ok(transactions
+            .into_iter()
+            .find(|tx| tx.from == sender && tx.nonce == nonce)
+            .map(|tx| tx.hash))
     }
 
     /// Handler for `getContractCreator`
