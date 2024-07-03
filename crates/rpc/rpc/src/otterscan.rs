@@ -218,9 +218,9 @@ where
         }
 
         // Quick check if the nonce is too high
-        if EthApiServer::transaction_count(&self.eth, sender, None).await?.saturating_to::<u64>() <
-            nonce
-        {
+        let higest_nonce =
+            EthApiServer::transaction_count(&self.eth, sender, None).await?.saturating_to::<u64>();
+        if nonce > higest_nonce {
             return Ok(None)
         }
 
@@ -232,12 +232,14 @@ where
 
         while low < high {
             let mid = (low + high) / 2;
-            let block_number = Some(BlockId::Number(BlockNumberOrTag::Number(mid)));
-            if EthApiServer::transaction_count(&self.eth, sender, block_number)
-                .await?
-                .saturating_to::<u64>() <
-                nonce
-            {
+            let mid_nonce = EthApiServer::transaction_count(
+                &self.eth,
+                sender,
+                Some(BlockId::Number(BlockNumberOrTag::Number(mid))),
+            )
+            .await?
+            .saturating_to::<u64>();
+            if mid_nonce < nonce {
                 low = mid + 1; // not found in current block, need to search in the later blocks
             } else {
                 high = mid - 1; // found in current block, try to find a lower block
