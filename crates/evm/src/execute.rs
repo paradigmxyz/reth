@@ -101,7 +101,7 @@ pub trait BatchExecutor<DB> {
 /// Contains the state changes, transaction receipts, and total gas used in the block.
 ///
 /// TODO(mattsse): combine with `ExecutionOutcome`
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BlockExecutionOutput<T> {
     /// The changed state of the block after execution.
     pub state: BundleState,
