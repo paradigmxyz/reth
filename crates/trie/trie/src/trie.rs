@@ -995,8 +995,10 @@ mod tests {
         assert_eq!(node2a.hashes.len(), 1);
 
         // Check storage trie
-        assert_eq!(trie_updates.storage_tries.len(), 1);
-        let (_, storage_trie_updates) = trie_updates.storage_tries.iter().next().unwrap();
+        let mut updated_storage_trie =
+            trie_updates.storage_tries.iter().filter(|(_, u)| !u.storage_nodes.is_empty());
+        assert_eq!(updated_storage_trie.clone().count(), 1);
+        let (_, storage_trie_updates) = updated_storage_trie.next().unwrap();
         assert_eq!(storage_trie_updates.storage_nodes.len(), 1);
 
         let (nibbles3, node3) = storage_trie_updates.storage_nodes.iter().next().unwrap();
@@ -1080,8 +1082,7 @@ mod tests {
                 .root_with_updates()
                 .unwrap();
             assert_eq!(root, computed_expected_root);
-            assert_eq!(trie_updates.account_nodes.len() + trie_updates.removed_nodes.len(), 7);
-            assert_eq!(trie_updates.storage_tries.len(), 1);
+            assert_eq!(trie_updates.account_nodes.len() + trie_updates.removed_nodes.len(), 1);
 
             assert_eq!(trie_updates.account_nodes.len(), 1);
 
@@ -1132,8 +1133,12 @@ mod tests {
                 .root_with_updates()
                 .unwrap();
             assert_eq!(root, computed_expected_root);
-            assert_eq!(trie_updates.account_nodes.len() + trie_updates.removed_nodes.len(), 6);
-            assert!(trie_updates.storage_tries.is_empty()); // no storage root update
+            assert_eq!(trie_updates.account_nodes.len() + trie_updates.removed_nodes.len(), 1);
+            assert!(trie_updates
+                .storage_tries
+                .iter()
+                .find(|(_, u)| !u.storage_nodes.is_empty() || !u.removed_nodes.is_empty())
+                .is_none()); // no storage root update
 
             assert_eq!(trie_updates.account_nodes.len(), 1);
 
