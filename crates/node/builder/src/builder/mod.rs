@@ -510,8 +510,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             |shutdown| {
                 network.run_until_graceful_shutdown(shutdown, |network| {
                     if let Some(peers_file) = known_peers_file {
-                        let known_peers = network.all_peers().collect::<Vec<_>>();
-                        trace!(target: "reth::cli", peers_file =?peers_file, num_peers=%known_peers.len(), "Saving current peers");
+                        let num_known_peers = network.num_known_peers();
+                        trace!(target: "reth::cli", peers_file =?peers_file, num_peers=%num_known_peers, "Saving current peers");
                         match network.write_peers_to_file(peers_file) {
                             Ok(_) => {
                                 info!(target: "reth::cli", "Wrote network peers to file");

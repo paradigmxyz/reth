@@ -338,6 +338,11 @@ where
         self.swarm.state().peers().iter_peers()
     }
 
+    /// Returns the number of peers in the peer set.
+    pub fn num_known_peers(&self) -> usize {
+        self.swarm.state().peers().num_known_peers()
+    }
+
     /// Returns a new [`PeersHandle`] that can be cloned and shared.
     ///
     /// The [`PeersHandle`] can be used to interact with the network's peer set.
