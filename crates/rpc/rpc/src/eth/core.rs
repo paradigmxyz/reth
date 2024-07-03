@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use derive_more::Deref;
 use reth_primitives::{BlockNumberOrTag, U256};
-use reth_provider::{BlockReaderIdExt, ChainSpecProvider};
+use reth_provider::BlockReaderIdExt;
 use reth_rpc_eth_api::{
     helpers::{transaction::UpdateRawTxForwarder, EthSigner, SpawnBlocking},
     RawTransactionForwarder,
@@ -31,18 +31,9 @@ pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
-    /// Sets a forwarder for `eth_sendRawTransaction`
-    ///
-    /// Note: this might be removed in the future in favor of a more generic approach.
-    pub fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
-        self.inner.raw_transaction_forwarder.write().replace(forwarder);
-    }
-}
-
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReaderIdExt + ChainSpecProvider,
+    Provider: BlockReaderIdExt,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[allow(clippy::too_many_arguments)]
@@ -53,6 +44,7 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
+        eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
@@ -65,6 +57,7 @@ where
             eth_cache,
             gas_oracle,
             gas_cap.into().into(),
+            eth_proof_window,
             Box::<TokioTaskExecutor>::default(),
             blocking_task_pool,
             fee_history_cache,
@@ -82,6 +75,7 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: u64,
+        eth_proof_window: u64,
         task_spawner: Box<dyn TaskSpawner>,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
@@ -104,6 +98,7 @@ where
             eth_cache,
             gas_oracle,
             gas_cap,
+            eth_proof_window,
             starting_block: U256::from(latest_block),
             task_spawner,
             pending_block: Default::default(),
@@ -114,6 +109,15 @@ where
         };
 
         Self { inner: Arc::new(inner) }
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
+    /// Sets a forwarder for `eth_sendRawTransaction`
+    ///
+    /// Note: this might be removed in the future in favor of a more generic approach.
+    pub fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
+        self.inner.raw_transaction_forwarder.write().replace(forwarder);
     }
 
     /// Returns the state cache frontend
@@ -129,6 +133,11 @@ where
     /// Returns the configured gas limit cap for `eth_call` and tracing related calls
     pub fn gas_cap(&self) -> u64 {
         self.inner.gas_cap
+    }
+
+    /// The maximum number of blocks into the past for generating state proofs.
+    pub fn eth_proof_window(&self) -> u64 {
+        self.inner.eth_proof_window
     }
 
     /// Returns the inner `Provider`
@@ -208,6 +217,8 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     gas_oracle: GasPriceOracle<Provider>,
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     gas_cap: u64,
+    /// The maximum number of blocks into the past for generating state proofs.
+    eth_proof_window: u64,
     /// The block number at which the node started
     starting_block: U256,
     /// The type that can spawn tasks which would otherwise block.
@@ -330,6 +341,7 @@ mod tests {
     use reth_rpc_eth_types::{
         EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
     };
+    use reth_rpc_server_types::constants::DEFAULT_ETH_PROOF_WINDOW;
     use reth_rpc_types::FeeHistory;
     use reth_tasks::pool::BlockingTaskPool;
     use reth_testing_utils::{generators, generators::Rng};
@@ -361,6 +373,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
             evm_config,
