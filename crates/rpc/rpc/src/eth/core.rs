@@ -267,13 +267,13 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
 
     /// Returns the inner `Network`
     #[inline]
-    pub fn network(&self) -> &Network {
+    pub const fn network(&self) -> &Network {
         &self.network
     }
 
     /// The maximum number of blocks into the past for generating state proofs.
     #[inline]
-    pub fn eth_proof_window(&self) -> u64 {
+    pub const fn eth_proof_window(&self) -> u64 {
         self.eth_proof_window
     }
 }
