@@ -4,7 +4,6 @@
 use alloy_dyn_abi::TypedData;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
-use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
@@ -715,13 +714,6 @@ where
         block_number: Option<BlockId>,
     ) -> RpcResult<EIP1186AccountProofResponse> {
         trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
-        let res = EthState::get_proof(self, address, keys, block_number)?.await;
-
-        Ok(res.map_err(|e| match e {
-            EthApiError::InvalidBlockRange => {
-                internal_rpc_err("eth_getProof is unimplemented for historical blocks")
-            }
-            _ => e.into(),
-        })?)
+        Ok(EthState::get_proof(self, address, keys, block_number)?.await?)
     }
 }

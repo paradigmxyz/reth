@@ -8,9 +8,13 @@ use reth_rpc_eth_types::EthStateCache;
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig> where
-    Self: LoadState + SpawnBlocking
+impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: LoadState + SpawnBlocking,
 {
+    fn max_proof_window(&self) -> u64 {
+        self.eth_proof_window()
+    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
@@ -47,6 +51,7 @@ mod tests {
     use reth_rpc_eth_types::{
         EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
     };
+    use reth_rpc_server_types::constants::DEFAULT_ETH_PROOF_WINDOW;
     use reth_tasks::pool::BlockingTaskPool;
     use reth_transaction_pool::test_utils::testing_pool;
 
@@ -66,6 +71,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(NoopProvider::default(), Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,
@@ -91,6 +97,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(mock_provider, Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,

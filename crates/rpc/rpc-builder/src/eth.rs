@@ -13,7 +13,8 @@ use reth_rpc_eth_types::{
     GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
 };
 use reth_rpc_server_types::constants::{
-    default_max_tracing_requests, DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE,
+    default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
+    DEFAULT_MAX_LOGS_PER_RESPONSE,
 };
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
@@ -141,6 +142,8 @@ pub struct EthConfig {
     pub cache: EthStateCacheConfig,
     /// Settings for the gas price oracle
     pub gas_oracle: GasPriceOracleConfig,
+    /// The maximum number of blocks into the past for generating state proofs.
+    pub eth_proof_window: u64,
     /// The maximum number of tracing calls that can be executed in concurrently.
     pub max_tracing_requests: usize,
     /// Maximum number of blocks that could be scanned per filter request in `eth_getLogs` calls.
@@ -173,6 +176,7 @@ impl Default for EthConfig {
         Self {
             cache: EthStateCacheConfig::default(),
             gas_oracle: GasPriceOracleConfig::default(),
+            eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
             max_tracing_requests: default_max_tracing_requests(),
             max_blocks_per_filter: DEFAULT_MAX_BLOCKS_PER_FILTER,
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
@@ -217,6 +221,12 @@ impl EthConfig {
     /// Configures the maximum gas limit for `eth_call` and call tracing RPC methods
     pub const fn rpc_gas_cap(mut self, rpc_gas_cap: u64) -> Self {
         self.rpc_gas_cap = rpc_gas_cap;
+        self
+    }
+
+    /// Configures the maximum proof window for historical proof generation.
+    pub const fn eth_proof_window(mut self, window: u64) -> Self {
+        self.eth_proof_window = window;
         self
     }
 }
@@ -269,6 +279,7 @@ impl EthApiBuild {
             ctx.cache.clone(),
             gas_oracle,
             ctx.config.rpc_gas_cap,
+            ctx.config.eth_proof_window,
             Box::new(ctx.executor.clone()),
             BlockingTaskPool::build().expect("failed to build blocking task pool"),
             fee_history_cache,
