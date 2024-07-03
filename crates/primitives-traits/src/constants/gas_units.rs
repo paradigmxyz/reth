@@ -18,11 +18,11 @@ pub const GIGAGAS: u64 = MEGAGAS * 1_000;
 pub fn format_gas_throughput(gas: u64, execution_duration: Duration) -> String {
     let gas_per_second = gas as f64 / execution_duration.as_secs_f64();
     if gas_per_second < MEGAGAS as f64 {
-        format!("{:.} Kgas/second", gas_per_second / KILOGAS as f64)
+        format!("{:.2} Kgas/second", gas_per_second / KILOGAS as f64)
     } else if gas_per_second < GIGAGAS as f64 {
-        format!("{:.} Mgas/second", gas_per_second / MEGAGAS as f64)
+        format!("{:.2} Mgas/second", gas_per_second / MEGAGAS as f64)
     } else {
-        format!("{:.} Ggas/second", gas_per_second / GIGAGAS as f64)
+        format!("{:.2} Ggas/second", gas_per_second / GIGAGAS as f64)
     }
 }
 

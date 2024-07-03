@@ -232,6 +232,12 @@ where
 
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
+
+        let mut last_block = start_block;
+        let mut last_duration = Duration::default();
+        let mut last_cumulative_gas = 0;
+        let log_speed_duration = Duration::from_secs(10);
+
         debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
 
         // Execute block range
@@ -269,6 +275,21 @@ where
                 }
             })?;
             execution_duration += execute_start.elapsed();
+
+            // Log execution speed
+            if execution_duration - last_duration >= log_speed_duration {
+                info!(
+                    target: "sync::stages::execution",
+                    start = last_block,
+                    end = block_number,
+                    throughput = format_gas_throughput(cumulative_gas - last_cumulative_gas, execution_duration - last_duration),
+                    "Finished executing block range"
+                );
+
+                last_block = block_number + 1;
+                last_duration = execution_duration;
+                last_cumulative_gas = cumulative_gas;
+            }
 
             // Gas metrics
             if let Some(metrics_tx) = &mut self.metrics_tx {
