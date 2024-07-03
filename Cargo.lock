@@ -7476,6 +7476,7 @@ dependencies = [
  "reth-dns-discovery",
  "reth-ecies",
  "reth-eth-wire",
+ "reth-fs-util",
  "reth-metrics",
  "reth-net-banlist",
  "reth-network",
@@ -7650,6 +7651,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
