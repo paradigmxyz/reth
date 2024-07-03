@@ -81,10 +81,10 @@ impl TrieUpdates {
     /// # Returns
     ///
     /// The number of storage trie entries updated in the database.
-    pub fn write_to_database(
-        self,
-        tx: &(impl DbTx + DbTxMut),
-    ) -> Result<usize, reth_db::DatabaseError> {
+    pub fn write_to_database<TX>(self, tx: &TX) -> Result<usize, reth_db::DatabaseError>
+    where
+        TX: DbTx + DbTxMut,
+    {
         if self.is_empty() {
             return Ok(0)
         }
@@ -93,16 +93,13 @@ impl TrieUpdates {
         let mut num_entries = 0;
 
         // Merge updated and removed nodes. Updated nodes must take precedence.
-        let capacity = self.removed_nodes.len() + self.account_nodes.len();
-        let mut account_updates = Vec::with_capacity(capacity);
-        for nibbles in self.removed_nodes {
-            if !self.account_nodes.contains_key(&nibbles) {
-                account_updates.push((nibbles, None));
-            }
-        }
-        for (nibbles, node) in self.account_nodes {
-            account_updates.push((nibbles, Some(node)))
-        }
+        let mut account_updates = self
+            .removed_nodes
+            .into_iter()
+            .filter_map(|n| (!self.account_nodes.contains_key(&n)).then_some((n, None)))
+            .collect::<Vec<_>>();
+        account_updates
+            .extend(self.account_nodes.into_iter().map(|(nibbles, node)| (nibbles, Some(node))));
         // Sort trie node updates.
         account_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
@@ -198,11 +195,14 @@ impl StorageTrieUpdates {
     }
 
     /// Initializes a storage trie cursor and writes updates to database.
-    pub fn write_to_database(
+    pub fn write_to_database<TX>(
         self,
-        tx: &(impl DbTx + DbTxMut),
+        tx: &TX,
         hashed_address: B256,
-    ) -> Result<usize, reth_db::DatabaseError> {
+    ) -> Result<usize, reth_db::DatabaseError>
+    where
+        TX: DbTx + DbTxMut,
+    {
         if self.is_empty() {
             return Ok(0)
         }
@@ -233,37 +233,32 @@ impl StorageTrieUpdates {
         }
 
         // Merge updated and removed nodes. Updated nodes must take precedence.
-        let mut storage_updates =
-            Vec::with_capacity(self.removed_nodes.len() + self.storage_nodes.len());
-        for nibbles in self.removed_nodes {
-            if !self.storage_nodes.contains_key(&nibbles) {
-                storage_updates.push((nibbles, None))
-            }
-        }
-        for (nibbles, node) in self.storage_nodes {
-            storage_updates.push((nibbles, Some(node)));
-        }
+        let mut storage_updates = self
+            .removed_nodes
+            .into_iter()
+            .filter_map(|n| (!self.storage_nodes.contains_key(&n)).then_some((n, None)))
+            .collect::<Vec<_>>();
+        storage_updates
+            .extend(self.storage_nodes.into_iter().map(|(nibbles, node)| (nibbles, Some(node))));
         // Sort trie node updates.
         storage_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         let mut num_entries = 0;
-        for (nibbles, maybe_updated) in storage_updates {
-            if !nibbles.is_empty() {
-                num_entries += 1;
-                let nibbles = StoredNibblesSubKey(nibbles);
-                // Delete the old entry if it exists.
-                if cursor
-                    .seek_by_key_subkey(hashed_address, nibbles.clone())?
-                    .filter(|e| e.nibbles == nibbles)
-                    .is_some()
-                {
-                    cursor.delete_current()?;
-                }
+        for (nibbles, maybe_updated) in storage_updates.into_iter().filter(|(n, _)| !n.is_empty()) {
+            num_entries += 1;
+            let nibbles = StoredNibblesSubKey(nibbles);
+            // Delete the old entry if it exists.
+            if cursor
+                .seek_by_key_subkey(hashed_address, nibbles.clone())?
+                .filter(|e| e.nibbles == nibbles)
+                .is_some()
+            {
+                cursor.delete_current()?;
+            }
 
-                // There is an updated version of this node, insert new entry.
-                if let Some(node) = maybe_updated {
-                    cursor.upsert(hashed_address, StorageTrieEntry { nibbles, node })?;
-                }
+            // There is an updated version of this node, insert new entry.
+            if let Some(node) = maybe_updated {
+                cursor.upsert(hashed_address, StorageTrieEntry { nibbles, node })?;
             }
         }
 

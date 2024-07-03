@@ -1137,8 +1137,7 @@ mod tests {
             assert!(trie_updates
                 .storage_tries
                 .iter()
-                .find(|(_, u)| !u.storage_nodes.is_empty() || !u.removed_nodes.is_empty())
-                .is_none()); // no storage root update
+                .any(|(_, u)| !u.storage_nodes.is_empty() || !u.removed_nodes.is_empty())); // no storage root update
 
             assert_eq!(trie_updates.account_nodes.len(), 1);
 
