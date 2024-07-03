@@ -14,7 +14,7 @@ use reth_cli_runner::CliRunner;
 
 use clap::{Error, Parser};
 
-pub mod chainspec_parser;
+pub mod chainspec;
 
 /// Reth based node cli.
 ///
