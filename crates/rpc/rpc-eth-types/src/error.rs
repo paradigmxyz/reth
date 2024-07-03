@@ -54,6 +54,9 @@ pub enum EthApiError {
     /// When an invalid block range is provided
     #[error("invalid block range")]
     InvalidBlockRange,
+    /// Thrown when the target block for proof computation exceeds the maximum configured lookback.
+    #[error("distance to target block exceeds maximum proof lookback")]
+    ExceedsMaxProofLookback,
     /// An internal error where prevrandao is not set in the evm's environment
     #[error("prevrandao not in the EVM's environment after merge")]
     PrevrandaoNotSet,
@@ -143,6 +146,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
             EthApiError::InvalidBlockRange |
+            EthApiError::ExceedsMaxProofLookback |
             EthApiError::ConflictingFeeFieldsInRequest |
             EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) |

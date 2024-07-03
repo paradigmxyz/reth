@@ -53,6 +53,7 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
+        max_proof_lookback: u64,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
@@ -65,6 +66,7 @@ where
             eth_cache,
             gas_oracle,
             gas_cap.into().into(),
+            max_proof_lookback,
             Box::<TokioTaskExecutor>::default(),
             blocking_task_pool,
             fee_history_cache,
@@ -82,6 +84,7 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: u64,
+        max_proof_lookback: u64,
         task_spawner: Box<dyn TaskSpawner>,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
@@ -104,6 +107,7 @@ where
             eth_cache,
             gas_oracle,
             gas_cap,
+            max_proof_lookback,
             starting_block: U256::from(latest_block),
             task_spawner,
             pending_block: Default::default(),
@@ -129,6 +133,11 @@ where
     /// Returns the configured gas limit cap for `eth_call` and tracing related calls
     pub fn gas_cap(&self) -> u64 {
         self.inner.gas_cap
+    }
+
+    /// The maximum number of blocks into the past for generating state proofs.
+    pub fn max_proof_lookback(&self) -> u64 {
+        self.inner.max_proof_lookback
     }
 
     /// Returns the inner `Provider`
@@ -208,6 +217,8 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     gas_oracle: GasPriceOracle<Provider>,
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     gas_cap: u64,
+    /// The maximum number of blocks into the past for generating state proofs.
+    max_proof_lookback: u64,
     /// The block number at which the node started
     starting_block: U256,
     /// The type that can spawn tasks which would otherwise block.
@@ -361,6 +372,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            0,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
             evm_config,

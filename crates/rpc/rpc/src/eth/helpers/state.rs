@@ -1,6 +1,6 @@
 //! Contains RPC handler implementations specific to state.
 
-use reth_provider::StateProviderFactory;
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
 use reth_rpc_eth_api::helpers::{EthState, LoadState, SpawnBlocking};
@@ -8,9 +8,14 @@ use reth_rpc_eth_types::EthStateCache;
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig> where
-    Self: LoadState + SpawnBlocking
+impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: LoadState + SpawnBlocking,
+    Provider: BlockReaderIdExt + ChainSpecProvider,
 {
+    fn maximum_proof_lookback(&self) -> u64 {
+        self.max_proof_lookback()
+    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
@@ -66,6 +71,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(NoopProvider::default(), Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            0,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,
@@ -91,6 +97,7 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(mock_provider, Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            0,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
             evm_config,

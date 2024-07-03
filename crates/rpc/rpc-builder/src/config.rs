@@ -91,6 +91,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_tracing_requests(self.rpc_max_tracing_requests)
             .max_blocks_per_filter(self.rpc_max_blocks_per_filter.unwrap_or_max())
             .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
+            .max_proof_lookback(self.rpc_max_proof_lookback)
             .rpc_gas_cap(self.rpc_gas_cap)
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())

@@ -156,6 +156,10 @@ pub struct RpcServerArgs {
     )]
     pub rpc_gas_cap: u64,
 
+    /// The maximum proof lookback for historical proof generation.
+    #[arg(long = "rpc.max-proof-lookback", default_value_t = 0)]
+    pub rpc_max_proof_lookback: u64,
+
     /// State cache configuration.
     #[command(flatten)]
     pub rpc_state_cache: RpcStateCacheArgs,
@@ -286,6 +290,7 @@ impl Default for RpcServerArgs {
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
+            rpc_max_proof_lookback: 0,
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
         }

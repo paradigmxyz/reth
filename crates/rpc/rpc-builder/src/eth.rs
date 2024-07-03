@@ -141,6 +141,8 @@ pub struct EthConfig {
     pub cache: EthStateCacheConfig,
     /// Settings for the gas price oracle
     pub gas_oracle: GasPriceOracleConfig,
+    /// The maximum number of blocks into the past for generating state proofs.
+    pub max_proof_lookback: u64,
     /// The maximum number of tracing calls that can be executed in concurrently.
     pub max_tracing_requests: usize,
     /// Maximum number of blocks that could be scanned per filter request in `eth_getLogs` calls.
@@ -173,6 +175,7 @@ impl Default for EthConfig {
         Self {
             cache: EthStateCacheConfig::default(),
             gas_oracle: GasPriceOracleConfig::default(),
+            max_proof_lookback: 0,
             max_tracing_requests: default_max_tracing_requests(),
             max_blocks_per_filter: DEFAULT_MAX_BLOCKS_PER_FILTER,
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
@@ -217,6 +220,12 @@ impl EthConfig {
     /// Configures the maximum gas limit for `eth_call` and call tracing RPC methods
     pub const fn rpc_gas_cap(mut self, rpc_gas_cap: u64) -> Self {
         self.rpc_gas_cap = rpc_gas_cap;
+        self
+    }
+
+    /// Configures the maximum proof lookback for historical proof generation.
+    pub const fn max_proof_lookback(mut self, max_lookback: u64) -> Self {
+        self.max_proof_lookback = max_lookback;
         self
     }
 }
@@ -269,6 +278,7 @@ impl EthApiBuild {
             ctx.cache.clone(),
             gas_oracle,
             ctx.config.rpc_gas_cap,
+            ctx.config.max_proof_lookback,
             Box::new(ctx.executor.clone()),
             BlockingTaskPool::build().expect("failed to build blocking task pool"),
             fee_history_cache,
