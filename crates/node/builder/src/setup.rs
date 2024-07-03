@@ -124,7 +124,8 @@ where
                     exex_manager_handle,
                 )
                 .with_metrics_tx(metrics_tx),
-            ),
+            )
+            .disable_if(reth_stages::StageId::SenderRecovery, || prune_modes.receipts.is_some()),
         )
         .build(provider_factory, static_file_producer);
 
