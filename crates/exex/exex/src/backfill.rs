@@ -25,8 +25,19 @@ pub struct BackfillJobFactory<E, P> {
 
 impl<E, P> BackfillJobFactory<E, P> {
     /// Creates a new [`BackfillJobFactory`].
-    pub fn new(executor: E, provider: P, prune_modes: PruneModes) -> Self {
-        Self { executor, provider, prune_modes, thresholds: ExecutionStageThresholds::default() }
+    pub fn new(executor: E, provider: P) -> Self {
+        Self {
+            executor,
+            provider,
+            prune_modes: PruneModes::none(),
+            thresholds: ExecutionStageThresholds::default(),
+        }
+    }
+
+    /// Sets the prune modes
+    pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
+        self.prune_modes = prune_modes;
+        self
     }
 
     /// Sets the thresholds
@@ -54,12 +65,10 @@ impl BackfillJobFactory<(), ()> {
     /// Creates a new [`BackfillJobFactory`] from [`FullNodeComponents`].
     pub fn new_from_components<Node: FullNodeComponents>(
         components: Node,
-        prune_modes: PruneModes,
     ) -> BackfillJobFactory<Node::Executor, Node::Provider> {
         BackfillJobFactory::<_, _>::new(
             components.block_executor().clone(),
             components.provider().clone(),
-            prune_modes,
         )
     }
 }
@@ -73,8 +82,8 @@ pub struct BackfillJob<E, DB, P> {
     executor: E,
     provider: P,
     prune_modes: PruneModes,
-    range: RangeInclusive<BlockNumber>,
     thresholds: ExecutionStageThresholds,
+    range: RangeInclusive<BlockNumber>,
     _db: PhantomData<DB>,
 }
 
@@ -102,12 +111,10 @@ where
     P: FullProvider<DB>,
 {
     fn execute_range(&mut self) -> Result<Chain, BlockExecutionError> {
-        let mut executor = self.executor.batch_executor(
-            StateProviderDatabase::new(
-                self.provider.history_by_block_number(self.range.start().saturating_sub(1))?,
-            ),
-            self.prune_modes.clone(),
-        );
+        let mut executor = self.executor.batch_executor(StateProviderDatabase::new(
+            self.provider.history_by_block_number(self.range.start().saturating_sub(1))?,
+        ));
+        executor.set_prune_modes(self.prune_modes.clone());
 
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
@@ -205,7 +212,6 @@ mod tests {
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
         BlockWriter, LatestStateProviderRef,
     };
-    use reth_prune_types::PruneModes;
     use reth_revm::database::StateProviderDatabase;
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
     use secp256k1::Keypair;
@@ -289,24 +295,18 @@ mod tests {
         let provider = provider_factory.provider()?;
         // Execute only the first block on top of genesis state
         let mut outcome_single = EthExecutorProvider::ethereum(chain_spec.clone())
-            .batch_executor(
-                StateProviderDatabase::new(LatestStateProviderRef::new(
-                    provider.tx_ref(),
-                    provider.static_file_provider().clone(),
-                )),
-                PruneModes::none(),
-            )
+            .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(
+                provider.tx_ref(),
+                provider.static_file_provider().clone(),
+            )))
             .execute_and_verify_batch([(&block1, U256::ZERO).into()])?;
         outcome_single.bundle.reverts.sort();
         // Execute both blocks on top of the genesis state
         let outcome_batch = EthExecutorProvider::ethereum(chain_spec)
-            .batch_executor(
-                StateProviderDatabase::new(LatestStateProviderRef::new(
-                    provider.tx_ref(),
-                    provider.static_file_provider().clone(),
-                )),
-                PruneModes::none(),
-            )
+            .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(
+                provider.tx_ref(),
+                provider.static_file_provider().clone(),
+            )))
             .execute_and_verify_batch([
                 (&block1, U256::ZERO).into(),
                 (&block2, U256::ZERO).into(),
@@ -327,7 +327,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Backfill the first block
-        let factory = BackfillJobFactory::new(executor, blockchain_db, PruneModes::none());
+        let factory = BackfillJobFactory::new(executor, blockchain_db);
         let job = factory.backfill(1..=1);
         let chains = job.collect::<Result<Vec<_>, _>>()?;
 
