@@ -10,9 +10,10 @@ use reth_engine_primitives::EngineTypes;
 use reth_primitives::{SealedBlockWithSenders, B256};
 use std::{
     collections::HashSet,
+    sync::mpsc::Sender,
     task::{Context, Poll},
 };
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 /// Advances the chain based on incoming requests.
 ///
@@ -146,9 +147,9 @@ pub trait EngineRequestHandler: Send + Sync {
 #[derive(Debug)]
 pub struct EngineApiRequestHandler<T: EngineTypes> {
     /// channel to send messages to the tree to execute the payload.
-    to_tree: mpsc::Sender<FromEngine<BeaconEngineMessage<T>>>,
+    to_tree: Sender<FromEngine<BeaconEngineMessage<T>>>,
     /// channel to receive messages from the tree.
-    from_tree: mpsc::UnboundedReceiver<EngineApiEvent>,
+    from_tree: UnboundedReceiver<EngineApiEvent>,
     // TODO add db controller
 }
 
@@ -157,8 +158,8 @@ where
     T: EngineTypes,
 {
     pub const fn new(
-        to_tree: mpsc::Sender<FromEngine<BeaconEngineMessage<T>>>,
-        from_tree: mpsc::UnboundedReceiver<EngineApiEvent>,
+        to_tree: Sender<FromEngine<BeaconEngineMessage<T>>>,
+        from_tree: UnboundedReceiver<EngineApiEvent>,
     ) -> Self {
         Self { to_tree, from_tree }
     }

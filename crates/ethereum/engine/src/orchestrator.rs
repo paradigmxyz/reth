@@ -16,10 +16,10 @@ use reth_tasks::TaskSpawner;
 use std::{
     future::Future,
     pin::Pin,
-    sync::Arc,
+    sync::{mpsc::Sender, Arc},
     task::{Context, Poll},
 };
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// Alias for Ethereum chain orchestrator.
@@ -52,8 +52,8 @@ where
     pub fn new(
         chain_spec: Arc<ChainSpec>,
         client: Client,
-        to_tree: mpsc::Sender<FromEngine<BeaconEngineMessage<EthEngineTypes>>>,
-        from_tree: mpsc::UnboundedReceiver<EngineApiEvent>,
+        to_tree: Sender<FromEngine<BeaconEngineMessage<EthEngineTypes>>>,
+        from_tree: UnboundedReceiver<EngineApiEvent>,
         incoming_requests: UnboundedReceiverStream<BeaconEngineMessage<EthEngineTypes>>,
         pipeline: Pipeline<DB>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
@@ -101,7 +101,8 @@ mod tests {
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_tasks::TokioTaskExecutor;
-    use std::sync::Arc;
+    use std::sync::{mpsc::channel, Arc};
+    use tokio::sync::mpsc::unbounded_channel;
 
     #[test]
     fn eth_chain_orchestrator_build() {
@@ -115,14 +116,14 @@ mod tests {
 
         let client = TestFullBlockClient::default();
 
-        let (_tx, rx) = mpsc::unbounded_channel::<BeaconEngineMessage<EthEngineTypes>>();
+        let (_tx, rx) = unbounded_channel::<BeaconEngineMessage<EthEngineTypes>>();
         let incoming_requests = UnboundedReceiverStream::new(rx);
 
         let pipeline = TestPipelineBuilder::new().build(chain_spec.clone());
         let pipeline_task_spawner = Box::<TokioTaskExecutor>::default();
 
-        let (to_tree_tx, _to_tree_rx) = mpsc::channel(32);
-        let (_from_tree_tx, from_tree_rx) = mpsc::unbounded_channel();
+        let (to_tree_tx, _to_tree_rx) = channel();
+        let (_from_tree_tx, from_tree_rx) = unbounded_channel();
 
         let _eth_chain_orchestrator = EthService::new(
             chain_spec,
