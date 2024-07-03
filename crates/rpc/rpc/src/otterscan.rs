@@ -20,7 +20,6 @@ use revm_inspectors::{
     transfer::{TransferInspector, TransferKind},
 };
 use revm_primitives::ExecutionResult;
-use tracing::debug;
 
 const API_LEVEL: u64 = 8;
 
@@ -221,24 +220,18 @@ where
         // contract was deployed
         let mut low = 1;
         let mut high = self.eth.block_number()?.saturating_to::<u64>();
-        let mut num = None;
+        let mut num = high;
 
-        while low < high {
+        while low <= high {
             let mid = (low + high) / 2;
             let block_number = Some(BlockId::Number(BlockNumberOrTag::Number(mid)));
             if self.eth.get_code(address, block_number).await?.is_empty() {
                 low = mid + 1; // not found in current block, need to search in the later blocks
             } else {
                 high = mid - 1; // found in current block, try to find a lower block
-                num = Some(mid);
+                num = mid;
             }
         }
-
-        // this should not happen, only if the state of the chain is inconsistent
-        let Some(num) = num else {
-            debug!(target: "rpc::otterscan", address = ?address, "Contract not found in history state");
-            return Err(internal_rpc_err("contract not found in history state"))
-        };
 
         let traces = self
             .eth
