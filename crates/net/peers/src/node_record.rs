@@ -8,12 +8,13 @@ use std::{
     str::FromStr,
 };
 
-use crate::PeerId;
+use crate::{PeerId, TrustedPeer};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 #[cfg(feature = "secp256k1")]
 use enr::Enr;
+use url::Host;
 
 /// Represents a ENR in discovery.
 ///
@@ -193,6 +194,26 @@ impl FromStr for NodeRecord {
             .map_err(|e| NodeRecordParseError::InvalidId(e.to_string()))?;
 
         Ok(Self { address, id, tcp_port: port, udp_port })
+    }
+}
+
+impl From<TrustedPeer> for NodeRecord {
+    fn from(trust: TrustedPeer) -> Self {
+        use std::net::{SocketAddr, ToSocketAddrs};
+        let lookup_host = |host: &str| -> Option<SocketAddr> {
+            let mut addrs = host.to_socket_addrs().expect("No IP found");
+            addrs.next()
+        };
+
+        let address = match trust.host {
+            Host::Ipv4(ip) => IpAddr::V4(ip),
+            Host::Ipv6(ip) => IpAddr::V6(ip),
+            Host::Domain(domain) => {
+                let ip = lookup_host(&format!("{domain}:0")).expect("No IP found");
+                ip.ip()
+            }
+        };
+        Self { address, tcp_port: trust.tcp_port, udp_port: trust.udp_port, id: trust.id }
     }
 }
 
