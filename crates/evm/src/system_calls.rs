@@ -16,7 +16,7 @@ use crate::ConfigureEvm;
 /// This uses [`apply_beacon_root_contract_call`] to ultimately apply the beacon root contract state
 /// change.
 #[allow(clippy::too_many_arguments)]
-pub fn pre_block_beacon_root_contract_call<EvmConfig, DB: Database + DatabaseCommit>(
+pub fn pre_block_beacon_root_contract_call<EvmConfig, DB>(
     db: &mut DB,
     _emv_config: EvmConfig,
     chain_spec: &ChainSpec,
@@ -27,6 +27,7 @@ pub fn pre_block_beacon_root_contract_call<EvmConfig, DB: Database + DatabaseCom
     parent_beacon_block_root: Option<B256>,
 ) -> Result<(), BlockExecutionError>
 where
+    DB: Database + DatabaseCommit,
     DB::Error: std::fmt::Display,
     EvmConfig: ConfigureEvm,
 {
@@ -58,7 +59,7 @@ where
 ///
 /// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
 #[inline]
-pub fn apply_beacon_root_contract_call<EvmConfig, EXT, DB: Database + DatabaseCommit>(
+pub fn apply_beacon_root_contract_call<EvmConfig, EXT, DB>(
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     block_number: u64,
@@ -66,6 +67,7 @@ pub fn apply_beacon_root_contract_call<EvmConfig, EXT, DB: Database + DatabaseCo
     evm: &mut Evm<'_, EXT, DB>,
 ) -> Result<(), BlockExecutionError>
 where
+    DB: Database + DatabaseCommit,
     DB::Error: core::fmt::Display,
     EvmConfig: ConfigureEvm,
 {
