@@ -11,7 +11,7 @@ pub trait ChainSpecParser: TypedValueParser<Value = Arc<ChainSpec>> + Default {
     /// List of supported chains.
     const SUPPORTED_CHAINS: &'static [&'static str];
 
-    /// Parses the given string into a `ChainSpec`.
+    /// Parses the given string into a [`ChainSpec`].
     ///
     /// # Arguments
     ///
@@ -20,6 +20,6 @@ pub trait ChainSpecParser: TypedValueParser<Value = Arc<ChainSpec>> + Default {
     /// # Errors
     ///
     /// This function will return an error if the input string cannot be parsed into a valid
-    /// `ChainSpec`.
+    /// [`ChainSpec`].
     fn parse(&self, s: &str) -> eyre::Result<Arc<ChainSpec>>;
 }
