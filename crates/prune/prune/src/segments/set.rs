@@ -1,6 +1,6 @@
 use crate::segments::{
-    AccountHistory, Receipts, ReceiptsByLogs, Segment, SenderRecovery, StorageHistory,
-    TransactionLookup,
+    AccountHistory, ReceiptsByLogs, Segment, SenderRecovery, StorageHistory, TransactionLookup,
+    UserReceipts,
 };
 use reth_db_api::database::Database;
 use reth_provider::providers::StaticFileProvider;
@@ -65,8 +65,8 @@ impl<DB: Database> SegmentSet<DB> {
             .segment_opt(account_history.map(AccountHistory::new))
             // Storage history
             .segment_opt(storage_history.map(StorageHistory::new))
-            // Receipts
-            .segment_opt(receipts.map(Receipts::new))
+            // User receipts
+            .segment_opt(receipts.map(UserReceipts::new))
             // Receipts by logs
             .segment_opt(
                 (!receipts_log_filter.is_empty())

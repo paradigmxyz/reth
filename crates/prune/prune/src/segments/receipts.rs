@@ -1,103 +1,17 @@
 use crate::{
-    segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
+    segments::{PruneInput, PruneOutput, PruneOutputCheckpoint},
     PrunerError,
 };
 use reth_db::tables;
 use reth_db_api::database::Database;
 use reth_provider::{
-    errors::provider::ProviderResult, providers::StaticFileProvider, DatabaseProviderRW,
-    PruneCheckpointWriter, TransactionsProvider,
+    errors::provider::ProviderResult, DatabaseProviderRW, PruneCheckpointWriter,
+    TransactionsProvider,
 };
-use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment};
-use reth_static_file_types::StaticFileSegment;
-use tracing::{instrument, trace};
+use reth_prune_types::{PruneCheckpoint, PruneProgress, PruneSegment};
+use tracing::trace;
 
-#[derive(Debug)]
-pub struct Receipts {
-    mode: PruneMode,
-}
-
-impl Receipts {
-    pub const fn new(mode: PruneMode) -> Self {
-        Self { mode }
-    }
-}
-
-impl<DB: Database> Segment<DB> for Receipts {
-    fn segment(&self) -> PruneSegment {
-        PruneSegment::Receipts
-    }
-
-    fn mode(&self) -> Option<PruneMode> {
-        Some(self.mode)
-    }
-
-    fn purpose(&self) -> PrunePurpose {
-        PrunePurpose::User
-    }
-
-    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
-    fn prune(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        input: PruneInput,
-    ) -> Result<PruneOutput, PrunerError> {
-        prune(provider, input)
-    }
-
-    fn save_checkpoint(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        checkpoint: PruneCheckpoint,
-    ) -> ProviderResult<()> {
-        save_checkpoint(provider, checkpoint)
-    }
-}
-
-#[derive(Debug)]
-pub struct StaticFileReceipts {
-    static_file_provider: StaticFileProvider,
-}
-
-impl StaticFileReceipts {
-    pub const fn new(static_file_provider: StaticFileProvider) -> Self {
-        Self { static_file_provider }
-    }
-}
-
-impl<DB: Database> Segment<DB> for StaticFileReceipts {
-    fn segment(&self) -> PruneSegment {
-        PruneSegment::Receipts
-    }
-
-    fn mode(&self) -> Option<PruneMode> {
-        self.static_file_provider
-            .get_highest_static_file_block(StaticFileSegment::Receipts)
-            .map(PruneMode::before_inclusive)
-    }
-
-    fn purpose(&self) -> PrunePurpose {
-        PrunePurpose::StaticFile
-    }
-
-    fn prune(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        input: PruneInput,
-    ) -> Result<PruneOutput, PrunerError> {
-        prune(provider, input)
-    }
-
-    fn save_checkpoint(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        checkpoint: PruneCheckpoint,
-    ) -> ProviderResult<()> {
-        save_checkpoint(provider, checkpoint)
-    }
-}
-
-fn prune<DB: Database>(
+pub(crate) fn prune<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
     input: PruneInput,
 ) -> Result<PruneOutput, PrunerError> {
@@ -140,7 +54,7 @@ fn prune<DB: Database>(
     })
 }
 
-fn save_checkpoint<DB: Database>(
+pub(crate) fn save_checkpoint<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
     checkpoint: PruneCheckpoint,
 ) -> ProviderResult<()> {
@@ -155,7 +69,7 @@ fn save_checkpoint<DB: Database>(
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, PruneOutput, Receipts, Segment};
+    use crate::segments::{PruneInput, PruneOutput};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -202,7 +116,6 @@ mod tests {
 
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
-            let segment = Receipts::new(prune_mode);
             let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
             let input = PruneInput {
                 previous_checkpoint: db
@@ -237,7 +150,7 @@ mod tests {
                 .sub(1);
 
             let provider = db.factory.provider_rw().unwrap();
-            let result = segment.prune(&provider, input).unwrap();
+            let result = super::prune(&provider, input).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
 
             assert_matches!(
@@ -246,12 +159,11 @@ mod tests {
                     if (progress, pruned) == expected_result
             );
 
-            segment
-                .save_checkpoint(
-                    &provider,
-                    result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
-                )
-                .unwrap();
+            super::save_checkpoint(
+                &provider,
+                result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
+            )
+            .unwrap();
             provider.commit().expect("commit");
 
             let last_pruned_block_number = blocks

@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
 use crate::{
-    segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
+    segments::{PruneInput, PruneOutput, PruneOutputCheckpoint},
     PrunerError,
 };
 use itertools::Itertools;
@@ -13,84 +13,14 @@ use reth_db_api::{
 };
 
 use alloy_primitives::BlockNumber;
-use reth_provider::{providers::StaticFileProvider, DatabaseProviderRW};
-use reth_prune_types::{PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment};
-use reth_static_file_types::StaticFileSegment;
-use tracing::{instrument, trace};
+use reth_provider::DatabaseProviderRW;
+use reth_prune_types::{PruneLimiter, PruneProgress};
+use tracing::trace;
 
 /// Number of header tables to prune in one step
 const HEADER_TABLES_TO_PRUNE: usize = 3;
 
-#[derive(Debug)]
-pub struct Headers {
-    mode: PruneMode,
-}
-
-impl Headers {
-    pub const fn new(mode: PruneMode) -> Self {
-        Self { mode }
-    }
-}
-
-impl<DB: Database> Segment<DB> for Headers {
-    fn segment(&self) -> PruneSegment {
-        PruneSegment::Headers
-    }
-
-    fn mode(&self) -> Option<PruneMode> {
-        Some(self.mode)
-    }
-
-    fn purpose(&self) -> PrunePurpose {
-        PrunePurpose::User
-    }
-
-    #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
-    fn prune(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        input: PruneInput,
-    ) -> Result<PruneOutput, PrunerError> {
-        prune(provider, input)
-    }
-}
-
-#[derive(Debug)]
-pub struct StaticFileHeaders {
-    static_file_provider: StaticFileProvider,
-}
-
-impl StaticFileHeaders {
-    pub const fn new(static_file_provider: StaticFileProvider) -> Self {
-        Self { static_file_provider }
-    }
-}
-
-impl<DB: Database> Segment<DB> for StaticFileHeaders {
-    fn segment(&self) -> PruneSegment {
-        PruneSegment::Headers
-    }
-
-    fn mode(&self) -> Option<PruneMode> {
-        self.static_file_provider
-            .get_highest_static_file_block(StaticFileSegment::Headers)
-            .map(PruneMode::before_inclusive)
-    }
-
-    fn purpose(&self) -> PrunePurpose {
-        PrunePurpose::StaticFile
-    }
-
-    fn prune(
-        &self,
-        provider: &DatabaseProviderRW<DB>,
-        input: PruneInput,
-    ) -> Result<PruneOutput, PrunerError> {
-        prune(provider, input)
-    }
-}
-
-fn prune<DB: Database>(
+pub(crate) fn prune<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
     input: PruneInput,
 ) -> Result<PruneOutput, PrunerError> {
@@ -238,7 +168,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_db::tables;
     use reth_db_api::transaction::DbTx;
-    use reth_provider::PruneCheckpointReader;
+    use reth_provider::{PruneCheckpointReader, PruneCheckpointWriter as _};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
     };
@@ -247,8 +177,7 @@ mod tests {
     use tracing::trace;
 
     use crate::segments::{
-        headers::HEADER_TABLES_TO_PRUNE, Headers, PruneInput, PruneOutput, PruneOutputCheckpoint,
-        Segment,
+        headers::HEADER_TABLES_TO_PRUNE, PruneInput, PruneOutput, PruneOutputCheckpoint,
     };
 
     #[test]
@@ -271,7 +200,6 @@ mod tests {
 
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let prune_mode = PruneMode::Before(to_block);
-            let segment = Headers::new(prune_mode);
             let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
             let input = PruneInput {
                 previous_checkpoint: db
@@ -295,7 +223,7 @@ mod tests {
                 .unwrap_or_default();
 
             let provider = db.factory.provider_rw().unwrap();
-            let result = segment.prune(&provider, input.clone()).unwrap();
+            let result = super::prune(&provider, input.clone()).unwrap();
             limiter.increment_deleted_entries_count_by(result.pruned);
             trace!(target: "pruner::test",
                 expected_prune_progress=?expected_result.0,
@@ -309,9 +237,9 @@ mod tests {
                 PruneOutput {progress, pruned, checkpoint: Some(_)}
                     if (progress, pruned) == expected_result
             );
-            segment
-                .save_checkpoint(
-                    &provider,
+            provider
+                .save_prune_checkpoint(
+                    PruneSegment::Headers,
                     result.checkpoint.unwrap().as_prune_checkpoint(prune_mode),
                 )
                 .unwrap();
@@ -356,7 +284,6 @@ mod tests {
     fn prune_cannot_be_done() {
         let db = TestStageDB::default();
 
-        let segment = Headers::new(PruneMode::Full);
         let limiter = PruneLimiter::default().set_deleted_entries_limit(0);
 
         let input = PruneInput {
@@ -367,7 +294,7 @@ mod tests {
         };
 
         let provider = db.factory.provider_rw().unwrap();
-        let result = segment.prune(&provider, input).unwrap();
+        let result = super::prune(&provider, input).unwrap();
         assert_eq!(
             result,
             PruneOutput::not_done(

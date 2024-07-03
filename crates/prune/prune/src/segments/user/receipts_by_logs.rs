@@ -219,7 +219,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{receipts_by_logs::ReceiptsByLogs, PruneInput, Segment};
+    use crate::segments::{PruneInput, ReceiptsByLogs, Segment};
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
     use reth_db::tables;

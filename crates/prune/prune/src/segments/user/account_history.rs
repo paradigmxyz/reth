@@ -1,6 +1,7 @@
 use crate::{
     segments::{
-        history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment,
+        user::history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint,
+        Segment,
     },
     PrunerError,
 };
@@ -109,8 +110,8 @@ impl<DB: Database> Segment<DB> for AccountHistory {
 #[cfg(test)]
 mod tests {
     use crate::segments::{
-        account_history::ACCOUNT_HISTORY_TABLES_TO_PRUNE, AccountHistory, PruneInput, PruneOutput,
-        Segment,
+        user::account_history::ACCOUNT_HISTORY_TABLES_TO_PRUNE, AccountHistory, PruneInput,
+        PruneOutput, Segment,
     };
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
