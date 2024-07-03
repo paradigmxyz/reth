@@ -190,8 +190,8 @@ pub enum PersistenceAction {
     /// Removes the blocks above the given block number from the database.
     RemoveBlocksAbove((u64, oneshot::Sender<Vec<ExecutedBlock>>)),
 
-    /// Prune associated block data before the given block number, according to already-configured prune
-    /// modes.
+    /// Prune associated block data before the given block number, according to already-configured
+    /// prune modes.
     PruneBefore((u64, oneshot::Sender<PruneProgress>)),
 
     /// Trigger a read of static file data, and delete data depending on the highest block in each
