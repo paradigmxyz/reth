@@ -6569,6 +6569,8 @@ name = "reth-cli"
 version = "1.0.0"
 dependencies = [
  "clap",
+ "eyre",
+ "reth-chainspec",
  "reth-cli-runner",
 ]
 

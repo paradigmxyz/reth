@@ -13,6 +13,8 @@ repository.workspace = true
 [dependencies]
 # reth
 reth-cli-runner.workspace = true
+reth-chainspec.workspace = true
+eyre.workspace = true
 
 # misc
 clap.workspace = true
