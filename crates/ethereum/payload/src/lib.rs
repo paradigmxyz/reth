@@ -291,9 +291,9 @@ where
         &mut db,
         evm_config.clone(),
         &chain_spec,
-        block_number,
         &initialized_cfg,
         &initialized_block_env,
+        block_number,
         attributes.timestamp,
         attributes.parent_beacon_block_root,
     )
