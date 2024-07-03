@@ -112,18 +112,6 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
-    /// The maximum number of blocks into the past for generating state proofs.
-    pub fn eth_proof_window(&self) -> u64 {
-        self.inner.eth_proof_window
-    }
-
-    /// Returns the inner `Network`
-    pub fn network(&self) -> &Network {
-        &self.inner.network
-    }
-}
-
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
     for EthApi<Provider, Pool, Network, EvmConfig>
 {
@@ -275,6 +263,18 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     #[inline]
     pub const fn starting_block(&self) -> U256 {
         self.starting_block
+    }
+
+    /// Returns the inner `Network`
+    #[inline]
+    pub fn network(&self) -> &Network {
+        &self.network
+    }
+
+    /// The maximum number of blocks into the past for generating state proofs.
+    #[inline]
+    pub fn eth_proof_window(&self) -> u64 {
+        self.eth_proof_window
     }
 }
 
