@@ -79,14 +79,14 @@ where
         self.op_executor(db)
     }
 
-    fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
+    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
     {
         let executor = self.op_executor(db);
         OpBatchExecutor {
             executor,
-            batch_record: BlockBatchRecord::new(prune_modes),
+            batch_record: BlockBatchRecord::default(),
             stats: BlockExecutorStats::default(),
         }
     }
@@ -435,6 +435,10 @@ where
         self.batch_record.set_tip(tip);
     }
 
+    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+        self.batch_record.set_prune_modes(prune_modes);
+    }
+
     fn size_hint(&self) -> Option<usize> {
         Some(self.executor.state.bundle_state.size_hint())
     }
@@ -528,8 +532,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor =
-            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
         executor.state_mut().load_cache_account(L1_BLOCK_CONTRACT).unwrap();
 
@@ -610,8 +613,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor =
-            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
         executor.state_mut().load_cache_account(L1_BLOCK_CONTRACT).unwrap();
 
