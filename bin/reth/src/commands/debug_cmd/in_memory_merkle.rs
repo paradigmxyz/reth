@@ -2,12 +2,12 @@
 
 use crate::{
     args::{get_secret_key, NetworkArgs},
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
     utils::{get_single_body, get_single_header},
 };
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_db::DatabaseEnv;
@@ -25,7 +25,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
-use reth_trie::{updates::TrieKey, StateRoot};
+use reth_trie::StateRoot;
 use std::{path::PathBuf, sync::Arc};
 use tracing::*;
 
@@ -163,7 +163,6 @@ impl Command {
                 .clone()
                 .try_seal_with_senders()
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
-            None,
         )?;
         execution_outcome.write_to_storage(provider_rw.tx_ref(), None, OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
@@ -188,15 +187,16 @@ impl Command {
         // Compare updates
         let mut in_mem_mismatched = Vec::new();
         let mut incremental_mismatched = Vec::new();
-        let mut in_mem_updates_iter = in_memory_updates.into_iter().peekable();
-        let mut incremental_updates_iter = incremental_trie_updates.into_iter().peekable();
+        let mut in_mem_updates_iter = in_memory_updates.account_nodes_ref().iter().peekable();
+        let mut incremental_updates_iter =
+            incremental_trie_updates.account_nodes_ref().iter().peekable();
 
         while in_mem_updates_iter.peek().is_some() || incremental_updates_iter.peek().is_some() {
             match (in_mem_updates_iter.next(), incremental_updates_iter.next()) {
                 (Some(in_mem), Some(incr)) => {
                     similar_asserts::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
                     if in_mem.1 != incr.1 &&
-                        matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.len() > self.skip_node_depth.unwrap_or_default())
+                        in_mem.0.len() > self.skip_node_depth.unwrap_or_default()
                     {
                         in_mem_mismatched.push(in_mem);
                         incremental_mismatched.push(incr);

@@ -6279,34 +6279,26 @@ dependencies = [
 name = "reth"
 version = "1.0.0"
 dependencies = [
- "ahash",
  "alloy-rlp",
  "aquamarine",
  "arbitrary",
- "assert_matches",
  "backon",
  "clap",
- "comfy-table",
  "confy",
- "crossterm",
  "discv5",
  "eyre",
  "fdlimit",
  "futures",
- "human_bytes",
  "itertools 0.13.0",
- "jsonrpsee",
  "libc",
  "metrics-process",
  "proptest",
  "proptest-arbitrary-interop",
- "rand 0.8.5",
- "ratatui",
- "rayon",
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-chainspec",
+ "reth-cli-commands",
  "reth-cli-runner",
  "reth-config",
  "reth-consensus",
@@ -6315,7 +6307,6 @@ dependencies = [
  "reth-db-api",
  "reth-db-common",
  "reth-discv4",
- "reth-discv5",
  "reth-downloaders",
  "reth-engine-util",
  "reth-errors",
@@ -6324,17 +6315,16 @@ dependencies = [
  "reth-execution-types",
  "reth-exex",
  "reth-fs-util",
- "reth-net-banlist",
  "reth-network",
  "reth-network-api",
  "reth-network-p2p",
- "reth-nippy-jar",
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
  "reth-node-ethereum",
  "reth-node-events",
  "reth-node-optimism",
+ "reth-optimism-cli",
  "reth-optimism-primitives",
  "reth-payload-builder",
  "reth-payload-primitives",
@@ -6342,7 +6332,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-prune",
- "reth-prune-types",
  "reth-revm",
  "reth-rpc",
  "reth-rpc-api",
@@ -6352,6 +6341,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-rpc-types-compat",
  "reth-stages",
+ "reth-stages-api",
  "reth-static-file",
  "reth-static-file-types",
  "reth-tasks",
@@ -6581,12 +6571,44 @@ name = "reth-cli"
 version = "1.0.0"
 dependencies = [
  "clap",
+ "eyre",
+ "reth-chainspec",
  "reth-cli-runner",
 ]
 
 [[package]]
 name = "reth-cli-commands"
 version = "1.0.0"
+dependencies = [
+ "ahash",
+ "clap",
+ "comfy-table",
+ "confy",
+ "crossterm",
+ "eyre",
+ "human_bytes",
+ "itertools 0.13.0",
+ "ratatui",
+ "reth-beacon-consensus",
+ "reth-chainspec",
+ "reth-config",
+ "reth-db",
+ "reth-db-api",
+ "reth-db-common",
+ "reth-downloaders",
+ "reth-evm",
+ "reth-fs-util",
+ "reth-node-core",
+ "reth-primitives",
+ "reth-provider",
+ "reth-stages",
+ "reth-static-file",
+ "reth-static-file-types",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "reth-cli-runner"
@@ -7096,6 +7118,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-ethereum-cli"
+version = "1.0.0"
+
+[[package]]
 name = "reth-ethereum-consensus"
 version = "1.0.0"
 dependencies = [
@@ -7104,6 +7130,24 @@ dependencies = [
  "reth-consensus-common",
  "reth-primitives",
  "tracing",
+]
+
+[[package]]
+name = "reth-ethereum-engine"
+version = "1.0.0"
+dependencies = [
+ "futures",
+ "pin-project",
+ "reth-beacon-consensus",
+ "reth-chainspec",
+ "reth-db-api",
+ "reth-engine-tree",
+ "reth-ethereum-engine-primitives",
+ "reth-network-p2p",
+ "reth-stages-api",
+ "reth-tasks",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -7175,6 +7219,7 @@ dependencies = [
 name = "reth-evm"
 version = "1.0.0"
 dependencies = [
+ "alloy-eips",
  "auto_impl",
  "futures-util",
  "parking_lot 0.12.3",
@@ -7275,6 +7320,7 @@ dependencies = [
  "reth-node-core",
  "reth-payload-builder",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
  "reth-revm",
@@ -7455,6 +7501,7 @@ dependencies = [
  "reth-dns-discovery",
  "reth-ecies",
  "reth-eth-wire",
+ "reth-fs-util",
  "reth-metrics",
  "reth-net-banlist",
  "reth-network",
@@ -7464,6 +7511,7 @@ dependencies = [
  "reth-network-types",
  "reth-primitives",
  "reth-provider",
+ "reth-storage-api",
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
@@ -7628,6 +7676,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
@@ -7737,6 +7786,7 @@ dependencies = [
  "reth-network",
  "reth-network-api",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
  "reth-stages",
@@ -7796,6 +7846,34 @@ dependencies = [
 [[package]]
 name = "reth-optimism-cli"
 version = "1.0.0"
+dependencies = [
+ "alloy-primitives",
+ "clap",
+ "eyre",
+ "futures-util",
+ "reth-cli-commands",
+ "reth-config",
+ "reth-consensus",
+ "reth-db",
+ "reth-db-api",
+ "reth-downloaders",
+ "reth-errors",
+ "reth-evm-optimism",
+ "reth-execution-types",
+ "reth-network-p2p",
+ "reth-node-core",
+ "reth-node-events",
+ "reth-optimism-primitives",
+ "reth-primitives",
+ "reth-provider",
+ "reth-prune",
+ "reth-stages",
+ "reth-stages-types",
+ "reth-static-file",
+ "reth-static-file-types",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "reth-optimism-consensus"
@@ -8073,6 +8151,7 @@ dependencies = [
  "alloy-rlp",
  "assert_matches",
  "async-trait",
+ "derive_more",
  "futures",
  "http 1.1.0",
  "http-body",
@@ -8174,6 +8253,7 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-engine-api",
+ "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-rpc-layer",
  "reth-rpc-server-types",
@@ -8391,6 +8471,7 @@ dependencies = [
  "reth-network-p2p",
  "reth-network-peers",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
  "reth-revm",

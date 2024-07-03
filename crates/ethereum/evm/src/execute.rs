@@ -11,6 +11,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
+    system_calls::apply_beacon_root_contract_call,
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -22,8 +23,8 @@ use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
     state_change::{
-        apply_beacon_root_contract_call, apply_blockhashes_update,
-        apply_withdrawal_requests_contract_call, post_block_balance_increments,
+        apply_blockhashes_update, apply_withdrawal_requests_contract_call,
+        post_block_balance_increments,
     },
     Evm, State,
 };
@@ -93,14 +94,14 @@ where
         self.eth_executor(db)
     }
 
-    fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
+    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
         let executor = self.eth_executor(db);
         EthBatchExecutor {
             executor,
-            batch_record: BlockBatchRecord::new(prune_modes),
+            batch_record: BlockBatchRecord::default(),
             stats: BlockExecutorStats::default(),
         }
     }
@@ -147,7 +148,7 @@ where
         DB::Error: Into<ProviderError> + std::fmt::Display,
     {
         // apply pre execution changes
-        apply_beacon_root_contract_call(
+        apply_beacon_root_contract_call::<EvmConfig, _, _>(
             &self.chain_spec,
             block.timestamp,
             block.number,
@@ -451,6 +452,10 @@ where
         self.batch_record.set_tip(tip);
     }
 
+    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+        self.batch_record.set_prune_modes(prune_modes);
+    }
+
     fn size_hint(&self) -> Option<usize> {
         Some(self.executor.state.bundle_state.size_hint())
     }
@@ -634,7 +639,7 @@ mod tests {
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         provider
-            .batch_executor(StateProviderDatabase::new(&db), PruneModes::none())
+            .batch_executor(StateProviderDatabase::new(&db))
             .execute_and_verify_one(
                 (
                     &BlockWithSenders {
@@ -684,8 +689,7 @@ mod tests {
             ..Header::default()
         };
 
-        let mut executor =
-            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
@@ -728,8 +732,7 @@ mod tests {
 
         let mut header = chain_spec.genesis_header();
         let provider = executor_provider(chain_spec);
-        let mut executor =
-            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
         header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
@@ -816,8 +819,7 @@ mod tests {
         let provider = executor_provider(chain_spec);
 
         // execute header
-        let mut executor =
-            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
@@ -884,8 +886,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor =
-            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
         // construct the header for block one
         let header = Header { timestamp: 1, number: 1, ..Header::default() };
@@ -938,8 +939,7 @@ mod tests {
 
         let header = chain_spec.genesis_header();
         let provider = executor_provider(chain_spec);
-        let mut executor =
-            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
         // attempt to execute genesis block, this should not fail
         executor
@@ -996,8 +996,7 @@ mod tests {
             ..Header::default()
         };
         let provider = executor_provider(chain_spec);
-        let mut executor =
-            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
         // attempt to execute the fork activation block, this should not fail
         executor
@@ -1052,8 +1051,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor =
-            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
         let header = Header {
             parent_hash: B256::random(),
@@ -1115,8 +1113,7 @@ mod tests {
         let header_hash = header.hash_slow();
 
         let provider = executor_provider(chain_spec);
-        let mut executor =
-            provider.batch_executor(StateProviderDatabase::new(&db), PruneModes::none());
+        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
 
         // attempt to execute the genesis block, this should not fail
         executor

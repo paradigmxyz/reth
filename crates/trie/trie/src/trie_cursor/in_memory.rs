@@ -1,5 +1,5 @@
 use super::{TrieCursor, TrieCursorFactory};
-use crate::updates::{TrieKey, TrieUpdatesSorted};
+use crate::updates::TrieUpdatesSorted;
 use reth_db::DatabaseError;
 use reth_primitives::B256;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
@@ -39,10 +39,11 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<
 /// The cursor to iterate over account trie updates and corresponding database entries.
 /// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct InMemoryAccountTrieCursor<'a, C> {
     cursor: C,
     trie_updates: &'a TrieUpdatesSorted,
-    last_key: Option<TrieKey>,
+    last_key: Option<Nibbles>,
 }
 
 impl<'a, C> InMemoryAccountTrieCursor<'a, C> {
@@ -54,61 +55,33 @@ impl<'a, C> InMemoryAccountTrieCursor<'a, C> {
 impl<'a, C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'a, C> {
     fn seek_exact(
         &mut self,
-        key: Nibbles,
+        _key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        if let Some((trie_key, trie_op)) = self.trie_updates.find_account_node(&key) {
-            self.last_key = Some(trie_key);
-            Ok(trie_op.into_update().map(|node| (key, node)))
-        } else {
-            let result = self.cursor.seek_exact(key)?;
-            self.last_key = result.as_ref().map(|(k, _)| TrieKey::AccountNode(k.clone()));
-            Ok(result)
-        }
+        unimplemented!()
     }
 
     fn seek(
         &mut self,
-        key: Nibbles,
+        _key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let trie_update_entry = self
-            .trie_updates
-            .trie_operations
-            .iter()
-            .find(|(k, _)| matches!(k, TrieKey::AccountNode(nibbles) if nibbles <= &key))
-            .cloned();
-
-        if let Some((trie_key, trie_op)) = trie_update_entry {
-            let nibbles = match &trie_key {
-                TrieKey::AccountNode(nibbles) => nibbles.clone(),
-                _ => panic!("Invalid trie key"),
-            };
-            self.last_key = Some(trie_key);
-            return Ok(trie_op.into_update().map(|node| (nibbles, node)))
-        }
-
-        let result = self.cursor.seek(key)?;
-        self.last_key = result.as_ref().map(|(k, _)| TrieKey::AccountNode(k.clone()));
-        Ok(result)
+        unimplemented!()
     }
 
-    fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
-        if self.last_key.is_some() {
-            Ok(self.last_key.clone())
-        } else {
-            self.cursor.current()
-        }
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+        unimplemented!()
     }
 }
 
 /// The cursor to iterate over storage trie updates and corresponding database entries.
 /// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct InMemoryStorageTrieCursor<'a, C> {
     cursor: C,
     trie_update_index: usize,
     trie_updates: &'a TrieUpdatesSorted,
     hashed_address: B256,
-    last_key: Option<TrieKey>,
+    last_key: Option<Nibbles>,
 }
 
 impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
@@ -120,55 +93,19 @@ impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
 impl<'a, C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'a, C> {
     fn seek_exact(
         &mut self,
-        key: Nibbles,
+        _key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        if let Some((trie_key, trie_op)) =
-            self.trie_updates.find_storage_node(&self.hashed_address, &key)
-        {
-            self.last_key = Some(trie_key);
-            Ok(trie_op.into_update().map(|node| (key, node)))
-        } else {
-            let result = self.cursor.seek_exact(key)?;
-            self.last_key =
-                result.as_ref().map(|(k, _)| TrieKey::StorageNode(self.hashed_address, k.clone()));
-            Ok(result)
-        }
+        unimplemented!()
     }
 
     fn seek(
         &mut self,
-        key: Nibbles,
+        _key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let mut trie_update_entry = self.trie_updates.trie_operations.get(self.trie_update_index);
-        while trie_update_entry
-            .filter(|(k, _)| matches!(k, TrieKey::StorageNode(address, nibbles) if address == &self.hashed_address && nibbles < &key)).is_some()
-        {
-            self.trie_update_index += 1;
-            trie_update_entry = self.trie_updates.trie_operations.get(self.trie_update_index);
-        }
-
-        if let Some((trie_key, trie_op)) =
-            trie_update_entry.filter(|(k, _)| matches!(k, TrieKey::StorageNode(_, _)))
-        {
-            let nibbles = match trie_key {
-                TrieKey::StorageNode(_, nibbles) => nibbles.clone(),
-                _ => panic!("this should not happen!"),
-            };
-            self.last_key = Some(trie_key.clone());
-            return Ok(trie_op.as_update().map(|node| (nibbles, node.clone())))
-        }
-
-        let result = self.cursor.seek(key)?;
-        self.last_key =
-            result.as_ref().map(|(k, _)| TrieKey::StorageNode(self.hashed_address, k.clone()));
-        Ok(result)
+        unimplemented!()
     }
 
-    fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
-        if self.last_key.is_some() {
-            Ok(self.last_key.clone())
-        } else {
-            self.cursor.current()
-        }
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+        unimplemented!()
     }
 }

@@ -7,6 +7,7 @@ use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_exex::{ExExManagerHandle, ExExNotification};
 use reth_primitives::{BlockNumber, Header, StaticFileSegment};
+use reth_primitives_traits::format_gas_throughput;
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
     BlockReader, DatabaseProviderRW, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
@@ -15,9 +16,9 @@ use reth_provider::{
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
-    format_gas_throughput, BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput,
-    ExecOutput, ExecutionCheckpoint, ExecutionStageThresholds, MetricEvent, MetricEventsSender,
-    Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
+    BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
+    ExecutionCheckpoint, ExecutionStageThresholds, MetricEvent, MetricEventsSender, Stage,
+    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use std::{
     cmp::Ordering,
@@ -106,7 +107,7 @@ impl<E> ExecutionStage<E> {
 
     /// Create an execution stage with the provided executor.
     ///
-    /// The commit threshold will be set to `10_000`.
+    /// The commit threshold will be set to [`MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD`].
     pub fn new_with_executor(executor_provider: E) -> Self {
         Self::new(
             executor_provider,
@@ -221,8 +222,9 @@ where
             provider.tx_ref(),
             provider.static_file_provider().clone(),
         ));
-        let mut executor = self.executor_provider.batch_executor(db, prune_modes);
+        let mut executor = self.executor_provider.batch_executor(db);
         executor.set_tip(max_block);
+        executor.set_prune_modes(prune_modes);
 
         // Progress tracking
         let mut stage_progress = start_block;
@@ -640,7 +642,7 @@ mod tests {
         StaticFileProviderFactory,
     };
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
-    use reth_stages_api::{format_gas_throughput, StageUnitCheckpoint};
+    use reth_stages_api::StageUnitCheckpoint;
     use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthExecutorProvider> {
@@ -659,22 +661,6 @@ mod tests {
             PruneModes::none(),
             ExExManagerHandle::empty(),
         )
-    }
-
-    #[test]
-    fn test_gas_throughput_fmt() {
-        let duration = Duration::from_secs(1);
-        let gas = 100_000;
-        let throughput = format_gas_throughput(gas, duration);
-        assert_eq!(throughput, "100 Kgas/second");
-
-        let gas = 100_000_000;
-        let throughput = format_gas_throughput(gas, duration);
-        assert_eq!(throughput, "100 Mgas/second");
-
-        let gas = 100_000_000_000;
-        let throughput = format_gas_throughput(gas, duration);
-        assert_eq!(throughput, "100 Ggas/second");
     }
 
     #[test]
@@ -715,12 +701,9 @@ mod tests {
                     .try_seal_with_senders()
                     .map_err(|_| BlockValidationError::SenderRecoveryError)
                     .unwrap(),
-                None,
             )
             .unwrap();
-        provider
-            .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
-            .unwrap();
+        provider.insert_historical_block(block.clone().try_seal_with_senders().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -760,10 +743,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
-        provider
-            .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
-            .unwrap();
+        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap()).unwrap();
+        provider.insert_historical_block(block.clone().try_seal_with_senders().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -803,10 +784,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
-        provider
-            .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
-            .unwrap();
+        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap()).unwrap();
+        provider.insert_historical_block(block.clone().try_seal_with_senders().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -840,10 +819,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
-        provider
-            .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
-            .unwrap();
+        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap()).unwrap();
+        provider.insert_historical_block(block.clone().try_seal_with_senders().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -991,10 +968,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
-        provider
-            .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
-            .unwrap();
+        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap()).unwrap();
+        provider.insert_historical_block(block.clone().try_seal_with_senders().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)
@@ -1110,10 +1085,8 @@ mod tests {
         let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f9025ff901f7a0c86e8cc0310ae7c531c758678ddbfd16fc51c8cef8cec650b032de9869e8b94fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa050554882fbbda2c2fd93fdc466db9946ea262a67f7a76cc169e714f105ab583da00967f09ef1dfed20c0eacfaa94d5cd4002eda3242ac47eae68972d07b106d192a0e3c8b47fbfc94667ef4cceb17e5cc21e3b1eebd442cebb27f07562b33836290db90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001830f42408238108203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f862f860800a83061a8094095e7baea6a6c7c4c2dfeb977efac326af552d8780801ba072ed817487b84ba367d15d2f039b5fc5f087d0a8882fbdf73e8cb49357e1ce30a0403d800545b8fc544f92ce8124e2255f8c3c6af93f28243a120585d4c4c6a2a3c0").as_slice();
         let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap(), None).unwrap();
-        provider
-            .insert_historical_block(block.clone().try_seal_with_senders().unwrap(), None)
-            .unwrap();
+        provider.insert_historical_block(genesis.try_seal_with_senders().unwrap()).unwrap();
+        provider.insert_historical_block(block.clone().try_seal_with_senders().unwrap()).unwrap();
         provider
             .static_file_provider()
             .latest_writer(StaticFileSegment::Headers)

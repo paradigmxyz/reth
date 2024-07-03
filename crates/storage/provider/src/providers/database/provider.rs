@@ -104,6 +104,8 @@ pub struct DatabaseProvider<TX> {
     chain_spec: Arc<ChainSpec>,
     /// Static File provider
     static_file_provider: StaticFileProvider,
+    /// Pruning configuration
+    prune_modes: PruneModes,
 }
 
 impl<TX> DatabaseProvider<TX> {
@@ -119,8 +121,9 @@ impl<TX: DbTxMut> DatabaseProvider<TX> {
         tx: TX,
         chain_spec: Arc<ChainSpec>,
         static_file_provider: StaticFileProvider,
+        prune_modes: PruneModes,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider }
+        Self { tx, chain_spec, static_file_provider, prune_modes }
     }
 }
 
@@ -174,7 +177,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     pub fn insert_historical_block(
         &self,
         block: SealedBlockWithSenders,
-        prune_modes: Option<&PruneModes>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let ttd = if block.number == 0 {
             block.difficulty
@@ -198,7 +200,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         writer.append_header(block.header.as_ref().clone(), ttd, block.hash())?;
 
-        self.insert_block(block, prune_modes)
+        self.insert_block(block)
     }
 }
 
@@ -256,8 +258,9 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         tx: TX,
         chain_spec: Arc<ChainSpec>,
         static_file_provider: StaticFileProvider,
+        prune_modes: PruneModes,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider }
+        Self { tx, chain_spec, static_file_provider, prune_modes }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -2396,7 +2399,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     block_hash: end_block_hash,
                 })))
             }
-            trie_updates.flush(&self.tx)?;
+            trie_updates.write_to_database(&self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertMerkleTree);
 
@@ -2592,7 +2595,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                     block_hash: parent_hash,
                 })))
             }
-            trie_updates.flush(&self.tx)?;
+            trie_updates.write_to_database(&self.tx)?;
         }
 
         // get blocks
@@ -2621,7 +2624,6 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,
-        prune_modes: Option<&PruneModes>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number;
 
@@ -2678,8 +2680,10 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         for (transaction, sender) in block.block.body.into_iter().zip(block.senders.iter()) {
             let hash = transaction.hash();
 
-            if prune_modes
-                .and_then(|modes| modes.sender_recovery)
+            if self
+                .prune_modes
+                .sender_recovery
+                .as_ref()
                 .filter(|prune_mode| prune_mode.is_full())
                 .is_none()
             {
@@ -2703,8 +2707,9 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
             }
             transactions_elapsed += elapsed;
 
-            if prune_modes
-                .and_then(|modes| modes.transaction_lookup)
+            if self
+                .prune_modes
+                .transaction_lookup
                 .filter(|prune_mode| prune_mode.is_full())
                 .is_none()
             {
@@ -2765,7 +2770,6 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         execution_outcome: ExecutionOutcome,
         hashed_state: HashedPostState,
         trie_updates: TrieUpdates,
-        prune_modes: Option<&PruneModes>,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to append empty block range");
@@ -2781,7 +2785,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         // Insert the blocks
         for block in blocks {
-            self.insert_block(block, prune_modes)?;
+            self.insert_block(block)?;
             durations_recorder.record_relative(metrics::Action::InsertBlock);
         }
 
@@ -2793,7 +2797,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         // insert hashes and intermediate merkle nodes
         {
             HashedStateChanges(hashed_state).write_to_db(&self.tx)?;
-            trie_updates.flush(&self.tx)?;
+            trie_updates.write_to_database(&self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 

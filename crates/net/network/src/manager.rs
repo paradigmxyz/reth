@@ -41,16 +41,18 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason, EthVersion, Status,
 };
+use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
-use reth_network_api::{EthProtocolInfo, NetworkStatus, ReputationChangeKind};
+use reth_network_api::{EthProtocolInfo, NetworkStatus, PeerInfo, ReputationChangeKind};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_primitives::ForkId;
-use reth_provider::{BlockNumReader, BlockReader};
+use reth_storage_api::BlockNumReader;
 use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventSender;
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
+    path::Path,
     pin::Pin,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -336,11 +338,28 @@ where
         self.swarm.state().peers().iter_peers()
     }
 
+    /// Returns the number of peers in the peer set.
+    pub fn num_known_peers(&self) -> usize {
+        self.swarm.state().peers().num_known_peers()
+    }
+
     /// Returns a new [`PeersHandle`] that can be cloned and shared.
     ///
     /// The [`PeersHandle`] can be used to interact with the network's peer set.
     pub fn peers_handle(&self) -> PeersHandle {
         self.swarm.state().peers().handle()
+    }
+
+    /// Collect the peers from the [`NetworkManager`] and write them to the given
+    /// `persistent_peers_file`.
+    pub fn write_peers_to_file(&self, persistent_peers_file: &Path) -> Result<(), FsPathError> {
+        let known_peers = self.all_peers().collect::<Vec<_>>();
+        let known_peers = serde_json::to_string_pretty(&known_peers).map_err(|e| {
+            FsPathError::WriteJson { source: e, path: persistent_peers_file.to_path_buf() }
+        })?;
+        persistent_peers_file.parent().map(fs::create_dir_all).transpose()?;
+        fs::write(persistent_peers_file, known_peers)?;
+        Ok(())
     }
 
     /// Returns a new [`FetchClient`] that can be cloned and shared.
@@ -604,17 +623,17 @@ where
                 }
             }
             NetworkHandleMessage::GetPeerInfos(tx) => {
-                let _ = tx.send(self.swarm.sessions_mut().get_peer_info());
+                let _ = tx.send(self.get_peer_infos());
             }
             NetworkHandleMessage::GetPeerInfoById(peer_id, tx) => {
-                let _ = tx.send(self.swarm.sessions_mut().get_peer_info_by_id(peer_id));
+                let _ = tx.send(self.get_peer_info_by_id(peer_id));
             }
             NetworkHandleMessage::GetPeerInfosByIds(peer_ids, tx) => {
-                let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peer_ids));
+                let _ = tx.send(self.get_peer_infos_by_ids(peer_ids));
             }
             NetworkHandleMessage::GetPeerInfosByPeerKind(kind, tx) => {
-                let peers = self.swarm.state().peers().peers_by_kind(kind);
-                let _ = tx.send(self.swarm.sessions().get_peer_infos_by_ids(peers));
+                let peer_ids = self.swarm.state().peers().peers_by_kind(kind);
+                let _ = tx.send(self.get_peer_infos_by_ids(peer_ids));
             }
             NetworkHandleMessage::AddRlpxSubProtocol(proto) => self.add_rlpx_sub_protocol(proto),
             NetworkHandleMessage::GetTransactionsHandle(tx) => {
@@ -865,6 +884,42 @@ where
         }
     }
 
+    /// Returns [`PeerInfo`] for all connected peers
+    fn get_peer_infos(&self) -> Vec<PeerInfo> {
+        self.swarm
+            .sessions()
+            .active_sessions()
+            .iter()
+            .filter_map(|(&peer_id, session)| {
+                self.swarm
+                    .state()
+                    .peers()
+                    .peer_by_id(peer_id)
+                    .map(|(record, kind)| session.peer_info(&record, kind))
+            })
+            .collect()
+    }
+
+    /// Returns [`PeerInfo`] for a given peer.
+    ///
+    /// Returns `None` if there's no active session to the peer.
+    fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
+        self.swarm.sessions().active_sessions().get(&peer_id).and_then(|session| {
+            self.swarm
+                .state()
+                .peers()
+                .peer_by_id(peer_id)
+                .map(|(record, kind)| session.peer_info(&record, kind))
+        })
+    }
+
+    /// Returns [`PeerInfo`] for a given peers.
+    ///
+    /// Ignore the non-active peer.
+    fn get_peer_infos_by_ids(&self, peer_ids: impl IntoIterator<Item = PeerId>) -> Vec<PeerInfo> {
+        peer_ids.into_iter().filter_map(|peer_id| self.get_peer_info_by_id(peer_id)).collect()
+    }
+
     /// Updates the metrics for active,established connections
     #[inline]
     fn update_active_connection_metrics(&self) {
@@ -890,7 +945,7 @@ where
 
 impl<C> NetworkManager<C>
 where
-    C: BlockReader + Unpin,
+    C: BlockNumReader + Unpin,
 {
     /// Drives the [`NetworkManager`] future until a [`GracefulShutdown`] signal is received.
     ///
@@ -919,7 +974,7 @@ where
 
 impl<C> Future for NetworkManager<C>
 where
-    C: BlockReader + Unpin,
+    C: BlockNumReader + Unpin,
 {
     type Output = ();
 

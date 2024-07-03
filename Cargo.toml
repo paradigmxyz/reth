@@ -30,7 +30,9 @@ members = [
     "crates/engine/util/",
     "crates/errors/",
     "crates/ethereum-forks/",
+    "crates/ethereum/cli/",
     "crates/ethereum/consensus/",
+    "crates/ethereum/engine/",
     "crates/ethereum/engine-primitives/",
     "crates/ethereum/evm",
     "crates/ethereum/node",
@@ -206,6 +208,7 @@ zero_sized_map_values = "warn"
 single_char_pattern = "warn"
 needless_continue = "warn"
 enum_glob_use = "warn"
+iter_without_into_iter = "warn"
 
 # These are nursery lints which have findings. Allow them for now. Some are not
 # quite mature enough for use in our codebase and some we don't really want.
@@ -293,6 +296,7 @@ reth-engine-util = { path = "crates/engine/util" }
 reth-errors = { path = "crates/errors" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
+reth-ethereum-cli = { path = "crates/ethereum/cli" }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
 reth-ethereum-forks = { path = "crates/ethereum-forks" }

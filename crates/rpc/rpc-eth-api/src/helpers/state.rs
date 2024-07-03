@@ -2,11 +2,11 @@
 //! RPC methods.
 
 use futures::Future;
-use reth_primitives::{
-    revm::env::fill_block_env_with_coinbase, Address, BlockId, BlockNumberOrTag, Bytes, Header,
-    B256, U256,
+use reth_evm::ConfigureEvmEnv;
+use reth_primitives::{Address, BlockId, Bytes, Header, B256, U256};
+use reth_provider::{
+    BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
 };
-use reth_provider::{BlockIdReader, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_rpc_eth_types::{
     EthApiError, EthResult, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError,
 };
@@ -19,6 +19,9 @@ use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
+    /// Returns the maximum number of blocks into the past for generating state proofs.
+    fn max_proof_window(&self) -> u64;
+
     /// Returns the number of transactions sent from an address at the given block identifier.
     ///
     /// If this is [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this will
@@ -90,19 +93,14 @@ pub trait EthState: LoadState + SpawnBlocking {
         let chain_info = self.chain_info()?;
         let block_id = block_id.unwrap_or_default();
 
-        // if we are trying to create a proof for the latest block, but have a BlockId as input
-        // that is not BlockNumberOrTag::Latest, then we need to figure out whether or not the
-        // BlockId corresponds to the latest block
-        let is_latest_block = match block_id {
-            BlockId::Number(BlockNumberOrTag::Number(num)) => num == chain_info.best_number,
-            BlockId::Hash(hash) => hash == chain_info.best_hash.into(),
-            BlockId::Number(BlockNumberOrTag::Latest) => true,
-            _ => false,
-        };
-
-        // TODO: remove when HistoricalStateProviderRef::proof is implemented
-        if !is_latest_block {
-            return Err(EthApiError::InvalidBlockRange)
+        // Check whether the distance to the block exceeds the maximum configured window.
+        let block_number = self
+            .provider()
+            .block_number_for_id(block_id)?
+            .ok_or(EthApiError::UnknownBlockNumber)?;
+        let max_window = self.max_proof_window();
+        if chain_info.best_number.saturating_sub(block_number) > max_window {
+            return Err(EthApiError::ExceedsMaxProofWindow)
         }
 
         Ok(self.spawn_tracing(move |this| {
@@ -209,7 +207,12 @@ pub trait LoadState {
             let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash.into()).await?;
 
             let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
-            fill_block_env_with_coinbase(&mut block_env, header, after_merge, header.beneficiary);
+            self.evm_config().fill_block_env(
+                &mut block_env,
+                &LoadPendingBlock::provider(self).chain_spec(),
+                header,
+                after_merge,
+            );
 
             Ok((cfg, block_env))
         }

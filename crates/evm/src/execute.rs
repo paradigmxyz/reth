@@ -85,6 +85,11 @@ pub trait BatchExecutor<DB> {
     /// This can be used to optimize state pruning during execution.
     fn set_tip(&mut self, tip: BlockNumber);
 
+    /// Set the prune modes.
+    ///
+    /// They are used to determine which parts of the state should be kept during execution.
+    fn set_prune_modes(&mut self, prune_modes: PruneModes);
+
     /// The size hint of the batch's tracked state size.
     ///
     /// This is used to optimize DB commits depending on the size of the state.
@@ -169,10 +174,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     ///
     /// Batch executor is used to execute multiple blocks in sequence and keep track of the state
     /// during historical sync which involves executing multiple blocks in sequence.
-    ///
-    /// The pruning modes are used to determine which parts of the state should be kept during
-    /// execution.
-    fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
+    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>;
 }
@@ -198,7 +200,7 @@ mod tests {
             TestExecutor(PhantomData)
         }
 
-        fn batch_executor<DB>(&self, _db: DB, _prune_modes: PruneModes) -> Self::BatchExecutor<DB>
+        fn batch_executor<DB>(&self, _db: DB) -> Self::BatchExecutor<DB>
         where
             DB: Database<Error: Into<ProviderError> + Display>,
         {
@@ -232,6 +234,10 @@ mod tests {
         }
 
         fn set_tip(&mut self, _tip: BlockNumber) {
+            todo!()
+        }
+
+        fn set_prune_modes(&mut self, _prune_modes: PruneModes) {
             todo!()
         }
 

@@ -313,6 +313,11 @@ RPC:
 
           [default: 50000000]
 
+      --rpc.eth-proof-window <RPC_ETH_PROOF_WINDOW>
+          The maximum proof window for historical proof generation. This value allows for generating historical proofs up to configured number of blocks from current tip (up to `tip - window`)
+
+          [default: 0]
+
 RPC State Cache:
       --rpc-cache.max-blocks <MAX_BLOCKS>
           Max number of blocks in cache

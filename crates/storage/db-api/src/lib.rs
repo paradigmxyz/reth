@@ -79,3 +79,5 @@ pub mod models;
 mod scale;
 
 mod utils;
+
+pub use database::Database;

@@ -20,6 +20,7 @@ reth-prune.workspace = true
 reth-static-file.workspace = true
 reth-db-api.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 
 # alloy
 alloy-rpc-types-engine.workspace = true

@@ -30,6 +30,12 @@ use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};
 use std::{collections::HashMap, sync::Arc};
 
+/// Type alias for the LRU cache used within the [`PrecompileCache`].
+type PrecompileLRUCache = LruMap<(Bytes, u64), PrecompileResult>;
+
+/// Type alias for the thread-safe `Arc<RwLock<_>>` wrapper around [`PrecompileCache`].
+type CachedPrecompileResult = Arc<RwLock<PrecompileLRUCache>>;
+
 /// A cache for precompile inputs / outputs.
 ///
 /// This assumes that the precompile is a standard precompile, as in `StandardPrecompileFn`, meaning
@@ -40,8 +46,7 @@ use std::{collections::HashMap, sync::Arc};
 #[derive(Debug, Default)]
 pub struct PrecompileCache {
     /// Caches for each precompile input / output.
-    #[allow(clippy::type_complexity)]
-    cache: HashMap<(Address, SpecId), Arc<RwLock<LruMap<(Bytes, u64), PrecompileResult>>>>,
+    cache: HashMap<(Address, SpecId), CachedPrecompileResult>,
 }
 
 /// Custom EVM configuration
@@ -144,6 +149,15 @@ impl ConfigureEvmEnv for MyEvmConfig {
         total_difficulty: U256,
     ) {
         EthEvmConfig::fill_cfg_env(cfg_env, chain_spec, header, total_difficulty)
+    }
+
+    fn fill_tx_env_system_contract_call(
+        env: &mut Env,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) {
+        EthEvmConfig::fill_tx_env_system_contract_call(env, caller, contract, data)
     }
 }
 

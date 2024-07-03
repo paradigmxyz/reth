@@ -1,6 +1,5 @@
 use crate::{
     args::{get_secret_key, NetworkArgs},
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
     macros::block_executor,
 };
 use clap::Parser;
@@ -10,6 +9,7 @@ use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensusEngine, EthBeacon
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_config::Config;
 use reth_consensus::Consensus;
@@ -85,7 +85,11 @@ impl Command {
         // Configure blockchain tree
         let tree_externals =
             TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
-        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
+        let tree = BlockchainTree::new(
+            tree_externals,
+            BlockchainTreeConfig::default(),
+            PruneModes::none(),
+        )?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // Set up the blockchain provider
@@ -144,7 +148,7 @@ impl Command {
             network_client,
             Pipeline::builder().build(
                 provider_factory.clone(),
-                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::none()),
             ),
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),

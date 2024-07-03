@@ -1,4 +1,8 @@
 //! This crate includes the core components for advancing a reth chain.
+//!
+//! ## Feature Flags
+//!
+//! - `test-utils`: Export utilities for testing
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -27,5 +31,5 @@ pub mod persistence;
 /// Support for interacting with the blockchain tree.
 pub mod tree;
 
-#[cfg(test)]
-mod test_utils;
+#[cfg(any(test, feature = "test-utils"))]
+pub mod test_utils;
