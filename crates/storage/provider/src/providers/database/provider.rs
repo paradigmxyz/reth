@@ -2399,7 +2399,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     block_hash: end_block_hash,
                 })))
             }
-            trie_updates.flush(&self.tx)?;
+            trie_updates.write_to_database(&self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertMerkleTree);
 
@@ -2595,7 +2595,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                     block_hash: parent_hash,
                 })))
             }
-            trie_updates.flush(&self.tx)?;
+            trie_updates.write_to_database(&self.tx)?;
         }
 
         // get blocks
@@ -2797,7 +2797,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         // insert hashes and intermediate merkle nodes
         {
             HashedStateChanges(hashed_state).write_to_db(&self.tx)?;
-            trie_updates.flush(&self.tx)?;
+            trie_updates.write_to_database(&self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 
