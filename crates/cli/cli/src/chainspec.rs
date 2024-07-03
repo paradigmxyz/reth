@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 /// Trait for parsing chain specifications.
 ///
-/// This trait extends [`clap_builder::TypedValueParser`] to provide a parser for chain
+/// This trait extends [`clap::builder::TypedValueParser`] to provide a parser for chain
 /// specifications. Implementors of this trait must provide a list of supported chains and a
 /// function to parse a given string into a [`ChainSpec`].
 pub trait ChainSpecParser: TypedValueParser<Value = Arc<ChainSpec>> + Default {
