@@ -21,7 +21,7 @@ reth-storage-errors.workspace = true
 reth-execution-types.workspace = true
 
 revm.workspace = true
-
+alloy-eips.workspace = true
 auto_impl.workspace = true
 futures-util.workspace = true
 parking_lot = { workspace = true, optional = true }

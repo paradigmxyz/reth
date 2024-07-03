@@ -7,6 +7,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
+    system_calls::apply_beacon_root_contract_call,
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -16,7 +17,7 @@ use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
-    state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
+    state_change::post_block_balance_increments,
     Evm, State,
 };
 use revm_primitives::{
@@ -121,7 +122,7 @@ where
         DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
     {
         // apply pre execution changes
-        apply_beacon_root_contract_call(
+        apply_beacon_root_contract_call::<EvmConfig, _, _>(
             &self.chain_spec,
             block.timestamp,
             block.number,

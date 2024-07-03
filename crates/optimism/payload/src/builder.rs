@@ -6,7 +6,7 @@ use crate::{
 };
 use reth_basic_payload_builder::*;
 use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
-use reth_evm::ConfigureEvm;
+use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
@@ -125,11 +125,13 @@ where
         // apply eip-4788 pre block contract call
         pre_block_beacon_root_contract_call(
             &mut db,
+            self.evm_config.clone(),
             &chain_spec,
-            block_number,
             &initialized_cfg,
             &initialized_block_env,
-            &attributes,
+            block_number,
+            attributes.payload_attributes.timestamp,
+            attributes.payload_attributes.parent_beacon_block_root,
         )
         .map_err(|err| {
             warn!(target: "payload_builder",
@@ -137,7 +139,7 @@ where
                 %err,
                 "failed to apply beacon root contract call for empty payload"
             );
-            err
+            PayloadBuilderError::Internal(err.into())
         })?;
 
         let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
@@ -286,12 +288,22 @@ where
     // apply eip-4788 pre block contract call
     pre_block_beacon_root_contract_call(
         &mut db,
+        evm_config.clone(),
         &chain_spec,
-        block_number,
         &initialized_cfg,
         &initialized_block_env,
-        &attributes,
-    )?;
+        block_number,
+        attributes.payload_attributes.timestamp,
+        attributes.payload_attributes.parent_beacon_block_root,
+    )
+    .map_err(|err| {
+        warn!(target: "payload_builder",
+            parent_hash=%parent_block.hash(),
+            %err,
+            "failed to apply beacon root contract call for empty payload"
+        );
+        PayloadBuilderError::Internal(err.into())
+    })?;
 
     // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
     // blocks will always have at least a single transaction in them (the L1 info transaction),

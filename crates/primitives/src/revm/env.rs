@@ -1,33 +1,14 @@
 use crate::{
     revm_primitives::{Env, TxEnv},
-    Address, Bytes, TxKind, B256, U256,
+    Address, Bytes, TxKind, U256,
 };
 
-use alloy_eips::{eip4788::BEACON_ROOTS_ADDRESS, eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS};
+use alloy_eips::eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS;
 #[cfg(feature = "optimism")]
 use revm_primitives::OptimismFields;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
-
-/// Fill transaction environment with the EIP-4788 system contract message data.
-///
-/// This requirements for the beacon root contract call defined by
-/// [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) are:
-///
-/// At the start of processing any execution block where `block.timestamp >= FORK_TIMESTAMP` (i.e.
-/// before processing any transactions), call [`BEACON_ROOTS_ADDRESS`] as
-/// [`SYSTEM_ADDRESS`](alloy_eips::eip4788::SYSTEM_ADDRESS) with the 32-byte input of
-/// `header.parent_beacon_block_root`. This will trigger the `set()` routine of the beacon roots
-/// contract.
-pub fn fill_tx_env_with_beacon_root_contract_call(env: &mut Env, parent_beacon_block_root: B256) {
-    fill_tx_env_with_system_contract_call(
-        env,
-        alloy_eips::eip4788::SYSTEM_ADDRESS,
-        BEACON_ROOTS_ADDRESS,
-        parent_beacon_block_root.0.into(),
-    );
-}
 
 /// Fill transaction environment with the EIP-7002 withdrawal requests contract message data.
 //
