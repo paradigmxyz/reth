@@ -45,7 +45,7 @@ use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{EthProtocolInfo, NetworkStatus, PeerInfo, ReputationChangeKind};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_primitives::ForkId;
-use reth_provider::{BlockNumReader, BlockReader};
+use reth_storage_api::BlockNumReader;
 use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventSender;
 use secp256k1::SecretKey;
@@ -926,7 +926,7 @@ where
 
 impl<C> NetworkManager<C>
 where
-    C: BlockReader + Unpin,
+    C: BlockNumReader + Unpin,
 {
     /// Drives the [`NetworkManager`] future until a [`GracefulShutdown`] signal is received.
     ///
@@ -955,7 +955,7 @@ where
 
 impl<C> Future for NetworkManager<C>
 where
-    C: BlockReader + Unpin,
+    C: BlockNumReader + Unpin,
 {
     type Output = ();
 

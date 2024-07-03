@@ -20,7 +20,7 @@ use reth_eth_wire::{
 use reth_network_api::PeerKind;
 use reth_network_peers::PeerId;
 use reth_primitives::{ForkId, B256};
-use reth_provider::BlockNumReader;
+use reth_storage_api::BlockNumReader;
 use std::{
     collections::{HashMap, VecDeque},
     net::{IpAddr, SocketAddr},

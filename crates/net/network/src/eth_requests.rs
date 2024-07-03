@@ -13,7 +13,7 @@ use reth_eth_wire::{
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection};
-use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
+use reth_storage_api::{BlockReader, HeaderProvider, ReceiptProvider};
 use std::{
     future::Future,
     pin::Pin,
