@@ -30,7 +30,7 @@ jobs:
           cache-on-failure: true
       - name: Build reth
         run: |
-          cargo build --features asm-keccak --profile hivetests --bin reth
+          cargo build --features asm-keccak --profile hivetests --bin reth --locked
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build and export reth image
