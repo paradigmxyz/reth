@@ -14,7 +14,7 @@ use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig, WithdrawalsOutcome,
 };
 use reth_errors::RethError;
-use reth_evm::{apply::pre_block_beacon_root_contract_call, ConfigureEvm};
+use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{

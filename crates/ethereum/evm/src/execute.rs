@@ -7,11 +7,11 @@ use crate::{
 use reth_chainspec::{ChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
-    apply::apply_beacon_root_contract_call,
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
+    system_calls::apply_beacon_root_contract_call,
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;

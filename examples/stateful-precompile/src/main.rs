@@ -145,6 +145,15 @@ impl ConfigureEvmEnv for MyEvmConfig {
     ) {
         EthEvmConfig::fill_cfg_env(cfg_env, chain_spec, header, total_difficulty)
     }
+
+    fn fill_tx_env_with_system_contract_call(
+        env: &mut Env,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) {
+        EthEvmConfig::fill_tx_env_with_system_contract_call(env, caller, contract, data)
+    }
 }
 
 impl ConfigureEvm for MyEvmConfig {

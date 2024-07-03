@@ -3,11 +3,11 @@
 use crate::{l1::ensure_create2_deployer, OptimismBlockExecutionError, OptimismEvmConfig};
 use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
 use reth_evm::{
-    apply::apply_beacon_root_contract_call,
     execute::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
+    system_calls::apply_beacon_root_contract_call,
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;

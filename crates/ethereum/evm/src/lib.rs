@@ -68,7 +68,8 @@ impl ConfigureEvmEnv for EthEvmConfig {
         contract: Address,
         data: Bytes,
     ) {
-        env.tx = TxEnv {
+        #[allow(clippy::needless_update)] // side-effect of optimism fields
+        let tx = TxEnv {
             caller,
             transact_to: TxKind::Call(contract),
             // Explicitly set nonce to None so revm does not do any nonce checks
@@ -91,6 +92,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
             // TODO remove this once this crate is no longer built with optimism
             ..Default::default()
         };
+        env.tx = tx;
 
         // ensure the block gas limit is >= the tx
         env.block.gas_limit = U256::from(env.tx.gas_limit);

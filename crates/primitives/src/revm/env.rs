@@ -1,9 +1,9 @@
 use crate::{
     revm_primitives::{Env, TxEnv},
-    Address, Bytes, TxKind, B256, U256,
+    Address, Bytes, TxKind, U256,
 };
 
-use alloy_eips::{eip4788::BEACON_ROOTS_ADDRESS, eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS};
+use alloy_eips::eip7002::WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS;
 #[cfg(feature = "optimism")]
 use revm_primitives::OptimismFields;
 

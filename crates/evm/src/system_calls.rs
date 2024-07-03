@@ -1,3 +1,5 @@
+//! System contract call functions.
+
 use alloy_eips::eip4788::BEACON_ROOTS_ADDRESS;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
@@ -16,6 +18,7 @@ use crate::ConfigureEvm;
 ///
 /// This uses [`apply_beacon_root_contract_call`] to ultimately apply the beacon root contract state
 /// change.
+#[allow(clippy::too_many_arguments)]
 pub fn pre_block_beacon_root_contract_call<EvmConfig, DB: Database + DatabaseCommit>(
     db: &mut DB,
     _emv_config: EvmConfig,

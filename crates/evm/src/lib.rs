@@ -23,11 +23,11 @@ use revm_primitives::{
     BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv,
 };
 
-pub mod apply;
 pub mod either;
 pub mod execute;
 pub mod noop;
 pub mod provider;
+pub mod system_calls;
 
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor

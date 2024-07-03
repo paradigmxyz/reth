@@ -6,7 +6,7 @@ use crate::{
 };
 use reth_basic_payload_builder::*;
 use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
-use reth_evm::{apply::pre_block_beacon_root_contract_call, ConfigureEvm};
+use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
