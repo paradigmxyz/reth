@@ -237,9 +237,9 @@ pub trait LoadPendingBlock {
                 &mut db,
                 self.evm_config().clone(),
                 chain_spec.as_ref(),
-                block_number,
                 &cfg,
                 &block_env,
+                block_number,
                 block_env.timestamp.to::<u64>(),
                 origin.header().parent_beacon_block_root,
             )

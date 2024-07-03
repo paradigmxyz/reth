@@ -13,9 +13,6 @@ use crate::ConfigureEvm;
 /// This constructs a new [Evm] with the given DB, and environment
 /// ([`CfgEnvWithHandlerCfg`] and [`BlockEnv`]) to execute the pre block contract call.
 ///
-/// The parent beacon block root used for the call is gathered from the given
-/// [`PayloadBuilderAttributes`].
-///
 /// This uses [`apply_beacon_root_contract_call`] to ultimately apply the beacon root contract state
 /// change.
 #[allow(clippy::too_many_arguments)]
@@ -23,9 +20,9 @@ pub fn pre_block_beacon_root_contract_call<EvmConfig, DB: Database + DatabaseCom
     db: &mut DB,
     _emv_config: EvmConfig,
     chain_spec: &ChainSpec,
-    block_number: u64,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
+    block_number: u64,
     block_timestamp: u64,
     parent_beacon_block_root: Option<B256>,
 ) -> Result<(), BlockExecutionError>

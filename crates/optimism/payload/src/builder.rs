@@ -127,9 +127,9 @@ where
             &mut db,
             self.evm_config.clone(),
             &chain_spec,
-            block_number,
             &initialized_cfg,
             &initialized_block_env,
+            block_number,
             attributes.payload_attributes.timestamp,
             attributes.payload_attributes.parent_beacon_block_root,
         )
@@ -290,9 +290,9 @@ where
         &mut db,
         evm_config.clone(),
         &chain_spec,
-        block_number,
         &initialized_cfg,
         &initialized_block_env,
+        block_number,
         attributes.payload_attributes.timestamp,
         attributes.payload_attributes.parent_beacon_block_root,
     )
