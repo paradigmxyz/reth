@@ -1,6 +1,6 @@
 //! Contains RPC handler implementations specific to state.
 
-use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
+use reth_provider::StateProviderFactory;
 use reth_transaction_pool::TransactionPool;
 
 use reth_rpc_eth_api::helpers::{EthState, LoadState, SpawnBlocking};
@@ -11,7 +11,6 @@ use crate::EthApi;
 impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadState + SpawnBlocking,
-    Provider: BlockReaderIdExt + ChainSpecProvider,
 {
     fn max_proof_window(&self) -> u64 {
         self.eth_proof_window()

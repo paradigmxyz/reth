@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use derive_more::Deref;
 use reth_primitives::{BlockNumberOrTag, U256};
-use reth_provider::{BlockReaderIdExt, ChainSpecProvider};
+use reth_provider::BlockReaderIdExt;
 use reth_rpc_eth_api::{
     helpers::{transaction::UpdateRawTxForwarder, EthSigner, SpawnBlocking},
     RawTransactionForwarder,
@@ -31,18 +31,9 @@ pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
-    /// Sets a forwarder for `eth_sendRawTransaction`
-    ///
-    /// Note: this might be removed in the future in favor of a more generic approach.
-    pub fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
-        self.inner.raw_transaction_forwarder.write().replace(forwarder);
-    }
-}
-
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReaderIdExt + ChainSpecProvider,
+    Provider: BlockReaderIdExt,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[allow(clippy::too_many_arguments)]
@@ -118,6 +109,15 @@ where
         };
 
         Self { inner: Arc::new(inner) }
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
+    /// Sets a forwarder for `eth_sendRawTransaction`
+    ///
+    /// Note: this might be removed in the future in favor of a more generic approach.
+    pub fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
+        self.inner.raw_transaction_forwarder.write().replace(forwarder);
     }
 
     /// Returns the state cache frontend
