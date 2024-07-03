@@ -1,7 +1,7 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
-use std::{fmt, sync::Arc};
+use std::{fmt, ops::Deref, sync::Arc};
 
 use alloy_dyn_abi::TypedData;
 use futures::Future;
@@ -647,4 +647,22 @@ pub trait LoadTransaction: SpawnBlocking {
 pub trait RawTransactionForwarder: fmt::Debug + Send + Sync + 'static {
     /// Forwards raw transaction bytes for `eth_sendRawTransaction`
     async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()>;
+}
+
+/// Configure server's forwarder for `eth_sendRawTransaction`, at runtime.
+pub trait UpdateRawTxForwarder {
+    /// Sets a forwarder for `eth_sendRawTransaction`
+    ///
+    /// Note: this might be removed in the future in favor of a more generic approach.
+    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>);
+}
+
+impl<T, K> UpdateRawTxForwarder for T
+where
+    T: Deref<Target = Arc<K>>,
+    K: UpdateRawTxForwarder,
+{
+    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
+        self.deref().deref().set_eth_raw_transaction_forwarder(forwarder);
+    }
 }

@@ -16,8 +16,15 @@ use reth_rpc_types::{
 use tracing::trace;
 
 use crate::helpers::{
-    EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadReceipt, Trace,
+    transaction::UpdateRawTxForwarder, EthApiSpec, EthBlocks, EthCall, EthFees, EthState,
+    EthTransactions, FullEthApi,
 };
+
+/// Helper trait, unifies functionality that must be supported to implement all RPC methods for
+/// server.
+pub trait FullEthApiServer: EthApiServer + FullEthApi + UpdateRawTxForwarder + Clone {}
+
+impl<T> FullEthApiServer for T where T: EthApiServer + FullEthApi + UpdateRawTxForwarder + Clone {}
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
@@ -324,14 +331,7 @@ pub trait EthApi {
 #[async_trait::async_trait]
 impl<T> EthApiServer for T
 where
-    Self: EthApiSpec
-        + EthTransactions
-        + EthBlocks
-        + EthState
-        + EthCall
-        + EthFees
-        + Trace
-        + LoadReceipt,
+    Self: FullEthApi,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> RpcResult<U64> {
