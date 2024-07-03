@@ -10,7 +10,7 @@ use std::sync::Arc;
 #[derive(Debug, Deref, DerefMut)]
 pub struct StaticFileCursor<'a>(NippyJarCursor<'a, SegmentHeader>);
 
-/// Type alias for column results.
+/// Type alias for column results with optional values.
 type ColumnResult<T> = ProviderResult<Option<T>>;
 
 impl<'a> StaticFileCursor<'a> {
