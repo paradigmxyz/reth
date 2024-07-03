@@ -68,9 +68,7 @@ reth-optimism-primitives.workspace = true
 reth-engine-util.workspace = true
 reth-prune.workspace = true
 reth-stages-api.workspace = true
-reth-optimism-cli = { workspace = true, optional = true, features = [
-    "optimism",
-] }
+reth-optimism-cli = { workspace = true, optional = true }
 
 # crypto
 alloy-rlp.workspace = true
@@ -139,7 +137,8 @@ min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
 optimism = [
-    "reth-optimism-cli/optimism",
+    "dep:reth-optimism-cli",
+    "reth-optimism-cli?/optimism",
     "reth-primitives/optimism",
     "reth-rpc/optimism",
     "reth-provider/optimism",
