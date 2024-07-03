@@ -7461,7 +7461,6 @@ dependencies = [
  "derive_more",
  "discv5",
  "enr",
- "eyre",
  "futures",
  "humantime-serde",
  "itertools 0.13.0",
