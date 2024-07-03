@@ -197,6 +197,13 @@ where
     }
 }
 
+impl<E, DB, P> BackfillJob<E, DB, P> {
+    /// Converts the backfill job into a single block backfill job.
+    pub fn into_single_blocks(self) -> SingleBlockBackfillJob<E, DB, P> {
+        self.into()
+    }
+}
+
 impl<E, DB, P> From<BackfillJob<E, DB, P>> for SingleBlockBackfillJob<E, DB, P> {
     fn from(value: BackfillJob<E, DB, P>) -> Self {
         Self {
@@ -269,7 +276,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{BackfillJobFactory, SingleBlockBackfillJob};
+    use crate::BackfillJobFactory;
     use eyre::OptionExt;
     use reth_blockchain_tree::noop::NoopBlockchainTree;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET};
@@ -501,7 +508,7 @@ mod tests {
         // Backfill the first block
         let factory = BackfillJobFactory::new(executor, blockchain_db);
         let job = factory.backfill(1..=1);
-        let single_job: SingleBlockBackfillJob<_, _, _> = job.into();
+        let single_job = job.into_single_blocks();
         let block_execution_it = single_job.into_iter();
 
         // Assert that the backfill job only produces a single block
