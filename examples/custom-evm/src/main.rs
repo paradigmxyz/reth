@@ -94,13 +94,13 @@ impl ConfigureEvmEnv for MyEvmConfig {
         EthEvmConfig::default().fill_tx_env(tx_env, transaction, sender)
     }
 
-    fn fill_tx_env_with_system_contract_call(
+    fn fill_tx_env_system_contract_call(
         env: &mut Env,
         caller: Address,
         contract: Address,
         data: Bytes,
     ) {
-        EthEvmConfig::fill_tx_env_with_system_contract_call(env, caller, contract, data)
+        EthEvmConfig::fill_tx_env_system_contract_call(env, caller, contract, data)
     }
 }
 

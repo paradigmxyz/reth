@@ -121,7 +121,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address);
 
     /// Fill transaction environment with a system contract call.
-    fn fill_tx_env_with_system_contract_call(
+    fn fill_tx_env_system_contract_call(
         env: &mut Env,
         caller: Address,
         contract: Address,

@@ -62,7 +62,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
         transaction.fill_tx_env(tx_env, sender);
     }
 
-    fn fill_tx_env_with_system_contract_call(
+    fn fill_tx_env_system_contract_call(
         env: &mut Env,
         caller: Address,
         contract: Address,
