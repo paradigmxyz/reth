@@ -234,9 +234,9 @@ where
         let mut execution_duration = Duration::default();
 
         let mut last_block = start_block;
-        let mut last_duration = Duration::default();
+        let mut last_execution_duration = Duration::default();
         let mut last_cumulative_gas = 0;
-        let log_speed_duration = Duration::from_secs(10);
+        let log_duration = Duration::from_secs(10);
 
         debug!(target: "sync::stages::execution", start = start_block, end = max_block, "Executing range");
 
@@ -277,17 +277,17 @@ where
             execution_duration += execute_start.elapsed();
 
             // Log execution throughput
-            if execution_duration - last_duration >= log_speed_duration {
+            if execution_duration - last_execution_duration >= log_duration {
                 info!(
                     target: "sync::stages::execution",
                     start = last_block,
                     end = block_number,
-                    throughput = format_gas_throughput(cumulative_gas - last_cumulative_gas, execution_duration - last_duration),
+                    throughput = format_gas_throughput(cumulative_gas - last_cumulative_gas, execution_duration - last_execution_duration),
                     "Finished executing block range"
                 );
 
                 last_block = block_number + 1;
-                last_duration = execution_duration;
+                last_execution_duration = execution_duration;
                 last_cumulative_gas = cumulative_gas;
             }
 
