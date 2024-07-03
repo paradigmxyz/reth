@@ -32,6 +32,16 @@ impl TrieUpdates {
         &self.account_nodes
     }
 
+    /// Returns a reference to removed account nodes.
+    pub const fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
+        &self.removed_nodes
+    }
+
+    /// Returns a reference to updated storage tries.
+    pub const fn storage_tries_ref(&self) -> &HashMap<B256, StorageTrieUpdates> {
+        &self.storage_tries
+    }
+
     /// Insert storage updates for a given hashed address.
     pub fn insert_storage_updates(
         &mut self,
@@ -162,6 +172,21 @@ impl StorageTrieUpdates {
         (self.is_deleted as usize) + self.storage_nodes.len() + self.removed_nodes.len()
     }
 
+    /// Returns `true` if the trie was deleted.
+    pub const fn is_deleted(&self) -> bool {
+        self.is_deleted
+    }
+
+    /// Returns reference to updated storage nodes.
+    pub const fn storage_nodes_ref(&self) -> &HashMap<Nibbles, BranchNodeCompact> {
+        &self.storage_nodes
+    }
+
+    /// Returns reference to removed storage nodes.
+    pub const fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
+        &self.removed_nodes
+    }
+
     /// Returns `true` if storage updates are empty.
     pub fn is_empty(&self) -> bool {
         !self.is_deleted && self.storage_nodes.is_empty() && self.removed_nodes.is_empty()
@@ -274,10 +299,44 @@ pub struct TrieUpdatesSorted {
     pub(crate) storage_tries: Vec<(B256, StorageTrieUpdatesSorted)>,
 }
 
+impl TrieUpdatesSorted {
+    /// Returns reference to updated account nodes.
+    pub fn account_nodes_ref(&self) -> &[(Nibbles, BranchNodeCompact)] {
+        &self.account_nodes
+    }
+
+    /// Returns reference to removed account nodes.
+    pub const fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
+        &self.removed_nodes
+    }
+
+    /// Returns reference to updated storage tries.
+    pub fn storage_tries_ref(&self) -> &[(B256, StorageTrieUpdatesSorted)] {
+        &self.storage_tries
+    }
+}
+
 /// Sorted trie updates used for lookups and insertions.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct StorageTrieUpdatesSorted {
     pub(crate) is_deleted: bool,
     pub(crate) storage_nodes: Vec<(Nibbles, BranchNodeCompact)>,
     pub(crate) removed_nodes: HashSet<Nibbles>,
+}
+
+impl StorageTrieUpdatesSorted {
+    /// Returns `true` if the trie was deleted.
+    pub const fn is_deleted(&self) -> bool {
+        self.is_deleted
+    }
+
+    /// Returns reference to updated storage nodes.
+    pub fn storage_nodes_ref(&self) -> &[(Nibbles, BranchNodeCompact)] {
+        &self.storage_nodes
+    }
+
+    /// Returns reference to removed storage nodes.
+    pub const fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
+        &self.removed_nodes
+    }
 }
