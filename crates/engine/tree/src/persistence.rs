@@ -190,7 +190,7 @@ pub enum PersistenceAction {
     /// Removes the blocks above the given block number from the database.
     RemoveBlocksAbove((u64, oneshot::Sender<Vec<ExecutedBlock>>)),
 
-    /// Prune associated block data before the given hash, according to already-configured prune
+    /// Prune associated block data before the given block number, according to already-configured prune
     /// modes.
     PruneBefore((u64, oneshot::Sender<PruneProgress>)),
 
