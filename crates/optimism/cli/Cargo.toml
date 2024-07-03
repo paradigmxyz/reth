@@ -51,5 +51,6 @@ eyre.workspace = true
 
 [features] 
  optimism = [ 
-    "reth-primitives/optimism"
+    "reth-primitives/optimism",
+    "reth-evm-optimism/optimism",
  ] 
