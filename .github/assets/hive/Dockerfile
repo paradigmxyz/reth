@@ -1,6 +1,6 @@
 FROM ubuntu AS runtime
 
-COPY ./target/hivetests/reth /usr/local/bin
+COPY artifacts/reth /usr/local/bin
 
 COPY LICENSE-* ./
 
