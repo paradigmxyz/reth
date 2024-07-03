@@ -101,6 +101,8 @@ where
 
     let prune_modes = prune_config.map(|prune| prune.segments).unwrap_or_default();
 
+    let is_full_node = prune_modes.receipts.is_some();
+
     let pipeline = builder
         .with_tip_sender(tip_tx)
         .with_metrics_tx(metrics_tx.clone())
@@ -125,7 +127,7 @@ where
                 )
                 .with_metrics_tx(metrics_tx),
             )
-            .disable_if(reth_stages::StageId::SenderRecovery, || prune_modes.receipts.is_some()),
+            .disable_if(reth_stages::StageId::SenderRecovery, || is_full_node),
         )
         .build(provider_factory, static_file_producer);
 
