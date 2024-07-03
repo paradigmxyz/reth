@@ -9,7 +9,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProofProvider,
-    StateProviderFactory, TransactionVariant,
+    StateProviderFactory, StateRootProvider, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
@@ -29,8 +29,9 @@ use reth_rpc_types::{
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
-    db::{BundleState, CacheDB},
+    db::{states::bundle_state::BundleRetention, BundleState, CacheDB},
     primitives::{db::DatabaseCommit, BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg},
+    StateBuilder,
 };
 use revm_inspectors::tracing::{
     js::{JsInspector, TransactionContext},
@@ -569,7 +570,10 @@ where
         self.inner
             .eth_api
             .spawn_with_state_at_block(block.parent_hash.into(), move |state| {
-                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut db = StateBuilder::new()
+                    .with_database(StateProviderDatabase::new(state))
+                    .with_bundle_update()
+                    .build();
 
                 // Re-execute all of the transactions in the block to load all touched accounts into
                 // the cache DB.
@@ -589,16 +593,32 @@ where
                     db.commit(res.state);
                 }
 
+                // Merge all state transitions
+                db.merge_transitions(BundleRetention::Reverts);
+
+                // Take the bundle state
+                let bundle_state = db.take_bundle();
+
                 // Destruct the cache database to retrieve the state provider.
-                let state = db.db.into_inner();
+                let state = db.database.into_inner();
 
                 // Grab all account proofs for the data accessed during block execution.
+                //
+                // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
+                // referenced accounts + storage slots.
                 let account_proofs = db
+                    .cache
                     .accounts
                     .into_iter()
                     .map(|(addr, db_acc)| {
-                        let storage_keys =
-                            db_acc.storage.keys().copied().map(Into::into).collect::<Vec<_>>();
+                        let storage_keys = db_acc
+                            .account
+                            .ok_or(ProviderError::CacheServiceUnavailable)?
+                            .storage
+                            .keys()
+                            .copied()
+                            .map(Into::into)
+                            .collect::<Vec<_>>();
 
                         let account_proof =
                             state.proof(&BundleState::default(), addr, &storage_keys)?;
@@ -614,7 +634,7 @@ where
                     acc + account_proof_size + storage_proofs_size
                 });
 
-                // Generate the witness by re-hashing all intermediate nodes.
+                // Generate the execution witness by re-hashing all intermediate nodes.
                 let mut witness = HashMap::with_capacity(total_nodes);
                 for proof in account_proofs {
                     // First, add all account proof nodes.
@@ -630,6 +650,88 @@ where
                             witness.insert(hash, node);
                         }
                     }
+                }
+
+                // Extend the witness with the information required to reproduce the state root
+                // after the block execution.
+                //
+                // The extra witness data appended within this operation consists of siblings within
+                // branch nodes that are required to unblind during state root recomputation.
+                let (_, trie_updates) = state.state_root_with_updates(&bundle_state)?;
+                for _path in trie_updates.removed_nodes_ref() {
+                    // // Fetch parent `BranchNodeCompact` from the DB. It must be a branch node, as
+                    // // extension nodes never point to single leaves.
+                    // let (mut cursor, deleted_node_nibble, path): (
+                    //     Box<dyn TrieCursor>,
+                    //     u8,
+                    //     Nibbles,
+                    // ) = match path {
+                    //     TrieKey::AccountNode(nibbles) => {
+                    //         let cursor = this
+                    //             .inner
+                    //             .provider
+                    //             .account_trie_cursor()
+                    //             .map_err(ProviderError::Database)?;
+                    //
+                    //         (Box::new(cursor), nibbles[0], nibbles.slice(1..))
+                    //     }
+                    //     TrieKey::StorageNode(hashed_address, nibbles) => {
+                    //         let cursor = this
+                    //             .inner
+                    //             .provider
+                    //             .storage_trie_cursor(hashed_address)
+                    //             .map_err(ProviderError::Database)?;
+                    //
+                    //         (Box::new(cursor), nibbles[0], nibbles.slice(1..))
+                    //     }
+                    //     TrieKey::StorageTrie(_) => {
+                    //         // Ignore storage trie root updates; These are not required for this
+                    // portion of the         // witness.
+                    //         continue;
+                    //     }
+                    // };
+                    //
+                    // // Fetch the parent branch node from the database.
+                    // let (_, branch) = cursor
+                    //     .seek_exact(path.clone())
+                    //     .map_err(ProviderError::Database)?
+                    //     .ok_or(ProviderError::Database(DatabaseError::Other(
+                    //         "Failed to seek to branch node".to_string(),
+                    //     )))?;
+                    //
+                    // // Check if there are only two children within the parent branch. If there
+                    // are, one is the deleted // leaf, and the other is the
+                    // sibling that we need to unblind. Otherwise, we can continue, as
+                    // // the branch node will remain after the deletion.
+                    // let sibling_nibble = if branch.state_mask.count_ones() != 2 {
+                    //     continue;
+                    // } else {
+                    //     // Find the first set bit.
+                    //     let first_bit_index = branch.state_mask.trailing_zeros() as u8;
+                    //
+                    //     // Create a new mask, clearing the first set bit.
+                    //     let mask = branch.state_mask.get() & (branch.state_mask.get() - 1);
+                    //
+                    //     // Find the second set bit.
+                    //     let second_bit_index = mask.trailing_zeros() as u8;
+                    //
+                    //     if first_bit_index == deleted_node_nibble {
+                    //         second_bit_index
+                    //     } else {
+                    //         first_bit_index
+                    //     }
+                    // };
+                    // let _sibling_path = Nibbles::from_nibbles_unchecked(
+                    //     std::iter::once(sibling_nibble)
+                    //         .chain(path.iter().copied())
+                    //         .collect::<Vec<_>>(),
+                    // );
+                    //
+                    // // Rebuild the sub-trie rooted at the sibling node using `TrieWalker` +
+                    // // `HashBuilder`.
+                    // // TODO
+                    //
+                    // // Add the preimage of the sibling node to the witness.
                 }
 
                 // TODO: Also need blinded sibling nodes accessed during deletion, to allow for
