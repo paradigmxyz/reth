@@ -36,7 +36,7 @@ pub fn fill_tx_env_with_withdrawal_requests_contract_call(env: &mut Env) {
 ///  * the call does not follow the EIP-1559 burn semantics - no value should be transferred as part
 ///    of the call
 ///  * if no code exists at the provided address, the call will fail silently
-fn fill_tx_env_with_system_contract_call(
+pub fn fill_tx_env_with_system_contract_call(
     env: &mut Env,
     caller: Address,
     contract: Address,
