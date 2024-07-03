@@ -22,15 +22,15 @@ pub struct TrieWalker<C> {
     pub can_skip_current_node: bool,
     /// A `PrefixSet` representing the changes to be applied to the trie.
     pub changes: PrefixSet,
-    /// The retained trie node keys that need to be deleted.
-    deleted_keys: Option<HashSet<Nibbles>>,
+    /// The retained trie node keys that need to be removed.
+    removed_keys: Option<HashSet<Nibbles>>,
 }
 
 impl<C> TrieWalker<C> {
     /// Constructs a new `TrieWalker` from existing stack and a cursor.
     pub fn from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
         let mut this =
-            Self { cursor, changes, stack, can_skip_current_node: false, deleted_keys: None };
+            Self { cursor, changes, stack, can_skip_current_node: false, removed_keys: None };
         this.update_skip_node();
         this
     }
@@ -38,14 +38,14 @@ impl<C> TrieWalker<C> {
     /// Sets the flag whether the trie updates should be stored.
     pub fn with_deletions_retained(mut self, retained: bool) -> Self {
         if retained {
-            self.deleted_keys = Some(HashSet::default());
+            self.removed_keys = Some(HashSet::default());
         }
         self
     }
 
     /// Split the walker into stack and trie updates.
     pub fn split(mut self) -> (Vec<CursorSubNode>, HashSet<Nibbles>) {
-        let keys = self.deleted_keys.take();
+        let keys = self.removed_keys.take();
         (self.stack, keys.unwrap_or_default())
     }
 
@@ -58,9 +58,9 @@ impl<C> TrieWalker<C> {
         println!("====================== END STACK ======================\n");
     }
 
-    /// The current length of the deleted keys.
-    pub fn deleted_keys_len(&self) -> usize {
-        self.deleted_keys.as_ref().map_or(0, |u| u.len())
+    /// The current length of the removed keys.
+    pub fn removed_keys_len(&self) -> usize {
+        self.removed_keys.as_ref().map_or(0, |u| u.len())
     }
 
     /// Returns the current key in the trie.
@@ -112,7 +112,7 @@ impl<C: TrieCursor> TrieWalker<C> {
             changes,
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
-            deleted_keys: None,
+            removed_keys: None,
         };
 
         // Set up the root node of the trie in the stack, if it exists.
@@ -188,7 +188,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
         if !self.can_skip_current_node || nibble != -1 {
-            if let Some((keys, key)) = self.deleted_keys.as_mut().zip(self.cursor.current()?) {
+            if let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?) {
                 keys.insert(key);
             }
         }
