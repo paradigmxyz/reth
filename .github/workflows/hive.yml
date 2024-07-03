@@ -37,6 +37,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: .github/assets/hive/Dockerfile
           tags: ghcr.io/paradigmxyz/reth:latest
           outputs: type=docker,dest=./artifacts/reth_image.tar
           cache-from: type=gha
