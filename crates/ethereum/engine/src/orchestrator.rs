@@ -23,7 +23,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// Alias for Ethereum chain orchestrator.
-type EthChainOrchestratorType<DB, Client> = ChainOrchestrator<
+type EthServiceType<DB, Client> = ChainOrchestrator<
     EngineHandler<
         EngineApiRequestHandler<EthEngineTypes>,
         UnboundedReceiverStream<BeaconEngineMessage<EthEngineTypes>>,
@@ -35,20 +35,20 @@ type EthChainOrchestratorType<DB, Client> = ChainOrchestrator<
 /// The type that drives the Ethereum chain forward and communicates progress.
 #[pin_project]
 #[allow(missing_debug_implementations)]
-pub struct EthChainOrchestrator<DB, Client>
+pub struct EthService<DB, Client>
 where
     DB: Database + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
-    orchestrator: EthChainOrchestratorType<DB, Client>,
+    orchestrator: EthServiceType<DB, Client>,
 }
 
-impl<DB, Client> EthChainOrchestrator<DB, Client>
+impl<DB, Client> EthService<DB, Client>
 where
     DB: Database + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
-    /// Constructor for `EthChainOrchestrator`.
+    /// Constructor for `EthService`.
     pub fn new(
         chain_spec: Arc<ChainSpec>,
         client: Client,
@@ -70,12 +70,12 @@ where
     }
 }
 
-impl<DB, Client> Future for EthChainOrchestrator<DB, Client>
+impl<DB, Client> Future for EthService<DB, Client>
 where
     DB: Database + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
-    type Output = Result<(), EthChainOrchestratorError>;
+    type Output = Result<(), EthServiceError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         // Call poll on the inner orchestrator.
@@ -87,9 +87,9 @@ where
     }
 }
 
-/// Potential error returned by `EthChainOrchestrator`.
+/// Potential error returned by `EthService`.
 #[derive(Debug)]
-pub struct EthChainOrchestratorError {}
+pub struct EthServiceError {}
 
 #[cfg(test)]
 mod tests {
@@ -122,7 +122,7 @@ mod tests {
         let (to_tree_tx, _to_tree_rx) = mpsc::channel(32);
         let (_from_tree_tx, from_tree_rx) = mpsc::unbounded_channel();
 
-        let _eth_chain_orchestrator = EthChainOrchestrator::new(
+        let _eth_chain_orchestrator = EthService::new(
             chain_spec,
             client,
             to_tree_tx,
