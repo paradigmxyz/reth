@@ -56,7 +56,6 @@ metrics.workspace = true
 # misc
 auto_impl.workspace = true
 aquamarine.workspace = true
-eyre.workspace = true
 tracing.workspace = true
 rustc-hash.workspace = true
 thiserror.workspace = true
