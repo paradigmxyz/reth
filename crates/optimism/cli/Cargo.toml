@@ -8,3 +8,49 @@ homepage.workspace = true
 repository.workspace = true
 
 [lints]
+workspace = true
+
+[dependencies]
+reth-static-file-types = { workspace = true, features = ["clap"] }
+clap = { workspace = true, features = ["derive", "env"] }
+reth-cli-commands.workspace = true
+reth-consensus.workspace = true
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-db-api.workspace = true
+reth-downloaders.workspace = true
+reth-optimism-primitives.workspace = true
+reth-provider.workspace = true
+reth-prune.workspace = true
+reth-stages.workspace = true
+reth-static-file.workspace = true
+reth-execution-types.workspace = true
+reth-node-core.workspace = true
+reth-primitives.workspace = true
+
+
+reth-stages-types.workspace = true
+reth-node-events.workspace = true
+reth-network-p2p.workspace = true
+reth-errors.workspace = true
+
+reth-config.workspace = true
+alloy-primitives.workspace = true
+futures-util.workspace = true
+reth-evm-optimism.workspace = true
+
+
+
+tokio = { workspace = true, features = [
+    "sync",
+    "macros",
+    "time",
+    "rt-multi-thread",
+] }
+tracing.workspace = true
+eyre.workspace = true
+
+[features] 
+ optimism = [ 
+    "reth-primitives/optimism",
+    "reth-evm-optimism/optimism",
+ ] 

@@ -197,11 +197,11 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// This syncs RLP encoded OP blocks below Bedrock from a file, without executing.
     #[cfg(feature = "optimism")]
     #[command(name = "import-op")]
-    ImportOp(crate::commands::import_op::ImportOpCommand),
+    ImportOp(reth_optimism_cli::ImportOpCommand),
     /// This imports RLP encoded receipts from a file.
     #[cfg(feature = "optimism")]
     #[command(name = "import-receipts-op")]
-    ImportReceiptsOp(crate::commands::import_receipts_op::ImportReceiptsOpCommand),
+    ImportReceiptsOp(reth_optimism_cli::ImportReceiptsOpCommand),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand),
     /// Database debugging utilities
