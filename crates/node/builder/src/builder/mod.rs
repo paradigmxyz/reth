@@ -512,7 +512,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                     if let Some(peers_file) = known_peers_file {
                         let num_known_peers = network.num_known_peers();
                         trace!(target: "reth::cli", peers_file =?peers_file, num_peers=%num_known_peers, "Saving current peers");
-                        match network.write_peers_to_file(peers_file) {
+                        match network.write_peers_to_file(peers_file.as_path()) {
                             Ok(_) => {
                                 info!(target: "reth::cli", "Wrote network peers to file");
                             }

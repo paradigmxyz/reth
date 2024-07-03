@@ -52,7 +52,7 @@ use reth_tokio_util::EventSender;
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
-    path::PathBuf,
+    path::Path,
     pin::Pin,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -352,13 +352,13 @@ where
 
     /// Collect the peers from the [`NetworkManager`] and write them to the given
     /// `persistent_peers_file`.
-    pub fn write_peers_to_file(&self, persistent_peers_file: PathBuf) -> Result<(), FsPathError> {
+    pub fn write_peers_to_file(&self, persistent_peers_file: &Path) -> Result<(), FsPathError> {
         let known_peers = self.all_peers().collect::<Vec<_>>();
         let known_peers = serde_json::to_string_pretty(&known_peers).map_err(|e| {
-            FsPathError::WriteJson { source: e, path: persistent_peers_file.clone() }
+            FsPathError::WriteJson { source: e, path: persistent_peers_file.to_path_buf() }
         })?;
         persistent_peers_file.parent().map(fs::create_dir_all).transpose()?;
-        fs::write(&persistent_peers_file, known_peers)?;
+        fs::write(persistent_peers_file, known_peers)?;
         Ok(())
     }
 
