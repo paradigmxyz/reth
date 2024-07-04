@@ -91,6 +91,7 @@ jobs:
           go build .
           ./hive -client reth --sim "devp2p|ethereum/engine|ethereum/rpc-compat|pyspec" -sim.timelimit 1s || true
           mv ./hive ../hive_assets/
+          docker save hive/hiveproxy:latest -o ../hive_assets/hiveproxy.tar
           docker save hive/simulators/devp2p:latest -o ../hive_assets/devp2p.tar
           docker save hive/simulators/ethereum/engine:latest -o ../hive_assets/engine.tar
           docker save hive/simulators/ethereum/rpc-compat:latest -o ../hive_assets/rpc_compat.tar
@@ -227,6 +228,7 @@ jobs:
 
       - name: Load Docker images
         run: |
+          docker load --input /tmp/hiveproxy.tar
           docker load --input /tmp/devp2p.tar
           docker load --input /tmp/engine.tar
           docker load --input /tmp/rpc_compat.tar
