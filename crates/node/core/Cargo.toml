@@ -14,6 +14,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
+reth-cli-util.workspace = true
 reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
@@ -57,7 +58,6 @@ metrics-util.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }
 humantime.workspace = true
-thiserror.workspace = true
 const_format.workspace = true
 rand.workspace = true
 derive_more.workspace = true

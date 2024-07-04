@@ -11,6 +11,7 @@ use crate::{
 };
 use futures::Future;
 use reth_chainspec::ChainSpec;
+use reth_cli_util::get_secret_key;
 use reth_db::{
     test_utils::{create_test_rw_db_with_path, tempdir_path, TempDatabase},
     DatabaseEnv,
@@ -25,7 +26,7 @@ use reth_network::{
 };
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::{
-    args::{get_secret_key, DatadirArgs},
+    args::DatadirArgs,
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath, MaybePlatformPath},
     node_config::NodeConfig,

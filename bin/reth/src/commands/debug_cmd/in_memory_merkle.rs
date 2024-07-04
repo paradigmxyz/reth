@@ -1,7 +1,7 @@
 //! Command for debugging in-memory merkle trie calculation.
 
 use crate::{
-    args::{get_secret_key, NetworkArgs},
+    args::NetworkArgs,
     macros::block_executor,
     utils::{get_single_body, get_single_header},
 };
@@ -9,6 +9,7 @@ use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
+use reth_cli_util::get_secret_key;
 use reth_config::Config;
 use reth_db::DatabaseEnv;
 use reth_errors::BlockValidationError;
