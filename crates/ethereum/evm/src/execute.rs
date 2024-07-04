@@ -361,13 +361,11 @@ where
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
-    /// Executes the block and commits the state changes.
+    /// Executes the block and commits the changes to the internal state.
     ///
     /// Returns the receipts of the transactions in the block.
     ///
     /// Returns an error if the block could not be executed or failed verification.
-    ///
-    /// State changes are committed to the database.
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
         let EthExecuteOutput { receipts, requests, gas_used } =
