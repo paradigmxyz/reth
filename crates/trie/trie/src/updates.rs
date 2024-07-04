@@ -310,7 +310,7 @@ impl TrieUpdatesSorted {
     }
 
     /// Returns reference to updated storage tries.
-    pub fn storage_tries_ref(&self) -> &HashMap<B256, StorageTrieUpdatesSorted> {
+    pub const fn storage_tries_ref(&self) -> &HashMap<B256, StorageTrieUpdatesSorted> {
         &self.storage_tries
     }
 }
