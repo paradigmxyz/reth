@@ -74,8 +74,8 @@ impl<DB: Database> Segment<DB> for AccountHistory {
                 range,
                 &mut limiter,
                 |_| false,
-                |(block_number, value)| {
-                    highest_deleted_accounts.insert(value.address, block_number);
+                |(block_number, account)| {
+                    highest_deleted_accounts.insert(account.address, block_number);
                     last_changeset_pruned_block = Some(block_number);
                 },
             )?;
