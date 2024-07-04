@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use crate::{
     segments::{
         history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment,
@@ -10,6 +9,7 @@ use reth_db::tables;
 use reth_db_api::{database::Database, models::ShardedKey};
 use reth_provider::DatabaseProviderRW;
 use reth_prune_types::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
+use std::collections::HashMap;
 use tracing::{instrument, trace};
 
 /// Number of account history tables to prune in one step.
