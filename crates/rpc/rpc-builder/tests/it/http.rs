@@ -295,13 +295,13 @@ where
     let address = Address::default();
     let sender = Address::default();
     let tx_hash = TxHash::default();
-    let block_number = BlockNumberOrTag::default();
+    let block_number = 1;
     let page_number = 1;
     let page_size = 10;
     let nonce = 1;
     let block_hash = B256::default();
 
-    OtterscanClient::get_header_by_number(client, 1).await.unwrap();
+    OtterscanClient::get_header_by_number(client, block_number).await.unwrap();
 
     OtterscanClient::has_code(client, address, None).await.unwrap();
 
