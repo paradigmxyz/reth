@@ -10,6 +10,7 @@ use reth_db_api::{
 use reth_primitives::{
     Account, Address, BlockNumber, Bytecode, StaticFileSegment, StorageKey, StorageValue, B256,
 };
+use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{proof::Proof, updates::TrieUpdates, AccountProof, HashedPostState};
 use revm::db::BundleState;
@@ -90,6 +91,14 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
     }
 }
 
+impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
+    fn proof(&self, address: Address, slots: &[B256]) -> ProviderResult<AccountProof> {
+        Ok(Proof::new(self.tx)
+            .account_proof(address, slots)
+            .map_err(Into::<reth_db::DatabaseError>::into)?)
+    }
+}
+
 impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
     /// Get storage.
     fn storage(
@@ -109,12 +118,6 @@ impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
-    }
-
-    fn proof(&self, address: Address, slots: &[B256]) -> ProviderResult<AccountProof> {
-        Ok(Proof::new(self.tx)
-            .account_proof(address, slots)
-            .map_err(Into::<reth_db::DatabaseError>::into)?)
     }
 }
 

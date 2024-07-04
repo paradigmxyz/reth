@@ -13,6 +13,7 @@ use reth_primitives::{
     constants::EPOCH_SLOTS, Account, Address, BlockNumber, Bytecode, StaticFileSegment, StorageKey,
     StorageValue, B256,
 };
+use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 use revm::db::BundleState;
@@ -271,6 +272,13 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
     }
 }
 
+impl<'b, TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'b, TX> {
+    /// Get account and storage proofs.
+    fn proof(&self, _address: Address, _slots: &[B256]) -> ProviderResult<AccountProof> {
+        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
+    }
+}
+
 impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
     /// Get storage.
     fn storage(
@@ -305,11 +313,6 @@ impl<'b, TX: DbTx> StateProvider for HistoricalStateProviderRef<'b, TX> {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
-    }
-
-    /// Get account and storage proofs.
-    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
     }
 }
 

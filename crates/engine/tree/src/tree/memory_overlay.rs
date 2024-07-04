@@ -1,7 +1,9 @@
 use super::ExecutedBlock;
 use reth_errors::ProviderResult;
 use reth_primitives::{Account, Address, BlockNumber, Bytecode, StorageKey, StorageValue, B256};
-use reth_provider::{AccountReader, BlockHashReader, StateProvider, StateRootProvider};
+use reth_provider::{
+    AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
+};
 use reth_trie::{updates::TrieUpdates, AccountProof};
 use revm::db::BundleState;
 
@@ -89,6 +91,15 @@ where
     }
 }
 
+impl<H> StateProofProvider for MemoryOverlayStateProvider<H>
+where
+    H: StateProofProvider + Send,
+{
+    fn proof(&self, address: Address, slots: &[B256]) -> ProviderResult<AccountProof> {
+        todo!()
+    }
+}
+
 impl<H> StateProvider for MemoryOverlayStateProvider<H>
 where
     H: StateProvider + Send,
@@ -115,9 +126,5 @@ where
         }
 
         self.historical.bytecode_by_hash(code_hash)
-    }
-
-    fn proof(&self, address: Address, keys: &[B256]) -> ProviderResult<AccountProof> {
-        todo!()
     }
 }
