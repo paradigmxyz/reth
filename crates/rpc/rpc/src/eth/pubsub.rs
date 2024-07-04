@@ -162,7 +162,7 @@ where
                 BroadcastStream::new(pubsub.chain_events.subscribe_to_canonical_state());
             // get current sync status
             let mut initial_sync_status = pubsub.network.is_syncing();
-            let current_sub_res = pubsub.sync_status(initial_sync_status).await;
+            let current_sub_res = pubsub.sync_status(initial_sync_status);
 
             // send the current status immediately
             let msg = SubscriptionMessage::from_json(&current_sub_res)
@@ -179,7 +179,7 @@ where
                     initial_sync_status = current_syncing;
 
                     // send a new message now that the status changed
-                    let sync_status = pubsub.sync_status(current_syncing).await;
+                    let sync_status = pubsub.sync_status(current_syncing);
                     let msg = SubscriptionMessage::from_json(&sync_status)
                         .map_err(SubscriptionSerializeError::new)?;
                     if accepted_sink.send(msg).await.is_err() {
@@ -270,7 +270,7 @@ where
     Provider: BlockReader + 'static,
 {
     /// Returns the current sync status for the `syncing` subscription
-    async fn sync_status(&self, is_syncing: bool) -> EthSubscriptionResult {
+    fn sync_status(&self, is_syncing: bool) -> EthSubscriptionResult {
         if is_syncing {
             let current_block =
                 self.provider.chain_info().map(|info| info.best_number).unwrap_or_default();

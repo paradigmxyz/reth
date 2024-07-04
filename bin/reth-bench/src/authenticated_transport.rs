@@ -39,7 +39,7 @@ impl InnerTransport {
         jwt: JwtSecret,
     ) -> Result<(Self, Claims), AuthenticatedTransportError> {
         match url.scheme() {
-            "http" | "https" => Self::connect_http(url, jwt).await,
+            "http" | "https" => Self::connect_http(url, jwt),
             "ws" | "wss" => Self::connect_ws(url, jwt).await,
             "file" => Ok((Self::connect_ipc(url).await?, Claims::default())),
             _ => Err(AuthenticatedTransportError::BadScheme(url.scheme().to_string())),
@@ -48,7 +48,7 @@ impl InnerTransport {
 
     /// Connects to an HTTP [`alloy_transport_http::Http`] transport. Returns an [`InnerTransport`]
     /// and the [Claims] generated from the jwt.
-    async fn connect_http(
+    fn connect_http(
         url: Url,
         jwt: JwtSecret,
     ) -> Result<(Self, Claims), AuthenticatedTransportError> {

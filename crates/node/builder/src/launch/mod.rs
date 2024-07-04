@@ -104,7 +104,7 @@ where
         let ctx = ctx
             .with_configured_globals()
             // load the toml config
-            .with_loaded_toml_config(config).await?
+            .with_loaded_toml_config(config)?
             // add resolved peers
             .with_resolved_peers().await?
             // attach the database
@@ -127,7 +127,7 @@ where
             .with_metrics()
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
-            .with_blockchain_db::<T>().await?
+            .with_blockchain_db::<T>()?
             .with_components(components_builder, on_component_initialized).await?;
 
         // spawn exexs
@@ -201,8 +201,7 @@ where
                 static_file_producer,
                 ctx.components().block_executor().clone(),
                 pipeline_exex_handle,
-            )
-            .await?;
+            )?;
 
             let pipeline_events = pipeline.events();
             task.set_pipeline_events(pipeline_events);
@@ -223,8 +222,7 @@ where
                 static_file_producer,
                 ctx.components().block_executor().clone(),
                 pipeline_exex_handle,
-            )
-            .await?;
+            )?;
 
             (pipeline, Either::Right(network_client.clone()))
         };
