@@ -130,10 +130,15 @@ impl NetworkArgs {
         secret_key: SecretKey,
         default_peers_file: PathBuf,
     ) -> NetworkConfigBuilder {
-        let chain_bootnodes: Vec<NodeRecord> = self
+        let chain_bootnodes = self
             .bootnodes
             .clone()
-            .map(|bootnodes| bootnodes.into_iter().map(Into::into).collect())
+            .map(|bootnodes| {
+                bootnodes
+                    .into_iter()
+                    .filter_map(|trusted_peer| trusted_peer.resolve_blocking().ok())
+                    .collect()
+            })
             .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
