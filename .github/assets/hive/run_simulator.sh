@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -x
+# set -x
 
 cd hivetests/
 
@@ -7,7 +7,7 @@ sim="${1}"
 limit="${2}"
 
 run_hive() {
-    hive --sim "${sim}" --sim.limit "${limit}" --sim.parallelism 4 --loglevel 5 --client reth 2>&1 | tee /tmp/log || true
+    hive --sim "${sim}" --sim.limit "${limit}" --sim.parallelism 4 --client reth 2>&1 | tee /tmp/log || true
 }
 
 check_log() {
