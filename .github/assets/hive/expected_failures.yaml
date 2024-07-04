@@ -36,6 +36,14 @@ engine-withdrawals:
   - Withdrawals Fork on Canonical Block 8 / Side Block 7 - 10 Block Re-Org Sync (Paris) (reth)
   - Withdrawals Fork on Canonical Block 8 / Side Block 9 - 10 Block Re-Org (Paris) (reth)
   - Withdrawals Fork on Canonical Block 8 / Side Block 9 - 10 Block Re-Org Sync (Paris) (reth)
+  
+  # https://github.com/paradigmxyz/reth/issues/8304#issuecomment-2208515839
+  - Sync after 2 blocks - Withdrawals on Block 1 - Single Withdrawal Account - No Transactions (Paris) (reth)
+  - Sync after 2 blocks - Withdrawals on Block 1 - Single Withdrawal Account (Paris) (reth)
+  - Sync after 2 blocks - Withdrawals on Genesis - Single Withdrawal Account (Paris) (reth)
+  - Sync after 2 blocks - Withdrawals on Block 2 - Multiple Withdrawal Accounts - No Transactions (Paris) (reth)
+  - Sync after 2 blocks - Withdrawals on Block 2 - Multiple Withdrawal Accounts (Paris) (reth)
+  - Sync after 128 blocks - Withdrawals on Block 2 - Multiple Withdrawal Accounts (Paris) (reth)
 
 # https://github.com/paradigmxyz/reth/issues/8305
 # https://github.com/paradigmxyz/reth/issues/6217
