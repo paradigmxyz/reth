@@ -81,7 +81,7 @@ jobs:
           docker save hive/simulators/ethereum/rpc-compat:latest -o ../hive_assets/rpc_compat.tar
           docker save hive/simulators/ethereum/pyspec:latest -o ../hive_assets/pyspec.tar
           
-          git apply ../.github/assets/no_sim_build.diff # makes sure we don't rebuild sim image when running hive
+          git apply ../.github/assets/hive/no_sim_build.diff # makes sure we don't rebuild sim image when running hive
           go build .
           mv ./hive ../hive_assets/
 
