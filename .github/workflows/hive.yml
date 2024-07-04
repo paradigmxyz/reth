@@ -203,7 +203,7 @@ jobs:
           path: /tmp
 
       - name: Load Docker images
-        run: ./github/assets/hive/load_images.sh
+        run: .github/assets/hive/load_images.sh
 
       - name: Move hive binary
         run: |
