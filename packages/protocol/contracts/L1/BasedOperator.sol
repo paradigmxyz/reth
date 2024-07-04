@@ -42,7 +42,7 @@ contract BasedOperator is EssentialContract, TaikoErrors {
 
     /// @dev Struct representing transition to be proven.
     struct ProofBatch {
-        TaikoData.BlockMetadata _block;
+        TaikoData.BlockMetadata blockMetadata;
         TaikoData.Transition transition;
         ProofData[] proofs;
         address prover;
@@ -53,14 +53,12 @@ contract BasedOperator is EssentialContract, TaikoErrors {
     uint256 public constant MAX_BLOCKS_TO_VERIFY = 5;
     uint256 public constant PROVING_WINDOW = 1 hours;
 
-    TaikoL1 public taiko; // Might change, so maybe better getting these addreses from addressManager (!)
-    VerifierRegistry public verifierRegistry; // Same as above
     address public treasury; // Same as above
 
     mapping(uint256 => Block) public blocks;
 
     function init(address _addressManager) external initializer {
-        if(_addressManager == address(0)) {
+        if (_addressManager == address(0)) {
             revert L1_INVALID_ADDRESS();
         }
         __Essential_init(_addressManager);
@@ -100,25 +98,30 @@ contract BasedOperator is EssentialContract, TaikoErrors {
         ProofBatch memory proofBatch = abi.decode(data, (ProofBatch));
 
         // Check who can prove the block
-        TaikoData.Block memory taikoBlock = TaikoL1(resolve("taiko", false)).getBlock(proofBatch._block.l2BlockNumber);
+        TaikoData.Block memory taikoBlock =
+            TaikoL1(resolve("taiko", false)).getBlock(proofBatch.blockMetadata.l2BlockNumber);
         if (block.timestamp < taikoBlock.timestamp + PROVING_WINDOW) {
             require(
-                proofBatch.prover == blocks[proofBatch._block.l2BlockNumber].assignedProver,
+                proofBatch.prover == blocks[proofBatch.blockMetadata.l2BlockNumber].assignedProver,
                 "assigned prover not the prover"
             );
         }
 
+        VerifierRegistry verifierRegistry = VerifierRegistry(resolve("verifier_registry", false));
+        TaikoL1 taiko = TaikoL1(resolve("taiko", false));   
         // Verify the proofs
         uint160 prevVerifier = uint160(0);
         for (uint256 i = 0; i < proofBatch.proofs.length; i++) {
             IVerifier verifier = proofBatch.proofs[i].verifier;
             // Make sure each verifier is unique
-            require(prevVerifier >= uint160(address(verifier)), "duplicated verifier");
+            if(prevVerifier >= uint160(address(verifier))) {
+                revert L1_INVALID_OR_DUPLICATE_VERIFIER();
+            }
             // Make sure it's a valid verifier
             require(verifierRegistry.isVerifier(address(verifier)), "invalid verifier");
             // Verify the proof
             verifier.verifyProof(
-                proofBatch._block,
+                proofBatch.blockMetadata,
                 proofBatch.transition,
                 proofBatch.prover,
                 proofBatch.proofs[i].proof
@@ -133,16 +136,27 @@ contract BasedOperator is EssentialContract, TaikoErrors {
         // Only allow an already proven block to be overwritten when the verifiers used are now
         // invalid
         // Get the currently stored transition
-        TaikoData.TransitionState memory storedTransition =
-            taiko.getTransition(proofBatch._block.l2BlockNumber, proofBatch.transition.parentHash);
-        if (storedTransition.blockHash != proofBatch.transition.blockHash) {
-            // TODO(Brecht): Check that one of the verifiers is now poissoned
-        } else {
+        TaikoData.TransitionState memory storedTransition = taiko.getTransition(
+            proofBatch.blockMetadata.l2BlockNumber, proofBatch.transition.parentHash
+        );
+
+        console2.log("What is stored:");
+        console2.logBytes32(storedTransition.blockHash);
+
+        console2.log("What we are trying to prove:");
+        console2.logBytes32(proofBatch.transition.blockHash);
+        
+        // Brecht: SO we set the blockHash in proposeBlock().
+        // But we need to prove it too (the same one), so somehow we need to check if this is proven already and IF NOT, then revert with "block already proven", no ? So i set the verifiableAfter in propseBlock to 0, because this is just a "proposed state".
+        if (storedTransition.isProven == true && storedTransition.blockHash == proofBatch.transition.blockHash) {
             revert("block already proven");
+        }
+        else {
+            // TODO(Brecht): Check that one of the verifiers is now poissoned
         }
 
         // Prove the block
-        taiko.proveBlock(proofBatch._block, proofBatch.transition, proofBatch.prover);
+        taiko.proveBlock(proofBatch.blockMetadata, proofBatch.transition, proofBatch.prover);
 
         // Verify some blocks
         _verifyBlocks(MAX_BLOCKS_TO_VERIFY);
@@ -153,7 +167,7 @@ contract BasedOperator is EssentialContract, TaikoErrors {
     }
 
     function _verifyBlocks(uint256 maxBlocksToVerify) internal {
-        taiko = TaikoL1(resolve("taiko", false));
+        TaikoL1 taiko = TaikoL1(resolve("taiko", false));
         uint256 lastVerifiedBlockIdBefore = taiko.getLastVerifiedBlockId();
         // Verify the blocks
         taiko.verifyBlocks(maxBlocksToVerify);

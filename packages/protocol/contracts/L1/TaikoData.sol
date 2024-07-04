@@ -50,6 +50,7 @@ library TaikoData {
         uint64 timestamp;
         address prover;
         uint64 verifiableAfter;
+        bool isProven;
     }
 
     /// @dev Struct containing data required for verifying a block.
