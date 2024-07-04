@@ -77,7 +77,7 @@ where
         retain_updates: bool,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
-        let prefix_sets = self.hashed_state.construct_prefix_sets();
+        let prefix_sets = self.hashed_state.construct_prefix_sets().freeze();
         let storage_root_targets = StorageRootTargets::new(
             self.hashed_state.accounts.keys().copied(),
             prefix_sets.storage_prefix_sets,
