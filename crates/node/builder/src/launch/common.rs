@@ -209,15 +209,16 @@ impl LaunchContextWith<WithConfigs> {
             info!(target: "reth::cli", "Adding trusted nodes");
 
             // resolve trusted peers if they use a domain instead of dns
-            for peer in &self.attachment.config.network.trusted_peers {
+            let resolved = futures::future::try_join_all(
+            self.attachment.config.network.trusted_peers.iter().map(|peer| async move {
                 let backoff = ConstantBuilder::default()
                     .with_max_times(self.attachment.config.network.dns_retries);
-                let resolved = (move || { peer.resolve() })
-                .retry(&backoff)
-                .notify(|err, _| warn!(target: "reth::cli", "Error resolving peer domain: {err}. Retrying..."))
-                .await?;
-                self.attachment.toml_config.peers.trusted_nodes.insert(resolved);
-            }
+                (move || { peer.resolve() })
+                    .retry(&backoff)
+                    .notify(|err, _| warn!(target: "reth::cli", "Error resolving peer domain: {err}. Retrying..."))
+                    .await
+            })).await?;
+            self.attachment.toml_config.peers.trusted_nodes.extend(resolved);
         }
         Ok(self)
     }
