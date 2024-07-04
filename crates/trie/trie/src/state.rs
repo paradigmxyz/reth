@@ -1,6 +1,6 @@
 use crate::{
     hashed_cursor::HashedPostStateCursorFactory,
-    prefix_set::{PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
+    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     updates::TrieUpdates,
     Nibbles, StateRoot,
 };
