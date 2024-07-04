@@ -138,9 +138,8 @@ where
         }
 
         let target_nibbles = proofs.iter().map(|p| p.nibbles.clone()).collect::<Vec<_>>();
-        let mut prefix_set = PrefixSetMut::from(
-            self.prefix_sets.storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default(),
-        );
+        let mut prefix_set =
+            self.prefix_sets.storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default();
         prefix_set.extend(target_nibbles.clone());
         let trie_cursor = DatabaseStorageTrieCursor::new(
             self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
