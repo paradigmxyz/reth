@@ -44,22 +44,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Checkout hive tests
-        uses: actions/checkout@v4
-        with:
-          repository: ethereum/hive
-          ref: master
-          path: hivetests
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "^1.13.1"
-      - run: go version
-      - name: Build hive tool
-        run: |
-          cd hivetests
-          go build .
-
       - name: Upload reth image
         uses: actions/upload-artifact@v4
         with:
@@ -72,6 +56,7 @@ jobs:
     runs-on:
       group: Reth
     steps:
+      - uses: actions/checkout@v4
       - name: Checkout hive tests
         uses: actions/checkout@v4
         with:
@@ -90,12 +75,16 @@ jobs:
           cd hivetests
           go build .
           ./hive -client reth --sim "devp2p|ethereum/engine|ethereum/rpc-compat|pyspec" -sim.timelimit 1s || true
-          mv ./hive ../hive_assets/
           docker save hive/hiveproxy:latest -o ../hive_assets/hiveproxy.tar
           docker save hive/simulators/devp2p:latest -o ../hive_assets/devp2p.tar
           docker save hive/simulators/ethereum/engine:latest -o ../hive_assets/engine.tar
           docker save hive/simulators/ethereum/rpc-compat:latest -o ../hive_assets/rpc_compat.tar
           docker save hive/simulators/ethereum/pyspec:latest -o ../hive_assets/pyspec.tar
+          
+          git apply ../.github/assets/no_sim_build.diff # makes sure we don't rebuild sim image when running hive
+          go build .
+          mv ./hive ../hive_assets/
+
       - name: Upload hive assets
         uses: actions/upload-artifact@v4
         with:
