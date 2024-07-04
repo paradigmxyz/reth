@@ -81,6 +81,12 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             )?;
         trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets)");
 
+        let last_changeset_pruned_block = last_changeset_pruned_block
+            // If there's more account changesets to prune, set the checkpoint block number to
+            // previous, so we could finish pruning its account changesets on the next run.
+            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
+            .unwrap_or(range_end);
+
         // Sort highest deleted block numbers by account address and turn them into sharded keys.
         // We did not use `BTreeMap` from the beginning, because it's inefficient for hashes.
         let highest_sharded_keys = highest_deleted_accounts
@@ -101,7 +107,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             progress,
             pruned: pruned_changesets + deleted_indices,
             checkpoint: Some(PruneOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block.unwrap_or(range_end)),
+                block_number: Some(last_changeset_pruned_block),
                 tx_number: None,
             }),
         })

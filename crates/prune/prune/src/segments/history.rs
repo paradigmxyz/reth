@@ -42,9 +42,6 @@ where
             .map(|(key, value)| Result::<_, DatabaseError>::Ok((key.key()?, value)))
             .transpose()?;
 
-        // Get the highest block number that needs to be deleted for this sharded key
-        let to_block = sharded_key.as_ref().highest_block_number;
-
         // If such shard doesn't exist, skip to the next sharded key
         if result.as_ref().map_or(true, |(key, _)| !key_matches(key, &sharded_key)) {
             continue
@@ -52,6 +49,9 @@ where
 
         // At this point, we're sure that the shard with the given sharded key exists
         let (key, raw_blocks): (T::Key, RawValue<BlockNumberList>) = result.unwrap();
+
+        // Get the highest block number that needs to be deleted for this sharded key
+        let to_block = sharded_key.as_ref().highest_block_number;
 
         match prune_shard(&mut cursor, key, raw_blocks, to_block, &key_matches)? {
             PruneShardOutcome::Deleted => deleted += 1,

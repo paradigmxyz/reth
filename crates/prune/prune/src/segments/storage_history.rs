@@ -84,6 +84,12 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             )?;
         trace!(target: "pruner", deleted = %pruned_changesets, %done, "Pruned storage history (changesets)");
 
+        let last_changeset_pruned_block = last_changeset_pruned_block
+            // If there's more storage changesets to prune, set the checkpoint block number to
+            // previous, so we could finish pruning its storage changesets on the next run.
+            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
+            .unwrap_or(range_end);
+
         // Sort highest deleted block numbers by account address and storage key and turn them into
         // sharded keys.
         // We did not use `BTreeMap` from the beginning, because it's inefficient for hashes.
@@ -107,7 +113,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             progress,
             pruned: pruned_changesets + deleted_indices,
             checkpoint: Some(PruneOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block.unwrap_or(range_end)),
+                block_number: Some(last_changeset_pruned_block),
                 tx_number: None,
             }),
         })
