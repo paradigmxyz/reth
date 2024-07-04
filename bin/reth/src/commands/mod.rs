@@ -17,3 +17,4 @@ pub mod stage;
 pub mod test_vectors;
 
 pub mod common;
+pub mod evm;

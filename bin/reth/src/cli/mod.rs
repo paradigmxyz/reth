@@ -2,17 +2,17 @@
 
 use crate::{
     args::{
-        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
         LogArgs,
+        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
     },
     commands::{
         config_cmd, db, debug_cmd, dump_genesis, import, init_cmd, init_state,
-        node::{self, NoArgs},
+        node::{self, NoArgs}, evm,
         p2p, prune, recover, stage, test_vectors,
     },
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use clap::{value_parser, Parser, Subcommand};
+use clap::{Parser, Subcommand, value_parser};
 use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
@@ -20,6 +20,7 @@ use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
+use crate::commands::evm::EvmCommand;
 
 /// Re-export of the `reth_node_core` types specifically in the `cli` module.
 ///
@@ -165,6 +166,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             Commands::Debug(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::Recover(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
             Commands::Prune(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Evm(command) => runner.run_blocking_until_ctrl_c(command.execute()),
         }
     }
 
@@ -227,6 +229,9 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
     Prune(prune::PruneCommand),
+    /// evm123456
+    #[command(name = "evm")]
+    Evm(evm::EvmCommand),
 }
 
 #[cfg(test)]
