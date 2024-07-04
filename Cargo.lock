@@ -6300,6 +6300,7 @@ dependencies = [
  "reth-chainspec",
  "reth-cli-commands",
  "reth-cli-runner",
+ "reth-cli-utils",
  "reth-config",
  "reth-consensus",
  "reth-consensus-common",
@@ -6617,6 +6618,17 @@ dependencies = [
  "reth-tasks",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "reth-cli-utils"
+version = "1.0.0"
+dependencies = [
+ "reth-fs-util",
+ "reth-network",
+ "reth-primitives",
+ "secp256k1",
+ "thiserror",
 ]
 
 [[package]]
@@ -7643,6 +7655,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-chainspec",
+ "reth-cli-utils",
  "reth-config",
  "reth-consensus",
  "reth-consensus-debug-client",

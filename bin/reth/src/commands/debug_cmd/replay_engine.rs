@@ -1,7 +1,4 @@
-use crate::{
-    args::{get_secret_key, NetworkArgs},
-    macros::block_executor,
-};
+use crate::{args::NetworkArgs, macros::block_executor};
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
@@ -11,6 +8,7 @@ use reth_blockchain_tree::{
 };
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
+use reth_cli_utils::get_secret_key;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::DatabaseEnv;
