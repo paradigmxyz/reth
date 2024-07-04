@@ -22,7 +22,6 @@ where
     DB: Database,
     T: Table<Value = BlockNumberList>,
     T::Key: AsRef<ShardedKey<SK>>,
-    SK: PartialEq,
 {
     let mut processed = 0;
     let mut deleted = 0;
@@ -85,7 +84,6 @@ where
     C: DbCursorRO<RawTable<T>> + DbCursorRW<RawTable<T>>,
     T: Table<Value = BlockNumberList>,
     T::Key: AsRef<ShardedKey<SK>>,
-    SK: PartialEq,
 {
     let mut deleted = 0;
 
