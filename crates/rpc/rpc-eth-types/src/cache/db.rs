@@ -31,6 +31,16 @@ impl<'a> reth_provider::StateRootProvider for StateProviderTraitObjWrapper<'a> {
     }
 }
 
+impl<'a> reth_provider::StateProofProvider for StateProviderTraitObjWrapper<'a> {
+    fn proof(
+        &self,
+        address: revm_primitives::Address,
+        keys: &[B256],
+    ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {
+        self.0.proof(address, keys)
+    }
+}
+
 impl<'a> reth_provider::AccountReader for StateProviderTraitObjWrapper<'a> {
     fn basic_account(
         &self,
@@ -91,14 +101,6 @@ impl<'a> StateProvider for StateProviderTraitObjWrapper<'a> {
         code_hash: B256,
     ) -> reth_errors::ProviderResult<Option<reth_primitives::Bytecode>> {
         self.0.bytecode_by_hash(code_hash)
-    }
-
-    fn proof(
-        &self,
-        address: revm_primitives::Address,
-        keys: &[B256],
-    ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {
-        self.0.proof(address, keys)
     }
 
     fn storage(

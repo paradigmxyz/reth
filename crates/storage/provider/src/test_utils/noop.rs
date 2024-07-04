@@ -14,6 +14,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, AccountProof};
 use revm::{
@@ -326,6 +327,12 @@ impl StateRootProvider for NoopProvider {
     }
 }
 
+impl StateProofProvider for NoopProvider {
+    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
+        Ok(AccountProof::new(address))
+    }
+}
+
 impl StateProvider for NoopProvider {
     fn storage(
         &self,
@@ -337,10 +344,6 @@ impl StateProvider for NoopProvider {
 
     fn bytecode_by_hash(&self, _code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         Ok(None)
-    }
-
-    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        Ok(AccountProof::new(address))
     }
 }
 

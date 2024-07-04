@@ -15,6 +15,7 @@ use reth_primitives::{
     SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
     TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, U256,
 };
+use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{updates::TrieUpdates, AccountProof};
 use revm::{
@@ -553,6 +554,12 @@ impl StateRootProvider for MockEthProvider {
     }
 }
 
+impl StateProofProvider for MockEthProvider {
+    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
+        Ok(AccountProof::new(address))
+    }
+}
+
 impl StateProvider for MockEthProvider {
     fn storage(
         &self,
@@ -573,10 +580,6 @@ impl StateProvider for MockEthProvider {
                 _ => None,
             }
         }))
-    }
-
-    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        Ok(AccountProof::new(address))
     }
 }
 
