@@ -231,6 +231,14 @@ impl NetworkArgs {
         self.port += instance - 1;
         self.discovery.adjust_instance_ports(instance);
     }
+
+    /// Resolve all trusted peers at once
+    pub async fn resolve_trusted_peers(&self) -> Result<Vec<NodeRecord>, std::io::Error> {
+        futures::future::try_join_all(
+            self.trusted_peers.iter().map(|peer| async move { peer.resolve().await }),
+        )
+        .await
+    }
 }
 
 impl Default for NetworkArgs {
