@@ -103,7 +103,7 @@ pub trait EthState: LoadState + SpawnBlocking {
             return Err(EthApiError::ExceedsMaxProofWindow)
         }
 
-        Ok(self.spawn_tracing(move |this| {
+        Ok(self.spawn_blocking_io(move |this| {
             let state = this.state_at_block_id(block_id)?;
             let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
             let proof = state.proof(address, &storage_keys)?;
