@@ -65,28 +65,27 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             ))
         }
 
-        let mut deleted_keys = HashMap::new();
         let mut last_changeset_pruned_block = None;
+        // Deleted account changeset keys (account address) with the highest block number
+        let mut highest_deleted_accounts = HashMap::new();
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::AccountChangeSets>(
                 range,
                 &mut limiter,
                 |_| false,
                 |(block_number, value)| {
-                    let highest_block = deleted_keys.entry(value.address).or_insert(0);
-                    if block_number > *highest_block {
-                        *highest_block = block_number;
-                    }
+                    highest_deleted_accounts.insert(value.address, block_number);
                     last_changeset_pruned_block = Some(block_number);
                 },
             )?;
-        let last_changeset_pruned_block = last_changeset_pruned_block.unwrap_or(range_end);
-        let deleted_keys = deleted_keys
+        trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets)");
+
+        // Sort highest deleted block numbers by account address
+        // We did not use `BTreeMap` from the beginning, because it's inefficient for hashes
+        let deleted_keys = highest_deleted_accounts
             .into_iter()
             .sorted_unstable()
             .map(|(address, block_number)| ShardedKey::new(address, block_number));
-        trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets)");
-
         let (processed, pruned_indices) = prune_history_indices::<DB, tables::AccountsHistory, _>(
             provider,
             deleted_keys,
@@ -100,7 +99,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             progress,
             pruned: pruned_changesets + pruned_indices,
             checkpoint: Some(PruneOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block),
+                block_number: Some(last_changeset_pruned_block.unwrap_or(range_end)),
                 tx_number: None,
             }),
         })

@@ -68,32 +68,32 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             ))
         }
 
-        let mut deleted_keys = HashMap::new();
         let mut last_changeset_pruned_block = None;
+        // Deleted storage changeset keys (account address and storage slot) with the highest block
+        // number
+        let mut highest_deleted_storages = HashMap::new();
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::StorageChangeSets>(
                 BlockNumberAddress::range(range),
                 &mut limiter,
                 |_| false,
                 |(BlockNumberAddress((block_number, address)), entry)| {
-                    let highest_block = deleted_keys.entry((address, entry.key)).or_insert(0);
-                    if block_number > *highest_block {
-                        *highest_block = block_number;
-                    }
+                    highest_deleted_storages.insert((address, entry.key), block_number);
                     last_changeset_pruned_block = Some(block_number);
                 },
             )?;
-        let last_changeset_pruned_block = last_changeset_pruned_block.unwrap_or(range_end);
-        let deleted_keys = deleted_keys.into_iter().sorted_unstable().map(
+        trace!(target: "pruner", deleted = %pruned_changesets, %done, "Pruned storage history (changesets)");
+
+        // Sort highest deleted block numbers by account address and storage key
+        // We did not use `BTreeMap` from the beginning, because it's inefficient for hashes
+        let highest_deleted_storages = highest_deleted_storages.into_iter().sorted_unstable().map(
             |((address, storage_key), block_number)| {
                 StorageShardedKey::new(address, storage_key, block_number)
             },
         );
-        trace!(target: "pruner", deleted = %pruned_changesets, %done, "Pruned storage history (changesets)");
-
         let (processed, pruned_indices) = prune_history_indices::<DB, tables::StoragesHistory, _>(
             provider,
-            deleted_keys,
+            highest_deleted_storages,
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
         )?;
         trace!(target: "pruner", %processed, deleted = %pruned_indices, %done, "Pruned storage history (history)");
@@ -104,7 +104,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             progress,
             pruned: pruned_changesets + pruned_indices,
             checkpoint: Some(PruneOutputCheckpoint {
-                block_number: Some(last_changeset_pruned_block),
+                block_number: Some(last_changeset_pruned_block.unwrap_or(range_end)),
                 tx_number: None,
             }),
         })
