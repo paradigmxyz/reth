@@ -1,12 +1,6 @@
 use crate::constants::MAINNET_DEPOSIT_CONTRACT;
 #[cfg(not(feature = "std"))]
-use alloc::{
-    collections::BTreeMap,
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, ChainKind, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -293,7 +287,7 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
 
-impl std::ops::Deref for ChainSpec {
+impl core::ops::Deref for ChainSpec {
     type Target = ChainHardforks;
 
     fn deref(&self) -> &Self::Target {
