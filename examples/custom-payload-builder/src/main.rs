@@ -32,14 +32,14 @@ pub struct CustomPayloadBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadBuilder
 where
-    Node: FullNodeTypes<Engine = EthEngineTypes>,
+    Node: FullNodeTypes<EngineTypes = EthEngineTypes>,
     Pool: TransactionPool + Unpin + 'static,
 {
     async fn spawn_payload_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
+    ) -> eyre::Result<PayloadBuilderHandle<Node::EngineTypes>> {
         tracing::info!("Spawning a custom payload builder");
         let conf = ctx.payload_builder_config();
 

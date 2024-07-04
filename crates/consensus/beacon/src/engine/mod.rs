@@ -8,9 +8,8 @@ use reth_db_api::database::Database;
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{BlockValidationError, ProviderResult, RethError, RethResult};
 use reth_network_p2p::{
-    bodies::client::BodiesClient,
-    headers::client::HeadersClient,
     sync::{NetworkSyncUpdater, SyncState},
+    BodiesClient, HeadersClient,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
@@ -88,6 +87,27 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 /// This is the default threshold, the distance to the head that the tree will be used for sync.
 /// If the distance exceeds this threshold, the pipeline will be used for sync.
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
+
+/// Helper trait, unifies data access from blockchain tree and database.
+pub trait FullBlockchainTreeEngine:
+    BlockchainTreeEngine
+    + BlockReader
+    + BlockIdReader
+    + CanonChainTracker
+    + StageCheckpointReader
+    + ChainSpecProvider
+{
+}
+
+impl<T> FullBlockchainTreeEngine for T where
+    T: BlockchainTreeEngine
+        + BlockReader
+        + BlockIdReader
+        + CanonChainTracker
+        + StageCheckpointReader
+        + ChainSpecProvider
+{
+}
 
 /// The beacon consensus engine is the driver that switches between historical and live sync.
 ///
@@ -221,13 +241,7 @@ where
 impl<DB, BT, Client, EngineT> BeaconConsensusEngine<DB, BT, Client, EngineT>
 where
     DB: Database + Unpin + 'static,
-    BT: BlockchainTreeEngine
-        + BlockReader
-        + BlockIdReader
-        + CanonChainTracker
-        + StageCheckpointReader
-        + ChainSpecProvider
-        + 'static,
+    BT: FullBlockchainTreeEngine + ChainSpecProvider + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
     EngineT: EngineTypes + Unpin + 'static,
 {
@@ -1787,14 +1801,7 @@ impl<DB, BT, Client, EngineT> Future for BeaconConsensusEngine<DB, BT, Client, E
 where
     DB: Database + Unpin + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
-    BT: BlockchainTreeEngine
-        + BlockReader
-        + BlockIdReader
-        + CanonChainTracker
-        + StageCheckpointReader
-        + ChainSpecProvider
-        + Unpin
-        + 'static,
+    BT: FullBlockchainTreeEngine + ChainSpecProvider + Unpin + 'static,
     EngineT: EngineTypes + Unpin + 'static,
 {
     type Output = Result<(), BeaconConsensusEngineError>;

@@ -15,7 +15,7 @@ pub(crate) struct NodeHooks<Node> {
     pub(crate) _marker: std::marker::PhantomData<Node>,
 }
 
-impl<Node: FullNodeComponents> NodeHooks<Node> {
+impl<Node: FullNodeComponentsExt> NodeHooks<Node> {
     /// Sets the hook that is run once the node's components are initialized.
     #[allow(unused)]
     pub(crate) fn on_components_initialized<F>(mut self, hook: F) -> NodeHooks<Node>
@@ -46,7 +46,7 @@ impl<Node: FullNodeComponents> NodeHooks<Node> {
     }
 }
 
-impl<Node: FullNodeComponents> Default for NodeHooks<Node> {
+impl<Node: FullNodeComponentsExt> Default for NodeHooks<Node> {
     fn default() -> Self {
         Self {
             on_component_initialized: Box::<()>::default(),
@@ -86,16 +86,15 @@ where
         ctx: &mut LaunchContextExt<Node>,
         hooks: NodeAddOnsExt<Node>,
     ) -> eyre::Result<()> {
-        (*self)(ctx, node, hooks)
+        (*self)(ctx, hooks)
     }
 }
 
-impl<Node, F> OnComponentsInitializedHook<Node> for F
+impl<Node, F, G> OnComponentsInitializedHook<Node> for F
 where
     Node: FullNodeComponentsExt,
-    F: FnOnce(
-        &mut LaunchContextExt<Node>,
-    ) -> impl FnOnce(&mut LaunchContextExt<Node>, NodeAddOnsExt<Node>),
+    F: FnOnce(&mut LaunchContextExt<Node>) -> G,
+    G: FnOnce(&mut LaunchContextExt<Node>, NodeAddOnsExt<Node>),
 {
     fn on_event(
         self: Box<Self>,

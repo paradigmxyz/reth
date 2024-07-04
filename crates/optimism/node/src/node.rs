@@ -225,7 +225,7 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
+    ) -> eyre::Result<PayloadBuilderHandle<Node::EngineTypes>> {
         let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::new(
             ctx.chain_spec(),
             self.evm_config,

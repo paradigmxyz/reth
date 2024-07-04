@@ -194,7 +194,7 @@ struct MyCustomNode;
 impl NodeTypes for MyCustomNode {
     type Primitives = ();
     // use the custom engine types
-    type Engine = CustomEngineTypes;
+    type EngineTypes = CustomEngineTypes;
 }
 
 /// Implement the Node trait for the custom node
@@ -202,7 +202,7 @@ impl NodeTypes for MyCustomNode {
 /// This provides a preset configuration for the node
 impl<N> Node<N> for MyCustomNode
 where
-    N: FullNodeTypes<Engine = CustomEngineTypes>,
+    N: FullNodeTypes<EngineTypes = CustomEngineTypes>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -231,14 +231,14 @@ pub struct CustomPayloadServiceBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadServiceBuilder
 where
-    Node: FullNodeTypes<Engine = CustomEngineTypes>,
+    Node: FullNodeTypes<EngineTypes = CustomEngineTypes>,
     Pool: TransactionPool + Unpin + 'static,
 {
     async fn spawn_payload_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
+    ) -> eyre::Result<PayloadBuilderHandle<Node::EngineTypes>> {
         let payload_builder = CustomPayloadBuilder::default();
         let conf = ctx.payload_builder_config();
 

@@ -2,10 +2,11 @@
 
 use std::{future::Future, sync::Arc};
 
+use common::{ExtComponentBuilder, InitializedComponents};
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
-    BeaconConsensusEngine,
+    BeaconConsensusEngine, FullBlockchainTreeEngine,
 };
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
@@ -21,7 +22,6 @@ use reth_node_core::{
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
-use reth_rpc_engine_api::EngineApi;
 use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
@@ -31,11 +31,12 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
     builder::{NodeAdapter, NodeAdapterExt, NodeAddOns, NodeTypesAdapter},
+    common::ExtComponentBuilder,
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     node::FullNode,
-    rpc::{RethRpcServerHandles, RpcRegistry},
-    NodeBuilderWithComponents, NodeHandle,
+    rpc::{RethRpcServerHandles, RpcAdapter, RpcRegistry},
+    EngineAdapter, NodeBuilderWithComponents, NodeHandle,
 };
 
 pub mod common;
@@ -84,14 +85,18 @@ impl DefaultNodeLauncher {
     }
 }
 
-impl<T, CB, R, X, EthApi> LaunchNode<NodeBuilderWithComponents<T, CB, X>> for DefaultNodeLauncher
+impl<T, CB, R> LaunchNode<NodeBuilderWithComponents<T, CB>> for DefaultNodeLauncher
 where
     T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
-    X: FullNodeComponentsExt,
     CB: NodeComponentsBuilder<T>,
-    EthApi: FullEthApiServer,
 {
-    type Node = NodeHandle<NodeAdapterExt<T, CB::Components>>;
+    type Node = NodeHandle<
+        NodeAdapterExt<
+            NodeAdapter<T, CB::Components>,
+            EngineAdapter<Self, AutoSealClient, WithComponents<Self::DB, Self, CB>::BlockchainTree>,
+            RpcAdapter<Self>,
+        >,
+    >;
 
     async fn launch_node<C>(
         self,
@@ -134,7 +139,7 @@ where
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
             .with_blockchain_db::<T>().await?
-            .with_components::<_, X>(components_builder, move |ctx, n| move || on_component_initialized(ctx, n, hooks_ext) ).await?;
+            .with_components::<_, _, _>(components_builder, move |ctx, n| move || on_component_initialized(ctx, n, hooks_ext) ).await?;
 
         // spawn exexs
         let exex_manager_handle = ExExLauncher::new(
@@ -269,6 +274,10 @@ where
         )?;
         info!(target: "reth::cli", "Consensus engine initialized");
 
+        // should move into a new `ConsensusBuilder` trait, like for `RpcBuilder`
+        let engine = EngineAdapter::new(beacon_consensus_engine, beacon_engine_handle);
+        ctx.right().engine(engine);
+
         let events = stream_select!(
             ctx.components().network().event_listener().map(Into::into),
             beacon_engine_handle.event_listener().map(Into::into),
@@ -294,16 +303,22 @@ where
             ),
         );
 
+        let consensus_engine_shutdown_rx =
+            ctx.right().consensus_engine_shutdown().expect("should be launched");
+        // temp here until building other components moved into `OnComponentInitializedHook`s, will
+        // be called in `LaunchContextWith::with_components -> NodeAdapterExt`
+        let node = ctx.right().build();
+
         let full_node = FullNode {
-            evm_config: ctx.components().evm_config().clone(),
-            block_executor: ctx.components().block_executor().clone(),
-            pool: ctx.components().pool().clone(),
-            network: ctx.components().network().clone(),
-            provider: ctx.components().provider().clone(),
-            payload_builder: ctx.components().payload_builder().clone(),
-            task_executor: ctx.task_executor().clone(),
-            rpc_server_handles: ctx.rpc().rpc_server_handles(),
-            rpc_registry: ctx.rpc().rpc_registry(),
+            evm_config: node.evm_config().clone(),
+            block_executor: node.block_executor().clone(),
+            pool: node.pool().clone(),
+            network: node.network().clone(),
+            provider: node.provider().clone(),
+            payload_builder: node.payload_builder().clone(),
+            task_executor: node.task_executor().clone(),
+            rpc_server_handles: node.rpc().rpc_server_handles(),
+            rpc_registry: node.rpc().rpc_registry(),
             config: ctx.node_config().clone(),
             data_dir: ctx.data_dir().clone(),
         };
@@ -312,7 +327,7 @@ where
 
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(
-                async { Ok(rx.await??) },
+                async { Ok(consensus_engine_shutdown_rx.await??) },
                 full_node.config.debug.terminate,
             ),
             node: full_node,

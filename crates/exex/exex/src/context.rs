@@ -74,7 +74,9 @@ impl<Node: FullNodeComponents> ExExContext<Node> {
     }
 
     /// Returns the handle to the payload builder service.
-    pub fn payload_builder(&self) -> &reth_payload_builder::PayloadBuilderHandle<Node::Engine> {
+    pub fn payload_builder(
+        &self,
+    ) -> &reth_payload_builder::PayloadBuilderHandle<Node::EngineTypes> {
         self.components.payload_builder()
     }
 

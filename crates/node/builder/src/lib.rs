@@ -21,6 +21,9 @@ pub mod components;
 mod builder;
 pub use builder::*;
 
+mod engine;
+pub use engine::EngineAdapter;
+
 mod launch;
 pub use launch::*;
 
@@ -28,6 +31,7 @@ mod handle;
 pub use handle::NodeHandle;
 
 pub mod rpc;
+pub use rpc::RpcBuilder;
 
 pub mod setup;
 

@@ -43,7 +43,7 @@ impl EthereumNode {
     >
     where
         Node: FullNodeTypes,
-        <Node as NodeTypes>::Engine: PayloadTypes<
+        <Node as NodeTypes>::EngineTypes: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
@@ -61,12 +61,12 @@ impl EthereumNode {
 
 impl NodeTypes for EthereumNode {
     type Primitives = ();
-    type Engine = EthEngineTypes;
+    type EngineTypes = EthEngineTypes;
 }
 
 impl<N> Node<N> for EthereumNode
 where
-    N: FullNodeTypes<Engine = EthEngineTypes>,
+    N: FullNodeTypes<EngineTypes = EthEngineTypes>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -188,7 +188,7 @@ impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder
 where
     Pool: TransactionPool + Unpin + 'static,
     Node: FullNodeTypes,
-    <Node as NodeTypes>::Engine: PayloadTypes<
+    <Node as NodeTypes>::EngineTypes: PayloadTypes<
         BuiltPayload = EthBuiltPayload,
         PayloadAttributes = EthPayloadAttributes,
         PayloadBuilderAttributes = EthPayloadBuilderAttributes,
@@ -198,7 +198,7 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
+    ) -> eyre::Result<PayloadBuilderHandle<Node::EngineTypes>> {
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
         let conf = ctx.payload_builder_config();
 

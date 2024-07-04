@@ -1,6 +1,7 @@
 //! Traits for configuring a node.
 
-use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
+use std::{marker::PhantomData, ops::Deref};
+
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -11,7 +12,8 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
-use std::{marker::PhantomData, ops::Deref};
+
+use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
 
 /// The type that configures the essential types of an ethereum like node.
 ///
@@ -23,7 +25,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives: NodePrimitives;
     /// The node's engine types, defining the interaction with the consensus engine.
-    type Engine: EngineTypes;
+    type EngineTypes: EngineTypes;
 }
 
 impl<T, D> NodeTypes for T
@@ -32,7 +34,7 @@ where
     D: NodeTypes,
 {
     type Primitives = D::Primitives;
-    type Engine = D::Engine;
+    type EngineTypes = D::EngineTypes;
 }
 
 /// A [`NodeTypes`] type builder
@@ -58,7 +60,7 @@ where
 {
     type Primitives = P;
 
-    type Engine = E;
+    type EngineTypes = E;
 }
 
 /// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful components to the
@@ -118,7 +120,7 @@ where
     Provider: Send + Sync + Unpin + 'static,
 {
     type Primitives = Types::Primitives;
-    type Engine = Types::Engine;
+    type EngineTypes = Types::EngineTypes;
 }
 
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
@@ -158,24 +160,77 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     fn network(&self) -> &NetworkHandle;
 
     /// Returns the handle to the payload builder service.
-    fn payload_builder(&self) -> &PayloadBuilderHandle<Self::Engine>;
+    fn payload_builder(&self) -> &PayloadBuilderHandle<Self::EngineTypes>;
 
     /// Returns the task executor.
     fn task_executor(&self) -> &TaskExecutor;
 }
 
 pub trait FullNodeComponentsExt: FullNodeComponents {
-    type Rpc: Rpc<Self>;
+    //type Pipeline: PipelineComponent<Self>;
+    type Engine: EngineComponent<Self>;
+    type Rpc: RpcComponent<Self>;
+
+    /// Returns the pipeline component, if installed.
+    //fn pipeline(&self) -> Option<&Self::Pipeline>;
+
+    /// Returns the consensus engine component, if installed.
+    fn engine(&self) -> Option<&<Self as FullNodeComponentsExt>::Engine>;
 
     /// Returns the RPC component, if installed.
     fn rpc(&self) -> Option<&Self::Rpc>;
 }
 
-pub trait Rpc<N: FullNodeComponents>: Send + Sync {
+//pub trait PipelineComponent<N: FullNodeComponents> {}
+
+pub trait EngineComponent<N: FullNodeComponents>: Send + Sync + Clone + Unpin {
+    type Engine;
+    type Handle;
+    type ShutdownSignalRx;
+
+    fn engine(&self) -> &Self::Engine;
+
+    fn handle(&self) -> &Self::Handle;
+
+    fn shutdown_signal_rx(&self) -> &Self::ShutdownSignalRx;
+}
+
+impl<N: FullNodeComponents> EngineComponent<N> for Option<()> {
+    type Engine = Self;
+    type Handle = Self;
+    type ShutdownSignalRx = Self;
+
+    fn engine(&self) -> &Self::Engine {
+        self
+    }
+
+    fn handle(&self) -> &Self::Handle {
+        self
+    }
+
+    fn shutdown_signal_rx(&self) -> &Self::ShutdownSignalRx {
+        self
+    }
+}
+
+pub trait RpcComponent<N: FullNodeComponents>: Send + Sync + Clone + Unpin {
     type ServerHandles;
     type Registry;
 
     fn handles(&self) -> &Self::ServerHandles;
 
     fn registry(&self) -> &Self::Registry;
+}
+
+impl<N: FullNodeComponents> RpcComponent<N> for Option<()> {
+    type ServerHandles = Self;
+    type Registry = Self;
+
+    fn handles(&self) -> &Self::ServerHandles {
+        self
+    }
+
+    fn registry(&self) -> &Self::Registry {
+        self
+    }
 }

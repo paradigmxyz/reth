@@ -2,7 +2,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use reth_chainspec::ChainSpec;
 use reth_network::NetworkHandle;
-use reth_node_api::{FullNodeComponents, FullNodeComponentsExt, Rpc};
+use reth_node_api::{FullNodeComponents, FullNodeComponentsExt, RpcComponent};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
@@ -56,7 +56,7 @@ where
 {
     type Primitives = N::Primitives;
 
-    type Engine = N::Engine;
+    type EngineTypes = N::EngineTypes;
 }
 
 impl<N, C> Node<N> for AnyNode<N, C>
@@ -87,13 +87,13 @@ pub struct FullNode<Node: FullNodeComponentsExt> {
     /// Provider to interact with the node's database
     pub provider: Node::Provider,
     /// Handle to the node's payload builder service.
-    pub payload_builder: PayloadBuilderHandle<Node::Engine>,
+    pub payload_builder: PayloadBuilderHandle<Node::EngineTypes>,
     /// Task executor for the node.
     pub task_executor: TaskExecutor,
     /// Handles to the node's rpc servers
-    pub rpc_server_handles: <Node::Rpc as Rpc>::ServerHandles,
+    pub rpc_server_handles: <Node::Rpc as RpcComponent<Node>>::ServerHandles,
     /// The configured rpc namespaces
-    pub rpc_registry: <Node::Rpc as Rpc>::Registry,
+    pub rpc_registry: <Node::Rpc as RpcComponent<Node>>::Registry,
     /// The initial node config.
     pub config: NodeConfig,
     /// The data dir of the node.
@@ -119,14 +119,14 @@ impl<Node: FullNodeComponentsExt> FullNode<Node> {
     /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
     ///
     /// This will send authenticated http requests to the node's auth server.
-    pub fn engine_http_client(&self) -> impl EngineApiClient<Node::Engine> {
+    pub fn engine_http_client(&self) -> impl EngineApiClient<Node::EngineTypes> {
         self.auth_server_handle().http_client()
     }
 
     /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
     ///
     /// This will send authenticated ws requests to the node's auth server.
-    pub async fn engine_ws_client(&self) -> impl EngineApiClient<Node::Engine> {
+    pub async fn engine_ws_client(&self) -> impl EngineApiClient<Node::EngineTypes> {
         self.auth_server_handle().ws_client().await
     }
 
@@ -134,7 +134,7 @@ impl<Node: FullNodeComponentsExt> FullNode<Node> {
     ///
     /// This will send not authenticated IPC requests to the node's auth server.
     #[cfg(unix)]
-    pub async fn engine_ipc_client(&self) -> Option<impl EngineApiClient<Node::Engine>> {
+    pub async fn engine_ipc_client(&self) -> Option<impl EngineApiClient<Node::EngineTypes>> {
         self.auth_server_handle().ipc_client().await
     }
 }

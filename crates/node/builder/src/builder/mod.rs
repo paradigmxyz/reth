@@ -255,10 +255,10 @@ where
     /// Preconfigures the node with a specific node implementation.
     ///
     /// This is a convenience method that sets the node's types and components in one call.
-    pub fn node<N, T, X>(
+    pub fn node<N, T, Engine, Rpc>(
         self,
         node: N,
-    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, X>>
+    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>>
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
@@ -270,21 +270,26 @@ where
     /// This bootstraps the node internals, creates all the components with the given [Node]
     ///
     /// Returns a [`NodeHandle`] that can be used to interact with the node.
-    pub async fn launch_node<N, X>(
+    pub async fn launch_node<N>(
         self,
         node: N,
     ) -> eyre::Result<
         NodeHandle<
-            NodeAdapter<
-                RethFullAdapter<DB, N>,
-                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-            >,
-        >,
-    >
-    where
+            NodeAdapterExt<
+                NodeAdapter<
+                    RethFullAdapter<DB, N>,
+                    <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components
+                >,
+                EngineAdapter<
+                    Self, AutoSealClient, WithComponents<Self::DB, Self, CB>::BlockchainTree
+                >,
+                RpcAdapter<Self>
+            >
+        >
+    > where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.node::<_, X>(node).launch().await
+        self.node(node).launch().await
     }
 }
 
@@ -294,7 +299,7 @@ where
     T: NodeTypes,
 {
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB, X>(
+    pub fn with_components<CB, Engine, Rpc>(
         self,
         components_builder: CB,
     ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, X>>
@@ -308,7 +313,7 @@ where
     }
 }
 
-impl<T, DB, CB, X> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, X>>
+impl<T, DB, CB> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: NodeTypes,
@@ -386,7 +391,19 @@ where
     /// Launches the node and returns a handle to it.
     pub async fn launch(
         self,
-    ) -> eyre::Result<NodeHandle<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>> {
+    ) -> eyre::Result<
+        NodeHandle<
+            NodeAdapterExt<
+                NodeAdapter<RethFullAdapter<DB, T>, CB::Components>,
+                EngineAdapter<
+                    Self,
+                    AutoSealClient,
+                    WithComponents<Self::DB, Self, CB>::BlockchainTree,
+                >,
+                RpcAdapter<Self>,
+            >,
+        >,
+    > {
         let Self { builder, task_executor } = self;
 
         let launcher = DefaultNodeLauncher::new(task_executor, builder.config.datadir());

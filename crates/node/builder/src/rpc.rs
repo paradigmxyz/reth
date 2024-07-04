@@ -5,7 +5,7 @@ use std::fmt;
 use derive_more::{Deref, DerefMut};
 use futures::TryFutureExt;
 use reth_network::NetworkHandle;
-use reth_node_api::{FullNodeComponents, FullNodeComponentsExt, Rpc};
+use reth_node_api::{FullNodeComponents, FullNodeComponentsExt, RpcComponent};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
@@ -29,12 +29,13 @@ use crate::{
     hooks::OnComponentsInitializedHook,
 };
 
+#[derive(Debug, Clone)]
 pub struct RpcAdapter<N: FullNodeComponents> {
     server_handles: RethRpcServerHandles,
     registry: RpcRegistry<N>,
 }
 
-impl<N: FullNodeComponents> Rpc<N> for RpcAdapter<N> {
+impl<N: FullNodeComponents> RpcComponent<N> for RpcAdapter<N> {
     type ServerHandles = RethRpcServerHandles;
     type Registry = RpcRegistry<N>;
 
@@ -245,7 +246,7 @@ impl<'a, Node: FullNodeComponents> RpcContext<'a, Node> {
     }
 
     /// Returns the handle to the payload builder service
-    pub fn payload_builder(&self) -> &PayloadBuilderHandle<Node::Engine> {
+    pub fn payload_builder(&self) -> &PayloadBuilderHandle<Node::EngineTypes> {
         self.node.payload_builder()
     }
 }
@@ -260,7 +261,7 @@ pub(crate) async fn launch_rpc_servers<Node, Engine>(
 ) -> eyre::Result<(RethRpcServerHandles, RpcRegistry<Node>)>
 where
     Node: FullNodeComponents + Clone,
-    Engine: EngineApiServer<Node::Engine>,
+    Engine: EngineApiServer<Node::EngineTypes>,
 {
     let RpcHooks { on_rpc_started, extend_rpc_modules } = hooks;
 
@@ -344,10 +345,10 @@ pub trait RpcBuilder<Node: FullNodeComponentsExt>: Send {
             commit: VERGEN_GIT_SHA.to_string(),
         };
         let engine_api = EngineApi::new(
-            node.blockchain_db().clone(),
+            ctx.blockchain_db().clone(),
             ctx.chain_spec(),
-            ctx.right().beacon_engine_handle(),
-            node.components().payload_builder().clone().into(),
+            ctx.right().engine().expect("engine should be built before rpc").beacon_engine_handle(),
+            ctx.components().payload_builder().clone().into(),
             Box::new(node.task_executor().clone()),
             client,
         );
@@ -358,7 +359,7 @@ pub trait RpcBuilder<Node: FullNodeComponentsExt>: Send {
 
         // Start RPC servers
         let (rpc_server_handles, rpc_registry) = crate::rpc::launch_rpc_servers(
-            node.components().clone(),
+            ctx.components().clone(),
             engine_api,
             ctx.node_config(),
             jwt_secret,
@@ -375,9 +376,15 @@ pub trait RpcBuilder<Node: FullNodeComponentsExt>: Send {
         // TODO: can safely be spawned in ExtComponentBuilder::build, i.e. after executing code
         // below?
         let (tx, rx) = oneshot::channel();
+        ctx.right().set_consensus_engine_shutdown_rx(rx);
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
-            let res = beacon_consensus_engine.await;
+            let res = ctx
+                .right()
+                .engine()
+                .expect("engine should be built before rpc")
+                .beacon_consensus_engine()
+                .await;
             let _ = tx.send(res);
         });
 
@@ -406,7 +413,7 @@ pub trait RpcBuilder<Node: FullNodeComponentsExt>: Send {
                 Arc::new(block_provider),
             );
             ctx.task_executor().spawn_critical("etherscan consensus client", async move {
-                rpc_consensus_client.run::<Node::Engine>().await
+                rpc_consensus_client.run::<Node::EngineTypes>().await
             });
         }
 
@@ -419,11 +426,11 @@ pub trait RpcBuilder<Node: FullNodeComponentsExt>: Send {
                 Arc::new(block_provider),
             );
             ctx.task_executor().spawn_critical("rpc consensus client", async move {
-                rpc_consensus_client.run::<Node::Engine>().await
+                rpc_consensus_client.run::<Node::EngineTypes>().await
             });
         }
 
-        ctx.right().set_rpc(RpcAdapter { server_handles, registry })
+        ExtComponentBuilder::rpc(ctx.right(), RpcAdapter { server_handles, registry })
     }
 }
 
@@ -431,7 +438,7 @@ impl<Node, F> RpcBuilder<Node> for F
 where
     Node: FullNodeComponentsExt,
     F: OnComponentsInitializedHook<Node> + BeaconEngineBuilder + Send,
-    Node::Rpc: Rpc<Node>,
+    Node::Rpc: RpcComponent<Node>,
 {
     fn build_rpc(
         self,

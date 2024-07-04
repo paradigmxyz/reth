@@ -10,7 +10,10 @@ use std::{fmt, future::Future};
 use derive_more::Constructor;
 use reth_exex::ExExContext;
 use reth_network::NetworkHandle;
-use reth_node_api::{FullNodeComponents, FullNodeComponentsExt, FullNodeTypes, NodeTypes, Rpc};
+use reth_node_api::{
+    EngineComponent, FullNodeComponents, FullNodeComponentsExt, FullNodeTypes, NodeTypes,
+    PipelineComponent, RpcComponent,
+};
 use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
@@ -93,7 +96,7 @@ pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> NodeTypes for NodeAdapter<T, C> {
     type Primitives = T::Primitives;
-    type Engine = T::Engine;
+    type EngineTypes = T::EngineTypes;
 }
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
@@ -126,7 +129,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<
         self.components.network()
     }
 
-    fn payload_builder(&self) -> &PayloadBuilderHandle<T::Engine> {
+    fn payload_builder(&self) -> &PayloadBuilderHandle<T::EngineTypes> {
         self.components.payload_builder()
     }
 
@@ -148,7 +151,7 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
 /// A fully type configured node builder.
 ///
 /// Supports adding additional addons to the node.
-pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsBuilder<T>, X> {
+pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> {
     /// All settings for how the node should be configured.
     pub(crate) config: NodeConfig,
     /// Adapter for the underlying node types and database
@@ -159,7 +162,7 @@ pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsBuilder
     pub(crate) add_ons: NodeAddOns<NodeAdapter<T, CB::Components>>,
 }
 
-impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>, X> NodeBuilderWithComponents<T, CB, X> {
+impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T, CB> {
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
@@ -234,7 +237,7 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>, X> NodeBuilderWithComponent
     }
 }
 
-impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>, X> NodeBuilderWithComponents<T, CB, X> {
+impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T, CB> {
     /// Launches the node with the given launcher.
     pub async fn launch_with<L, C>(self, launcher: L) -> eyre::Result<L::Node>
     where
@@ -260,15 +263,23 @@ pub struct NodeAddOnsExt<Node: FullNodeComponents> {
     pub rpc: RpcHooks<Node>,
 }
 
-pub struct NodeAdapterExt<Node: FullNodeComponents, Rpc: Rpc<Self>> {
+#[derive(Debug, Clone)]
+pub struct NodeAdapterExt<
+    Node: FullNodeComponents,
+    Engine: EngineComponent<Self>,
+    Rpc: RpcComponent<Self>,
+> {
     pub core: Node,
-    pub rpc: Rpc,
+    pub engine: Option<Engine>,
+    //pub pipeline: Option<Pipeline>,
+    pub rpc: Option<Rpc>,
 }
 
-impl<Node, Rpc> FullNodeComponents for NodeAdapterExt<Node, Rpc>
+impl<Node, Engine, Rpc> FullNodeComponents for NodeAdapterExt<Node, Engine, Rpc>
 where
     Node: FullNodeComponents,
-    Rpc: Rpc<Self>,
+    Engine: EngineComponent<Self>,
+    Rpc: RpcComponent<Self>,
 {
     type Pool = Node::Pool;
     type Evm = Node::Evm;
@@ -294,7 +305,7 @@ where
         self.core.network()
     }
 
-    fn payload_builder(&self) -> &PayloadBuilderHandle<Self::Engine> {
+    fn payload_builder(&self) -> &PayloadBuilderHandle<Self::EngineTypes> {
         self.core.payload_builder()
     }
 
@@ -303,15 +314,27 @@ where
     }
 }
 
-impl<T, C, Rpc> FullNodeComponentsExt for NodeAdapterExt<NodeAdapter<T, C>, Rpc>
+impl<T, C, Engine, Rpc> FullNodeComponentsExt for NodeAdapterExt<NodeAdapter<T, C>, Engine, Rpc>
 where
     T: FullNodeTypes,
     C: NodeComponents<T>,
-    Rpc: Rpc<Self>,
+    //Pipeline: PipelineComponent<Self>,
+    Engine: EngineComponent<Self>,
+    Rpc: RpcComponent<Self>,
 {
-    type Rpc = Rpc;
+    // type Pipeline = Pipeline;
+    type Engine = Option<Engine>;
+    type Rpc = Option<Rpc>;
 
-    fn rpc(&self) -> &Self::Rpc {
-        &self.rpc
+    /*fn pipeline(&self) -> Option<&Self::Pipeline> {
+        self.pipeline.as_ref()
+    }*/
+
+    fn engine(&self) -> Option<&<Self as FullNodeComponentsExt>::Engine> {
+        self.engine.as_ref()
+    }
+
+    fn rpc(&self) -> Option<&Self::Rpc> {
+        self.rpc.as_ref()
     }
 }

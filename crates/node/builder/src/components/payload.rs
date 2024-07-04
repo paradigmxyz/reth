@@ -14,7 +14,7 @@ pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Sen
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<Node::Engine>>> + Send;
+    ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<Node::EngineTypes>>> + Send;
 }
 
 impl<Node, F, Fut, Pool> PayloadServiceBuilder<Node, Pool> for F
@@ -22,13 +22,13 @@ where
     Node: FullNodeTypes,
     Pool: TransactionPool,
     F: Fn(&BuilderContext<Node>, Pool) -> Fut + Send,
-    Fut: Future<Output = eyre::Result<PayloadBuilderHandle<Node::Engine>>> + Send,
+    Fut: Future<Output = eyre::Result<PayloadBuilderHandle<Node::EngineTypes>>> + Send,
 {
     fn spawn_payload_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<Node::Engine>>> + Send {
+    ) -> impl Future<Output = eyre::Result<PayloadBuilderHandle<Node::EngineTypes>>> + Send {
         self(ctx, pool)
     }
 }

@@ -25,9 +25,9 @@ where
     Node: FullNodeComponents,
 {
     pub inner: FullNode<Node>,
-    pub payload: PayloadTestContext<Node::Engine>,
+    pub payload: PayloadTestContext<Node::EngineTypes>,
     pub network: NetworkTestContext,
-    pub engine_api: EngineApiTestContext<Node::Engine>,
+    pub engine_api: EngineApiTestContext<Node::EngineTypes>,
     pub rpc: RpcTestContext<Node>,
 }
 
@@ -46,7 +46,7 @@ where
             engine_api: EngineApiTestContext {
                 engine_api_client: node.auth_server_handle().http_client(),
                 canonical_stream: node.provider.canonical_state_stream(),
-                _marker: PhantomData::<Node::Engine>,
+                _marker: PhantomData::<Node::EngineTypes>,
             },
             rpc: RpcTestContext { inner: node.rpc_registry },
         })
@@ -66,17 +66,17 @@ where
         &mut self,
         length: u64,
         tx_generator: impl Fn(u64) -> Pin<Box<dyn Future<Output = Bytes>>>,
-        attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes
+        attributes_generator: impl Fn(u64) -> <Node::EngineTypes as PayloadTypes>::PayloadBuilderAttributes
             + Copy,
     ) -> eyre::Result<
         Vec<(
-            <Node::Engine as PayloadTypes>::BuiltPayload,
-            <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
+            <Node::EngineTypes as PayloadTypes>::BuiltPayload,
+            <Node::EngineTypes as PayloadTypes>::PayloadBuilderAttributes,
         )>,
     >
     where
-        <Node::Engine as EngineTypes>::ExecutionPayloadV3:
-            From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
+        <Node::EngineTypes as EngineTypes>::ExecutionPayloadV3:
+            From<<Node::EngineTypes as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {
@@ -97,14 +97,17 @@ where
     /// It triggers the resolve payload via engine api and expects the built payload event.
     pub async fn new_payload(
         &mut self,
-        attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
+        attributes_generator: impl Fn(
+            u64,
+        )
+            -> <Node::EngineTypes as PayloadTypes>::PayloadBuilderAttributes,
     ) -> eyre::Result<(
-        <<Node as NodeTypes>::Engine as PayloadTypes>::BuiltPayload,
-        <<Node as NodeTypes>::Engine as PayloadTypes>::PayloadBuilderAttributes,
+        <<Node as NodeTypes>::EngineTypes as PayloadTypes>::BuiltPayload,
+        <<Node as NodeTypes>::EngineTypes as PayloadTypes>::PayloadBuilderAttributes,
     )>
     where
-        <Node::Engine as EngineTypes>::ExecutionPayloadV3:
-            From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
+        <Node::EngineTypes as EngineTypes>::ExecutionPayloadV3:
+            From<<Node::EngineTypes as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
         // trigger new payload building draining the pool
         let eth_attr = self.payload.new_payload(attributes_generator).await.unwrap();
@@ -122,14 +125,17 @@ where
     pub async fn advance_block(
         &mut self,
         versioned_hashes: Vec<B256>,
-        attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
+        attributes_generator: impl Fn(
+            u64,
+        )
+            -> <Node::EngineTypes as PayloadTypes>::PayloadBuilderAttributes,
     ) -> eyre::Result<(
-        <Node::Engine as PayloadTypes>::BuiltPayload,
-        <<Node as NodeTypes>::Engine as PayloadTypes>::PayloadBuilderAttributes,
+        <Node::EngineTypes as PayloadTypes>::BuiltPayload,
+        <<Node as NodeTypes>::EngineTypes as PayloadTypes>::PayloadBuilderAttributes,
     )>
     where
-        <Node::Engine as EngineTypes>::ExecutionPayloadV3:
-            From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
+        <Node::EngineTypes as EngineTypes>::ExecutionPayloadV3:
+            From<<Node::EngineTypes as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
     {
         let (payload, eth_attr) = self.new_payload(attributes_generator).await?;
 

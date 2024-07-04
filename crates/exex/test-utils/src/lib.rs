@@ -110,12 +110,12 @@ pub struct TestNode;
 
 impl NodeTypes for TestNode {
     type Primitives = ();
-    type Engine = EthEngineTypes;
+    type EngineTypes = EthEngineTypes;
 }
 
 impl<N> Node<N> for TestNode
 where
-    N: FullNodeTypes<Engine = EthEngineTypes>,
+    N: FullNodeTypes<EngineTypes = EthEngineTypes>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
