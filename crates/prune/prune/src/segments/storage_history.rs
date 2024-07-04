@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+
 use crate::{
     segments::{
         history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment,
     },
     PrunerError,
 };
+use itertools::Itertools;
 use reth_db::tables;
 use reth_db_api::{
     database::Database,
@@ -66,27 +69,33 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             ))
         }
 
+        let mut deleted_keys = HashMap::new();
         let mut last_changeset_pruned_block = None;
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::StorageChangeSets>(
                 BlockNumberAddress::range(range),
                 &mut limiter,
                 |_| false,
-                |row| last_changeset_pruned_block = Some(row.0.block_number()),
+                |(BlockNumberAddress((block_number, address)), entry)| {
+                    let highest_block = deleted_keys.entry((address, entry.key)).or_insert(0);
+                    if block_number > *highest_block {
+                        *highest_block = block_number;
+                    }
+                    last_changeset_pruned_block = Some(block_number);
+                },
             )?;
+        let last_changeset_pruned_block = last_changeset_pruned_block.unwrap_or(range_end);
+        let deleted_keys = deleted_keys.into_iter().sorted_unstable().map(
+            |((address, storage_key), block_number)| {
+                StorageShardedKey::new(address, storage_key, block_number)
+            },
+        );
         trace!(target: "pruner", deleted = %pruned_changesets, %done, "Pruned storage history (changesets)");
-
-        let last_changeset_pruned_block = last_changeset_pruned_block
-            // If there's more storage storage changesets to prune, set the checkpoint block number
-            // to previous, so we could finish pruning its storage changesets on the next run.
-            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
-            .unwrap_or(range_end);
 
         let (processed, pruned_indices) = prune_history_indices::<DB, tables::StoragesHistory, _>(
             provider,
-            last_changeset_pruned_block,
+            deleted_keys,
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
-            |key| StorageShardedKey::last(key.address, key.sharded_key.key),
         )?;
         trace!(target: "pruner", %processed, deleted = %pruned_indices, %done, "Pruned storage history (history)");
 

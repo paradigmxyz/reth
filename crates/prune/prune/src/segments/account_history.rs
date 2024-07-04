@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+
 use crate::{
     segments::{
         history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment,
     },
     PrunerError,
 };
+use itertools::Itertools;
 use reth_db::tables;
 use reth_db_api::{database::Database, models::ShardedKey};
 use reth_provider::DatabaseProviderRW;
@@ -63,27 +66,32 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             ))
         }
 
+        let mut deleted_keys = HashMap::new();
         let mut last_changeset_pruned_block = None;
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::AccountChangeSets>(
                 range,
                 &mut limiter,
                 |_| false,
-                |row| last_changeset_pruned_block = Some(row.0),
+                |(block_number, value)| {
+                    let highest_block = deleted_keys.entry(value.address).or_insert(0);
+                    if block_number > *highest_block {
+                        *highest_block = block_number;
+                    }
+                    last_changeset_pruned_block = Some(block_number);
+                },
             )?;
+        let last_changeset_pruned_block = last_changeset_pruned_block.unwrap_or(range_end);
+        let deleted_keys = deleted_keys
+            .into_iter()
+            .sorted_unstable()
+            .map(|(address, block_number)| ShardedKey::new(address, block_number));
         trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets)");
-
-        let last_changeset_pruned_block = last_changeset_pruned_block
-            // If there's more account account changesets to prune, set the checkpoint block number
-            // to previous, so we could finish pruning its account changesets on the next run.
-            .map(|block_number| if done { block_number } else { block_number.saturating_sub(1) })
-            .unwrap_or(range_end);
 
         let (processed, pruned_indices) = prune_history_indices::<DB, tables::AccountsHistory, _>(
             provider,
-            last_changeset_pruned_block,
+            deleted_keys,
             |a, b| a.key == b.key,
-            |key| ShardedKey::last(key.key),
         )?;
         trace!(target: "pruner", %processed, pruned = %pruned_indices, %done, "Pruned account history (history)");
 
