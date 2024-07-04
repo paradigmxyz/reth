@@ -6,6 +6,8 @@
 
 pragma solidity ^0.8.20;
 
+import "forge-std/console2.sol";
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../common/AddressResolver.sol";
 import "../common/EssentialContract.sol";
@@ -51,11 +53,18 @@ contract BasedOperator is EssentialContract, TaikoErrors {
     uint256 public constant MAX_BLOCKS_TO_VERIFY = 5;
     uint256 public constant PROVING_WINDOW = 1 hours;
 
-    TaikoL1 public taiko;
-    VerifierRegistry public verifierRegistry;
-    address public treasury;
+    TaikoL1 public taiko; // Might change, so maybe better getting these addreses from addressManager (!)
+    VerifierRegistry public verifierRegistry; // Same as above
+    address public treasury; // Same as above
 
     mapping(uint256 => Block) public blocks;
+
+    function init(address _addressManager) external initializer {
+        if(_addressManager == address(0)) {
+            revert L1_INVALID_ADDRESS();
+        }
+        __Essential_init(_addressManager);
+    }
 
     /// @dev Proposes a Taiko L2 block.
     function proposeBlock(
@@ -69,9 +78,15 @@ contract BasedOperator is EssentialContract, TaikoErrors {
         whenNotPaused
         returns (TaikoData.BlockMetadata memory _block)
     {
+        console2.log("BO:1");
         require(msg.value == PROVER_BOND, "Prover bond not expected");
+        console2.log("BO:2");
 
-        _block = taiko.proposeBlock(params, txList);
+        console2.log("Address is:");
+        console2.log(resolve("taiko", true));
+        _block = TaikoL1(resolve("taiko", false)).proposeBlock(params, txList);
+
+        console2.log("BO:3");
 
         // Check if we have whitelisted proposers
         if (!_isProposerPermitted(_block)) {
@@ -91,7 +106,7 @@ contract BasedOperator is EssentialContract, TaikoErrors {
         ProofBatch memory proofBatch = abi.decode(data, (ProofBatch));
 
         // Check who can prove the block
-        TaikoData.Block memory taikoBlock = taiko.getBlock(proofBatch._block.l2BlockNumber);
+        TaikoData.Block memory taikoBlock = TaikoL1(resolve("taiko", false)).getBlock(proofBatch._block.l2BlockNumber);
         if (block.timestamp < taikoBlock.timestamp + PROVING_WINDOW) {
             require(
                 proofBatch.prover == blocks[proofBatch._block.l2BlockNumber].assignedProver,
@@ -144,6 +159,7 @@ contract BasedOperator is EssentialContract, TaikoErrors {
     }
 
     function _verifyBlocks(uint256 maxBlocksToVerify) internal {
+        taiko = TaikoL1(resolve("taiko", false));
         uint256 lastVerifiedBlockIdBefore = taiko.getLastVerifiedBlockId();
         // Verify the blocks
         taiko.verifyBlocks(maxBlocksToVerify);
