@@ -59,12 +59,9 @@ impl EnvironmentArgs {
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
 
-        // ensure the provided datadir exist
-        if !db_path.is_dir() {
-            return Err(eyre::eyre!("Database path does not exist: {:?}", db_path));
-        }
-        if !sf_path.is_dir() {
-            return Err(eyre::eyre!("Static files path does not exist: {:?}", sf_path));
+        if access.is_read_write() {
+            reth_fs_util::create_dir_all(&db_path)?;
+            reth_fs_util::create_dir_all(&sf_path)?;
         }
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());

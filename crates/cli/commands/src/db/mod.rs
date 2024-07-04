@@ -67,6 +67,14 @@ impl Command {
         let db_path = data_dir.db();
         let static_files_path = data_dir.static_files();
 
+        // ensure the provided datadir exist
+        if !db_path.is_dir() {
+            return Err(eyre::eyre!("Database path does not exist: {:?}", db_path));
+        }
+        if !static_files_path.is_dir() {
+            return Err(eyre::eyre!("Static files path does not exist: {:?}", static_files_path));
+        }
+
         match self.command {
             // TODO: We'll need to add this on the DB trait.
             Subcommands::Stats(command) => {
