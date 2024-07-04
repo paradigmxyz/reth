@@ -87,18 +87,19 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             .into_iter()
             .sorted_unstable() // Unstable is fine because no equal keys exist in the map
             .map(|(address, block_number)| ShardedKey::new(address, block_number));
-        let (processed, pruned_indices) = prune_history_indices::<DB, tables::AccountsHistory, _>(
-            provider,
-            highest_sharded_keys,
-            |a, b| a.key == b.key,
-        )?;
-        trace!(target: "pruner", %processed, pruned = %pruned_indices, %done, "Pruned account history (history)");
+        let (deleted_indices, updated_indices, unchanged_indices) =
+            prune_history_indices::<DB, tables::AccountsHistory, _>(
+                provider,
+                highest_sharded_keys,
+                |a, b| a.key == b.key,
+            )?;
+        trace!(target: "pruner", deleted = %deleted_indices, updated = %updated_indices, unchanged = %unchanged_indices, %done, "Pruned account history (indices)");
 
         let progress = PruneProgress::new(done, &limiter);
 
         Ok(PruneOutput {
             progress,
-            pruned: pruned_changesets + pruned_indices,
+            pruned: pruned_changesets + deleted_indices,
             checkpoint: Some(PruneOutputCheckpoint {
                 block_number: Some(last_changeset_pruned_block.unwrap_or(range_end)),
                 tx_number: None,

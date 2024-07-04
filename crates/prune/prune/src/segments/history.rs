@@ -10,21 +10,28 @@ use reth_db_api::{
 };
 use reth_provider::DatabaseProviderRW;
 
+enum PruneShardOutcome {
+    Deleted,
+    Updated,
+    Unchanged,
+}
+
 /// Prune history indices according to the provided list of highest sharded keys.
 ///
-/// Returns total number of processed (walked) and deleted entities.
+/// Returns total number of deleted, updated and unchanged entities.
 pub(crate) fn prune_history_indices<DB, T, SK>(
     provider: &DatabaseProviderRW<DB>,
     highest_sharded_keys: impl IntoIterator<Item = T::Key>,
     key_matches: impl Fn(&T::Key, &T::Key) -> bool,
-) -> Result<(usize, usize), DatabaseError>
+) -> Result<(usize, usize, usize), DatabaseError>
 where
     DB: Database,
     T: Table<Value = BlockNumberList>,
     T::Key: AsRef<ShardedKey<SK>>,
 {
-    let mut processed = 0;
     let mut deleted = 0;
+    let mut updated = 0;
+    let mut unchanged = 0;
     let mut cursor = provider.tx_ref().cursor_write::<RawTable<T>>()?;
 
     for sharded_key in highest_sharded_keys {
@@ -46,7 +53,11 @@ where
         // At this point, we're sure that the shard with the given sharded key exists
         let (key, raw_blocks): (T::Key, RawValue<BlockNumberList>) = result.unwrap();
 
-        deleted += prune_shard(&mut cursor, key, raw_blocks, to_block, &key_matches)?;
+        match prune_shard(&mut cursor, key, raw_blocks, to_block, &key_matches)? {
+            PruneShardOutcome::Deleted => deleted += 1,
+            PruneShardOutcome::Updated => updated += 1,
+            PruneShardOutcome::Unchanged => unchanged += 1,
+        }
 
         while let Some((key, value)) = cursor
             .next()?
@@ -54,16 +65,18 @@ where
             .transpose()?
         {
             if key_matches(&key, &sharded_key) {
-                deleted += prune_shard(&mut cursor, key, value, to_block, &key_matches)?;
+                match prune_shard(&mut cursor, key, value, to_block, &key_matches)? {
+                    PruneShardOutcome::Deleted => deleted += 1,
+                    PruneShardOutcome::Updated => updated += 1,
+                    PruneShardOutcome::Unchanged => unchanged += 1,
+                }
             } else {
                 break
             }
         }
-
-        processed += 1;
     }
 
-    Ok((processed, deleted))
+    Ok((deleted, updated, unchanged))
 }
 
 /// Prunes one shard of a history table.
@@ -79,19 +92,17 @@ fn prune_shard<C, T, SK>(
     raw_blocks: RawValue<T::Value>,
     to_block: BlockNumber,
     key_matches: impl Fn(&T::Key, &T::Key) -> bool,
-) -> Result<usize, DatabaseError>
+) -> Result<PruneShardOutcome, DatabaseError>
 where
     C: DbCursorRO<RawTable<T>> + DbCursorRW<RawTable<T>>,
     T: Table<Value = BlockNumberList>,
     T::Key: AsRef<ShardedKey<SK>>,
 {
-    let mut deleted = 0;
-
     // If shard consists only of block numbers less than the target one, delete shard
     // completely.
     if key.as_ref().highest_block_number <= to_block {
         cursor.delete_current()?;
-        deleted += 1;
+        Ok(PruneShardOutcome::Deleted)
     }
     // Shard contains block numbers that are higher than the target one, so we need to
     // filter it. It is guaranteed that further shards for this sharded key will not
@@ -117,10 +128,10 @@ where
                         // has previous shards, replace it with the previous shard.
                         Some((prev_key, prev_value)) if key_matches(&prev_key, &key) => {
                             cursor.delete_current()?;
-                            deleted += 1;
                             // Upsert will replace the last shard for this sharded key with
                             // the previous value.
                             cursor.upsert(RawKey::new(key), prev_value)?;
+                            Ok(PruneShardOutcome::Updated)
                         }
                         // If there's no previous shard for this sharded key,
                         // just delete last shard completely.
@@ -132,7 +143,7 @@ where
                             }
                             // Delete shard.
                             cursor.delete_current()?;
-                            deleted += 1;
+                            Ok(PruneShardOutcome::Deleted)
                         }
                     }
                 }
@@ -140,16 +151,17 @@ where
                 // just delete it.
                 else {
                     cursor.delete_current()?;
-                    deleted += 1;
+                    Ok(PruneShardOutcome::Deleted)
                 }
             } else {
                 cursor.upsert(
                     RawKey::new(key),
                     RawValue::new(BlockNumberList::new_pre_sorted(higher_blocks)),
                 )?;
+                Ok(PruneShardOutcome::Updated)
             }
+        } else {
+            Ok(PruneShardOutcome::Unchanged)
         }
     }
-
-    Ok(deleted)
 }
