@@ -84,7 +84,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
 impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
     for BundleStateProvider<SP, EDP>
 {
-    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
+    fn proof(&self, _address: Address, _slots: &[B256]) -> ProviderResult<AccountProof> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
     }
 }

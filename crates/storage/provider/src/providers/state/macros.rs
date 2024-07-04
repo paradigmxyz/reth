@@ -46,7 +46,7 @@ macro_rules! delegate_provider_impls {
                 fn state_root_with_updates(&self, state: &revm::db::BundleState) -> reth_storage_errors::provider::ProviderResult<(reth_primitives::B256, reth_trie::updates::TrieUpdates)>;
             }
             StateProofProvider $(where [$($generics)*])? {
-                fn proof(&self, address: reth_primitives::Address, keys: &[reth_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_trie::AccountProof>;
+                fn proof(&self, address: reth_primitives::Address, slots: &[reth_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_trie::AccountProof>;
             }
         );
     }
