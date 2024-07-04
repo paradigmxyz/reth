@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  prepare:
+  prepare-reth:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
     runs-on:
@@ -59,14 +59,47 @@ jobs:
         run: |
           cd hivetests
           go build .
-          mv ./hive ../artifacts/
 
-      - name: Upload artifacts
+      - name: Upload reth image
         uses: actions/upload-artifact@v4
         with:
           name: artifacts
           path: ./artifacts
 
+  prepare-hive:
+    if: github.repository == 'paradigmxyz/reth'
+    timeout-minutes: 45
+    runs-on:
+      group: Reth
+    steps:
+      - name: Checkout hive tests
+        uses: actions/checkout@v4
+        with:
+          repository: ethereum/hive
+          ref: master
+          path: hivetests
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "^1.13.1"
+      - run: go version
+
+      - name: Build hive assets
+        run: |
+          mkdir hive_assets/
+          cd hivetests
+          go build .
+          ./hive -client reth --sim "devp2p|ethereum/engine|ethereum/rpc-compat|pyspec" -sim.timelimit 1s || true
+          mv ./hive ../hive_assets/
+          docker save hive/simulators/devp2p:latest -o ../hive_assets/devp2p.tar
+          docker save hive/simulators/ethereum/engine:latest -o ../hive_assets/engine.tar
+          docker save hive/simulators/ethereum/rpc-compat:latest -o ../hive_assets/rpc_compat.tar
+          docker save hive/simulators/ethereum/pyspec:latest -o ../hive_assets/pyspec.tar
+      - name: Upload hive assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: hive_assets
+          path: ./hive_assets
   test:
     timeout-minutes: 60
     strategy:
@@ -167,7 +200,9 @@ jobs:
             include: [homestead/]
           - sim: pyspec
             include: [frontier/]
-    needs: prepare
+    needs: 
+      - prepare-reth
+      - prepare-hive
     name: run
     runs-on:
       group: Reth
@@ -178,14 +213,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download artifacts
+      - name: Download hive assets
+        uses: actions/download-artifact@v4
+        with:
+          name: hive_assets
+          path: /tmp
+
+      - name: Download reth image
         uses: actions/download-artifact@v4
         with:
           name: artifacts
           path: /tmp
 
-      - name: Load Docker image
+      - name: Load Docker images
         run: |
+          docker load --input /tmp/devp2p.tar
+          docker load --input /tmp/engine.tar
+          docker load --input /tmp/rpc_compat.tar
+          docker load --input /tmp/pyspec.tar
           docker load --input /tmp/reth_image.tar
           docker image ls -a
       - name: Move hive binary
