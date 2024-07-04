@@ -78,7 +78,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
             deployProxy({
                 name: "tier_sgx_and_pse_zkevm",
                 impl: address(new SgxAndZkVerifier()),
-                data: bytes.concat(SgxAndZkVerifier.init.selector, abi.encode(address(addressManager)))
+data: bytes.concat(SgxAndZkVerifier.init.selector, abi.encode(address(addressManager)))
             })
         );
 
@@ -86,7 +86,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
             deployProxy({
                 name: "guardian_verifier",
                 impl: address(new GuardianVerifier()),
-                data: bytes.concat(GuardianVerifier.init.selector, abi.encode(address(addressManager)))
+data: bytes.concat(GuardianVerifier.init.selector, abi.encode(address(addressManager)))
             })
         );
 
@@ -94,7 +94,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
             deployProxy({
                 name: "guardian_prover",
                 impl: address(new GuardianProver()),
-                data: bytes.concat(GuardianProver.init.selector, abi.encode(address(addressManager)))
+data: bytes.concat(GuardianProver.init.selector, abi.encode(address(addressManager)))
             })
         );
 
@@ -124,7 +124,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
             deployProxy({
                 name: "assignment_hook",
                 impl: address(new AssignmentHook()),
-                data: bytes.concat(AssignmentHook.init.selector, abi.encode(address(addressManager)))
+data: bytes.concat(AssignmentHook.init.selector, abi.encode(address(addressManager)))
             })
         );
 

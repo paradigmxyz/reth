@@ -29,7 +29,7 @@ contract TestERC20Airdrop is TaikoTest {
                 impl: address(new ERC20Airdrop()),
                 data: bytes.concat(
                     ERC20Airdrop.init.selector, abi.encode(0, 0, merkleRoot, address(token), owner)
-                    )
+                )
             })
         );
 
@@ -42,7 +42,7 @@ contract TestERC20Airdrop is TaikoTest {
                 data: bytes.concat(
                     ERC20Airdrop2.init.selector,
                     abi.encode(0, 0, merkleRoot, address(token), owner, 10 days)
-                    )
+                )
             })
         );
 

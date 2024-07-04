@@ -17,5 +17,5 @@ interface IVerifier {
         address prover,
         bytes calldata proof
     )
-    external;
+        external;
 }

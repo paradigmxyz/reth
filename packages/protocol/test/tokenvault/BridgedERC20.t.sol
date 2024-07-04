@@ -133,7 +133,7 @@ contract TestBridgedERC20 is TaikoTest {
                 data: bytes.concat(
                     BridgedERC20.init.selector,
                     abi.encode(address(manager), srcToken, srcChainId, srcDecimals, name, name)
-                    ),
+                ),
                 registerTo: manager,
                 owner: owner
             })

@@ -7,16 +7,14 @@
 pragma solidity ^0.8.20;
 
 import "../common/EssentialContract.sol";
-import "./preconfs/ISequencerRegistry.sol";
 import "./TaikoErrors.sol";
 import "./TaikoEvents.sol";
 
 /// @title TaikoL1
 contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
-
     event ProvingPaused(bool paused);
 
-    uint public constant SECURITY_DELAY_AFTER_PROVEN = 8 hours;
+    uint256 public constant SECURITY_DELAY_AFTER_PROVEN = 8 hours;
 
     // According to EIP4844, each blob has up to 4096 field elements, and each
     // field element has 32 bytes.
@@ -44,10 +42,7 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         blk.blockHash = _genesisBlockHash;
         blk.timestamp = uint64(block.timestamp);
 
-        emit BlockVerified({
-            blockId: 0,
-            blockHash: _genesisBlockHash
-        });
+        emit BlockVerified({ blockId: 0, blockHash: _genesisBlockHash });
     }
 
     /// Proposes a Taiko L2 block.
@@ -65,16 +60,6 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         onlyFromNamed("operator")
         returns (TaikoData.BlockMetadata memory _block)
     {
-        // If there's a sequencer registry, check if the block can be proposed by the current
-        // proposer
-        ISequencerRegistry sequencerRegistry =
-            ISequencerRegistry(resolve("sequencer_registry", true));
-        if (sequencerRegistry != ISequencerRegistry(address(0))) {
-            if (!sequencerRegistry.isEligibleSigner(msg.sender)) {
-                revert L1_INVALID_PROPOSER();
-            }
-        }
-
         TaikoData.Config memory config = getConfig();
 
         // Decode the block data
@@ -91,7 +76,10 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         // Verify DA data
         if (_block.blobUsed) {
             //require(_block.blobHash == blobhash(0), "invalid data blob");
-            require(uint256(_block.txListByteOffset) + _block.txListByteSize <= MAX_BYTES_PER_BLOB, "invalid blob size");
+            require(
+                uint256(_block.txListByteOffset) + _block.txListByteSize <= MAX_BYTES_PER_BLOB,
+                "invalid blob size"
+            );
         } else {
             require(_block.blobHash == keccak256(txList), "INVALID_TXLIST_HASH");
             require(_block.txListByteOffset == 0, "INVALID_TXLIST_START");
@@ -99,10 +87,12 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         }
 
         // Check that the tx length is non-zero and within the supported range
-        require(_block.txListByteSize == 0 || _block.txListByteSize > config.blockMaxTxListBytes, "invalid txlist size");
+        require(
+            _block.txListByteSize == 0 || _block.txListByteSize > config.blockMaxTxListBytes,
+            "invalid txlist size"
+        );
 
-        TaikoData.Block storage parentBlock =
-            state.blocks[(state.numBlocks - 1)];
+        TaikoData.Block storage parentBlock = state.blocks[(state.numBlocks - 1)];
         require(_block.parentMetaHash == parentBlock.metaHash, "invalid parentMetaHash");
 
         // Verify the passed in L1 state block number.
@@ -122,8 +112,7 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         // The other constraint is that the timestamp needs to be larger than or equal the one
         // in the previous L2 block.
         if (
-            _block.timestamp + 128 * 12 < block.timestamp
-                || _block.timestamp > block.timestamp
+            _block.timestamp + 128 * 12 < block.timestamp || _block.timestamp > block.timestamp
                 || _block.timestamp < parentBlock.timestamp
         ) {
             revert L1_INVALID_TIMESTAMP();
@@ -144,15 +133,13 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         // Store the passed in block hash as in
         state.transitions[blk.blockId][_block.parentMetaHash].blockHash = _block.blockHash;
         // For now it does not matter - we are not going to prove anyways
-        state.transitions[blk.blockId][_block.parentMetaHash].verifiableAfter = uint64(block.timestamp) + 365 days;
+        state.transitions[blk.blockId][_block.parentMetaHash].verifiableAfter =
+            uint64(block.timestamp) + 365 days;
 
         // Increment the counter (cursor) by 1.
         state.numBlocks++;
 
-        emit BlockProposed({
-            blockId: _block.l2BlockNumber,
-            meta: _block
-        });
+        emit BlockProposed({ blockId: _block.l2BlockNumber, meta: _block });
     }
 
     /// @notice Proves or contests a block transition.
@@ -163,14 +150,17 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         TaikoData.BlockMetadata memory _block,
         TaikoData.Transition memory transition,
         address prover
-        )
+    )
         external
         nonReentrant
         whenNotPaused
         onlyFromNamed("operator")
     {
         // Check that the block has been proposed but has not yet been verified.
-        if (_block.l2BlockNumber <= state.lastVerifiedBlockId || _block.l2BlockNumber >= state.numBlocks) {
+        if (
+            _block.l2BlockNumber <= state.lastVerifiedBlockId
+                || _block.l2BlockNumber >= state.numBlocks
+        ) {
             revert L1_INVALID_BLOCK_ID();
         }
 
@@ -180,21 +170,18 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         require(blk.metaHash != keccak256(abi.encode(_block)), "incorrect block");
 
         // Store the transition
-        TaikoData.TransitionState storage storedTransition = state.transitions[_block.l2BlockNumber][transition.parentHash];
+        TaikoData.TransitionState storage storedTransition =
+            state.transitions[_block.l2BlockNumber][transition.parentHash];
         storedTransition.blockHash = transition.blockHash;
         storedTransition.prover = prover;
         storedTransition.verifiableAfter = uint32(block.timestamp + SECURITY_DELAY_AFTER_PROVEN);
 
-        emit TransitionProved({
-            blockId: _block.l2BlockNumber,
-            tran: transition,
-            prover: prover
-        });
+        emit TransitionProved({ blockId: _block.l2BlockNumber, tran: transition, prover: prover });
     }
 
     /// @notice Verifies up to N blocks.
     /// @param maxBlocksToVerify Max number of blocks to verify.
-    function verifyBlocks(uint maxBlocksToVerify)
+    function verifyBlocks(uint256 maxBlocksToVerify)
         external
         nonReentrant
         whenNotPaused
@@ -204,15 +191,17 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         TaikoData.Block storage blk = state.blocks[state.lastVerifiedBlockId];
         bytes32 blockHash = blk.blockHash;
         // Go to the first unverified block
-        uint blockId = uint(state.lastVerifiedBlockId) + 1;
-        uint numBlocksVerified;
+        uint256 blockId = uint256(state.lastVerifiedBlockId) + 1;
+        uint256 numBlocksVerified;
         while (blockId < state.numBlocks && numBlocksVerified < maxBlocksToVerify) {
             blk = state.blocks[blockId];
 
             // Check if the parent block hash matches the actual block hash of the parent
             // Check if the timestamp is older than required
-            if (state.transitions[blockId][blockHash].blockHash == bytes32(0) ||
-                block.timestamp < state.transitions[blockId][blockHash].verifiableAfter) {
+            if (
+                state.transitions[blockId][blockHash].blockHash == bytes32(0)
+                    || block.timestamp < state.transitions[blockId][blockHash].verifiableAfter
+            ) {
                 break;
             }
 
@@ -221,10 +210,7 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
             // Update latest block hash
             blockHash = blk.blockHash;
 
-            emit BlockVerified({
-                blockId: blockId,
-                blockHash: blockHash
-            });
+            emit BlockVerified({ blockId: blockId, blockHash: blockHash });
 
             ++blockId;
             ++numBlocksVerified;
@@ -255,12 +241,19 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         return state.blocks[blockId];
     }
 
-    function getTransition(uint64 blockId, bytes32 parentHash) public view returns (TaikoData.TransitionState memory) {
+    function getTransition(
+        uint64 blockId,
+        bytes32 parentHash
+    )
+        public
+        view
+        returns (TaikoData.TransitionState memory)
+    {
         return state.transitions[blockId][parentHash];
     }
 
-    function getLastVerifiedBlockId() public view returns (uint) {
-        return uint(state.lastVerifiedBlockId);
+    function getLastVerifiedBlockId() public view returns (uint256) {
+        return uint256(state.lastVerifiedBlockId);
     }
 
     /// @notice Gets the configuration of the TaikoL1 contract.
@@ -277,7 +270,7 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         });
     }
 
-    function isConfigValid(TaikoData.Config memory config ) public pure returns (bool) {
+    function isConfigValid(TaikoData.Config memory config) public pure returns (bool) {
         if (
             config.chainId <= 1 //
                 || config.blockMaxGasLimit == 0 || config.blockMaxTxListBytes == 0

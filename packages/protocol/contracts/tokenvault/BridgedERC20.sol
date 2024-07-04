@@ -6,8 +6,7 @@
 
 pragma solidity ^0.8.20;
 
-import
-    "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/IERC20MetadataUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/IERC20MetadataUpgradeable.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
 
 import "./LibBridgedToken.sol";

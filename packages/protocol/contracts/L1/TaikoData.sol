@@ -63,17 +63,14 @@ library TaikoData {
 
     /// @dev Struct holding the state variables for the {TaikoL1} contract.
     struct State {
-        mapping(uint blockId => Block) blocks;
-        mapping(uint blockId => mapping(bytes32 parentBlockHash => TransitionState)) transitions;
-
+        mapping(uint256 blockId => Block) blocks;
+        mapping(uint256 blockId => mapping(bytes32 parentBlockHash => TransitionState)) transitions;
         uint64 genesisHeight;
         uint64 genesisTimestamp;
-
         uint64 numBlocks;
         uint64 lastVerifiedBlockId;
         bool provingPaused;
         uint64 lastUnpausedAt;
-
         uint256[143] __gap;
     }
 }
