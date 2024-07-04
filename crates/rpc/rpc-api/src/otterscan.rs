@@ -5,13 +5,23 @@ use reth_rpc_types::{
         BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
         TransactionsWithReceipts,
     },
-    Transaction,
+    Header, Transaction,
 };
 
 /// Otterscan rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "ots"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "ots"))]
 pub trait Otterscan {
+    /// Get the block header by block number, required by otterscan.
+    /// Otterscan currently requires this endpoint, used as:
+    ///
+    /// 1. check if the node is Erigon or not
+    /// 2. get block header instead of the full block
+    ///
+    /// Ref: <https://github.com/otterscan/otterscan/blob/071d8c55202badf01804f6f8d53ef9311d4a9e47/src/useProvider.ts#L71>
+    #[method(name = "getHeaderByNumber", aliases = ["erigon_getHeaderByNumber"])]
+    async fn get_header_by_number(&self, block_number: u64) -> RpcResult<Option<Header>>;
+
     /// Check if a certain address contains a deployed code.
     #[method(name = "hasCode")]
     async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool>;

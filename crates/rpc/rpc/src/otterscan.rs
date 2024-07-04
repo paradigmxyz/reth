@@ -10,7 +10,7 @@ use reth_rpc_types::{
         BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
         OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
     },
-    BlockTransactions, Transaction,
+    BlockTransactions, Header, Transaction,
 };
 use revm_inspectors::transfer::{TransferInspector, TransferKind};
 use revm_primitives::ExecutionResult;
@@ -35,6 +35,11 @@ impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
     Eth: EthApiServer + TraceExt + 'static,
 {
+    /// Handler for `{ots,erigon}_getHeaderByNumber`
+    async fn get_header_by_number(&self, block_number: u64) -> RpcResult<Option<Header>> {
+        Ok(self.eth.header_by_number(BlockNumberOrTag::Number(block_number)).await?)
+    }
+
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool> {
         self.eth.get_code(address, block_number).await.map(|code| !code.is_empty())
