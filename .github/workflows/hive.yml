@@ -70,20 +70,7 @@ jobs:
       - run: go version
 
       - name: Build hive assets
-        run: |
-          mkdir hive_assets/
-          cd hivetests
-          go build .
-          ./hive -client reth --sim "devp2p|ethereum/engine|ethereum/rpc-compat|pyspec" -sim.timelimit 1s || true
-          docker save hive/hiveproxy:latest -o ../hive_assets/hiveproxy.tar
-          docker save hive/simulators/devp2p:latest -o ../hive_assets/devp2p.tar
-          docker save hive/simulators/ethereum/engine:latest -o ../hive_assets/engine.tar
-          docker save hive/simulators/ethereum/rpc-compat:latest -o ../hive_assets/rpc_compat.tar
-          docker save hive/simulators/ethereum/pyspec:latest -o ../hive_assets/pyspec.tar
-          
-          git apply ../.github/assets/hive/no_sim_build.diff # makes sure we don't rebuild sim image when running hive
-          go build .
-          mv ./hive ../hive_assets/
+        run: .github/assets/hive/build_simulations.sh
 
       - name: Upload hive assets
         uses: actions/upload-artifact@v4
