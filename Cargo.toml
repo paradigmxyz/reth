@@ -17,6 +17,7 @@ members = [
     "crates/cli/cli/",
     "crates/cli/commands/",
     "crates/cli/runner/",
+    "crates/cli/util/",
     "crates/config/",
     "crates/consensus/auto-seal/",
     "crates/consensus/beacon/",
@@ -276,6 +277,7 @@ reth-chainspec = { path = "crates/chainspec" }
 reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
+reth-cli-util = { path = "crates/cli/util" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-codecs-derive = { path = "crates/storage/codecs/derive" }
 reth-config = { path = "crates/config" }

@@ -1,13 +1,14 @@
 //! Main node command for launching a node
 
 use crate::args::{
-    utils::{chain_help, chain_value_parser, parse_socket_address, SUPPORTED_CHAINS},
+    utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
     DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
     RpcServerArgs, TxPoolArgs,
 };
 use clap::{value_parser, Args, Parser};
 use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliContext;
+use reth_cli_util::parse_socket_address;
 use reth_db::{init_db, DatabaseEnv};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{node_config::NodeConfig, version};

@@ -31,6 +31,7 @@ reth-transaction-pool.workspace = true
 reth-beacon-consensus.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-commands.workspace = true
+reth-cli-util.workspace = true
 reth-consensus-common.workspace = true
 reth-blockchain-tree.workspace = true
 reth-rpc-builder.workspace = true
