@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, TxHash, B256};
+use reth_primitives::{Address, BlockId, Bytes, TxHash, B256};
 use reth_rpc_types::{
     trace::otterscan::{
         BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
@@ -48,10 +48,7 @@ pub trait Otterscan {
     /// Tailor-made and expanded version of eth_getBlockByNumber for block details page in
     /// Otterscan.
     #[method(name = "getBlockDetails")]
-    async fn get_block_details(
-        &self,
-        block_number: BlockNumberOrTag,
-    ) -> RpcResult<Option<BlockDetails>>;
+    async fn get_block_details(&self, block_number: u64) -> RpcResult<Option<BlockDetails>>;
 
     /// Tailor-made and expanded version of eth_getBlockByHash for block details page in Otterscan.
     #[method(name = "getBlockDetailsByHash")]
@@ -61,7 +58,7 @@ pub trait Otterscan {
     #[method(name = "getBlockTransactions")]
     async fn get_block_transactions(
         &self,
-        block_number: BlockNumberOrTag,
+        block_number: u64,
         page_number: usize,
         page_size: usize,
     ) -> RpcResult<OtsBlockTransactions>;
@@ -71,7 +68,7 @@ pub trait Otterscan {
     async fn search_transactions_before(
         &self,
         address: Address,
-        block_number: BlockNumberOrTag,
+        block_number: u64,
         page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts>;
 
@@ -80,7 +77,7 @@ pub trait Otterscan {
     async fn search_transactions_after(
         &self,
         address: Address,
-        block_number: BlockNumberOrTag,
+        block_number: u64,
         page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts>;
 

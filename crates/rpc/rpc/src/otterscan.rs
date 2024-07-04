@@ -99,11 +99,8 @@ where
     }
 
     /// Handler for `ots_getBlockDetails`
-    async fn get_block_details(
-        &self,
-        block_number: BlockNumberOrTag,
-    ) -> RpcResult<Option<BlockDetails>> {
-        let block = self.eth.block_by_number(block_number, true).await?;
+    async fn get_block_details(&self, block_number: u64) -> RpcResult<Option<BlockDetails>> {
+        let block = self.eth.block_by_number(BlockNumberOrTag::Number(block_number), true).await?;
         Ok(block.map(Into::into))
     }
 
@@ -116,11 +113,12 @@ where
     /// Handler for `getBlockTransactions`
     async fn get_block_transactions(
         &self,
-        block_number: BlockNumberOrTag,
+        block_number: u64,
         page_number: usize,
         page_size: usize,
     ) -> RpcResult<OtsBlockTransactions> {
         // retrieve full block and its receipts
+        let block_number = BlockNumberOrTag::Number(block_number);
         let block = self.eth.block_by_number(block_number, true);
         let receipts = self.eth.block_receipts(BlockId::Number(block_number));
         let (block, receipts) = futures::try_join!(block, receipts)?;
@@ -184,7 +182,7 @@ where
     async fn search_transactions_before(
         &self,
         _address: Address,
-        _block_number: BlockNumberOrTag,
+        _block_number: u64,
         _page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))
@@ -194,7 +192,7 @@ where
     async fn search_transactions_after(
         &self,
         _address: Address,
-        _block_number: BlockNumberOrTag,
+        _block_number: u64,
         _page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))
