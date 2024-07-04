@@ -419,6 +419,9 @@ alloy-pubsub = { version = "0.1", default-features = false }
 alloy-json-rpc = { version = "0.1", default-features = false }
 alloy-rpc-client = { version = "0.1", default-features = false }
 
+#op
+op-alloy-rpc-types = { version = "0.1" }
+
 # misc
 auto_impl = "1"
 aquamarine = "0.5"

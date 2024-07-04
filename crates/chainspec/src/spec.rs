@@ -39,6 +39,9 @@ use reth_network_peers::{
     op_testnet_nodes, sepolia_nodes,
 };
 
+#[cfg(feature = "optimism")]
+use op_alloy_rpc_types::genesis::{OptimismBaseFeeInfo, OptimismGenesisInfo as OpGenesisInfo};
+
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
@@ -748,7 +751,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
             (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Bedrock.boxed(), optimism_genesis_info.bedrock_block),
+            (OptimismHardfork::Bedrock.boxed(), optimism_genesis_info.genesis_info.bedrock_block),
         ];
         let mut hardforks = hardfork_opts
             .into_iter()
@@ -777,13 +780,13 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Regolith.boxed(), optimism_genesis_info.regolith_time),
+            (OptimismHardfork::Regolith.boxed(), optimism_genesis_info.genesis_info.regolith_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Canyon.boxed(), optimism_genesis_info.canyon_time),
+            (OptimismHardfork::Canyon.boxed(), optimism_genesis_info.genesis_info.canyon_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Ecotone.boxed(), optimism_genesis_info.ecotone_time),
+            (OptimismHardfork::Ecotone.boxed(), optimism_genesis_info.genesis_info.ecotone_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Fjord.boxed(), optimism_genesis_info.fjord_time),
+            (OptimismHardfork::Fjord.boxed(), optimism_genesis_info.genesis_info.fjord_time),
         ];
 
         let time_hardforks = time_hardfork_opts
@@ -1085,32 +1088,21 @@ impl DepositContract {
 #[derive(Default, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OptimismGenesisInfo {
-    bedrock_block: Option<u64>,
-    regolith_time: Option<u64>,
-    canyon_time: Option<u64>,
-    ecotone_time: Option<u64>,
-    fjord_time: Option<u64>,
+    genesis_info: OpGenesisInfo,
     #[serde(skip)]
     base_fee_params: BaseFeeParamsKind,
 }
 
 #[cfg(feature = "optimism")]
-#[derive(Debug, Eq, PartialEq, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OptimismBaseFeeInfo {
-    eip1559_elasticity: Option<u64>,
-    eip1559_denominator: Option<u64>,
-    eip1559_denominator_canyon: Option<u64>,
-}
-
-#[cfg(feature = "optimism")]
 impl OptimismGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
-        let mut optimism_genesis_info: Self =
-            genesis.config.extra_fields.deserialize_as().unwrap_or_default();
+        let mut optimism_genesis_info = OptimismGenesisInfo::default();
+        if let Some(genesis_info) = OpGenesisInfo::extract_from(&genesis.config.extra_fields) {
+            optimism_genesis_info.genesis_info = genesis_info;
+        }
 
-        if let Some(Ok(optimism_base_fee_info)) =
-            genesis.config.extra_fields.get_deserialized::<OptimismBaseFeeInfo>("optimism")
+        if let Some(optimism_base_fee_info) =
+            OptimismBaseFeeInfo::extract_from(&genesis.config.extra_fields)
         {
             if let (Some(elasticity), Some(denominator)) = (
                 optimism_base_fee_info.eip1559_elasticity,
