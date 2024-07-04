@@ -11,13 +11,13 @@ go build .
 
 # Run each hive command in the background for each simulator and wait
 echo "Building images"
-./hive -client reth --sim "devp2p" -sim.timelimit 1s || true &
-./hive -client reth --sim "ethereum/engine" -sim.timelimit 1s || true &
-./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 1s || true &
-./hive -client reth --sim "pyspec" -sim.timelimit 1s || true &
-./hive -client reth --sim "smoke/genesis" -sim.timelimit 1s || true &
-./hive -client reth --sim "smoke/network" -sim.timelimit 1s || true &
-./hive -client reth --sim "ethereum/sync" -sim.timelimit 1s || true &
+./hive -client reth --sim "devp2p" -sim.timelimit 10ms || true &
+./hive -client reth --sim "ethereum/engine" -sim.timelimit 10ms || true &
+./hive -client reth --sim "ethereum/rpc-compat" -sim.timelimit 10ms || true &
+./hive -client reth --sim "pyspec" -sim.timelimit 10ms || true &
+./hive -client reth --sim "smoke/genesis" -sim.timelimit 10ms || true &
+./hive -client reth --sim "smoke/network" -sim.timelimit 10ms || true &
+./hive -client reth --sim "ethereum/sync" -sim.timelimit 10ms || true &
 wait
 
 # Run docker save in parallel and wait
