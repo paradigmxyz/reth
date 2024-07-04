@@ -1,5 +1,5 @@
 [package]
-name = "reth-cli-utils"
+name = "reth-cli-util"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

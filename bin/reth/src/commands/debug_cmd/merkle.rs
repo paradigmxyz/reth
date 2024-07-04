@@ -5,7 +5,7 @@ use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
-use reth_cli_utils::get_secret_key;
+use reth_cli_util::get_secret_key;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::{tables, DatabaseEnv};

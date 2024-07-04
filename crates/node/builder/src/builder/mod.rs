@@ -11,7 +11,7 @@ use crate::{
 };
 use futures::Future;
 use reth_chainspec::ChainSpec;
-use reth_cli_utils::get_secret_key;
+use reth_cli_util::get_secret_key;
 use reth_db::{
     test_utils::{create_test_rw_db_with_path, tempdir_path, TempDatabase},
     DatabaseEnv,

@@ -14,7 +14,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
-reth-cli-utils.workspace = true
+reth-cli-util.workspace = true
 reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
