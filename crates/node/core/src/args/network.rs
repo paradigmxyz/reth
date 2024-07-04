@@ -219,14 +219,11 @@ impl NetworkArgs {
 
     /// Resolve all trusted peers at once
     pub async fn resolve_trusted_peers(&self) -> eyre::Result<Vec<NodeRecord>> {
-        let peers = self.trusted_peers.clone();
-        let mut resolved_peers = Vec::new();
-
-        for peer in peers {
-            resolved_peers.push(async move { peer.resolve().await });
-        }
-
-        Ok(futures::future::try_join_all(resolved_peers).await?)
+        let resolved_peers = futures::future::try_join_all(
+            self.trusted_peers.iter().map(|peer| async move { peer.resolve().await }),
+        )
+        .await?;
+        Ok(resolved_peers)
     }
 }
 
