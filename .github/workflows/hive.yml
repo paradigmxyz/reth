@@ -239,7 +239,7 @@ jobs:
       - name: Run ${{ matrix.sim }} simulator
         run: |
           cd hivetests
-          hive --sim "${{ matrix.sim }}$" --sim.limit "${{matrix.limit}}/${{join(matrix.include, '|')}}" --sim.parallelism 4 --client reth 2>&1 | tee /tmp/log; tail -n 1 /tmp/log | grep -q "tests"
+          hive --sim "${{ matrix.sim }}$" --sim.limit "${{matrix.limit}}/${{join(matrix.include, '|')}}" --sim.parallelism 4 --client reth 2>&1 | tee /tmp/log; tail -n 1 /tmp/log | grep -Eq "finished|tests failed"
 
       - name: Parse hive output
         run: |
