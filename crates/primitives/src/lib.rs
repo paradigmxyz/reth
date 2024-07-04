@@ -32,8 +32,6 @@ pub mod genesis;
 pub mod header;
 pub mod proofs;
 mod receipt;
-/// Helpers for working with revm
-pub mod revm;
 pub use reth_static_file_types as static_file;
 pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]

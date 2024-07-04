@@ -11,7 +11,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
-    system_calls::apply_beacon_root_contract_call,
+    system_calls::{apply_beacon_root_contract_call, apply_withdrawal_requests_contract_call},
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -22,10 +22,7 @@ use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
-    state_change::{
-        apply_blockhashes_update, apply_withdrawal_requests_contract_call,
-        post_block_balance_increments,
-    },
+    state_change::{apply_blockhashes_update, post_block_balance_increments},
     Evm, State,
 };
 use revm_primitives::{
@@ -222,7 +219,8 @@ where
                 crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, &receipts)?;
 
             // Collect all EIP-7685 requests
-            let withdrawal_requests = apply_withdrawal_requests_contract_call(&mut evm)?;
+            let withdrawal_requests =
+                apply_withdrawal_requests_contract_call::<EvmConfig, _, _>(&mut evm)?;
 
             [deposit_requests, withdrawal_requests].concat()
         } else {

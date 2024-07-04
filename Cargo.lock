@@ -8128,7 +8128,6 @@ name = "reth-revm"
 version = "1.0.0"
 dependencies = [
  "alloy-eips",
- "alloy-rlp",
  "reth-chainspec",
  "reth-consensus-common",
  "reth-execution-errors",
