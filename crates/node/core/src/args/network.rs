@@ -123,6 +123,12 @@ impl NetworkArgs {
     ///
     /// The `default_peers_file` will be used as the default location to store the persistent peers
     /// file if `no_persist_peers` is false, and there is no provided `peers_file`.
+    ///
+    /// Configured Bootnodes are prioritized, if unset, the chain spec bootnodes are used
+    /// Priority order for bootnodes configuration:
+    /// 1. --bootnodes flag
+    /// 2. Network preset flags (e.g. --holesky)
+    /// 3. default to mainnet nodes
     pub fn network_config(
         &self,
         config: &Config,
