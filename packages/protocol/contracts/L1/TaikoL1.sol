@@ -58,7 +58,7 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         payable
         nonReentrant
         whenNotPaused
-        onlyFromNamed("based_operator")
+        onlyFromNamed("operator")
         returns (TaikoData.BlockMetadata memory _block)
     {
         TaikoData.Config memory config = getConfig();
@@ -95,7 +95,10 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
 
         TaikoData.Block storage parentBlock = state.blocks[(state.numBlocks - 1)];
 
-        require(_block.parentMetaHash == parentBlock.blockHash, "invalid parentMetaHash");
+        console2.log("Mi a faszom");
+        console2.logBytes32(_block.parentMetaHash);
+        console2.logBytes32(parentBlock.metaHash);
+        require(_block.parentMetaHash == parentBlock.metaHash, "invalid parentHash");
 
         // Verify the passed in L1 state block number.
         // We only allow the L1 block to be 4 epochs old.
@@ -132,7 +135,7 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         // Store the block
         state.blocks[state.numBlocks] = blk;
 
-        // Store the passed in block hash as in
+        // Store the passed in block hash as is
         state.transitions[blk.blockId][_block.parentMetaHash].blockHash = _block.blockHash;
         // For now it does not matter - we are not going to prove anyways
         state.transitions[blk.blockId][_block.parentMetaHash].verifiableAfter =
@@ -156,8 +159,12 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         external
         nonReentrant
         whenNotPaused
-        onlyFromNamed("based_operator")
+        onlyFromNamed("operator")
     {
+        console2.log("Miafasz van mar");
+        console2.log(_block.l2BlockNumber);
+        console2.log(state.lastVerifiedBlockId);
+        console2.log(state.numBlocks);
         // Check that the block has been proposed but has not yet been verified.
         if (
             _block.l2BlockNumber <= state.lastVerifiedBlockId
@@ -169,7 +176,9 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         TaikoData.Block storage blk = state.blocks[_block.l2BlockNumber];
 
         // Make sure the correct block was proven
-        require(blk.metaHash != keccak256(abi.encode(_block)), "incorrect block");
+        if(blk.metaHash != keccak256(abi.encode(_block))) {
+            revert L1_INCORRECT_BLOCK();
+        }
 
         // Store the transition
         TaikoData.TransitionState storage storedTransition =
@@ -177,6 +186,7 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         storedTransition.blockHash = transition.blockHash;
         storedTransition.prover = prover;
         storedTransition.verifiableAfter = uint32(block.timestamp + SECURITY_DELAY_AFTER_PROVEN);
+        storedTransition.isProven = true;
 
         emit TransitionProved({ blockId: _block.l2BlockNumber, tran: transition, prover: prover });
     }
@@ -187,26 +197,30 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         external
         nonReentrant
         whenNotPaused
-        onlyFromNamed("based_operator")
+        onlyFromNamed("operator")
     {
         // Get the last verified blockhash
         TaikoData.Block storage blk = state.blocks[state.lastVerifiedBlockId];
-        bytes32 blockHash = blk.blockHash;
+        // Brecht: i think this was a bug, or indeed TaikoData's Transition mapping was misleading.. Now i'm using metaHash as a path/key in the mapping, so i guess we shall use it here to query data, right ? But somehow it is not working :D
         // Go to the first unverified block
+        bytes32 blockHash = blk.metaHash;
+        //blockHash = blk.blockHash; 
         uint256 blockId = uint256(state.lastVerifiedBlockId) + 1;
         uint256 numBlocksVerified;
+        console2.log("V1");
         while (blockId < state.numBlocks && numBlocksVerified < maxBlocksToVerify) {
             blk = state.blocks[blockId];
-
             // Check if the parent block hash matches the actual block hash of the parent
             // Check if the timestamp is older than required
             if (
+                // Brecht: I think here is also not good, or a mismatch.. How we use/save transitions. Is it blockHash or metaHash??
                 state.transitions[blockId][blockHash].blockHash == bytes32(0)
                     || block.timestamp < state.transitions[blockId][blockHash].verifiableAfter
             ) {
                 break;
             }
 
+        console2.log("V3");
             // Copy the blockhash to the block
             blk.blockHash = state.transitions[blockId][blockHash].blockHash;
             // Update latest block hash

@@ -57,7 +57,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
 
         basedOperator = BasedOperator(
             deployProxy({
-                name: "based_operator",
+                name: "operator",
                 impl: address(new BasedOperator()),
                 data: abi.encodeCall(BasedOperator.init, (address(addressManager)))
             })
@@ -72,7 +72,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
         );
 
         registerAddress("taiko", address(L1));
-        registerAddress("based_operator", address(basedOperator));
+        registerAddress("operator", address(basedOperator));
         registerAddress("verifier_registry", address(vr));
 
         //         ss = SignalService(
@@ -93,7 +93,8 @@ abstract contract TaikoL1TestBase is TaikoTest {
         //         );
 
         address sgxImpl = address(new SgxVerifier());
-        //Naming is like: 3, 1, 2, is because we need to have incremental order of addresses in BasedOperator, so figured out this is actually the way
+        //Naming is like: 3, 1, 2, is because we need to have incremental order of addresses in
+        // BasedOperator, so figured out this is actually the way
         sv3 = SgxVerifier(
             deployProxy({
                 name: "sgx1", //Name does not matter now, since we check validity via
@@ -279,7 +280,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
         // }
 
         // meta.blockHash = blockHash;
-        // meta.parentMetaHash = parentMetaHash;
+        // meta.parentHash = parentHash;
 
         // meta.timestamp = uint64(block.timestamp);
         // meta.l1Height = uint64(block.number - 1);
@@ -303,20 +304,13 @@ abstract contract TaikoL1TestBase is TaikoTest {
         return meta;
     }
 
-    function proveBlock(
-        address prover,
-        bytes memory blockProof
-    )
-        internal
-    {
+    function proveBlock(address prover, bytes memory blockProof) internal {
         vm.prank(prover, prover);
-        basedOperator.proveBlock(
-            blockProof
-        );
+        basedOperator.proveBlock(blockProof);
     }
 
-    function verifyBlock(address, uint64 count) internal {
-        L1.verifyBlocks(count);
+    function verifyBlock(uint64 count) internal {
+        basedOperator.verifyBlocks(count);
     }
 
     // function setupGuardianProverMultisig() internal {
@@ -425,6 +419,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
     }
 
     function createBlockMetaData(
+        bytes32 parentMetaHash,
         address coinbase,
         uint64 l2BlockNumber,
         uint32 belowBlockTipHeight, // How many blocks (negatived direction) away from block.id
@@ -435,9 +430,9 @@ abstract contract TaikoL1TestBase is TaikoTest {
     {
         meta.blockHash = randBytes32();
 
-        meta.parentMetaHash = randBytes32();
+        meta.parentMetaHash = parentMetaHash;
         if (l2BlockNumber == 1) {
-            meta.parentMetaHash = GENESIS_BLOCK_HASH;
+            meta.parentMetaHash = hex"0000000000000000000000000000000000000000000000000000000000000000";
         }
 
         meta.l1Hash = blockhash(block.number - belowBlockTipHeight);
@@ -476,7 +471,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
 
         // Set transition
         TaikoData.Transition memory transition;
-        transition.parentHash = meta.parentMetaHash;
+        transition.parentHash = L1.getBlock(meta.l2BlockNumber).blockHash;
         transition.blockHash = meta.blockHash;
         proofBatch.transition = transition;
 
@@ -509,7 +504,8 @@ abstract contract TaikoL1TestBase is TaikoTest {
             proofs[2].verifier = sv3;
             proofs[2].proof = bytes.concat(bytes4(0), bytes20(newInstance), signature);
         } else {
-            //Todo(dani): Implement more proof and verifiers when needed/available but for now, not to change the code in BasedOperator, maybe best to mock those 3
+            //Todo(dani): Implement more proof and verifiers when needed/available but for now, not
+            // to change the code in BasedOperator, maybe best to mock those 3
         }
 
         proofBatch.proofs = proofs;

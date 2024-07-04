@@ -108,13 +108,13 @@ contract BasedOperator is EssentialContract, TaikoErrors {
         }
 
         VerifierRegistry verifierRegistry = VerifierRegistry(resolve("verifier_registry", false));
-        TaikoL1 taiko = TaikoL1(resolve("taiko", false));   
+        TaikoL1 taiko = TaikoL1(resolve("taiko", false));
         // Verify the proofs
         uint160 prevVerifier = uint160(0);
         for (uint256 i = 0; i < proofBatch.proofs.length; i++) {
             IVerifier verifier = proofBatch.proofs[i].verifier;
             // Make sure each verifier is unique
-            if(prevVerifier >= uint160(address(verifier))) {
+            if (prevVerifier >= uint160(address(verifier))) {
                 revert L1_INVALID_OR_DUPLICATE_VERIFIER();
             }
             // Make sure it's a valid verifier
@@ -140,18 +140,16 @@ contract BasedOperator is EssentialContract, TaikoErrors {
             proofBatch.blockMetadata.l2BlockNumber, proofBatch.transition.parentHash
         );
 
-        console2.log("What is stored:");
-        console2.logBytes32(storedTransition.blockHash);
-
-        console2.log("What we are trying to prove:");
-        console2.logBytes32(proofBatch.transition.blockHash);
-        
         // Brecht: SO we set the blockHash in proposeBlock().
-        // But we need to prove it too (the same one), so somehow we need to check if this is proven already and IF NOT, then revert with "block already proven", no ? So i set the verifiableAfter in propseBlock to 0, because this is just a "proposed state".
-        if (storedTransition.isProven == true && storedTransition.blockHash == proofBatch.transition.blockHash) {
+        // But we need to prove it too (the same one), so somehow we need to check if this is proven
+        // already and IF NOT, then revert with "block already proven", no ? So i set the
+        // verifiableAfter in propseBlock to 0, because this is just a "proposed state".
+        if (
+            storedTransition.isProven == true
+                && storedTransition.blockHash == proofBatch.transition.blockHash
+        ) {
             revert("block already proven");
-        }
-        else {
+        } else {
             // TODO(Brecht): Check that one of the verifiers is now poissoned
         }
 

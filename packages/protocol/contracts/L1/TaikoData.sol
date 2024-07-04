@@ -65,7 +65,8 @@ library TaikoData {
     /// @dev Struct holding the state variables for the {TaikoL1} contract.
     struct State {
         mapping(uint256 blockId => Block) blocks;
-        mapping(uint256 blockId => mapping(bytes32 parentBlockHash => TransitionState)) transitions;
+        // Todo (Brecht): please check which one to use here (?) metaHash or blockHash
+        mapping(uint256 blockId => mapping(bytes32 parentMetaHash => TransitionState)) transitions;
         uint64 genesisHeight;
         uint64 genesisTimestamp;
         uint64 numBlocks;

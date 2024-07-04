@@ -20,6 +20,7 @@ abstract contract TaikoErrors {
     error L1_BLOB_NOT_FOUND();
     error L1_BLOB_NOT_REUSEABLE();
     error L1_BLOCK_MISMATCH();
+    error L1_INCORRECT_BLOCK();
     error L1_INSUFFICIENT_TOKEN();
     error L1_INVALID_ADDRESS();
     error L1_INVALID_AMOUNT();

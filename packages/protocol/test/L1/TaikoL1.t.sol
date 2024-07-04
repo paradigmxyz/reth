@@ -19,7 +19,7 @@ contract TaikoL1Test is TaikoL1TestBase {
 
         // console2.log(block.number);
         // meta.blockHash = randBytes32();
-        // meta.parentMetaHash = GENESIS_BLOCK_HASH;
+        // meta.parentHash = GENESIS_BLOCK_HASH;
         // meta.l1Hash = blockhash(block.number - 1);
         // meta.difficulty = block.prevrandao;
         // meta.blobHash = randBytes32();
@@ -32,22 +32,24 @@ contract TaikoL1Test is TaikoL1TestBase {
         // meta.txListByteOffset = 0;
         // meta.txListByteSize = 0;
         // meta.blobUsed = true;
-
+        bytes32 parentMetaHash;
         for (uint64 blockId = 1; blockId <= 1; blockId++) {
             printVariables("before propose");
-            meta = createBlockMetaData(Alice, blockId, 1, true);
+            // Create metadata and propose the block
+            meta = createBlockMetaData(parentMetaHash, Alice, blockId, 1, true);
             proposeBlock(Alice, Alice, meta);
-            printVariables("after propose");
 
+            // Create proofs and prove a block
             BasedOperator.ProofBatch memory blockProofs = createProofs(meta, Alice, true);
-
             proveBlock(Alice, abi.encode(blockProofs));
 
-            // bytes32 blockHash = bytes32(1e10 + blockId);
-            // bytes32 stateRoot = bytes32(1e9 + blockId);
+            //Wait enought time and verify block
+            vm.warp(uint32(block.timestamp + L1.SECURITY_DELAY_AFTER_PROVEN() + 1));
+            vm.roll(block.number + 10);
+            verifyBlock(1);
+            printVariables("after verify");
 
-            // proveBlock(Alice, meta, parentHash, blockHash, stateRoot, meta.minTier, "");
-            // parentHash = blockHash;
+            parentMetaHash = keccak256(abi.encode(meta));
         }
     }
 }
