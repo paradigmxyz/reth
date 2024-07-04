@@ -77,12 +77,11 @@ impl TrieUpdates {
     pub fn into_sorted(self) -> TrieUpdatesSorted {
         let mut account_nodes = Vec::from_iter(self.account_nodes);
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let mut storage_tries = Vec::from_iter(
-            self.storage_tries
-                .into_iter()
-                .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted())),
-        );
-        storage_tries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let storage_tries = self
+            .storage_tries
+            .into_iter()
+            .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
+            .collect();
         TrieUpdatesSorted { removed_nodes: self.removed_nodes, account_nodes, storage_tries }
     }
 
@@ -296,7 +295,7 @@ impl StorageTrieUpdates {
 pub struct TrieUpdatesSorted {
     pub(crate) account_nodes: Vec<(Nibbles, BranchNodeCompact)>,
     pub(crate) removed_nodes: HashSet<Nibbles>,
-    pub(crate) storage_tries: Vec<(B256, StorageTrieUpdatesSorted)>,
+    pub(crate) storage_tries: HashMap<B256, StorageTrieUpdatesSorted>,
 }
 
 impl TrieUpdatesSorted {
@@ -311,7 +310,7 @@ impl TrieUpdatesSorted {
     }
 
     /// Returns reference to updated storage tries.
-    pub fn storage_tries_ref(&self) -> &[(B256, StorageTrieUpdatesSorted)] {
+    pub const fn storage_tries_ref(&self) -> &HashMap<B256, StorageTrieUpdatesSorted> {
         &self.storage_tries
     }
 }
