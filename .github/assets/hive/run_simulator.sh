@@ -7,7 +7,7 @@ sim="${1}"
 limit="${2}"
 
 # Run the hive command with the specified parameters
-hive --sim "${sim}" --sim.limit "${limit}" --sim.parallelism 4 --client reth 2>&1 | tee /tmp/log | grep -Eq "suites=0"
+hive --sim "${sim}" --sim.limit "${limit}" --sim.parallelism 4 --loglevel 5 --client reth 2>&1 | tee /tmp/log | grep -Eq "suites=0"
 
 # Check if no tests were run
 if [ $? -eq 0 ]; then
