@@ -123,6 +123,12 @@ impl NetworkArgs {
     ///
     /// The `default_peers_file` will be used as the default location to store the persistent peers
     /// file if `no_persist_peers` is false, and there is no provided `peers_file`.
+    ///
+    /// Configured Bootnodes are prioritized, if unset, the chain spec bootnodes are used
+    /// Priority order for bootnodes configuration:
+    /// 1. --bootnodes flag
+    /// 2. Network preset flags (e.g. --holesky)
+    /// 3. default to mainnet nodes
     pub fn network_config(
         &self,
         config: &Config,
@@ -137,15 +143,9 @@ impl NetworkArgs {
                 bootnodes
                     .into_iter()
                     .filter_map(|trusted_peer| trusted_peer.resolve_blocking().ok())
-                    .collect::<Vec<NodeRecord>>()
+                    .collect()
             })
-            .unwrap_or_default()
-            .into_iter()
-            .chain(chain_spec.bootnodes().unwrap_or_default())
-            .collect::<Vec<NodeRecord>>();
-        let chain_bootnodes =
-            if chain_bootnodes.is_empty() { mainnet_nodes() } else { chain_bootnodes };
-
+            .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
