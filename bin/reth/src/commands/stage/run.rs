@@ -117,12 +117,7 @@ impl Command {
 
                     let mut config = config;
                     config.peers.trusted_nodes_only = self.network.trusted_only;
-                    if !self.network.trusted_peers.is_empty() {
-                        config
-                            .peers
-                            .trusted_nodes
-                            .extend(self.network.resolve_trusted_peers().await?);
-                    }
+                    config.peers.trusted_nodes.extend(self.network.resolve_trusted_peers().await?);
 
                     let network_secret_path = self
                         .network
