@@ -72,12 +72,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # TODO: enable etherem/sync once resolved:
-        # https://github.com/paradigmxyz/reth/issues/8579
         # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
-        # sim: [smoke/genesis, smoke/network, ethereum/sync]
-        sim: [smoke/genesis, smoke/network]
+        sim: [smoke/genesis, smoke/network, ethereum/sync]
         include:
           - sim: devp2p
             limit: discv4
@@ -104,26 +101,16 @@ jobs:
               - TestBlobViolations
           - sim: ethereum/engine
             limit: engine-exchange-capabilities
-          # TODO: enable engine-withdrawals once resolved:
-          # https://github.com/paradigmxyz/reth/issues/8732
-          # - sim: ethereum/engine
-          #   limit: engine-withdrawals
+          - sim: ethereum/engine
+            limit: engine-withdrawals
           - sim: ethereum/engine
             limit: engine-auth
           - sim: ethereum/engine
             limit: engine-transition
-          # TODO: enable engine-api once resolved:
-          # https://github.com/paradigmxyz/reth/issues/8305
-          # https://github.com/paradigmxyz/reth/issues/6217
-          # - sim: ethereum/engine
-          #   limit: engine-api
-          # TODO: enable cancun once resolved:
-          # https://github.com/paradigmxyz/reth/issues/8305
-          # https://github.com/paradigmxyz/reth/issues/6217
-          # https://github.com/paradigmxyz/reth/issues/8306
-          # https://github.com/paradigmxyz/reth/issues/7144
-          # - sim: ethereum/engine
-          #   limit: cancun
+          - sim: ethereum/engine
+            limit: engine-api
+          - sim: ethereum/engine
+            limit: cancun
           # eth_ rpc methods
           - sim: ethereum/rpc-compat
             include:
@@ -144,12 +131,9 @@ jobs:
               - eth_getTransactionReceipt
               - eth_sendRawTransaction
               - eth_syncing
-          # TODO: enable debug_ rpc-compat once resolved:
-          # https://github.com/paradigmxyz/reth/issues/7015
-          # https://github.com/paradigmxyz/reth/issues/6332
           # debug_ rpc methods
-          # - sim: ethereum/rpc-compat
-          # include: [debug_]
+          - sim: ethereum/rpc-compat
+            include: [debug_]
           # Pyspec cancun jobs
           - sim: pyspec
             include: [cancun/eip4844]
@@ -190,6 +174,10 @@ jobs:
     permissions:
       issues: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -215,7 +203,11 @@ jobs:
       - name: Run ${{ matrix.sim }} simulator
         run: |
           cd hivetests
-          hive --sim "${{ matrix.sim }}$" --sim.limit "${{matrix.limit}}/${{join(matrix.include, '|')}}" --client reth
+          hive --sim "${{ matrix.sim }}$" --sim.limit "${{matrix.limit}}/${{join(matrix.include, '|')}}" --sim.parallelism 2 --client reth || true
+
+      - name: Parse hive output
+        run: |
+          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/assets/hive/parse.py {} --exclusion .github/assets/hive/expected_failures.yaml
 
       - name: Create github issue if sim failed
         env:
@@ -239,6 +231,7 @@ jobs:
             -f title='Hive Test Failure: ${{ matrix.sim }}' \
             -f body="!!!!!!! This is an automated issue created by the hive test failure !!!!!!!<br /><br />The hive test for ${{ matrix.sim }} failed. Please investigate and fix the issue.<br /><br />[Link to the failed run](https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }})" \
             -f "labels[]=C-hivetest"
+
       - name: Print simulator output
         if: ${{ failure() }}
         run: |
