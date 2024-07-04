@@ -26,10 +26,22 @@ pub struct Proof<'a, TX, H> {
     hashed_cursor_factory: H,
 }
 
+impl<'a, TX, H> Proof<'a, TX, H> {
+    /// Creates a new proof generator.
+    pub const fn new(tx: &'a TX, hashed_cursor_factory: H) -> Self {
+        Self { tx, hashed_cursor_factory }
+    }
+
+    /// Set the hashed cursor factory.
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Proof<'a, TX, HF> {
+        Proof { tx: self.tx, hashed_cursor_factory }
+    }
+}
+
 impl<'a, TX> Proof<'a, TX, &'a TX> {
-    /// Create a new [Proof] instance.
-    pub const fn new(tx: &'a TX) -> Self {
-        Self { tx, hashed_cursor_factory: tx }
+    /// Create a new [Proof] instance from database transaction.
+    pub const fn from_tx(tx: &'a TX) -> Self {
+        Self::new(tx, tx)
     }
 }
 
@@ -282,7 +294,8 @@ mod tests {
         let provider = factory.provider().unwrap();
         for (target, expected_proof) in data {
             let target = Address::from_str(target).unwrap();
-            let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[]).unwrap();
+            let account_proof =
+                Proof::from_tx(provider.tx_ref()).account_proof(target, &[]).unwrap();
             similar_asserts::assert_eq!(
                 account_proof.proof,
                 expected_proof,
@@ -302,7 +315,8 @@ mod tests {
         let slots = Vec::from([B256::with_last_byte(1), B256::with_last_byte(3)]);
 
         let provider = factory.provider().unwrap();
-        let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &slots).unwrap();
+        let account_proof =
+            Proof::from_tx(provider.tx_ref()).account_proof(target, &slots).unwrap();
         assert_eq!(account_proof.storage_root, EMPTY_ROOT_HASH, "expected empty storage root");
 
         assert_eq!(slots.len(), account_proof.storage_proofs.len());
@@ -334,7 +348,7 @@ mod tests {
         ]);
 
         let provider = factory.provider().unwrap();
-        let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[]).unwrap();
+        let account_proof = Proof::from_tx(provider.tx_ref()).account_proof(target, &[]).unwrap();
         similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
         assert_eq!(account_proof.verify(root), Ok(()));
     }
@@ -357,7 +371,7 @@ mod tests {
         ]);
 
         let provider = factory.provider().unwrap();
-        let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[]).unwrap();
+        let account_proof = Proof::from_tx(provider.tx_ref()).account_proof(target, &[]).unwrap();
         similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
         assert_eq!(account_proof.verify(root), Ok(()));
     }
@@ -443,7 +457,8 @@ mod tests {
         };
 
         let provider = factory.provider().unwrap();
-        let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &slots).unwrap();
+        let account_proof =
+            Proof::from_tx(provider.tx_ref()).account_proof(target, &slots).unwrap();
         similar_asserts::assert_eq!(account_proof, expected);
         assert_eq!(account_proof.verify(root), Ok(()));
     }
