@@ -301,6 +301,8 @@ where
     let nonce = 1;
     let block_hash = B256::default();
 
+    OtterscanClient::get_header_by_number(client, 1).await.unwrap();
+
     OtterscanClient::has_code(client, address, None).await.unwrap();
 
     OtterscanClient::get_api_level(client).await.unwrap();
