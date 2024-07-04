@@ -1,7 +1,7 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
-    prefix_set::PrefixSetMut,
+    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
     walker::TrieWalker,
     HashBuilder, Nibbles,
@@ -24,23 +24,31 @@ pub struct Proof<'a, TX, H> {
     tx: &'a TX,
     /// The factory for hashed cursors.
     hashed_cursor_factory: H,
+    /// A set of prefix sets that have changes.
+    prefix_sets: TriePrefixSetsMut,
 }
 
 impl<'a, TX, H> Proof<'a, TX, H> {
     /// Creates a new proof generator.
-    pub const fn new(tx: &'a TX, hashed_cursor_factory: H) -> Self {
-        Self { tx, hashed_cursor_factory }
+    pub fn new(tx: &'a TX, hashed_cursor_factory: H) -> Self {
+        Self { tx, hashed_cursor_factory, prefix_sets: TriePrefixSetsMut::default() }
     }
 
     /// Set the hashed cursor factory.
     pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Proof<'a, TX, HF> {
-        Proof { tx: self.tx, hashed_cursor_factory }
+        Proof { tx: self.tx, hashed_cursor_factory, prefix_sets: self.prefix_sets }
+    }
+
+    /// Set the prefix sets. They have to be mutable in order to allow extension with proof target.
+    pub fn with_prefix_sets_mut(mut self, prefix_sets: TriePrefixSetsMut) -> Self {
+        self.prefix_sets = prefix_sets;
+        self
     }
 }
 
 impl<'a, TX> Proof<'a, TX, &'a TX> {
     /// Create a new [Proof] instance from database transaction.
-    pub const fn from_tx(tx: &'a TX) -> Self {
+    pub fn from_tx(tx: &'a TX) -> Self {
         Self::new(tx, tx)
     }
 }
@@ -65,7 +73,7 @@ where
             DatabaseAccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
 
         // Create the walker.
-        let mut prefix_set = PrefixSetMut::default();
+        let mut prefix_set = self.prefix_sets.account_prefix_set.clone();
         prefix_set.insert(target_nibbles.clone());
         let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
 
@@ -130,12 +138,15 @@ where
         }
 
         let target_nibbles = proofs.iter().map(|p| p.nibbles.clone()).collect::<Vec<_>>();
-        let prefix_set = PrefixSetMut::from(target_nibbles.clone()).freeze();
+        let mut prefix_set = PrefixSetMut::from(
+            self.prefix_sets.storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default(),
+        );
+        prefix_set.extend(target_nibbles.clone());
         let trie_cursor = DatabaseStorageTrieCursor::new(
             self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
         );
-        let walker = TrieWalker::new(trie_cursor, prefix_set);
+        let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
 
         let retainer = ProofRetainer::from_iter(target_nibbles);
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);

@@ -131,6 +131,15 @@ impl PrefixSetMut {
         self.keys.push(nibbles);
     }
 
+    /// Extend prefix set keys with contents of provided iterator.
+    pub fn extend<I>(&mut self, nibbles_iter: I)
+    where
+        I: IntoIterator<Item = Nibbles>,
+    {
+        self.sorted = false;
+        self.keys.extend(nibbles_iter);
+    }
+
     /// Returns the number of elements in the set.
     pub fn len(&self) -> usize {
         self.keys.len()
