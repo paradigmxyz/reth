@@ -120,7 +120,7 @@ impl Command {
                     if !self.network.trusted_peers.is_empty() {
                         let peers = &self.network.resolve_trusted_peers().await?;
                         for peer in peers {
-                            config.peers.trusted_nodes.insert(peer.clone());
+                            config.peers.trusted_nodes.insert(*peer);
                         }
                     }
 
