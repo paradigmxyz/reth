@@ -20,8 +20,9 @@ pub mod components;
 
 mod builder;
 pub use builder::*;
+pub use ext::{InitializedComponentsExt, NodeComponentsBuilderExt, StageExtComponentsBuild};
 
-mod engine;
+pub mod engine;
 pub use engine::EngineAdapter;
 
 mod launch;
@@ -30,8 +31,11 @@ pub use launch::*;
 mod handle;
 pub use handle::NodeHandle;
 
+pub mod pipeline;
+pub use pipeline::PipelineAdapter;
+
 pub mod rpc;
-pub use rpc::RpcBuilder;
+pub use rpc::{RpcAdapter, RpcBuilder, RpcServerHandles};
 
 pub mod setup;
 

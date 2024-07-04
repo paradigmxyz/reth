@@ -47,3 +47,7 @@ pub mod test_utils;
 
 pub use bodies::client::BodiesClient;
 pub use headers::client::HeadersClient;
+
+pub trait FullClient: HeadersClient + BodiesClient + Unpin {}
+
+impl<T> FullClient for T where T: HeadersClient + BodiesClient + Unpin {}

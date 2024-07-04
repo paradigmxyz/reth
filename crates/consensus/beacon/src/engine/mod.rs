@@ -96,6 +96,7 @@ pub trait FullBlockchainTreeEngine:
     + CanonChainTracker
     + StageCheckpointReader
     + ChainSpecProvider
+    + Unpin
 {
 }
 
@@ -106,6 +107,7 @@ impl<T> FullBlockchainTreeEngine for T where
         + CanonChainTracker
         + StageCheckpointReader
         + ChainSpecProvider
+        + Unpin
 {
 }
 

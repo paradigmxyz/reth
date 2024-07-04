@@ -151,4 +151,5 @@ pub use session::{
 pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
+pub use reth_network_p2p::{BodiesClient, FullClient, HeadersClient};
 pub use reth_network_types::{PeersConfig, SessionsConfig};

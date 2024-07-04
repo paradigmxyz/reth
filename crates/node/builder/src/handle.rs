@@ -1,12 +1,17 @@
-use crate::node::FullNode;
+use std::fmt;
+
+use derive_more::Deref;
 use reth_node_api::FullNodeComponentsExt;
 use reth_node_core::exit::NodeExitFuture;
-use std::fmt;
+
+use crate::node::FullNode;
 
 /// A Handle to the launched node.
 #[must_use = "Needs to await the node exit future"]
+#[derive(Deref)]
 pub struct NodeHandle<Node: FullNodeComponentsExt> {
     /// All node components.
+    #[deref]
     pub node: FullNode<Node>,
     /// The exit future of the node.
     pub node_exit_future: NodeExitFuture,

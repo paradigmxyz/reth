@@ -7541,7 +7541,7 @@ name = "reth-node-builder"
 version = "1.0.0"
 dependencies = [
  "aquamarine",
- "auto_impl",
+ "async-trait",
  "backon",
  "confy",
  "derive_more",

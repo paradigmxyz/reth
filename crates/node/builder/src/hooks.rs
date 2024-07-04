@@ -1,29 +1,26 @@
-use std::fmt;
+use std::{fmt, pin::Pin};
 
+use futures::Future;
 use reth_node_api::{FullNodeComponents, FullNodeComponentsExt};
 
-use crate::{
-    common::{ExtComponentBuilder, InitializedComponents, LaunchContextExt},
-    node::FullNode,
-    NodeAddOnsExt,
-};
+use crate::{common::ExtBuilderContext, node::FullNode};
 
 /// Container for all the configurable hook functions.
 pub(crate) struct NodeHooks<Node> {
-    pub(crate) on_component_initialized: Box<dyn OnComponentsInitializedHook<Node>>,
+    pub(crate) on_components_initialized: Vec<Box<dyn OnComponentsInitializedHook<Node>>>,
     pub(crate) on_node_started: Box<dyn OnNodeStartedHook<Node>>,
     pub(crate) _marker: std::marker::PhantomData<Node>,
 }
 
 impl<Node: FullNodeComponentsExt> NodeHooks<Node> {
-    /// Sets the hook that is run once the node's components are initialized.
-    #[allow(unused)]
-    pub(crate) fn on_components_initialized<F>(mut self, hook: F) -> NodeHooks<Node>
+    /// Sets a hook that is run once the node's components are initialized.
+    pub(crate) fn on_components_initialized<F>(self, hook: F) -> NodeHooks<Node>
     where
         F: OnComponentsInitializedHook<Node> + 'static,
     {
-        let Self { on_node_started, _marker, .. } = self;
-        NodeHooks { on_component_initialized: Box::new(hook), on_node_started, _marker }
+        let Self { on_node_started, _marker, mut on_components_initialized } = self;
+        on_components_initialized.push(Box::new(hook));
+        NodeHooks { on_components_initialized, on_node_started, _marker }
     }
 
     /// Sets the hook that is run once the node has started.
@@ -49,7 +46,7 @@ impl<Node: FullNodeComponentsExt> NodeHooks<Node> {
 impl<Node: FullNodeComponentsExt> Default for NodeHooks<Node> {
     fn default() -> Self {
         Self {
-            on_component_initialized: Box::<()>::default(),
+            on_components_initialized: vec![Box::<()>::default()],
             on_node_started: Box::<()>::default(),
             _marker: Default::default(),
         }
@@ -58,7 +55,7 @@ impl<Node: FullNodeComponentsExt> Default for NodeHooks<Node> {
 impl<Node: FullNodeComponents> fmt::Debug for NodeHooks<Node> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("NodeHooks")
-            .field("on_component_initialized", &"...")
+            .field("on_components_initialized", &"...")
             .field("on_node_started", &"...")
             .finish()
     }
@@ -69,39 +66,25 @@ pub trait OnComponentsInitializedHook<Node: FullNodeComponentsExt>: Send {
     /// Consumes the event hook and runs it.
     ///
     /// If this returns an error, the node launch will be aborted.
-    fn on_event(
+    fn on_event<'a>(
         self: Box<Self>,
-        ctx: &mut LaunchContextExt<Node>,
-        hooks: NodeAddOnsExt<Node>,
-    ) -> eyre::Result<()>;
+        ctx: ExtBuilderContext<'a, Node>,
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send>>;
 }
 
 impl<Node, F> OnComponentsInitializedHook<Node> for F
 where
     Node: FullNodeComponentsExt,
-    F: FnOnce(&mut LaunchContextExt<Node>, NodeAddOnsExt<Node>) -> eyre::Result<()> + Send,
+    for<'a> F: FnOnce(
+            ExtBuilderContext<'a, Node>,
+        ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send>>
+        + Send,
 {
-    fn on_event(
+    fn on_event<'a>(
         self: Box<Self>,
-        ctx: &mut LaunchContextExt<Node>,
-        hooks: NodeAddOnsExt<Node>,
-    ) -> eyre::Result<()> {
-        (*self)(ctx, hooks)
-    }
-}
-
-impl<Node, F, G> OnComponentsInitializedHook<Node> for F
-where
-    Node: FullNodeComponentsExt,
-    F: FnOnce(&mut LaunchContextExt<Node>) -> G,
-    G: FnOnce(&mut LaunchContextExt<Node>, NodeAddOnsExt<Node>),
-{
-    fn on_event(
-        self: Box<Self>,
-        ctx: &mut LaunchContextExt<Node>,
-        hooks: NodeAddOnsExt<Node>,
-    ) -> eyre::Result<()> {
-        (*self)(ctx)(ctx, hooks)
+        ctx: ExtBuilderContext<'a, Node>,
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send>> {
+        (*self)(ctx)
     }
 }
 
@@ -120,16 +103,6 @@ where
 {
     fn on_event(self: Box<Self>, node: FullNode<Node>) -> eyre::Result<()> {
         (*self)(node)
-    }
-}
-
-impl<Node: FullNodeComponentsExt> OnComponentsInitializedHook<Node> for () {
-    fn on_event(
-        self: Box<Self>,
-        _ctx: LaunchContextExt<Node>,
-        _hooks: NodeAddOnsExt<Node>,
-    ) -> eyre::Result<()> {
-        Ok(())
     }
 }
 

@@ -13,10 +13,7 @@ use reth_provider::ChainSpecProvider;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
 
-use crate::{
-    components::NodeComponentsBuilder,
-    rpc::{RethRpcServerHandles, RpcRegistry},
-};
+use crate::{components::NodeComponentsBuilder, RpcServerHandles};
 
 // re-export the node api types
 pub use reth_node_api::{FullNodeTypes, NodeTypes};
@@ -100,20 +97,23 @@ pub struct FullNode<Node: FullNodeComponentsExt> {
     pub data_dir: ChainPath<DataDirPath>,
 }
 
-impl<Node: FullNodeComponentsExt> FullNode<Node> {
+impl<Node: FullNodeComponentsExt> FullNode<Node>
+where
+    <Node::Rpc as RpcComponent<Node>>::ServerHandles: RpcServerHandles,
+{
     /// Returns the [`ChainSpec`] of the node.
     pub fn chain_spec(&self) -> Arc<ChainSpec> {
         self.provider.chain_spec()
     }
 
     /// Returns the [`RpcServerHandle`] to the started rpc server.
-    pub const fn rpc_server_handle(&self) -> &RpcServerHandle {
-        &self.rpc_server_handles.rpc
+    pub fn rpc_server_handle(&self) -> &RpcServerHandle {
+        &self.rpc_server_handles.rpc()
     }
 
     /// Returns the [`AuthServerHandle`] to the started authenticated engine API server.
-    pub const fn auth_server_handle(&self) -> &AuthServerHandle {
-        &self.rpc_server_handles.auth
+    pub fn auth_server_handle(&self) -> &AuthServerHandle {
+        &self.rpc_server_handles.auth()
     }
 
     /// Returns the [`EngineApiClient`] interface for the authenticated engine API.

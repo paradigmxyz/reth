@@ -5,26 +5,29 @@
 //! The node builder process is essentially a state machine that transitions through various states
 //! before the node can be launched.
 
-use std::{fmt, future::Future};
+use std::{fmt, future::Future, pin::Pin};
 
-use derive_more::Constructor;
+use derive_more::{Constructor, Deref};
+use futures::future::Either;
+use reth_auto_seal_consensus::AutoSealClient;
+use reth_beacon_consensus::FullBlockchainTreeEngine;
 use reth_exex::ExExContext;
-use reth_network::NetworkHandle;
-use reth_node_api::{
-    EngineComponent, FullNodeComponents, FullNodeComponentsExt, FullNodeTypes, NodeTypes,
-    PipelineComponent, RpcComponent,
-};
+use reth_network::{FetchClient, NetworkHandle};
+use reth_network_p2p::FullClient;
+use reth_node_api::{FullNodeComponents, FullNodeComponentsExt, FullNodeTypes, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
+use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskExecutor;
 
 use crate::{
+    common::ExtBuilderContext,
     components::{NodeComponents, NodeComponentsBuilder},
     exex::BoxedLaunchExEx,
     hooks::NodeHooks,
     launch::LaunchNode,
-    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
-    FullNode,
+    rpc::{RpcContext, RpcHooks},
+    EngineAdapter, FullNode, NodeComponentsBuilderExt, PipelineAdapter, RpcAdapter,
 };
 
 /// A node builder that also has the configured types.
@@ -42,10 +45,7 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     }
 
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB, R>(
-        self,
-        components_builder: CB,
-    ) -> NodeBuilderWithComponents<T, CB, R>
+    pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB>
     where
         CB: NodeComponentsBuilder<T>,
     {
@@ -55,11 +55,8 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             config,
             adapter,
             components_builder,
-            add_ons: NodeAddOns {
-                hooks: NodeHooks::default(),
-                exexs: Vec::new(),
-                hooks_ext: NodeAddOnsExt::new(RpcHooks::new()),
-            },
+            add_ons: NodeAddOns { hooks: NodeHooks::default(), exexs: Vec::new() },
+            ext_builder: None,
         }
     }
 }
@@ -151,7 +148,15 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
 /// A fully type configured node builder.
 ///
 /// Supports adding additional addons to the node.
-pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> {
+pub struct NodeBuilderWithComponents<
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+    Output: FullNodeComponentsExt = NodeAdapterExt<
+        NodeAdapter<T, <CB as NodeComponentsBuilder<T>>::Components>,
+        BlockchainProvider<<T as FullNodeTypes>::DB>,
+        Either<AutoSealClient, FetchClient>,
+    >,
+> {
     /// All settings for how the node should be configured.
     pub(crate) config: NodeConfig,
     /// Adapter for the underlying node types and database
@@ -159,14 +164,25 @@ pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsBuilder
     /// container for type specific components
     pub(crate) components_builder: CB,
     /// Additional node extensions.
-    pub(crate) add_ons: NodeAddOns<NodeAdapter<T, CB::Components>>,
+    pub(crate) add_ons: NodeAddOns<Output>,
+    /// Builds optional components.
+    pub(crate) ext_builder: Option<Box<dyn NodeComponentsBuilderExt<Output>>>,
 }
 
-impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T, CB> {
+impl<T, CB, Output> NodeBuilderWithComponents<T, CB, Output>
+where
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+    Output: FullNodeComponentsExt,
+{
     /// Sets the hook that is run once the node's components are initialized.
-    pub fn on_component_initialized<F>(mut self, hook: F) -> Self
+    pub fn on_components_initialized<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(NodeAdapter<T, CB::Components>) -> eyre::Result<()> + Send + 'static,
+        F: FnOnce(
+                &mut ExtBuilderContext<'_, Output>,
+            ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send>>
+            + Send
+            + 'static,
     {
         self.add_ons.hooks = self.add_ons.hooks.on_components_initialized(hook);
         self
@@ -175,23 +191,9 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
     /// Sets the hook that is run once the node has started.
     pub fn on_node_started<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(FullNode<NodeAdapter<T, CB::Components>>) -> eyre::Result<()> + Send + 'static,
+        F: FnOnce(FullNode<Output>) -> eyre::Result<()> + Send + 'static,
     {
         self.add_ons.hooks.set_on_node_started(hook);
-        self
-    }
-
-    /// Sets the hook that is run once the rpc server is started.
-    pub fn on_rpc_started<F>(mut self, hook: F) -> Self
-    where
-        F: FnOnce(
-                RpcContext<'_, NodeAdapter<T, CB::Components>>,
-                RethRpcServerHandles,
-            ) -> eyre::Result<()>
-            + Send
-            + 'static,
-    {
-        self.add_ons.rpc.set_on_rpc_started(hook);
         self
     }
 
@@ -239,7 +241,7 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
 
 impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T, CB> {
     /// Launches the node with the given launcher.
-    pub async fn launch_with<L, C>(self, launcher: L) -> eyre::Result<L::Node>
+    pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
     where
         L: LaunchNode<Self>,
     {
@@ -253,33 +255,39 @@ pub(crate) struct NodeAddOns<Node: FullNodeComponents> {
     pub(crate) hooks: NodeHooks<Node>,
     /// The `ExExs` (execution extensions) of the node.
     pub(crate) exexs: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
-    /// Hooks for optional components.
-    pub(crate) hooks_ext: NodeAddOnsExt<Node>,
 }
 
-#[derive(Constructor)]
-pub struct NodeAddOnsExt<Node: FullNodeComponents> {
-    /// Additional RPC hooks.
-    pub rpc: RpcHooks<Node>,
-}
-
-#[derive(Debug, Clone)]
+#[allow(missing_debug_implementations)]
+#[derive(Deref, Clone)]
 pub struct NodeAdapterExt<
     Node: FullNodeComponents,
-    Engine: EngineComponent<Self>,
-    Rpc: RpcComponent<Self>,
+    BT: FullBlockchainTreeEngine + 'static,
+    C: FullClient + 'static,
 > {
+    #[deref]
     pub core: Node,
-    pub engine: Option<Engine>,
-    //pub pipeline: Option<Pipeline>,
-    pub rpc: Option<Rpc>,
+    pub tree: Option<BlockchainProvider<Node::DB>>,
+    pub pipeline: Option<PipelineAdapter<C>>,
+    pub engine: Option<EngineAdapter<Node, BT, C>>,
+    pub rpc: Option<RpcAdapter<Node>>,
 }
 
-impl<Node, Engine, Rpc> FullNodeComponents for NodeAdapterExt<Node, Engine, Rpc>
+impl<Node, BT, C> NodeAdapterExt<Node, BT, C>
 where
     Node: FullNodeComponents,
-    Engine: EngineComponent<Self>,
-    Rpc: RpcComponent<Self>,
+    BT: FullBlockchainTreeEngine + 'static,
+    C: FullClient + 'static,
+{
+    pub fn new(core: Node) -> Self {
+        Self { core, tree: None, pipeline: None, engine: None, rpc: None }
+    }
+}
+
+impl<Node, BT, C> FullNodeComponents for NodeAdapterExt<Node, BT, C>
+where
+    Node: FullNodeComponents,
+    BT: FullBlockchainTreeEngine + Clone + 'static,
+    C: FullClient + Clone + 'static,
 {
     type Pool = Node::Pool;
     type Evm = Node::Evm;
@@ -297,7 +305,7 @@ where
         self.core.block_executor()
     }
 
-    fn provider(&self) -> &Self::Provider {
+    fn provider(&self) -> &<Self as FullNodeTypes>::Provider {
         self.core.provider()
     }
 
@@ -305,7 +313,7 @@ where
         self.core.network()
     }
 
-    fn payload_builder(&self) -> &PayloadBuilderHandle<Self::EngineTypes> {
+    fn payload_builder(&self) -> &PayloadBuilderHandle<Node::EngineTypes> {
         self.core.payload_builder()
     }
 
@@ -314,21 +322,24 @@ where
     }
 }
 
-impl<T, C, Engine, Rpc> FullNodeComponentsExt for NodeAdapterExt<NodeAdapter<T, C>, Engine, Rpc>
+impl<N, BT, C> FullNodeComponentsExt for NodeAdapterExt<N, BT, C>
 where
-    T: FullNodeTypes,
-    C: NodeComponents<T>,
-    //Pipeline: PipelineComponent<Self>,
-    Engine: EngineComponent<Self>,
-    Rpc: RpcComponent<Self>,
+    N: FullNodeComponents,
+    BT: FullBlockchainTreeEngine + Clone + 'static,
+    C: FullClient + Clone + 'static,
 {
-    // type Pipeline = Pipeline;
-    type Engine = Option<Engine>;
-    type Rpc = Option<Rpc>;
+    type Tree = BlockchainProvider<N::DB>;
+    type Pipeline = PipelineAdapter<C>;
+    type Engine = EngineAdapter<N, BT, C>;
+    type Rpc = RpcAdapter<N>;
 
-    /*fn pipeline(&self) -> Option<&Self::Pipeline> {
+    fn tree(&self) -> Option<&Self::Tree> {
+        self.tree.as_ref()
+    }
+
+    fn pipeline(&self) -> Option<&Self::Pipeline> {
         self.pipeline.as_ref()
-    }*/
+    }
 
     fn engine(&self) -> Option<&<Self as FullNodeComponentsExt>::Engine> {
         self.engine.as_ref()
@@ -337,4 +348,10 @@ where
     fn rpc(&self) -> Option<&Self::Rpc> {
         self.rpc.as_ref()
     }
+}
+
+#[derive(Constructor)]
+pub struct NodeAddOnsExt<Node: FullNodeComponents> {
+    /// Additional RPC hooks.
+    pub rpc: RpcHooks<Node>,
 }

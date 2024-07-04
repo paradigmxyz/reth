@@ -1,14 +1,12 @@
 //! Abstraction for launching a node.
 
-use std::{future::Future, sync::Arc};
+use std::future::Future;
 
-use common::{ExtComponentBuilder, InitializedComponents};
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
-    BeaconConsensusEngine, FullBlockchainTreeEngine,
+    BeaconConsensusEngine,
 };
-use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::NetworkEvents;
@@ -16,27 +14,24 @@ use reth_node_api::{FullNodeComponentsExt, FullNodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
-    rpc::eth::FullEthApiServer,
-    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
-use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
-use tokio::sync::{mpsc::unbounded_channel, oneshot};
+use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::{
-    builder::{NodeAdapter, NodeAdapterExt, NodeAddOns, NodeTypesAdapter},
-    common::ExtComponentBuilder,
+    builder::{NodeAddOns, NodeTypesAdapter},
+    common::InitializedComponents,
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     node::FullNode,
     rpc::{RethRpcServerHandles, RpcAdapter, RpcRegistry},
-    EngineAdapter, NodeBuilderWithComponents, NodeHandle,
+    EngineAdapter, NodeBuilderWithComponents, NodeHandle, StageExtComponentsBuild,
 };
 
 pub mod common;
@@ -85,31 +80,27 @@ impl DefaultNodeLauncher {
     }
 }
 
-impl<T, CB, R> LaunchNode<NodeBuilderWithComponents<T, CB>> for DefaultNodeLauncher
+impl<T, CB, Output> LaunchNode<NodeBuilderWithComponents<T, CB, Output>> for DefaultNodeLauncher
 where
     T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
     CB: NodeComponentsBuilder<T>,
+    Output: FullNodeComponentsExt,
 {
-    type Node = NodeHandle<
-        NodeAdapterExt<
-            NodeAdapter<T, CB::Components>,
-            EngineAdapter<Self, AutoSealClient, WithComponents<Self::DB, Self, CB>::BlockchainTree>,
-            RpcAdapter<Self>,
-        >,
-    >;
+    type Node = NodeHandle<Output>;
 
-    async fn launch_node<C>(
+    async fn launch_node(
         self,
-        target: NodeBuilderWithComponents<T, CB, R>,
+        target: NodeBuilderWithComponents<T, CB, Output>,
     ) -> eyre::Result<Self::Node> {
         let Self { ctx } = self;
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             components_builder,
-            add_ons: NodeAddOns { hooks, exexs: installed_exex, hooks_ext },
+            add_ons: NodeAddOns { hooks, exexs: installed_exex },
             config,
+            ext_builder: _,
         } = target;
-        let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
+        let NodeHooks { on_components_initialized, on_node_started, .. } = hooks;
 
         // setup the launch context
         let ctx = ctx
@@ -139,12 +130,12 @@ where
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
             .with_blockchain_db::<T>().await?
-            .with_components::<_, _, _>(components_builder, move |ctx, n| move || on_component_initialized(ctx, n, hooks_ext) ).await?;
+            .with_components::<Output,_, _, _>(components_builder, on_components_initialized).await?;
 
         // spawn exexs
         let exex_manager_handle = ExExLauncher::new(
             ctx.head(),
-            ctx.components().clone(),
+            ctx.node().clone(),
             installed_exex,
             ctx.configs().clone(),
         )
@@ -152,7 +143,7 @@ where
         .await;
 
         // create pipeline
-        let network_client = ctx.components().network().fetch_client().await?;
+        let network_client = ctx.node().network().fetch_client().await?;
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
         let node_config = ctx.node_config();
@@ -187,7 +178,7 @@ where
 
             // install auto-seal
             let mining_mode =
-                ctx.dev_mining_mode(ctx.components().pool().pending_transactions_listener());
+                ctx.dev_mining_mode(ctx.node().pool().pending_transactions_listener());
             info!(target: "reth::cli", mode=%mining_mode, "configuring dev mining mode");
 
             let (_, client, mut task) = reth_auto_seal_consensus::AutoSealBuilder::new(
@@ -210,7 +201,7 @@ where
                 ctx.prune_config(),
                 max_block,
                 static_file_producer,
-                ctx.components().block_executor().clone(),
+                ctx.node().block_executor().clone(),
                 pipeline_exex_handle,
             )
             .await?;
@@ -232,7 +223,7 @@ where
                 ctx.prune_config(),
                 max_block,
                 static_file_producer,
-                ctx.components().block_executor().clone(),
+                ctx.node().block_executor().clone(),
                 pipeline_exex_handle,
             )
             .await?;
@@ -263,9 +254,9 @@ where
             pipeline,
             ctx.blockchain_db().clone(),
             Box::new(ctx.task_executor().clone()),
-            Box::new(ctx.components().network().clone()),
+            Box::new(ctx.node().network().clone()),
             max_block,
-            ctx.components().payload_builder().clone(),
+            ctx.node().payload_builder().clone(),
             initial_target,
             reth_beacon_consensus::MIN_BLOCKS_FOR_PIPELINE_RUN,
             consensus_engine_tx,
@@ -279,7 +270,7 @@ where
         ctx.right().engine(engine);
 
         let events = stream_select!(
-            ctx.components().network().event_listener().map(Into::into),
+            ctx.node().network().event_listener().map(Into::into),
             beacon_engine_handle.event_listener().map(Into::into),
             pipeline_events.map(Into::into),
             if ctx.node_config().debug.tip.is_none() && !ctx.is_dev() {
@@ -296,7 +287,7 @@ where
         ctx.task_executor().spawn_critical(
             "events task",
             node::handle_events(
-                Some(ctx.components().network().clone()),
+                Some(ctx.node().network().clone()),
                 Some(ctx.head().number),
                 events,
                 database.clone(),
@@ -305,9 +296,9 @@ where
 
         let consensus_engine_shutdown_rx =
             ctx.right().consensus_engine_shutdown().expect("should be launched");
-        // temp here until building other components moved into `OnComponentInitializedHook`s, will
+        // temp here until building other components moved into `OnComponentsInitializedHook`s, will
         // be called in `LaunchContextWith::with_components -> NodeAdapterExt`
-        let node = ctx.right().build();
+        let node = ctx.right().build().await;
 
         let full_node = FullNode {
             evm_config: node.evm_config().clone(),

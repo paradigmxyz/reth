@@ -1,13 +1,13 @@
 //! Traits for configuring a node.
 
-use std::{marker::PhantomData, ops::Deref};
+use std::{fmt, marker::PhantomData, ops::Deref};
 
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
 use reth_evm::execute::BlockExecutorProvider;
-use reth_network::NetworkHandle;
+use reth_network::{FullClient, NetworkHandle};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
@@ -166,39 +166,50 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     fn task_executor(&self) -> &TaskExecutor;
 }
 
+/// An intermediary type for `FullNodeComponentsExt`, that isn't `Clone`.
 pub trait FullNodeComponentsExt: FullNodeComponents {
-    //type Pipeline: PipelineComponent<Self>;
-    type Engine: EngineComponent<Self>;
-    type Rpc: RpcComponent<Self>;
+    type Tree;
+    type Pipeline: PipelineComponent;
+    type Engine: EngineComponent<Self> + 'static;
+    type Rpc: RpcComponent<Self> + 'static;
 
-    /// Returns the pipeline component, if installed.
-    //fn pipeline(&self) -> Option<&Self::Pipeline>;
+    /// Returns reference to blockchain tree component, if installed.
+    fn tree(&self) -> Option<&Self::Tree>;
 
-    /// Returns the consensus engine component, if installed.
-    fn engine(&self) -> Option<&<Self as FullNodeComponentsExt>::Engine>;
+    /// Returns reference to pipeline component, if installed.
+    fn pipeline(&self) -> Option<&Self::Pipeline>;
 
-    /// Returns the RPC component, if installed.
+    /// Returns reference to consensus engine component, if installed.
+    fn engine(&self) -> Option<&Self::Engine>;
+
+    /// Returns reference to RPC component, if installed.
     fn rpc(&self) -> Option<&Self::Rpc>;
 }
+pub trait TreeComponent: Send + Sync + Unpin + Clone + 'static {
+    // ..
+}
 
-//pub trait PipelineComponent<N: FullNodeComponents> {}
+pub trait PipelineComponent: Send + Sync + Unpin + Clone + 'static {
+    type Client: FullClient + Send + Sync + Clone;
+    // ..
+}
 
-pub trait EngineComponent<N: FullNodeComponents>: Send + Sync + Clone + Unpin {
-    type Engine;
-    type Handle;
-    type ShutdownSignalRx;
+pub trait EngineComponent<N: FullNodeComponents>: Send + Unpin + Clone + 'static {
+    type Engine: Send + 'static;
+    type Handle: Send + Sync + Unpin + 'static;
+    type ShutdownRx: Send + Unpin + Default + 'static;
 
     fn engine(&self) -> &Self::Engine;
 
     fn handle(&self) -> &Self::Handle;
 
-    fn shutdown_signal_rx(&self) -> &Self::ShutdownSignalRx;
+    fn shutdown_rx_mut(&mut self) -> &mut Self::ShutdownRx;
 }
 
 impl<N: FullNodeComponents> EngineComponent<N> for Option<()> {
     type Engine = Self;
     type Handle = Self;
-    type ShutdownSignalRx = Self;
+    type ShutdownRx = Self;
 
     fn engine(&self) -> &Self::Engine {
         self
@@ -208,14 +219,14 @@ impl<N: FullNodeComponents> EngineComponent<N> for Option<()> {
         self
     }
 
-    fn shutdown_signal_rx(&self) -> &Self::ShutdownSignalRx {
+    fn shutdown_rx_mut(&mut self) -> &mut Self::ShutdownRx {
         self
     }
 }
 
-pub trait RpcComponent<N: FullNodeComponents>: Send + Sync + Clone + Unpin {
-    type ServerHandles;
-    type Registry;
+pub trait RpcComponent<N: FullNodeComponents>: Send + Sync + Unpin + Clone + 'static {
+    type ServerHandles: Send + Sync + Unpin + fmt::Debug + Clone + 'static;
+    type Registry: Send + Unpin + fmt::Debug + Clone + 'static;
 
     fn handles(&self) -> &Self::ServerHandles;
 

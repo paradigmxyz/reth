@@ -27,7 +27,7 @@ fn main() {
                     println!("RPC started");
                     Ok(())
                 })
-                .on_component_initialized(|_ctx| {
+                .on_components_initialized(|_ctx| {
                     println!("All components initialized");
                     Ok(())
                 })

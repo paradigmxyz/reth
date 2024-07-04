@@ -14,7 +14,7 @@ fn test_basic_setup() {
         .with_database(db)
         .with_types::<OptimismNode>()
         .with_components(OptimismNode::components(Default::default()))
-        .on_component_initialized(move |ctx| {
+        .on_components_initialized(move |ctx| {
             let _provider = ctx.provider();
             Ok(())
         })

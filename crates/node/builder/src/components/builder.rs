@@ -1,16 +1,22 @@
 //! A generic [`NodeComponentsBuilder`]
 
+use std::{future::Future, marker::PhantomData};
+
+use derive_more::Deref;
+use reth_consensus::Consensus;
+use reth_evm::execute::BlockExecutorProvider;
+use reth_node_api::{FullNodeComponents, FullNodeComponentsExt};
+use reth_transaction_pool::TransactionPool;
+
 use crate::{
+    common::{ExtBuilderContext, InitializedComponents},
     components::{
         Components, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, NodeComponents,
         PayloadServiceBuilder, PoolBuilder,
     },
+    hooks::OnComponentsInitializedHook,
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
-use reth_consensus::Consensus;
-use reth_evm::execute::BlockExecutorProvider;
-use reth_transaction_pool::TransactionPool;
-use std::{future::Future, marker::PhantomData};
 
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
 ///

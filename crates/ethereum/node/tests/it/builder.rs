@@ -15,7 +15,7 @@ fn test_basic_setup() {
         .with_database(db)
         .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
-        .on_component_initialized(move |ctx| {
+        .on_components_initialized(move |ctx| {
             let _provider = ctx.provider();
             println!("{msg}");
             Ok(())

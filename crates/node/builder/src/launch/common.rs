@@ -3,13 +3,10 @@
 use std::{marker::PhantomData, ops, sync::Arc, thread::available_parallelism};
 
 use backon::{ConstantBuilder, Retryable};
-use derive_more::Deref;
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_auto_seal_consensus::MiningMode;
-use reth_beacon_consensus::{
-    BeaconConsensusEngineHandle, EthBeaconConsensus, FullBlockchainTreeEngine,
-};
+use reth_beacon_consensus::{EthBeaconConsensus, FullBlockchainTreeEngine};
 use reth_blockchain_tree::{
     noop::NoopBlockchainTree, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
     TreeExternals,
@@ -21,14 +18,12 @@ use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
-use reth_network::NetworkHandle;
-use reth_network_p2p::headers::client::HeadersClient;
+use reth_network_p2p::{headers::client::HeadersClient, FullClient};
 use reth_node_api::{FullNodeComponents, FullNodeComponentsExt, FullNodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
 };
-use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::{BlockNumber, Head, B256};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
@@ -48,13 +43,14 @@ use tokio::sync::{
 
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
+    ext::{ExtComponentsBuildStage, InitializedComponentsExt, WithComponentsExt},
     hooks::OnComponentsInitializedHook,
-    BuilderContext, NodeAdapter, NodeAdapterExt, NodeAddOnsExt, RpcBuilder,
+    BuilderContext, NodeAdapter, NodeAdapterExt, StageExtComponentsBuild,
 };
 
-/// Type alias for extension component launch context, holds the initialized core components.
-pub type LaunchContextExt<Node> =
-    LaunchContextWith<Attached<WithConfigs, Box<dyn ExtComponentBuilder<Node = Node>>>>;
+/// Type alias for extension component build context, holds the initialized core components.
+pub type ExtBuilderContext<'a, Node: FullNodeComponentsExt> =
+    LaunchContextWith<Attached<WithConfigs, &'a mut Box<dyn InitializedComponentsExt<Node>>>>;
 
 /// Reusable setup for launching a node.
 ///
@@ -474,7 +470,7 @@ where
             .start_metrics_endpoint(
                 prometheus_handle,
                 self.database().clone(),
-                self.static_file_provider(),
+                self.provider_factory().static_file_provider(),
                 self.task_executor().clone(),
             )
             .await
@@ -568,7 +564,7 @@ where
 impl<DB, T> LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>
 where
     DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
-    T: FullNodeTypes<Provider = BlockchainProvider<DB>>,
+    T: FullNodeTypes<Provider = BlockchainProvider<DB>, DB = DB>,
 {
     /// Returns access to the underlying database.
     pub fn database(&self) -> &DB {
@@ -610,15 +606,32 @@ where
     }
 
     /// Creates a `NodeAdapter` and attaches it to the launch context.
-    pub async fn with_components<CB, Engine, Rpc>(
+    pub async fn with_components<N, CB, BT, C>(
         self,
         components_builder: CB,
-        on_component_initialized: Vec<
-            Box<dyn OnComponentsInitializedHook<WithComponentsExt<Engine, Rpc>>>,
+        on_components_initialized: Vec<
+            Box<
+                dyn OnComponentsInitializedHook<
+                    NodeAdapterExt<NodeAdapter<T, CB::Components>, BT, C>,
+                >,
+            >,
         >,
-    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithComponentsExt<Engine, Rpc>>>>
+    ) -> eyre::Result<
+        Box<
+            dyn StageExtComponentsBuild<
+                NodeAdapterExt<NodeAdapter<T, CB::Components>, BT, C>,
+                Components = Box<
+                    dyn InitializedComponentsExt<
+                        NodeAdapterExt<NodeAdapter<T, CB::Components>, BT, C>,
+                    >,
+                >,
+            >,
+        >,
+    >
     where
         CB: NodeComponentsBuilder<T>,
+        BT: FullBlockchainTreeEngine + Clone,
+        C: FullClient + Clone,
     {
         // fetch the head block from the database
         let head = self.lookup_head()?;
@@ -660,7 +673,7 @@ where
             provider: blockchain_db.clone(),
         };
 
-        debug!(target: "reth::cli", "calling on_component_initialized hook");
+        debug!(target: "reth::cli", "calling on_components_initialized hook");
 
         let components_container = WithComponents {
             db_provider_container: WithMeteredProvider {
@@ -669,35 +682,26 @@ where
             },
             blockchain_db,
             tree_config: self.right().tree_config,
-            node_adapter,
+            node_adapter: NodeAdapterExt::new(node_adapter),
             head,
             consensus,
         };
 
-        let components_ext_container =
-            WithComponentsExt { core: components_container, engine: None, rpc: None };
+        let launch_ctx =
+            LaunchContextWith { inner: self.inner, attachment: self.attachment.clone_left(()) };
 
-        let ctx = LaunchContextWith {
-            inner: self.inner,
-            attachment: self.attachment.map_right(|_| components_container),
-        };
+        let ext_components_staging = ExtComponentsBuildStage::new(
+            launch_ctx,
+            build_ctx,
+            WithComponentsExt::new(components_container),
+        );
 
-        // todo: call here, when rpc dep components pipeline and engine are built as
-        // `OnComponentInitializedHook`s too
-        /*for hook in on_component_initialized {
-            // hooks must be in order with respect to dependency, e.g.
-            hook.on_event(&mut components_ext_container, hooks_ext)?;
-        }*/
-        // for now, delay starting rpc component so engine can be built first
-        components_ext_container.rpc(on_component_initialized);
-
-        Ok(ctx)
+        Ok(Box::new(ext_components_staging))
     }
 }
 
 impl<T> LaunchContextWith<Attached<WithConfigs, T>>
 where
-    Self: InitializedComponents,
     T: InitializedComponents,
 {
     /// Returns the max block that the node should run to, looking it up from the network if
@@ -706,61 +710,36 @@ where
     where
         C: HeadersClient,
     {
-        self.node_config().max_block(client, self.components().provider().clone()).await
+        self.node_config().max_block(client, self.node().provider().clone()).await
     }
 
     /// Returns the static file provider to interact with the static files.
     pub fn static_file_provider(&self) -> StaticFileProvider {
-        self.components().provider().static_file_provider()
+        self.node().provider().static_file_provider()
     }
 
     /// Creates a new [`StaticFileProducer`] with the attached database.
     pub fn static_file_producer(&self) -> StaticFileProducer<<T::Node as FullNodeTypes>::DB> {
         StaticFileProducer::new(
-            self.components().provider().clone(),
+            self.provider_factory().clone(),
             self.prune_modes().unwrap_or_default(),
         )
     }
 }
 
-impl<R> InitializedComponents for LaunchContextWith<Attached<WithConfigs, R>>
+impl<T> ops::Deref for LaunchContextWith<Attached<WithConfigs, T>>
 where
-    R: InitializedComponents,
+    T: InitializedComponents,
 {
-    type Node = R::Node;
-    type BlockchainTree = R::BlockchainTree;
+    type Target = T;
 
-    fn head(&self) -> Head {
-        self.right().head()
-    }
-
-    fn provider_factory(&self) -> &<Self::Node as FullNodeTypes>::Provider {
-        self.right().provider_factory()
-    }
-
-    fn blockchain_db(&self) -> &Self::BlockchainTree {
-        self.right().blockchain_db()
-    }
-
-    fn consensus(&self) -> Arc<dyn Consensus> {
-        self.right().consensus()
-    }
-
-    fn sync_metrics_tx(&self) -> UnboundedSender<MetricEvent> {
-        self.right().sync_metrics_tx()
-    }
-
-    fn tree_config(&self) -> &BlockchainTreeConfig {
-        self.right().tree_config()
-    }
-
-    fn components(&self) -> &Self::Node {
-        self.right().components()
+    fn deref(&self) -> &Self::Target {
+        self.attachment.right()
     }
 }
 
 /// Joins two attachments together.
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub struct Attached<L, R> {
     left: L,
     right: R,
@@ -770,6 +749,22 @@ impl<L, R> Attached<L, R> {
     /// Creates a new `Attached` with the given values.
     pub const fn new(left: L, right: R) -> Self {
         Self { left, right }
+    }
+
+    /// Creates a new `Attached` with the existing left and given right values.
+    pub fn clone_right<T>(&self, left: T) -> Attached<T, R>
+    where
+        R: Clone,
+    {
+        Attached { left, right: self.right.clone() }
+    }
+
+    /// Creates a new `Attached` with the existing left and given right values.
+    pub fn clone_left<T>(&self, right: T) -> Attached<L, T>
+    where
+        L: Clone,
+    {
+        Attached { left: self.left.clone(), right }
     }
 
     /// Maps the left value to a new value.
@@ -809,6 +804,16 @@ impl<L, R> Attached<L, R> {
     }
 }
 
+impl<L, R> Clone for Attached<L, R>
+where
+    L: Clone,
+    R: Clone,
+{
+    fn clone(&self) -> Self {
+        Self { left: self.left.clone(), right: self.right.clone() }
+    }
+}
+
 /// Helper container type to bundle the initial [`NodeConfig`] and the loaded settings from the
 /// reth.toml config
 #[derive(Debug, Clone)]
@@ -840,7 +845,6 @@ pub struct WithMeteredProviders<DB, T> {
     phantom_data: PhantomData<T>,
 }
 
-#[auto_impl::auto_impl(&)]
 pub trait InitializedComponents {
     type Node: FullNodeComponents;
     type BlockchainTree;
@@ -849,7 +853,7 @@ pub trait InitializedComponents {
     fn head(&self) -> Head;
 
     /// Returns the configured database provider.
-    fn provider_factory(&self) -> &<Self::Node as FullNodeTypes>::Provider;
+    fn provider_factory(&self) -> &ProviderFactory<<Self::Node as FullNodeTypes>::DB>;
 
     /// Returns a reference to the blockchain provider.
     fn blockchain_db(&self) -> &Self::BlockchainTree;
@@ -864,39 +868,71 @@ pub trait InitializedComponents {
     fn tree_config(&self) -> &BlockchainTreeConfig;
 
     /// Returns the core components.
-    fn components(&self) -> &Self::Node;
+    fn node(&self) -> &Self::Node;
+}
+
+impl<T> InitializedComponents for T
+where
+    T: ops::Deref,
+    <T as ops::Deref>::Target: InitializedComponents,
+{
+    type Node = <<T as ops::Deref>::Target as InitializedComponents>::Node;
+    type BlockchainTree = <<T as ops::Deref>::Target as InitializedComponents>::BlockchainTree;
+
+    fn head(&self) -> Head {
+        self.deref().head()
+    }
+
+    fn provider_factory(&self) -> &ProviderFactory<<Self::Node as FullNodeTypes>::DB> {
+        self.deref().provider_factory()
+    }
+
+    fn blockchain_db(&self) -> &Self::BlockchainTree {
+        self.deref().blockchain_db()
+    }
+
+    fn consensus(&self) -> Arc<dyn Consensus> {
+        self.deref().consensus()
+    }
+
+    fn sync_metrics_tx(&self) -> UnboundedSender<MetricEvent> {
+        self.deref().sync_metrics_tx()
+    }
+
+    fn tree_config(&self) -> &BlockchainTreeConfig {
+        self.deref().tree_config()
+    }
+
+    fn node(&self) -> &Self::Node {
+        self.deref().node()
+    }
 }
 
 /// Helper container to bundle the metered providers container and [`NodeAdapter`].
 #[allow(missing_debug_implementations)]
-pub struct WithComponents<DB, T, CB>
-where
-    T: FullNodeTypes<Provider = BlockchainProvider<DB>>,
-    CB: NodeComponentsBuilder<T>,
-{
+pub struct WithComponents<N, DB> {
     db_provider_container: WithMeteredProvider<DB>,
     tree_config: BlockchainTreeConfig,
     blockchain_db: BlockchainProvider<DB>,
-    node_adapter: NodeAdapter<T, CB::Components>,
+    node_adapter: N,
     head: Head,
     consensus: Arc<dyn Consensus>,
 }
 
-impl<DB, T, CB> InitializedComponents for WithComponents<DB, T, CB>
+impl<N, DB> InitializedComponents for WithComponents<N, DB>
 where
+    N: FullNodeComponents<DB = DB>,
     DB: Send + Sync,
-    T: FullNodeTypes<Provider = BlockchainProvider<DB>>,
-    CB: NodeComponentsBuilder<T>,
 {
-    type Node = NodeAdapter<T, CB::Components>;
-    type BlockchainTree = BlockchainProvider<<Self::Node as FullNodeTypes>::DB>;
+    type Node = N;
+    type BlockchainTree = BlockchainProvider<DB>;
 
     fn head(&self) -> Head {
         self.head
     }
 
-    fn provider_factory(&self) -> &<Self::Node as FullNodeTypes>::Provider {
-        self.components().provider()
+    fn provider_factory(&self) -> &ProviderFactory<DB> {
+        &self.db_provider_container.provider_factory
     }
 
     fn blockchain_db(&self) -> &Self::BlockchainTree {
@@ -915,73 +951,8 @@ where
         &self.tree_config
     }
 
-    fn components(&self) -> &Self::Node {
+    fn node(&self) -> &Self::Node {
         &self.node_adapter
-    }
-}
-
-#[allow(missing_debug_implementations)]
-#[derive(Deref)]
-pub struct WithComponentsExt<Engine, Rpc> {
-    #[deref]
-    core: Box<dyn InitializedComponents>,
-    //pipeline: Option<Pipeline>,
-    engine: Option<Engine>,
-    rpc: Option<Rpc>,
-}
-
-// todo, helpful for replacing just one component, due to inter deps pipeline -> engine, rpc ->
-// engine api (currently engine api -> rpc, but will be decoupled)
-pub trait EngineApiContext {}
-
-pub trait EngineContext {}
-
-pub trait PipelineContext {}
-
-pub trait ExtComponentBuilder {
-    type Node: FullNodeComponentsExt;
-
-    // fn pipeline(self, pipeline: Self::Node::Pipeline) -> Self;
-
-    fn engine(self, engine: Self::Node::Engine) -> Self;
-
-    fn rpc(self, rpc: Box<dyn OnComponentsInitializedHook<Self::Node>>) -> Self;
-
-    fn build(self: &mut LaunchContextExt<Box<Self>>) -> Self::Node;
-}
-
-impl<Engine, Rpc> ExtComponentBuilder for WithComponentsExt<Engine, Rpc>
-where
-    Engine: EngineComponent<Self::Node>,
-    Rpc: RpcComponent<Self::Node>,
-{
-    type Node = NodeAdapterExt<<Self as InitializedComponents>::Node, Engine, Rpc>;
-
-    /// Installs pipeline.
-    /*fn pipeline(mut self, pipeline: Self::Node::Pipeline) -> Self {
-        self.pipeline = Some(pipeline);
-        self
-    }*/
-
-    // todo: add builder here instead
-    fn engine(mut self, engine: <Self::Node as FullNodeComponentsExt>::Engine) -> Self {
-        self.engine = Some(engine);
-        self
-    }
-
-    fn rpc(mut self, rpc: Box<dyn OnComponentsInitializedHook<Self::Node>>) -> Self {
-        self.rpc = Some(rpc);
-        self
-    }
-
-    fn build(self: &mut LaunchContextExt<Box<Self>>) -> Self::Node {
-        let Self { core, rpc, .. } = self;
-
-        let rpc = if let Some(rpc) = rpc {
-            rpc.on_event(self)
-        };
-
-        NodeAdapterExt { core, engine: None, rpc }
     }
 }
 

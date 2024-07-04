@@ -2,13 +2,13 @@
 
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
-use crate::{
-    common::WithConfigs,
-    components::{NodeComponents, NodeComponentsBuilder},
-    node::FullNode,
-    rpc::{RethRpcServerHandles, RpcContext},
-    DefaultNodeLauncher, Node, NodeHandle,
-};
+pub mod ext;
+mod states;
+
+pub use states::*;
+
+use std::{pin::Pin, sync::Arc};
+
 use futures::Future;
 use reth_chainspec::ChainSpec;
 use reth_db::{
@@ -23,7 +23,7 @@ use reth_exex::ExExContext;
 use reth_network::{
     NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
-use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
+use reth_node_api::{FullNodeComponentsExt, FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::{
     args::{get_secret_key, DatadirArgs},
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
@@ -37,10 +37,14 @@ use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
-pub use states::*;
-use std::sync::Arc;
 
-mod states;
+use crate::{
+    common::{ExtBuilderContext, WithConfigs},
+    components::NodeComponentsBuilder,
+    node::FullNode,
+    rpc::{RethRpcServerHandles, RpcContext},
+    DefaultNodeLauncher, Node, NodeHandle,
+};
 
 /// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -94,7 +98,7 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 ///
 /// Once all the components are configured, the builder can be used to set hooks that are run at
 /// specific points in the node's lifecycle. This way custom services can be spawned before the node
-/// is launched [`NodeBuilderWithComponents::on_component_initialized`], or once the rpc server(s)
+/// is launched [`NodeBuilderWithComponents::on_components_initialized`], or once the rpc server(s)
 /// are launched [`NodeBuilderWithComponents::on_rpc_started`]. The
 /// [`NodeBuilderWithComponents::extend_rpc_modules`] can be used to inject custom rpc modules into
 /// the rpc server before it is launched. See also [`RpcContext`] All hooks accept a closure that is
@@ -208,10 +212,10 @@ where
     /// Preconfigures the node with a specific node implementation.
     ///
     /// This is a convenience method that sets the node's types and components in one call.
-    pub fn node<N, T, X>(
+    pub fn node<N, T>(
         self,
         node: N,
-    ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, X>
+    ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
@@ -255,7 +259,7 @@ where
     /// Preconfigures the node with a specific node implementation.
     ///
     /// This is a convenience method that sets the node's types and components in one call.
-    pub fn node<N, T, Engine, Rpc>(
+    pub fn node<N>(
         self,
         node: N,
     ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>>
@@ -273,20 +277,8 @@ where
     pub async fn launch_node<N>(
         self,
         node: N,
-    ) -> eyre::Result<
-        NodeHandle<
-            NodeAdapterExt<
-                NodeAdapter<
-                    RethFullAdapter<DB, N>,
-                    <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components
-                >,
-                EngineAdapter<
-                    Self, AutoSealClient, WithComponents<Self::DB, Self, CB>::BlockchainTree
-                >,
-                RpcAdapter<Self>
-            >
-        >
-    > where
+    ) -> eyre::Result<NodeHandle<impl FullNodeComponentsExt>>
+    where
         N: Node<RethFullAdapter<DB, N>>,
     {
         self.node(node).launch().await
@@ -299,10 +291,10 @@ where
     T: NodeTypes,
 {
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB, Engine, Rpc>(
+    pub fn with_components<CB>(
         self,
         components_builder: CB,
-    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, X>>
+    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
     where
         CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     {
@@ -320,26 +312,25 @@ where
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
 {
     /// Sets the hook that is run once the node's components are initialized.
-    pub fn on_component_initialized<F>(self, hook: F) -> Self
+    pub fn on_components_initialized<N, F>(self, hook: F) -> Self
     where
-        F: FnOnce(NodeAdapter<RethFullAdapter<DB, T>, CB::Components>) -> eyre::Result<()>
-            + Send
-            + 'static,
+        N: FullNodeComponentsExt,
+        F: FnOnce(
+                &mut ExtBuilderContext<'_, N>,
+            ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send>>
+            + Send,
     {
         Self {
-            builder: self.builder.on_component_initialized(hook),
+            builder: self.builder.on_components_initialized(hook),
             task_executor: self.task_executor,
         }
     }
 
     /// Sets the hook that is run once the node has started.
-    pub fn on_node_started<F>(self, hook: F) -> Self
+    pub fn on_node_started<N, F>(self, hook: F) -> Self
     where
-        F: FnOnce(
-                FullNode<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
-            ) -> eyre::Result<()>
-            + Send
-            + 'static,
+        N: FullNodeComponentsExt,
+        F: FnOnce(FullNode<N>) -> eyre::Result<()> + Send + 'static,
     {
         Self { builder: self.builder.on_node_started(hook), task_executor: self.task_executor }
     }
@@ -389,21 +380,7 @@ where
     }
 
     /// Launches the node and returns a handle to it.
-    pub async fn launch(
-        self,
-    ) -> eyre::Result<
-        NodeHandle<
-            NodeAdapterExt<
-                NodeAdapter<RethFullAdapter<DB, T>, CB::Components>,
-                EngineAdapter<
-                    Self,
-                    AutoSealClient,
-                    WithComponents<Self::DB, Self, CB>::BlockchainTree,
-                >,
-                RpcAdapter<Self>,
-            >,
-        >,
-    > {
+    pub async fn launch(self) -> eyre::Result<NodeHandle<impl FullNodeComponentsExt>> {
         let Self { builder, task_executor } = self;
 
         let launcher = DefaultNodeLauncher::new(task_executor, builder.config.datadir());

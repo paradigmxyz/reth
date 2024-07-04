@@ -1,18 +1,24 @@
-use reth_beacon_consensus::{BeaconConsensusEngine, FullBlockchainTreeEngine};
+use std::sync::{Arc, Mutex};
+
+use reth_beacon_consensus::{
+    BeaconConsensusEngine, BeaconConsensusEngineError, BeaconConsensusEngineHandle,
+    FullBlockchainTreeEngine,
+};
 use reth_network_p2p::{BodiesClient, HeadersClient};
 use reth_node_api::{EngineComponent, FullNodeComponents};
 use tokio::sync::oneshot;
 
-#[derive(Debug, Clone)]
+#[allow(missing_debug_implementations)]
+#[derive(Clone)]
 pub struct EngineAdapter<N, BT, C>
 where
     N: FullNodeComponents,
     C: HeadersClient + BodiesClient,
     BT: FullBlockchainTreeEngine,
 {
-    pub engine: BeaconConsensusEngine<N::DB, BT, C, N::EngineTypes>,
+    pub engine: Arc<Mutex<BeaconConsensusEngine<N::DB, BT, C, N::EngineTypes>>>,
     pub handle: BeaconConsensusEngineHandle<N::EngineTypes>,
-    pub shutdown_signal: Option<oneshot::Receiver<Result<(), BeaconConsensusEngineError>>>,
+    pub shutdown_rx: Option<Arc<Mutex<oneshot::Receiver<Result<(), BeaconConsensusEngineError>>>>>,
 }
 
 impl<N, BT, C> EngineAdapter<N, BT, C>
@@ -22,22 +28,22 @@ where
     C: HeadersClient + BodiesClient,
 {
     pub fn new(
-        engine: BeaconConsensusEngine<N::DB, BT, C, N::EngineTypes>,
+        engine: Arc<Mutex<BeaconConsensusEngine<N::DB, BT, C, N::EngineTypes>>>,
         handle: BeaconConsensusEngineHandle<N::EngineTypes>,
     ) -> Self {
-        EngineAdapter { engine, handle, shutdown_signal: None }
+        EngineAdapter { engine, handle, shutdown_rx: None }
     }
 }
 
-impl<N, BT, C> EngineComponent<N, BT, C> for EngineAdapter<N, BT, C>
+impl<N, BT, C> EngineComponent<N> for EngineAdapter<N, BT, C>
 where
     N: FullNodeComponents,
-    BT: FullBlockchainTreeEngine,
-    C: HeadersClient + BodiesClient,
+    BT: FullBlockchainTreeEngine + Send + Sync + Unpin + Clone + 'static,
+    C: HeadersClient + BodiesClient + Send + Sync + Unpin + Clone + 'static,
 {
-    type Engine = BeaconConsensusEngine<N::DB, BT, C, N::EngineTypes>;
+    type Engine = Arc<Mutex<BeaconConsensusEngine<N::DB, BT, C, N::EngineTypes>>>;
     type Handle = BeaconConsensusEngineHandle<N::EngineTypes>;
-    type ShutdownSignalRx = Option<oneshot::Receiver<Result<(), BeaconConsensusEngineError>>>;
+    type ShutdownRx = Option<Arc<Mutex<oneshot::Receiver<Result<(), BeaconConsensusEngineError>>>>>;
 
     fn engine(&self) -> &Self::Engine {
         &self.engine
@@ -47,7 +53,7 @@ where
         &self.handle
     }
 
-    fn shutdown_signal_rx(&self) -> &Self::ShutdownSignalRx {
-        self.shutdown_signal.as_ref()
+    fn shutdown_rx_mut(&mut self) -> &mut Self::ShutdownRx {
+        &mut self.shutdown_rx
     }
 }

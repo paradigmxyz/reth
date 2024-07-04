@@ -21,8 +21,6 @@ pub use network::*;
 pub use payload::*;
 pub use pool::*;
 
-use std::ops::Deref;
-
 use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::NetworkHandle;
