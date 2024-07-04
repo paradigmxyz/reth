@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-
 use crate::{
     segments::{
         history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment,
