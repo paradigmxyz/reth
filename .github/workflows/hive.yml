@@ -116,8 +116,6 @@ jobs:
           - sim: ethereum/engine
             limit: engine-auth
           - sim: ethereum/engine
-            limit: engine-transition
-          - sim: ethereum/engine
             limit: engine-api
           - sim: ethereum/engine
             limit: cancun

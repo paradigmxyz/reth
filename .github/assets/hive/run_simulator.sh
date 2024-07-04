@@ -1,20 +1,38 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -x
 
 cd hivetests/
 
 sim="${1}"
 limit="${2}"
 
-# Run the hive command with the specified parameters
-hive --sim "${sim}" --sim.limit "${limit}" --sim.parallelism 4 --loglevel 5 --client reth 2>&1 | tee /tmp/log | grep -Eq "suites=0"
+run_hive() {
+    hive --sim "${sim}" --sim.limit "${limit}" --sim.parallelism 4 --loglevel 5 --client reth 2>&1 | tee /tmp/log || true
+}
 
-# Check if no tests were run
-if [ $? -eq 0 ]; then
-    echo "no tests were run"
-    exit 1
-else
-    # Check the last line of the log for "finished" or "tests failed"
-    tail -n 1 /tmp/log | grep -Eq "finished|tests failed"
-    exit $?
-fi
+check_log() {
+    tail -n 1 /tmp/log | sed -r 's/\x1B\[[0-9;]*[mK]//g'
+}
+
+attempt=0
+max_attempts=5
+
+while [ $attempt -lt $max_attempts ]; do
+    run_hive
+
+    # Check if no tests were run. sed removes ansi colors
+    if check_log | grep -q "suites=0"; then
+        echo "no tests were run, retrying in 5 seconds"
+        sleep 5
+        attempt=$((attempt + 1))
+        continue
+    fi
+
+    # Check the last line of the log for "finished", "tests failed", or "test failed"
+    if check_log | grep -Eq "(finished|tests? failed)"; then
+        exit $?
+    else
+        exit 1
+    fi
+done
+exit 1
