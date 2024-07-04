@@ -78,9 +78,7 @@ impl Command {
 
         let mut config: Config = confy::load_path(&config_path).unwrap_or_default();
 
-        for peer in &self.network.trusted_peers {
-            config.peers.trusted_nodes.insert(peer.resolve().await?);
-        }
+        config.peers.trusted_nodes.extend(self.network.resolve_trusted_peers().await?);
 
         if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {
             eyre::bail!("No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`")
