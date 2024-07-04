@@ -137,9 +137,15 @@ impl NetworkArgs {
                 bootnodes
                     .into_iter()
                     .filter_map(|trusted_peer| trusted_peer.resolve_blocking().ok())
-                    .collect()
+                    .collect::<Vec<NodeRecord>>()
             })
-            .unwrap_or_else(|| chain_spec.bootnodes().unwrap_or_else(mainnet_nodes));
+            .unwrap_or_default()
+            .into_iter()
+            .chain(chain_spec.bootnodes().unwrap_or_default())
+            .collect::<Vec<NodeRecord>>();
+        let chain_bootnodes =
+            if chain_bootnodes.is_empty() { mainnet_nodes() } else { chain_bootnodes };
+
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
