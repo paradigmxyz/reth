@@ -118,9 +118,9 @@ impl Command {
                     let mut config = config;
                     config.peers.trusted_nodes_only = self.network.trusted_only;
                     if !self.network.trusted_peers.is_empty() {
-                        for peer in &self.network.trusted_peers {
-                            let peer = peer.resolve().await?;
-                            config.peers.trusted_nodes.insert(peer);
+                        let peers = &self.network.resolve_trusted_peers().await?;
+                        for peer in peers {
+                            config.peers.trusted_nodes.insert(peer.clone());
                         }
                     }
 
