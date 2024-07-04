@@ -66,7 +66,8 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         }
 
         let mut last_changeset_pruned_block = None;
-        // Deleted account changeset keys (account address) with the highest block number
+        // Deleted account changeset keys (account addresses) with the highest block number deleted
+        // for that key
         let mut highest_deleted_accounts = HashMap::new();
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::AccountChangeSets>(
@@ -80,15 +81,15 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             )?;
         trace!(target: "pruner", pruned = %pruned_changesets, %done, "Pruned account history (changesets)");
 
-        // Sort highest deleted block numbers by account address
-        // We did not use `BTreeMap` from the beginning, because it's inefficient for hashes
-        let deleted_keys = highest_deleted_accounts
+        // Sort highest deleted block numbers by account address and turn them into sharded keys.
+        // We did not use `BTreeMap` from the beginning, because it's inefficient for hashes.
+        let highest_sharded_keys = highest_deleted_accounts
             .into_iter()
             .sorted_unstable()
             .map(|(address, block_number)| ShardedKey::new(address, block_number));
         let (processed, pruned_indices) = prune_history_indices::<DB, tables::AccountsHistory, _>(
             provider,
-            deleted_keys,
+            highest_sharded_keys,
             |a, b| a.key == b.key,
         )?;
         trace!(target: "pruner", %processed, pruned = %pruned_indices, %done, "Pruned account history (history)");

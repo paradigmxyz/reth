@@ -10,12 +10,12 @@ use reth_db_api::{
 };
 use reth_provider::DatabaseProviderRW;
 
-/// Prune history indices according to the provided list of deleted changesets.
+/// Prune history indices according to the provided list of highest sharded keys.
 ///
 /// Returns total number of processed (walked) and deleted entities.
 pub(crate) fn prune_history_indices<DB, T, SK>(
     provider: &DatabaseProviderRW<DB>,
-    deleted_changesets: impl IntoIterator<Item = T::Key>,
+    highest_sharded_keys: impl IntoIterator<Item = T::Key>,
     key_matches: impl Fn(&T::Key, &T::Key) -> bool,
 ) -> Result<(usize, usize), DatabaseError>
 where
@@ -28,29 +28,23 @@ where
     let mut deleted = 0;
     let mut cursor = provider.tx_ref().cursor_write::<RawTable<T>>()?;
 
-    // Prune history table:
-    // 1. If the shard has `highest_block_number` less than or equal to the target block number
-    // for pruning, delete the shard completely.
-    // 2. If the shard has `highest_block_number` greater than the target block number for
-    // pruning, filter block numbers inside the shard which are less than the target
-    // block number for pruning.
-    for changeset_key in deleted_changesets {
-        // Seek to the shard that has the key >= the given changeset key
+    for sharded_key in highest_sharded_keys {
+        // Seek to the shard that has the key >= the given sharded key
         // TODO: optimize
         let result = cursor
-            .seek(RawKey::new(changeset_key.clone()))?
+            .seek(RawKey::new(sharded_key.clone()))?
             .map(|(key, value)| Result::<_, DatabaseError>::Ok((key.key()?, value)))
             .transpose()?;
 
-        // Get the highest block number that needs to be deleted for this changeset key
-        let to_block = changeset_key.as_ref().highest_block_number;
+        // Get the highest block number that needs to be deleted for this sharded key
+        let to_block = sharded_key.as_ref().highest_block_number;
 
-        // If such shard doesn't exist, skip to the next changeset key
-        if result.as_ref().map_or(true, |(key, _)| !key_matches(key, &changeset_key)) {
+        // If such shard doesn't exist, skip to the next sharded key
+        if result.as_ref().map_or(true, |(key, _)| !key_matches(key, &sharded_key)) {
             continue
         }
 
-        // At this point, we're sure that the shard with the given changeset key exists
+        // At this point, we're sure that the shard with the given sharded key exists
         let (key, raw_blocks): (T::Key, RawValue<BlockNumberList>) = result.unwrap();
 
         deleted += prune_shard(&mut cursor, key, raw_blocks, to_block, &key_matches)?;
@@ -60,7 +54,7 @@ where
             .map(|(k, v)| Result::<_, DatabaseError>::Ok((k.key()?, v)))
             .transpose()?
         {
-            if key_matches(&key, &changeset_key) {
+            if key_matches(&key, &sharded_key) {
                 deleted += prune_shard(&mut cursor, key, value, to_block, &key_matches)?;
             } else {
                 break
@@ -73,6 +67,13 @@ where
     Ok((processed, deleted))
 }
 
+/// Prunes one shard of a history table.
+///
+/// 1. If the shard has `highest_block_number` less than or equal to the target block number for
+///    pruning, delete the shard completely.
+/// 2. If the shard has `highest_block_number` greater than the target block number for pruning,
+///    filter block numbers inside the shard which are less than the target block number for
+///    pruning.
 fn prune_shard<C, T, SK>(
     cursor: &mut C,
     key: T::Key,

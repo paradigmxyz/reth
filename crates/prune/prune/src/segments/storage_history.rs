@@ -69,8 +69,8 @@ impl<DB: Database> Segment<DB> for StorageHistory {
         }
 
         let mut last_changeset_pruned_block = None;
-        // Deleted storage changeset keys (account address and storage slot) with the highest block
-        // number
+        // Deleted storage changeset keys (account addresses and storage slots) with the highest
+        // block number deleted for that key
         let mut highest_deleted_storages = HashMap::new();
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::StorageChangeSets>(
@@ -84,16 +84,17 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             )?;
         trace!(target: "pruner", deleted = %pruned_changesets, %done, "Pruned storage history (changesets)");
 
-        // Sort highest deleted block numbers by account address and storage key
-        // We did not use `BTreeMap` from the beginning, because it's inefficient for hashes
-        let highest_deleted_storages = highest_deleted_storages.into_iter().sorted_unstable().map(
+        // Sort highest deleted block numbers by account address and storage key and turn them into
+        // sharded keys.
+        // We did not use `BTreeMap` from the beginning, because it's inefficient for hashes.
+        let highest_sharded_keys = highest_deleted_storages.into_iter().sorted_unstable().map(
             |((address, storage_key), block_number)| {
                 StorageShardedKey::new(address, storage_key, block_number)
             },
         );
         let (processed, pruned_indices) = prune_history_indices::<DB, tables::StoragesHistory, _>(
             provider,
-            highest_deleted_storages,
+            highest_sharded_keys,
             |a, b| a.address == b.address && a.sharded_key.key == b.sharded_key.key,
         )?;
         trace!(target: "pruner", %processed, deleted = %pruned_indices, %done, "Pruned storage history (history)");
