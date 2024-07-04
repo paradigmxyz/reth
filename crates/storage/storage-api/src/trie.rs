@@ -27,5 +27,5 @@ pub trait StateRootProvider: Send + Sync {
 #[auto_impl::auto_impl(&, Box, Arc)]
 pub trait StateProofProvider: Send + Sync {
     /// Get account and storage proofs.
-    fn proof(&self, address: Address, keys: &[B256]) -> ProviderResult<AccountProof>;
+    fn proof(&self, address: Address, slots: &[B256]) -> ProviderResult<AccountProof>;
 }

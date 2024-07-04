@@ -95,7 +95,7 @@ impl<H> StateProofProvider for MemoryOverlayStateProvider<H>
 where
     H: StateProofProvider + Send,
 {
-    fn proof(&self, address: Address, keys: &[B256]) -> ProviderResult<AccountProof> {
+    fn proof(&self, address: Address, slots: &[B256]) -> ProviderResult<AccountProof> {
         todo!()
     }
 }

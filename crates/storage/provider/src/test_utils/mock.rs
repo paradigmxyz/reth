@@ -555,7 +555,7 @@ impl StateRootProvider for MockEthProvider {
 }
 
 impl StateProofProvider for MockEthProvider {
-    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
+    fn proof(&self, address: Address, _slots: &[B256]) -> ProviderResult<AccountProof> {
         Ok(AccountProof::new(address))
     }
 }

@@ -35,9 +35,9 @@ impl<'a> reth_provider::StateProofProvider for StateProviderTraitObjWrapper<'a> 
     fn proof(
         &self,
         address: revm_primitives::Address,
-        keys: &[B256],
+        slots: &[B256],
     ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {
-        self.0.proof(address, keys)
+        self.0.proof(address, slots)
     }
 }
 
