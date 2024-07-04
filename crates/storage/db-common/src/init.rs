@@ -521,7 +521,7 @@ struct GenesisAccountWithAddress {
 mod tests {
     use super::*;
     use alloy_genesis::Genesis;
-    use reth_chainspec::{Chain, GOERLI, MAINNET, SEPOLIA};
+    use reth_chainspec::{Chain, GOERLI, HOLESKY, MAINNET, SEPOLIA};
     use reth_db::DatabaseEnv;
     use reth_db_api::{
         cursor::DbCursorRO,
@@ -529,7 +529,9 @@ mod tests {
         table::{Table, TableRow},
         transaction::DbTx,
     };
-    use reth_primitives::{GOERLI_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
+    use reth_primitives::{
+        GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+    };
     use reth_primitives_traits::IntegerList;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
 
@@ -568,6 +570,15 @@ mod tests {
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
+    }
+
+    #[test]
+    fn success_init_genesis_holesky() {
+        let genesis_hash =
+            init_genesis(create_test_provider_factory_with_chain_spec(HOLESKY.clone())).unwrap();
+
+        // actual, expected
+        assert_eq!(genesis_hash, HOLESKY_GENESIS_HASH);
     }
 
     #[test]
