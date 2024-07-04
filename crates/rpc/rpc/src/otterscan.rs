@@ -217,7 +217,7 @@ where
         }
 
         let highest =
-            self.eth.transaction_count(sender, None).await?.saturating_to::<u64>();
+            EthApiServer::transaction_count(&self.eth, sender, None).await?.saturating_to::<u64>();
 
         // If the nonce is higher or equal to the highest nonce, the transaction is pending or not
         // exists.
