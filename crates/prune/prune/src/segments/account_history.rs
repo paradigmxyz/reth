@@ -92,7 +92,9 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         let highest_sharded_keys = highest_deleted_accounts
             .into_iter()
             .sorted_unstable() // Unstable is fine because no equal keys exist in the map
-            .map(|(address, block_number)| ShardedKey::new(address, block_number));
+            .map(|(address, block_number)| {
+                ShardedKey::new(address, block_number.min(last_changeset_pruned_block))
+            });
         let (deleted_indices, updated_indices, unchanged_indices) =
             prune_history_indices::<DB, tables::AccountsHistory, _>(
                 provider,

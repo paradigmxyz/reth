@@ -97,7 +97,11 @@ impl<DB: Database> Segment<DB> for StorageHistory {
             .into_iter()
             .sorted_unstable() // Unstable is fine because no equal keys exist in the map
             .map(|((address, storage_key), block_number)| {
-                StorageShardedKey::new(address, storage_key, block_number)
+                StorageShardedKey::new(
+                    address,
+                    storage_key,
+                    block_number.min(last_changeset_pruned_block),
+                )
             });
         let (deleted_indices, updated_indices, unchanged_indices) =
             prune_history_indices::<DB, tables::StoragesHistory, _>(
