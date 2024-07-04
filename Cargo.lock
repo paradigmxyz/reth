@@ -7915,6 +7915,10 @@ name = "reth-optimism-primitives"
 version = "1.0.0"
 
 [[package]]
+name = "reth-optimism-rpc"
+version = "1.0.0"
+
+[[package]]
 name = "reth-payload-builder"
 version = "1.0.0"
 dependencies = [
