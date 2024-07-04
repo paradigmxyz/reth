@@ -1,6 +1,6 @@
 use crate::{
     hashed_cursor::HashedPostStateCursorFactory,
-    prefix_set::{PrefixSetMut, TriePrefixSets},
+    prefix_set::{PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
     updates::TrieUpdates,
     Nibbles, StateRoot,
 };
@@ -170,10 +170,10 @@ impl HashedPostState {
         HashedPostStateSorted { accounts, storages }
     }
 
-    /// Construct [`TriePrefixSets`] from hashed post state.
+    /// Construct [`TriePrefixSetsMut`] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
-    pub fn construct_prefix_sets(&self) -> TriePrefixSets {
+    pub fn construct_prefix_sets(&self) -> TriePrefixSetsMut {
         // Populate account prefix set.
         let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
         let mut destroyed_accounts = HashSet::default();
@@ -194,14 +194,10 @@ impl HashedPostState {
             for hashed_slot in hashed_storage.storage.keys() {
                 prefix_set.insert(Nibbles::unpack(hashed_slot));
             }
-            storage_prefix_sets.insert(*hashed_address, prefix_set.freeze());
+            storage_prefix_sets.insert(*hashed_address, prefix_set);
         }
 
-        TriePrefixSets {
-            account_prefix_set: account_prefix_set.freeze(),
-            storage_prefix_sets,
-            destroyed_accounts,
-        }
+        TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
     }
 
     /// Calculate the state root for this [`HashedPostState`].
@@ -236,7 +232,7 @@ impl HashedPostState {
     /// The state root for this [`HashedPostState`].
     pub fn state_root<TX: DbTx>(&self, tx: &TX) -> Result<B256, StateRootError> {
         let sorted = self.clone().into_sorted();
-        let prefix_sets = self.construct_prefix_sets();
+        let prefix_sets = self.construct_prefix_sets().freeze();
         StateRoot::from_tx(tx)
             .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
             .with_prefix_sets(prefix_sets)
@@ -250,7 +246,7 @@ impl HashedPostState {
         tx: &TX,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let sorted = self.clone().into_sorted();
-        let prefix_sets = self.construct_prefix_sets();
+        let prefix_sets = self.construct_prefix_sets().freeze();
         StateRoot::from_tx(tx)
             .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
             .with_prefix_sets(prefix_sets)
