@@ -40,7 +40,7 @@ use reth_network_peers::{
 };
 
 #[cfg(feature = "optimism")]
-use op_alloy_rpc_types::genesis::{OptimismBaseFeeInfo, OptimismGenesisInfo as OpGenesisInfo};
+use op_alloy_rpc_types::genesis::OptimismChainInfo;
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
@@ -734,6 +734,9 @@ impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
         #[cfg(feature = "optimism")]
         let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
+        #[cfg(feature = "optimism")]
+        let genesis_info =
+            optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
 
         // Block-based hardforks
         let hardfork_opts = [
@@ -751,7 +754,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
             (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Bedrock.boxed(), optimism_genesis_info.genesis_info.bedrock_block),
+            (OptimismHardfork::Bedrock.boxed(), genesis_info.bedrock_block),
         ];
         let mut hardforks = hardfork_opts
             .into_iter()
@@ -780,13 +783,13 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Regolith.boxed(), optimism_genesis_info.genesis_info.regolith_time),
+            (OptimismHardfork::Regolith.boxed(), genesis_info.regolith_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Canyon.boxed(), optimism_genesis_info.genesis_info.canyon_time),
+            (OptimismHardfork::Canyon.boxed(), genesis_info.canyon_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Ecotone.boxed(), optimism_genesis_info.genesis_info.ecotone_time),
+            (OptimismHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Fjord.boxed(), optimism_genesis_info.genesis_info.fjord_time),
+            (OptimismHardfork::Fjord.boxed(), genesis_info.fjord_time),
         ];
 
         let time_hardforks = time_hardfork_opts
@@ -1088,7 +1091,7 @@ impl DepositContract {
 #[derive(Default, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OptimismGenesisInfo {
-    genesis_info: OpGenesisInfo,
+    optimism_chain_info: OptimismChainInfo,
     #[serde(skip)]
     base_fee_params: BaseFeeParamsKind,
 }
@@ -1096,40 +1099,42 @@ struct OptimismGenesisInfo {
 #[cfg(feature = "optimism")]
 impl OptimismGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
-        let mut optimism_genesis_info = OptimismGenesisInfo::default();
-        if let Some(genesis_info) = OpGenesisInfo::extract_from(&genesis.config.extra_fields) {
-            optimism_genesis_info.genesis_info = genesis_info;
-        }
-
-        if let Some(optimism_base_fee_info) =
-            OptimismBaseFeeInfo::extract_from(&genesis.config.extra_fields)
+        let mut optimism_genesis_info = Self::default();
+        if let Some(optimism_chain_info) =
+            OptimismChainInfo::extract_from(&genesis.config.extra_fields)
         {
-            if let (Some(elasticity), Some(denominator)) = (
-                optimism_base_fee_info.eip1559_elasticity,
-                optimism_base_fee_info.eip1559_denominator,
-            ) {
-                let base_fee_params = if let Some(canyon_denominator) =
-                    optimism_base_fee_info.eip1559_denominator_canyon
-                {
-                    BaseFeeParamsKind::Variable(
-                        vec![
-                            (
-                                EthereumHardfork::London.boxed(),
-                                BaseFeeParams::new(denominator as u128, elasticity as u128),
-                            ),
-                            (
-                                OptimismHardfork::Canyon.boxed(),
-                                BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
-                            ),
-                        ]
-                        .into(),
-                    )
-                } else {
-                    BaseFeeParams::new(denominator as u128, elasticity as u128).into()
-                };
+            if let Some(ref optimism_base_fee_info) = optimism_chain_info.base_fee_info {
+                if let (Some(elasticity), Some(denominator)) = (
+                    optimism_base_fee_info.eip1559_elasticity,
+                    optimism_base_fee_info.eip1559_denominator,
+                ) {
+                    let base_fee_params = if let Some(canyon_denominator) =
+                        optimism_base_fee_info.eip1559_denominator_canyon
+                    {
+                        BaseFeeParamsKind::Variable(
+                            vec![
+                                (
+                                    EthereumHardfork::London.boxed(),
+                                    BaseFeeParams::new(denominator as u128, elasticity as u128),
+                                ),
+                                (
+                                    OptimismHardfork::Canyon.boxed(),
+                                    BaseFeeParams::new(
+                                        canyon_denominator as u128,
+                                        elasticity as u128,
+                                    ),
+                                ),
+                            ]
+                            .into(),
+                        )
+                    } else {
+                        BaseFeeParams::new(denominator as u128, elasticity as u128).into()
+                    };
 
-                optimism_genesis_info.base_fee_params = base_fee_params;
+                    optimism_genesis_info.base_fee_params = base_fee_params;
+                }
             }
+            optimism_genesis_info.optimism_chain_info = optimism_chain_info;
         }
 
         optimism_genesis_info
@@ -1143,6 +1148,8 @@ mod tests {
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
     use core::ops::Deref;
+    #[cfg(feature = "optimism")]
+    use op_alloy_rpc_types::genesis::OptimismBaseFeeInfo;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use reth_trie_common::TrieAccount;
     use std::{collections::HashMap, str::FromStr};
