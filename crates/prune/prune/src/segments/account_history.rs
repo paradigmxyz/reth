@@ -9,7 +9,7 @@ use reth_db::tables;
 use reth_db_api::{database::Database, models::ShardedKey};
 use reth_provider::DatabaseProviderRW;
 use reth_prune_types::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use tracing::{instrument, trace};
 
 /// Number of account history tables to prune in one step.
@@ -68,7 +68,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         let mut last_changeset_pruned_block = None;
         // Deleted account changeset keys (account addresses) with the highest block number deleted
         // for that key
-        let mut highest_deleted_accounts = HashMap::new();
+        let mut highest_deleted_accounts = FxHashMap::default();
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::AccountChangeSets>(
                 range,
@@ -85,7 +85,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         // We did not use `BTreeMap` from the beginning, because it's inefficient for hashes.
         let highest_sharded_keys = highest_deleted_accounts
             .into_iter()
-            .sorted_unstable()
+            .sorted_unstable() // Unstable is fine because no equal keys exist in the map
             .map(|(address, block_number)| ShardedKey::new(address, block_number));
         let (processed, pruned_indices) = prune_history_indices::<DB, tables::AccountsHistory, _>(
             provider,
