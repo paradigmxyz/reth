@@ -37,7 +37,7 @@ where
 {
     /// Handler for `{ots,erigon}_getHeaderByNumber`
     async fn get_header_by_number(&self, block_number: u64) -> RpcResult<Option<Header>> {
-        Ok(self.eth.header_by_number(BlockNumberOrTag::Number(block_number)).await?)
+        self.eth.header_by_number(BlockNumberOrTag::Number(block_number)).await
     }
 
     /// Handler for `ots_hasCode`
