@@ -234,7 +234,8 @@ where
 
         while low <= high {
             let mid = (low + high) / 2;
-            let mid_nonce = self.eth.transaction_count(
+            let mid_nonce = EthApiServer::transaction_count(
+                &self.eth,
                 sender,
                 Some(BlockId::Number(BlockNumberOrTag::Number(mid))),
             )
