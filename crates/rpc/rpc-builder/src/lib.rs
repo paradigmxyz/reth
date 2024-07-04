@@ -1699,7 +1699,7 @@ enum WsHttpServers {
 
 impl WsHttpServers {
     /// Starts the servers and returns the handles (http, ws)
-    async fn start(
+    fn start(
         self,
         http_module: Option<RpcModule<()>>,
         ws_module: Option<RpcModule<()>>,
@@ -1796,7 +1796,7 @@ impl RpcServer {
             jwt_secret: None,
         };
 
-        let (http, ws) = ws_http.server.start(http, ws, &config).await?;
+        let (http, ws) = ws_http.server.start(http, ws, &config)?;
         handle.http = http;
         handle.ws = ws;
 
