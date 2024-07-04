@@ -93,7 +93,7 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
 
 impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
     fn proof(&self, address: Address, slots: &[B256]) -> ProviderResult<AccountProof> {
-        Ok(Proof::new(self.tx)
+        Ok(Proof::from_tx(self.tx)
             .account_proof(address, slots)
             .map_err(Into::<reth_db::DatabaseError>::into)?)
     }
