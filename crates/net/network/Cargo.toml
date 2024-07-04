@@ -30,7 +30,7 @@ reth-storage-api.workspace = true
 reth-provider = { workspace = true, optional = true }
 reth-tokio-util.workspace = true
 reth-consensus.workspace = true
-reth-network-peers.workspace = true
+reth-network-peers = { workspace = true, features = ["net"] }
 reth-network-types.workspace = true
 
 # ethereum
