@@ -63,11 +63,9 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
     {
         TaikoData.Config memory config = getConfig();
 
-        console2.log("T:1");
         // Decode the block data
         _block = abi.decode(data, (TaikoData.BlockMetadata));
 
-        console2.log("T:2");
         // Verify L1 data
         // TODO(Brecht): needs to be more configurable for preconfirmations
         require(_block.l1Hash == blockhash(_block.l1StateBlockNumber), "INVALID_L1_BLOCKHASH");
@@ -75,8 +73,6 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         // Verify misc data
         require(_block.gasLimit == config.blockMaxGasLimit, "INVALID_GAS_LIMIT");
 
-        console2.log("Irasd ki");
-        console2.logBytes(txList);
         require(_block.blobUsed == (txList.length == 0), "INVALID_BLOB_USED");
         // Verify DA data
         if (_block.blobUsed) {
@@ -99,12 +95,6 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
 
         TaikoData.Block storage parentBlock = state.blocks[(state.numBlocks - 1)];
 
-        console2.log("Ennyi blokk van:", state.numBlocks);
-        console2.logBytes32(_block.parentMetaHash);
-        console2.logBytes32(parentBlock.metaHash);
-        console2.logBytes32(parentBlock.blockHash);
-        console2.log("ID-ja:",parentBlock.blockId);
-        console2.log("Timestamp-je:",parentBlock.timestamp);
         require(_block.parentMetaHash == parentBlock.blockHash, "invalid parentMetaHash");
 
         // Verify the passed in L1 state block number.

@@ -78,15 +78,9 @@ contract BasedOperator is EssentialContract, TaikoErrors {
         whenNotPaused
         returns (TaikoData.BlockMetadata memory _block)
     {
-        console2.log("BO:1");
         require(msg.value == PROVER_BOND, "Prover bond not expected");
-        console2.log("BO:2");
 
-        console2.log("Address is:");
-        console2.log(resolve("taiko", true));
         _block = TaikoL1(resolve("taiko", false)).proposeBlock(params, txList);
-
-        console2.log("BO:3");
 
         // Check if we have whitelisted proposers
         if (!_isProposerPermitted(_block)) {
