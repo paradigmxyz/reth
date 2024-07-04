@@ -6624,6 +6624,8 @@ dependencies = [
 name = "reth-cli-utils"
 version = "1.0.0"
 dependencies = [
+ "eyre",
+ "proptest",
  "reth-fs-util",
  "reth-network",
  "reth-primitives",
@@ -7716,6 +7718,7 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "reth-chainspec",
+ "reth-cli-utils",
  "reth-config",
  "reth-consensus-common",
  "reth-db",
@@ -7745,7 +7748,6 @@ dependencies = [
  "secp256k1",
  "serde_json",
  "shellexpand",
- "thiserror",
  "tikv-jemalloc-ctl",
  "tokio",
  "tower",

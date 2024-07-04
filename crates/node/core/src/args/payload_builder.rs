@@ -1,11 +1,9 @@
-use crate::{
-    args::utils::parse_duration_from_secs, cli::config::PayloadBuilderConfig,
-    version::default_extradata,
-};
+use crate::{cli::config::PayloadBuilderConfig, version::default_extradata};
 use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
+use reth_cli_utils::parse_duration_from_secs;
 use reth_primitives::constants::{
     ETHEREUM_BLOCK_GAS_LIMIT, MAXIMUM_EXTRA_DATA_SIZE, SLOT_DURATION,
 };

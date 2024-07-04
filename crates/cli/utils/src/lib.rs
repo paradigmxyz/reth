@@ -9,5 +9,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 /// Helper function to load a secret key from a file.
-pub mod secret_key;
-pub use secret_key::get_secret_key;
+pub mod load_secret_key;
+pub use load_secret_key::get_secret_key;
+
+/// Cli parsers functions.
+pub mod parsers;
+pub use parsers::{hash_or_num_value_parser, parse_duration_from_secs, parse_socket_address};

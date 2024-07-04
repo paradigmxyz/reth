@@ -2,7 +2,7 @@
 
 use crate::{
     args::{
-        utils::{chain_help, chain_value_parser, hash_or_num_value_parser, SUPPORTED_CHAINS},
+        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
         DatabaseArgs, NetworkArgs,
     },
     utils::get_single_header,
@@ -10,7 +10,7 @@ use crate::{
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
-use reth_cli_utils::get_secret_key;
+use reth_cli_utils::{get_secret_key, hash_or_num_value_parser};
 use reth_config::Config;
 use reth_network::NetworkConfigBuilder;
 use reth_network_p2p::bodies::client::BodiesClient;

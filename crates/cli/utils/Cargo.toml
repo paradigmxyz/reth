@@ -14,6 +14,10 @@ reth-network.workspace = true
 reth-primitives.workspace = true
 secp256k1.workspace = true
 thiserror.workspace = true
+eyre.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
 
 [lints]
 workspace = true
