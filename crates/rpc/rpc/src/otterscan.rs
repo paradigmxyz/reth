@@ -35,11 +35,12 @@ pub struct OtterscanApi<Eth> {
 ///
 /// The binary search is performed by calling the provided asynchronous `check` closure on the
 /// blocks of the range. The closure should return a future representing the result of performing
-/// the desired logic at a given block. The future resolves to an `Option<bool>` where:
+/// the desired logic at a given block. The future resolves to an `bool` where:
 /// - `true` indicates that the condition has been matched, but we can try to find a lower block to
 ///   make the condition more matchable.
 /// - `false` indicates that the condition not matched, so the target is not present in the current
 ///   block and should continue searching in a higher range.
+///
 /// Args:
 /// - `low`: The lower bound of the block range (inclusive).
 /// - `high`: The upper bound of the block range (inclusive).
@@ -270,7 +271,10 @@ where
                 .await?
                 .saturating_to::<u64>();
 
-                Ok(mid_nonce >= nonce + 1)
+                // The `transaction_count` returns the `nonce` after the transaction was
+                // executed, which is the state of the account after the block, and we need to find
+                // the transaction whose nonce is the pre-state, so need to compare with `nonce+1`.
+                Ok(mid_nonce > nonce + 1)
             })
         })
         .await?;
