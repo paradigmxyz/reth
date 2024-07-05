@@ -5349,7 +5349,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "alloy-serde",
- "arbitrary",
  "op-alloy-consensus",
  "serde",
  "serde_json",

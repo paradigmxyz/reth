@@ -1096,47 +1096,43 @@ struct OptimismGenesisInfo {
 #[cfg(feature = "optimism")]
 impl OptimismGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
-        let mut optimism_genesis_info = Self::default();
-        if let Some(optimism_chain_info) =
-            op_alloy_rpc_types::genesis::OptimismChainInfo::extract_from(
+        let mut info = Self {
+            optimism_chain_info: op_alloy_rpc_types::genesis::OptimismChainInfo::extract_from(
                 &genesis.config.extra_fields,
             )
-        {
-            if let Some(ref optimism_base_fee_info) = optimism_chain_info.base_fee_info {
-                if let (Some(elasticity), Some(denominator)) = (
-                    optimism_base_fee_info.eip1559_elasticity,
-                    optimism_base_fee_info.eip1559_denominator,
-                ) {
-                    let base_fee_params = if let Some(canyon_denominator) =
-                        optimism_base_fee_info.eip1559_denominator_canyon
-                    {
-                        BaseFeeParamsKind::Variable(
-                            vec![
-                                (
-                                    EthereumHardfork::London.boxed(),
-                                    BaseFeeParams::new(denominator as u128, elasticity as u128),
-                                ),
-                                (
-                                    OptimismHardfork::Canyon.boxed(),
-                                    BaseFeeParams::new(
-                                        canyon_denominator as u128,
-                                        elasticity as u128,
-                                    ),
-                                ),
-                            ]
-                            .into(),
-                        )
-                    } else {
-                        BaseFeeParams::new(denominator as u128, elasticity as u128).into()
-                    };
+            .unwrap_or_default(),
+            ..Default::default()
+        };
+        if let Some(optimism_base_fee_info) = &info.optimism_chain_info.base_fee_info {
+            if let (Some(elasticity), Some(denominator)) = (
+                optimism_base_fee_info.eip1559_elasticity,
+                optimism_base_fee_info.eip1559_denominator,
+            ) {
+                let base_fee_params = if let Some(canyon_denominator) =
+                    optimism_base_fee_info.eip1559_denominator_canyon
+                {
+                    BaseFeeParamsKind::Variable(
+                        vec![
+                            (
+                                EthereumHardfork::London.boxed(),
+                                BaseFeeParams::new(denominator as u128, elasticity as u128),
+                            ),
+                            (
+                                OptimismHardfork::Canyon.boxed(),
+                                BaseFeeParams::new(canyon_denominator as u128, elasticity as u128),
+                            ),
+                        ]
+                        .into(),
+                    )
+                } else {
+                    BaseFeeParams::new(denominator as u128, elasticity as u128).into()
+                };
 
-                    optimism_genesis_info.base_fee_params = base_fee_params;
-                }
+                info.base_fee_params = base_fee_params;
             }
-            optimism_genesis_info.optimism_chain_info = optimism_chain_info;
         }
 
-        optimism_genesis_info
+        info
     }
 }
 
@@ -1147,8 +1143,6 @@ mod tests {
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
     use core::ops::Deref;
-    #[cfg(feature = "optimism")]
-    use op_alloy_rpc_types::genesis::OptimismBaseFeeInfo;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
     use reth_trie_common::TrieAccount;
     use std::{collections::HashMap, str::FromStr};
@@ -2900,6 +2894,8 @@ Post-merge hard forks (timestamp based):
     #[cfg(feature = "optimism")]
     #[test]
     fn parse_genesis_optimism_with_variable_base_fee_params() {
+        use op_alloy_rpc_types::genesis::OptimismBaseFeeInfo;
+
         let geth_genesis = r#"
     {
       "config": {
