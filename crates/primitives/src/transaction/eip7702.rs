@@ -91,7 +91,7 @@ impl TxEip7702 {
         }
     }
 
-    /// Calculates a heuristic for the in-memory size of the [TxEip7702] transaction.
+    /// Calculates a heuristic for the in-memory size of the [`TxEip7702`] transaction.
     #[inline]
     pub fn size(&self) -> usize {
         mem::size_of::<ChainId>() + // chain_id
@@ -295,7 +295,7 @@ impl std::hash::Hash for TxEip7702 {
         self.to.hash(state);
         self.value.hash(state);
         self.access_list.hash(state);
-        for auth in self.authorization_list.iter() {
+        for auth in &self.authorization_list {
             auth.signature_hash().hash(state);
         }
         self.input.hash(state);

@@ -60,7 +60,7 @@ impl TxType {
     pub const fn has_access_list(&self) -> bool {
         match self {
             Self::Legacy => false,
-            Self::Eip2930 | TxType::Eip1559 | TxType::Eip4844 | TxType::Eip7702 => true,
+            Self::Eip2930 | Self::Eip1559 | Self::Eip4844 | Self::Eip7702 => true,
             #[cfg(feature = "optimism")]
             Self::Deposit => false,
         }
@@ -145,7 +145,7 @@ impl Compact for TxType {
                 buf.put_u8(self as u8);
                 3
             }
-            TxType::Eip7702 => {
+            Self::Eip7702 => {
                 buf.put_u8(self as u8);
                 3
             }

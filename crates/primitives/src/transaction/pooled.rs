@@ -79,7 +79,7 @@ impl PooledTransactionsElement {
                 Ok(Self::Eip1559 { transaction: tx, signature, hash })
             }
             TransactionSigned { transaction: Transaction::Eip7702(tx), signature, hash } => {
-                Ok(PooledTransactionsElement::Eip7702 { transaction: tx, signature, hash })
+                Ok(Self::Eip7702 { transaction: tx, signature, hash })
             }
             // Not supported because missing blob sidecar
             tx @ TransactionSigned { transaction: Transaction::Eip4844(_), .. } => Err(tx),
@@ -128,7 +128,7 @@ impl PooledTransactionsElement {
             Self::Legacy { hash, .. } |
             Self::Eip2930 { hash, .. } |
             Self::Eip1559 { hash, .. } |
-            PooledTransactionsElement::Eip7702 { hash, .. } => hash,
+            Self::Eip7702 { hash, .. } => hash,
             Self::BlobTransaction(tx) => &tx.hash,
         }
     }
@@ -254,7 +254,7 @@ impl PooledTransactionsElement {
                         signature: typed_tx.signature,
                         hash: typed_tx.hash,
                     }),
-                    Transaction::Eip7702(tx) => {Ok(PooledTransactionsElement::Eip7702 {
+                    Transaction::Eip7702(tx) => {Ok(Self::Eip7702 {
                         transaction: tx,
                         signature: typed_tx.signature,
                         hash: typed_tx.hash,
@@ -407,8 +407,8 @@ impl PooledTransactionsElement {
         }
     }
 
-    /// Returns the [TxEip7702] variant if the transaction is an EIP-7702 transaction.
-    pub fn as_eip7702(&self) -> Option<&TxEip7702> {
+    /// Returns the [`TxEip7702`] variant if the transaction is an EIP-7702 transaction.
+    pub const fn as_eip7702(&self) -> Option<&TxEip7702> {
         match self {
             Self::Eip7702 { transaction, .. } => Some(transaction),
             _ => None,
@@ -626,7 +626,7 @@ impl Decodable for PooledTransactionsElement {
                         signature: typed_tx.signature,
                         hash: typed_tx.hash,
                     }),
-                    Transaction::Eip7702(tx) => Ok(PooledTransactionsElement::Eip7702 {
+                    Transaction::Eip7702(tx) => Ok(Self::Eip7702 {
                         transaction: tx,
                         signature: typed_tx.signature,
                         hash: typed_tx.hash,

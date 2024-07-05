@@ -257,7 +257,7 @@ impl Transaction {
         }
     }
 
-    /// Returns the [AuthorizationList] of the transaction.
+    /// Returns the [`AuthorizationList`] of the transaction.
     ///
     /// Returns `None` if this transaction is not EIP-7702.
     pub fn authorization_list(
@@ -605,7 +605,7 @@ impl Transaction {
     /// Returns true if the transaction is an EIP-7702 transaction.
     #[inline]
     pub const fn is_eip7702(&self) -> bool {
-        matches!(self, Transaction::Eip7702(_))
+        matches!(self, Self::Eip7702(_))
     }
 
     /// Returns the [`TxLegacy`] variant if the transaction is a legacy transaction.
@@ -643,7 +643,7 @@ impl Transaction {
     /// Returns the [TxEip7702] variant if the transaction is an EIP-7702 transaction.
     pub fn as_eip7702(&self) -> Option<&TxEip7702> {
         match self {
-            Transaction::Eip7702(tx) => Some(tx),
+            Self::Eip7702(tx) => Some(tx),
             _ => None,
         }
     }
@@ -675,7 +675,7 @@ impl From<TxEip4844> for Transaction {
 
 impl From<TxEip7702> for Transaction {
     fn from(tx: TxEip7702) -> Self {
-        Transaction::Eip7702(tx)
+        Self::Eip7702(tx)
     }
 }
 
@@ -700,7 +700,7 @@ impl Compact for Transaction {
             Self::Eip4844(tx) => {
                 tx.to_compact(buf);
             }
-            Transaction::Eip7702(tx) => {
+            Self::Eip7702(tx) => {
                 tx.to_compact(buf);
             }
             #[cfg(feature = "optimism")]
@@ -747,7 +747,7 @@ impl Compact for Transaction {
                     }
                     4 => {
                         let (tx, buf) = TxEip7702::from_compact(buf, buf.len());
-                        (Transaction::Eip7702(tx), buf)
+                        (Self::Eip7702(tx), buf)
                     }
                     #[cfg(feature = "optimism")]
                     126 => {
@@ -785,7 +785,7 @@ impl Encodable for Transaction {
             Self::Eip4844(blob_tx) => {
                 blob_tx.encode_for_signing(out);
             }
-            Transaction::Eip7702(set_code_tx) => {
+            Self::Eip7702(set_code_tx) => {
                 set_code_tx.encode_for_signing(out);
             }
             #[cfg(feature = "optimism")]
