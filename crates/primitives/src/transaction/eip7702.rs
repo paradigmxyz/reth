@@ -238,7 +238,7 @@ impl TxEip7702 {
     }
 }
 
-// TODO(onbjerg): This is temporary until we upstream `Arbitary` to EIP-7702 types and `Signature`
+// TODO(onbjerg): This is temporary until we upstream `Arbitrary` to EIP-7702 types and `Signature`
 // in alloy
 impl<'a> Arbitrary<'a> for TxEip7702 {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
