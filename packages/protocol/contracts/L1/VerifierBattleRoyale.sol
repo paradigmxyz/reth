@@ -84,7 +84,10 @@ contract VerifierBattleRoyale is EssentialContract {
 
             TaikoData.Transition memory transitionA = proofBatch.proofs[0].transition;
             TaikoData.Transition memory transitionB = proofBatch.proofs[1].transition;
-            require(transitionA.parentHash == transitionB.parentHash, "parentHash not the same");
+            require(
+                transitionA.parentBlockHash == transitionB.parentBlockHash,
+                "parentHash not the same"
+            );
             require(transitionA.blockHash != transitionB.blockHash, "blockhash the same");
         } else if (proofBatch.proofs.length == 3) {
             /* Multiple verifiers in a consensus show that another verifier is faulty */
@@ -105,7 +108,10 @@ contract VerifierBattleRoyale is EssentialContract {
             for (uint256 i = 0; i < proofBatch.proofs.length - 1; i++) {
                 TaikoData.Transition memory transitionA = proofBatch.proofs[i].transition;
                 TaikoData.Transition memory transitionB = proofBatch.proofs[i + 1].transition;
-                require(transitionA.parentHash == transitionB.parentHash, "parentHash not the same");
+                require(
+                    transitionA.parentBlockHash == transitionB.parentBlockHash,
+                    "parentHash not the same"
+                );
                 if (i < proofBatch.proofs.length - 2) {
                     require(transitionA.blockHash == transitionB.blockHash, "blockhash the same");
                 } else {

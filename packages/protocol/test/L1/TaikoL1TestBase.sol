@@ -57,7 +57,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
 
         basedOperator = BasedOperator(
             deployProxy({
-                name: "based_operator",
+                name: "operator",
                 impl: address(new BasedOperator()),
                 data: abi.encodeCall(BasedOperator.init, (address(addressManager)))
             })
@@ -72,7 +72,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
         );
 
         registerAddress("taiko", address(L1));
-        registerAddress("based_operator", address(basedOperator));
+        registerAddress("operator", address(basedOperator));
         registerAddress("verifier_registry", address(vr));
 
         //         ss = SignalService(
@@ -93,7 +93,8 @@ abstract contract TaikoL1TestBase is TaikoTest {
         //         );
 
         address sgxImpl = address(new SgxVerifier());
-        //Naming is like: 3, 1, 2, is because we need to have incremental order of addresses in BasedOperator, so figured out this is actually the way
+        //Naming is like: 3, 1, 2, is because we need to have incremental order of addresses in
+        // BasedOperator, so figured out this is actually the way
         sv3 = SgxVerifier(
             deployProxy({
                 name: "sgx1", //Name does not matter now, since we check validity via
@@ -235,7 +236,8 @@ abstract contract TaikoL1TestBase is TaikoTest {
     function proposeBlock(
         address proposer,
         address prover,
-        TaikoData.BlockMetadata memory meta
+        TaikoData.BlockMetadata memory meta,
+        bytes4 revertReason
     )
         internal
         returns (TaikoData.BlockMetadata memory)
@@ -279,7 +281,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
         // }
 
         // meta.blockHash = blockHash;
-        // meta.parentMetaHash = parentMetaHash;
+        // meta.parentHash = parentHash;
 
         // meta.timestamp = uint64(block.timestamp);
         // meta.l1Height = uint64(block.number - 1);
@@ -295,28 +297,29 @@ abstract contract TaikoL1TestBase is TaikoTest {
             hex"0000000000000000000000000000000000000000000000000000000000000001";
         bytes memory emptyTxList;
 
-        vm.prank(proposer, proposer);
-        meta = basedOperator.proposeBlock{ value: 1 ether / 10 }(
-            abi.encode(meta), meta.blobUsed == true ? emptyTxList : dummyTxList, prover
-        );
+        if (revertReason == "") {
+            vm.prank(proposer, proposer);
+            meta = basedOperator.proposeBlock{ value: 1 ether / 10 }(
+                abi.encode(meta), meta.blobUsed == true ? emptyTxList : dummyTxList, prover
+            );
+        } else {
+            vm.prank(proposer, proposer);
+            vm.expectRevert(revertReason);
+            meta = basedOperator.proposeBlock{ value: 1 ether / 10 }(
+                abi.encode(meta), meta.blobUsed == true ? emptyTxList : dummyTxList, prover
+            );
+        }
 
         return meta;
     }
 
-    function proveBlock(
-        address prover,
-        bytes memory blockProof
-    )
-        internal
-    {
+    function proveBlock(address prover, bytes memory blockProof) internal {
         vm.prank(prover, prover);
-        basedOperator.proveBlock(
-            blockProof
-        );
+        basedOperator.proveBlock(blockProof);
     }
 
-    function verifyBlock(address, uint64 count) internal {
-        L1.verifyBlocks(count);
+    function verifyBlock(uint64 count) internal {
+        basedOperator.verifyBlocks(count);
     }
 
     // function setupGuardianProverMultisig() internal {
@@ -406,13 +409,12 @@ abstract contract TaikoL1TestBase is TaikoTest {
     }
 
     function printVariables(string memory comment) internal {
-        (,,, uint64 numBlock,,) = L1.state();
         string memory str = string.concat(
             Strings.toString(logCount++),
             ":[",
             Strings.toString(L1.getLastVerifiedBlockId()),
             unicode"→",
-            Strings.toString(numBlock),
+            Strings.toString(L1.getNumOfBlocks()),
             "] // ",
             comment
         );
@@ -427,7 +429,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
     function createBlockMetaData(
         address coinbase,
         uint64 l2BlockNumber,
-        uint32 belowBlockTipHeight, // How many blocks (negatived direction) away from block.id
+        uint32 belowBlockTipHeight, // How many blocks below from current tip (block.id)
         bool blobUsed
     )
         internal
@@ -435,11 +437,9 @@ abstract contract TaikoL1TestBase is TaikoTest {
     {
         meta.blockHash = randBytes32();
 
-        meta.parentMetaHash = randBytes32();
-        if (l2BlockNumber == 1) {
-            meta.parentMetaHash = GENESIS_BLOCK_HASH;
-        }
-
+        TaikoData.Block memory parentBlock = L1.getBlock(l2BlockNumber - 1);
+        meta.parentMetaHash = parentBlock.metaHash;
+        meta.parentBlockHash = parentBlock.blockHash;
         meta.l1Hash = blockhash(block.number - belowBlockTipHeight);
         meta.difficulty = block.prevrandao;
         meta.blobHash = randBytes32();
@@ -476,7 +476,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
 
         // Set transition
         TaikoData.Transition memory transition;
-        transition.parentHash = meta.parentMetaHash;
+        transition.parentBlockHash = L1.getBlock(meta.l2BlockNumber - 1).blockHash;
         transition.blockHash = meta.blockHash;
         proofBatch.transition = transition;
 
@@ -509,7 +509,8 @@ abstract contract TaikoL1TestBase is TaikoTest {
             proofs[2].verifier = sv3;
             proofs[2].proof = bytes.concat(bytes4(0), bytes20(newInstance), signature);
         } else {
-            //Todo(dani): Implement more proof and verifiers when needed/available but for now, not to change the code in BasedOperator, maybe best to mock those 3
+            //Todo(dani): Implement more proof and verifiers when needed/available but for now, not
+            // to change the code in BasedOperator, maybe best to mock those 3
         }
 
         proofBatch.proofs = proofs;
