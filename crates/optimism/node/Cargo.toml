@@ -58,8 +58,10 @@ serde_json.workspace = true
 [dev-dependencies]
 reth.workspace = true
 reth-db.workspace = true
-reth-revm = { workspace = true, features = ["test-utils"] }
 reth-e2e-test-utils.workspace = true
+reth-node-builder = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-revm = { workspace = true, features = ["test-utils"] }
 tokio.workspace = true
 alloy-primitives.workspace = true
 alloy-genesis.workspace = true
@@ -78,3 +80,4 @@ optimism = [
     "reth-auto-seal-consensus/optimism",
     "reth-rpc-eth-types/optimism"
 ]
+test-utils = ["reth-node-builder/test-utils"]
