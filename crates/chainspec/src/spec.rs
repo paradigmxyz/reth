@@ -13,7 +13,10 @@ use reth_ethereum_forks::{
 };
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::{
-    constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS},
+    constants::{
+        DEV_GENESIS_HASH, EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH,
+        MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+    },
     Header, SealedHeader,
 };
 use reth_trie_common::root::state_root_ref_unhashed;
@@ -39,9 +42,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::mainnet(),
         genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
             .expect("Can't deserialize Mainnet genesis json"),
-        genesis_hash: Some(b256!(
-            "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
-        )),
+        genesis_hash: Some(MAINNET_GENESIS_HASH),
         // <https://etherscan.io/block/15537394>
         paris_block_and_final_difficulty: Some((
             15537394,
@@ -66,9 +67,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::sepolia(),
         genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
             .expect("Can't deserialize Sepolia genesis json"),
-        genesis_hash: Some(b256!(
-            "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
-        )),
+        genesis_hash: Some(SEPOLIA_GENESIS_HASH),
         // <https://sepolia.etherscan.io/block/1450409>
         paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
         hardforks: EthereumHardfork::sepolia().into(),
@@ -90,9 +89,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::holesky(),
         genesis: serde_json::from_str(include_str!("../res/genesis/holesky.json"))
             .expect("Can't deserialize Holesky genesis json"),
-        genesis_hash: Some(b256!(
-            "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"
-        )),
+        genesis_hash: Some(HOLESKY_GENESIS_HASH),
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
         hardforks: EthereumHardfork::holesky().into(),
         deposit_contract: Some(DepositContract::new(
@@ -115,9 +112,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::dev(),
         genesis: serde_json::from_str(include_str!("../res/genesis/dev.json"))
             .expect("Can't deserialize Dev testnet genesis json"),
-        genesis_hash: Some(b256!(
-            "2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"
-        )),
+        genesis_hash: Some(DEV_GENESIS_HASH),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: DEV_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
