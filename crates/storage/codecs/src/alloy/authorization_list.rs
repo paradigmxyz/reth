@@ -29,7 +29,7 @@ impl Compact for AlloyAuthorization {
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let (authorization, _) = Authorization::from_compact(buf, len);
-        let alloy_authorization = AlloyAuthorization {
+        let alloy_authorization = Self {
             chain_id: authorization.chain_id,
             address: authorization.address,
             nonce: authorization.nonce.into(),
@@ -44,7 +44,7 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         let mut buffer = Vec::new();
-        // todo: add `SignedAuthorization::into_parts(self) -> (Auth, Signature)`
+        // todo(onbjerg): add `SignedAuthorization::into_parts(self) -> (Auth, Signature)`
         let (auth, signature) = (self.deref().clone(), self.signature());
         let (v, r, s) = (signature.v(), signature.r(), signature.s());
         auth.to_compact(&mut buffer);
