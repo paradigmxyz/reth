@@ -302,7 +302,6 @@ impl std::hash::Hash for TxEip7702 {
     }
 }
 
-// TODO(eip7702): fix these tests
 #[cfg(test)]
 mod tests {
     use super::TxEip7702;
@@ -321,7 +320,7 @@ mod tests {
             max_fee_per_gas: 0x4a817c800,
             max_priority_fee_per_gas: 0x3b9aca00,
             gas_limit: 2,
-            to: TxKind::Create, // TODO(eip7702): fix
+            to: TxKind::Create,
             value: U256::ZERO,
             input: Bytes::from(vec![1, 2]),
             access_list: Default::default(),

@@ -73,23 +73,28 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
 
 #[cfg(test)]
 mod tests {
-    /*
     use super::*;
     use alloy_primitives::{address, b256};
 
     #[test]
     fn test_roundtrip_compact_authorization_list_item() {
-        let authorization = Authorization {
+        let authorization = AlloyAuthorization {
             chain_id: 1,
             address: address!("dac17f958d2ee523a2206206994597c13d831ec7"),
-            nonce: None,
-            y_parity: false,
-            r: b256!("1fd474b1f9404c0c5df43b7620119ffbc3a1c3f942c73b6e14e9f55255ed9b1d").into(),
-            s: b256!("29aca24813279a901ec13b5f7bb53385fa1fc627b946592221417ff74a49600d").into(),
-        };
+            nonce: None.into(),
+        }
+        .into_signed(
+            alloy_primitives::Signature::from_rs_and_parity(
+                b256!("1fd474b1f9404c0c5df43b7620119ffbc3a1c3f942c73b6e14e9f55255ed9b1d").into(),
+                b256!("29aca24813279a901ec13b5f7bb53385fa1fc627b946592221417ff74a49600d").into(),
+                false,
+            )
+            .unwrap(),
+        );
         let mut compacted_authorization = Vec::<u8>::new();
         let len = authorization.clone().to_compact(&mut compacted_authorization);
-        let (decoded_authorization, _) = Authorization::from_compact(&compacted_authorization, len);
+        let (decoded_authorization, _) =
+            SignedAuthorization::from_compact(&compacted_authorization, len);
         assert_eq!(authorization, decoded_authorization);
-        }*/
+    }
 }

@@ -14,7 +14,7 @@ use reth_primitives::{
     BlobTransactionSidecar, BlobTransactionValidationError, FromRecoveredPooledTransaction,
     IntoRecoveredTransaction, PooledTransactionsElement, PooledTransactionsElementEcRecovered,
     SealedBlock, Transaction, TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxHash,
-    TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, U256,
+    TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -1130,13 +1130,12 @@ impl EthPoolTransaction for EthPooledTransaction {
 impl TryFromRecoveredTransaction for EthPooledTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    // TODO(eip7702): fix this
     fn try_from_recovered_transaction(
         tx: TransactionSignedEcRecovered,
     ) -> Result<Self, Self::Error> {
         // ensure we can handle the transaction type and its format
         match tx.tx_type() as u8 {
-            0..=EIP1559_TX_TYPE_ID => {
+            0..=EIP1559_TX_TYPE_ID | EIP7702_TX_TYPE_ID => {
                 // supported
             }
             EIP4844_TX_TYPE_ID => {
