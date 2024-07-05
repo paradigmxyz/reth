@@ -33,7 +33,7 @@ use reth::rpc::builder::{
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 use reth::{blockchain_tree::noop::NoopBlockchainTree, tasks::TokioTaskExecutor};
 use reth_node_ethereum::EthEvmConfig;
-use reth_provider::providers::test_utils::TestCanonStateSubscriptions;
+use reth_provider::test_utils::TestCanonStateSubscriptions;
 
 // Custom rpc extension
 pub mod myrpc_ext;
