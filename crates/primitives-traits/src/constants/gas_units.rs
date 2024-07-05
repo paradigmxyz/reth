@@ -67,14 +67,14 @@ mod tests {
         let duration = Duration::from_secs(1);
         let gas = 100_000;
         let throughput = format_gas_throughput(gas, duration);
-        assert_eq!(throughput, "100 Kgas/second");
+        assert_eq!(throughput, "100.00 Kgas/second");
 
         let gas = 100_000_000;
         let throughput = format_gas_throughput(gas, duration);
-        assert_eq!(throughput, "100 Mgas/second");
+        assert_eq!(throughput, "100.00 Mgas/second");
 
         let gas = 100_000_000_000;
         let throughput = format_gas_throughput(gas, duration);
-        assert_eq!(throughput, "100 Ggas/second");
+        assert_eq!(throughput, "100.00 Ggas/second");
     }
 }
