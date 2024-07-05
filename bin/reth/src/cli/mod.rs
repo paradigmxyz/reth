@@ -15,8 +15,6 @@ use crate::{
 use clap::{value_parser, Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli_commands::db;
-#[cfg(feature = "dev")]
-use reth_cli_commands::test_vectors;
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
@@ -219,7 +217,7 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// Generate Test Vectors
     #[cfg(feature = "dev")]
     #[command(name = "test-vectors")]
-    TestVectors(test_vectors::Command),
+    TestVectors(reth_cli_commands::test_vectors::Command),
     /// Write config to stdout
     #[command(name = "config")]
     Config(config_cmd::Command),
