@@ -23,6 +23,7 @@ library TaikoData {
     /// @dev Struct containing data only required for proving a block
     struct BlockMetadata {
         bytes32 blockHash;
+        bytes32 parentBlockHash;
         bytes32 parentMetaHash;
         bytes32 l1Hash;
         uint256 difficulty;
@@ -40,13 +41,13 @@ library TaikoData {
 
     /// @dev Struct representing transition to be proven.
     struct Transition {
-        bytes32 parentHash;
+        bytes32 parentBlockHash;
         bytes32 blockHash;
     }
 
     /// @dev Struct representing state transition data.
     struct TransitionState {
-        bytes32 blockHash;
+        bytes32 blockHash; //Might be removed..
         uint64 timestamp;
         address prover;
         uint64 verifiableAfter;
@@ -65,8 +66,7 @@ library TaikoData {
     /// @dev Struct holding the state variables for the {TaikoL1} contract.
     struct State {
         mapping(uint256 blockId => Block) blocks;
-        // Todo (Brecht): please check which one to use here (?) metaHash or blockHash
-        mapping(uint256 blockId => mapping(bytes32 parentMetaHash => TransitionState)) transitions;
+        mapping(uint256 blockId => mapping(bytes32 parentBlockHash => TransitionState)) transitions;
         uint64 genesisHeight;
         uint64 genesisTimestamp;
         uint64 numBlocks;

@@ -236,7 +236,8 @@ abstract contract TaikoL1TestBase is TaikoTest {
     function proposeBlock(
         address proposer,
         address prover,
-        TaikoData.BlockMetadata memory meta
+        TaikoData.BlockMetadata memory meta,
+        bytes4 revertReason
     )
         internal
         returns (TaikoData.BlockMetadata memory)
@@ -296,10 +297,18 @@ abstract contract TaikoL1TestBase is TaikoTest {
             hex"0000000000000000000000000000000000000000000000000000000000000001";
         bytes memory emptyTxList;
 
-        vm.prank(proposer, proposer);
-        meta = basedOperator.proposeBlock{ value: 1 ether / 10 }(
-            abi.encode(meta), meta.blobUsed == true ? emptyTxList : dummyTxList, prover
-        );
+        if (revertReason == "") {
+            vm.prank(proposer, proposer);
+            meta = basedOperator.proposeBlock{ value: 1 ether / 10 }(
+                abi.encode(meta), meta.blobUsed == true ? emptyTxList : dummyTxList, prover
+            );
+        } else {
+            vm.prank(proposer, proposer);
+            vm.expectRevert(revertReason);
+            meta = basedOperator.proposeBlock{ value: 1 ether / 10 }(
+                abi.encode(meta), meta.blobUsed == true ? emptyTxList : dummyTxList, prover
+            );
+        }
 
         return meta;
     }
@@ -400,13 +409,12 @@ abstract contract TaikoL1TestBase is TaikoTest {
     }
 
     function printVariables(string memory comment) internal {
-        (,,, uint64 numBlock,,) = L1.state();
         string memory str = string.concat(
             Strings.toString(logCount++),
             ":[",
             Strings.toString(L1.getLastVerifiedBlockId()),
             unicode"→",
-            Strings.toString(numBlock),
+            Strings.toString(L1.getNumOfBlocks()),
             "] // ",
             comment
         );
@@ -419,10 +427,9 @@ abstract contract TaikoL1TestBase is TaikoTest {
     }
 
     function createBlockMetaData(
-        bytes32 parentMetaHash,
         address coinbase,
         uint64 l2BlockNumber,
-        uint32 belowBlockTipHeight, // How many blocks (negatived direction) away from block.id
+        uint32 belowBlockTipHeight, // How many blocks below from current tip (block.id)
         bool blobUsed
     )
         internal
@@ -430,11 +437,9 @@ abstract contract TaikoL1TestBase is TaikoTest {
     {
         meta.blockHash = randBytes32();
 
-        meta.parentMetaHash = parentMetaHash;
-        if (l2BlockNumber == 1) {
-            meta.parentMetaHash = hex"0000000000000000000000000000000000000000000000000000000000000000";
-        }
-
+        TaikoData.Block memory parentBlock = L1.getBlock(l2BlockNumber - 1);
+        meta.parentMetaHash = parentBlock.metaHash;
+        meta.parentBlockHash = parentBlock.blockHash;
         meta.l1Hash = blockhash(block.number - belowBlockTipHeight);
         meta.difficulty = block.prevrandao;
         meta.blobHash = randBytes32();
@@ -471,7 +476,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
 
         // Set transition
         TaikoData.Transition memory transition;
-        transition.parentHash = L1.getBlock(meta.l2BlockNumber).blockHash;
+        transition.parentBlockHash = L1.getBlock(meta.l2BlockNumber - 1).blockHash;
         transition.blockHash = meta.blockHash;
         proofBatch.transition = transition;
 

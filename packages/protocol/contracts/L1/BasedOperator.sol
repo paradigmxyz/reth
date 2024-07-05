@@ -137,7 +137,7 @@ contract BasedOperator is EssentialContract, TaikoErrors {
         // invalid
         // Get the currently stored transition
         TaikoData.TransitionState memory storedTransition = taiko.getTransition(
-            proofBatch.blockMetadata.l2BlockNumber, proofBatch.transition.parentHash
+            proofBatch.blockMetadata.l2BlockNumber, proofBatch.transition.parentBlockHash
         );
 
         // Brecht: SO we set the blockHash in proposeBlock().
