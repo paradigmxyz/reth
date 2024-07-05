@@ -40,6 +40,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
     }
 
     fn fill_tx_env_system_contract_call(
+        &self,
         env: &mut Env,
         caller: Address,
         contract: Address,
@@ -83,6 +84,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
     }
 
     fn fill_cfg_env(
+        &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
@@ -143,7 +145,7 @@ mod tests {
         let chain_spec = ChainSpec::default();
         let total_difficulty = U256::ZERO;
 
-        OptimismEvmConfig::fill_cfg_and_block_env(
+        OptimismEvmConfig::default().fill_cfg_and_block_env(
             &mut cfg_env,
             &mut block_env,
             &chain_spec,

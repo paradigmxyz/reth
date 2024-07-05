@@ -235,7 +235,7 @@ pub trait LoadPendingBlock {
             // parent beacon block root
             pre_block_beacon_root_contract_call(
                 &mut db,
-                self.evm_config().clone(),
+                self.evm_config(),
                 chain_spec.as_ref(),
                 &cfg,
                 &block_env,
