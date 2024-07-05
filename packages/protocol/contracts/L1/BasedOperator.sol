@@ -6,8 +6,6 @@
 
 pragma solidity ^0.8.20;
 
-import "forge-std/console2.sol";
-
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../common/AddressResolver.sol";
 import "../common/EssentialContract.sol";
@@ -53,7 +51,7 @@ contract BasedOperator is EssentialContract, TaikoErrors {
     uint256 public constant MAX_BLOCKS_TO_VERIFY = 5;
     uint256 public constant PROVING_WINDOW = 1 hours;
 
-    address public treasury; // Same as above
+    address public treasury; // (?)
 
     mapping(uint256 => Block) public blocks;
 
