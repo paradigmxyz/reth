@@ -6310,7 +6310,6 @@ version = "1.0.0"
 dependencies = [
  "alloy-rlp",
  "aquamarine",
- "arbitrary",
  "backon",
  "clap",
  "confy",
@@ -6321,8 +6320,6 @@ dependencies = [
  "itertools 0.13.0",
  "libc",
  "metrics-process",
- "proptest",
- "proptest-arbitrary-interop",
  "reth-basic-payload-builder",
  "reth-beacon-consensus",
  "reth-blockchain-tree",
@@ -6612,6 +6609,7 @@ name = "reth-cli-commands"
 version = "1.0.0"
 dependencies = [
  "ahash",
+ "arbitrary",
  "clap",
  "comfy-table",
  "confy",
@@ -6619,6 +6617,8 @@ dependencies = [
  "eyre",
  "human_bytes",
  "itertools 0.13.0",
+ "proptest",
+ "proptest-arbitrary-interop",
  "ratatui",
  "reth-beacon-consensus",
  "reth-chainspec",

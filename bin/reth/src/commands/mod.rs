@@ -11,4 +11,3 @@ pub mod p2p;
 pub mod prune;
 pub mod recover;
 pub mod stage;
-pub mod test_vectors;

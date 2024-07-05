@@ -15,7 +15,6 @@ Commands:
   db            Database debugging utilities
   stage         Manipulate individual stages
   p2p           P2P Debugging utilities
-  test-vectors  Generate Test Vectors
   config        Write config to stdout
   debug         Various debug routines
   recover       Scripts for node recovery
