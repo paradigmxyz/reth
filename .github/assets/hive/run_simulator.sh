@@ -30,7 +30,7 @@ while [ $attempt -lt $max_attempts ]; do
 
     # Check the last line of the log for "finished", "tests failed", or "test failed"
     if check_log | grep -Eq "(finished|tests? failed)"; then
-        exit $?
+        exit 0
     else
         exit 1
     fi
