@@ -284,7 +284,7 @@ where
                     start = last_block,
                     end = block_number,
                     throughput = format_gas_throughput(cumulative_gas - last_cumulative_gas, execution_duration - last_execution_duration),
-                    "Finished executing block range"
+                    "Executed block range"
                 );
 
                 last_block = block_number + 1;
