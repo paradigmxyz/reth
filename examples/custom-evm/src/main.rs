@@ -68,6 +68,7 @@ impl MyEvmConfig {
 
 impl ConfigureEvmEnv for MyEvmConfig {
     fn fill_cfg_env(
+        &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
@@ -95,12 +96,13 @@ impl ConfigureEvmEnv for MyEvmConfig {
     }
 
     fn fill_tx_env_system_contract_call(
+        &self,
         env: &mut Env,
         caller: Address,
         contract: Address,
         data: Bytes,
     ) {
-        EthEvmConfig::fill_tx_env_system_contract_call(env, caller, contract, data)
+        self.fill_tx_env_system_contract_call(env, caller, contract, data)
     }
 }
 

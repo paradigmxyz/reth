@@ -148,7 +148,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
         header: &Header,
         total_difficulty: U256,
     ) {
-        EthEvmConfig::fill_cfg_env(cfg_env, chain_spec, header, total_difficulty)
+        EthEvmConfig::default().fill_cfg_env(cfg_env, chain_spec, header, total_difficulty)
     }
 
     fn fill_tx_env_system_contract_call(
@@ -157,7 +157,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
         contract: Address,
         data: Bytes,
     ) {
-        EthEvmConfig::fill_tx_env_system_contract_call(env, caller, contract, data)
+        EthEvmConfig::default().fill_tx_env_system_contract_call(env, caller, contract, data)
     }
 }
 
