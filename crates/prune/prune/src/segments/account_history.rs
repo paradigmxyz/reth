@@ -95,19 +95,18 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             .map(|(address, block_number)| {
                 ShardedKey::new(address, block_number.min(last_changeset_pruned_block))
             });
-        let (deleted_indices, updated_indices, unchanged_indices) =
-            prune_history_indices::<DB, tables::AccountsHistory, _>(
-                provider,
-                highest_sharded_keys,
-                |a, b| a.key == b.key,
-            )?;
-        trace!(target: "pruner", deleted = %deleted_indices, updated = %updated_indices, unchanged = %unchanged_indices, %done, "Pruned account history (indices)");
+        let outcomes = prune_history_indices::<DB, tables::AccountsHistory, _>(
+            provider,
+            highest_sharded_keys,
+            |a, b| a.key == b.key,
+        )?;
+        trace!(target: "pruner", ?outcomes, %done, "Pruned account history (indices)");
 
         let progress = PruneProgress::new(done, &limiter);
 
         Ok(PruneOutput {
             progress,
-            pruned: pruned_changesets + deleted_indices,
+            pruned: pruned_changesets + outcomes.deleted,
             checkpoint: Some(PruneOutputCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
                 tx_number: None,

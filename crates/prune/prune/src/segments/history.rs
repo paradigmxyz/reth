@@ -16,6 +16,13 @@ enum PruneShardOutcome {
     Unchanged,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct PrunedIndices {
+    pub(crate) deleted: usize,
+    pub(crate) updated: usize,
+    pub(crate) unchanged: usize,
+}
+
 /// Prune history indices according to the provided list of highest sharded keys.
 ///
 /// Returns total number of deleted, updated and unchanged entities.
@@ -23,15 +30,13 @@ pub(crate) fn prune_history_indices<DB, T, SK>(
     provider: &DatabaseProviderRW<DB>,
     highest_sharded_keys: impl IntoIterator<Item = T::Key>,
     key_matches: impl Fn(&T::Key, &T::Key) -> bool,
-) -> Result<(usize, usize, usize), DatabaseError>
+) -> Result<PrunedIndices, DatabaseError>
 where
     DB: Database,
     T: Table<Value = BlockNumberList>,
     T::Key: AsRef<ShardedKey<SK>>,
 {
-    let mut deleted = 0;
-    let mut updated = 0;
-    let mut unchanged = 0;
+    let mut outcomes = PrunedIndices::default();
     let mut cursor = provider.tx_ref().cursor_write::<RawTable<T>>()?;
 
     for sharded_key in highest_sharded_keys {
@@ -51,9 +56,9 @@ where
 
             if key_matches(&key, &sharded_key) {
                 match prune_shard(&mut cursor, key, block_nums, to_block, &key_matches)? {
-                    PruneShardOutcome::Deleted => deleted += 1,
-                    PruneShardOutcome::Updated => updated += 1,
-                    PruneShardOutcome::Unchanged => unchanged += 1,
+                    PruneShardOutcome::Deleted => outcomes.deleted += 1,
+                    PruneShardOutcome::Updated => outcomes.updated += 1,
+                    PruneShardOutcome::Unchanged => outcomes.unchanged += 1,
                 }
             } else {
                 // If such shard doesn't exist, skip to the next sharded key
@@ -64,7 +69,7 @@ where
         }
     }
 
-    Ok((deleted, updated, unchanged))
+    Ok(outcomes)
 }
 
 /// Prunes one shard of a history table.
