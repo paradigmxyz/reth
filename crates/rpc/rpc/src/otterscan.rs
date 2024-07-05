@@ -273,8 +273,9 @@ where
 
                 // The `transaction_count` returns the `nonce` after the transaction was
                 // executed, which is the state of the account after the block, and we need to find
-                // the transaction whose nonce is the pre-state, so need to compare with `nonce+1`.
-                Ok(mid_nonce > nonce + 1)
+                // the transaction whose nonce is the pre-state, so need to compare with `nonce`(no
+                // equal).
+                Ok(mid_nonce > nonce)
             })
         })
         .await?;
