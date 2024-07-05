@@ -34,10 +34,11 @@ impl<'a> reth_provider::StateRootProvider for StateProviderTraitObjWrapper<'a> {
 impl<'a> reth_provider::StateProofProvider for StateProviderTraitObjWrapper<'a> {
     fn proof(
         &self,
+        state: &revm::db::BundleState,
         address: revm_primitives::Address,
         slots: &[B256],
     ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {
-        self.0.proof(address, slots)
+        self.0.proof(state, address, slots)
     }
 }
 

@@ -11,6 +11,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_types::{serde_helpers::JsonStorageKey, EIP1186AccountProofResponse};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use revm::db::BundleState;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
@@ -104,7 +105,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         Ok(self.spawn_blocking_io(move |this| {
             let state = this.state_at_block_id(block_id)?;
             let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
-            let proof = state.proof(address, &storage_keys)?;
+            let proof = state.proof(&BundleState::default(), address, &storage_keys)?;
             Ok(from_primitive_account_proof(proof))
         }))
     }
