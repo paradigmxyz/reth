@@ -274,7 +274,12 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
 
 impl<'b, TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'b, TX> {
     /// Get account and storage proofs.
-    fn proof(&self, _address: Address, _slots: &[B256]) -> ProviderResult<AccountProof> {
+    fn proof(
+        &self,
+        _state: &BundleState,
+        _address: Address,
+        _slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
         Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
     }
 }

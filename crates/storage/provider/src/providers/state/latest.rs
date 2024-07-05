@@ -12,7 +12,7 @@ use reth_primitives::{
 };
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::{proof::Proof, updates::TrieUpdates, AccountProof, HashedPostState};
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 use revm::db::BundleState;
 
 /// State provider over latest state that takes tx reference.
@@ -92,9 +92,14 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
-    fn proof(&self, address: Address, slots: &[B256]) -> ProviderResult<AccountProof> {
-        Ok(Proof::from_tx(self.tx)
-            .account_proof(address, slots)
+    fn proof(
+        &self,
+        bundle_state: &BundleState,
+        address: Address,
+        slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        Ok(HashedPostState::from_bundle_state(&bundle_state.state)
+            .account_proof(self.tx, address, slots)
             .map_err(Into::<reth_db::DatabaseError>::into)?)
     }
 }

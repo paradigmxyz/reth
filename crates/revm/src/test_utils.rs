@@ -79,7 +79,12 @@ impl StateRootProvider for StateProviderTest {
 }
 
 impl StateProofProvider for StateProviderTest {
-    fn proof(&self, _address: Address, _slots: &[B256]) -> ProviderResult<AccountProof> {
+    fn proof(
+        &self,
+        _state: &BundleState,
+        _address: Address,
+        _slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
         unimplemented!("proof generation is not supported")
     }
 }
