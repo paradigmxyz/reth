@@ -102,7 +102,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
         contract: Address,
         data: Bytes,
     ) {
-        self.fill_tx_env_system_contract_call(env, caller, contract, data)
+        EthEvmConfig::default().fill_tx_env_system_contract_call(env, caller, contract, data)
     }
 }
 
