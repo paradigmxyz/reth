@@ -39,9 +39,6 @@ use reth_network_peers::{
     op_testnet_nodes, sepolia_nodes,
 };
 
-#[cfg(feature = "optimism")]
-use op_alloy_rpc_types::genesis::OptimismChainInfo;
-
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
     ChainSpec {
@@ -1091,7 +1088,7 @@ impl DepositContract {
 #[derive(Default, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OptimismGenesisInfo {
-    optimism_chain_info: OptimismChainInfo,
+    optimism_chain_info: op_alloy_rpc_types::genesis::OptimismChainInfo,
     #[serde(skip)]
     base_fee_params: BaseFeeParamsKind,
 }
@@ -1101,7 +1098,9 @@ impl OptimismGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
         let mut optimism_genesis_info = Self::default();
         if let Some(optimism_chain_info) =
-            OptimismChainInfo::extract_from(&genesis.config.extra_fields)
+            op_alloy_rpc_types::genesis::OptimismChainInfo::extract_from(
+                &genesis.config.extra_fields,
+            )
         {
             if let Some(ref optimism_base_fee_info) = optimism_chain_info.base_fee_info {
                 if let (Some(elasticity), Some(denominator)) = (

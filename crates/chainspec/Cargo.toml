@@ -52,7 +52,7 @@ default = ["std"]
 optimism = [
     "reth-ethereum-forks/optimism",
     "serde",
-    "op-alloy-rpc-types/arbitrary",
+    "dep:op-alloy-rpc-types",
 ]
 std = []
 arbitrary = [
