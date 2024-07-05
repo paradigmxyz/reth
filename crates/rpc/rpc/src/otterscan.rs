@@ -40,6 +40,10 @@ pub struct OtterscanApi<Eth> {
 ///   make the condition more matchable.
 /// - `false` indicates that the condition not matched, so the target is not present in the current
 ///   block and should continue searching in a higher range.
+/// Args:
+/// - `low`: The lower bound of the block range (inclusive).
+/// - `high`: The upper bound of the block range (inclusive).
+/// - `check`: A closure that performs the desired logic at a given block.
 async fn binary_search<'a, F>(low: u64, high: u64, check: F) -> RpcResult<u64>
 where
     F: Fn(u64) -> BoxFuture<'a, RpcResult<bool>>,
@@ -348,5 +352,29 @@ where
         // return the first found transaction, this behavior is consistent with etherscan's
         let found = traces.and_then(|traces| traces.first().cloned());
         Ok(found)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_binary_search() {
+        // in the middle
+        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 5) })).await;
+        assert_eq!(num, Ok(5));
+
+        // in the upper
+        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 7) })).await;
+        assert_eq!(num, Ok(7));
+
+        // in the lower
+        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 1) })).await;
+        assert_eq!(num, Ok(1));
+
+        // high than the upper
+        let num = binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 11) })).await;
+        assert_eq!(num, Ok(10));
     }
 }
