@@ -42,7 +42,7 @@ where
         // Get the highest block number that needs to be deleted for this sharded key
         let to_block = sharded_key.as_ref().highest_block_number;
 
-        loop {
+        'shard: loop {
             let Some((key, block_nums)) =
                 shard.map(|(k, v)| Result::<_, DatabaseError>::Ok((k.key()?, v))).transpose()?
             else {
@@ -57,7 +57,7 @@ where
                 }
             } else {
                 // If such shard doesn't exist, skip to the next sharded key
-                break
+                break 'shard
             }
 
             shard = cursor.next()?;
