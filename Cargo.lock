@@ -7962,6 +7962,12 @@ version = "1.0.0"
 [[package]]
 name = "reth-optimism-rpc"
 version = "1.0.0"
+dependencies = [
+ "reth-rpc-eth-api",
+ "reth-rpc-eth-types",
+ "reth-rpc-server-types",
+ "reth-rpc-types",
+]
 
 [[package]]
 name = "reth-payload-builder"
