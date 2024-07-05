@@ -4,9 +4,7 @@
 use futures::Future;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{Address, BlockId, Bytes, Header, B256, U256};
-use reth_provider::{
-    BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
-};
+use reth_provider::{BlockIdReader, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_rpc_eth_types::{
     EthApiError, EthResult, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError,
 };
@@ -207,12 +205,7 @@ pub trait LoadState {
             let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash.into()).await?;
 
             let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
-            self.evm_config().fill_block_env(
-                &mut block_env,
-                &LoadPendingBlock::provider(self).chain_spec(),
-                header,
-                after_merge,
-            );
+            self.evm_config().fill_block_env(&mut block_env, header, after_merge);
 
             Ok((cfg, block_env))
         }

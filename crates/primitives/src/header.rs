@@ -1,70 +1,11 @@
 //! Header types.
 
-use crate::{recover_signer_unchecked, Address, Bytes};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
-use reth_chainspec::{Chain, ChainSpec};
 use reth_codecs::derive_arbitrary;
 use serde::{Deserialize, Serialize};
 
 pub use reth_primitives_traits::{Header, HeaderError, SealedHeader};
-
-/// Return the coinbase address for the given header and chain spec.
-pub fn block_coinbase(chain_spec: &ChainSpec, header: &Header, after_merge: bool) -> Address {
-    // Clique consensus fills the EXTRA_SEAL (last 65 bytes) of the extra data with the
-    // signer's signature.
-    //
-    // On the genesis block, the extra data is filled with zeros, so we should not attempt to
-    // recover the signer on the genesis block.
-    //
-    // From EIP-225:
-    //
-    // * `EXTRA_SEAL`: Fixed number of extra-data suffix bytes reserved for signer seal.
-    //   * 65 bytes fixed as signatures are based on the standard `secp256k1` curve.
-    //   * Filled with zeros on genesis block.
-    if chain_spec.chain == Chain::goerli() && !after_merge && header.number > 0 {
-        recover_header_signer(header).unwrap_or_else(|err| {
-            panic!(
-                "Failed to recover goerli Clique Consensus signer from header ({}, {}) using extradata {}: {:?}",
-                header.number, header.hash_slow(), header.extra_data, err
-            )
-        })
-    } else {
-        header.beneficiary
-    }
-}
-
-/// Error type for recovering Clique signer from a header.
-#[derive(Debug, thiserror_no_std::Error)]
-pub enum CliqueSignerRecoveryError {
-    /// Header extradata is too short.
-    #[error("Invalid extra data length")]
-    InvalidExtraData,
-    /// Recovery failed.
-    #[error("Invalid signature: {0}")]
-    InvalidSignature(#[from] secp256k1::Error),
-}
-
-/// Recover the account from signed header per clique consensus rules.
-pub fn recover_header_signer(header: &Header) -> Result<Address, CliqueSignerRecoveryError> {
-    let extra_data_len = header.extra_data.len();
-    // Fixed number of extra-data suffix bytes reserved for signer signature.
-    // 65 bytes fixed as signatures are based on the standard secp256k1 curve.
-    // Filled with zeros on genesis block.
-    let signature_start_byte = extra_data_len - 65;
-    let signature: [u8; 65] = header.extra_data[signature_start_byte..]
-        .try_into()
-        .map_err(|_| CliqueSignerRecoveryError::InvalidExtraData)?;
-    let seal_hash = {
-        let mut header_to_seal = header.clone();
-        header_to_seal.extra_data = Bytes::from(header.extra_data[..signature_start_byte].to_vec());
-        header_to_seal.hash_slow()
-    };
-
-    // TODO: this is currently unchecked recovery, does this need to be checked w.r.t EIP-2?
-    recover_signer_unchecked(&signature, &seal_hash.0)
-        .map_err(CliqueSignerRecoveryError::InvalidSignature)
-}
 
 /// Represents the direction for a headers request depending on the `reverse` field of the request.
 /// > The response must contain a number of block headers, of rising number when reverse is 0,
@@ -147,9 +88,7 @@ impl From<HeadersDirection> for bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        address, b256, bloom, bytes, hex, Address, Bytes, Header, HeadersDirection, B256, U256,
-    };
+    use crate::{address, b256, bloom, bytes, hex, Address, Bytes, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
@@ -412,14 +351,5 @@ mod tests {
         let data = hex!("f90242a013a7ec98912f917b3e804654e37c9866092043c13eb8eab94eb64818e886cff5a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d4934794f97e180c050e5ab072211ad2c213eb5aee4df134a0ec229dbe85b0d3643ad0f471e6ec1a36bbc87deffbbd970762d22a53b35d068aa056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080830305988401c9c380808464c40d5499d883010c01846765746888676f312e32302e35856c696e7578a070ccadc40b16e2094954b1064749cc6fbac783c1712f1b271a8aac3eda2f232588000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421891122334455667788998401600000");
         Header::decode(&mut data.as_slice())
             .expect_err("blob_gas_used size should make this header decoding fail");
-    }
-
-    #[test]
-    fn test_recover_genesis_goerli_signer() {
-        // just ensures that `block_coinbase` does not panic on the genesis block
-        let chain_spec = reth_chainspec::GOERLI.clone();
-        let header = chain_spec.genesis_header();
-        let block_coinbase = block_coinbase(&chain_spec, &header, false);
-        assert_eq!(block_coinbase, header.beneficiary);
     }
 }
