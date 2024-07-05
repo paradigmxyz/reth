@@ -140,10 +140,8 @@ contract BasedOperator is EssentialContract, TaikoErrors {
             proofBatch.blockMetadata.l2BlockNumber, proofBatch.transition.parentBlockHash
         );
 
-        // Brecht: SO we set the blockHash in proposeBlock().
-        // But we need to prove it too (the same one), so somehow we need to check if this is proven
-        // already and IF NOT, then revert with "block already proven", no ? So i set the
-        // verifiableAfter in propseBlock to 0, because this is just a "proposed state".
+        // Somehow we need to check if this is proven already and IF YES and transition is trying to
+        // prove the same, then revert with "block already proven".
         if (
             storedTransition.isProven == true
                 && storedTransition.blockHash == proofBatch.transition.blockHash
