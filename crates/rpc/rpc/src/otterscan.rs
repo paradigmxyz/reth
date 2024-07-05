@@ -1,5 +1,6 @@
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
+use futures::future::BoxFuture;
 use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
@@ -28,6 +29,36 @@ const API_LEVEL: u64 = 8;
 #[derive(Debug)]
 pub struct OtterscanApi<Eth> {
     eth: Eth,
+}
+
+/// Performs a binary search within a given block range to find the desired block number.
+///
+/// The binary search is performed by calling the provided asynchronous `check` closure on the
+/// blocks of the range. The closure should return a future representing the result of performing
+/// the desired logic at a given block. The future resolves to an `Option<bool>` where:
+/// - `true` indicates that the condition has been matched, but we can try to find a lower block to
+///   make the condition more matchable.
+/// - `false` indicates that the condition not matched, so the target is not present in the current
+///   block and should continue searching in a higher range.
+async fn binary_search<'a, F>(low: u64, high: u64, check: F) -> RpcResult<u64>
+where
+    F: Fn(u64) -> BoxFuture<'a, RpcResult<bool>>,
+{
+    let mut low = low;
+    let mut high = high;
+    let mut num = high;
+
+    while low <= high {
+        let mid = (low + high) / 2;
+        if check(mid).await? {
+            high = mid - 1;
+            num = mid;
+        } else {
+            low = mid + 1
+        }
+    }
+
+    Ok(num)
 }
 
 impl<Eth> OtterscanApi<Eth> {
@@ -225,34 +256,20 @@ where
             return Ok(None)
         }
 
-        // To find the first block where the sender's nonce is equal to the given one, we can use
-        // binary search within the range of blocks starting from block 1 up to the latest block
-        // number.
-        let mut low = 1;
-        let mut high = self.eth.block_number()?.saturating_to::<u64>();
-        let mut num = high;
+        let num = binary_search(1, self.eth.block_number()?.saturating_to(), |mid| {
+            Box::pin(async move {
+                let mid_nonce = EthApiServer::transaction_count(
+                    &self.eth,
+                    sender,
+                    Some(BlockId::Number(BlockNumberOrTag::Number(mid))),
+                )
+                .await?
+                .saturating_to::<u64>();
 
-        while low <= high {
-            let mid = (low + high) / 2;
-            let mid_nonce = EthApiServer::transaction_count(
-                &self.eth,
-                sender,
-                Some(BlockId::Number(BlockNumberOrTag::Number(mid))),
-            )
-            .await?
-            .saturating_to::<u64>();
-
-            // The `transaction_count` returns the `nonce` after the transaction was executed, which
-            // is the state of the account after the block, and we need to find the
-            // transaction whose nonce is the pre-state, so need to compare with
-            // `nonce+1`.
-            if mid_nonce < nonce + 1 {
-                low = mid + 1; // not found in current block, need to search in the later blocks
-            } else {
-                high = mid - 1; // found in current block, try to find a lower block
-                num = mid;
-            }
-        }
+                Ok(mid_nonce >= nonce + 1)
+            })
+        })
+        .await?;
 
         let Some(BlockTransactions::Full(transactions)) =
             self.eth.block_by_number(num.into(), true).await?.map(|block| block.inner.transactions)
