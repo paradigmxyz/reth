@@ -37,42 +37,30 @@ where
     for sharded_key in highest_sharded_keys {
         // Seek to the shard that has the key >= the given sharded key
         // TODO: optimize
-        let result = cursor
-            .seek(RawKey::new(sharded_key.clone()))?
-            .map(|(key, value)| Result::<_, DatabaseError>::Ok((key.key()?, value)))
-            .transpose()?;
-
-        // If such shard doesn't exist, skip to the next sharded key
-        if result.as_ref().map_or(true, |(key, _)| !key_matches(key, &sharded_key)) {
-            continue
-        }
-
-        // At this point, we're sure that the shard with the given sharded key exists
-        let (key, raw_blocks): (T::Key, RawValue<BlockNumberList>) = result.unwrap();
+        let mut shard = cursor.seek(RawKey::new(sharded_key.clone()))?;
 
         // Get the highest block number that needs to be deleted for this sharded key
         let to_block = sharded_key.as_ref().highest_block_number;
 
-        match prune_shard(&mut cursor, key, raw_blocks, to_block, &key_matches)? {
-            PruneShardOutcome::Deleted => deleted += 1,
-            PruneShardOutcome::Updated => updated += 1,
-            PruneShardOutcome::Unchanged => unchanged += 1,
-        }
+        'shard: loop {
+            let Some((key, block_nums)) =
+                shard.map(|(k, v)| Result::<_, DatabaseError>::Ok((k.key()?, v))).transpose()?
+            else {
+                break
+            };
 
-        while let Some((key, value)) = cursor
-            .next()?
-            .map(|(k, v)| Result::<_, DatabaseError>::Ok((k.key()?, v)))
-            .transpose()?
-        {
             if key_matches(&key, &sharded_key) {
-                match prune_shard(&mut cursor, key, value, to_block, &key_matches)? {
+                match prune_shard(&mut cursor, key, block_nums, to_block, &key_matches)? {
                     PruneShardOutcome::Deleted => deleted += 1,
                     PruneShardOutcome::Updated => updated += 1,
                     PruneShardOutcome::Unchanged => unchanged += 1,
                 }
             } else {
-                break
+                // If such shard doesn't exist, skip to the next sharded key
+                break 'shard
             }
+
+            shard = cursor.next()?;
         }
     }
 
