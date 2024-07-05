@@ -24,7 +24,7 @@ contract PBSActor {
         bytes calldata params,
         bytes calldata txList,
         bytes memory proverPaymentData,
-        bytes32 parentMetaHash,
+        bytes32 parentHash,
         uint256 tip
     )
         external
@@ -35,7 +35,7 @@ contract PBSActor {
             operator.proposeBlock{ value: msg.value - tip }(params, txList, proverPaymentData);
 
         // Check if parent block has the right meta hash
-        require(keccak256(abi.encode(_block)) == parentMetaHash, "unexpected parent");
+        require(keccak256(abi.encode(_block)) == parentHash, "unexpected parent");
 
         // Do conditional payment
         address(block.coinbase).sendEther(tip);

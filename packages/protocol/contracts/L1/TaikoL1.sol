@@ -68,10 +68,11 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         // Verify L1 data
         // TODO(Brecht): needs to be more configurable for preconfirmations
         require(_block.l1Hash == blockhash(_block.l1StateBlockNumber), "INVALID_L1_BLOCKHASH");
+        require(_block.blockHash != 0x0, "INVALID_L2_BLOCKHASH");
         require(_block.difficulty == block.prevrandao, "INVALID_DIFFICULTY");
-        require(_block.timestamp == uint64(block.timestamp), "INVALID_TIMESTAMP");
         // Verify misc data
         require(_block.gasLimit == config.blockMaxGasLimit, "INVALID_GAS_LIMIT");
+
         require(_block.blobUsed == (txList.length == 0), "INVALID_BLOB_USED");
         // Verify DA data
         if (_block.blobUsed) {
@@ -93,7 +94,8 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         );
 
         TaikoData.Block storage parentBlock = state.blocks[(state.numBlocks - 1)];
-        require(_block.parentMetaHash == parentBlock.metaHash, "invalid parentMetaHash");
+
+        require(_block.parentMetaHash == parentBlock.metaHash, "invalid parentHash");
 
         // Verify the passed in L1 state block number.
         // We only allow the L1 block to be 4 epochs old.
@@ -130,11 +132,10 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         // Store the block
         state.blocks[state.numBlocks] = blk;
 
-        // Store the passed in block hash as in
-        state.transitions[blk.blockId][_block.parentMetaHash].blockHash = _block.blockHash;
-        // For now it does not matter - we are not going to prove anyways
-        state.transitions[blk.blockId][_block.parentMetaHash].verifiableAfter =
-            uint64(block.timestamp) + 365 days;
+        // Store the passed in block hash as is
+        state.transitions[blk.blockId][_block.parentBlockHash].blockHash = _block.blockHash;
+        // Big enough number so that we are sure we don't hit that deadline in the future.
+        state.transitions[blk.blockId][_block.parentBlockHash].verifiableAfter = type(uint64).max;
 
         // Increment the counter (cursor) by 1.
         state.numBlocks++;
@@ -167,14 +168,17 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         TaikoData.Block storage blk = state.blocks[_block.l2BlockNumber];
 
         // Make sure the correct block was proven
-        require(blk.metaHash != keccak256(abi.encode(_block)), "incorrect block");
+        if (blk.metaHash != keccak256(abi.encode(_block))) {
+            revert L1_INCORRECT_BLOCK();
+        }
 
         // Store the transition
         TaikoData.TransitionState storage storedTransition =
-            state.transitions[_block.l2BlockNumber][transition.parentHash];
+            state.transitions[_block.l2BlockNumber][transition.parentBlockHash];
         storedTransition.blockHash = transition.blockHash;
         storedTransition.prover = prover;
         storedTransition.verifiableAfter = uint32(block.timestamp + SECURITY_DELAY_AFTER_PROVEN);
+        storedTransition.isProven = true;
 
         emit TransitionProved({ blockId: _block.l2BlockNumber, tran: transition, prover: prover });
     }
@@ -190,21 +194,22 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         // Get the last verified blockhash
         TaikoData.Block storage blk = state.blocks[state.lastVerifiedBlockId];
         bytes32 blockHash = blk.blockHash;
-        // Go to the first unverified block
         uint256 blockId = uint256(state.lastVerifiedBlockId) + 1;
         uint256 numBlocksVerified;
+
         while (blockId < state.numBlocks && numBlocksVerified < maxBlocksToVerify) {
             blk = state.blocks[blockId];
-
-            // Check if the parent block hash matches the actual block hash of the parent
             // Check if the timestamp is older than required
             if (
-                state.transitions[blockId][blockHash].blockHash == bytes32(0)
-                    || block.timestamp < state.transitions[blockId][blockHash].verifiableAfter
+                block
+                    // Genesis is already verified with initialization so if we do not allow to set
+                    // blockHash = bytes32(0), then we can remove the bytes32(0) check.
+                    /*state.transitions[blockId][blockHash].blockHash == bytes32(0)
+                    || */
+                    .timestamp < state.transitions[blockId][blockHash].verifiableAfter
             ) {
                 break;
             }
-
             // Copy the blockhash to the block
             blk.blockHash = state.transitions[blockId][blockHash].blockHash;
             // Update latest block hash
@@ -254,6 +259,10 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
 
     function getLastVerifiedBlockId() public view returns (uint256) {
         return uint256(state.lastVerifiedBlockId);
+    }
+
+    function getNumOfBlocks() public view returns (uint256) {
+        return uint256(state.numBlocks);
     }
 
     /// @notice Gets the configuration of the TaikoL1 contract.
