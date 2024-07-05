@@ -10,3 +10,5 @@
 
 pub mod common;
 pub mod db;
+#[cfg(feature = "dev")]
+pub mod test_vectors;

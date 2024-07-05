@@ -61,8 +61,6 @@
     - [`reth p2p`](./cli/reth/p2p.md)
       - [`reth p2p header`](./cli/reth/p2p/header.md)
       - [`reth p2p body`](./cli/reth/p2p/body.md)
-    - [`reth test-vectors`](./cli/reth/test-vectors.md)
-      - [`reth test-vectors tables`](./cli/reth/test-vectors/tables.md)
     - [`reth config`](./cli/reth/config.md)
     - [`reth debug`](./cli/reth/debug.md)
       - [`reth debug execution`](./cli/reth/debug/execution.md)
