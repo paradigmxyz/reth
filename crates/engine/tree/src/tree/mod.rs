@@ -329,7 +329,9 @@ where
                                 error!("Failed to send event: {err:?}");
                             }
                         }
-                        BeaconEngineMessage::TransitionConfigurationExchanged => {}
+                        BeaconEngineMessage::TransitionConfigurationExchanged => {
+                            todo!()
+                        }
                     },
                     FromEngine::DownloadedBlocks(blocks) => {
                         if let Some(event) = self.on_downloaded(blocks) {
