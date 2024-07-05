@@ -3,7 +3,7 @@ use crate::{
 };
 use reth_primitives::{Account, Address, BlockNumber, Bytecode, B256};
 use reth_storage_api::StateProofProvider;
-use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, AccountProof};
 use revm::db::BundleState;
 
