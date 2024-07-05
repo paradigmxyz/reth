@@ -1,16 +1,18 @@
 use super::access_list::AccessList;
 use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
-use alloy_eips::eip7702::SignedAuthorization;
+use alloy_eips::eip7702::{Authorization, SignedAuthorization};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
+use arbitrary::Arbitrary;
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
+use revm_primitives::Address;
 use std::mem;
 
 /// [EIP-7702 Set Code Transaction](https://eips.ethereum.org/EIPS/eip-7702)
 ///
 /// Set EOA account code for one transaction
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[main_codec(no_arbitrary, add_arbitrary_tests)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TxEip7702 {
     /// Added as EIP-pub 155: Simple replay attack protection
     pub chain_id: ChainId,
@@ -233,6 +235,70 @@ impl TxEip7702 {
         let mut buf = BytesMut::with_capacity(self.payload_len_for_signature());
         self.encode_for_signing(&mut buf);
         keccak256(&buf)
+    }
+}
+
+// TODO(onbjerg): This is temporary until we upstream `Arbitary` to EIP-7702 types and `Signature`
+// in alloy
+impl<'a> Arbitrary<'a> for TxEip7702 {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        #[derive(Arbitrary)]
+        struct AbitrarySignedAuth {
+            chain_id: ChainId,
+            address: Address,
+            nonce: Option<u64>,
+            y: bool,
+            r: U256,
+            s: U256,
+        }
+
+        let iter = u.arbitrary_iter::<AbitrarySignedAuth>()?;
+        let mut authorization_list = Vec::new();
+        for auth in iter {
+            let auth = auth?;
+            authorization_list.push(
+                Authorization {
+                    chain_id: auth.chain_id,
+                    address: auth.address,
+                    nonce: auth.nonce.into(),
+                }
+                .into_signed(
+                    alloy_primitives::Signature::from_rs_and_parity(auth.r, auth.s, auth.y)
+                        .expect("arbitrary generated invalid eip-7702 signature"),
+                ),
+            );
+        }
+
+        Ok(Self {
+            chain_id: Arbitrary::arbitrary(u)?,
+            nonce: Arbitrary::arbitrary(u)?,
+            gas_limit: Arbitrary::arbitrary(u)?,
+            max_fee_per_gas: Arbitrary::arbitrary(u)?,
+            max_priority_fee_per_gas: Arbitrary::arbitrary(u)?,
+            to: Arbitrary::arbitrary(u)?,
+            value: Arbitrary::arbitrary(u)?,
+            access_list: Arbitrary::arbitrary(u)?,
+            authorization_list,
+            input: Arbitrary::arbitrary(u)?,
+        })
+    }
+}
+
+// TODO(onbjerg): This is temporary until we upstream `Hash` for EIP-7702 types in alloy
+impl std::hash::Hash for TxEip7702 {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.chain_id.hash(state);
+        self.nonce.hash(state);
+        self.gas_limit.hash(state);
+        self.max_fee_per_gas.hash(state);
+        self.max_priority_fee_per_gas.hash(state);
+        self.to.hash(state);
+        self.value.hash(state);
+        self.access_list.hash(state);
+        for auth in self.authorization_list.iter() {
+            auth.signature_hash().hash(state);
+        }
+        self.input.hash(state);
     }
 }
 

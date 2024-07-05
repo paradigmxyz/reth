@@ -1,10 +1,9 @@
 //! Common conversions from alloy types.
 
 use crate::{
-    constants::EMPTY_TRANSACTIONS,
-    transaction::{extract_chain_id, TxEip7702},
-    Block, Signature, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxEip1559,
-    TxEip2930, TxEip4844, TxLegacy, TxType,
+    constants::EMPTY_TRANSACTIONS, transaction::extract_chain_id, Block, Signature, Transaction,
+    TransactionSigned, TransactionSignedEcRecovered, TxEip1559, TxEip2930, TxEip4844, TxLegacy,
+    TxType,
 };
 use alloy_primitives::TxKind;
 use alloy_rlp::Error as RlpError;

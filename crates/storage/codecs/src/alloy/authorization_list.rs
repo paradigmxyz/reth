@@ -71,7 +71,6 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
     }
 }
 
-// TODO(eip7702): complete these tests
 #[cfg(test)]
 mod tests {
     /*
