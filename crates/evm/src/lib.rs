@@ -15,9 +15,7 @@ extern crate alloc;
 use core::ops::Deref;
 
 use reth_chainspec::ChainSpec;
-use reth_primitives::{
-    header::block_coinbase, Address, Header, TransactionSigned, TransactionSignedEcRecovered, U256,
-};
+use reth_primitives::{Address, Header, TransactionSigned, TransactionSignedEcRecovered, U256};
 use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
 use revm_primitives::{
     BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv,
@@ -122,6 +120,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 
     /// Fill transaction environment with a system contract call.
     fn fill_tx_env_system_contract_call(
+        &self,
         env: &mut Env,
         caller: Address,
         contract: Address,
@@ -130,6 +129,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 
     /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header
     fn fill_cfg_env(
+        &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
@@ -137,26 +137,9 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     );
 
     /// Fill [`BlockEnv`] field according to the chain spec and given header
-    fn fill_block_env(
-        &self,
-        block_env: &mut BlockEnv,
-        chain_spec: &ChainSpec,
-        header: &Header,
-        after_merge: bool,
-    ) {
-        let coinbase = block_coinbase(chain_spec, header, after_merge);
-        Self::fill_block_env_with_coinbase(block_env, header, after_merge, coinbase);
-    }
-
-    /// Fill block environment with coinbase.
-    fn fill_block_env_with_coinbase(
-        block_env: &mut BlockEnv,
-        header: &Header,
-        after_merge: bool,
-        coinbase: Address,
-    ) {
+    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Header, after_merge: bool) {
         block_env.number = U256::from(header.number);
-        block_env.coinbase = coinbase;
+        block_env.coinbase = header.beneficiary;
         block_env.timestamp = U256::from(header.timestamp);
         if after_merge {
             block_env.prevrandao = Some(header.mix_hash);
@@ -177,19 +160,15 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
     /// [`ConfigureEvmEnv::fill_block_env`].
     fn fill_cfg_and_block_env(
+        &self,
         cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
-        Self::fill_cfg_env(cfg, chain_spec, header, total_difficulty);
+        self.fill_cfg_env(cfg, chain_spec, header, total_difficulty);
         let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
-        Self::fill_block_env_with_coinbase(
-            block_env,
-            header,
-            after_merge,
-            block_coinbase(chain_spec, header, after_merge),
-        );
+        self.fill_block_env(block_env, header, after_merge);
     }
 }

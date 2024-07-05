@@ -24,7 +24,7 @@ use revm_primitives::{
 #[allow(clippy::too_many_arguments)]
 pub fn pre_block_beacon_root_contract_call<EvmConfig, DB>(
     db: &mut DB,
-    _emv_config: EvmConfig,
+    evm_config: &EvmConfig,
     chain_spec: &ChainSpec,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
@@ -48,7 +48,8 @@ where
         .build();
 
     // initialize a block from the env, because the pre block call needs the block itself
-    apply_beacon_root_contract_call::<EvmConfig, _, _>(
+    apply_beacon_root_contract_call(
+        evm_config,
         chain_spec,
         block_timestamp,
         block_number,
@@ -66,6 +67,7 @@ where
 /// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
 #[inline]
 pub fn apply_beacon_root_contract_call<EvmConfig, EXT, DB>(
+    evm_config: &EvmConfig,
     chain_spec: &ChainSpec,
     block_timestamp: u64,
     block_number: u64,
@@ -100,7 +102,7 @@ where
     let previous_env = Box::new(evm.context.env().clone());
 
     // modify env for pre block call
-    EvmConfig::fill_tx_env_system_contract_call(
+    evm_config.fill_tx_env_system_contract_call(
         &mut evm.context.evm.env,
         alloy_eips::eip4788::SYSTEM_ADDRESS,
         BEACON_ROOTS_ADDRESS,
@@ -138,6 +140,7 @@ where
 /// This uses [`apply_withdrawal_requests_contract_call`] to ultimately calculate the
 /// [requests](Request).
 pub fn post_block_withdrawal_requests_contract_call<EvmConfig, DB>(
+    evm_config: &EvmConfig,
     db: &mut DB,
     initialized_cfg: &CfgEnvWithHandlerCfg,
     initialized_block_env: &BlockEnv,
@@ -158,7 +161,7 @@ where
         .build();
 
     // initialize a block from the env, because the post block call needs the block itself
-    apply_withdrawal_requests_contract_call::<EvmConfig, _, _>(&mut evm_post_block)
+    apply_withdrawal_requests_contract_call::<EvmConfig, _, _>(evm_config, &mut evm_post_block)
 }
 
 /// Applies the post-block call to the EIP-7002 withdrawal requests contract.
@@ -167,6 +170,7 @@ where
 /// returned. Otherwise, the withdrawal requests are returned.
 #[inline]
 pub fn apply_withdrawal_requests_contract_call<EvmConfig, EXT, DB>(
+    evm_config: &EvmConfig,
     evm: &mut Evm<'_, EXT, DB>,
 ) -> Result<Vec<Request>, BlockExecutionError>
 where
@@ -185,7 +189,7 @@ where
     // At the end of processing any execution block where `block.timestamp >= FORK_TIMESTAMP` (i.e.
     // after processing all transactions and after performing the block body withdrawal requests
     // validations), call the contract as `SYSTEM_ADDRESS`.
-    EvmConfig::fill_tx_env_system_contract_call(
+    evm_config.fill_tx_env_system_contract_call(
         &mut evm.context.evm.env,
         alloy_eips::eip7002::SYSTEM_ADDRESS,
         WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,

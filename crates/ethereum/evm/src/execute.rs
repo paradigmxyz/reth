@@ -145,7 +145,8 @@ where
         DB::Error: Into<ProviderError> + std::fmt::Display,
     {
         // apply pre execution changes
-        apply_beacon_root_contract_call::<EvmConfig, _, _>(
+        apply_beacon_root_contract_call(
+            &self.evm_config,
             &self.chain_spec,
             block.timestamp,
             block.number,
@@ -220,7 +221,7 @@ where
 
             // Collect all EIP-7685 requests
             let withdrawal_requests =
-                apply_withdrawal_requests_contract_call::<EvmConfig, _, _>(&mut evm)?;
+                apply_withdrawal_requests_contract_call(&self.evm_config, &mut evm)?;
 
             [deposit_requests, withdrawal_requests].concat()
         } else {
@@ -275,7 +276,7 @@ where
     fn evm_env_for_block(&self, header: &Header, total_difficulty: U256) -> EnvWithHandlerCfg {
         let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
         let mut block_env = BlockEnv::default();
-        EvmConfig::fill_cfg_and_block_env(
+        self.executor.evm_config.fill_cfg_and_block_env(
             &mut cfg,
             &mut block_env,
             self.chain_spec(),
@@ -361,13 +362,11 @@ where
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
-    /// Executes the block and commits the state changes.
+    /// Executes the block and commits the changes to the internal state.
     ///
     /// Returns the receipts of the transactions in the block.
     ///
     /// Returns an error if the block could not be executed or failed verification.
-    ///
-    /// State changes are committed to the database.
     fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
         let EthExecuteOutput { receipts, requests, gas_used } =

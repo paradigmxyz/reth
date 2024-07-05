@@ -71,11 +71,11 @@ impl LaunchContext {
     /// `config`.
     ///
     /// Attaches both the `NodeConfig` and the loaded `reth.toml` config to the launch context.
-    pub async fn with_loaded_toml_config(
+    pub fn with_loaded_toml_config(
         self,
         config: NodeConfig,
     ) -> eyre::Result<LaunchContextWith<WithConfigs>> {
-        let toml_config = self.load_toml_config(&config).await?;
+        let toml_config = self.load_toml_config(&config)?;
         Ok(self.with(WithConfigs { config, toml_config }))
     }
 
@@ -83,7 +83,7 @@ impl LaunchContext {
     /// `config`.
     ///
     /// This is async because the trusted peers may have to be resolved.
-    pub async fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
+    pub fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
         let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
 
         let mut toml_config = confy::load_path::<reth_config::Config>(&config_path)
@@ -518,7 +518,7 @@ where
     }
 
     /// Creates a `BlockchainProvider` and attaches it to the launch context.
-    pub async fn with_blockchain_db<T>(
+    pub fn with_blockchain_db<T>(
         self,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>>
     where

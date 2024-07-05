@@ -28,8 +28,7 @@ pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
             ),
             to,
             from,
-        )
-        .await?;
+        )?;
     }
 
     Ok(())
@@ -66,7 +65,7 @@ fn unwind_and_copy<DB: Database>(
 }
 
 /// Try to re-execute the stage straight away
-async fn dry_run<DB: Database>(
+fn dry_run<DB: Database>(
     output_provider_factory: ProviderFactory<DB>,
     to: u64,
     from: u64,

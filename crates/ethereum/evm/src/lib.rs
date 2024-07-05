@@ -36,6 +36,7 @@ pub struct EthEvmConfig;
 
 impl ConfigureEvmEnv for EthEvmConfig {
     fn fill_cfg_env(
+        &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
@@ -63,6 +64,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 
     fn fill_tx_env_system_contract_call(
+        &self,
         env: &mut Env,
         caller: Address,
         contract: Address,
@@ -132,7 +134,7 @@ mod tests {
         let chain_spec = ChainSpec::default();
         let total_difficulty = U256::ZERO;
 
-        EthEvmConfig::fill_cfg_and_block_env(
+        EthEvmConfig::default().fill_cfg_and_block_env(
             &mut cfg_env,
             &mut block_env,
             &chain_spec,

@@ -118,7 +118,7 @@ where
         // apply eip-4788 pre block contract call
         pre_block_beacon_root_contract_call(
             &mut db,
-            self.evm_config.clone(),
+            &self.evm_config,
             &chain_spec,
             &initialized_cfg,
             &initialized_block_env,
@@ -201,6 +201,7 @@ where
             // We do not calculate the EIP-6110 deposit requests because there are no
             // transactions in an empty payload.
             let withdrawal_requests = post_block_withdrawal_requests_contract_call::<EvmConfig, _>(
+                &self.evm_config,
                 &mut db,
                 &initialized_cfg,
                 &initialized_block_env,
@@ -296,7 +297,7 @@ where
     // apply eip-4788 pre block contract call
     pre_block_beacon_root_contract_call(
         &mut db,
-        evm_config.clone(),
+        &evm_config,
         &chain_spec,
         &initialized_cfg,
         &initialized_block_env,
@@ -443,7 +444,8 @@ where
     {
         let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter().flatten())
             .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
-        let withdrawal_requests = post_block_withdrawal_requests_contract_call::<EvmConfig, _>(
+        let withdrawal_requests = post_block_withdrawal_requests_contract_call(
+            &evm_config,
             &mut db,
             &initialized_cfg,
             &initialized_block_env,

@@ -78,7 +78,7 @@ impl Command {
             }
 
             // This will build an offline-only pipeline if the `offline` flag is enabled
-            let mut pipeline = self.build_pipeline(config, provider_factory.clone()).await?;
+            let mut pipeline = self.build_pipeline(config, provider_factory)?;
 
             // Move all applicable data from database to static files.
             pipeline.move_to_static_files()?;
@@ -108,7 +108,7 @@ impl Command {
         Ok(())
     }
 
-    async fn build_pipeline<DB: Database + 'static>(
+    fn build_pipeline<DB: Database + 'static>(
         self,
         config: Config,
         provider_factory: ProviderFactory<Arc<DB>>,

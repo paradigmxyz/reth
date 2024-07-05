@@ -21,7 +21,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
 
     import_tables_with_range(&output_db, db_tool, from, to)?;
 
-    unwind_and_copy(db_tool, from, tip_block_number, &output_db).await?;
+    unwind_and_copy(db_tool, from, tip_block_number, &output_db)?;
 
     if should_run {
         dry_run(
@@ -32,8 +32,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
             ),
             to,
             from,
-        )
-        .await?;
+        )?;
     }
 
     Ok(())
@@ -120,7 +119,7 @@ fn import_tables_with_range<DB: Database>(
 /// Dry-run an unwind to FROM block, so we can get the `PlainStorageState` and
 /// `PlainAccountState` safely. There might be some state dependency from an address
 /// which hasn't been changed in the given range.
-async fn unwind_and_copy<DB: Database>(
+fn unwind_and_copy<DB: Database>(
     db_tool: &DbTool<DB>,
     from: u64,
     tip_block_number: u64,
@@ -151,7 +150,7 @@ async fn unwind_and_copy<DB: Database>(
 }
 
 /// Try to re-execute the stage without committing
-async fn dry_run<DB: Database>(
+fn dry_run<DB: Database>(
     output_provider_factory: ProviderFactory<DB>,
     to: u64,
     from: u64,

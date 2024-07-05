@@ -1,0 +1,23 @@
+[package]
+name = "reth-cli-util"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+reth-fs-util.workspace = true
+reth-network.workspace = true
+reth-primitives.workspace = true
+secp256k1.workspace = true
+thiserror.workspace = true
+eyre.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true
