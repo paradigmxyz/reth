@@ -140,7 +140,7 @@ mod tests {
     use alloy_genesis::GenesisAccount;
     use alloy_primitives::{b256, Address, LogData};
     use alloy_rlp::Decodable;
-    use reth_chainspec::{GOERLI, HOLESKY, MAINNET, SEPOLIA};
+    use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
     use reth_trie_common::root::{state_root_ref_unhashed, state_root_unhashed};
     use std::collections::HashMap;
 
@@ -533,14 +533,6 @@ mod tests {
         assert_eq!(
             expected_mainnet_state_root, calculated_mainnet_state_root,
             "mainnet state root mismatch"
-        );
-
-        let expected_goerli_state_root =
-            b256!("5d6cded585e73c4e322c30c2f782a336316f17dd85a4863b9d838d2d4b8b3008");
-        let calculated_goerli_state_root = state_root_ref_unhashed(&GOERLI.genesis.alloc);
-        assert_eq!(
-            expected_goerli_state_root, calculated_goerli_state_root,
-            "goerli state root mismatch"
         );
 
         let expected_sepolia_state_root =
