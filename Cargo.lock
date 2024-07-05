@@ -7963,6 +7963,10 @@ version = "1.0.0"
 name = "reth-optimism-rpc"
 version = "1.0.0"
 dependencies = [
+ "alloy-primitives",
+ "reth-chainspec",
+ "reth-errors",
+ "reth-rpc",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
