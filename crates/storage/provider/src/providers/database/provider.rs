@@ -2040,7 +2040,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         header: &Header,
-        _evm_config: EvmConfig,
+        evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
         EvmConfig: ConfigureEvmEnv,
@@ -2048,7 +2048,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        EvmConfig::fill_cfg_and_block_env(
+        evm_config.fill_cfg_and_block_env(
             cfg,
             block_env,
             &self.chain_spec,
@@ -2076,7 +2076,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
         header: &Header,
-        _evm_config: EvmConfig,
+        evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
         EvmConfig: ConfigureEvmEnv,
@@ -2084,7 +2084,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        EvmConfig::fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
+        evm_config.fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
     }
 }
