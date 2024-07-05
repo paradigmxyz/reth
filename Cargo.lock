@@ -3056,6 +3056,7 @@ dependencies = [
  "reth-db",
  "reth-db-api",
  "reth-node-ethereum",
+ "reth-provider",
  "tokio",
 ]
 

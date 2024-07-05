@@ -32,9 +32,10 @@ use reth::rpc::builder::{
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 use reth::{
-    blockchain_tree::noop::NoopBlockchainTree, providers::test_utils::TestCanonStateSubscriptions,
+    blockchain_tree::noop::NoopBlockchainTree,
     tasks::TokioTaskExecutor,
 };
+use reth_provider::providers::test_utils::TestCanonStateSubscriptions;
 use reth_node_ethereum::EthEvmConfig;
 
 // Custom rpc extension
