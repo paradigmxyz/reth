@@ -1,7 +1,8 @@
 use crate::EthVersion;
+use alloy_chains::{Chain, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use reth_chainspec::{Chain, ChainSpec, NamedChain, MAINNET};
+use reth_chainspec::{ChainSpec, MAINNET};
 use reth_codecs_derive::derive_arbitrary;
 use reth_primitives::{hex, EthereumHardfork, ForkId, Head, B256, U256};
 #[cfg(feature = "serde")]
