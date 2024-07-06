@@ -348,12 +348,12 @@ mod tests {
     use crate::{
         broadcast::BlockHashNumber,
         errors::{EthHandshakeError, EthStreamError},
+        hello::DEFAULT_TCP_PORT,
         p2pstream::{ProtocolVersion, UnauthedP2PStream},
         EthMessage, EthStream, EthVersion, HelloMessageWithProtocols, PassthroughCodec, Status,
     };
     use futures::{SinkExt, StreamExt};
     use reth_chainspec::NamedChain;
-    use reth_discv4::DEFAULT_DISCOVERY_PORT;
     use reth_ecies::stream::ECIESStream;
     use reth_network_peers::pk2id;
     use reth_primitives::{ForkFilter, Head, B256, U256};
@@ -624,7 +624,7 @@ mod tests {
                 protocol_version: ProtocolVersion::V5,
                 client_version: "bitcoind/1.0.0".to_string(),
                 protocols: vec![EthVersion::Eth67.into()],
-                port: DEFAULT_DISCOVERY_PORT,
+                port: DEFAULT_TCP_PORT,
                 id: pk2id(&server_key.public_key(SECP256K1)),
             };
 
@@ -652,7 +652,7 @@ mod tests {
             protocol_version: ProtocolVersion::V5,
             client_version: "bitcoind/1.0.0".to_string(),
             protocols: vec![EthVersion::Eth67.into()],
-            port: DEFAULT_DISCOVERY_PORT,
+            port: DEFAULT_TCP_PORT,
             id: pk2id(&client_key.public_key(SECP256K1)),
         };
 
