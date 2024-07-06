@@ -35,11 +35,11 @@ pub fn format_gas_throughput(gas: u64, execution_duration: Duration) -> String {
 pub fn format_gas(gas: u64) -> String {
     let gas = gas as f64;
     if gas < MEGAGAS as f64 {
-        format!("{:.} Kgas", gas / KILOGAS as f64)
+        format!("{:.2} Kgas", gas / KILOGAS as f64)
     } else if gas < GIGAGAS as f64 {
-        format!("{:.} Mgas", gas / MEGAGAS as f64)
+        format!("{:.2} Mgas", gas / MEGAGAS as f64)
     } else {
-        format!("{:.} Ggas", gas / GIGAGAS as f64)
+        format!("{:.2} Ggas", gas / GIGAGAS as f64)
     }
 }
 
@@ -51,15 +51,15 @@ mod tests {
     fn test_gas_fmt() {
         let gas = 100_000;
         let gas_unit = format_gas(gas);
-        assert_eq!(gas_unit, "100 Kgas");
+        assert_eq!(gas_unit, "100.00 Kgas");
 
         let gas = 100_000_000;
         let gas_unit = format_gas(gas);
-        assert_eq!(gas_unit, "100 Mgas");
+        assert_eq!(gas_unit, "100.00 Mgas");
 
         let gas = 100_000_000_000;
         let gas_unit = format_gas(gas);
-        assert_eq!(gas_unit, "100 Ggas");
+        assert_eq!(gas_unit, "100.00 Ggas");
     }
 
     #[test]
