@@ -102,7 +102,7 @@ optimism = [
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-rpc-eth-api/optimism",
-    "reth-rpc-eth-types/optimism"
+    "reth-rpc-eth-types/optimism",
 ]
 
 jemalloc = ["dep:tikv-jemalloc-ctl"]

@@ -1,6 +1,6 @@
 //! Command that runs pruning without any limits.
+use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use tracing::info;

@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
+reth-codecs.workspace = true
 reth-codecs-derive.workspace = true
 reth-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["derive"] }
@@ -47,4 +48,3 @@ arbitrary = [
     "dep:proptest-arbitrary-interop",
 ]
 serde = ["dep:serde"]
-

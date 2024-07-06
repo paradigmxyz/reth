@@ -5,10 +5,12 @@ use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWra
 use reth_codecs_derive::{add_arbitrary_tests, derive_arbitrary};
 #[cfg(any(test, feature = "arbitrary"))]
 use reth_primitives::generate_valid_header;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
+use reth_primitives::{BlockBody, BlockHashOrNumber, Header, B256};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+use crate::HeadersDirection;
 
 /// A request for a peer to return block headers starting at the requested block.
 /// The peer must return at most [`limit`](#structfield.limit) headers.
@@ -107,11 +109,14 @@ impl From<Vec<BlockBody>> for BlockBodies {
 
 #[cfg(test)]
 mod tests {
-    use crate::{message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders};
+    use crate::{
+        message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
+        HeadersDirection,
+    };
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{
-        hex, BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction,
-        TransactionSigned, TxKind, TxLegacy, U256,
+        hex, BlockHashOrNumber, Header, Signature, Transaction, TransactionSigned, TxKind,
+        TxLegacy, U256,
     };
     use std::str::FromStr;
 

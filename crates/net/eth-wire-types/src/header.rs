@@ -5,8 +5,6 @@ use bytes::BufMut;
 use reth_codecs::derive_arbitrary;
 use serde::{Deserialize, Serialize};
 
-pub use reth_primitives_traits::{Header, HeaderError, SealedHeader};
-
 /// Represents the direction for a headers request depending on the `reverse` field of the request.
 /// > The response must contain a number of block headers, of rising number when reverse is 0,
 /// > falling when 1
@@ -88,8 +86,8 @@ impl From<HeadersDirection> for bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{address, b256, bloom, bytes, hex, Address, Bytes, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
+    use reth_primitives::{address, b256, bloom, bytes, hex, Address, Bytes, Header, B256, U256};
     use std::str::FromStr;
 
     // Test vector from: https://eips.ethereum.org/EIPS/eip-2481

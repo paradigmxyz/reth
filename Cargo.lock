@@ -3056,6 +3056,7 @@ dependencies = [
  "reth-db",
  "reth-db-api",
  "reth-node-ethereum",
+ "reth-provider",
  "tokio",
 ]
 
@@ -6610,6 +6611,7 @@ version = "1.0.0"
 dependencies = [
  "ahash",
  "arbitrary",
+ "backon",
  "clap",
  "comfy-table",
  "confy",
@@ -6622,6 +6624,8 @@ dependencies = [
  "ratatui",
  "reth-beacon-consensus",
  "reth-chainspec",
+ "reth-cli-runner",
+ "reth-cli-util",
  "reth-config",
  "reth-db",
  "reth-db-api",
@@ -6629,15 +6633,20 @@ dependencies = [
  "reth-downloaders",
  "reth-evm",
  "reth-fs-util",
+ "reth-network",
+ "reth-network-p2p",
  "reth-node-core",
  "reth-primitives",
  "reth-provider",
+ "reth-prune",
  "reth-stages",
  "reth-static-file",
  "reth-static-file-types",
+ "reth-trie",
  "serde",
  "serde_json",
  "tokio",
+ "toml",
  "tracing",
 ]
 
@@ -7154,6 +7163,7 @@ dependencies = [
  "proptest-derive 0.5.0",
  "rand 0.8.5",
  "reth-chainspec",
+ "reth-codecs",
  "reth-codecs-derive",
  "reth-primitives",
  "serde",
