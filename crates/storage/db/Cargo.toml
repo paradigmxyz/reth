@@ -18,15 +18,18 @@ reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
-reth-libmdbx = { workspace = true, optional = true, features = [
-    "return-borrowed",
-    "read-tx-timeouts",
-] }
 reth-nippy-jar.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-tracing.workspace = true
 reth-trie-common.workspace = true
+
+# mdbx
+reth-libmdbx = { workspace = true, optional = true, features = [
+    "return-borrowed",
+    "read-tx-timeouts",
+] }
+eyre = { workspace = true, optional = true }
 
 # codecs
 serde = { workspace = true, default-features = false }
@@ -41,7 +44,6 @@ page_size = "0.6.0"
 thiserror.workspace = true
 tempfile = { workspace = true, optional = true }
 derive_more.workspace = true
-eyre.workspace = true
 paste.workspace = true
 rustc-hash.workspace = true
 sysinfo = { version = "0.30", default-features = false }
@@ -75,8 +77,8 @@ assert_matches.workspace = true
 
 [features]
 default = ["mdbx"]
-test-utils = ["tempfile", "arbitrary"]
-mdbx = ["reth-libmdbx"]
+mdbx = ["dep:reth-libmdbx", "dep:eyre"]
+test-utils = ["dep:tempfile", "arbitrary"]
 bench = []
 arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
 optimism = []
