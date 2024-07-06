@@ -172,8 +172,9 @@ impl<TX: DbTx + 'static> DatabaseProvider<TX> {
 }
 
 impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
-    #[cfg(any(test, feature = "test-utils"))]
-    /// Inserts an historical block. Used for setting up test environments
+    // TODO: uncomment below, once `reth debug_cmd` has been feature gated with dev.
+    // #[cfg(any(test, feature = "test-utils"))]
+    /// Inserts an historical block. **Used for setting up test environments**
     pub fn insert_historical_block(
         &self,
         block: SealedBlockWithSenders,

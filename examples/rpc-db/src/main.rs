@@ -31,11 +31,9 @@ use reth::rpc::builder::{
 };
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
-use reth::{
-    blockchain_tree::noop::NoopBlockchainTree, providers::test_utils::TestCanonStateSubscriptions,
-    tasks::TokioTaskExecutor,
-};
+use reth::{blockchain_tree::noop::NoopBlockchainTree, tasks::TokioTaskExecutor};
 use reth_node_ethereum::EthEvmConfig;
+use reth_provider::test_utils::TestCanonStateSubscriptions;
 
 // Custom rpc extension
 pub mod myrpc_ext;
