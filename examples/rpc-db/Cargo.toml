@@ -13,5 +13,6 @@ reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
 reth-node-ethereum.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["full"] }
 eyre.workspace = true
