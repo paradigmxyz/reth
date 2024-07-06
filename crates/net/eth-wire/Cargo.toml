@@ -29,7 +29,7 @@ bytes.workspace = true
 derive_more.workspace = true
 thiserror.workspace = true
 serde = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["net", "sync", "time"] }
 tokio-util = { workspace = true, features = ["io", "codec"] }
 futures.workspace = true
 tokio-stream.workspace = true
@@ -45,6 +45,7 @@ reth-primitives = { workspace = true, features = ["arbitrary"] }
 reth-tracing.workspace = true
 
 test-fuzz.workspace = true
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["io", "codec"] }
 rand.workspace = true
 secp256k1 = { workspace = true, features = [
@@ -65,7 +66,6 @@ arbitrary = [
     "reth-primitives/arbitrary",
     "dep:arbitrary",
 ]
-optimism = ["reth-primitives/optimism"]
 serde = ["dep:serde", "reth-eth-wire-types/serde"]
 
 [[test]]

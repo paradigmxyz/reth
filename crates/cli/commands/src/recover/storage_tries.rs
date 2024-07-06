@@ -1,5 +1,5 @@
+use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_db::tables;
 use reth_db_api::{

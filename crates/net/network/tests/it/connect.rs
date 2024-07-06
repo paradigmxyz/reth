@@ -4,7 +4,7 @@ use alloy_node_bindings::Geth;
 use alloy_provider::{ext::AdminApi, ProviderBuilder};
 use futures::StreamExt;
 use reth_discv4::Discv4Config;
-use reth_eth_wire::DisconnectReason;
+use reth_eth_wire::{DisconnectReason, HeadersDirection};
 use reth_net_banlist::BanList;
 use reth_network::{
     test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
@@ -16,7 +16,6 @@ use reth_network_p2p::{
     sync::{NetworkSyncUpdater, SyncState},
 };
 use reth_network_peers::{mainnet_nodes, NodeRecord};
-use reth_primitives::HeadersDirection;
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
