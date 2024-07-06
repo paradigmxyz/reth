@@ -15,7 +15,6 @@ workspace = true
 # reth
 reth-config.workspace = true
 reth-consensus.workspace = true
-reth-eth-wire-types.workspace = true
 reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
 reth-primitives.workspace = true

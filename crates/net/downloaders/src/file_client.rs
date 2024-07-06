@@ -1,12 +1,11 @@
 use super::file_codec::BlockFileCodec;
 use futures::Future;
 use itertools::Either;
-use reth_eth_wire_types::HeadersDirection;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::RequestError,
-    headers::client::{HeadersClient, HeadersFut, HeadersRequest},
+    headers::client::{HeadersClient, HeadersDirection, HeadersFut, HeadersRequest},
     priority::Priority,
 };
 use reth_network_peers::PeerId;

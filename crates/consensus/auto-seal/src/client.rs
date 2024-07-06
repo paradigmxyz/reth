@@ -1,11 +1,10 @@
 //! This includes download client implementations for auto sealing miners.
 
 use crate::Storage;
-use reth_eth_wire_types::HeadersDirection;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
-    headers::client::{HeadersClient, HeadersFut, HeadersRequest},
+    headers::client::{HeadersClient, HeadersDirection, HeadersFut, HeadersRequest},
     priority::Priority,
 };
 use reth_network_peers::{PeerId, WithPeerId};
