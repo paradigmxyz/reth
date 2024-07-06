@@ -28,7 +28,7 @@ bytes.workspace = true
 derive_more.workspace = true
 thiserror.workspace = true
 serde = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["net", "sync", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "sync", "time"] }
 tokio-util = { workspace = true, features = ["io", "codec"] }
 futures.workspace = true
 tokio-stream.workspace = true
