@@ -19,6 +19,12 @@
 
 pub use reth_codecs_derive::*;
 
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, U256};
 use bytes::Buf;
 

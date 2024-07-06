@@ -4,6 +4,9 @@ use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::mem;
 use reth_codecs::{main_codec, Compact};
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]

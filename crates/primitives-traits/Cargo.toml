@@ -27,7 +27,7 @@ revm-primitives = { workspace = true, features = ["serde"] }
 # misc
 thiserror-no-std = { workspace = true, default-features = false }
 roaring = "0.10.2"
-byteorder = "1"
+byteorder = { version = "1", default-features = false }
 
 # required by reth-codecs
 modular-bitfield.workspace = true

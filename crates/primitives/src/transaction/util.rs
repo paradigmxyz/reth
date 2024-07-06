@@ -1,3 +1,4 @@
+#[cfg(feature = "secp256k1")]
 pub(crate) mod secp256k1 {
     use super::*;
     use crate::{keccak256, Address, Signature};
@@ -43,6 +44,43 @@ pub(crate) mod secp256k1 {
         // strip out the first byte because that should be the SECP256K1_TAG_PUBKEY_UNCOMPRESSED
         // tag returned by libsecp's uncompressed pubkey serialization
         let hash = keccak256(&public.serialize_uncompressed()[1..]);
+        Address::from_slice(&hash[12..])
+    }
+}
+
+#[cfg(not(feature = "secp256k1"))]
+pub(crate) mod secp256k1 {
+    use super::*;
+    use crate::{keccak256, Address};
+    pub(crate) use ::k256::ecdsa::Error;
+    use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
+
+    /// Recovers the address of the sender using secp256k1 pubkey recovery.
+    ///
+    /// Converts the public key into an ethereum address by hashing the public key with keccak256.
+    ///
+    /// This does not ensure that the `s` value in the signature is low, and _just_ wraps the
+    /// underlying secp256k1 library.
+    pub fn recover_signer_unchecked(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {
+        let mut signature = Signature::from_slice(&sig[0..64])?;
+        let mut recid = sig[64];
+
+        // normalize signature and flip recovery id if needed.
+        if let Some(sig_normalized) = signature.normalize_s() {
+            signature = sig_normalized;
+            recid ^= 1;
+        }
+        let recid = RecoveryId::from_byte(recid).expect("recovery ID is valid");
+
+        // recover key
+        let recovered_key = VerifyingKey::recover_from_prehash(&msg[..], &signature, recid)?;
+        Ok(public_key_to_address(recovered_key))
+    }
+
+    /// Converts a public key into an ethereum address by hashing the encoded public key with
+    /// keccak256.
+    fn public_key_to_address(public: VerifyingKey) -> Address {
+        let hash = keccak256(&public.to_encoded_point(/* compress = */ false).as_bytes()[1..]);
         Address::from_slice(&hash[12..])
     }
 }
