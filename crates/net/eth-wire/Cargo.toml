@@ -66,7 +66,6 @@ arbitrary = [
     "reth-primitives/arbitrary",
     "dep:arbitrary",
 ]
-optimism = ["reth-primitives/optimism"]
 serde = ["dep:serde"]
 
 [[test]]
