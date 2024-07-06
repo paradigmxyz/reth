@@ -2,6 +2,7 @@ use crate::{
     backfill::BackfillAction,
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
+    persistence::{PersistenceAction, PersistenceHandle},
 };
 use reth_beacon_consensus::{
     BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated,
@@ -242,6 +243,7 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     state: EngineApiTreeState,
     incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
     outgoing: UnboundedSender<EngineApiEvent>,
+    persistence: PersistenceHandle,
     /// (tmp) The flag indicating whether the pipeline is active.
     is_pipeline_active: bool,
     _marker: PhantomData<T>,
@@ -262,6 +264,7 @@ where
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         outgoing: UnboundedSender<EngineApiEvent>,
         state: EngineApiTreeState,
+        persistence: PersistenceHandle,
     ) -> Self {
         Self {
             provider,
@@ -270,6 +273,7 @@ where
             payload_validator,
             incoming,
             outgoing,
+            persistence,
             is_pipeline_active: false,
             state,
             _marker: PhantomData,
@@ -284,6 +288,7 @@ where
         payload_validator: ExecutionPayloadValidator,
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         state: EngineApiTreeState,
+        persistence: PersistenceHandle,
     ) -> UnboundedSender<EngineApiEvent> {
         let (outgoing, rx) = tokio::sync::mpsc::unbounded_channel();
         let task = Self::new(
@@ -294,6 +299,7 @@ where
             incoming,
             outgoing.clone(),
             state,
+            persistence,
         );
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
         outgoing
@@ -342,7 +348,38 @@ where
                     }
                 }
             }
+
+            if self.should_persist() {
+                self.persist_state();
+            }
         }
+    }
+
+    /// Returns true if the canonical chain length minus the last persisted
+    /// block is more than the persistence threshold.
+    const fn should_persist(&self) -> bool {
+        false
+    }
+
+    fn persist_state(&self) {
+        let blocks_to_persist = self.get_blocks_to_persist();
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let action = PersistenceAction::SaveBlocks((blocks_to_persist, sender));
+        self.persistence.send_action(action).unwrap();
+
+        // Handle the response from the persistence task
+        tokio::spawn(async move {
+            match receiver.await {
+                Ok(_response) => {}
+                Err(e) => {
+                    error!("Failed to persist data: {e}");
+                }
+            }
+        });
+    }
+
+    const fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
+        Vec::new()
     }
 
     /// Return block from database or in-memory state by hash.
