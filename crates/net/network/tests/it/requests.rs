@@ -2,6 +2,7 @@
 //! Tests for eth related requests
 
 use rand::Rng;
+use reth_eth_wire::HeadersDirection;
 use reth_network::{
     test_utils::{NetworkEventStream, Testnet},
     NetworkEvents,
@@ -12,8 +13,8 @@ use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
 };
 use reth_primitives::{
-    Block, BlockBody, Bytes, Header, HeadersDirection, Signature, Transaction, TransactionSigned,
-    TxEip2930, TxKind, U256,
+    Block, BlockBody, Bytes, Header, Signature, Transaction, TransactionSigned, TxEip2930, TxKind,
+    U256,
 };
 use reth_provider::test_utils::MockEthProvider;
 use std::sync::Arc;

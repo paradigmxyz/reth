@@ -7155,6 +7155,7 @@ dependencies = [
  "proptest-derive 0.5.0",
  "rand 0.8.5",
  "reth-chainspec",
+ "reth-codecs",
  "reth-codecs-derive",
  "reth-primitives",
  "serde",
