@@ -5,8 +5,6 @@ use alloy_rlp::{RlpDecodable, RlpEncodable};
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_codecs_derive::derive_arbitrary;
 use reth_primitives::{hex, EthereumHardfork, ForkId, Head, B256, U256};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
@@ -16,7 +14,7 @@ use std::fmt::{Debug, Display};
 /// hash. This information should be treated as untrusted.
 #[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Status {
     /// The current protocol version. For example, peers running `eth/66` would have a version of
     /// 66.

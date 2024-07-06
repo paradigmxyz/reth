@@ -4,15 +4,12 @@ use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs_derive::derive_arbitrary;
 use reth_primitives::{Bytes, B256};
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 /// A request for state tree nodes corresponding to the given hashes.
 /// This message was removed in `eth/67`, only clients running `eth/66` or earlier will respond to
 /// this message.
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GetNodeData(pub Vec<B256>);
 
 /// The response to [`GetNodeData`], containing the state tree nodes or contract bytecode
@@ -22,7 +19,7 @@ pub struct GetNodeData(pub Vec<B256>);
 /// This message was removed in `eth/67`.
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NodeData(pub Vec<Bytes>);
 
 #[cfg(test)]
