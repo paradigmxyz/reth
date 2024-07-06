@@ -63,6 +63,7 @@ async-stream.workspace = true
 default = ["serde"]
 arbitrary = [
     "reth-primitives/arbitrary",
+    "reth-eth-wire-types/arbitrary",
     "dep:arbitrary",
 ]
 optimism = ["reth-primitives/optimism"]

@@ -7145,6 +7145,7 @@ dependencies = [
 name = "reth-eth-wire-types"
 version = "1.0.0"
 dependencies = [
+ "alloy-chains",
  "alloy-genesis",
  "alloy-rlp",
  "arbitrary",
