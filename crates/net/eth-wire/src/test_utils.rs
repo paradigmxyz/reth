@@ -1,10 +1,10 @@
 //! Utilities for testing p2p protocol.
 
 use crate::{
-    EthVersion, HelloMessageWithProtocols, P2PStream, ProtocolVersion, Status, UnauthedP2PStream,
+    hello::DEFAULT_TCP_PORT, EthVersion, HelloMessageWithProtocols, P2PStream, ProtocolVersion,
+    Status, UnauthedP2PStream,
 };
 use reth_chainspec::Chain;
-use reth_discv4::DEFAULT_DISCOVERY_PORT;
 use reth_network_peers::pk2id;
 use reth_primitives::{ForkFilter, Head, B256, U256};
 use secp256k1::{SecretKey, SECP256K1};
@@ -22,7 +22,7 @@ pub fn eth_hello() -> (HelloMessageWithProtocols, SecretKey) {
         protocol_version: ProtocolVersion::V5,
         client_version: "eth/1.0.0".to_string(),
         protocols,
-        port: DEFAULT_DISCOVERY_PORT,
+        port: DEFAULT_TCP_PORT,
         id: pk2id(&server_key.public_key(SECP256K1)),
     };
     (hello, server_key)
