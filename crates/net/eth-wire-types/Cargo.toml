@@ -43,7 +43,6 @@ proptest-derive.workspace = true
 rand.workspace = true
 
 [features]
-default = ["serde"]
 arbitrary = [
     "reth-primitives/arbitrary",
     "alloy-chains/arbitrary",

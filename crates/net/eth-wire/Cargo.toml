@@ -58,15 +58,15 @@ proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest-derive.workspace = true
 async-stream.workspace = true
+serde.workspace = true
 
 [features]
-default = ["serde"]
 arbitrary = [
     "reth-primitives/arbitrary",
     "reth-eth-wire-types/arbitrary",
     "dep:arbitrary",
 ]
-serde = ["dep:serde"]
+serde = ["dep:serde", "reth-eth-wire-types/serde"]
 
 [[test]]
 name = "fuzz_roundtrip"
