@@ -15,6 +15,7 @@ workspace = true
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-cli-util.workspace = true
+reth-eth-wire-types.workspace = true
 reth-fs-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
@@ -102,7 +103,7 @@ optimism = [
     "reth-provider/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-rpc-eth-api/optimism",
-    "reth-rpc-eth-types/optimism"
+    "reth-rpc-eth-types/optimism",
 ]
 
 jemalloc = ["dep:tikv-jemalloc-ctl"]

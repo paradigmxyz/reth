@@ -1,6 +1,7 @@
 use super::file_codec::BlockFileCodec;
 use futures::Future;
 use itertools::Either;
+use reth_eth_wire_types::HeadersDirection;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
@@ -10,8 +11,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, SealedHeader,
-    B256,
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, SealedHeader, B256,
 };
 use std::{collections::HashMap, io, path::Path};
 use thiserror::Error;
