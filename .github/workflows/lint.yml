@@ -52,7 +52,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          target: riscv32imac-unknown-none-elf
+          target: wasm32-wasi
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
         with:

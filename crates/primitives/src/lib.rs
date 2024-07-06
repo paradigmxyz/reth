@@ -79,6 +79,8 @@ pub use transaction::util::secp256k1::{
 #[cfg(not(feature = "secp256k1"))]
 pub use transaction::util::secp256k1::recover_signer_unchecked;
 
+use k256 as _;
+
 // Re-exports
 pub use self::ruint::UintTryTo;
 pub use alloy_primitives::{
