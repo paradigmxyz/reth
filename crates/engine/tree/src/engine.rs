@@ -178,14 +178,14 @@ where
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
-        todo!("poll from_tree")
+        todo!("poll tree")
     }
 }
 
 /// Events emitted by the engine API handler.
 #[derive(Debug)]
 pub enum EngineApiEvent {
-    /// Bubled from tree.
+    /// Bubbled from tree.
     FromTree(TreeEvent),
 }
 
