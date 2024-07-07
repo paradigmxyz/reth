@@ -1,6 +1,6 @@
 //! Abstraction for launching a node.
 
-use std::future::Future;
+use std::{future::Future, ops::Deref};
 
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
@@ -31,7 +31,8 @@ use crate::{
     hooks::NodeHooks,
     node::FullNode,
     rpc::{RethRpcServerHandles, RpcAdapter, RpcRegistry},
-    EngineAdapter, NodeBuilderWithComponents, NodeHandle, StageExtComponentsBuild,
+    EngineAdapter, InitializedComponentsExt, NodeBuilderWithComponents, NodeHandle,
+    StageExtComponentsBuild,
 };
 
 pub mod common;

@@ -1,21 +1,16 @@
-use std::{marker::PhantomData, mem, pin::Pin, sync::Arc};
+use std::{marker::PhantomData, mem, pin::Pin};
 
+use auto_impl::auto_impl;
+use derive_more::Deref;
 use futures::Future;
 use reth_beacon_consensus::FullBlockchainTreeEngine;
-use reth_blockchain_tree::BlockchainTreeConfig;
-use reth_consensus::Consensus;
 use reth_network_p2p::{headers::client::HeadersClient, BodiesClient};
 use reth_node_api::{
     EngineComponent, FullNodeComponents, FullNodeComponentsExt, PipelineComponent, RpcComponent,
 };
-use reth_primitives::Head;
-use reth_provider::ProviderFactory;
-use reth_stages::MetricEvent;
-use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
     common::{Attached, InitializedComponents, LaunchContextWith, WithConfigs},
-    components::NodeComponents,
     hooks::OnComponentsInitializedHook,
     rpc::OnRpcStarted,
     NodeAdapterExt,
@@ -55,7 +50,7 @@ where
 
     fn build(
         self,
-        stage: Box<
+        mut stage: Box<
             dyn StageExtComponentsBuild<
                 Self::Output,
                 Components = Box<dyn InitializedComponentsExt<Self::Output>>,
@@ -63,19 +58,27 @@ where
         >,
     ) -> Pin<Box<dyn Future<Output = eyre::Result<Self::Output>> + Send>> {
         Box::pin(async move {
-            let _pipeline = stage.build_pipeline().await;
-            let _engine = stage.build_engine().await;
-            let rpc = stage.build_rpc().await;
+            if let Some(builder) = stage.build_pipeline() {
+                builder.await?
+            }
+            if let Some(builder) = stage.build_engine() {
+                builder.await?
+            }
+            if let Some(builder) = stage.build_rpc() {
+                builder.await?
+            }
 
-            NodeAdapterExt::new(stage.components_mut().node().clone())
-        })
+            Ok(stage.components().node().clone())
+        }) as Pin<Box<dyn Future<Output = eyre::Result<Self::Output>> + Send>>
     }
 }
 
 /// Staging environment for building extension components. Allows to control when components are
 /// built, w.r.t. their inter-dependencies.
-pub trait StageExtComponentsBuild<N: FullNodeComponentsExt> {
-    type Components: InitializedComponentsExt<N> + 'static;
+pub trait StageExtComponentsBuild<N: FullNodeComponentsExt>: Send {
+    type Components: InitializedComponentsExt<N> + Sized + 'static;
+
+    fn components(&self) -> &Self::Components;
 
     fn components_mut(&mut self) -> &mut Self::Components;
 
@@ -108,8 +111,10 @@ pub trait StageExtComponentsBuild<N: FullNodeComponentsExt> {
 }
 
 #[allow(missing_debug_implementations)]
+#[derive(Deref)]
 pub struct ExtComponentsBuildStage<N: FullNodeComponentsExt> {
     pub core_ctx: LaunchContextWith<Attached<WithConfigs, ()>>,
+    #[deref]
     pub components: Box<dyn InitializedComponentsExt<N>>,
     pub ctx_builder: Box<dyn ExtComponentCtxBuilder<N>>,
     pub pipeline_builder: Option<Box<dyn OnComponentsInitializedHook<N>>>,
@@ -151,6 +156,10 @@ where
     N::Rpc: RpcComponent<N> + 'static,
 {
     type Components = Box<dyn InitializedComponentsExt<N>>;
+
+    fn components(&self) -> &Self::Components {
+        &self.components
+    }
 
     fn components_mut(&mut self) -> &mut Self::Components {
         &mut self.components
@@ -239,6 +248,7 @@ pub fn build_ctx<'a, N: FullNodeComponentsExt>(
 }
 
 /// Builds extensions components.
+#[auto_impl(&mut, Box)]
 pub trait InitializedComponentsExt<N: FullNodeComponentsExt>:
     InitializedComponents<Node = N, BlockchainTree = N::Tree>
 {
@@ -251,30 +261,10 @@ pub trait InitializedComponentsExt<N: FullNodeComponentsExt>:
     fn rpc_mut(&mut self) -> Option<&mut <Self::Node as FullNodeComponentsExt>::Rpc>;
 }
 
-impl<N: FullNodeComponentsExt> InitializedComponentsExt<N> for WithComponentsExt<N> {
-    fn pipeline(&self) -> Option<&N::Pipeline> {
-        self.pipeline.as_ref()
-    }
-    fn engine(&self) -> Option<&N::Engine> {
-        self.engine.as_ref()
-    }
-    fn rpc(&self) -> Option<&N::Rpc> {
-        self.rpc.as_ref()
-    }
-
-    fn pipeline_mut(&mut self) -> Option<&mut N::Pipeline> {
-        self.pipeline.as_mut()
-    }
-    fn engine_mut(&mut self) -> Option<&mut N::Engine> {
-        self.engine.as_mut()
-    }
-    fn rpc_mut(&mut self) -> Option<&mut N::Rpc> {
-        self.rpc.as_mut()
-    }
-}
-
 #[allow(missing_debug_implementations)]
+#[derive(Deref)]
 pub struct WithComponentsExt<N: FullNodeComponentsExt> {
+    #[deref]
     pub core: Box<dyn InitializedComponents<Node = N, BlockchainTree = N::Tree>>,
     pub pipeline: Option<N::Pipeline>,
     pub engine: Option<N::Engine>,
@@ -297,42 +287,24 @@ impl<N: FullNodeComponentsExt> WithComponentsExt<N> {
     }
 }
 
-impl<N: FullNodeComponentsExt> InitializedComponents for WithComponentsExt<N> {
-    type Node = N;
-    type BlockchainTree = N::Tree;
-
-    /// Returns the current head block.
-    fn head(&self) -> Head {
-        self.core.head()
+impl<N: FullNodeComponentsExt> InitializedComponentsExt<N> for WithComponentsExt<N> {
+    fn pipeline(&self) -> Option<&N::Pipeline> {
+        self.pipeline.as_ref()
+    }
+    fn engine(&self) -> Option<&N::Engine> {
+        self.engine.as_ref()
+    }
+    fn rpc(&self) -> Option<&N::Rpc> {
+        self.rpc.as_ref()
     }
 
-    /// Returns the configured database provider.
-    fn provider_factory(&self) -> &ProviderFactory<N::DB> {
-        self.core.provider_factory()
+    fn pipeline_mut(&mut self) -> Option<&mut N::Pipeline> {
+        self.pipeline.as_mut()
     }
-
-    /// Returns a reference to the blockchain provider.
-    fn blockchain_db(&self) -> &N::Tree {
-        self.core.blockchain_db()
+    fn engine_mut(&mut self) -> Option<&mut N::Engine> {
+        self.engine.as_mut()
     }
-
-    /// Returns the configured `Consensus`.
-    fn consensus(&self) -> Arc<dyn Consensus> {
-        self.core.consensus()
-    }
-
-    /// Returns the metrics sender.
-    fn sync_metrics_tx(&self) -> UnboundedSender<MetricEvent> {
-        self.core.sync_metrics_tx()
-    }
-
-    /// Returns a reference to the `BlockchainTreeConfig`.
-    fn tree_config(&self) -> &BlockchainTreeConfig {
-        self.core.tree_config()
-    }
-
-    /// Returns the core components.
-    fn node(&self) -> &Self::Node {
-        self.core.node()
+    fn rpc_mut(&mut self) -> Option<&mut N::Rpc> {
+        self.rpc.as_mut()
     }
 }

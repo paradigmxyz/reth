@@ -606,7 +606,7 @@ where
     }
 
     /// Creates a `NodeAdapter` and attaches it to the launch context.
-    pub async fn with_components<N, CB, BT, C>(
+    pub async fn with_components<CB, BT, C>(
         self,
         components_builder: CB,
         on_components_initialized: Vec<
@@ -845,7 +845,7 @@ pub struct WithMeteredProviders<DB, T> {
     phantom_data: PhantomData<T>,
 }
 
-pub trait InitializedComponents {
+pub trait InitializedComponents: Send {
     type Node: FullNodeComponents;
     type BlockchainTree;
 
@@ -873,8 +873,8 @@ pub trait InitializedComponents {
 
 impl<T> InitializedComponents for T
 where
-    T: ops::Deref,
-    <T as ops::Deref>::Target: InitializedComponents,
+    T: ops::Deref + Send,
+    <T as ops::Deref>::Target: InitializedComponents + Send,
 {
     type Node = <<T as ops::Deref>::Target as InitializedComponents>::Node;
     type BlockchainTree = <<T as ops::Deref>::Target as InitializedComponents>::BlockchainTree;

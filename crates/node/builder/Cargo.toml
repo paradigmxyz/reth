@@ -73,6 +73,7 @@ confy.workspace = true
 rayon.workspace = true
 backon.workspace = true
 derive_more.workspace = true
+auto_impl.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

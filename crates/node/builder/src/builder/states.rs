@@ -166,7 +166,7 @@ pub struct NodeBuilderWithComponents<
     /// Additional node extensions.
     pub(crate) add_ons: NodeAddOns<Output>,
     /// Builds optional components.
-    pub(crate) ext_builder: Option<Box<dyn NodeComponentsBuilderExt<Output>>>,
+    pub(crate) ext_builder: Option<Box<dyn NodeComponentsBuilderExt<Output = Output>>>,
 }
 
 impl<T, CB, Output> NodeBuilderWithComponents<T, CB, Output>
@@ -215,7 +215,7 @@ where
     /// The `ExEx` ID must be unique.
     pub fn install_exex<F, R, E>(mut self, exex_id: impl Into<String>, exex: F) -> Self
     where
-        F: FnOnce(ExExContext<NodeAdapter<T, CB::Components>>) -> R + Send + 'static,
+        F: FnOnce(ExExContext<Output>) -> R + Send + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {

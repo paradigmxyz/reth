@@ -7542,6 +7542,7 @@ version = "1.0.0"
 dependencies = [
  "aquamarine",
  "async-trait",
+ "auto_impl",
  "backon",
  "confy",
  "derive_more",
