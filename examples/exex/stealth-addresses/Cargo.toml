@@ -15,10 +15,6 @@ reth-execution-types.workspace = true
 
 alloy-sol-types = { workspace = true, features = ["json"] }
 
-k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 eyre.workspace = true
 futures.workspace = true
-
-
-[dev-dependencies]
-rand.workspace = true
+k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
