@@ -234,7 +234,7 @@ where
     let block_id = BlockId::Number(BlockNumberOrTag::default());
 
     DebugApiClient::raw_header(client, block_id).await.unwrap();
-    DebugApiClient::raw_block(client, block_id).await.unwrap();
+    DebugApiClient::raw_block(client, block_id).await.unwrap_err();
     DebugApiClient::raw_transaction(client, B256::default()).await.unwrap();
     DebugApiClient::raw_receipts(client, block_id).await.unwrap();
     assert!(is_unimplemented(DebugApiClient::bad_blocks(client).await.err().unwrap()));

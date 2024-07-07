@@ -33,7 +33,7 @@ alloy-rlp.workspace = true
 futures.workspace = true
 futures-util.workspace = true
 pin-project.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "fs", "io-util"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
 
