@@ -1,6 +1,7 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
+use async_trait::async_trait;
 use std::sync::Arc;
 
 use derive_more::Deref;
@@ -11,8 +12,11 @@ use reth_rpc_eth_api::{
     RawTransactionForwarder,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock};
-use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
-use tokio::sync::Mutex;
+use reth_tasks::{
+    pool::{BlockingTaskGuard, BlockingTaskPool},
+    TaskSpawner, TokioTaskExecutor,
+};
+use tokio::sync::{AcquireError, Mutex, OwnedSemaphorePermit};
 
 use crate::eth::DevSigner;
 
@@ -49,6 +53,7 @@ where
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
         raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+        proof_permits: usize,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -63,6 +68,7 @@ where
             fee_history_cache,
             evm_config,
             raw_transaction_forwarder,
+            proof_permits,
         )
     }
 
@@ -81,6 +87,7 @@ where
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
         raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+        proof_permits: usize,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -106,6 +113,7 @@ where
             fee_history_cache,
             evm_config,
             raw_transaction_forwarder: parking_lot::RwLock::new(raw_transaction_forwarder),
+            blocking_task_guard: BlockingTaskGuard::new(proof_permits),
         };
 
         Self { inner: Arc::new(inner) }
@@ -126,6 +134,7 @@ impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Networ
     }
 }
 
+#[async_trait]
 impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
@@ -139,6 +148,14 @@ where
     #[inline]
     fn tracing_task_pool(&self) -> &reth_tasks::pool::BlockingTaskPool {
         self.inner.blocking_task_pool()
+    }
+
+    async fn acquire_owned(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
+        self.blocking_task_guard.clone().acquire_owned().await
+    }
+
+    async fn acquire_many_owned(&self, n: u32) -> Result<OwnedSemaphorePermit, AcquireError> {
+        self.blocking_task_guard.clone().acquire_many_owned(n).await
     }
 }
 
@@ -184,6 +201,7 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     evm_config: EvmConfig,
     /// Allows forwarding received raw transactions
     raw_transaction_forwarder: parking_lot::RwLock<Option<Arc<dyn RawTransactionForwarder>>>,
+    blocking_task_guard: BlockingTaskGuard,
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig> {
@@ -304,7 +322,7 @@ mod tests {
     use reth_rpc_eth_types::{
         EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
     };
-    use reth_rpc_server_types::constants::DEFAULT_ETH_PROOF_WINDOW;
+    use reth_rpc_server_types::constants::{DEFAULT_ETH_PROOF_WINDOW, DEFAULT_PROOF_PERMITS};
     use reth_rpc_types::FeeHistory;
     use reth_tasks::pool::BlockingTaskPool;
     use reth_testing_utils::{generators, generators::Rng};
@@ -341,6 +359,7 @@ mod tests {
             fee_history_cache,
             evm_config,
             None,
+            DEFAULT_PROOF_PERMITS,
         )
     }
 

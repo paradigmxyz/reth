@@ -95,6 +95,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .rpc_gas_cap(self.rpc_gas_cap)
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
+            .proof_permits(self.rpc_proof_permits)
     }
 
     fn state_cache_config(&self) -> EthStateCacheConfig {
