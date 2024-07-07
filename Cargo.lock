@@ -2565,6 +2565,7 @@ dependencies = [
  "ff",
  "generic-array",
  "group",
+ "hkdf",
  "pkcs8",
  "rand_core 0.6.4",
  "sec1",
@@ -2966,6 +2967,23 @@ dependencies = [
  "secp256k1",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "example-exex-stealth-addresses"
+version = "0.0.0"
+dependencies = [
+ "alloy-sol-types",
+ "eyre",
+ "futures",
+ "k256",
+ "rand 0.8.5",
+ "reth",
+ "reth-execution-types",
+ "reth-exex",
+ "reth-node-api",
+ "reth-node-ethereum",
+ "reth-tracing",
 ]
 
 [[package]]
