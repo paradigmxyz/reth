@@ -201,6 +201,7 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     evm_config: EvmConfig,
     /// Allows forwarding received raw transactions
     raw_transaction_forwarder: parking_lot::RwLock<Option<Arc<dyn RawTransactionForwarder>>>,
+    /// Guard for getproof calls
     blocking_task_guard: BlockingTaskGuard,
 }
 

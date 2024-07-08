@@ -20,10 +20,10 @@ pub trait SpawnBlocking: Clone + Send + Sync + 'static {
     /// Thread pool access in default trait method implementations.
     fn tracing_task_pool(&self) -> &BlockingTaskPool;
 
-    /// See also [`Semaphore::acquire_owned`]
+    /// See also [Semaphore::acquire_owned](`tokio::sync::Semaphore::acquire_owned`).
     async fn acquire_owned(&self) -> Result<OwnedSemaphorePermit, AcquireError>;
 
-    /// See also [`Semaphore::acquire_many_owned`]
+    /// See also  [Semaphore::acquire_many_owned](`tokio::sync::Semaphore::acquire_many_owned`).
     async fn acquire_many_owned(&self, n: u32) -> Result<OwnedSemaphorePermit, AcquireError>;
 
     /// Executes the future on a new blocking task.

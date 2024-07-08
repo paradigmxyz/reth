@@ -318,6 +318,11 @@ RPC:
 
           [default: 0]
 
+      --rpc.proof-permits <COUNT>
+          Maximum number of concurrent tracing requests
+
+          [default: 25]
+
 RPC State Cache:
       --rpc-cache.max-blocks <MAX_BLOCKS>
           Max number of blocks in cache
