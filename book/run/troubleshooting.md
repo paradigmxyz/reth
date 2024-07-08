@@ -154,7 +154,6 @@ If your hardware performance is significantly lower than these reference numbers
 ### RAM Speed and Health Testing
 
 1. Check RAM speed with [lshw](https://linux.die.net/man/1/lshw):
-
    ```bash
    sudo lshw -short -C memory
    ```
