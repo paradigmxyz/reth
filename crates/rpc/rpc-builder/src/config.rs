@@ -91,6 +91,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_tracing_requests(self.rpc_max_tracing_requests)
             .max_blocks_per_filter(self.rpc_max_blocks_per_filter.unwrap_or_max())
             .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
+            .eth_proof_window(self.rpc_eth_proof_window)
             .rpc_gas_cap(self.rpc_gas_cap)
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
@@ -214,13 +215,11 @@ impl RethRpcServerConfig for RpcServerArgs {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-
     use clap::{Args, Parser};
     use reth_node_core::args::RpcServerArgs;
-    use reth_rpc_server_types::{
-        constants, constants::gas_oracle::RPC_DEFAULT_GAS_CAP, RethRpcModule, RpcModuleSelection,
-    };
+    use reth_rpc_eth_types::RPC_DEFAULT_GAS_CAP;
+    use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
+    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
     use crate::config::RethRpcServerConfig;
 

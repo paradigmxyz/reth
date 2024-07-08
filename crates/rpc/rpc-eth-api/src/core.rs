@@ -4,7 +4,6 @@
 use alloy_dyn_abi::TypedData;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64};
-use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
@@ -16,8 +15,15 @@ use reth_rpc_types::{
 use tracing::trace;
 
 use crate::helpers::{
-    EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, LoadReceipt, Trace,
+    transaction::UpdateRawTxForwarder, EthApiSpec, EthBlocks, EthCall, EthFees, EthState,
+    EthTransactions, FullEthApi,
 };
+
+/// Helper trait, unifies functionality that must be supported to implement all RPC methods for
+/// server.
+pub trait FullEthApiServer: EthApiServer + FullEthApi + UpdateRawTxForwarder + Clone {}
+
+impl<T> FullEthApiServer for T where T: EthApiServer + FullEthApi + UpdateRawTxForwarder + Clone {}
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
@@ -324,14 +330,7 @@ pub trait EthApi {
 #[async_trait::async_trait]
 impl<T> EthApiServer for T
 where
-    Self: EthApiSpec
-        + EthTransactions
-        + EthBlocks
-        + EthState
-        + EthCall
-        + EthFees
-        + Trace
-        + LoadReceipt,
+    Self: FullEthApi,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> RpcResult<U64> {
@@ -464,7 +463,8 @@ where
         index: Index,
     ) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getRawTransactionByBlockHashAndIndex");
-        Ok(EthTransactions::raw_transaction_by_block_and_tx_index(self, hash.into(), index).await?)
+        Ok(EthTransactions::raw_transaction_by_block_and_tx_index(self, hash.into(), index.into())
+            .await?)
     }
 
     /// Handler for: `eth_getTransactionByBlockHashAndIndex`
@@ -474,7 +474,8 @@ where
         index: Index,
     ) -> RpcResult<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getTransactionByBlockHashAndIndex");
-        Ok(EthTransactions::transaction_by_block_and_tx_index(self, hash.into(), index).await?)
+        Ok(EthTransactions::transaction_by_block_and_tx_index(self, hash.into(), index.into())
+            .await?)
     }
 
     /// Handler for: `eth_getRawTransactionByBlockNumberAndIndex`
@@ -484,8 +485,12 @@ where
         index: Index,
     ) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getRawTransactionByBlockNumberAndIndex");
-        Ok(EthTransactions::raw_transaction_by_block_and_tx_index(self, number.into(), index)
-            .await?)
+        Ok(EthTransactions::raw_transaction_by_block_and_tx_index(
+            self,
+            number.into(),
+            index.into(),
+        )
+        .await?)
     }
 
     /// Handler for: `eth_getTransactionByBlockNumberAndIndex`
@@ -495,7 +500,8 @@ where
         index: Index,
     ) -> RpcResult<Option<reth_rpc_types::Transaction>> {
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getTransactionByBlockNumberAndIndex");
-        Ok(EthTransactions::transaction_by_block_and_tx_index(self, number.into(), index).await?)
+        Ok(EthTransactions::transaction_by_block_and_tx_index(self, number.into(), index.into())
+            .await?)
     }
 
     /// Handler for: `eth_getTransactionReceipt`
@@ -715,13 +721,6 @@ where
         block_number: Option<BlockId>,
     ) -> RpcResult<EIP1186AccountProofResponse> {
         trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
-        let res = EthState::get_proof(self, address, keys, block_number)?.await;
-
-        Ok(res.map_err(|e| match e {
-            EthApiError::InvalidBlockRange => {
-                internal_rpc_err("eth_getProof is unimplemented for historical blocks")
-            }
-            _ => e.into(),
-        })?)
+        Ok(EthState::get_proof(self, address, keys, block_number)?.await?)
     }
 }

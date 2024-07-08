@@ -6,8 +6,7 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, Withdrawals,
-    B256, U256,
+    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory,
@@ -674,17 +673,14 @@ where
 
     /// Handler for `debug_getRawBlock`
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
-        let block = self.inner.provider.block_by_id(block_id).to_rpc_result()?;
-
+        let block = self
+            .inner
+            .provider
+            .block_by_id(block_id)
+            .to_rpc_result()?
+            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
         let mut res = Vec::new();
-        if let Some(mut block) = block {
-            // In RPC withdrawals are always present
-            if block.withdrawals.is_none() {
-                block.withdrawals = Some(Withdrawals::default());
-            }
-            block.encode(&mut res);
-        }
-
+        block.encode(&mut res);
         Ok(res.into())
     }
 

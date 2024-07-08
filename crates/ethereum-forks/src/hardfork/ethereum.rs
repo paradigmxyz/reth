@@ -358,29 +358,6 @@ impl EthereumHardfork {
         ]
     }
 
-    /// Ethereum goerli list of hardforks.
-    pub const fn goerli() -> [(Self, ForkCondition); 14] {
-        [
-            (Self::Frontier, ForkCondition::Block(0)),
-            (Self::Homestead, ForkCondition::Block(0)),
-            (Self::Dao, ForkCondition::Block(0)),
-            (Self::Tangerine, ForkCondition::Block(0)),
-            (Self::SpuriousDragon, ForkCondition::Block(0)),
-            (Self::Byzantium, ForkCondition::Block(0)),
-            (Self::Constantinople, ForkCondition::Block(0)),
-            (Self::Petersburg, ForkCondition::Block(0)),
-            (Self::Istanbul, ForkCondition::Block(1561651)),
-            (Self::Berlin, ForkCondition::Block(4460644)),
-            (Self::London, ForkCondition::Block(5062605)),
-            (
-                Self::Paris,
-                ForkCondition::TTD { fork_block: None, total_difficulty: uint!(10_790_000_U256) },
-            ),
-            (Self::Shanghai, ForkCondition::Timestamp(1678832736)),
-            (Self::Cancun, ForkCondition::Timestamp(1705473120)),
-        ]
-    }
-
     /// Ethereum sepolia list of hardforks.
     pub const fn sepolia() -> [(Self, ForkCondition); 15] {
         [

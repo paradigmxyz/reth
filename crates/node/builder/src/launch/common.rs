@@ -71,11 +71,11 @@ impl LaunchContext {
     /// `config`.
     ///
     /// Attaches both the `NodeConfig` and the loaded `reth.toml` config to the launch context.
-    pub async fn with_loaded_toml_config(
+    pub fn with_loaded_toml_config(
         self,
         config: NodeConfig,
     ) -> eyre::Result<LaunchContextWith<WithConfigs>> {
-        let toml_config = self.load_toml_config(&config).await?;
+        let toml_config = self.load_toml_config(&config)?;
         Ok(self.with(WithConfigs { config, toml_config }))
     }
 
@@ -83,7 +83,7 @@ impl LaunchContext {
     /// `config`.
     ///
     /// This is async because the trusted peers may have to be resolved.
-    pub async fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
+    pub fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
         let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
 
         let mut toml_config = confy::load_path::<reth_config::Config>(&config_path)
@@ -209,15 +209,16 @@ impl LaunchContextWith<WithConfigs> {
             info!(target: "reth::cli", "Adding trusted nodes");
 
             // resolve trusted peers if they use a domain instead of dns
-            for peer in &self.attachment.config.network.trusted_peers {
+            let resolved = futures::future::try_join_all(
+            self.attachment.config.network.trusted_peers.iter().map(|peer| async move {
                 let backoff = ConstantBuilder::default()
                     .with_max_times(self.attachment.config.network.dns_retries);
-                let resolved = (move || { peer.resolve() })
-                .retry(&backoff)
-                .notify(|err, _| warn!(target: "reth::cli", "Error resolving peer domain: {err}. Retrying..."))
-                .await?;
-                self.attachment.toml_config.peers.trusted_nodes.insert(resolved);
-            }
+                (move || { peer.resolve() })
+                    .retry(&backoff)
+                    .notify(|err, _| warn!(target: "reth::cli", "Error resolving peer domain: {err}. Retrying..."))
+                    .await
+            })).await?;
+            self.attachment.toml_config.peers.trusted_nodes.extend(resolved);
         }
         Ok(self)
     }
@@ -517,7 +518,7 @@ where
     }
 
     /// Creates a `BlockchainProvider` and attaches it to the launch context.
-    pub async fn with_blockchain_db<T>(
+    pub fn with_blockchain_db<T>(
         self,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>>
     where

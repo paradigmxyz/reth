@@ -10,7 +10,7 @@ use reth_rpc_types::{
         BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
         OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
     },
-    BlockTransactions, Transaction,
+    BlockTransactions, Header, Transaction,
 };
 use revm_inspectors::transfer::{TransferInspector, TransferKind};
 use revm_primitives::ExecutionResult;
@@ -35,6 +35,11 @@ impl<Eth> OtterscanServer for OtterscanApi<Eth>
 where
     Eth: EthApiServer + TraceExt + 'static,
 {
+    /// Handler for `{ots,erigon}_getHeaderByNumber`
+    async fn get_header_by_number(&self, block_number: u64) -> RpcResult<Option<Header>> {
+        self.eth.header_by_number(BlockNumberOrTag::Number(block_number)).await
+    }
+
     /// Handler for `ots_hasCode`
     async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool> {
         self.eth.get_code(address, block_number).await.map(|code| !code.is_empty())
@@ -94,11 +99,8 @@ where
     }
 
     /// Handler for `ots_getBlockDetails`
-    async fn get_block_details(
-        &self,
-        block_number: BlockNumberOrTag,
-    ) -> RpcResult<Option<BlockDetails>> {
-        let block = self.eth.block_by_number(block_number, true).await?;
+    async fn get_block_details(&self, block_number: u64) -> RpcResult<Option<BlockDetails>> {
+        let block = self.eth.block_by_number(BlockNumberOrTag::Number(block_number), true).await?;
         Ok(block.map(Into::into))
     }
 
@@ -111,11 +113,12 @@ where
     /// Handler for `getBlockTransactions`
     async fn get_block_transactions(
         &self,
-        block_number: BlockNumberOrTag,
+        block_number: u64,
         page_number: usize,
         page_size: usize,
     ) -> RpcResult<OtsBlockTransactions> {
         // retrieve full block and its receipts
+        let block_number = BlockNumberOrTag::Number(block_number);
         let block = self.eth.block_by_number(block_number, true);
         let receipts = self.eth.block_receipts(BlockId::Number(block_number));
         let (block, receipts) = futures::try_join!(block, receipts)?;
@@ -179,7 +182,7 @@ where
     async fn search_transactions_before(
         &self,
         _address: Address,
-        _block_number: BlockNumberOrTag,
+        _block_number: u64,
         _page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))
@@ -189,7 +192,7 @@ where
     async fn search_transactions_after(
         &self,
         _address: Address,
-        _block_number: BlockNumberOrTag,
+        _block_number: u64,
         _page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))

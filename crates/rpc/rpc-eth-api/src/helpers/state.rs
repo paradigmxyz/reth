@@ -3,22 +3,24 @@
 
 use futures::Future;
 use reth_evm::ConfigureEvmEnv;
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, Bytes, Header, B256, U256};
-use reth_provider::{
-    BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
-};
+use reth_primitives::{Address, BlockId, Bytes, Header, B256, U256};
+use reth_provider::{BlockIdReader, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_rpc_eth_types::{
     EthApiError, EthResult, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError,
 };
 use reth_rpc_types::{serde_helpers::JsonStorageKey, EIP1186AccountProofResponse};
 use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use revm::db::BundleState;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
+    /// Returns the maximum number of blocks into the past for generating state proofs.
+    fn max_proof_window(&self) -> u64;
+
     /// Returns the number of transactions sent from an address at the given block identifier.
     ///
     /// If this is [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this will
@@ -90,25 +92,20 @@ pub trait EthState: LoadState + SpawnBlocking {
         let chain_info = self.chain_info()?;
         let block_id = block_id.unwrap_or_default();
 
-        // if we are trying to create a proof for the latest block, but have a BlockId as input
-        // that is not BlockNumberOrTag::Latest, then we need to figure out whether or not the
-        // BlockId corresponds to the latest block
-        let is_latest_block = match block_id {
-            BlockId::Number(BlockNumberOrTag::Number(num)) => num == chain_info.best_number,
-            BlockId::Hash(hash) => hash == chain_info.best_hash.into(),
-            BlockId::Number(BlockNumberOrTag::Latest) => true,
-            _ => false,
-        };
-
-        // TODO: remove when HistoricalStateProviderRef::proof is implemented
-        if !is_latest_block {
-            return Err(EthApiError::InvalidBlockRange)
+        // Check whether the distance to the block exceeds the maximum configured window.
+        let block_number = self
+            .provider()
+            .block_number_for_id(block_id)?
+            .ok_or(EthApiError::UnknownBlockNumber)?;
+        let max_window = self.max_proof_window();
+        if chain_info.best_number.saturating_sub(block_number) > max_window {
+            return Err(EthApiError::ExceedsMaxProofWindow)
         }
 
-        Ok(self.spawn_tracing(move |this| {
+        Ok(self.spawn_blocking_io(move |this| {
             let state = this.state_at_block_id(block_id)?;
             let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
-            let proof = state.proof(address, &storage_keys)?;
+            let proof = state.proof(&BundleState::default(), address, &storage_keys)?;
             Ok(from_primitive_account_proof(proof))
         }))
     }
@@ -209,12 +206,7 @@ pub trait LoadState {
             let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash.into()).await?;
 
             let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
-            self.evm_config().fill_block_env(
-                &mut block_env,
-                &LoadPendingBlock::provider(self).chain_spec(),
-                header,
-                after_merge,
-            );
+            self.evm_config().fill_block_env(&mut block_env, header, after_merge);
 
             Ok((cfg, block_env))
         }

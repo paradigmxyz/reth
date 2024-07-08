@@ -8,5 +8,5 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-/// Ethereum engine orchestrator.
-pub mod orchestrator;
+/// Ethereum engine service.
+pub mod service;

@@ -125,7 +125,7 @@ where
         // apply eip-4788 pre block contract call
         pre_block_beacon_root_contract_call(
             &mut db,
-            self.evm_config.clone(),
+            &self.evm_config,
             &chain_spec,
             &initialized_cfg,
             &initialized_block_env,
@@ -288,7 +288,7 @@ where
     // apply eip-4788 pre block contract call
     pre_block_beacon_root_contract_call(
         &mut db,
-        evm_config.clone(),
+        &evm_config,
         &chain_spec,
         &initialized_cfg,
         &initialized_block_env,

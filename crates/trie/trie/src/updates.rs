@@ -32,6 +32,16 @@ impl TrieUpdates {
         &self.account_nodes
     }
 
+    /// Returns a reference to removed account nodes.
+    pub const fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
+        &self.removed_nodes
+    }
+
+    /// Returns a reference to updated storage tries.
+    pub const fn storage_tries_ref(&self) -> &HashMap<B256, StorageTrieUpdates> {
+        &self.storage_tries
+    }
+
     /// Insert storage updates for a given hashed address.
     pub fn insert_storage_updates(
         &mut self,
@@ -67,12 +77,11 @@ impl TrieUpdates {
     pub fn into_sorted(self) -> TrieUpdatesSorted {
         let mut account_nodes = Vec::from_iter(self.account_nodes);
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let mut storage_tries = Vec::from_iter(
-            self.storage_tries
-                .into_iter()
-                .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted())),
-        );
-        storage_tries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let storage_tries = self
+            .storage_tries
+            .into_iter()
+            .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
+            .collect();
         TrieUpdatesSorted { removed_nodes: self.removed_nodes, account_nodes, storage_tries }
     }
 
@@ -160,6 +169,21 @@ impl StorageTrieUpdates {
     /// Returns the length of updated nodes.
     pub fn len(&self) -> usize {
         (self.is_deleted as usize) + self.storage_nodes.len() + self.removed_nodes.len()
+    }
+
+    /// Returns `true` if the trie was deleted.
+    pub const fn is_deleted(&self) -> bool {
+        self.is_deleted
+    }
+
+    /// Returns reference to updated storage nodes.
+    pub const fn storage_nodes_ref(&self) -> &HashMap<Nibbles, BranchNodeCompact> {
+        &self.storage_nodes
+    }
+
+    /// Returns reference to removed storage nodes.
+    pub const fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
+        &self.removed_nodes
     }
 
     /// Returns `true` if storage updates are empty.
@@ -271,7 +295,24 @@ impl StorageTrieUpdates {
 pub struct TrieUpdatesSorted {
     pub(crate) account_nodes: Vec<(Nibbles, BranchNodeCompact)>,
     pub(crate) removed_nodes: HashSet<Nibbles>,
-    pub(crate) storage_tries: Vec<(B256, StorageTrieUpdatesSorted)>,
+    pub(crate) storage_tries: HashMap<B256, StorageTrieUpdatesSorted>,
+}
+
+impl TrieUpdatesSorted {
+    /// Returns reference to updated account nodes.
+    pub fn account_nodes_ref(&self) -> &[(Nibbles, BranchNodeCompact)] {
+        &self.account_nodes
+    }
+
+    /// Returns reference to removed account nodes.
+    pub const fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
+        &self.removed_nodes
+    }
+
+    /// Returns reference to updated storage tries.
+    pub const fn storage_tries_ref(&self) -> &HashMap<B256, StorageTrieUpdatesSorted> {
+        &self.storage_tries
+    }
 }
 
 /// Sorted trie updates used for lookups and insertions.
@@ -280,4 +321,21 @@ pub struct StorageTrieUpdatesSorted {
     pub(crate) is_deleted: bool,
     pub(crate) storage_nodes: Vec<(Nibbles, BranchNodeCompact)>,
     pub(crate) removed_nodes: HashSet<Nibbles>,
+}
+
+impl StorageTrieUpdatesSorted {
+    /// Returns `true` if the trie was deleted.
+    pub const fn is_deleted(&self) -> bool {
+        self.is_deleted
+    }
+
+    /// Returns reference to updated storage nodes.
+    pub fn storage_nodes_ref(&self) -> &[(Nibbles, BranchNodeCompact)] {
+        &self.storage_nodes
+    }
+
+    /// Returns reference to removed storage nodes.
+    pub const fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
+        &self.removed_nodes
+    }
 }

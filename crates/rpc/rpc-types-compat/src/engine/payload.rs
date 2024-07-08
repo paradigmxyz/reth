@@ -97,7 +97,12 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
 
 /// Converts [`ExecutionPayloadV4`] to [Block]
 pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, PayloadError> {
-    let ExecutionPayloadV4 { payload_inner, deposit_requests, withdrawal_requests } = payload;
+    let ExecutionPayloadV4 {
+        payload_inner,
+        deposit_requests,
+        withdrawal_requests,
+        consolidation_requests,
+    } = payload;
     let mut block = try_payload_v3_to_block(payload_inner)?;
 
     // attach requests with asc type identifiers
@@ -105,6 +110,7 @@ pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, Pay
         .into_iter()
         .map(Request::DepositRequest)
         .chain(withdrawal_requests.into_iter().map(Request::WithdrawalRequest))
+        .chain(consolidation_requests.into_iter().map(Request::ConsolidationRequest))
         .collect::<Vec<_>>();
 
     let requests_root = proofs::calculate_requests_root(&requests);
@@ -211,10 +217,10 @@ pub fn block_to_payload_v3(value: SealedBlock) -> (ExecutionPayloadV3, Option<B2
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV4`]
 pub fn block_to_payload_v4(mut value: SealedBlock) -> ExecutionPayloadV4 {
-    let (deposit_requests, withdrawal_requests) =
+    let (deposit_requests, withdrawal_requests, consolidation_requests) =
         value.requests.take().unwrap_or_default().into_iter().fold(
-            (Vec::new(), Vec::new()),
-            |(mut deposits, mut withdrawals), request| {
+            (Vec::new(), Vec::new(), Vec::new()),
+            |(mut deposits, mut withdrawals, mut consolidation_requests), request| {
                 match request {
                     Request::DepositRequest(r) => {
                         deposits.push(r);
@@ -222,16 +228,20 @@ pub fn block_to_payload_v4(mut value: SealedBlock) -> ExecutionPayloadV4 {
                     Request::WithdrawalRequest(r) => {
                         withdrawals.push(r);
                     }
+                    Request::ConsolidationRequest(r) => {
+                        consolidation_requests.push(r);
+                    }
                     _ => {}
                 };
 
-                (deposits, withdrawals)
+                (deposits, withdrawals, consolidation_requests)
             },
         );
 
     ExecutionPayloadV4 {
         deposit_requests,
         withdrawal_requests,
+        consolidation_requests,
         payload_inner: block_to_payload_v3(value).0,
     }
 }
@@ -661,7 +671,8 @@ mod tests {
         "0x02f9021e8330182401843b9aca0085174876e80083030d40944242424242424242424242424242424242424242893635c9adc5dea00000b901a422895118000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000120d694d6a0b0103651aafd87db6c88297175d7317c6e6da53ccf706c3c991c91fd0000000000000000000000000000000000000000000000000000000000000030b0b1b3b51cf688ead965a954c5cc206ba4e76f3f8efac60656ae708a9aad63487a2ca1fb30ccaf2ebe1028a2b2886b1b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020002d2b75f4a27f78e585a4735a40ab2437eceb12ec39938a94dc785a54d625130000000000000000000000000000000000000000000000000000000000000060b9759766e9bb191b1c457ae1da6cdf71a23fb9d8bc9f845eaa49ee4af280b3b9720ac4d81e64b1b50a65db7b8b4e76f1176a12e19d293d75574600e99fbdfecc1ab48edaeeffb3226cd47691d24473821dad0c6ff3973f03e4aa89f418933a56c080a099dc5b94a51e9b91a6425b1fed9792863006496ab71a4178524819d7db0c5e88a0119748e62700234079d91ae80f4676f9e0f71b260e9b46ef9b4aff331d3c2318"
       ],
       "withdrawalRequests": [],
-      "withdrawals": []
+      "withdrawals": [],
+      "consolidationRequests": []
     }"#;
 
         let payload = serde_json::from_str::<ExecutionPayloadV4>(s).unwrap();

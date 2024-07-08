@@ -24,9 +24,6 @@ pub use database::DatabaseArgs;
 mod log;
 pub use log::{ColorMode, LogArgs};
 
-mod secret_key;
-pub use secret_key::{get_secret_key, SecretKeyError};
-
 /// `PayloadBuilderArgs` struct for configuring the payload builder
 mod payload_builder;
 pub use payload_builder::PayloadBuilderArgs;

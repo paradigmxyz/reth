@@ -11,10 +11,7 @@ use crate::{
 };
 use futures::Future;
 use reth_chainspec::ChainSpec;
-use reth_db::{
-    test_utils::{create_test_rw_db_with_path, tempdir_path, TempDatabase},
-    DatabaseEnv,
-};
+use reth_cli_util::get_secret_key;
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -25,9 +22,8 @@ use reth_network::{
 };
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::{
-    args::{get_secret_key, DatadirArgs},
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
-    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
+    dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::Head,
 };
@@ -175,19 +171,24 @@ impl<DB> NodeBuilder<DB> {
     }
 
     /// Creates an _ephemeral_ preconfigured node for testing purposes.
+    #[cfg(feature = "test-utils")]
     pub fn testing_node(
         mut self,
         task_executor: TaskExecutor,
-    ) -> WithLaunchContext<NodeBuilder<Arc<TempDatabase<DatabaseEnv>>>> {
-        let path = MaybePlatformPath::<DataDirPath>::from(tempdir_path());
-        self.config = self
-            .config
-            .with_datadir_args(DatadirArgs { datadir: path.clone(), ..Default::default() });
+    ) -> WithLaunchContext<NodeBuilder<Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>>
+    {
+        let path = reth_node_core::dirs::MaybePlatformPath::<DataDirPath>::from(
+            reth_db::test_utils::tempdir_path(),
+        );
+        self.config = self.config.with_datadir_args(reth_node_core::args::DatadirArgs {
+            datadir: path.clone(),
+            ..Default::default()
+        });
 
         let data_dir =
             path.unwrap_or_chain_default(self.config.chain.chain, self.config.datadir.clone());
 
-        let db = create_test_rw_db_with_path(data_dir.db());
+        let db = reth_db::test_utils::create_test_rw_db_with_path(data_dir.db());
 
         WithLaunchContext { builder: self.with_database(db), task_executor }
     }
