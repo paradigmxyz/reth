@@ -21,6 +21,7 @@ impl NetworkStackId {
     pub const OPSTACK: &'static [u8] = b"opstack";
 
     /// Returns the [`NetworkStackId`] that matches the given [`ChainSpec`].
+    #[allow(clippy::missing_const_for_fn)]
     pub fn id(chain: &ChainSpec) -> Option<&'static [u8]> {
         if chain.is_optimism() {
             return Some(Self::OPEL)
