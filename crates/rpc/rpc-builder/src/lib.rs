@@ -1282,11 +1282,6 @@ impl RpcServerConfig {
         cors.as_deref().map(cors::create_cors_layer).transpose()
     }
 
-    /// Creates the [`AuthLayer`] if any
-    // fn maybe_jwt_layer(&self) -> Option<AuthLayer<JwtAuthValidator>> {
-    //     self.jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)))
-    // }
-
     /// Builds and starts the ws and http server(s).
     ///
     /// If both are on the same port, they are combined into one server.
@@ -1384,26 +1379,6 @@ impl RpcServerConfig {
         let mut http_local_addr = None;
         let mut http_server = None;
 
-        // let builder = self.ws_server_config.expect("Expected a value, but found None");
-        // let server = builder
-        //     .ws_only()
-        //     .set_http_middleware(
-        //         tower::ServiceBuilder::new()
-        //             .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
-        //             .option_layer(
-        //                 self.jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret))),
-        //             ),
-        //     )
-        //     .set_rpc_middleware(
-        //         RpcServiceBuilder::new()
-        //             .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
-        //     )
-        //     .build(ws_socket_addr)
-        //     .await
-        //     .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
-        // let addr = server
-        //     .local_addr()
-        //     .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
         if let Some(builder) = self.ws_server_config {
             let server = builder
                 .ws_only()
@@ -1430,7 +1405,6 @@ impl RpcServerConfig {
             ws_server = Some(server);
         }
 
-        //let builder = self.http_server_config.expect("Expected a value, but found None");
         if let Some(builder) = self.http_server_config {
             let server = builder
                 .http_only()
@@ -1454,7 +1428,6 @@ impl RpcServerConfig {
             http_local_addr = Some(local_addr);
             http_server = Some(server);
         }
-
 
         let http_handle = http_server
             .map(|http_server| http_server.start(modules.http.clone().expect("http server error")));
