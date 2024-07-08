@@ -10,7 +10,7 @@ use reth_primitives::{
     PooledTransactionsElement, U256,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_rpc_types::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
+use reth_rpc_types::mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::CacheDB,
@@ -48,7 +48,7 @@ where
     /// state, or it can be used to simulate a past block. The sender is responsible for signing the
     /// transactions and using the correct nonce and ensuring validity
     pub async fn call_bundle(&self, bundle: EthCallBundle) -> EthResult<EthCallBundleResponse> {
-        let EthCallBundle { txs, block_number, state_block_number, timestamp } = bundle;
+        let EthCallBundle { txs, block_number, state_block_number, timestamp, .. } = bundle;
         if txs.is_empty() {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
