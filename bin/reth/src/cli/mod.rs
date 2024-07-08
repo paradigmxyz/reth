@@ -161,12 +161,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute(ctx, |chain_spec| {
-                    #[cfg(feature = "optimism")]
-                    return reth_node_optimism::OpExecutorProvider::optimism(chain_spec);
-                    #[cfg(not(feature = "optimism"))]
-                    reth_node_ethereum::EthExecutorProvider::ethereum(chain_spec)
-                })
+                command.execute(ctx, |chain_spec| block_executor!(chain_spec))
             }),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
             #[cfg(feature = "dev")]
