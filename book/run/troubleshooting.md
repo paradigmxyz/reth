@@ -169,7 +169,6 @@ If your hardware performance is significantly lower than these reference numbers
    ```
 
 2. Test RAM health with [memtester](https://linux.die.net/man/8/memtester):
-
    ```bash
    sudo memtester 10G
    ```
