@@ -38,6 +38,12 @@ pub(crate) fn peek(chain: &Chain) {
                     stealth_address = ?announcement.stealthAddress,
                     "🎉 One of us! One of us! 🎉"
                 );
+
+                if let Some(note) =
+                    crypto::try_decrypt_node(&view, &ephemeral_pub, &announcement.metadata[1..])
+                {
+                    info!("🔐 Found a secure note! 🔐\n{note}");
+                }
             }
         }
     }
@@ -51,6 +57,6 @@ fn get_announcements(chain: &Chain) -> Vec<ERC5564Announcement> {
         .flat_map(|r| r.logs.iter())
         .filter(|l| l.address == ANNOUNCER)
         .filter_map(|l| ERC5564Announcement::decode_log(l, false).ok().map(|e| e.data))
-        .filter(|ev| ev.schemeId == U256::from(1))
+        .filter(|ev| ev.schemeId == U256::from(1) && !ev.metadata.is_empty())
         .collect()
 }
