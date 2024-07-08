@@ -4,8 +4,17 @@ use alloy_primitives::{Address, U64};
 use reth_chainspec::ChainInfo;
 use reth_errors::RethResult;
 use reth_evm::ConfigureEvm;
-use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory};
-use reth_rpc_eth_api::{helpers::{Call, EthApiSpec, EthBlocks, EthSigner, EthTransactions, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, LoadState, LoadTransaction, SpawnBlocking}, RawTransactionForwarder};
+use reth_provider::{
+    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory,
+};
+use reth_rpc_eth_api::{
+    helpers::{
+        Call, EthApiSpec, EthBlocks, EthCall, EthFees, EthSigner, EthState, EthTransactions,
+        LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, LoadState, LoadTransaction,
+        SpawnBlocking, Trace,
+    },
+    RawTransactionForwarder,
+};
 use reth_rpc_eth_types::{EthStateCache, PendingBlock};
 use reth_rpc_types::SyncStatus;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
@@ -72,21 +81,23 @@ impl<Eth: LoadBlock> LoadBlock for OpEthApi<Eth> {
 }
 
 impl<Eth: LoadPendingBlock> LoadPendingBlock for OpEthApi<Eth> {
-    fn provider(&self,) -> impl BlockReaderIdExt+EvmEnvProvider+ChainSpecProvider+StateProviderFactory {
-            self.inner.provider()
-        }
+    fn provider(
+        &self,
+    ) -> impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory {
+        self.inner.provider()
+    }
 
     fn pool(&self) -> impl TransactionPool {
-            self.inner.pool()
-        }
+        self.inner.pool()
+    }
 
-    fn pending_block(&self) ->  &Mutex<Option<PendingBlock> >  {
-            self.inner.pending_block()
-        }
+    fn pending_block(&self) -> &Mutex<Option<PendingBlock>> {
+        self.inner.pending_block()
+    }
 
-    fn evm_config(&self) ->  &impl ConfigureEvm {
-            self.inner.evm_config()
-        }
+    fn evm_config(&self) -> &impl ConfigureEvm {
+        self.inner.evm_config()
+    }
 }
 
 impl<Eth: SpawnBlocking> SpawnBlocking for OpEthApi<Eth> {
@@ -100,7 +111,7 @@ impl<Eth: SpawnBlocking> SpawnBlocking for OpEthApi<Eth> {
 }
 
 impl<Eth: LoadReceipt> LoadReceipt for OpEthApi<Eth> {
-    fn cache(&self) ->  &EthStateCache {
+    fn cache(&self) -> &EthStateCache {
         self.inner.cache()
     }
 }
@@ -168,9 +179,7 @@ impl<Eth: EthTransactions> EthTransactions for OpEthApi<Eth> {
         EthTransactions::provider(&self.inner)
     }
 
-    fn raw_tx_forwarder(
-        &self,
-    ) -> Option<std::sync::Arc<dyn RawTransactionForwarder>> {
+    fn raw_tx_forwarder(&self) -> Option<std::sync::Arc<dyn RawTransactionForwarder>> {
         self.inner.raw_tx_forwarder()
     }
 
@@ -182,5 +191,21 @@ impl<Eth: EthTransactions> EthTransactions for OpEthApi<Eth> {
 impl<Eth: EthBlocks> EthBlocks for OpEthApi<Eth> {
     fn provider(&self) -> impl HeaderProvider {
         EthBlocks::provider(&self.inner)
+    }
+}
+
+impl<Eth: EthState> EthState for OpEthApi<Eth> {
+    fn max_proof_window(&self) -> u64 {
+        self.inner.max_proof_window()
+    }
+}
+
+impl<Eth: EthCall> EthCall for OpEthApi<Eth> {}
+
+impl<Eth: EthFees> EthFees for OpEthApi<Eth> {}
+
+impl<Eth: Trace> Trace for OpEthApi<Eth> {
+    fn evm_config(&self) -> &impl ConfigureEvm {
+        self.inner.evm_config()
     }
 }
