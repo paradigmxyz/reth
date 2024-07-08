@@ -55,7 +55,7 @@
 //!         evm_config,
 //!     )
 //!     .build(transports, EthApiBuild::build);
-//!     RpcServerConfig::default()
+//!     let handle = RpcServerConfig::default()
 //!         .with_http(ServerBuilder::default())
 //!         .start(&transport_modules)
 //!         .await;
@@ -1282,6 +1282,16 @@ impl RpcServerConfig {
         cors.as_deref().map(cors::create_cors_layer).transpose()
     }
 
+    //   /// Creates the [`AuthLayer`] if any
+    //    fn maybe_jwt_layer(&self) -> Option<AuthLayer<JwtAuthValidator>> {
+    //         self.jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)))
+    //     }
+
+    /// Creates the [`AuthLayer`] if any
+    fn maybe_jwt_layer(jwt_secret: Option<JwtSecret>) -> Option<AuthLayer<JwtAuthValidator>> {
+        jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)))
+    }
+
     /// Builds and starts the ws and http server(s).
     ///
     /// If both are on the same port, they are combined into one server.
@@ -1331,47 +1341,47 @@ impl RpcServerConfig {
             // we merge this into one server using the http setup
             modules.config.ensure_ws_http_identical()?;
 
-            let builder = self.http_server_config.expect("Expected a value, but found None");
-
-            let server = builder
-                .set_http_middleware(
-                    tower::ServiceBuilder::new()
-                        .option_layer(Self::maybe_cors_layer(cors)?)
-                        .option_layer(
-                            self.jwt_secret
-                                .map(|secret| AuthLayer::new(JwtAuthValidator::new(secret))),
+            //let builder = self.http_server_config.expect("Expected a value, but found None");
+            if let Some(builder) = self.http_server_config {
+                let server = builder
+                    .set_http_middleware(
+                        tower::ServiceBuilder::new()
+                            .option_layer(Self::maybe_cors_layer(cors)?)
+                            .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
+                    )
+                    .set_rpc_middleware(
+                        RpcServiceBuilder::new().layer(
+                            modules
+                                .http
+                                .as_ref()
+                                .or(modules.ws.as_ref())
+                                .map(RpcRequestMetrics::same_port)
+                                .unwrap_or_default(),
                         ),
-                )
-                .set_rpc_middleware(
-                    RpcServiceBuilder::new().layer(
-                        modules
-                            .http
-                            .as_ref()
-                            .or(modules.ws.as_ref())
-                            .map(RpcRequestMetrics::same_port)
-                            .unwrap_or_default(),
-                    ),
-                )
-                .build(http_socket_addr)
-                .await
-                .map_err(|err| RpcError::server_error(err, ServerKind::WsHttp(http_socket_addr)))?;
-            let addr = server
-                .local_addr()
-                .map_err(|err| RpcError::server_error(err, ServerKind::WsHttp(http_socket_addr)))?;
-            if let Some(module) = modules.http.as_ref().or(modules.ws.as_ref()) {
-                let handle = server.start(module.clone());
-                http_handle = Some(handle.clone());
-                ws_handle = Some(handle);
+                    )
+                    .build(http_socket_addr)
+                    .await
+                    .map_err(|err| {
+                        RpcError::server_error(err, ServerKind::WsHttp(http_socket_addr))
+                    })?;
+                let addr = server.local_addr().map_err(|err| {
+                    RpcError::server_error(err, ServerKind::WsHttp(http_socket_addr))
+                })?;
+                if let Some(module) = modules.http.as_ref().or(modules.ws.as_ref()) {
+                    let handle = server.start(module.clone());
+                    http_handle = Some(handle.clone());
+                    ws_handle = Some(handle);
+                }
+                return Ok(RpcServerHandle {
+                    http_local_addr: Some(addr),
+                    ws_local_addr: Some(addr),
+                    http: http_handle,
+                    ws: ws_handle,
+                    ipc_endpoint: self.ipc_endpoint.clone(),
+                    ipc: ipc_handle,
+                    jwt_secret: self.jwt_secret,
+                });
             }
-            return Ok(RpcServerHandle {
-                http_local_addr: Some(addr),
-                ws_local_addr: Some(addr),
-                http: http_handle,
-                ws: ws_handle,
-                ipc_endpoint: self.ipc_endpoint.clone(),
-                ipc: ipc_handle,
-                jwt_secret: self.jwt_secret,
-            });
         }
 
         let mut ws_local_addr = None;
@@ -1432,9 +1442,9 @@ impl RpcServerConfig {
             http_server = Some(server);
         }
 
-        let http_handle = http_server
+        http_handle = http_server
             .map(|http_server| http_server.start(modules.http.clone().expect("http server error")));
-        let ws_handle = ws_server
+        ws_handle = ws_server
             .map(|ws_server| ws_server.start(modules.ws.clone().expect("ws server error")));
         Ok(RpcServerHandle {
             http_local_addr,
