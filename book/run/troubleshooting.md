@@ -109,3 +109,71 @@ pthread_mutex_lock.c:438: __pthread_mutex_lock_full: Assertion `e != ESRCH || !r
 If you are using Docker, a possible solution is to run all database-accessing containers with `--pid=host` flag.
 
 For more information, check out the `Containers` section in the [libmdbx README](https://github.com/erthink/libmdbx#containers).
+
+## Hardware Performance Testing
+
+If you're experiencing degraded performance, it may be related to hardware issues. Below are some tools and tests you can run to evaluate your hardware performance.
+
+If your hardware performance is significantly lower than these reference numbers, it may explain degraded node performance. Consider upgrading your hardware or investigating potential issues with your current setup.
+
+### Disk Speed Testing with [IOzone](https://linux.die.net/man/1/iozone)
+
+1. Test disk speed:
+   ```bash
+   iozone -e -t1 -i0 -i2 -r1k -s1g /tmp
+   ```
+   Reference numbers (on Latitude c3.large.x86):
+
+   ```console
+   Children see throughput for  1 initial writers  =  907733.81 kB/sec
+   Parent sees throughput for  1 initial writers   =  907239.68 kB/sec
+   Children see throughput for  1 rewriters        = 1765222.62 kB/sec
+   Parent sees throughput for  1 rewriters         = 1763433.35 kB/sec
+   Children see throughput for 1 random readers    = 1557497.38 kB/sec
+   Parent sees throughput for 1 random readers     = 1554846.58 kB/sec
+   Children see throughput for 1 random writers    =  984428.69 kB/sec
+   Parent sees throughput for 1 random writers     =  983476.67 kB/sec
+   ```
+2. Test disk speed with memory-mapped files:
+   ```bash
+   iozone -B -G -e -t1 -i0 -i2 -r1k -s1g /tmp
+   ```
+   Reference numbers (on Latitude c3.large.x86):
+
+   ```console
+   Children see throughput for  1 initial writers  =   56471.06 kB/sec
+   Parent sees throughput for  1 initial writers   =   56365.14 kB/sec
+   Children see throughput for  1 rewriters        =  241650.69 kB/sec
+   Parent sees throughput for  1 rewriters         =  239067.96 kB/sec
+   Children see throughput for 1 random readers    = 6833161.00 kB/sec
+   Parent sees throughput for 1 random readers     = 5597659.65 kB/sec
+   Children see throughput for 1 random writers    =  220248.53 kB/sec
+   Parent sees throughput for 1 random writers     =  219112.26 kB/sec
+    ```
+
+### RAM Speed and Health Testing
+
+1. Check RAM speed with [lshw](https://linux.die.net/man/1/lshw):
+   ```bash
+   sudo lshw -short -C memory
+   ```
+   Look for the frequency in the output. Reference output:
+
+   ```console
+   H/W path              Device          Class          Description
+   ================================================================
+   /0/24/0                               memory         64GiB DIMM DDR4 Synchronous Registered (Buffered) 3200 MHz (0.3 ns)
+   /0/24/1                               memory         64GiB DIMM DDR4 Synchronous Registered (Buffered) 3200 MHz (0.3 ns)
+   ...
+   ```
+
+2. Test RAM health with [memtester](https://linux.die.net/man/8/memtester):
+   ```bash
+   sudo memtester 10G
+   ```
+   This will take a while. You can test with a smaller amount first:
+
+   ```bash
+   sudo memtester 1G 1
+   ```
+   All checks should report "ok".
