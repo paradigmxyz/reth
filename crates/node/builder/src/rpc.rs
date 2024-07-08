@@ -289,7 +289,8 @@ where
     extend_rpc_modules.extend_rpc_modules(ctx)?;
 
     let server_config = config.rpc.rpc_server_config();
-    let launch_rpc = modules.clone().start_server(server_config).map_ok(|handle| {
+    let cloned_modules = modules.clone();
+    let launch_rpc = server_config.start(&cloned_modules).map_ok(|handle| {
         if let Some(path) = handle.ipc_endpoint() {
             info!(target: "reth::cli", %path, "RPC IPC server started");
         }
