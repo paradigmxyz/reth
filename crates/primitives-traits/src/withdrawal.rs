@@ -63,6 +63,12 @@ impl Withdrawals {
     pub fn into_inner(self) -> Vec<Withdrawal> {
         self.0
     }
+
+    /// Check if the Withdrawals collection is empty.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl<'a> IntoIterator for &'a Withdrawals {
