@@ -842,6 +842,11 @@ pub trait PoolTransaction:
         self.tx_type() == EIP4844_TX_TYPE_ID
     }
 
+    /// Returns true if the transaction is an EIP-7702 transaction.
+    fn is_eip7702(&self) -> bool {
+        self.tx_type() == EIP7702_TX_TYPE_ID
+    }
+
     /// Returns the length of the rlp encoded transaction object
     ///
     /// Note: Implementations should cache this value.

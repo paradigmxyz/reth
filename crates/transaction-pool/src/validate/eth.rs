@@ -12,14 +12,14 @@ use crate::{
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{
     constants::{eip4844::MAX_BLOBS_PER_BLOCK, ETHEREUM_BLOCK_GAS_LIMIT},
-    Address, GotExpected, InvalidTransactionError, SealedBlock, TxKind, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
+    GotExpected, InvalidTransactionError, SealedBlock, TxKind, EIP1559_TX_TYPE_ID,
+    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm::{
     interpreter::gas::validate_initial_tx_gas,
-    primitives::{EnvKzgSettings, SpecId},
+    primitives::{AccessListItem, EnvKzgSettings, SpecId},
 };
 use std::{
     marker::PhantomData,
@@ -268,6 +268,19 @@ where
 
         // intrinsic gas checks
         let is_shanghai = self.fork_tracker.is_shanghai_activated();
+
+        // 7702 check
+        // TODO: get num auth items
+        if transaction.is_eip7702() {
+            // Cancun fork is required for 7702 txs
+            if !self.fork_tracker.is_prague_activated() {
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidTransactionError::TxTypeNotSupported.into(),
+                )
+            }
+        }
+
         if let Err(err) = ensure_intrinsic_gas(&transaction, is_shanghai) {
             return TransactionValidationOutcome::Invalid(transaction, err)
         }
@@ -418,6 +431,10 @@ where
         if self.chain_spec.is_shanghai_active_at_timestamp(new_tip_block.timestamp) {
             self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
         }
+
+        if self.chain_spec.is_prague_active_at_timestamp(new_tip_block.timestamp) {
+            self.fork_tracker.prague.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 
@@ -429,6 +446,8 @@ pub struct EthTransactionValidatorBuilder {
     shanghai: bool,
     /// Fork indicator whether we are in the Cancun hardfork.
     cancun: bool,
+    /// Fork indicator whether we are in the Cancun hardfork.
+    prague: bool,
     /// Whether using EIP-2718 type transactions is allowed
     eip2718: bool,
     /// Whether using EIP-1559 type transactions is allowed
@@ -484,6 +503,9 @@ impl EthTransactionValidatorBuilder {
 
             // cancun is activated by default
             cancun: true,
+
+            // prague not yet activated
+            prague: false,
         }
     }
 
@@ -515,6 +537,17 @@ impl EthTransactionValidatorBuilder {
     /// Set the Shanghai fork.
     pub const fn set_shanghai(mut self, shanghai: bool) -> Self {
         self.shanghai = shanghai;
+        self
+    }
+
+    /// Disables the Prague fork.
+    pub const fn no_prague(self) -> Self {
+        self.set_prague(false)
+    }
+
+    /// Set the Prague fork.
+    pub const fn set_prague(mut self, prague: bool) -> Self {
+        self.prague = prague;
         self
     }
 
@@ -605,6 +638,7 @@ impl EthTransactionValidatorBuilder {
             chain_spec,
             shanghai,
             cancun,
+            prague,
             eip2718,
             eip1559,
             eip4844,
@@ -617,8 +651,11 @@ impl EthTransactionValidatorBuilder {
             ..
         } = self;
 
-        let fork_tracker =
-            ForkTracker { shanghai: AtomicBool::new(shanghai), cancun: AtomicBool::new(cancun) };
+        let fork_tracker = ForkTracker {
+            shanghai: AtomicBool::new(shanghai),
+            cancun: AtomicBool::new(cancun),
+            prague: AtomicBool::new(prague),
+        };
 
         let inner = EthTransactionValidatorInner {
             chain_spec,
@@ -691,6 +728,8 @@ pub(crate) struct ForkTracker {
     pub(crate) shanghai: AtomicBool,
     /// Tracks if cancun is activated at the block's timestamp.
     pub(crate) cancun: AtomicBool,
+    /// Tracks if prague is activated at the block's timestamp.
+    pub(crate) prague: AtomicBool,
 }
 
 impl ForkTracker {
@@ -702,6 +741,11 @@ impl ForkTracker {
     /// Returns `true` if Cancun fork is activated.
     pub(crate) fn is_cancun_activated(&self) -> bool {
         self.cancun.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns `true` if Prague fork is activated.
+    pub(crate) fn is_prague_activated(&self) -> bool {
+        self.prague.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -728,12 +772,11 @@ pub fn ensure_intrinsic_gas<T: PoolTransaction>(
     transaction: &T,
     is_shanghai: bool,
 ) -> Result<(), InvalidPoolTransactionError> {
-    let access_list = transaction.access_list().map(|list| list.flattened()).unwrap_or_default();
     if transaction.gas_limit() <
         calculate_intrinsic_gas_after_merge(
             transaction.input(),
             &transaction.kind(),
-            &access_list,
+            transaction.access_list().map(|list| list.0.as_slice()).as_deref().unwrap_or(&[]),
             is_shanghai,
         )
     {
@@ -750,11 +793,11 @@ pub fn ensure_intrinsic_gas<T: PoolTransaction>(
 pub fn calculate_intrinsic_gas_after_merge(
     input: &[u8],
     kind: &TxKind,
-    access_list: &[(Address, Vec<U256>)],
+    access_list: &[AccessListItem],
     is_shanghai: bool,
 ) -> u64 {
     let spec_id = if is_shanghai { SpecId::SHANGHAI } else { SpecId::MERGE };
-    validate_initial_tx_gas(spec_id, input, kind.is_create(), access_list)
+    validate_initial_tx_gas(spec_id, input, kind.is_create(), access_list, 0)
 }
 
 #[cfg(test)]

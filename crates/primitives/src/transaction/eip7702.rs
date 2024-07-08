@@ -1,11 +1,9 @@
 use super::access_list::AccessList;
 use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
-use alloy_eips::eip7702::{Authorization, SignedAuthorization};
+use alloy_eips::eip7702::SignedAuthorization;
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
-use arbitrary::Arbitrary;
 use bytes::BytesMut;
 use reth_codecs::{main_codec, Compact};
-use revm_primitives::Address;
 use std::mem;
 
 /// [EIP-7702 Set Code Transaction](https://eips.ethereum.org/EIPS/eip-7702)
@@ -240,12 +238,14 @@ impl TxEip7702 {
 
 // TODO(onbjerg): This is temporary until we upstream `Arbitrary` to EIP-7702 types and `Signature`
 // in alloy
-impl<'a> Arbitrary<'a> for TxEip7702 {
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for TxEip7702 {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        use arbitrary::Arbitrary;
         #[derive(Arbitrary)]
         struct AbitrarySignedAuth {
             chain_id: ChainId,
-            address: Address,
+            address: alloy_primitives::Address,
             nonce: Option<u64>,
             y: bool,
             r: U256,
@@ -257,7 +257,7 @@ impl<'a> Arbitrary<'a> for TxEip7702 {
         for auth in iter {
             let auth = auth?;
             authorization_list.push(
-                Authorization {
+                alloy_eips::eip7702::Authorization {
                     chain_id: auth.chain_id,
                     address: auth.address,
                     nonce: auth.nonce.into(),
