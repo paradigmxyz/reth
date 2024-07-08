@@ -319,7 +319,7 @@ RPC:
           [default: 0]
 
       --rpc.proof-permits <COUNT>
-          Maximum number of concurrent tracing requests
+          Maximum number of concurrent getproof requests
 
           [default: 25]
 
