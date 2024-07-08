@@ -1,14 +1,12 @@
 //! Spawns a blocking task. CPU heavy tasks are executed with the `rayon` library. IO heavy tasks
 //! are executed on the `tokio` runtime.
 
-use async_trait::async_trait;
 use futures::Future;
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit};
 
 /// Executes code on a blocking thread.
-#[async_trait]
 pub trait SpawnBlocking: Clone + Send + Sync + 'static {
     /// Returns a handle for spawning IO heavy blocking tasks.
     ///
@@ -20,11 +18,16 @@ pub trait SpawnBlocking: Clone + Send + Sync + 'static {
     /// Thread pool access in default trait method implementations.
     fn tracing_task_pool(&self) -> &BlockingTaskPool;
 
-    /// See also [Semaphore::acquire_owned](`tokio::sync::Semaphore::acquire_owned`).
-    async fn acquire_owned(&self) -> Result<OwnedSemaphorePermit, AcquireError>;
+    /// See also [`Semaphore::acquire_owned`](`tokio::sync::Semaphore::acquire_owned`).
+    fn acquire_owned(
+        &self,
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send;
 
-    /// See also  [Semaphore::acquire_many_owned](`tokio::sync::Semaphore::acquire_many_owned`).
-    async fn acquire_many_owned(&self, n: u32) -> Result<OwnedSemaphorePermit, AcquireError>;
+    /// See also  [`Semaphore::acquire_many_owned`](`tokio::sync::Semaphore::acquire_many_owned`).
+    fn acquire_many_owned(
+        &self,
+        n: u32,
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send;
 
     /// Executes the future on a new blocking task.
     ///

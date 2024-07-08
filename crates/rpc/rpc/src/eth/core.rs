@@ -1,7 +1,7 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
-use async_trait::async_trait;
+use futures::Future;
 use std::sync::Arc;
 
 use derive_more::Deref;
@@ -134,7 +134,6 @@ impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Networ
     }
 }
 
-#[async_trait]
 impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
@@ -150,12 +149,17 @@ where
         self.inner.blocking_task_pool()
     }
 
-    async fn acquire_owned(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
-        self.blocking_task_guard.clone().acquire_owned().await
+    fn acquire_owned(
+        &self,
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
+        self.blocking_task_guard.clone().acquire_owned()
     }
 
-    async fn acquire_many_owned(&self, n: u32) -> Result<OwnedSemaphorePermit, AcquireError> {
-        self.blocking_task_guard.clone().acquire_many_owned(n).await
+    fn acquire_many_owned(
+        &self,
+        n: u32,
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
+        self.blocking_task_guard.clone().acquire_many_owned(n)
     }
 }
 
