@@ -17,10 +17,12 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_primitives::PayloadTypes;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Address, Block, BlockNumber, Receipts, Requests, SealedBlock, SealedBlockWithSenders, B256,
-    U256,
+    Address, Block, BlockNumber, GotExpected, Receipts, Requests, SealedBlock,
+    SealedBlockWithSenders, B256, U256,
 };
-use reth_provider::{BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory};
+use reth_provider::{
+    BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory, StateRootProvider,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
     engine::{
@@ -548,10 +550,16 @@ where
             PostExecutionInput::new(&output.receipts, &output.requests),
         )?;
 
+        // TODO: change StateRootProvider API to accept hashed post state
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
-        // TODO: compute and validate state root
-        let trie_output = TrieUpdates::default();
+        let (state_root, trie_output) = state_provider.state_root_with_updates(&output.state)?;
+        if state_root != block.state_root {
+            return Err(ConsensusError::BodyStateRootDiff(
+                GotExpected { got: state_root, expected: block.state_root }.into(),
+            )
+            .into())
+        }
 
         let executed = ExecutedBlock {
             block: Arc::new(block.block.seal(block_hash)),
