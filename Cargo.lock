@@ -7959,13 +7959,17 @@ name = "reth-optimism-rpc"
 version = "1.0.0"
 dependencies = [
  "alloy-primitives",
+ "parking_lot 0.12.3",
  "reth-chainspec",
  "reth-errors",
- "reth-rpc",
+ "reth-evm",
+ "reth-provider",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
- "reth-rpc-server-types",
  "reth-rpc-types",
+ "reth-tasks",
+ "reth-transaction-pool",
+ "tokio",
 ]
 
 [[package]]
