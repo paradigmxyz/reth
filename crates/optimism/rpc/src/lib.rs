@@ -8,4 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+pub mod error;
 pub mod eth;
+
+pub use error::OpEthApiError;
+pub use eth::{receipt::op_receipt_fields, transaction::OptimismTxMeta, OpEthApi};
