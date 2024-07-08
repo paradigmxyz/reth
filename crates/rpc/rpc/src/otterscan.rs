@@ -1,9 +1,10 @@
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
-use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
+use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::helpers::TraceExt;
+use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
     trace::{
@@ -227,11 +228,12 @@ where
 
         while low <= high {
             let mid = (low + high) / 2;
-            let block_number = Some(BlockId::Number(BlockNumberOrTag::Number(mid)));
-            if self.eth.get_code(address, block_number).await?.is_empty() {
-                low = mid + 1; // not found in current block, need to search in the later blocks
+            if self.eth.get_code(address, Some(mid.into())).await?.is_empty() {
+                // not found in current block, need to search in the later blocks
+                low = mid + 1;
             } else {
-                high = mid - 1; // found in current block, try to find a lower block
+                // found in current block, try to find a lower block
+                high = mid - 1;
                 num = mid;
             }
         }
@@ -260,16 +262,16 @@ where
                                 })),
                                 None,
                             ) if contract == address => Some(ContractCreator {
-                                hash: tx_trace.transaction_hash.ok_or_else(|| {
-                                    internal_rpc_err("transaction hash is missing")
-                                })?,
+                                hash: tx_trace
+                                    .transaction_hash
+                                    .ok_or_else(|| EthApiError::TransactionNotFound)?,
                                 creator,
                             }),
                             _ => None,
                         })
                     })
                     .filter_map(Result::transpose)
-                    .collect::<Result<Vec<_>, ErrorObjectOwned>>()
+                    .collect::<Result<Vec<_>, EthApiError>>()
             })
             .transpose()?;
 

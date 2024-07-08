@@ -342,7 +342,7 @@ where
             .err()
             .unwrap()
     ));
-    OtterscanClient::get_contract_creator(client, address).await.err().unwrap();
+    assert!(OtterscanClient::get_contract_creator(client, address).await.unwrap().is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
