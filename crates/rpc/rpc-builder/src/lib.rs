@@ -1282,11 +1282,6 @@ impl RpcServerConfig {
         cors.as_deref().map(cors::create_cors_layer).transpose()
     }
 
-    //   /// Creates the [`AuthLayer`] if any
-    //    fn maybe_jwt_layer(&self) -> Option<AuthLayer<JwtAuthValidator>> {
-    //         self.jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)))
-    //     }
-
     /// Creates the [`AuthLayer`] if any
     fn maybe_jwt_layer(jwt_secret: Option<JwtSecret>) -> Option<AuthLayer<JwtAuthValidator>> {
         jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)))
@@ -1341,7 +1336,6 @@ impl RpcServerConfig {
             // we merge this into one server using the http setup
             modules.config.ensure_ws_http_identical()?;
 
-            //let builder = self.http_server_config.expect("Expected a value, but found None");
             if let Some(builder) = self.http_server_config {
                 let server = builder
                     .set_http_middleware(
@@ -1395,10 +1389,7 @@ impl RpcServerConfig {
                 .set_http_middleware(
                     tower::ServiceBuilder::new()
                         .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
-                        .option_layer(
-                            self.jwt_secret
-                                .map(|secret| AuthLayer::new(JwtAuthValidator::new(secret))),
-                        ),
+                        .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                 )
                 .set_rpc_middleware(
                     RpcServiceBuilder::new()
@@ -1422,10 +1413,7 @@ impl RpcServerConfig {
                 .set_http_middleware(
                     tower::ServiceBuilder::new()
                         .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
-                        .option_layer(
-                            self.jwt_secret
-                                .map(|secret| AuthLayer::new(JwtAuthValidator::new(secret))),
-                        ),
+                        .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                 )
                 .set_rpc_middleware(
                     RpcServiceBuilder::new().layer(
