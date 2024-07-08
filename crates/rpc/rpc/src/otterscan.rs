@@ -298,23 +298,12 @@ where
             return Ok(None);
         }
 
-        // use binary search from block [1, latest block number] to find the first block where the
-        // contract was deployed
-        let mut low = 1;
-        let mut high = self.eth.block_number()?.saturating_to::<u64>();
-        let mut num = high;
-
-        while low <= high {
-            let mid = (low + high) / 2;
-            if self.eth.get_code(address, Some(mid.into())).await?.is_empty() {
-                // not found in current block, need to search in the later blocks
-                low = mid + 1;
-            } else {
-                // found in current block, try to find a lower block
-                high = mid - 1;
-                num = mid;
-            }
-        }
+        let num = binary_search(1, self.eth.block_number()?.saturating_to(), |mid| {
+            Box::pin(
+                async move { Ok(!self.eth.get_code(address, Some(mid.into())).await?.is_empty()) },
+            )
+        })
+        .await?;
 
         let traces = self
             .eth
