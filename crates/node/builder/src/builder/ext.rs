@@ -99,10 +99,22 @@ pub trait StageExtComponentsBuild<N: FullNodeComponentsExt>: Send {
     fn rpc_builder(&mut self, b: Box<dyn OnComponentsInitializedHook<N>>);
 
     /// Sets the hook that is run to configure the rpc modules.
-    fn extend_rpc_modules(&mut self, hook: Box<dyn ExtendRpcModules<N>>);
+    fn extend_rpc_modules(&mut self, hook: Box<dyn ExtendRpcModules<N>>) {
+        _ = self
+            .components_mut()
+            .rpc_add_ons_mut()
+            .get_or_insert(&mut RpcHooks::new())
+            .set_extend_rpc_modules(hook)
+    }
 
     /// Sets the hook that is run once the rpc server is started.
-    fn on_rpc_started(&mut self, hook: Box<dyn OnRpcStarted<N>>);
+    fn on_rpc_started(&mut self, hook: Box<dyn OnRpcStarted<N>>) {
+        _ = self
+            .components_mut()
+            .rpc_add_ons_mut()
+            .get_or_insert(&mut RpcHooks::new())
+            .set_on_rpc_started(hook)
+    }
 
     fn build_ctx(&mut self) -> ExtBuilderContext<'_, N>;
 
@@ -123,7 +135,7 @@ pub struct ExtComponentsBuildStage<N: FullNodeComponentsExt> {
     pub pipeline_builder: Option<Box<dyn OnComponentsInitializedHook<N>>>,
     pub engine_builder: Option<Box<dyn OnComponentsInitializedHook<N>>>,
     pub rpc_builder: Option<Box<dyn OnComponentsInitializedHook<N>>>,
-    pub rpc_add_ons: RpcHooks<N>,
+    pub rpc_add_ons: Option<RpcHooks<N>>,
 }
 
 impl<N: FullNodeComponentsExt> ExtComponentsBuildStage<N> {
@@ -185,14 +197,6 @@ where
 
     fn rpc_builder(&mut self, b: Box<dyn OnComponentsInitializedHook<N>>) {
         self.rpc_builder = Some(b)
-    }
-
-    fn extend_rpc_modules(&mut self, hook: Box<dyn ExtendRpcModules<N>>) {
-        _ = self.rpc_add_ons.set_extend_rpc_modules(hook);
-    }
-
-    fn on_rpc_started(&mut self, hook: Box<dyn OnRpcStarted<N>>) {
-        self.rpc_add_ons.set_on_rpc_started(hook);
     }
 
     fn build_ctx(&mut self) -> ExtBuilderContext<'_, N> {
@@ -269,6 +273,9 @@ pub trait InitializedComponentsExt<N: FullNodeComponentsExt>:
     fn pipeline_mut(&mut self) -> Option<&mut <Self::Node as FullNodeComponentsExt>::Pipeline>;
     fn engine_mut(&mut self) -> Option<&mut <Self::Node as FullNodeComponentsExt>::Engine>;
     fn rpc_mut(&mut self) -> Option<&mut <Self::Node as FullNodeComponentsExt>::Rpc>;
+    fn rpc_add_ons_mut(&self) -> Option<&mut RpcHooks<N>>;
+
+    fn take_rpc_hooks(&mut self) -> RpcHooks<N>;
 }
 
 #[allow(missing_debug_implementations)]
@@ -280,6 +287,7 @@ pub struct WithComponentsExt<N: FullNodeComponentsExt> {
     pub engine: Option<N::Engine>,
     pub engine_shutdown_rx: Option<<N::Engine as EngineComponent<N::Core>>::ShutdownRx>,
     pub rpc: Option<N::Rpc>,
+    pub rpc_add_ons: Option<RpcHooks<N>>,
 }
 
 impl<N: FullNodeComponentsExt> WithComponentsExt<N> {
@@ -293,6 +301,7 @@ impl<N: FullNodeComponentsExt> WithComponentsExt<N> {
             engine: None,
             engine_shutdown_rx: None,
             rpc: None,
+            rpc_add_ons: None,
         }
     }
 }
@@ -316,5 +325,12 @@ impl<N: FullNodeComponentsExt> InitializedComponentsExt<N> for WithComponentsExt
     }
     fn rpc_mut(&mut self) -> Option<&mut N::Rpc> {
         self.rpc.as_mut()
+    }
+    fn rpc_add_ons_mut(&self) -> Option<&RpcHooks<N>> {
+        self.rpc_add_ons.as_ref()
+    }
+
+    fn take_rpc_hooks(&mut self) -> RpcHooks<N> {
+        self.rpc_add_ons.take().unwrap_or(RpcHooks::new())
     }
 }

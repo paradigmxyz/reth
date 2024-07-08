@@ -1,6 +1,6 @@
 //! Traits for configuring a node.
 
-use std::{fmt, marker::PhantomData, ops::Deref};
+use std::{fmt, marker::PhantomData, ops};
 
 use reth_db_api::{
     database::Database,
@@ -176,6 +176,8 @@ pub trait FullNodeComponentsExt: FullNodeComponents {
 
     fn from_core(core: Self::Core) -> Self;
 
+    fn core(&self) -> &Self::Core;
+
     /// Returns reference to blockchain tree component, if installed.
     fn tree(&self) -> Option<&Self::Tree>;
 
@@ -187,6 +189,18 @@ pub trait FullNodeComponentsExt: FullNodeComponents {
 
     /// Returns reference to RPC component, if installed.
     fn rpc(&self) -> Option<&Self::Rpc>;
+}
+
+impl<T> ops::Deref for T
+where
+    T: ops::Deref,
+    T::Target: FullNodeComponents,
+{
+    type Target = T::Target;
+
+    fn deref(&self) -> &Self::Target {
+        self.core()
+    }
 }
 
 pub trait TreeComponent: Send + Sync + Unpin + Clone + 'static {

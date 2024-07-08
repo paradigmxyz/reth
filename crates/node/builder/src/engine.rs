@@ -16,7 +16,7 @@ where
     C: FullClient,
     BT: FullBlockchainTreeEngine,
 {
-    pub engine: Arc<Mutex<BeaconConsensusEngine<N::DB, BT, C, N::EngineTypes>>>,
+    pub engine: Arc<OnceLock<Mutex<BeaconConsensusEngine<N::DB, BT, C, N::EngineTypes>>>>,
     pub handle: BeaconConsensusEngineHandle<N::EngineTypes>,
     pub shutdown_rx: Arc<OnceLock<oneshot::Receiver<Result<(), BeaconConsensusEngineError>>>>,
 }
@@ -32,7 +32,7 @@ where
         handle: BeaconConsensusEngineHandle<N::EngineTypes>,
     ) -> Self {
         EngineAdapter {
-            engine: Arc::new(Mutex::new(engine)),
+            engine: Arc::new(OnceLock::from(Mutex::new(engine))),
             handle,
             shutdown_rx: Arc::from(OnceLock::new()),
         }
@@ -45,7 +45,7 @@ where
     BT: FullBlockchainTreeEngine + Send + Sync + Unpin + Clone + 'static,
     C: FullClient + Send + Sync + Clone + 'static,
 {
-    type Engine = Arc<Mutex<BeaconConsensusEngine<N::DB, BT, C, N::EngineTypes>>>;
+    type Engine = Arc<OnceLock<Mutex<BeaconConsensusEngine<N::DB, BT, C, N::EngineTypes>>>>;
     type Handle = BeaconConsensusEngineHandle<N::EngineTypes>;
     type ShutdownRx = Arc<OnceLock<oneshot::Receiver<Result<(), BeaconConsensusEngineError>>>>;
 

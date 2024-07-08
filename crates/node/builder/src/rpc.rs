@@ -77,8 +77,8 @@ impl<Node: FullNodeComponents> RpcHooks<Node> {
     }
 
     /// Sets the hook that is run once the rpc server is started.
-    pub(crate) fn set_on_rpc_started<F>(&mut self, hook: Box<dyn OnRpcStarted<Node>>) -> &mut Self {
-        self.on_rpc_started = Box::new(hook);
+    pub(crate) fn set_on_rpc_started(&mut self, hook: Box<dyn OnRpcStarted<Node>>) -> &mut Self {
+        self.on_rpc_started = hook;
         self
     }
 
@@ -328,25 +328,23 @@ where
 }
 
 /// Builds optional RPC component.
-pub trait RpcBuilder<
-    CoreNode,
-    BT,
-    C,
-    Node: FullNodeComponentsExt<
-        Pipeline = PipelineAdapter<C>,
-        Tree = BT,
-        Engine = EngineAdapter<CoreNode, BT, C>,
-    >,
->: Send where
-    CoreNode: FullNodeComponents,
+pub trait RpcBuilder<Core, BT, C, Node>: Send
+where
+    Core: FullNodeComponents,
     BT: FullBlockchainTreeEngine + Clone,
     C: FullClient + Clone,
-    EngineApi<BT, CoreNode::EngineTypes>: EngineApiServer<<Node::NodeTypes>::EngineTypes>,
+    Node: FullNodeComponentsExt<
+        Core = Core,
+        Pipeline = PipelineAdapter<C>,
+        Tree = BT,
+        Engine = EngineAdapter<Core, BT, C>,
+        Rpc = RpcAdapter<Core>,
+    >,
 {
     /// Installs RPC on the node.
     fn build_rpc(
         self: Box<Self>,
-        ctx: &mut ExtBuilderContext<Node>,
+        ctx: ExtBuilderContext<'_, Node>,
     ) -> impl Future<Output = eyre::Result<()>> {
         async move {
             let client = ClientVersionV1 {
@@ -374,11 +372,11 @@ pub trait RpcBuilder<
 
             // Start RPC servers
             let (server_handles, registry) = crate::rpc::launch_rpc_servers(
-                ctx.node().clone(),
+                ctx.node().clone().into_core(),
                 engine_api,
                 ctx.node_config(),
                 jwt_secret,
-                hooks.rpc,
+                ctx.right().take_rpc_hooks(),
             )
             .await?;
 
@@ -393,7 +391,7 @@ pub trait RpcBuilder<
             let (tx, rx) = oneshot::channel();
             ctx.right()
                 .engine_mut()
-                .map(|engine| engine.shutdown_rx_mut() = Arc::new(Mutex::new(Some(rx))));
+                .map(|engine| engine.shutdown_rx_mut().set(rx).expect("should not be set yet"));
             info!(target: "reth::cli", "Starting consensus engine");
             ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
                 let res = ctx
@@ -401,6 +399,9 @@ pub trait RpcBuilder<
                     .engine()
                     .expect("engine should be built before rpc") // todo: fix engine deps with impl of engine builder
                     .engine()
+                    .take()
+                    .expect("engine should not be spawned yet")
+                    .into_inner()
                     .await;
                 let _ = tx.send(res);
             });
@@ -446,22 +447,31 @@ pub trait RpcBuilder<
                 });
             }
 
-            ctx.right().rpc(RpcAdapter { server_handles, registry });
+            ctx.right().rpc_mut().map(|rpc| *rpc = RpcAdapter { server_handles, registry });
 
             Ok(())
         }
     }
 }
 
-impl<Node, F> RpcBuilder<Node> for F
+impl<Core, BT, C, Node, F> RpcBuilder<Core, BT, C, Node> for F
 where
-    Node: FullNodeComponentsExt,
+    Core: FullNodeComponents,
+    BT: FullBlockchainTreeEngine + Clone,
+    C: FullClient + Clone,
+    Node: FullNodeComponentsExt<
+        Core = Core,
+        Pipeline = PipelineAdapter<C>,
+        Tree = BT,
+        Engine = EngineAdapter<Core, BT, C>,
+        Rpc = RpcAdapter<Core>,
+    >,
     F: OnComponentsInitializedHook<Node> + Send,
     Node::Rpc: RpcComponent<Node>,
 {
     fn build_rpc(
         self: Box<Self>,
-        ctx: &mut ExtBuilderContext<Node>,
+        ctx: ExtBuilderContext<'_, Node>,
     ) -> impl Future<Output = eyre::Result<()>> {
         self.on_event(ctx)
     }

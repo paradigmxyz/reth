@@ -337,6 +337,10 @@ where
     fn rpc(&self) -> Option<&Self::Rpc> {
         self.rpc.as_ref()
     }
+
+    fn into_core(self) -> Self::Core {
+        self.core
+    }
 }
 
 #[derive(Constructor)]
