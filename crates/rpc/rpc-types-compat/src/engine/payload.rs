@@ -8,8 +8,8 @@ use reth_primitives::{
 };
 use reth_rpc_types::engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
-    ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
-    ExecutionPayloadV4, PayloadError,
+    ExecutionPayload, ExecutionPayloadBodyV2, ExecutionPayloadV1, ExecutionPayloadV2,
+    ExecutionPayloadV3, ExecutionPayloadV4, PayloadError,
 };
 
 /// Converts [`ExecutionPayloadV1`] to [Block]
@@ -376,6 +376,52 @@ pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
         transactions: transactions.collect(),
         withdrawals: value.withdrawals.map(Withdrawals::into_inner),
     }
+}
+
+/// Converts [Block] to [`ExecutionPayloadBodyV2`]
+pub fn convert_to_payload_body_v2(value: Block) -> ExecutionPayloadBodyV2 {
+    let transactions = value.body.into_iter().map(|tx| {
+        let mut out = Vec::new();
+        tx.encode_enveloped(&mut out);
+        out.into()
+    });
+
+    let mut payload = ExecutionPayloadBodyV2 {
+        transactions: transactions.collect(),
+        withdrawals: value.withdrawals.map(Withdrawals::into_inner),
+        deposit_requests: None,
+        withdrawal_requests: None,
+        consolidation_requests: None,
+    };
+
+    if let Some(requests) = value.requests {
+        let (deposit_requests, withdrawal_requests, consolidation_requests) =
+            requests.into_iter().fold(
+                (Vec::new(), Vec::new(), Vec::new()),
+                |(mut deposits, mut withdrawals, mut consolidation_requests), request| {
+                    match request {
+                        Request::DepositRequest(r) => {
+                            deposits.push(r);
+                        }
+                        Request::WithdrawalRequest(r) => {
+                            withdrawals.push(r);
+                        }
+                        Request::ConsolidationRequest(r) => {
+                            consolidation_requests.push(r);
+                        }
+                        _ => {}
+                    };
+
+                    (deposits, withdrawals, consolidation_requests)
+                },
+            );
+
+        payload.deposit_requests = Some(deposit_requests);
+        payload.withdrawal_requests = Some(withdrawal_requests);
+        payload.consolidation_requests = Some(consolidation_requests);
+    }
+
+    payload
 }
 
 /// Transforms a [`SealedBlock`] into a [`ExecutionPayloadV1`]
