@@ -96,8 +96,7 @@ impl ImportCommand {
                 Arc::new(file_client),
                 StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
                 self.no_state,
-            )
-            .await?;
+            )?;
 
             // override the tip
             pipeline.set_tip(tip);
@@ -153,7 +152,7 @@ impl ImportCommand {
 ///
 /// If configured to execute, all stages will run. Otherwise, only stages that don't require state
 /// will run.
-pub async fn build_import_pipeline<DB, C>(
+pub fn build_import_pipeline<DB, C>(
     config: &Config,
     provider_factory: ProviderFactory<DB>,
     consensus: &Arc<C>,

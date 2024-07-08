@@ -1,5 +1,11 @@
-use crate::{backfill::BackfillAction, engine::DownloadRequest};
-use reth_beacon_consensus::{ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated};
+use crate::{
+    backfill::BackfillAction,
+    chain::FromOrchestrator,
+    engine::{DownloadRequest, EngineApiEvent, FromEngine},
+};
+use reth_beacon_consensus::{
+    BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated,
+};
 use reth_blockchain_tree::{
     error::InsertBlockErrorKind, BlockAttachment, BlockBuffer, BlockStatus,
 };
@@ -11,10 +17,12 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_primitives::PayloadTypes;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Address, Block, BlockNumber, Receipts, Requests, SealedBlock, SealedBlockWithSenders, B256,
-    U256,
+    Address, Block, BlockNumber, GotExpected, Receipts, Requests, SealedBlock,
+    SealedBlockWithSenders, B256, U256,
 };
-use reth_provider::{BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory};
+use reth_provider::{
+    BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory, StateRootProvider,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
     engine::{
@@ -27,8 +35,9 @@ use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
-    sync::Arc,
+    sync::{mpsc::Receiver, Arc},
 };
+use tokio::sync::mpsc::UnboundedSender;
 use tracing::*;
 
 mod memory_overlay;
@@ -72,7 +81,7 @@ impl ExecutedBlock {
 }
 
 /// Keeps track of the state of the tree.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TreeState {
     /// All executed blocks by hash.
     blocks_by_hash: HashMap<B256, ExecutedBlock>,
@@ -129,11 +138,22 @@ pub struct EngineApiTreeState {
     invalid_headers: InvalidHeaderCache,
 }
 
+impl EngineApiTreeState {
+    fn new(block_buffer_limit: u32, max_invalid_header_cache_length: u32) -> Self {
+        Self {
+            invalid_headers: InvalidHeaderCache::new(max_invalid_header_cache_length),
+            buffer: BlockBuffer::new(block_buffer_limit),
+            tree_state: TreeState::default(),
+            forkchoice_state_tracker: ForkchoiceStateTracker::default(),
+        }
+    }
+}
+
 /// The type responsible for processing engine API requests.
 ///
 /// TODO: design: should the engine handler functions also accept the response channel or return the
 /// result and the caller redirects the response
-pub trait EngineApiTreeHandler: Send + Sync {
+pub trait EngineApiTreeHandler {
     /// The engine type that this handler is for.
     type Engine: EngineTypes;
 
@@ -170,7 +190,7 @@ pub trait EngineApiTreeHandler: Send + Sync {
         &mut self,
         state: ForkchoiceState,
         attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
-    ) -> TreeOutcome<Result<OnForkChoiceUpdated, String>>;
+    ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>>;
 }
 
 /// The outcome of a tree operation.
@@ -220,6 +240,8 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     consensus: Arc<dyn Consensus>,
     payload_validator: ExecutionPayloadValidator,
     state: EngineApiTreeState,
+    incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
+    outgoing: UnboundedSender<EngineApiEvent>,
     /// (tmp) The flag indicating whether the pipeline is active.
     is_pipeline_active: bool,
     _marker: PhantomData<T>,
@@ -227,10 +249,102 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
 
 impl<P, E, T> EngineApiTreeHandlerImpl<P, E, T>
 where
-    P: BlockReader + StateProviderFactory,
+    P: BlockReader + StateProviderFactory + Clone + 'static,
     E: BlockExecutorProvider,
-    T: EngineTypes,
+    T: EngineTypes + 'static,
 {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        provider: P,
+        executor_provider: E,
+        consensus: Arc<dyn Consensus>,
+        payload_validator: ExecutionPayloadValidator,
+        incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
+        outgoing: UnboundedSender<EngineApiEvent>,
+        state: EngineApiTreeState,
+    ) -> Self {
+        Self {
+            provider,
+            executor_provider,
+            consensus,
+            payload_validator,
+            incoming,
+            outgoing,
+            is_pipeline_active: false,
+            state,
+            _marker: PhantomData,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_new(
+        provider: P,
+        executor_provider: E,
+        consensus: Arc<dyn Consensus>,
+        payload_validator: ExecutionPayloadValidator,
+        incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
+        state: EngineApiTreeState,
+    ) -> UnboundedSender<EngineApiEvent> {
+        let (outgoing, rx) = tokio::sync::mpsc::unbounded_channel();
+        let task = Self::new(
+            provider,
+            executor_provider,
+            consensus,
+            payload_validator,
+            incoming,
+            outgoing.clone(),
+            state,
+        );
+        std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
+        outgoing
+    }
+
+    fn run(mut self) {
+        loop {
+            while let Ok(msg) = self.incoming.recv() {
+                match msg {
+                    FromEngine::Event(event) => match event {
+                        FromOrchestrator::BackfillSyncFinished => {
+                            todo!()
+                        }
+                        FromOrchestrator::BackfillSyncStarted => {
+                            todo!()
+                        }
+                    },
+                    FromEngine::Request(request) => match request {
+                        BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                            let output = self.on_forkchoice_updated(state, payload_attrs);
+                            if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(Into::into))
+                            {
+                                error!("Failed to send event: {err:?}");
+                            }
+                        }
+                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
+                            let output = self.on_new_payload(payload, cancun_fields);
+                            if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(|e| {
+                                reth_beacon_consensus::BeaconOnNewPayloadError::Internal(Box::new(
+                                    e,
+                                ))
+                            })) {
+                                error!("Failed to send event: {err:?}");
+                            }
+                        }
+                        BeaconEngineMessage::TransitionConfigurationExchanged => {
+                            todo!()
+                        }
+                    },
+                    FromEngine::DownloadedBlocks(blocks) => {
+                        if let Some(event) = self.on_downloaded(blocks) {
+                            if let Err(err) = self.outgoing.send(EngineApiEvent::FromTree(event)) {
+                                error!("Failed to send event: {err:?}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Return block from database or in-memory state by hash.
     fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Block>> {
         // check database first
@@ -355,6 +469,15 @@ where
         Ok(Some(status))
     }
 
+    /// Checks if the given `head` points to an invalid header, which requires a specific response
+    /// to a forkchoice update.
+    fn check_invalid_ancestor(&mut self, head: B256) -> ProviderResult<Option<PayloadStatus>> {
+        // check if the head was previously marked as invalid
+        let Some(header) = self.state.invalid_headers.get(&head) else { return Ok(None) };
+        // populate the latest valid hash field
+        Ok(Some(self.prepare_invalid_response(header.parent_hash)?))
+    }
+
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
     fn validate_block(&self, block: &SealedBlockWithSenders) -> Result<(), ConsensusError> {
@@ -437,10 +560,16 @@ where
             PostExecutionInput::new(&output.receipts, &output.requests),
         )?;
 
+        // TODO: change StateRootProvider API to accept hashed post state
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
-        // TODO: compute and validate state root
-        let trie_output = TrieUpdates::default();
+        let (state_root, trie_output) = state_provider.state_root_with_updates(&output.state)?;
+        if state_root != block.state_root {
+            return Err(ConsensusError::BodyStateRootDiff(
+                GotExpected { got: state_root, expected: block.state_root }.into(),
+            )
+            .into())
+        }
 
         let executed = ExecutedBlock {
             block: Arc::new(block.block.seal(block_hash)),
@@ -459,13 +588,42 @@ where
         let attachment = BlockAttachment::Canonical; // TODO: remove or revise attachment
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)))
     }
+
+    /// Pre-validate forkchoice update and check whether it can be processed.
+    ///
+    /// This method returns the update outcome if validation fails or
+    /// the node is syncing and the update cannot be processed at the moment.
+    fn pre_validate_forkchoice_update(
+        &mut self,
+        state: ForkchoiceState,
+    ) -> ProviderResult<Option<OnForkChoiceUpdated>> {
+        if state.head_block_hash.is_zero() {
+            return Ok(Some(OnForkChoiceUpdated::invalid_state()))
+        }
+
+        // check if the new head hash is connected to any ancestor that we previously marked as
+        // invalid
+        let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
+        if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu)? {
+            return Ok(Some(OnForkChoiceUpdated::with_invalid(status)))
+        }
+
+        if self.is_pipeline_active {
+            // We can only process new forkchoice updates if the pipeline is idle, since it requires
+            // exclusive access to the database
+            trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
+            return Ok(Some(OnForkChoiceUpdated::syncing()))
+        }
+
+        Ok(None)
+    }
 }
 
 impl<P, E, T> EngineApiTreeHandler for EngineApiTreeHandlerImpl<P, E, T>
 where
-    P: BlockReader + StateProviderFactory + Clone,
+    P: BlockReader + StateProviderFactory + Clone + 'static,
     E: BlockExecutorProvider,
-    T: EngineTypes,
+    T: EngineTypes + 'static,
 {
     type Engine = T;
 
@@ -588,7 +746,12 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
-    ) -> TreeOutcome<Result<OnForkChoiceUpdated, String>> {
+    ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
+        if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
+            self.state.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
+            return Ok(TreeOutcome::new(on_updated))
+        }
+
         todo!()
     }
 }

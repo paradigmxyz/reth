@@ -7,9 +7,10 @@ use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
 };
 use reth_db_api::{database::Database, database_metrics::DatabaseMetadata};
-use reth_network::{NetworkEvent, NetworkHandle};
+use reth_network::NetworkEvent;
 use reth_network_api::PeersInfo;
 use reth_primitives::{constants, BlockNumber, B256};
+use reth_primitives_traits::{format_gas, format_gas_throughput};
 use reth_prune::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
 use reth_static_file::StaticFileProducerEvent;
@@ -35,8 +36,8 @@ struct NodeState<DB> {
     /// Used for freelist calculation reported in the "Status" log message.
     /// See [`EventHandler::poll`].
     db: DB,
-    /// Connection to the network.
-    network: Option<NetworkHandle>,
+    /// Information about connected peers.
+    peers_info: Option<Box<dyn PeersInfo>>,
     /// The stage currently being executed.
     current_stage: Option<CurrentStage>,
     /// The latest block reached by either pipeline or consensus engine.
@@ -54,12 +55,12 @@ struct NodeState<DB> {
 impl<DB> NodeState<DB> {
     const fn new(
         db: DB,
-        network: Option<NetworkHandle>,
+        peers_info: Option<Box<dyn PeersInfo>>,
         latest_block: Option<BlockNumber>,
     ) -> Self {
         Self {
             db,
-            network,
+            peers_info,
             current_stage: None,
             latest_block,
             latest_block_time: None,
@@ -70,7 +71,7 @@ impl<DB> NodeState<DB> {
     }
 
     fn num_connected_peers(&self) -> usize {
-        self.network.as_ref().map(|net| net.num_connected_peers()).unwrap_or_default()
+        self.peers_info.as_ref().map(|info| info.num_connected_peers()).unwrap_or_default()
     }
 
     /// Processes an event emitted by the pipeline
@@ -279,8 +280,8 @@ impl<DB> NodeState<DB> {
                     hash=?block.hash(),
                     peers=self.num_connected_peers(),
                     txs=block.body.len(),
-                    mgas=%format!("{:.3}MGas", block.header.gas_used as f64 / constants::MGAS_TO_GAS as f64),
-                    mgas_throughput=%format!("{:.3}MGas/s", block.header.gas_used as f64 / elapsed.as_secs_f64() / constants::MGAS_TO_GAS as f64),
+                    gas=%format_gas(block.header.gas_used),
+                    gas_throughput=%format_gas_throughput(block.header.gas_used, elapsed),
                     full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
                     base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas.unwrap_or(0) as f64 / constants::GWEI_TO_WEI as f64),
                     blobs=block.header.blob_gas_used.unwrap_or(0) / constants::eip4844::DATA_GAS_PER_BLOB,
@@ -437,7 +438,7 @@ impl From<StaticFileProducerEvent> for NodeEvent {
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
 pub async fn handle_events<E, DB>(
-    network: Option<NetworkHandle>,
+    peers_info: Option<Box<dyn PeersInfo>>,
     latest_block_number: Option<BlockNumber>,
     events: E,
     db: DB,
@@ -445,7 +446,7 @@ pub async fn handle_events<E, DB>(
     E: Stream<Item = NodeEvent> + Unpin,
     DB: DatabaseMetadata + Database + 'static,
 {
-    let state = NodeState::new(db, network, latest_block_number);
+    let state = NodeState::new(db, peers_info, latest_block_number);
 
     let start = tokio::time::Instant::now() + Duration::from_secs(3);
     let mut info_interval = tokio::time::interval_at(start, INFO_MESSAGE_INTERVAL);

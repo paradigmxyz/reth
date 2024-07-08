@@ -464,19 +464,17 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
             .root_with_progress()?
         {
             StateRootProgress::Progress(state, _, updates) => {
-                let updates_len = updates.len();
+                let updated_len = updates.write_to_database(tx)?;
+                total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
                     last_account_key = %state.last_account_key,
-                    updates_len,
+                    updated_len,
                     total_flushed_updates,
                     "Flushing trie updates"
                 );
 
                 intermediate_state = Some(*state);
-                updates.flush(tx)?;
-
-                total_flushed_updates += updates_len;
 
                 if total_flushed_updates % SOFT_LIMIT_COUNT_FLUSHED_UPDATES == 0 {
                     info!(target: "reth::cli",
@@ -486,15 +484,12 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
                 }
             }
             StateRootProgress::Complete(root, _, updates) => {
-                let updates_len = updates.len();
-
-                updates.flush(tx)?;
-
-                total_flushed_updates += updates_len;
+                let updated_len = updates.write_to_database(tx)?;
+                total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
                     %root,
-                    updates_len = updates_len,
+                    updated_len,
                     total_flushed_updates,
                     "State root has been computed"
                 );
@@ -526,7 +521,7 @@ struct GenesisAccountWithAddress {
 mod tests {
     use super::*;
     use alloy_genesis::Genesis;
-    use reth_chainspec::{Chain, GOERLI, MAINNET, SEPOLIA};
+    use reth_chainspec::{Chain, HOLESKY, MAINNET, SEPOLIA};
     use reth_db::DatabaseEnv;
     use reth_db_api::{
         cursor::DbCursorRO,
@@ -534,7 +529,7 @@ mod tests {
         table::{Table, TableRow},
         transaction::DbTx,
     };
-    use reth_primitives::{GOERLI_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
+    use reth_primitives::{HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
     use reth_primitives_traits::IntegerList;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
 
@@ -558,21 +553,21 @@ mod tests {
     }
 
     #[test]
-    fn success_init_genesis_goerli() {
-        let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(GOERLI.clone())).unwrap();
-
-        // actual, expected
-        assert_eq!(genesis_hash, GOERLI_GENESIS_HASH);
-    }
-
-    #[test]
     fn success_init_genesis_sepolia() {
         let genesis_hash =
             init_genesis(create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
+    }
+
+    #[test]
+    fn success_init_genesis_holesky() {
+        let genesis_hash =
+            init_genesis(create_test_provider_factory_with_chain_spec(HOLESKY.clone())).unwrap();
+
+        // actual, expected
+        assert_eq!(genesis_hash, HOLESKY_GENESIS_HASH);
     }
 
     #[test]

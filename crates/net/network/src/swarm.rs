@@ -13,7 +13,7 @@ use reth_eth_wire::{
     EthVersion, Status,
 };
 use reth_network_peers::PeerId;
-use reth_provider::{BlockNumReader, BlockReader};
+use reth_storage_api::BlockNumReader;
 use std::{
     io,
     net::SocketAddr,
@@ -287,7 +287,7 @@ where
 
 impl<C> Stream for Swarm<C>
 where
-    C: BlockReader + Unpin,
+    C: BlockNumReader + Unpin,
 {
     type Item = SwarmEvent;
 

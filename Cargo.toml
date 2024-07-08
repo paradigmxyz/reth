@@ -17,6 +17,7 @@ members = [
     "crates/cli/cli/",
     "crates/cli/commands/",
     "crates/cli/runner/",
+    "crates/cli/util/",
     "crates/config/",
     "crates/consensus/auto-seal/",
     "crates/consensus/beacon/",
@@ -30,7 +31,9 @@ members = [
     "crates/engine/util/",
     "crates/errors/",
     "crates/ethereum-forks/",
+    "crates/ethereum/cli/",
     "crates/ethereum/consensus/",
+    "crates/ethereum/engine/",
     "crates/ethereum/engine-primitives/",
     "crates/ethereum/evm",
     "crates/ethereum/node",
@@ -68,6 +71,7 @@ members = [
     "crates/optimism/node/",
     "crates/optimism/payload/",
     "crates/optimism/primitives/",
+    "crates/optimism/rpc/",
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/primitives/",
@@ -273,6 +277,7 @@ reth-chainspec = { path = "crates/chainspec" }
 reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
+reth-cli-util = { path = "crates/cli/util" }
 reth-codecs = { path = "crates/storage/codecs" }
 reth-codecs-derive = { path = "crates/storage/codecs/derive" }
 reth-config = { path = "crates/config" }
@@ -294,6 +299,7 @@ reth-engine-util = { path = "crates/engine/util" }
 reth-errors = { path = "crates/errors" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
+reth-ethereum-cli = { path = "crates/ethereum/cli" }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
 reth-ethereum-forks = { path = "crates/ethereum-forks" }
@@ -331,6 +337,7 @@ reth-optimism-cli = { path = "crates/optimism/cli" }
 reth-optimism-consensus = { path = "crates/optimism/consensus" }
 reth-optimism-payload-builder = { path = "crates/optimism/payload" }
 reth-optimism-primitives = { path = "crates/optimism/primitives" }
+reth-optimism-rpc = { path = "crates/optimism/rpc" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
@@ -395,6 +402,7 @@ alloy-rpc-types-txpool = { version = "0.1", default-features = false }
 alloy-serde = { version = "0.1", default-features = false }
 alloy-rpc-types-engine = { version = "0.1", default-features = false }
 alloy-rpc-types-eth = { version = "0.1", default-features = false }
+alloy-rpc-types-mev = { version = "0.1", default-features = false }
 alloy-rpc-types-trace = { version = "0.1", default-features = false }
 alloy-genesis = { version = "0.1", default-features = false }
 alloy-node-bindings = { version = "0.1", default-features = false }
@@ -415,6 +423,9 @@ alloy-transport-ipc = { version = "0.1", default-features = false }
 alloy-pubsub = { version = "0.1", default-features = false }
 alloy-json-rpc = { version = "0.1", default-features = false }
 alloy-rpc-client = { version = "0.1", default-features = false }
+
+# op
+op-alloy-rpc-types = "0.1"
 
 # misc
 auto_impl = "1"

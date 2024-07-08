@@ -102,7 +102,6 @@ impl Case for BlockchainTestCase {
                     )
                     .try_seal_with_senders()
                     .unwrap(),
-                    None,
                 )?;
                 case.pre.write_to_db(provider.tx_ref())?;
 
@@ -121,7 +120,6 @@ impl Case for BlockchainTestCase {
                     let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
                     provider.insert_historical_block(
                         decoded.clone().try_seal_with_senders().unwrap(),
-                        None,
                     )?;
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;
@@ -189,7 +187,7 @@ pub fn should_skip(path: &Path) -> bool {
         | "ValueOverflow.json"
         | "ValueOverflowParis.json"
 
-        // txbyte is of type 02 and we dont parse tx bytes for this test to fail.
+        // txbyte is of type 02 and we don't parse tx bytes for this test to fail.
         | "typeTwoBerlin.json"
 
         // Test checks if nonce overflows. We are handling this correctly but we are not parsing

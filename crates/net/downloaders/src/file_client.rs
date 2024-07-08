@@ -5,13 +5,12 @@ use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::RequestError,
-    headers::client::{HeadersClient, HeadersFut, HeadersRequest},
+    headers::client::{HeadersClient, HeadersDirection, HeadersFut, HeadersRequest},
     priority::Priority,
 };
 use reth_network_peers::PeerId;
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, SealedHeader,
-    B256,
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, SealedHeader, B256,
 };
 use std::{collections::HashMap, io, path::Path};
 use thiserror::Error;

@@ -393,7 +393,8 @@ where
         let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
         let tree = Arc::new(ShareableBlockchainTree::new(
-            BlockchainTree::new(externals, config, None).expect("failed to create tree"),
+            BlockchainTree::new(externals, config, PruneModes::default())
+                .expect("failed to create tree"),
         ));
         let latest = self.base_config.chain_spec.genesis_header().seal_slow();
         let blockchain_provider =

@@ -12,7 +12,7 @@ Options:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
+              mainnet, sepolia, holesky, dev
 
           [default: mainnet]
 

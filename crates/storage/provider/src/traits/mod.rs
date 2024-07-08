@@ -43,7 +43,7 @@ mod stats;
 pub use stats::StatsReader;
 
 mod full;
-pub use full::FullProvider;
+pub use full::{FullProvider, FullRpcProvider};
 
 mod tree_viewer;
 pub use tree_viewer::TreeViewer;

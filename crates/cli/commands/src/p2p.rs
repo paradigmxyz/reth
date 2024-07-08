@@ -1,23 +1,20 @@
 //! P2P Debugging tool
 
-use crate::{
-    args::{
-        get_secret_key,
-        utils::{chain_help, chain_value_parser, hash_or_num_value_parser, SUPPORTED_CHAINS},
-        DatabaseArgs, NetworkArgs,
-    },
-    utils::get_single_header,
-};
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
+use reth_cli_util::{get_secret_key, hash_or_num_value_parser};
 use reth_config::Config;
-use reth_db::create_db;
 use reth_network::NetworkConfigBuilder;
 use reth_network_p2p::bodies::client::BodiesClient;
-use reth_node_core::args::DatadirArgs;
+use reth_node_core::{
+    args::{
+        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, DatadirArgs, NetworkArgs,
+    },
+    utils::get_single_header,
+};
 use reth_primitives::BlockHashOrNumber;
-use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use std::{path::PathBuf, sync::Arc};
 
 /// `reth p2p` command
@@ -75,18 +72,12 @@ pub enum Subcommands {
 impl Command {
     /// Execute `p2p` command
     pub async fn execute(&self) -> eyre::Result<()> {
-        let tempdir = tempfile::TempDir::new()?;
-        let noop_db = Arc::new(create_db(tempdir.into_path(), self.db.database_args())?);
-
-        // add network name to data dir
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain);
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
         let mut config: Config = confy::load_path(&config_path).unwrap_or_default();
 
-        for peer in &self.network.trusted_peers {
-            config.peers.trusted_nodes.insert(peer.resolve().await?);
-        }
+        config.peers.trusted_nodes.extend(self.network.resolve_trusted_peers().await?);
 
         if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {
             eyre::bail!("No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`")
@@ -101,7 +92,7 @@ impl Command {
         let rlpx_socket = (self.network.addr, self.network.port).into();
         let boot_nodes = self.chain.bootnodes().unwrap_or_default();
 
-        let network = NetworkConfigBuilder::new(p2p_secret_key)
+        let net = NetworkConfigBuilder::new(p2p_secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(None))
             .external_ip_resolver(self.network.nat)
             .chain_spec(self.chain.clone())
@@ -110,13 +101,11 @@ impl Command {
             .apply(|builder| {
                 self.network.discovery.apply_to_builder(builder, rlpx_socket, boot_nodes)
             })
-            .build(Arc::new(ProviderFactory::new(
-                noop_db,
-                self.chain.clone(),
-                StaticFileProvider::read_write(data_dir.static_files())?,
-            )))
-            .start_network()
+            .build_with_noop_provider()
+            .manager()
             .await?;
+        let network = net.handle().clone();
+        tokio::task::spawn(net);
 
         let fetch_client = network.fetch_client().await?;
         let retries = self.retries.max(1);

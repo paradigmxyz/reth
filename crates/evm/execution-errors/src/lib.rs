@@ -98,6 +98,14 @@ pub enum BlockValidationError {
         /// The error message.
         message: String,
     },
+    /// EVM error during consolidation requests contract call [EIP-7251]
+    ///
+    /// [EIP-7251]: https://eips.ethereum.org/EIPS/eip-7251
+    #[error("failed to apply consolidation requests contract call: {message}")]
+    ConsolidationRequestsContractCall {
+        /// The error message.
+        message: String,
+    },
     /// Error when decoding deposit requests from receipts [EIP-6110]
     ///
     /// [EIP-6110]: https://eips.ethereum.org/EIPS/eip-6110

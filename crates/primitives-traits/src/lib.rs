@@ -14,6 +14,7 @@ mod alloy_compat;
 
 /// Common constants.
 pub mod constants;
+pub use constants::gas_units::{format_gas, format_gas_throughput};
 
 /// Minimal account
 pub mod account;
