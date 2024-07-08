@@ -28,9 +28,8 @@ async fn test_http_addr_in_use() {
     let builder = test_rpc_builder();
     let server = builder
         .build(TransportRpcModuleConfig::set_http(vec![RethRpcModule::Admin]), EthApiBuild::build);
-    let result = server
-        .start_server(RpcServerConfig::http(Default::default()).with_http_address(addr))
-        .await;
+    let mut config = RpcServerConfig::http(Default::default()).with_http_address(addr);
+    let result = config.start(&server).await;
     let err = result.unwrap_err();
     assert!(is_addr_in_use_kind(&err, ServerKind::Http(addr)), "{err}");
 }
@@ -42,8 +41,8 @@ async fn test_ws_addr_in_use() {
     let builder = test_rpc_builder();
     let server = builder
         .build(TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Admin]), EthApiBuild::build);
-    let result =
-        server.start_server(RpcServerConfig::ws(Default::default()).with_ws_address(addr)).await;
+    let mut config = RpcServerConfig::ws(Default::default()).with_ws_address(addr);
+    let result = config.start(&server).await;
     let err = result.unwrap_err();
     assert!(is_addr_in_use_kind(&err, ServerKind::WS(addr)), "{err}");
 }
@@ -65,14 +64,11 @@ async fn test_launch_same_port_different_modules() {
         EthApiBuild::build,
     );
     let addr = test_address();
-    let res = server
-        .start_server(
-            RpcServerConfig::ws(Default::default())
-                .with_ws_address(addr)
-                .with_http(Default::default())
-                .with_http_address(addr),
-        )
-        .await;
+    let mut config = RpcServerConfig::ws(Default::default())
+        .with_ws_address(addr)
+        .with_http(Default::default())
+        .with_http_address(addr);
+    let res = config.start(&server).await;
     let err = res.unwrap_err();
     assert!(matches!(
         err,
@@ -89,16 +85,13 @@ async fn test_launch_same_port_same_cors() {
         EthApiBuild::build,
     );
     let addr = test_address();
-    let res = server
-        .start_server(
-            RpcServerConfig::ws(Default::default())
-                .with_ws_address(addr)
-                .with_http(Default::default())
-                .with_cors(Some("*".to_string()))
-                .with_http_cors(Some("*".to_string()))
-                .with_http_address(addr),
-        )
-        .await;
+    let mut config = RpcServerConfig::ws(Default::default())
+        .with_ws_address(addr)
+        .with_http(Default::default())
+        .with_cors(Some("*".to_string()))
+        .with_http_cors(Some("*".to_string()))
+        .with_http_address(addr);
+    let res = config.start(&server).await;
     assert!(res.is_ok());
 }
 
@@ -111,16 +104,13 @@ async fn test_launch_same_port_different_cors() {
         EthApiBuild::build,
     );
     let addr = test_address();
-    let res = server
-        .start_server(
-            RpcServerConfig::ws(Default::default())
-                .with_ws_address(addr)
-                .with_http(Default::default())
-                .with_cors(Some("*".to_string()))
-                .with_http_cors(Some("example".to_string()))
-                .with_http_address(addr),
-        )
-        .await;
+    let mut config = RpcServerConfig::ws(Default::default())
+        .with_ws_address(addr)
+        .with_http(Default::default())
+        .with_cors(Some("*".to_string()))
+        .with_http_cors(Some("example".to_string()))
+        .with_http_address(addr);
+    let res = config.start(&server).await;
     let err = res.unwrap_err();
     assert!(matches!(
         err,
