@@ -4,15 +4,22 @@ use jsonrpsee::core::RpcResult;
 use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::helpers::TraceExt;
+use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
-    trace::otterscan::{
-        BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
-        OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+    trace::{
+        otterscan::{
+            BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
+            OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+        },
+        parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
     BlockTransactions, Header, Transaction,
 };
-use revm_inspectors::transfer::{TransferInspector, TransferKind};
+use revm_inspectors::{
+    tracing::TracingInspectorConfig,
+    transfer::{TransferInspector, TransferKind},
+};
 use revm_primitives::ExecutionResult;
 
 const API_LEVEL: u64 = 8;
@@ -208,7 +215,69 @@ where
     }
 
     /// Handler for `getContractCreator`
-    async fn get_contract_creator(&self, _address: Address) -> RpcResult<Option<ContractCreator>> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn get_contract_creator(&self, address: Address) -> RpcResult<Option<ContractCreator>> {
+        if !self.has_code(address, None).await? {
+            return Ok(None);
+        }
+
+        // use binary search from block [1, latest block number] to find the first block where the
+        // contract was deployed
+        let mut low = 1;
+        let mut high = self.eth.block_number()?.saturating_to::<u64>();
+        let mut num = high;
+
+        while low <= high {
+            let mid = (low + high) / 2;
+            if self.eth.get_code(address, Some(mid.into())).await?.is_empty() {
+                // not found in current block, need to search in the later blocks
+                low = mid + 1;
+            } else {
+                // found in current block, try to find a lower block
+                high = mid - 1;
+                num = mid;
+            }
+        }
+
+        let traces = self
+            .eth
+            .trace_block_with(
+                num.into(),
+                TracingInspectorConfig::default_parity(),
+                |tx_info, inspector, _, _, _| {
+                    Ok(inspector.into_parity_builder().into_localized_transaction_traces(tx_info))
+                },
+            )
+            .await?
+            .map(|traces| {
+                traces
+                    .into_iter()
+                    .flatten()
+                    .map(|tx_trace| {
+                        let trace = tx_trace.trace;
+                        Ok(match (trace.action, trace.result, trace.error) {
+                            (
+                                Action::Create(CreateAction { from: creator, .. }),
+                                Some(TraceOutput::Create(CreateOutput {
+                                    address: contract, ..
+                                })),
+                                None,
+                            ) if contract == address => Some(ContractCreator {
+                                hash: tx_trace
+                                    .transaction_hash
+                                    .ok_or_else(|| EthApiError::TransactionNotFound)?,
+                                creator,
+                            }),
+                            _ => None,
+                        })
+                    })
+                    .filter_map(Result::transpose)
+                    .collect::<Result<Vec<_>, EthApiError>>()
+            })
+            .transpose()?;
+
+        // A contract maybe created and then destroyed in multiple transactions, here we
+        // return the first found transaction, this behavior is consistent with etherscan's
+        let found = traces.and_then(|traces| traces.first().cloned());
+        Ok(found)
     }
 }
