@@ -279,7 +279,7 @@ where
         ctx.task_executor().spawn_critical(
             "events task",
             node::handle_events(
-                Some(ctx.components().network().clone()),
+                Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
                 database.clone(),
