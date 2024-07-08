@@ -204,7 +204,7 @@ impl Command {
         ctx.task_executor.spawn_critical(
             "events task",
             reth_node_events::node::handle_events(
-                Some(network.clone()),
+                Some(Box::new(network)),
                 latest_block_number,
                 events,
                 provider_factory.db_ref().clone(),
