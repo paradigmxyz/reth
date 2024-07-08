@@ -1,11 +1,20 @@
 #![allow(dead_code)]
 
 use reth_db::database::Database;
-use reth_primitives::BlockNumber;
-use reth_provider::ProviderFactory;
-use reth_static_file::{HighestStaticFiles, StaticFileProducerInner};
-use std::sync::mpsc::{Receiver, Sender};
+use reth_errors::ProviderResult;
+use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256};
+use reth_provider::{ProviderFactory, StaticFileProviderFactory, StaticFileWriter};
+use reth_static_file::StaticFileProducerInner;
+use std::sync::{
+    mpsc::{Receiver, SendError, Sender},
+    Arc,
+};
 use tokio::sync::oneshot;
+
+use crate::{
+    persistence::{PersistenceAction, PersistenceHandle},
+    tree::ExecutedBlock,
+};
 
 /// Writes finalized blocks to reth's static files.
 ///
@@ -20,6 +29,8 @@ pub struct StaticFileTask<DB> {
     provider: ProviderFactory<DB>,
     /// The static file producer to use
     static_file_producer: StaticFileProducerInner<DB>,
+    /// Handle for the database task
+    database_handle: PersistenceHandle,
     /// Incoming requests to write static files
     incoming: Receiver<StaticFileAction>,
 }
@@ -40,32 +51,86 @@ where
 
         // StaticFileTaskHandle::new(tx)
     }
+
+    // TODO: some things about this are a bit weird, and just to make the underlying static file
+    // writes work - tx number, total difficulty inclusion. They require either additional in memory
+    // data or a db lookup. Maybe we can use a db read here
+    /// Writes the transactions to static files, to act as a log.
+    ///
+    /// This will then send a command to the db task, that it should update the checkpoints for
+    /// headers and block bodies.
+    fn log_transactions(
+        &self,
+        block: Arc<SealedBlock>,
+        start_tx_number: u64,
+        td: U256,
+        sender: oneshot::Sender<()>,
+    ) -> ProviderResult<()> {
+        let provider = self.provider.static_file_provider();
+        let mut header_writer = provider.get_writer(block.number, StaticFileSegment::Headers)?;
+        let mut transactions_writer =
+            provider.get_writer(block.number, StaticFileSegment::Transactions)?;
+
+        // TODO: does to_compact require ownership?
+        header_writer.append_header(block.header().clone(), td, block.hash())?;
+        let no_hash_transactions =
+            block.body.clone().into_iter().map(TransactionSignedNoHash::from);
+
+        let mut tx_number = start_tx_number;
+        for tx in no_hash_transactions {
+            transactions_writer.append_transaction(tx_number, tx)?;
+            tx_number += 1;
+        }
+
+        // TODO: what's the point of setting the segment in `get_writer` if i can just use
+        // `append_transaction` on header_writer anyways?
+        // increment block for both segments
+        header_writer.increment_block(StaticFileSegment::Headers, block.number)?;
+        transactions_writer.increment_block(StaticFileSegment::Transactions, block.number)?;
+
+        // finally commit
+        header_writer.commit()?;
+        transactions_writer.commit()?;
+
+        // send a command to the db task to update the checkpoints for headers / bodies
+        self.database_handle
+            .send_action(PersistenceAction::UpdateTransactionMeta((block.number, sender)));
+
+        Ok(())
+    }
+
+    fn write_execution_data(&self, blocks: Vec<ExecutedBlock>) -> ProviderResult<()> {
+        todo!("implement me")
+    }
 }
 
 impl<DB> StaticFileTask<DB>
 where
-    DB: Database,
+    DB: Database + 'static,
 {
-    /// This is the main loop, that will listen to finalization actions, and write DB data to static
+    /// This is the main loop, that will listen to static file actions, and write DB data to static
     /// files.
     fn run(self) {
         // If the receiver errors then senders have disconnected, so the loop should then end.
         while let Ok(action) = self.incoming.recv() {
             match action {
-                StaticFileAction::FinalizedBlock((new_finalized_num, sender)) => {
-                    let finalized_block_nums = HighestStaticFiles {
-                        headers: Some(new_finalized_num),
-                        transactions: Some(new_finalized_num),
-                        receipts: Some(new_finalized_num),
-                    };
-                    let targets = self
-                        .static_file_producer
-                        .get_static_file_targets(finalized_block_nums)
-                        .unwrap();
-                    self.static_file_producer.run(targets).unwrap();
-
-                    // The caller may not care about the result so we ignore the error
-                    let _ = sender.send(());
+                StaticFileAction::LogTransactions((
+                    block,
+                    start_tx_number,
+                    td,
+                    response_sender,
+                )) => {
+                    self.log_transactions(block, start_tx_number, td, response_sender)
+                        .expect("todo: handle errors");
+                    todo!("implement me")
+                    // let _ = response_sender.send(());
+                }
+                StaticFileAction::RemoveBlocksAbove((block_num, response_sender)) => {
+                    todo!("implement me")
+                }
+                StaticFileAction::WriteExecutionData((blocks, response_sender)) => {
+                    self.write_execution_data(blocks).expect("todo: handle errors");
+                    let _ = response_sender.send(());
                 }
             }
         }
@@ -75,9 +140,27 @@ where
 /// A signal to the static file task that some data should be copied from the DB to static files.
 #[derive(Debug)]
 pub enum StaticFileAction {
-    /// The given block number is the newest finalized block, and data from the DB can be copied
-    /// over to static files.
-    FinalizedBlock((BlockNumber, oneshot::Sender<()>)),
+    /// The given block has been added to the canonical chain, its transactions and headers will be
+    /// persisted for durability.
+    ///
+    /// This will then send a command to the db task, that it should update the checkpoints for
+    /// headers and block bodies.
+    LogTransactions((Arc<SealedBlock>, u64, U256, oneshot::Sender<()>)),
+
+    /// Write execution-related block data to static files.
+    ///
+    /// This will then send a command to the db task, that it should write new data, and update the
+    /// checkpoints for execution and beyond.
+    WriteExecutionData((Vec<ExecutedBlock>, oneshot::Sender<()>)),
+
+    /// Removes the blocks above the given block number from static files. Also removes related
+    /// receipt and header data.
+    ///
+    /// This is meant to be called by the db task, as this should only be done after related data
+    /// is removed from the database, and checkpoints are updated.
+    ///
+    /// Returns the hash of the lowest removed block.
+    RemoveBlocksAbove((u64, oneshot::Sender<B256>)),
 }
 
 /// A handle to the static file task
@@ -93,12 +176,9 @@ impl StaticFileTaskHandle {
         Self { sender }
     }
 
-    /// Writes to static files based on what the new finalized block is.
-    pub async fn finalized_block(&self, block_num: BlockNumber) {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(StaticFileAction::FinalizedBlock((block_num, tx)))
-            .expect("should be able to send");
-        rx.await.expect("todo: err handling")
+    /// Sends a specific [`StaticFileAction`] in the contained channel. The caller is responsible
+    /// for creating any channels for the given action.
+    pub fn send_action(&self, action: StaticFileAction) -> Result<(), SendError<StaticFileAction>> {
+        self.sender.send(action)
     }
 }

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::tree::ExecutedBlock;
+use crate::{static_files::StaticFileTaskHandle, tree::ExecutedBlock};
 use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::B256;
@@ -9,6 +9,7 @@ use reth_provider::{
     ProviderFactory, StageCheckpointWriter, StateWriter,
 };
 use reth_prune::{PruneProgress, Pruner};
+use reth_stages::{StageCheckpoint, StageId};
 use std::sync::mpsc::{Receiver, SendError, Sender};
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -30,6 +31,8 @@ pub struct Persistence<DB> {
     provider: ProviderFactory<DB>,
     /// Incoming requests to persist stuff
     incoming: Receiver<PersistenceAction>,
+    /// Handle for the static file task.
+    static_file_handle: StaticFileTaskHandle,
     /// The pruner
     pruner: Pruner<DB>,
 }
@@ -39,9 +42,10 @@ impl<DB: Database> Persistence<DB> {
     const fn new(
         provider: ProviderFactory<DB>,
         incoming: Receiver<PersistenceAction>,
+        static_file_handle: StaticFileTaskHandle,
         pruner: Pruner<DB>,
     ) -> Self {
-        Self { provider, incoming, pruner }
+        Self { provider, incoming, static_file_handle, pruner }
     }
 
     /// Writes the cloned tree state to the database
@@ -102,7 +106,7 @@ impl<DB: Database> Persistence<DB> {
     }
 
     /// Removes the blocks above the give block number from the database, returning them.
-    fn remove_blocks_above(&self, _block_number: u64) -> Vec<ExecutedBlock> {
+    fn remove_blocks_above(&self, _block_number: u64) -> B256 {
         todo!("implement this")
     }
 
@@ -113,10 +117,14 @@ impl<DB: Database> Persistence<DB> {
         self.pruner.run(block_num).expect("todo: handle errors")
     }
 
-    /// Removes static file related data from the database, depending on the current block height in
-    /// existing static files.
-    fn clean_static_file_duplicates(&self) {
-        todo!("implement this")
+    /// Updates checkpoints related to block headers and bodies. This should be called by the static
+    /// file task, after new transactions have been successfully written to disk.
+    fn update_transaction_meta(&mut self, block_num: u64) -> ProviderResult<()> {
+        let provider_rw = self.provider.provider_rw()?;
+        provider_rw.save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(block_num))?;
+        provider_rw.save_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(block_num))?;
+        provider_rw.commit()?;
+        Ok(())
     }
 }
 
@@ -125,9 +133,13 @@ where
     DB: Database + 'static,
 {
     /// Create a new persistence task, spawning it, and returning a [`PersistenceHandle`].
-    fn spawn_new(provider: ProviderFactory<DB>, pruner: Pruner<DB>) -> PersistenceHandle {
+    fn spawn_new(
+        provider: ProviderFactory<DB>,
+        static_file_handle: StaticFileTaskHandle,
+        pruner: Pruner<DB>,
+    ) -> PersistenceHandle {
         let (tx, rx) = std::sync::mpsc::channel();
-        let task = Self::new(provider, rx, pruner);
+        let task = Self::new(provider, rx, static_file_handle, pruner);
         std::thread::Builder::new()
             .name("Persistence Task".to_string())
             .spawn(|| task.run())
@@ -169,11 +181,11 @@ where
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(res);
                 }
-                PersistenceAction::CleanStaticFileDuplicates(sender) => {
-                    self.clean_static_file_duplicates();
+                PersistenceAction::UpdateTransactionMeta((block_num, sender)) => {
+                    let res = self.update_transaction_meta(block_num);
 
                     // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(());
+                    let _ = sender.send(res);
                 }
             }
         }
@@ -185,18 +197,25 @@ where
 pub enum PersistenceAction {
     /// The section of tree state that should be persisted. These blocks are expected in order of
     /// increasing block number.
+    ///
+    /// This should just store the execution history-related data. Header, transaction, and
+    /// receipt-related data should already be written to static files.
     SaveBlocks((Vec<ExecutedBlock>, oneshot::Sender<B256>)),
 
-    /// Removes the blocks above the given block number from the database.
-    RemoveBlocksAbove((u64, oneshot::Sender<Vec<ExecutedBlock>>)),
+    /// Updates checkpoints related to block headers and bodies. This should be called by the
+    /// static file task, after new transactions have been successfully written to disk.
+    UpdateTransactionMeta((u64, oneshot::Sender<()>)),
+
+    /// Removes block data above the given block number from the database.
+    ///
+    /// This will then send a command to the static file task, to remove the actual block data.
+    ///
+    /// Returns the block hash for the lowest block removed from the database.
+    RemoveBlocksAbove((u64, oneshot::Sender<B256>)),
 
     /// Prune associated block data before the given block number, according to already-configured
     /// prune modes.
     PruneBefore((u64, oneshot::Sender<PruneProgress>)),
-
-    /// Trigger a read of static file data, and delete data depending on the highest block in each
-    /// static file segment.
-    CleanStaticFileDuplicates(oneshot::Sender<()>),
 }
 
 /// A handle to the persistence task
@@ -236,7 +255,7 @@ impl PersistenceHandle {
 
     /// Tells the persistence task to remove blocks above a certain block number. The removed blocks
     /// are returned by the task.
-    pub async fn remove_blocks_above(&self, block_num: u64) -> Vec<ExecutedBlock> {
+    pub async fn remove_blocks_above(&self, block_num: u64) -> B256 {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(PersistenceAction::RemoveBlocksAbove((block_num, tx)))
@@ -250,16 +269,6 @@ impl PersistenceHandle {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(PersistenceAction::PruneBefore((block_num, tx)))
-            .expect("should be able to send");
-        rx.await.expect("todo: err handling")
-    }
-
-    /// Tells the persistence task to read static file data, and delete data depending on the
-    /// highest block in each static file segment.
-    pub async fn clean_static_file_duplicates(&self) {
-        let (tx, rx) = oneshot::channel();
-        self.sender
-            .send(PersistenceAction::CleanStaticFileDuplicates(tx))
             .expect("should be able to send");
         rx.await.expect("todo: err handling")
     }
