@@ -209,7 +209,7 @@ pub trait EthCall: Call + LoadPendingBlock {
     {
         let state = self.state_at_block_id(at)?;
 
-        let mut env = Self::build_call_evm_env(cfg, block, request.clone())?;
+        let mut env = self.build_call_evm_env(cfg, block, request.clone())?;
 
         // we want to disable this in eth_createAccessList, since this is common practice used by
         // other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
@@ -533,7 +533,7 @@ pub trait Call: LoadState + SpawnBlocking {
             .unwrap_or(block_env_gas_limit);
 
         // Configure the evm env
-        let mut env = Self::build_call_evm_env(cfg, block, request)?;
+        let mut env = self.build_call_evm_env(cfg, block, request)?;
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
         // Apply any state overrides if specified.
@@ -785,6 +785,7 @@ pub trait Call: LoadState + SpawnBlocking {
     ///
     /// Note: this does _not_ access the Database to check the sender.
     fn build_call_evm_env(
+        &self,
         cfg: CfgEnvWithHandlerCfg,
         block: BlockEnv,
         request: TransactionRequest,
@@ -879,41 +880,6 @@ pub trait Call: LoadState + SpawnBlocking {
         DB: DatabaseRef,
         EthApiError: From<<DB as DatabaseRef>::Error>,
     {
-        /// Applies the given block overrides to the env
-        fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
-            let BlockOverrides {
-                number,
-                difficulty,
-                time,
-                gas_limit,
-                coinbase,
-                random,
-                base_fee,
-                block_hash: _,
-            } = overrides;
-
-            if let Some(number) = number {
-                env.number = number;
-            }
-            if let Some(difficulty) = difficulty {
-                env.difficulty = difficulty;
-            }
-            if let Some(time) = time {
-                env.timestamp = U256::from(time);
-            }
-            if let Some(gas_limit) = gas_limit {
-                env.gas_limit = U256::from(gas_limit);
-            }
-            if let Some(coinbase) = coinbase {
-                env.coinbase = coinbase;
-            }
-            if let Some(random) = random {
-                env.prevrandao = Some(random);
-            }
-            if let Some(base_fee) = base_fee {
-                env.basefee = base_fee;
-            }
-        }
         // we want to disable this in eth_call, since this is common practice used by other node
         // impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
         cfg.disable_block_gas_limit = true;
@@ -939,7 +905,7 @@ pub trait Call: LoadState + SpawnBlocking {
         }
 
         let request_gas = request.gas;
-        let mut env = Self::build_call_evm_env(cfg, block, request)?;
+        let mut env = self.build_call_evm_env(cfg, block, request)?;
         // set nonce to None so that the next nonce is used when transacting the call
         env.tx.nonce = None;
 
@@ -1094,6 +1060,42 @@ impl CallFees {
                 Err(EthApiError::ConflictingFeeFieldsInRequest)
             }
         }
+    }
+}
+
+/// Applies the given block overrides to the env
+fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
+    let BlockOverrides {
+        number,
+        difficulty,
+        time,
+        gas_limit,
+        coinbase,
+        random,
+        base_fee,
+        block_hash: _,
+    } = overrides;
+
+    if let Some(number) = number {
+        env.number = number;
+    }
+    if let Some(difficulty) = difficulty {
+        env.difficulty = difficulty;
+    }
+    if let Some(time) = time {
+        env.timestamp = U256::from(time);
+    }
+    if let Some(gas_limit) = gas_limit {
+        env.gas_limit = U256::from(gas_limit);
+    }
+    if let Some(coinbase) = coinbase {
+        env.coinbase = coinbase;
+    }
+    if let Some(random) = random {
+        env.prevrandao = Some(random);
+    }
+    if let Some(base_fee) = base_fee {
+        env.basefee = base_fee;
     }
 }
 
