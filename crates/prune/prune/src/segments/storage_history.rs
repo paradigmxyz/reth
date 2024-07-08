@@ -70,7 +70,13 @@ impl<DB: Database> Segment<DB> for StorageHistory {
 
         let mut last_changeset_pruned_block = None;
         // Deleted storage changeset keys (account addresses and storage slots) with the highest
-        // block number deleted for that key
+        // block number deleted for that key.
+        //
+        // The size of this map it's limited by `prune_delete_limit * blocks_since_last_run / 2`,
+        // and with current default it's usually `3500 * 5 / 2`, so 8750 entries.
+        // Each entry is `160 bit + 256 bit + 64 bit`, so the total size should be up to 0.5MB +
+        // some hashmap overhead. `blocks_since_last_run` is additionally limited by the
+        // `max_reorg_depth`, so no OOM is expected here.
         let mut highest_deleted_storages = FxHashMap::default();
         let (pruned_changesets, done) = provider
             .prune_table_with_range::<tables::StorageChangeSets>(
