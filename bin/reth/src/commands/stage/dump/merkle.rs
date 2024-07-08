@@ -1,20 +1,21 @@
 use super::setup;
-use crate::{macros::block_executor, utils::DbTool};
+use crate::macros::block_executor;
 use eyre::Result;
 use reth_config::config::EtlConfig;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, table::TableImporter};
+use reth_db_common::DbTool;
 use reth_exex::ExExManagerHandle;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::BlockNumber;
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
-use reth_prune_types::PruneModes;
+use reth_prune::PruneModes;
 use reth_stages::{
     stages::{
-        AccountHashingStage, ExecutionStage, ExecutionStageThresholds, MerkleStage,
-        StorageHashingStage, MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+        AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage,
+        MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
     },
-    Stage, StageCheckpoint, UnwindInput,
+    ExecutionStageThresholds, Stage, StageCheckpoint, UnwindInput,
 };
 use tracing::info;
 
@@ -43,7 +44,7 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
         )
     })??;
 
-    unwind_and_copy(db_tool, (from, to), tip_block_number, &output_db).await?;
+    unwind_and_copy(db_tool, (from, to), tip_block_number, &output_db)?;
 
     if should_run {
         dry_run(
@@ -54,15 +55,14 @@ pub(crate) async fn dump_merkle_stage<DB: Database>(
             ),
             to,
             from,
-        )
-        .await?;
+        )?;
     }
 
     Ok(())
 }
 
 /// Dry-run an unwind to FROM block and copy the necessary table data to the new database.
-async fn unwind_and_copy<DB: Database>(
+fn unwind_and_copy<DB: Database>(
     db_tool: &DbTool<DB>,
     range: (u64, u64),
     tip_block_number: u64,
@@ -142,7 +142,7 @@ async fn unwind_and_copy<DB: Database>(
 }
 
 /// Try to re-execute the stage straight away
-async fn dry_run<DB: Database>(
+fn dry_run<DB: Database>(
     output_provider_factory: ProviderFactory<DB>,
     to: u64,
     from: u64,

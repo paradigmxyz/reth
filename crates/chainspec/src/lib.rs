@@ -13,7 +13,7 @@ pub use alloy_chains::{Chain, ChainKind, NamedChain};
 pub use info::ChainInfo;
 pub use spec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
-    ForkBaseFeeParams, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
+    ForkBaseFeeParams, DEV, HOLESKY, MAINNET, SEPOLIA,
 };
 #[cfg(feature = "optimism")]
 pub use spec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
@@ -25,9 +25,6 @@ extern crate alloc;
 // pub mod config;
 /// The chain info module.
 mod info;
-
-/// Network related constants
-pub mod net;
 
 /// The chain spec module.
 mod spec;
@@ -53,8 +50,8 @@ mod tests {
 
     #[test]
     fn test_named_id() {
-        let chain = Chain::from_named(NamedChain::Goerli);
-        assert_eq!(chain.id(), 5);
+        let chain = Chain::from_named(NamedChain::Holesky);
+        assert_eq!(chain.id(), 17000);
     }
 
     #[test]
@@ -80,9 +77,9 @@ mod tests {
 
     #[test]
     fn test_into_u256() {
-        let chain = Chain::from_named(NamedChain::Goerli);
+        let chain = Chain::from_named(NamedChain::Holesky);
         let n: U256 = U256::from(chain.id());
-        let expected = U256::from(5);
+        let expected = U256::from(17000);
 
         assert_eq!(n, expected);
     }

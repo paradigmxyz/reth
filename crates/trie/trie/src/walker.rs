@@ -1,11 +1,11 @@
 use crate::{
     prefix_set::PrefixSet,
     trie_cursor::{CursorSubNode, TrieCursor},
-    updates::TrieUpdates,
     BranchNodeCompact, Nibbles,
 };
 use reth_db::DatabaseError;
 use reth_primitives::B256;
+use std::collections::HashSet;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
 /// It allows moving through the trie in a depth-first manner, skipping certain branches
@@ -22,36 +22,31 @@ pub struct TrieWalker<C> {
     pub can_skip_current_node: bool,
     /// A `PrefixSet` representing the changes to be applied to the trie.
     pub changes: PrefixSet,
-    /// The trie updates to be applied to the trie.
-    trie_updates: Option<TrieUpdates>,
+    /// The retained trie node keys that need to be removed.
+    removed_keys: Option<HashSet<Nibbles>>,
 }
 
 impl<C> TrieWalker<C> {
     /// Constructs a new `TrieWalker` from existing stack and a cursor.
     pub fn from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
         let mut this =
-            Self { cursor, changes, stack, can_skip_current_node: false, trie_updates: None };
+            Self { cursor, changes, stack, can_skip_current_node: false, removed_keys: None };
         this.update_skip_node();
         this
     }
 
     /// Sets the flag whether the trie updates should be stored.
-    pub fn with_updates(mut self, retain_updates: bool) -> Self {
-        self.set_updates(retain_updates);
+    pub fn with_deletions_retained(mut self, retained: bool) -> Self {
+        if retained {
+            self.removed_keys = Some(HashSet::default());
+        }
         self
     }
 
-    /// Sets the flag whether the trie updates should be stored.
-    pub fn set_updates(&mut self, retain_updates: bool) {
-        if retain_updates {
-            self.trie_updates = Some(TrieUpdates::default());
-        }
-    }
-
     /// Split the walker into stack and trie updates.
-    pub fn split(mut self) -> (Vec<CursorSubNode>, TrieUpdates) {
-        let trie_updates = self.trie_updates.take();
-        (self.stack, trie_updates.unwrap_or_default())
+    pub fn split(mut self) -> (Vec<CursorSubNode>, HashSet<Nibbles>) {
+        let keys = self.removed_keys.take();
+        (self.stack, keys.unwrap_or_default())
     }
 
     /// Prints the current stack of trie nodes.
@@ -63,9 +58,9 @@ impl<C> TrieWalker<C> {
         println!("====================== END STACK ======================\n");
     }
 
-    /// The current length of the trie updates.
-    pub fn updates_len(&self) -> usize {
-        self.trie_updates.as_ref().map(|u| u.len()).unwrap_or(0)
+    /// The current length of the removed keys.
+    pub fn removed_keys_len(&self) -> usize {
+        self.removed_keys.as_ref().map_or(0, |u| u.len())
     }
 
     /// Returns the current key in the trie.
@@ -117,7 +112,7 @@ impl<C: TrieCursor> TrieWalker<C> {
             changes,
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
-            trie_updates: None,
+            removed_keys: None,
         };
 
         // Set up the root node of the trie in the stack, if it exists.
@@ -193,8 +188,8 @@ impl<C: TrieCursor> TrieWalker<C> {
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
         if !self.can_skip_current_node || nibble != -1 {
-            if let Some((updates, key)) = self.trie_updates.as_mut().zip(self.cursor.current()?) {
-                updates.schedule_delete(key);
+            if let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?) {
+                keys.insert(key);
             }
         }
 

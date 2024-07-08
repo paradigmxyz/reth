@@ -13,14 +13,15 @@ reth.workspace = true
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-tracing.workspace = true
-reth-db.workspace = true
+reth-db = { workspace = true, features = ["test-utils"] }
 reth-rpc.workspace = true
 reth-rpc-layer.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-provider.workspace = true
-reth-node-builder.workspace = true
+reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-tokio-util.workspace = true
 reth-stages-types.workspace = true
+reth-network-peers.workspace = true
 
 jsonrpsee.workspace = true
 

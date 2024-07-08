@@ -13,17 +13,16 @@ use reth_beacon_consensus::{
     BeaconConsensusEngine,
 };
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
+use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::NetworkEvents;
 use reth_node_api::FullNodeTypes;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
-    engine::EngineMessageStreamExt,
     exit::NodeExitFuture,
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-
 use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::EngineApi;
@@ -105,7 +104,7 @@ where
         let ctx = ctx
             .with_configured_globals()
             // load the toml config
-            .with_loaded_toml_config(config).await?
+            .with_loaded_toml_config(config)?
             // add resolved peers
             .with_resolved_peers().await?
             // attach the database
@@ -128,7 +127,7 @@ where
             .with_metrics()
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
-            .with_blockchain_db::<T>().await?
+            .with_blockchain_db::<T>()?
             .with_components(components_builder, on_component_initialized).await?;
 
         // spawn exexs
@@ -202,8 +201,7 @@ where
                 static_file_producer,
                 ctx.components().block_executor().clone(),
                 pipeline_exex_handle,
-            )
-            .await?;
+            )?;
 
             let pipeline_events = pipeline.events();
             task.set_pipeline_events(pipeline_events);
@@ -224,8 +222,7 @@ where
                 static_file_producer,
                 ctx.components().block_executor().clone(),
                 pipeline_exex_handle,
-            )
-            .await?;
+            )?;
 
             (pipeline, Either::Right(network_client.clone()))
         };
@@ -282,7 +279,7 @@ where
         ctx.task_executor().spawn_critical(
             "events task",
             node::handle_events(
-                Some(ctx.components().network().clone()),
+                Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
                 database.clone(),
@@ -309,7 +306,7 @@ where
         let jwt_secret = ctx.auth_jwt_secret()?;
 
         // Start RPC servers
-        let (rpc_server_handles, mut rpc_registry) = crate::rpc::launch_rpc_servers(
+        let (rpc_server_handles, rpc_registry) = crate::rpc::launch_rpc_servers(
             ctx.node_adapter().clone(),
             engine_api,
             ctx.node_config(),
@@ -390,7 +387,10 @@ where
         on_node_started.on_event(full_node.clone())?;
 
         let handle = NodeHandle {
-            node_exit_future: NodeExitFuture::new(rx, full_node.config.debug.terminate),
+            node_exit_future: NodeExitFuture::new(
+                async { Ok(rx.await??) },
+                full_node.config.debug.terminate,
+            ),
             node: full_node,
         };
 

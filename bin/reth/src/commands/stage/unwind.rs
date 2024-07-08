@@ -1,7 +1,9 @@
 //! Unwinding a certain block range
 
+use crate::macros::block_executor;
 use clap::{Parser, Subcommand};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db_api::database::Database;
@@ -13,21 +15,16 @@ use reth_provider::{
     BlockExecutionWriter, BlockNumReader, ChainSpecProvider, FinalizedBlockReader,
     FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
 };
-use reth_prune_types::PruneModes;
+use reth_prune::PruneModes;
 use reth_stages::{
     sets::{DefaultStages, OfflineStages},
-    stages::{ExecutionStage, ExecutionStageThresholds},
-    Pipeline, StageSet,
+    stages::ExecutionStage,
+    ExecutionStageThresholds, Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use std::{ops::RangeInclusive, sync::Arc};
 use tokio::sync::watch;
 use tracing::info;
-
-use crate::{
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
-    macros::block_executor,
-};
 
 /// `reth stage unwind` command
 #[derive(Debug, Parser)]
@@ -81,7 +78,7 @@ impl Command {
             }
 
             // This will build an offline-only pipeline if the `offline` flag is enabled
-            let mut pipeline = self.build_pipeline(config, provider_factory.clone()).await?;
+            let mut pipeline = self.build_pipeline(config, provider_factory)?;
 
             // Move all applicable data from database to static files.
             pipeline.move_to_static_files()?;
@@ -111,7 +108,7 @@ impl Command {
         Ok(())
     }
 
-    async fn build_pipeline<DB: Database + 'static>(
+    fn build_pipeline<DB: Database + 'static>(
         self,
         config: Config,
         provider_factory: ProviderFactory<Arc<DB>>,

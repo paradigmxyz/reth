@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_chainspec::{Chain, ChainSpec, Hardfork};
+use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
@@ -51,7 +51,7 @@ impl EthBeaconConsensus {
     ) -> Result<(), ConsensusError> {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
         let parent_gas_limit =
-            if self.chain_spec.fork(Hardfork::London).transitions_at_block(header.number) {
+            if self.chain_spec.fork(EthereumHardfork::London).transitions_at_block(header.number) {
                 parent.gas_limit *
                     self.chain_spec
                         .base_fee_params_at_timestamp(header.timestamp)
@@ -153,7 +153,7 @@ impl Consensus for EthBeaconConsensus {
     ) -> Result<(), ConsensusError> {
         let is_post_merge = self
             .chain_spec
-            .fork(Hardfork::Paris)
+            .fork(EthereumHardfork::Paris)
             .active_at_ttd(total_difficulty, header.difficulty);
 
         if is_post_merge {
@@ -198,10 +198,9 @@ impl Consensus for EthBeaconConsensus {
                 })
             }
 
-            // Goerli and early OP exception:
-            //  * If the network is goerli pre-merge, ignore the extradata check, since we do not
-            //  support clique. Same goes for OP blocks below Bedrock.
-            if self.chain_spec.chain != Chain::goerli() && !self.chain_spec.is_optimism() {
+            // Early OP exception:
+            //  * If the network is pre-Bedrock OP, ignore the extradata check.
+            if !self.chain_spec.is_optimism() {
                 validate_header_extradata(header)?;
             }
         }

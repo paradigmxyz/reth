@@ -1,11 +1,10 @@
 use crate::EthVersion;
+use alloy_chains::{Chain, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use reth_chainspec::{Chain, ChainSpec, NamedChain, MAINNET};
+use reth_chainspec::{ChainSpec, MAINNET};
 use reth_codecs_derive::derive_arbitrary;
-use reth_primitives::{hex, ForkId, Hardfork, Head, B256, U256};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use reth_primitives::{hex, EthereumHardfork, ForkId, Head, B256, U256};
 use std::fmt::{Debug, Display};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
@@ -15,7 +14,7 @@ use std::fmt::{Debug, Display};
 /// hash. This information should be treated as untrusted.
 #[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Status {
     /// The current protocol version. For example, peers running `eth/66` would have a version of
     /// 66.
@@ -142,7 +141,7 @@ impl Default for Status {
             blockhash: mainnet_genesis,
             genesis: mainnet_genesis,
             forkid: MAINNET
-                .hardfork_fork_id(Hardfork::Frontier)
+                .hardfork_fork_id(EthereumHardfork::Frontier)
                 .expect("The Frontier hardfork should always exist"),
         }
     }
@@ -152,7 +151,7 @@ impl Default for Status {
 ///
 /// # Example
 /// ```
-/// use reth_chainspec::{Chain, Hardfork, MAINNET};
+/// use reth_chainspec::{Chain, EthereumHardfork, MAINNET};
 /// use reth_eth_wire_types::{EthVersion, Status};
 /// use reth_primitives::{B256, MAINNET_GENESIS_HASH, U256};
 ///
@@ -163,7 +162,7 @@ impl Default for Status {
 ///     .total_difficulty(U256::from(100))
 ///     .blockhash(B256::from(MAINNET_GENESIS_HASH))
 ///     .genesis(B256::from(MAINNET_GENESIS_HASH))
-///     .forkid(MAINNET.hardfork_fork_id(Hardfork::Paris).unwrap())
+///     .forkid(MAINNET.hardfork_fork_id(EthereumHardfork::Paris).unwrap())
 ///     .build();
 ///
 /// assert_eq!(
@@ -174,7 +173,7 @@ impl Default for Status {
 ///         total_difficulty: U256::from(100),
 ///         blockhash: B256::from(MAINNET_GENESIS_HASH),
 ///         genesis: B256::from(MAINNET_GENESIS_HASH),
-///         forkid: MAINNET.hardfork_fork_id(Hardfork::Paris).unwrap(),
+///         forkid: MAINNET.hardfork_fork_id(EthereumHardfork::Paris).unwrap(),
 ///     }
 /// );
 /// ```
@@ -233,7 +232,7 @@ mod tests {
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
     use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};
-    use reth_primitives::{hex, ForkHash, ForkId, Hardfork, Head, B256, U256};
+    use reth_primitives::{hex, EthereumHardfork, ForkHash, ForkId, Head, B256, U256};
     use std::str::FromStr;
 
     #[test]
@@ -368,12 +367,12 @@ mod tests {
 
         // add a few hardforks
         let hardforks = vec![
-            (Hardfork::Tangerine, ForkCondition::Block(1)),
-            (Hardfork::SpuriousDragon, ForkCondition::Block(2)),
-            (Hardfork::Byzantium, ForkCondition::Block(3)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(5)),
-            (Hardfork::London, ForkCondition::Block(8)),
-            (Hardfork::Shanghai, ForkCondition::Timestamp(13)),
+            (EthereumHardfork::Tangerine, ForkCondition::Block(1)),
+            (EthereumHardfork::SpuriousDragon, ForkCondition::Block(2)),
+            (EthereumHardfork::Byzantium, ForkCondition::Block(3)),
+            (EthereumHardfork::MuirGlacier, ForkCondition::Block(5)),
+            (EthereumHardfork::London, ForkCondition::Block(8)),
+            (EthereumHardfork::Shanghai, ForkCondition::Timestamp(13)),
         ];
 
         let mut chainspec = ChainSpec::builder().genesis(genesis).chain(Chain::from_id(1337));

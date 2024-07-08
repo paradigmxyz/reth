@@ -1,17 +1,18 @@
-use crate::result::ToRpcResult;
+use std::sync::Arc;
+
 use alloy_genesis::ChainConfig;
 use alloy_primitives::B256;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
 use reth_network_api::{NetworkInfo, PeerKind, Peers};
-use reth_network_peers::{AnyNode, NodeRecord};
+use reth_network_peers::{id2pk, AnyNode, NodeRecord};
 use reth_rpc_api::AdminApiServer;
-use reth_rpc_types::{
-    admin::{EthProtocolInfo, NodeInfo, Ports, ProtocolInfo},
-    PeerEthProtocolInfo, PeerInfo, PeerNetworkInfo, PeerProtocolsInfo,
+use reth_rpc_server_types::ToRpcResult;
+use reth_rpc_types::admin::{
+    EthInfo, EthPeerInfo, EthProtocolInfo, NodeInfo, PeerInfo, PeerNetworkInfo, PeerProtocolInfo,
+    Ports, ProtocolInfo,
 };
-use std::sync::Arc;
 
 /// `admin` API implementation.
 ///
@@ -37,7 +38,7 @@ where
 {
     /// Handler for `admin_addPeer`
     fn add_peer(&self, record: NodeRecord) -> RpcResult<bool> {
-        self.network.add_peer(record.id, record.tcp_addr());
+        self.network.add_peer_with_udp(record.id, record.tcp_addr(), record.udp_addr());
         Ok(true)
     }
 
@@ -50,7 +51,7 @@ where
     /// Handler for `admin_addTrustedPeer`
     fn add_trusted_peer(&self, record: AnyNode) -> RpcResult<bool> {
         if let Some(record) = record.node_record() {
-            self.network.add_trusted_peer(record.id, record.tcp_addr())
+            self.network.add_trusted_peer_with_udp(record.id, record.tcp_addr(), record.udp_addr())
         }
         self.network.add_trusted_peer_id(record.peer_id());
         Ok(true)
@@ -62,33 +63,43 @@ where
         Ok(true)
     }
 
+    /// Handler for `admin_peers`
     async fn peers(&self) -> RpcResult<Vec<PeerInfo>> {
         let peers = self.network.get_all_peers().await.to_rpc_result()?;
-        let peers = peers
-            .into_iter()
-            .map(|peer| PeerInfo {
-                id: Some(peer.remote_id.to_string()),
-                name: peer.client_version.to_string(),
-                caps: peer.capabilities.capabilities().iter().map(|cap| cap.to_string()).collect(),
-                network: PeerNetworkInfo {
-                    remote_address: peer.remote_addr.to_string(),
-                    local_address: peer
-                        .local_addr
-                        .unwrap_or_else(|| self.network.local_addr())
-                        .to_string(),
-                },
-                protocols: PeerProtocolsInfo {
-                    eth: Some(PeerEthProtocolInfo {
-                        difficulty: Some(peer.status.total_difficulty),
-                        head: peer.status.blockhash.to_string(),
-                        version: peer.status.version as u32,
-                    }),
-                    pip: None,
-                },
-            })
-            .collect();
+        let mut infos = Vec::with_capacity(peers.len());
 
-        Ok(peers)
+        for peer in peers {
+            if let Ok(pk) = id2pk(peer.remote_id) {
+                infos.push(PeerInfo {
+                    id: pk.to_string(),
+                    name: peer.client_version.to_string(),
+                    enode: peer.enode,
+                    enr: peer.enr,
+                    caps: peer
+                        .capabilities
+                        .capabilities()
+                        .iter()
+                        .map(|cap| cap.to_string())
+                        .collect(),
+                    network: PeerNetworkInfo {
+                        remote_address: peer.remote_addr,
+                        local_address: peer.local_addr.unwrap_or_else(|| self.network.local_addr()),
+                        inbound: peer.direction.is_incoming(),
+                        trusted: peer.kind.is_trusted(),
+                        static_node: peer.kind.is_static(),
+                    },
+                    protocols: PeerProtocolInfo {
+                        eth: Some(EthPeerInfo::Info(EthInfo {
+                            version: peer.status.version as u64,
+                        })),
+                        snap: None,
+                        other: Default::default(),
+                    },
+                })
+            }
+        }
+
+        Ok(infos)
     }
 
     /// Handler for `admin_nodeInfo`

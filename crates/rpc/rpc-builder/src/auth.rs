@@ -7,8 +7,8 @@ use jsonrpsee::{
     Methods,
 };
 use reth_engine_primitives::EngineTypes;
-use reth_rpc::EthSubscriptionIdProvider;
 use reth_rpc_api::servers::*;
+use reth_rpc_eth_types::EthSubscriptionIdProvider;
 use reth_rpc_layer::{
     secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, JwtAuthValidator,
     JwtSecret,

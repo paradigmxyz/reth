@@ -5,17 +5,14 @@ use crate::{
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
 use reth_basic_payload_builder::*;
-use reth_chainspec::ChainSpec;
-use reth_evm::ConfigureEvm;
+use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
+use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
     constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
     eip4844::calculate_excess_blob_gas,
-    proofs,
-    revm::env::tx_env_with_recovered,
-    Block, Hardfork, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH,
-    U256,
+    proofs, Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
@@ -128,11 +125,13 @@ where
         // apply eip-4788 pre block contract call
         pre_block_beacon_root_contract_call(
             &mut db,
+            &self.evm_config,
             &chain_spec,
-            block_number,
             &initialized_cfg,
             &initialized_block_env,
-            &attributes,
+            block_number,
+            attributes.payload_attributes.timestamp,
+            attributes.payload_attributes.parent_beacon_block_root,
         )
         .map_err(|err| {
             warn!(target: "payload_builder",
@@ -140,7 +139,7 @@ where
                 %err,
                 "failed to apply beacon root contract call for empty payload"
             );
-            err
+            PayloadBuilderError::Internal(err.into())
         })?;
 
         let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
@@ -281,18 +280,30 @@ where
 
     let block_number = initialized_block_env.number.to::<u64>();
 
-    let is_regolith = chain_spec
-        .is_fork_active_at_timestamp(Hardfork::Regolith, attributes.payload_attributes.timestamp);
+    let is_regolith = chain_spec.is_fork_active_at_timestamp(
+        OptimismHardfork::Regolith,
+        attributes.payload_attributes.timestamp,
+    );
 
     // apply eip-4788 pre block contract call
     pre_block_beacon_root_contract_call(
         &mut db,
+        &evm_config,
         &chain_spec,
-        block_number,
         &initialized_cfg,
         &initialized_block_env,
-        &attributes,
-    )?;
+        block_number,
+        attributes.payload_attributes.timestamp,
+        attributes.payload_attributes.parent_beacon_block_root,
+    )
+    .map_err(|err| {
+        warn!(target: "payload_builder",
+            parent_hash=%parent_block.hash(),
+            %err,
+            "failed to apply beacon root contract call for empty payload"
+        );
+        PayloadBuilderError::Internal(err.into())
+    })?;
 
     // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
     // blocks will always have at least a single transaction in them (the L1 info transaction),
@@ -323,7 +334,7 @@ where
         }
 
         // Convert the transaction to a [TransactionSignedEcRecovered]. This is
-        // purely for the purposes of utilizing the [tx_env_with_recovered] function.
+        // purely for the purposes of utilizing the `evm_config.tx_env`` function.
         // Deposit transactions do not have signatures, so if the tx is a deposit, this
         // will just pull in its `from` address.
         let sequencer_tx = sequencer_tx.clone().try_into_ecrecovered().map_err(|_| {
@@ -350,7 +361,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
-            tx_env_with_recovered(&sequencer_tx),
+            evm_config.tx_env(&sequencer_tx),
         );
 
         let mut evm = evm_config.evm_with_env(&mut db, env);
@@ -393,7 +404,7 @@ where
             // ensures this is only set for post-Canyon deposit transactions.
             deposit_receipt_version: chain_spec
                 .is_fork_active_at_timestamp(
-                    Hardfork::Canyon,
+                    OptimismHardfork::Canyon,
                     attributes.payload_attributes.timestamp,
                 )
                 .then_some(1),
@@ -429,7 +440,7 @@ where
             let env = EnvWithHandlerCfg::new_with_cfg_env(
                 initialized_cfg.clone(),
                 initialized_block_env.clone(),
-                tx_env_with_recovered(&tx),
+                evm_config.tx_env(&tx),
             );
 
             // Configure the environment for the block.

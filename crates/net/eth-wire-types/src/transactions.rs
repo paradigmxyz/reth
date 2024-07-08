@@ -7,13 +7,10 @@ use reth_primitives::{
     transaction::TransactionConversionError, PooledTransactionsElement, TransactionSigned, B256,
 };
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GetPooledTransactions(
     /// The transaction hashes to request transaction bodies for.
     pub Vec<B256>,
@@ -48,7 +45,7 @@ where
     Deref,
     Constructor,
 )]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PooledTransactions(
     /// The transaction bodies, each of which should correspond to a requested hash.
     pub Vec<PooledTransactionsElement>,

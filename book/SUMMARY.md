@@ -61,8 +61,6 @@
     - [`reth p2p`](./cli/reth/p2p.md)
       - [`reth p2p header`](./cli/reth/p2p/header.md)
       - [`reth p2p body`](./cli/reth/p2p/body.md)
-    - [`reth test-vectors`](./cli/reth/test-vectors.md)
-      - [`reth test-vectors tables`](./cli/reth/test-vectors/tables.md)
     - [`reth config`](./cli/reth/config.md)
     - [`reth debug`](./cli/reth/debug.md)
       - [`reth debug execution`](./cli/reth/debug/execution.md)
@@ -72,6 +70,7 @@
       - [`reth debug replay-engine`](./cli/reth/debug/replay-engine.md)
     - [`reth recover`](./cli/reth/recover.md)
       - [`reth recover storage-tries`](./cli/reth/recover/storage-tries.md)
+    - [`reth prune`](./cli/reth/prune.md)
 - [Developers](./developers/developers.md) <!-- CLI_REFERENCE END -->
    - [Execution Extensions](./developers/exex/exex.md)
       - [How do ExExes work?](./developers/exex/how-it-works.md)

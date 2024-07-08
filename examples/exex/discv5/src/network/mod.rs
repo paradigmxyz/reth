@@ -2,8 +2,8 @@
 
 use discv5::{enr::secp256k1::rand, Enr, Event, ListenConfig};
 use reth::network::config::SecretKey;
-use reth_chainspec::net::NodeRecord;
 use reth_discv5::{enr::EnrCombinedKeyWrapper, Config, Discv5};
+use reth_network_peers::NodeRecord;
 use reth_tracing::tracing::info;
 use std::{
     future::Future,

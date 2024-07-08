@@ -30,6 +30,12 @@ use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};
 use std::{collections::HashMap, sync::Arc};
 
+/// Type alias for the LRU cache used within the [`PrecompileCache`].
+type PrecompileLRUCache = LruMap<(Bytes, u64), PrecompileResult>;
+
+/// Type alias for the thread-safe `Arc<RwLock<_>>` wrapper around [`PrecompileCache`].
+type CachedPrecompileResult = Arc<RwLock<PrecompileLRUCache>>;
+
 /// A cache for precompile inputs / outputs.
 ///
 /// This assumes that the precompile is a standard precompile, as in `StandardPrecompileFn`, meaning
@@ -40,8 +46,7 @@ use std::{collections::HashMap, sync::Arc};
 #[derive(Debug, Default)]
 pub struct PrecompileCache {
     /// Caches for each precompile input / output.
-    #[allow(clippy::type_complexity)]
-    cache: HashMap<(Address, SpecId), Arc<RwLock<LruMap<(Bytes, u64), PrecompileResult>>>>,
+    cache: HashMap<(Address, SpecId), CachedPrecompileResult>,
 }
 
 /// Custom EVM configuration
@@ -133,17 +138,28 @@ impl StatefulPrecompileMut for WrappedPrecompile {
 }
 
 impl ConfigureEvmEnv for MyEvmConfig {
-    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        EthEvmConfig::fill_tx_env(tx_env, transaction, sender)
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        EthEvmConfig::default().fill_tx_env(tx_env, transaction, sender)
     }
 
     fn fill_cfg_env(
+        &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
-        EthEvmConfig::fill_cfg_env(cfg_env, chain_spec, header, total_difficulty)
+        EthEvmConfig::default().fill_cfg_env(cfg_env, chain_spec, header, total_difficulty)
+    }
+
+    fn fill_tx_env_system_contract_call(
+        &self,
+        env: &mut Env,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) {
+        EthEvmConfig::default().fill_tx_env_system_contract_call(env, caller, contract, data)
     }
 }
 

@@ -1,10 +1,7 @@
 //! Support for handling peer sessions.
 
-use crate::{
-    message::PeerMessage,
-    metrics::SessionManagerMetrics,
-    session::{active::ActiveSession, config::SessionCounter},
-};
+use crate::{message::PeerMessage, metrics::SessionManagerMetrics, session::active::ActiveSession};
+use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
@@ -15,6 +12,7 @@ use reth_eth_wire::{
 };
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_peers::PeerId;
+use reth_network_types::SessionsConfig;
 use reth_primitives::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_tasks::TaskSpawner;
 use rustc_hash::FxHashMap;
@@ -37,12 +35,11 @@ use tokio_util::sync::PollSender;
 use tracing::{debug, instrument, trace};
 
 mod active;
-mod config;
 mod conn;
+mod counter;
 mod handle;
 pub use crate::message::PeerRequestSender;
 use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocolHandlers, RlpxSubProtocols};
-pub use config::{SessionLimits, SessionsConfig};
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     SessionCommand,
@@ -171,6 +168,11 @@ impl SessionManager {
     /// Returns the secret key used for authenticating sessions.
     pub const fn secret_key(&self) -> SecretKey {
         self.secret_key
+    }
+
+    /// Returns a borrowed reference to the active sessions.
+    pub const fn active_sessions(&self) -> &HashMap<PeerId, ActiveSessionHandle> {
+        &self.active_sessions
     }
 
     /// Returns the session hello message.
@@ -589,35 +591,6 @@ impl SessionManager {
                 }
             }
         }
-    }
-
-    /// Returns [`PeerInfo`] for all connected peers
-    pub(crate) fn get_peer_info(&self) -> Vec<PeerInfo> {
-        self.active_sessions.values().map(ActiveSessionHandle::peer_info).collect()
-    }
-
-    /// Returns [`PeerInfo`] for a given peer.
-    ///
-    /// Returns `None` if there's no active session to the peer.
-    pub(crate) fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
-        self.active_sessions.get(&peer_id).map(ActiveSessionHandle::peer_info)
-    }
-    /// Returns [`PeerInfo`] for a given peer.
-    ///
-    /// Returns `None` if there's no active session to the peer.
-    pub(crate) fn get_peer_infos_by_ids(
-        &self,
-        peer_ids: impl IntoIterator<Item = PeerId>,
-    ) -> Vec<PeerInfo> {
-        let mut infos = Vec::new();
-        for peer_id in peer_ids {
-            if let Some(info) =
-                self.active_sessions.get(&peer_id).map(ActiveSessionHandle::peer_info)
-            {
-                infos.push(info);
-            }
-        }
-        infos
     }
 }
 

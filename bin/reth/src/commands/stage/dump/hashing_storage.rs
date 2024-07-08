@@ -1,8 +1,8 @@
 use super::setup;
-use crate::utils::DbTool;
 use eyre::Result;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, table::TableImporter};
+use reth_db_common::DbTool;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use reth_stages::{stages::StorageHashingStage, Stage, StageCheckpoint, UnwindInput};
@@ -28,8 +28,7 @@ pub(crate) async fn dump_hashing_storage_stage<DB: Database>(
             ),
             to,
             from,
-        )
-        .await?;
+        )?;
     }
 
     Ok(())
@@ -66,7 +65,7 @@ fn unwind_and_copy<DB: Database>(
 }
 
 /// Try to re-execute the stage straight away
-async fn dry_run<DB: Database>(
+fn dry_run<DB: Database>(
     output_provider_factory: ProviderFactory<DB>,
     to: u64,
     from: u64,

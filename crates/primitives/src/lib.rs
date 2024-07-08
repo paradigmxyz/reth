@@ -29,11 +29,8 @@ mod compression;
 pub mod constants;
 pub mod eip4844;
 pub mod genesis;
-pub mod header;
 pub mod proofs;
 mod receipt;
-/// Helpers for working with revm
-pub mod revm;
 pub use reth_static_file_types as static_file;
 pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]
@@ -45,17 +42,16 @@ pub use block::{
 #[cfg(feature = "zstd-codec")]
 pub use compression::*;
 pub use constants::{
-    DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, GOERLI_GENESIS_HASH, HOLESKY_GENESIS_HASH,
-    KECCAK_EMPTY, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+    DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, HOLESKY_GENESIS_HASH, KECCAK_EMPTY,
+    MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
 };
 pub use genesis::{ChainConfig, Genesis, GenesisAccount};
-pub use header::{Header, HeadersDirection, SealedHeader};
 pub use receipt::{
     gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
 };
 pub use reth_primitives_traits::{
-    logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Log, LogData, Request, Requests,
-    StorageEntry, Withdrawal, Withdrawals,
+    logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
+    LogData, Request, Requests, SealedHeader, StorageEntry, Withdrawal, Withdrawals,
 };
 pub use static_file::StaticFileSegment;
 
@@ -115,13 +111,7 @@ pub use c_kzg as kzg;
 #[cfg(feature = "optimism")]
 mod optimism {
     pub use crate::transaction::{TxDeposit, DEPOSIT_TX_TYPE_ID};
-    pub use reth_chainspec::{
-        net::{
-            base_nodes, base_testnet_nodes, op_nodes, op_testnet_nodes, OP_BOOTNODES,
-            OP_TESTNET_BOOTNODES,
-        },
-        BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA,
-    };
+    pub use reth_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 }
 
 #[cfg(feature = "optimism")]

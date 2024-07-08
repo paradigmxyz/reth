@@ -11,7 +11,7 @@
 use crate::metrics::PayloadBuilderMetrics;
 use futures_core::ready;
 use futures_util::FutureExt;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_payload_builder::{
     database::CachedReads, error::PayloadBuilderError, KeepPayloadJobAlive, PayloadId, PayloadJob,
     PayloadJobGenerator,
@@ -19,20 +19,17 @@ use reth_payload_builder::{
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, BlockNumberOrTag, Bytes, Request, SealedBlock, Withdrawals, B256, U256,
+    proofs, BlockNumberOrTag, Bytes, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
 };
-use reth_revm::state_change::{
-    apply_beacon_root_contract_call, apply_withdrawal_requests_contract_call,
-    post_block_withdrawals_balance_increments,
-};
+use reth_revm::state_change::post_block_withdrawals_balance_increments;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg},
-    Database, DatabaseCommit, Evm, State,
+    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+    Database, State,
 };
 use std::{
     fmt,
@@ -921,79 +918,6 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
         withdrawals: Some(withdrawals),
         withdrawals_root: Some(withdrawals_root),
     })
-}
-
-/// Apply the [EIP-4788](https://eips.ethereum.org/EIPS/eip-4788) pre block contract call.
-///
-/// This constructs a new [Evm] with the given DB, and environment
-/// ([`CfgEnvWithHandlerCfg`] and [`BlockEnv`]) to execute the pre block contract call.
-///
-/// The parent beacon block root used for the call is gathered from the given
-/// [`PayloadBuilderAttributes`].
-///
-/// This uses [`apply_beacon_root_contract_call`] to ultimately apply the beacon root contract state
-/// change.
-pub fn pre_block_beacon_root_contract_call<DB: Database + DatabaseCommit, Attributes>(
-    db: &mut DB,
-    chain_spec: &ChainSpec,
-    block_number: u64,
-    initialized_cfg: &CfgEnvWithHandlerCfg,
-    initialized_block_env: &BlockEnv,
-    attributes: &Attributes,
-) -> Result<(), PayloadBuilderError>
-where
-    DB::Error: std::fmt::Display,
-    Attributes: PayloadBuilderAttributes,
-{
-    // apply pre-block EIP-4788 contract call
-    let mut evm_pre_block = Evm::builder()
-        .with_db(db)
-        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-            initialized_cfg.clone(),
-            initialized_block_env.clone(),
-            Default::default(),
-        ))
-        .build();
-
-    // initialize a block from the env, because the pre block call needs the block itself
-    apply_beacon_root_contract_call(
-        chain_spec,
-        attributes.timestamp(),
-        block_number,
-        attributes.parent_beacon_block_root(),
-        &mut evm_pre_block,
-    )
-    .map_err(|err| PayloadBuilderError::Internal(err.into()))
-}
-
-/// Apply the [EIP-7002](https://eips.ethereum.org/EIPS/eip-7002) post block contract call.
-///
-/// This constructs a new [Evm] with the given DB, and environment
-/// ([`CfgEnvWithHandlerCfg`] and [`BlockEnv`]) to execute the post block contract call.
-///
-/// This uses [`apply_withdrawal_requests_contract_call`] to ultimately calculate the
-/// [requests](Request).
-pub fn post_block_withdrawal_requests_contract_call<DB: Database + DatabaseCommit>(
-    db: &mut DB,
-    initialized_cfg: &CfgEnvWithHandlerCfg,
-    initialized_block_env: &BlockEnv,
-) -> Result<Vec<Request>, PayloadBuilderError>
-where
-    DB::Error: std::fmt::Display,
-{
-    // apply post-block EIP-7002 contract call
-    let mut evm_post_block = Evm::builder()
-        .with_db(db)
-        .with_env_with_handler_cfg(EnvWithHandlerCfg::new_with_cfg_env(
-            initialized_cfg.clone(),
-            initialized_block_env.clone(),
-            Default::default(),
-        ))
-        .build();
-
-    // initialize a block from the env, because the post block call needs the block itself
-    apply_withdrawal_requests_contract_call(&mut evm_post_block)
-        .map_err(|err| PayloadBuilderError::Internal(err.into()))
 }
 
 /// Checks if the new payload is better than the current best.

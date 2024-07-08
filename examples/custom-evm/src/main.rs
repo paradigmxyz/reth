@@ -7,8 +7,8 @@ use reth::{
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     primitives::{
         address,
-        revm_primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
-        Address, Bytes, U256,
+        revm_primitives::{Env, PrecompileResult},
+        Bytes,
     },
     revm::{
         handler::register::EvmHandler,
@@ -18,11 +18,15 @@ use reth::{
     },
     tasks::TaskManager,
 };
-use reth_chainspec::{Chain, ChainSpec};
+use reth_chainspec::{Chain, ChainSpec, Head};
+use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
-use reth_primitives::{Header, TransactionSigned};
+use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
+use reth_primitives::{
+    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
+    Address, Header, TransactionSigned, U256,
+};
 use reth_tracing::{RethTracer, Tracer};
 use std::sync::Arc;
 
@@ -63,17 +67,42 @@ impl MyEvmConfig {
 }
 
 impl ConfigureEvmEnv for MyEvmConfig {
-    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        EthEvmConfig::fill_tx_env(tx_env, transaction, sender)
-    }
-
     fn fill_cfg_env(
+        &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
-        EthEvmConfig::fill_cfg_env(cfg_env, chain_spec, header, total_difficulty)
+        let spec_id = reth_evm_ethereum::revm_spec(
+            chain_spec,
+            &Head {
+                number: header.number,
+                timestamp: header.timestamp,
+                difficulty: header.difficulty,
+                total_difficulty,
+                hash: Default::default(),
+            },
+        );
+
+        cfg_env.chain_id = chain_spec.chain().id();
+        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
+
+        cfg_env.handler_cfg.spec_id = spec_id;
+    }
+
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        EthEvmConfig::default().fill_tx_env(tx_env, transaction, sender)
+    }
+
+    fn fill_tx_env_system_contract_call(
+        &self,
+        env: &mut Env,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) {
+        EthEvmConfig::default().fill_tx_env_system_contract_call(env, caller, contract, data)
     }
 }
 

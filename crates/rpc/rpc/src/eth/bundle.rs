@@ -1,19 +1,15 @@
 //! `Eth` bundle implementation and helpers.
 
-use crate::eth::{
-    error::{EthApiError, EthResult, RpcInvalidTransactionError},
-    revm_utils::FillableTransaction,
-    utils::recover_raw_transaction,
-    EthTransactions,
-};
+use std::sync::Arc;
+
 use jsonrpsee::core::RpcResult;
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
     keccak256,
     revm_primitives::db::{DatabaseCommit, DatabaseRef},
     PooledTransactionsElement, U256,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_rpc_api::EthCallBundleApiServer;
 use reth_rpc_types::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
@@ -21,7 +17,14 @@ use revm::{
     primitives::{ResultAndState, TxEnv},
 };
 use revm_primitives::{EnvKzgSettings, EnvWithHandlerCfg, MAX_BLOB_GAS_PER_BLOCK};
-use std::sync::Arc;
+
+use reth_rpc_eth_api::{
+    helpers::{Call, EthTransactions, LoadPendingBlock},
+    EthCallBundleApiServer,
+};
+use reth_rpc_eth_types::{
+    utils::recover_raw_transaction, EthApiError, EthResult, RpcInvalidTransactionError,
+};
 
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
@@ -38,7 +41,7 @@ impl<Eth> EthBundle<Eth> {
 
 impl<Eth> EthBundle<Eth>
 where
-    Eth: EthTransactions + 'static,
+    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
 {
     /// Simulates a bundle of transactions at the top of a given block number with the state of
     /// another (or the same) block. This can be used to simulate future blocks with the current
@@ -98,6 +101,8 @@ where
         // use the block number of the request
         block_env.number = U256::from(block_number);
 
+        let eth_api = self.inner.eth_api.clone();
+
         self.inner
             .eth_api
             .spawn_with_state_at_block(at, move |state| {
@@ -115,8 +120,7 @@ where
                 let mut total_gas_fess = U256::ZERO;
                 let mut hash_bytes = Vec::with_capacity(32 * transactions.len());
 
-                let mut evm =
-                    revm::Evm::builder().with_db(db).with_env_with_handler_cfg(env).build();
+                let mut evm = Call::evm_config(&eth_api).evm_with_env(db, env);
 
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();
@@ -129,13 +133,13 @@ where
                             .map_err(|e| EthApiError::InvalidParams(e.to_string()))?;
                     }
 
-                    let tx = tx.into_ecrecovered_transaction(signer);
+                    let tx = tx.into_transaction();
 
                     hash_bytes.extend_from_slice(tx.hash().as_slice());
                     let gas_price = tx
                         .effective_tip_per_gas(basefee)
                         .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)?;
-                    tx.try_fill_tx_env(evm.tx_mut())?;
+                    Call::evm_config(&eth_api).fill_tx_env(evm.tx_mut(), &tx, signer);
                     let ResultAndState { result, state } = evm.transact()?;
 
                     let gas_used = result.gas_used();
@@ -166,7 +170,7 @@ where
                     let tx_res = EthCallBundleTransactionResult {
                         coinbase_diff,
                         eth_sent_to_coinbase,
-                        from_address: tx.signer(),
+                        from_address: signer,
                         gas_fees,
                         gas_price: U256::from(gas_price),
                         gas_used,
@@ -212,7 +216,7 @@ where
 #[async_trait::async_trait]
 impl<Eth> EthCallBundleApiServer for EthBundle<Eth>
 where
-    Eth: EthTransactions + 'static,
+    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
         Ok(Self::call_bundle(self, request).await?)

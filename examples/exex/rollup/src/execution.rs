@@ -10,10 +10,9 @@ use reth_primitives::{
     constants,
     eip4844::kzg_to_versioned_hash,
     keccak256,
-    revm::env::fill_tx_env,
     revm_primitives::{CfgEnvWithHandlerCfg, EVMError, ExecutionResult, ResultAndState},
-    Address, Block, BlockWithSenders, Bytes, Hardfork, Header, Receipt, TransactionSigned, TxType,
-    B256, U256,
+    Address, Block, BlockWithSenders, Bytes, EthereumHardfork, Header, Receipt, TransactionSigned,
+    TxType, B256, U256,
 };
 use reth_revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
@@ -69,16 +68,17 @@ fn construct_header(db: &Database, header: &RollupContract::BlockHeader) -> eyre
     let block_number = u64::try_from(header.sequence)?;
 
     // Calculate base fee per gas for EIP-1559 transactions
-    let base_fee_per_gas = if CHAIN_SPEC.fork(Hardfork::London).transitions_at_block(block_number) {
-        constants::EIP1559_INITIAL_BASE_FEE
-    } else {
-        parent_block
-            .as_ref()
-            .ok_or(eyre::eyre!("parent block not found"))?
-            .header
-            .next_block_base_fee(CHAIN_SPEC.base_fee_params_at_block(block_number))
-            .ok_or(eyre::eyre!("failed to calculate base fee"))?
-    };
+    let base_fee_per_gas =
+        if CHAIN_SPEC.fork(EthereumHardfork::London).transitions_at_block(block_number) {
+            constants::EIP1559_INITIAL_BASE_FEE
+        } else {
+            parent_block
+                .as_ref()
+                .ok_or(eyre::eyre!("parent block not found"))?
+                .header
+                .next_block_base_fee(CHAIN_SPEC.base_fee_params_at_block(block_number))
+                .ok_or(eyre::eyre!("failed to calculate base fee"))?
+        };
 
     // Construct header
     Ok(Header {
@@ -103,17 +103,11 @@ fn configure_evm<'a>(
             .build(),
     );
     evm.db_mut().set_state_clear_flag(
-        CHAIN_SPEC.fork(Hardfork::SpuriousDragon).active_at_block(header.number),
+        CHAIN_SPEC.fork(EthereumHardfork::SpuriousDragon).active_at_block(header.number),
     );
 
     let mut cfg = CfgEnvWithHandlerCfg::new_with_spec_id(evm.cfg().clone(), evm.spec_id());
-    EthEvmConfig::fill_cfg_and_block_env(
-        &mut cfg,
-        evm.block_mut(),
-        &CHAIN_SPEC,
-        header,
-        U256::ZERO,
-    );
+    config.fill_cfg_and_block_env(&mut cfg, evm.block_mut(), &CHAIN_SPEC, header, U256::ZERO);
     *evm.cfg_mut() = cfg.cfg_env;
 
     evm
@@ -216,7 +210,7 @@ fn execute_transactions(
             }
             // Execute transaction.
             // Fill revm structure.
-            fill_tx_env(evm.tx_mut(), &transaction, sender);
+            EthEvmConfig::default().fill_tx_env(evm.tx_mut(), &transaction, sender);
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(result) => result,

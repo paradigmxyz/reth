@@ -12,14 +12,14 @@
 #[cfg(not(feature = "std"))]
 extern crate alloc;
 
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{
-    revm::{config::revm_spec, env::fill_tx_env},
-    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Address, Head, Header, TransactionSigned, U256,
-};
+use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned, U256};
 use reth_revm::{Database, EvmBuilder};
+use revm_primitives::{AnalysisKind, Bytes, CfgEnvWithHandlerCfg, Env, TxEnv, TxKind};
+
+mod config;
+pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};
 
 pub mod execute;
 
@@ -35,19 +35,16 @@ pub mod eip6110;
 pub struct EthEvmConfig;
 
 impl ConfigureEvmEnv for EthEvmConfig {
-    fn fill_tx_env(tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        fill_tx_env(tx_env, transaction, sender)
-    }
-
     fn fill_cfg_env(
+        &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
         total_difficulty: U256,
     ) {
-        let spec_id = revm_spec(
+        let spec_id = config::revm_spec(
             chain_spec,
-            Head {
+            &Head {
                 number: header.number,
                 timestamp: header.timestamp,
                 difficulty: header.difficulty,
@@ -60,6 +57,50 @@ impl ConfigureEvmEnv for EthEvmConfig {
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
 
         cfg_env.handler_cfg.spec_id = spec_id;
+    }
+
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+        transaction.fill_tx_env(tx_env, sender);
+    }
+
+    fn fill_tx_env_system_contract_call(
+        &self,
+        env: &mut Env,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) {
+        #[allow(clippy::needless_update)] // side-effect of optimism fields
+        let tx = TxEnv {
+            caller,
+            transact_to: TxKind::Call(contract),
+            // Explicitly set nonce to None so revm does not do any nonce checks
+            nonce: None,
+            gas_limit: 30_000_000,
+            value: U256::ZERO,
+            data,
+            // Setting the gas price to zero enforces that no value is transferred as part of the
+            // call, and that the call will not count against the block's gas limit
+            gas_price: U256::ZERO,
+            // The chain ID check is not relevant here and is disabled if set to None
+            chain_id: None,
+            // Setting the gas priority fee to None ensures the effective gas price is derived from
+            // the `gas_price` field, which we need to be zero
+            gas_priority_fee: None,
+            access_list: Vec::new(),
+            // blob fields can be None for this tx
+            blob_hashes: Vec::new(),
+            max_fee_per_blob_gas: None,
+            // TODO remove this once this crate is no longer built with optimism
+            ..Default::default()
+        };
+        env.tx = tx;
+
+        // ensure the block gas limit is >= the tx
+        env.block.gas_limit = U256::from(env.tx.gas_limit);
+
+        // disable the base fee check for this call by setting the base fee to zero
+        env.block.basefee = U256::ZERO;
     }
 }
 
@@ -77,7 +118,12 @@ impl ConfigureEvm for EthEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::revm_primitives::{BlockEnv, CfgEnv, SpecId};
+    use reth_chainspec::ChainSpec;
+    use reth_primitives::{
+        revm_primitives::{BlockEnv, CfgEnv, SpecId},
+        Header, U256,
+    };
+    use revm_primitives::CfgEnvWithHandlerCfg;
 
     #[test]
     #[ignore]
@@ -88,7 +134,7 @@ mod tests {
         let chain_spec = ChainSpec::default();
         let total_difficulty = U256::ZERO;
 
-        EthEvmConfig::fill_cfg_and_block_env(
+        EthEvmConfig::default().fill_cfg_and_block_env(
             &mut cfg_env,
             &mut block_env,
             &chain_spec,

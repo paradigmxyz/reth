@@ -1,4 +1,4 @@
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     gas_spent_by_transactions, BlockWithSenders, Bloom, GotExpected, Receipt, Request, B256,
@@ -14,6 +14,16 @@ pub fn validate_block_post_execution(
     receipts: &[Receipt],
     requests: &[Request],
 ) -> Result<(), ConsensusError> {
+    // Check if gas used matches the value set in header.
+    let cumulative_gas_used =
+        receipts.last().map(|receipt| receipt.cumulative_gas_used).unwrap_or(0);
+    if block.gas_used != cumulative_gas_used {
+        return Err(ConsensusError::BlockGasUsed {
+            gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
+            gas_spent_by_tx: gas_spent_by_transactions(receipts),
+        })
+    }
+
     // Before Byzantium, receipts contained state root that would mean that expensive
     // operation as hashing that is required for state root got calculated in every
     // transaction This was replaced with is_success flag.
@@ -25,16 +35,6 @@ pub fn validate_block_post_execution(
             tracing::debug!(%error, ?receipts, "receipts verification failed");
             return Err(error)
         }
-    }
-
-    // Check if gas used matches the value set in header.
-    let cumulative_gas_used =
-        receipts.last().map(|receipt| receipt.cumulative_gas_used).unwrap_or(0);
-    if block.gas_used != cumulative_gas_used {
-        return Err(ConsensusError::BlockGasUsed {
-            gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
-            gas_spent_by_tx: gas_spent_by_transactions(receipts),
-        })
     }
 
     // Validate that the header requests root matches the calculated requests root

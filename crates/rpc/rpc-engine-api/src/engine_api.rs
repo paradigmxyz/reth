@@ -10,7 +10,7 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, PayloadAttributes,
     PayloadBuilderAttributes, PayloadOrAttributes,
 };
-use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, Hardfork, B256, U64};
+use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, EthereumHardfork, B256, U64};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
@@ -83,7 +83,7 @@ where
     }
 
     /// Fetches the client version.
-    async fn get_client_version_v1(
+    fn get_client_version_v1(
         &self,
         _client: ClientVersionV1,
     ) -> EngineApiResult<Vec<ClientVersionV1>> {
@@ -444,7 +444,7 @@ where
 
     /// Called to verify network configuration parameters and ensure that Consensus and Execution
     /// layers are using the latest configuration.
-    pub async fn exchange_transition_configuration(
+    pub fn exchange_transition_configuration(
         &self,
         config: TransitionConfiguration,
     ) -> EngineApiResult<TransitionConfiguration> {
@@ -457,7 +457,7 @@ where
         let merge_terminal_td = self
             .inner
             .chain_spec
-            .fork(Hardfork::Paris)
+            .fork(EthereumHardfork::Paris)
             .ttd()
             .expect("the engine API should not be running for chains w/o paris");
 
@@ -469,7 +469,7 @@ where
             })
         }
 
-        self.inner.beacon_consensus.transition_configuration_exchanged().await;
+        self.inner.beacon_consensus.transition_configuration_exchanged();
 
         // Short circuit if communicated block hash is zero
         if terminal_block_hash.is_zero() {
@@ -801,7 +801,7 @@ where
     ) -> RpcResult<TransitionConfiguration> {
         trace!(target: "rpc::engine", "Serving engine_exchangeTransitionConfigurationV1");
         let start = Instant::now();
-        let res = Self::exchange_transition_configuration(self, config).await;
+        let res = Self::exchange_transition_configuration(self, config);
         self.inner.metrics.latency.exchange_transition_configuration.record(start.elapsed());
         Ok(res?)
     }
@@ -814,7 +814,7 @@ where
         client: ClientVersionV1,
     ) -> RpcResult<Vec<ClientVersionV1>> {
         trace!(target: "rpc::engine", "Serving engine_getClientVersionV1");
-        let res = Self::get_client_version_v1(self, client).await;
+        let res = Self::get_client_version_v1(self, client);
 
         Ok(res?)
     }
@@ -889,7 +889,7 @@ mod tests {
             commit: "defa64b2".to_string(),
         };
         let (_, api) = setup_engine_api();
-        let res = api.get_client_version_v1(client.clone()).await;
+        let res = api.get_client_version_v1(client.clone());
         assert_eq!(res.unwrap(), vec![client]);
     }
 
@@ -1036,17 +1036,21 @@ mod tests {
             let (handle, api) = setup_engine_api();
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap() +
+                terminal_total_difficulty: handle
+                    .chain_spec
+                    .fork(EthereumHardfork::Paris)
+                    .ttd()
+                    .unwrap() +
                     U256::from(1),
                 ..Default::default()
             };
 
-            let res = api.exchange_transition_configuration(transition_config).await;
+            let res = api.exchange_transition_configuration(transition_config);
 
             assert_matches!(
                 res,
                 Err(EngineApiError::TerminalTD { execution, consensus })
-                    if execution == handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap() && consensus == U256::from(transition_config.terminal_total_difficulty)
+                    if execution == handle.chain_spec.fork(EthereumHardfork::Paris).ttd().unwrap() && consensus == U256::from(transition_config.terminal_total_difficulty)
             );
         }
 
@@ -1063,13 +1067,17 @@ mod tests {
                 random_block(&mut rng, terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
+                terminal_total_difficulty: handle
+                    .chain_spec
+                    .fork(EthereumHardfork::Paris)
+                    .ttd()
+                    .unwrap(),
                 terminal_block_hash: consensus_terminal_block.hash(),
                 terminal_block_number: U64::from(terminal_block_number),
             };
 
             // Unknown block number
-            let res = api.exchange_transition_configuration(transition_config).await;
+            let res = api.exchange_transition_configuration(transition_config);
 
             assert_matches!(
                res,
@@ -1083,7 +1091,7 @@ mod tests {
                 execution_terminal_block.clone().unseal(),
             );
 
-            let res = api.exchange_transition_configuration(transition_config).await;
+            let res = api.exchange_transition_configuration(transition_config);
 
             assert_matches!(
                 res,
@@ -1101,14 +1109,18 @@ mod tests {
                 random_block(&mut generators::rng(), terminal_block_number, None, None, None);
 
             let transition_config = TransitionConfiguration {
-                terminal_total_difficulty: handle.chain_spec.fork(Hardfork::Paris).ttd().unwrap(),
+                terminal_total_difficulty: handle
+                    .chain_spec
+                    .fork(EthereumHardfork::Paris)
+                    .ttd()
+                    .unwrap(),
                 terminal_block_hash: terminal_block.hash(),
                 terminal_block_number: U64::from(terminal_block_number),
             };
 
             handle.provider.add_block(terminal_block.hash(), terminal_block.unseal());
 
-            let config = api.exchange_transition_configuration(transition_config).await.unwrap();
+            let config = api.exchange_transition_configuration(transition_config).unwrap();
             assert_eq!(config, transition_config);
         }
     }

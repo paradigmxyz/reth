@@ -1,16 +1,16 @@
 //! Main `stage` command
 //!
 //! Stage debugging tool
-
 use crate::{
-    args::{get_secret_key, NetworkArgs, StageEnum},
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
+    args::{NetworkArgs, StageEnum},
     macros::block_executor,
     prometheus_exporter,
 };
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
+use reth_cli_util::get_secret_key;
 use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_exex::ExExManagerHandle;
@@ -20,11 +20,11 @@ use reth_provider::{
 };
 use reth_stages::{
     stages::{
-        AccountHashingStage, BodyStage, ExecutionStage, ExecutionStageThresholds,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TransactionLookupStage,
+        AccountHashingStage, BodyStage, ExecutionStage, IndexAccountHistoryStage,
+        IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
+        TransactionLookupStage,
     },
-    ExecInput, ExecOutput, Stage, StageExt, UnwindInput, UnwindOutput,
+    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
 use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
 use tracing::*;
@@ -118,12 +118,7 @@ impl Command {
 
                     let mut config = config;
                     config.peers.trusted_nodes_only = self.network.trusted_only;
-                    if !self.network.trusted_peers.is_empty() {
-                        for peer in &self.network.trusted_peers {
-                            let peer = peer.resolve().await?;
-                            config.peers.trusted_nodes.insert(peer);
-                        }
-                    }
+                    config.peers.trusted_nodes.extend(self.network.resolve_trusted_peers().await?);
 
                     let network_secret_path = self
                         .network

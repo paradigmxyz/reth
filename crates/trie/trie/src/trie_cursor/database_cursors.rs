@@ -1,5 +1,5 @@
 use super::{TrieCursor, TrieCursorFactory};
-use crate::{updates::TrieKey, BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey};
+use crate::{BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey};
 use reth_db::{tables, DatabaseError};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
@@ -9,18 +9,22 @@ use reth_primitives::B256;
 
 /// Implementation of the trie cursor factory for a database transaction.
 impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
-    fn account_trie_cursor(&self) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
-        Ok(Box::new(DatabaseAccountTrieCursor::new(self.cursor_read::<tables::AccountsTrie>()?)))
+    type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
+    type StorageTrieCursor =
+        DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
+
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
+        Ok(DatabaseAccountTrieCursor::new(self.cursor_read::<tables::AccountsTrie>()?))
     }
 
-    fn storage_tries_cursor(
+    fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Box<dyn TrieCursor + '_>, DatabaseError> {
-        Ok(Box::new(DatabaseStorageTrieCursor::new(
+    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+        Ok(DatabaseStorageTrieCursor::new(
             self.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
-        )))
+        ))
     }
 }
 
@@ -56,8 +60,8 @@ where
     }
 
     /// Retrieves the current key in the cursor.
-    fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
-        Ok(self.0.current()?.map(|(k, _)| TrieKey::AccountNode(k)))
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+        Ok(self.0.current()?.map(|(k, _)| k.0))
     }
 }
 
@@ -105,8 +109,8 @@ where
     }
 
     /// Retrieves the current value in the storage trie cursor.
-    fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError> {
-        Ok(self.cursor.current()?.map(|(k, v)| TrieKey::StorageNode(k, v.nibbles)))
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+        Ok(self.cursor.current()?.map(|(_, v)| v.nibbles.0))
     }
 }
 

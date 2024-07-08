@@ -1,12 +1,14 @@
-use crate::utils::EthNode;
+use std::sync::Arc;
+
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures::StreamExt;
-use reth::rpc::eth::EthTransactions;
+use reth::rpc::api::eth::helpers::EthTransactions;
 use reth_chainspec::ChainSpec;
 use reth_e2e_test_utils::setup;
 use reth_provider::CanonStateSubscriptions;
-use std::sync::Arc;
+
+use crate::utils::EthNode;
 
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
@@ -17,7 +19,7 @@ async fn can_run_dev_node() -> eyre::Result<()> {
     Ok(())
 }
 
-async fn assert_chain_advances(mut node: EthNode) {
+async fn assert_chain_advances(node: EthNode) {
     let mut notifications = node.inner.provider.canonical_state_stream();
 
     // submit tx through rpc

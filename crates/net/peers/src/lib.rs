@@ -39,6 +39,11 @@
 //! - [`TrustedPeer`]: A [`NodeRecord`] with an optional domain name, which can be resolved to a
 //!   [`NodeRecord`]. Useful for adding trusted peers at startup, whose IP address may not be
 //!   static.
+//!
+//!
+//! ## Feature Flags
+//!
+//! - `net`: Support for address lookups.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -62,6 +67,9 @@ pub use node_record::{NodeRecord, NodeRecordParseError};
 
 pub mod trusted_peer;
 pub use trusted_peer::TrustedPeer;
+
+mod bootnodes;
+pub use bootnodes::*;
 
 /// This tag should be set to indicate to libsecp256k1 that the following bytes denote an
 /// uncompressed pubkey.

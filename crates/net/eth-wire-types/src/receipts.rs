@@ -4,13 +4,10 @@ use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs_derive::derive_arbitrary;
 use reth_primitives::{ReceiptWithBloom, B256};
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
 /// A request for transaction receipts from the given block hashes.
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GetReceipts(
     /// The block hashes to request receipts for.
     pub Vec<B256>,
@@ -20,7 +17,7 @@ pub struct GetReceipts(
 /// requested.
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Receipts(
     /// Each receipt hash should correspond to a block hash in the request.
     pub Vec<Vec<ReceiptWithBloom>>,

@@ -1,18 +1,22 @@
-use crate::eth::{
-    error::{EthApiError, EthResult},
-    revm_utils::prepare_call_env,
-    utils::recover_raw_transaction,
-    EthTransactions,
-};
+use std::{collections::HashSet, sync::Arc};
+
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult as Result;
+use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };
-use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, Header, B256, U256};
+use reth_evm::ConfigureEvmEnv;
+use reth_primitives::{BlockId, Bytes, Header, B256, U256};
 use reth_provider::{BlockReader, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
+use reth_rpc_eth_api::helpers::{Call, TraceExt};
+use reth_rpc_eth_types::{
+    error::{EthApiError, EthResult},
+    revm_utils::prepare_call_env,
+    utils::recover_raw_transaction,
+};
 use reth_rpc_types::{
     state::{EvmOverrides, StateOverride},
     trace::{
@@ -32,7 +36,6 @@ use revm_inspectors::{
     opcode::OpcodeGasInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
 };
-use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `trace` API implementation.
@@ -74,7 +77,7 @@ impl<Provider, Eth> TraceApi<Provider, Eth> {
 impl<Provider, Eth> TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: EthTransactions + 'static,
+    Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(&self, trace_request: TraceCallRequest) -> EthResult<TraceResults> {
@@ -86,6 +89,10 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, env| {
+                // wrapper is hack to get around 'higher-ranked lifetime error', see
+                // <https://github.com/rust-lang/rust/issues/100013>
+                let db = db.0;
+
                 let (res, _) = this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                 let trace_res = inspector.into_parity_builder().into_trace_results_with_state(
                     &res,
@@ -107,8 +114,12 @@ where
         let tx = recover_raw_transaction(tx)?;
 
         let (cfg, block, at) = self.inner.eth_api.evm_env_at(block_id.unwrap_or_default()).await?;
-        let tx = tx_env_with_recovered(&tx.into_ecrecovered_transaction());
-        let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block, tx);
+
+        let env = EnvWithHandlerCfg::new_with_cfg_env(
+            cfg,
+            block,
+            Call::evm_config(self.eth_api()).tx_env(&tx.into_ecrecovered_transaction()),
+        );
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
 
@@ -372,7 +383,7 @@ where
             },
         );
 
-        let block = self.inner.eth_api.block_by_id(block_id);
+        let block = self.inner.eth_api.block(block_id);
         let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
 
         let mut maybe_traces =
@@ -455,7 +466,7 @@ where
         let res = self
             .inner
             .eth_api
-            .trace_block_with_inspector(
+            .trace_block_inspector(
                 block_id,
                 OpcodeGasInspector::default,
                 move |tx_info, inspector, _res, _, _| {
@@ -470,7 +481,7 @@ where
 
         let Some(transactions) = res else { return Ok(None) };
 
-        let Some(block) = self.inner.eth_api.block_by_id(block_id).await? else { return Ok(None) };
+        let Some(block) = self.inner.eth_api.block(block_id).await? else { return Ok(None) };
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),
@@ -548,7 +559,7 @@ where
 impl<Provider, Eth> TraceApiServer for TraceApi<Provider, Eth>
 where
     Provider: BlockReader + StateProviderFactory + EvmEnvProvider + ChainSpecProvider + 'static,
-    Eth: EthTransactions + 'static,
+    Eth: TraceExt + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     ///
