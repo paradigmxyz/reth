@@ -1379,52 +1379,82 @@ impl RpcServerConfig {
             });
         }
 
-        let builder = self.ws_server_config.expect("Expected a value, but found None");
-        let server = builder
-            .ws_only()
-            .set_http_middleware(
-                tower::ServiceBuilder::new()
-                    .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
-                    .option_layer(
-                        self.jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret))),
-                    ),
-            )
-            .set_rpc_middleware(
-                RpcServiceBuilder::new()
-                    .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
-            )
-            .build(ws_socket_addr)
-            .await
-            .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
-        let addr = server
-            .local_addr()
-            .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
+        let mut ws_local_addr = None;
+        let mut ws_server = None;
+        let mut http_local_addr = None;
+        let mut http_server = None;
 
-        let ws_local_addr = Some(addr);
-        let ws_server = Some(server);
+        // let builder = self.ws_server_config.expect("Expected a value, but found None");
+        // let server = builder
+        //     .ws_only()
+        //     .set_http_middleware(
+        //         tower::ServiceBuilder::new()
+        //             .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
+        //             .option_layer(
+        //                 self.jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret))),
+        //             ),
+        //     )
+        //     .set_rpc_middleware(
+        //         RpcServiceBuilder::new()
+        //             .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
+        //     )
+        //     .build(ws_socket_addr)
+        //     .await
+        //     .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
+        // let addr = server
+        //     .local_addr()
+        //     .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
+        if let Some(builder) = self.ws_server_config {
+            let server = builder
+                .ws_only()
+                .set_http_middleware(
+                    tower::ServiceBuilder::new()
+                        .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
+                        .option_layer(
+                            self.jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret))),
+                        ),
+                )
+                .set_rpc_middleware(
+                    RpcServiceBuilder::new()
+                        .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
+                )
+                .build(ws_socket_addr)
+                .await
+                .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
+            
+            let addr = server
+                .local_addr()
+                .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
+                
+            ws_local_addr = Some(addr);
+            ws_server = Some(server);
+        }
 
-        let builder = self.http_server_config.expect("Expected a value, but found None");
-        let server = builder
-            .http_only()
-            .set_http_middleware(
-                tower::ServiceBuilder::new()
-                    .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
-                    .option_layer(
-                        self.jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret))),
-                    ),
-            )
-            .set_rpc_middleware(
-                RpcServiceBuilder::new()
-                    .layer(modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default()),
-            )
-            .build(http_socket_addr)
-            .await
-            .map_err(|err| RpcError::server_error(err, ServerKind::Http(http_socket_addr)))?;
-        let local_addr = server
-            .local_addr()
-            .map_err(|err| RpcError::server_error(err, ServerKind::Http(http_socket_addr)))?;
-        let http_local_addr = Some(local_addr);
-        let http_server = Some(server);
+        //let builder = self.http_server_config.expect("Expected a value, but found None");
+        if let Some(builder) = self.http_server_config {
+            let server = builder
+                .http_only()
+                .set_http_middleware(
+                    tower::ServiceBuilder::new()
+                        .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
+                        .option_layer(
+                            self.jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret))),
+                        ),
+                )
+                .set_rpc_middleware(
+                    RpcServiceBuilder::new()
+                        .layer(modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default()),
+                )
+                .build(http_socket_addr)
+                .await
+                .map_err(|err| RpcError::server_error(err, ServerKind::Http(http_socket_addr)))?;
+            let local_addr = server
+                .local_addr()
+                .map_err(|err| RpcError::server_error(err, ServerKind::Http(http_socket_addr)))?;
+            http_local_addr = Some(local_addr);
+            http_server = Some(server);
+        }
+
 
         let http_handle = http_server
             .map(|http_server| http_server.start(modules.http.clone().expect("http server error")));
