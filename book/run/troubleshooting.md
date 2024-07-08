@@ -135,7 +135,6 @@ If your hardware performance is significantly lower than these reference numbers
    Parent sees throughput for 1 random writers     =  983476.67 kB/sec
    ```
 2. Test disk speed with memory-mapped files:
-
    ```bash
    iozone -B -G -e -t1 -i0 -i2 -r1k -s1g /tmp
    ```
