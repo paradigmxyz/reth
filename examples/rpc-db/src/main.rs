@@ -77,7 +77,7 @@ async fn main() -> eyre::Result<()> {
     server.merge_configured(custom_rpc.into_rpc())?;
 
     // Start the server & keep it alive
-    let mut server_args =
+    let server_args =
         RpcServerConfig::http(Default::default()).with_http_address("0.0.0.0:8545".parse()?);
     let _handle = server_args.start(&server).await?;
     futures::future::pending::<()>().await;
