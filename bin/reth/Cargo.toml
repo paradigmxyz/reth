@@ -32,7 +32,6 @@ reth-beacon-consensus.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-commands.workspace = true
 reth-cli-util.workspace = true
-reth-cli = { workspace = true, optional = true }
 reth-consensus-common.workspace = true
 reth-blockchain-tree.workspace = true
 reth-rpc-builder.workspace = true
@@ -136,8 +135,6 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 optimism = [
     "dep:reth-optimism-cli",
     "reth-optimism-cli?/optimism",
-    "dep:reth-cli",
-    "reth-cli?/optimism",
     "reth-primitives/optimism",
     "reth-rpc/optimism",
     "reth-provider/optimism",

@@ -31,5 +31,4 @@ optimism = [
     "reth-chainspec/optimism",
 ]
 
-ethereum = []
 
