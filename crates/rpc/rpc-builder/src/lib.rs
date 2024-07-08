@@ -1386,7 +1386,8 @@ impl RpcServerConfig {
                     tower::ServiceBuilder::new()
                         .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
                         .option_layer(
-                            self.jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret))),
+                            self.jwt_secret
+                                .map(|secret| AuthLayer::new(JwtAuthValidator::new(secret))),
                         ),
                 )
                 .set_rpc_middleware(
@@ -1396,11 +1397,11 @@ impl RpcServerConfig {
                 .build(ws_socket_addr)
                 .await
                 .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
-            
+
             let addr = server
                 .local_addr()
                 .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
-                
+
             ws_local_addr = Some(addr);
             ws_server = Some(server);
         }
@@ -1412,12 +1413,14 @@ impl RpcServerConfig {
                     tower::ServiceBuilder::new()
                         .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
                         .option_layer(
-                            self.jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret))),
+                            self.jwt_secret
+                                .map(|secret| AuthLayer::new(JwtAuthValidator::new(secret))),
                         ),
                 )
                 .set_rpc_middleware(
-                    RpcServiceBuilder::new()
-                        .layer(modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default()),
+                    RpcServiceBuilder::new().layer(
+                        modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
+                    ),
                 )
                 .build(http_socket_addr)
                 .await
