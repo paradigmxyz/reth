@@ -94,7 +94,7 @@ contract MockSgxVerifier is EssentialContract, IVerifier {
     }
 
     /// @inheritdoc IVerifier
-    /* MODIFIED- TO RETURN TRUE WITHOUT VERIFICATION IF INSTANCE ADDED!!! */
+    /* MODIFIED- TO RETURN TRUE WITHOUT REAL VERIFICATION!!! */
     function verifyProof(
         TaikoData.BlockMetadata calldata /*_block*/,
         TaikoData.Transition calldata /*transition*/,
@@ -139,7 +139,7 @@ contract MockSgxVerifier is EssentialContract, IVerifier {
         emit InstanceAdded(id, newInstance, oldInstance, block.timestamp);
     }
 
-    /* MODIFIED- TO RETURN TRUE!!! */
+    /* MODIFIED- TO RETURN TRUE IF INSTANCE ADDED!!! */
     function _isInstanceValid(uint256 id, address instance) private view returns (bool) {
         if (instance == address(0)) return false;
         if (instance != instances[id].addr) return false;
