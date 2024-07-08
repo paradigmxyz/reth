@@ -1287,9 +1287,11 @@ impl RpcServerConfig {
         jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)))
     }
 
-    /// Builds and starts the ws and http server(s).
+    /// Builds and starts the configured server(s): http, ws, ipc.
     ///
-    /// If both are on the same port, they are combined into one server.
+    /// If both http and ws are on the same port, they are combined into one server.
+    ///
+    /// Returns the [`RpcServerHandle`] with the handle to the started servers.
     pub async fn start(self, modules: &TransportRpcModules) -> Result<RpcServerHandle, RpcError> {
         let mut http_handle = None;
         let mut ws_handle = None;
