@@ -1293,6 +1293,7 @@ impl RpcServerConfig {
     pub async fn start(self, modules: &TransportRpcModules) -> Result<RpcServerHandle, RpcError> {
         let mut http_handle = None;
         let mut ws_handle = None;
+        let mut ipc_handle = None;
 
         let http_socket_addr = self.http_addr.unwrap_or(SocketAddr::V4(SocketAddrV4::new(
             Ipv4Addr::LOCALHOST,
@@ -1308,10 +1309,12 @@ impl RpcServerConfig {
         let ipc_path =
             self.ipc_endpoint.clone().unwrap_or_else(|| constants::DEFAULT_IPC_ENDPOINT.into());
 
-        let builder = self.ipc_server_config.expect("Expected a value, but found None");
-        let ipc =
-            builder.set_rpc_middleware(IpcRpcServiceBuilder::new().layer(metrics)).build(ipc_path);
-        let ipc_handle = Some(ipc.start(modules.ipc.clone().expect("ipc server error")).await?);
+        if let Some(builder) = self.ipc_server_config {
+            let ipc = builder
+                .set_rpc_middleware(IpcRpcServiceBuilder::new().layer(metrics))
+                .build(ipc_path);
+            ipc_handle = Some(ipc.start(modules.ipc.clone().expect("ipc server error")).await?);
+        }
 
         // If both are configured on the same port, we combine them into one server.
         if self.http_addr == self.ws_addr &&
