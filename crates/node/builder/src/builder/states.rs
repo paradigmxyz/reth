@@ -26,8 +26,8 @@ use crate::{
     exex::BoxedLaunchExEx,
     hooks::NodeHooks,
     launch::LaunchNode,
-    rpc::{RpcContext, RpcHooks},
-    EngineAdapter, FullNode, NodeComponentsBuilderExt, PipelineAdapter, RpcAdapter,
+    rpc::RpcHooks,
+    EngineAdapter, FullNode, PipelineAdapter, RpcAdapter,
 };
 
 /// A node builder that also has the configured types.
@@ -56,7 +56,6 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             adapter,
             components_builder,
             add_ons: NodeAddOns { hooks: NodeHooks::default(), exexs: Vec::new() },
-            ext_builder: None,
         }
     }
 }
@@ -165,8 +164,6 @@ pub struct NodeBuilderWithComponents<
     pub(crate) components_builder: CB,
     /// Additional node extensions.
     pub(crate) add_ons: NodeAddOns<Output>,
-    /// Builds optional components.
-    pub(crate) ext_builder: Option<Box<dyn NodeComponentsBuilderExt<Output = Output>>>,
 }
 
 impl<T, CB, Output> NodeBuilderWithComponents<T, CB, Output>
@@ -178,8 +175,8 @@ where
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_components_initialized<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(
-                &mut ExtBuilderContext<'_, Output>,
+        for<'a> F: FnOnce(
+                ExtBuilderContext<'a, Output>,
             ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send>>
             + Send
             + 'static,
@@ -194,17 +191,6 @@ where
         F: FnOnce(FullNode<Output>) -> eyre::Result<()> + Send + 'static,
     {
         self.add_ons.hooks.set_on_node_started(hook);
-        self
-    }
-
-    /// Sets the hook that is run to configure the rpc modules.
-    pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
-    where
-        F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>>) -> eyre::Result<()>
-            + Send
-            + 'static,
-    {
-        self.add_ons.rpc.set_extend_rpc_modules(hook);
         self
     }
 
@@ -237,13 +223,11 @@ where
     pub const fn check_launch(self) -> Self {
         self
     }
-}
 
-impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T, CB> {
     /// Launches the node with the given launcher.
     pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
     where
-        L: LaunchNode<Self>,
+        L: LaunchNode<Self, Node = Output>,
     {
         launcher.launch_node(self).await
     }
@@ -325,13 +309,18 @@ where
 impl<N, BT, C> FullNodeComponentsExt for NodeAdapterExt<N, BT, C>
 where
     N: FullNodeComponents,
-    BT: FullBlockchainTreeEngine + Clone + 'static,
-    C: FullClient + Clone + 'static,
+    BT: FullBlockchainTreeEngine + Send + Sync + Unpin + Clone + 'static,
+    C: FullClient + Send + Sync + Clone + 'static,
 {
+    type Core = N;
     type Tree = BlockchainProvider<N::DB>;
     type Pipeline = PipelineAdapter<C>;
     type Engine = EngineAdapter<N, BT, C>;
     type Rpc = RpcAdapter<N>;
+
+    fn from_core(core: Self::Core) -> Self {
+        Self::new(core)
+    }
 
     fn tree(&self) -> Option<&Self::Tree> {
         self.tree.as_ref()
@@ -341,7 +330,7 @@ where
         self.pipeline.as_ref()
     }
 
-    fn engine(&self) -> Option<&<Self as FullNodeComponentsExt>::Engine> {
+    fn engine(&self) -> Option<&Self::Engine> {
         self.engine.as_ref()
     }
 

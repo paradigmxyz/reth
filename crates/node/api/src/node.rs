@@ -168,10 +168,13 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 
 /// An intermediary type for `FullNodeComponentsExt`, that isn't `Clone`.
 pub trait FullNodeComponentsExt: FullNodeComponents {
+    type Core: FullNodeComponents;
     type Tree;
     type Pipeline: PipelineComponent;
-    type Engine: EngineComponent<Self> + 'static;
-    type Rpc: RpcComponent<Self> + 'static;
+    type Engine: EngineComponent<Self::Core> + 'static;
+    type Rpc: RpcComponent<Self::Core> + 'static;
+
+    fn from_core(core: Self::Core) -> Self;
 
     /// Returns reference to blockchain tree component, if installed.
     fn tree(&self) -> Option<&Self::Tree>;
@@ -185,6 +188,7 @@ pub trait FullNodeComponentsExt: FullNodeComponents {
     /// Returns reference to RPC component, if installed.
     fn rpc(&self) -> Option<&Self::Rpc>;
 }
+
 pub trait TreeComponent: Send + Sync + Unpin + Clone + 'static {
     // ..
 }

@@ -88,9 +88,9 @@ pub struct FullNode<Node: FullNodeComponentsExt> {
     /// Task executor for the node.
     pub task_executor: TaskExecutor,
     /// Handles to the node's rpc servers
-    pub rpc_server_handles: <Node::Rpc as RpcComponent<Node>>::ServerHandles,
+    pub rpc_server_handles: <Node::Rpc as RpcComponent<Node::Core>>::ServerHandles,
     /// The configured rpc namespaces
-    pub rpc_registry: <Node::Rpc as RpcComponent<Node>>::Registry,
+    pub rpc_registry: <Node::Rpc as RpcComponent<Node::Core>>::Registry,
     /// The initial node config.
     pub config: NodeConfig,
     /// The data dir of the node.
@@ -99,7 +99,7 @@ pub struct FullNode<Node: FullNodeComponentsExt> {
 
 impl<Node: FullNodeComponentsExt> FullNode<Node>
 where
-    <Node::Rpc as RpcComponent<Node>>::ServerHandles: RpcServerHandles,
+    <Node::Rpc as RpcComponent<Node::Core>>::ServerHandles: RpcServerHandles,
 {
     /// Returns the [`ChainSpec`] of the node.
     pub fn chain_spec(&self) -> Arc<ChainSpec> {

@@ -305,20 +305,22 @@ where
     }
 }
 
-impl<T, DB, CB> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
+impl<T, DB, CB, Output>
+    WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, Output>>
 where
+    Output: FullNodeComponentsExt,
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: NodeTypes,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
 {
     /// Sets the hook that is run once the node's components are initialized.
-    pub fn on_components_initialized<N, F>(self, hook: F) -> Self
+    pub fn on_components_initialized<F>(self, hook: F) -> Self
     where
-        N: FullNodeComponentsExt,
-        F: FnOnce(
-                &mut ExtBuilderContext<'_, N>,
+        for<'a> F: FnOnce(
+                ExtBuilderContext<'a, Output>,
             ) -> Pin<Box<dyn Future<Output = eyre::Result<()>> + Send>>
-            + Send,
+            + Send
+            + 'static,
     {
         Self {
             builder: self.builder.on_components_initialized(hook),
@@ -327,37 +329,11 @@ where
     }
 
     /// Sets the hook that is run once the node has started.
-    pub fn on_node_started<N, F>(self, hook: F) -> Self
+    pub fn on_node_started<F>(self, hook: F) -> Self
     where
-        N: FullNodeComponentsExt,
-        F: FnOnce(FullNode<N>) -> eyre::Result<()> + Send + 'static,
+        F: FnOnce(FullNode<Output>) -> eyre::Result<()> + Send + 'static,
     {
         Self { builder: self.builder.on_node_started(hook), task_executor: self.task_executor }
-    }
-
-    /// Sets the hook that is run once the rpc server is started.
-    pub fn on_rpc_started<F>(self, hook: F) -> Self
-    where
-        F: FnOnce(
-                RpcContext<'_, NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
-                RethRpcServerHandles,
-            ) -> eyre::Result<()>
-            + Send
-            + 'static,
-    {
-        Self { builder: self.builder.on_rpc_started(hook), task_executor: self.task_executor }
-    }
-
-    /// Sets the hook that is run to configure the rpc modules.
-    pub fn extend_rpc_modules<F>(self, hook: F) -> Self
-    where
-        F: FnOnce(
-                RpcContext<'_, NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
-            ) -> eyre::Result<()>
-            + Send
-            + 'static,
-    {
-        Self { builder: self.builder.extend_rpc_modules(hook), task_executor: self.task_executor }
     }
 
     /// Installs an `ExEx` (Execution Extension) in the node.
@@ -367,9 +343,7 @@ where
     /// The `ExEx` ID must be unique.
     pub fn install_exex<F, R, E>(self, exex_id: impl Into<String>, exex: F) -> Self
     where
-        F: FnOnce(ExExContext<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>) -> R
-            + Send
-            + 'static,
+        F: FnOnce(ExExContext<Output>) -> R + Send + 'static,
         R: Future<Output = eyre::Result<E>> + Send,
         E: Future<Output = eyre::Result<()>> + Send,
     {
@@ -379,19 +353,26 @@ where
         }
     }
 
+    /// Check that the builder can be launched
+    ///
+    /// This is useful when writing tests to ensure that the builder is configured correctly.
+    pub const fn check_launch(self) -> Self {
+        self
+    }
+}
+
+impl<T, DB, CB> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
+where
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    T: NodeTypes,
+    CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
+{
     /// Launches the node and returns a handle to it.
     pub async fn launch(self) -> eyre::Result<NodeHandle<impl FullNodeComponentsExt>> {
         let Self { builder, task_executor } = self;
 
         let launcher = DefaultNodeLauncher::new(task_executor, builder.config.datadir());
         builder.launch_with(launcher).await
-    }
-
-    /// Check that the builder can be launched
-    ///
-    /// This is useful when writing tests to ensure that the builder is configured correctly.
-    pub const fn check_launch(self) -> Self {
-        self
     }
 }
 

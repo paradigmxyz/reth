@@ -4,8 +4,9 @@ use std::{fmt, sync::Arc};
 
 use derive_more::{Deref, DerefMut};
 use futures::{Future, TryFutureExt};
+use reth_beacon_consensus::FullBlockchainTreeEngine;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
-use reth_network::NetworkHandle;
+use reth_network::{FullClient, NetworkHandle};
 use reth_node_api::{EngineComponent, FullNodeComponents, FullNodeComponentsExt, RpcComponent};
 use reth_node_core::{
     node_config::NodeConfig,
@@ -27,8 +28,9 @@ use reth_tracing::tracing::{debug, info};
 use tokio::sync::oneshot;
 
 use crate::{
-    common::{ExtBuilderContext, InitializedComponents, StageExtComponentsBuild},
+    common::{ExtBuilderContext, InitializedComponents},
     hooks::OnComponentsInitializedHook,
+    EngineAdapter, PipelineAdapter,
 };
 
 #[allow(missing_debug_implementations)]
@@ -75,39 +77,30 @@ impl<Node: FullNodeComponents> RpcHooks<Node> {
     }
 
     /// Sets the hook that is run once the rpc server is started.
-    pub(crate) fn set_on_rpc_started<F>(&mut self, hook: F) -> &mut Self
-    where
-        F: OnRpcStarted<Node> + 'static,
-    {
+    pub(crate) fn set_on_rpc_started<F>(&mut self, hook: Box<dyn OnRpcStarted<Node>>) -> &mut Self {
         self.on_rpc_started = Box::new(hook);
         self
     }
 
     /// Sets the hook that is run once the rpc server is started.
     #[allow(unused)]
-    pub(crate) fn on_rpc_started<F>(mut self, hook: F) -> Self
-    where
-        F: OnRpcStarted<Node> + 'static,
-    {
+    pub(crate) fn on_rpc_started(mut self, hook: Box<dyn OnRpcStarted<Node>>) -> Self {
         self.set_on_rpc_started(hook);
         self
     }
 
     /// Sets the hook that is run to configure the rpc modules.
-    pub(crate) fn set_extend_rpc_modules<F>(&mut self, hook: F) -> &mut Self
-    where
-        F: ExtendRpcModules<Node> + 'static,
-    {
-        self.extend_rpc_modules = Box::new(hook);
+    pub(crate) fn set_extend_rpc_modules(
+        &mut self,
+        hook: Box<dyn ExtendRpcModules<Node>>,
+    ) -> &mut Self {
+        self.extend_rpc_modules = hook;
         self
     }
 
     /// Sets the hook that is run to configure the rpc modules.
     #[allow(unused)]
-    pub(crate) fn extend_rpc_modules<F>(mut self, hook: F) -> Self
-    where
-        F: ExtendRpcModules<Node> + 'static,
-    {
+    pub(crate) fn extend_rpc_modules(mut self, hook: Box<dyn ExtendRpcModules<Node>>) -> Self {
         self.set_extend_rpc_modules(hook);
         self
     }
@@ -335,7 +328,21 @@ where
 }
 
 /// Builds optional RPC component.
-pub trait RpcBuilder<Node: FullNodeComponentsExt>: Send {
+pub trait RpcBuilder<
+    CoreNode,
+    BT,
+    C,
+    Node: FullNodeComponentsExt<
+        Pipeline = PipelineAdapter<C>,
+        Tree = BT,
+        Engine = EngineAdapter<CoreNode, BT, C>,
+    >,
+>: Send where
+    CoreNode: FullNodeComponents,
+    BT: FullBlockchainTreeEngine + Clone,
+    C: FullClient + Clone,
+    EngineApi<BT, CoreNode::EngineTypes>: EngineApiServer<<Node::NodeTypes>::EngineTypes>,
+{
     /// Installs RPC on the node.
     fn build_rpc(
         self: Box<Self>,
@@ -354,7 +361,8 @@ pub trait RpcBuilder<Node: FullNodeComponentsExt>: Send {
                 ctx.right()
                     .engine()
                     .expect("engine should be built before rpc") // todo: fix engine deps with impl of engine builder
-                    .handle(),
+                    .handle()
+                    .clone(),
                 ctx.node().payload_builder().clone().into(),
                 Box::new(ctx.node().task_executor().clone()),
                 client,
@@ -383,7 +391,9 @@ pub trait RpcBuilder<Node: FullNodeComponentsExt>: Send {
             // TODO: can safely be spawned in NodeComponentsBuilderExt::build, i.e. after executing
             // code below?
             let (tx, rx) = oneshot::channel();
-            ctx.right().engine_shutdown_rx(rx);
+            ctx.right()
+                .engine_mut()
+                .map(|engine| engine.shutdown_rx_mut() = Arc::new(Mutex::new(Some(rx))));
             info!(target: "reth::cli", "Starting consensus engine");
             ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
                 let res = ctx

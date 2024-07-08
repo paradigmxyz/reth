@@ -19,8 +19,8 @@ use reth_primitives::{
     B256,
 };
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
-    StageCheckpointReader,
+    BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, EvmEnvProvider,
+    ProviderError, StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc_types::engine::{
     CancunPayloadFields, ExecutionPayload, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
@@ -96,6 +96,8 @@ pub trait FullBlockchainTreeEngine:
     + CanonChainTracker
     + StageCheckpointReader
     + ChainSpecProvider
+    + StateProviderFactory
+    + EvmEnvProvider
     + Unpin
 {
 }
@@ -107,6 +109,8 @@ impl<T> FullBlockchainTreeEngine for T where
         + CanonChainTracker
         + StageCheckpointReader
         + ChainSpecProvider
+        + StateProviderFactory
+        + EvmEnvProvider
         + Unpin
 {
 }

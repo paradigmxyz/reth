@@ -19,7 +19,7 @@ use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_network_p2p::{headers::client::HeadersClient, FullClient};
-use reth_node_api::{FullNodeComponents, FullNodeComponentsExt, FullNodeTypes};
+use reth_node_api::{EngineComponent, FullNodeComponents, FullNodeComponentsExt, FullNodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
@@ -43,7 +43,7 @@ use tokio::sync::{
 
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
-    ext::{ExtComponentsBuildStage, InitializedComponentsExt, WithComponentsExt},
+    ext::{self, ExtComponentsBuildStage, InitializedComponentsExt, WithComponentsExt},
     hooks::OnComponentsInitializedHook,
     BuilderContext, NodeAdapter, NodeAdapterExt, StageExtComponentsBuild,
 };
@@ -692,7 +692,7 @@ where
 
         let ext_components_staging = ExtComponentsBuildStage::new(
             launch_ctx,
-            build_ctx,
+            ext::build_ctx,
             WithComponentsExt::new(components_container),
         );
 

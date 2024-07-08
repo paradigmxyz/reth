@@ -3,13 +3,14 @@
 use std::{future::Future, ops::Deref};
 
 use futures::{future::Either, stream, stream_select, StreamExt};
+use reth_auto_seal_consensus::AutoSealClient;
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
     BeaconConsensusEngine,
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
-use reth_network::NetworkEvents;
+use reth_network::{FetchClient, NetworkEvents};
 use reth_node_api::{FullNodeComponentsExt, FullNodeTypes};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -31,8 +32,8 @@ use crate::{
     hooks::NodeHooks,
     node::FullNode,
     rpc::{RethRpcServerHandles, RpcAdapter, RpcRegistry},
-    EngineAdapter, InitializedComponentsExt, NodeBuilderWithComponents, NodeHandle,
-    StageExtComponentsBuild,
+    EngineAdapter, InitializedComponentsExt, NodeAdapter, NodeAdapterExt,
+    NodeBuilderWithComponents, NodeHandle, StageExtComponentsBuild,
 };
 
 pub mod common;
@@ -81,17 +82,22 @@ impl DefaultNodeLauncher {
     }
 }
 
-impl<T, CB, Output> LaunchNode<NodeBuilderWithComponents<T, CB, Output>> for DefaultNodeLauncher
+impl<T, CB> LaunchNode<NodeBuilderWithComponents<T, CB>> for DefaultNodeLauncher
 where
     T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
     CB: NodeComponentsBuilder<T>,
-    Output: FullNodeComponentsExt,
 {
-    type Node = NodeHandle<Output>;
+    type Node = NodeHandle<
+        NodeAdapterExt<
+            NodeAdapter<T, <CB as NodeComponentsBuilder<T>>::Components>,
+            BlockchainProvider<<T as FullNodeTypes>::DB>,
+            Either<AutoSealClient, FetchClient>,
+        >,
+    >;
 
     async fn launch_node(
         self,
-        target: NodeBuilderWithComponents<T, CB, Output>,
+        target: NodeBuilderWithComponents<T, CB>,
     ) -> eyre::Result<Self::Node> {
         let Self { ctx } = self;
         let NodeBuilderWithComponents {
@@ -99,7 +105,6 @@ where
             components_builder,
             add_ons: NodeAddOns { hooks, exexs: installed_exex },
             config,
-            ext_builder: _,
         } = target;
         let NodeHooks { on_components_initialized, on_node_started, .. } = hooks;
 
@@ -131,7 +136,7 @@ where
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
             .with_blockchain_db::<T>().await?
-            .with_components::<Output,_, _, _>(components_builder, on_components_initialized).await?;
+            .with_components(components_builder, on_components_initialized).await?;
 
         // spawn exexs
         let exex_manager_handle = ExExLauncher::new(

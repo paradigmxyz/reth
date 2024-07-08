@@ -14,13 +14,12 @@ pub(crate) struct NodeHooks<Node> {
 
 impl<Node: FullNodeComponentsExt> NodeHooks<Node> {
     /// Sets a hook that is run once the node's components are initialized.
-    pub(crate) fn on_components_initialized<F>(self, hook: F) -> NodeHooks<Node>
+    pub(crate) fn on_components_initialized<F>(mut self, hook: F) -> Self
     where
         F: OnComponentsInitializedHook<Node> + 'static,
     {
-        let Self { on_node_started, _marker, mut on_components_initialized } = self;
-        on_components_initialized.push(Box::new(hook));
-        NodeHooks { on_components_initialized, on_node_started, _marker }
+        self.on_components_initialized.push(Box::new(hook));
+        self
     }
 
     /// Sets the hook that is run once the node has started.
@@ -46,7 +45,7 @@ impl<Node: FullNodeComponentsExt> NodeHooks<Node> {
 impl<Node: FullNodeComponentsExt> Default for NodeHooks<Node> {
     fn default() -> Self {
         Self {
-            on_components_initialized: vec![Box::<()>::default()],
+            on_components_initialized: vec![],
             on_node_started: Box::<()>::default(),
             _marker: Default::default(),
         }

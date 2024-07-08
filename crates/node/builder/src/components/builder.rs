@@ -2,20 +2,21 @@
 
 use std::{future::Future, marker::PhantomData};
 
-use derive_more::Deref;
+use futures::future::Either;
+use reth_auto_seal_consensus::AutoSealClient;
 use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_node_api::{FullNodeComponents, FullNodeComponentsExt};
+use reth_network::FetchClient;
+use reth_node_api::FullNodeComponentsExt;
+use reth_provider::providers::BlockchainProvider;
 use reth_transaction_pool::TransactionPool;
 
 use crate::{
-    common::{ExtBuilderContext, InitializedComponents},
     components::{
         Components, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, NodeComponents,
         PayloadServiceBuilder, PoolBuilder,
     },
-    hooks::OnComponentsInitializedHook,
-    BuilderContext, ConfigureEvm, FullNodeTypes,
+    BuilderContext, ConfigureEvm, FullNodeTypes, NodeAdapter, NodeAdapterExt,
 };
 
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
@@ -304,6 +305,11 @@ where
     ExecB: ExecutorBuilder<Node>,
     ConsB: ConsensusBuilder<Node>,
 {
+    type Output = NodeAdapterExt<
+        NodeAdapter<Node, Self::Components>,
+        BlockchainProvider<Node::DB>,
+        Either<AutoSealClient, FetchClient>,
+    >;
     type Components = Components<Node, PoolB::Pool, ExecB::EVM, ExecB::Executor, ConsB::Consensus>;
 
     async fn build_components(
@@ -359,6 +365,7 @@ impl Default for ComponentsBuilder<(), (), (), (), (), ()> {
 /// Ethereum and Optimism.
 /// A type that's responsible for building the components of the node.
 pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
+    type Output;
     /// The components for the node with the given types
     type Components: NodeComponents<Node>;
 
@@ -371,7 +378,7 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
 
 impl<Node, F, Fut, Pool, EVM, Executor, Cons> NodeComponentsBuilder<Node> for F
 where
-    Node: FullNodeTypes,
+    Node: FullNodeComponentsExt,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM, Executor, Cons>>> + Send,
     Pool: TransactionPool + Unpin + 'static,
@@ -379,6 +386,7 @@ where
     Executor: BlockExecutorProvider,
     Cons: Consensus + Clone + Unpin + 'static,
 {
+    type Output = Node;
     type Components = Components<Node, Pool, EVM, Executor, Cons>;
 
     fn build_components(

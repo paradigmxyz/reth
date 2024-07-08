@@ -12,7 +12,7 @@ use reth_node_api::{
 use crate::{
     common::{Attached, InitializedComponents, LaunchContextWith, WithConfigs},
     hooks::OnComponentsInitializedHook,
-    rpc::OnRpcStarted,
+    rpc::{ExtendRpcModules, OnRpcStarted, RpcHooks},
     NodeAdapterExt,
 };
 
@@ -37,7 +37,7 @@ pub trait NodeComponentsBuilderExt: Send {
 }
 
 pub struct NodeComponentsExtBuild<N, BT, C> {
-    _phantom: PhantomData<(N, BT, C)>,
+    _marker: PhantomData<(N, BT, C)>,
 }
 
 impl<N, BT, C> NodeComponentsBuilderExt for NodeComponentsExtBuild<N, BT, C>
@@ -82,12 +82,12 @@ pub trait StageExtComponentsBuild<N: FullNodeComponentsExt>: Send {
 
     fn components_mut(&mut self) -> &mut Self::Components;
 
-    fn engine_shutdown_rx(&mut self) -> <N::Engine as EngineComponent<N>>::ShutdownRx {
+    fn engine_shutdown_rx(&mut self) -> <N::Engine as EngineComponent<N::Core>>::ShutdownRx {
         if let Some(rx) = self.components_mut().engine_mut().map(|engine| engine.shutdown_rx_mut())
         {
             return mem::take(rx)
         }
-        <N::Engine as EngineComponent<N>>::ShutdownRx::default()
+        <N::Engine as EngineComponent<N::Core>>::ShutdownRx::default()
     }
 
     fn ctx_builder(&mut self, b: Box<dyn ExtComponentCtxBuilder<N>>);
@@ -98,6 +98,12 @@ pub trait StageExtComponentsBuild<N: FullNodeComponentsExt>: Send {
 
     fn rpc_builder(&mut self, b: Box<dyn OnComponentsInitializedHook<N>>);
 
+    /// Sets the hook that is run to configure the rpc modules.
+    fn extend_rpc_modules(&mut self, hook: Box<dyn ExtendRpcModules<N>>);
+
+    /// Sets the hook that is run once the rpc server is started.
+    fn on_rpc_started(&mut self, hook: Box<dyn OnRpcStarted<N>>);
+
     fn build_ctx(&mut self) -> ExtBuilderContext<'_, N>;
 
     fn build_pipeline(&mut self) -> Option<Pin<Box<dyn Future<Output = eyre::Result<()>> + Send>>>;
@@ -105,9 +111,6 @@ pub trait StageExtComponentsBuild<N: FullNodeComponentsExt>: Send {
     fn build_engine(&mut self) -> Option<Pin<Box<dyn Future<Output = eyre::Result<()>> + Send>>>;
 
     fn build_rpc(&mut self) -> Option<Pin<Box<dyn Future<Output = eyre::Result<()>> + Send>>>;
-
-    /// Sets the hook that is run once the rpc server is started.
-    fn on_rpc_started(&mut self, hook: Box<dyn OnRpcStarted<N>>);
 }
 
 #[allow(missing_debug_implementations)]
@@ -120,7 +123,7 @@ pub struct ExtComponentsBuildStage<N: FullNodeComponentsExt> {
     pub pipeline_builder: Option<Box<dyn OnComponentsInitializedHook<N>>>,
     pub engine_builder: Option<Box<dyn OnComponentsInitializedHook<N>>>,
     pub rpc_builder: Option<Box<dyn OnComponentsInitializedHook<N>>>,
-    pub rpc_add_ons: Vec<Box<dyn OnRpcStarted<N>>>,
+    pub rpc_add_ons: RpcHooks<N>,
 }
 
 impl<N: FullNodeComponentsExt> ExtComponentsBuildStage<N> {
@@ -150,10 +153,13 @@ where
     N: FullNodeComponentsExt + 'static,
     Box<(dyn InitializedComponentsExt<N> + 'static)>:
         InitializedComponents + InitializedComponentsExt<N>,
+    N::Core: FullNodeComponents,
     N::Tree: FullBlockchainTreeEngine + Clone + 'static,
     N::Pipeline: PipelineComponent + Send + Sync + Unpin + Clone + 'static,
-    N::Engine: EngineComponent<N> + 'static,
-    N::Rpc: RpcComponent<N> + 'static,
+    N::Engine: EngineComponent<N::Core> + 'static,
+    N::Rpc: RpcComponent<N::Core> + 'static,
+    Box<dyn ExtendRpcModules<N>>: ExtendRpcModules<N>,
+    Box<dyn OnRpcStarted<N>>: OnRpcStarted<N>,
 {
     type Components = Box<dyn InitializedComponentsExt<N>>;
 
@@ -181,6 +187,14 @@ where
         self.rpc_builder = Some(b)
     }
 
+    fn extend_rpc_modules(&mut self, hook: Box<dyn ExtendRpcModules<N>>) {
+        _ = self.rpc_add_ons.set_extend_rpc_modules(hook);
+    }
+
+    fn on_rpc_started(&mut self, hook: Box<dyn OnRpcStarted<N>>) {
+        self.rpc_add_ons.set_on_rpc_started(hook);
+    }
+
     fn build_ctx(&mut self) -> ExtBuilderContext<'_, N> {
         let ctx_builder = &self.ctx_builder;
         let core_ctx = self.core_ctx.clone();
@@ -204,10 +218,6 @@ where
         let rpc_builder = self.rpc_builder.take()?;
         let ctx = self.build_ctx();
         Some(rpc_builder.on_event(ctx))
-    }
-
-    fn on_rpc_started(&mut self, hook: Box<dyn OnRpcStarted<N>>) {
-        self.rpc_add_ons.push(hook);
     }
 }
 
@@ -268,7 +278,7 @@ pub struct WithComponentsExt<N: FullNodeComponentsExt> {
     pub core: Box<dyn InitializedComponents<Node = N, BlockchainTree = N::Tree>>,
     pub pipeline: Option<N::Pipeline>,
     pub engine: Option<N::Engine>,
-    pub engine_shutdown_rx: Option<<N::Engine as EngineComponent<N>>::ShutdownRx>,
+    pub engine_shutdown_rx: Option<<N::Engine as EngineComponent<N::Core>>::ShutdownRx>,
     pub rpc: Option<N::Rpc>,
 }
 
