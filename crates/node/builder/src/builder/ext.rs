@@ -154,7 +154,7 @@ impl<N: FullNodeComponentsExt> ExtComponentsBuildStage<N> {
             pipeline_builder: None,
             engine_builder: None,
             rpc_builder: None,
-            rpc_add_ons: vec![],
+            rpc_add_ons: None,
             components: Box::new(components),
         }
     }

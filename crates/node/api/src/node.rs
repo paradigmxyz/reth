@@ -28,13 +28,13 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     type EngineTypes: EngineTypes;
 }
 
-impl<T, D> NodeTypes for T
+impl<T> NodeTypes for T
 where
-    T: Deref<Target = D> + Send + Sync + Unpin + 'static,
-    D: NodeTypes,
+    T: ops::Deref + Send + Sync + Unpin + 'static,
+    <T as ops::Deref>::Target: NodeTypes,
 {
-    type Primitives = D::Primitives;
-    type EngineTypes = D::EngineTypes;
+    type Primitives = <<T as ops::Deref>::Target as NodeTypes>::Primitives;
+    type EngineTypes = <<T as ops::Deref>::Target as NodeTypes>::EngineTypes;
 }
 
 /// A [`NodeTypes`] type builder
@@ -74,13 +74,13 @@ pub trait FullNodeTypes: NodeTypes + 'static {
     type Provider: FullProvider<Self::DB>;
 }
 
-impl<T, D> FullNodeTypes for T
+impl<T> FullNodeTypes for T
 where
-    T: Deref<Target = D> + NodeTypes,
-    D: FullNodeTypes,
+    T: NodeTypes + ops::Deref,
+    <T as ops::Deref>::Target: FullNodeTypes,
 {
-    type DB = D::DB;
-    type Provider = D::Provider;
+    type DB = <<T as ops::Deref>::Target as FullNodeTypes>::DB;
+    type Provider = <<T as ops::Deref>::Target as FullNodeTypes>::Provider;
 }
 
 /// An adapter type that adds the builtin provider type to the user configured node types.
@@ -167,7 +167,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 }
 
 /// An intermediary type for `FullNodeComponentsExt`, that isn't `Clone`.
-pub trait FullNodeComponentsExt: FullNodeComponents {
+pub trait FullNodeComponentsExt: FullNodeTypes + Clone + 'static {
     type Core: FullNodeComponents;
     type Tree;
     type Pipeline: PipelineComponent;
@@ -189,17 +189,45 @@ pub trait FullNodeComponentsExt: FullNodeComponents {
 
     /// Returns reference to RPC component, if installed.
     fn rpc(&self) -> Option<&Self::Rpc>;
+
+    fn into_core(self) -> Self::Core;
 }
 
-impl<T> ops::Deref for T
+impl<T> FullNodeComponents for T
 where
-    T: ops::Deref,
-    T::Target: FullNodeComponents,
+    T: FullNodeComponentsExt + ops::Deref,
+    T::Target: FullNodeComponents<Provider = T::Provider, EngineTypes = T::EngineTypes>,
 {
-    type Target = T::Target;
+    type Pool = <T::Target as FullNodeComponents>::Pool;
+    type Evm = <T::Target as FullNodeComponents>::Evm;
+    type Executor = <T::Target as FullNodeComponents>::Executor;
 
-    fn deref(&self) -> &Self::Target {
-        self.core()
+    fn pool(&self) -> &Self::Pool {
+        self.deref().pool()
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        self.deref().evm_config()
+    }
+
+    fn block_executor(&self) -> &Self::Executor {
+        self.deref().block_executor()
+    }
+
+    fn provider(&self) -> &Self::Provider {
+        self.deref().provider()
+    }
+
+    fn network(&self) -> &NetworkHandle {
+        self.deref().network()
+    }
+
+    fn payload_builder(&self) -> &PayloadBuilderHandle<Self::EngineTypes> {
+        self.deref().payload_builder()
+    }
+
+    fn task_executor(&self) -> &TaskExecutor {
+        self.deref().task_executor()
     }
 }
 

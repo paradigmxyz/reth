@@ -322,6 +322,10 @@ where
         Self::new(core)
     }
 
+    fn core(&self) -> &Self::Core {
+        &self.core
+    }
+
     fn tree(&self) -> Option<&Self::Tree> {
         self.tree.as_ref()
     }

@@ -334,6 +334,7 @@ where
     BT: FullBlockchainTreeEngine + Clone,
     C: FullClient + Clone,
     Node: FullNodeComponentsExt<
+        EngineTypes = Core::EngineTypes,
         Core = Core,
         Pipeline = PipelineAdapter<C>,
         Tree = BT,
@@ -460,6 +461,7 @@ where
     BT: FullBlockchainTreeEngine + Clone,
     C: FullClient + Clone,
     Node: FullNodeComponentsExt<
+        EngineTypes = Core::EngineTypes,
         Core = Core,
         Pipeline = PipelineAdapter<C>,
         Tree = BT,
