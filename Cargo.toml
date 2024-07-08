@@ -467,6 +467,7 @@ paste = "1.0"
 url = "2.3"
 backon = "0.4"
 boyer-moore-magiclen = "0.2.16"
+shellexpand = "3.0.0"
 
 # metrics
 metrics = "0.23.0"

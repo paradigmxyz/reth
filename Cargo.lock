@@ -6325,6 +6325,7 @@ dependencies = [
  "reth-beacon-consensus",
  "reth-blockchain-tree",
  "reth-chainspec",
+ "reth-cli",
  "reth-cli-commands",
  "reth-cli-runner",
  "reth-cli-util",
@@ -6599,10 +6600,13 @@ dependencies = [
 name = "reth-cli"
 version = "1.0.1"
 dependencies = [
+ "alloy-genesis",
  "clap",
  "eyre",
  "reth-chainspec",
  "reth-cli-runner",
+ "serde_json",
+ "shellexpand",
 ]
 
 [[package]]
