@@ -9,6 +9,7 @@ use crate::{
         debug_cmd, import,
         node::{self, NoArgs},
     },
+    macros::block_executor,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
