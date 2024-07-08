@@ -31,7 +31,7 @@ pub trait RethCli: Sized {
     /// Parse args from iterator from [`std::env::args_os()`].
     fn parse_args() -> Result<Self, Error>
     where
-        Self: Parser + Sized,
+        Self: Parser,
     {
         <Self as RethCli>::try_parse_from(std::env::args_os())
     }
@@ -39,7 +39,7 @@ pub trait RethCli: Sized {
     /// Parse args from the given iterator.
     fn try_parse_from<I, T>(itr: I) -> Result<Self, Error>
     where
-        Self: Parser + Sized,
+        Self: Parser,
         I: IntoIterator<Item = T>,
         T: Into<OsString> + Clone,
     {
@@ -59,7 +59,7 @@ pub trait RethCli: Sized {
     /// Parses and executes a command.
     fn execute<F, R>(f: F) -> Result<R, Error>
     where
-        Self: Parser + Sized,
+        Self: Parser,
         F: FnOnce(Self, CliRunner) -> R,
     {
         let cli = Self::parse_args()?;

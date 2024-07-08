@@ -10,7 +10,7 @@ pub struct EthChainSpecParser;
 
 impl Default for EthChainSpecParser {
     fn default() -> Self {
-        EthChainSpecParser
+        Self
     }
 }
 
@@ -57,7 +57,7 @@ impl TypedValueParser for EthChainSpecParser {
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        <EthChainSpecParser as ChainSpecParser>::parse(val).map_err(|err| {
+        <Self as ChainSpecParser>::parse(val).map_err(|err| {
             let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
             let possible_values = Self::SUPPORTED_CHAINS.join(",");
             let msg = format!(

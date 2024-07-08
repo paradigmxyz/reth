@@ -10,7 +10,7 @@ pub struct OptimismChainSpecParser;
 
 impl Default for OptimismChainSpecParser {
     fn default() -> Self {
-        OptimismChainSpecParser
+        Self
     }
 }
 
@@ -64,7 +64,7 @@ impl TypedValueParser for OptimismChainSpecParser {
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        <OptimismChainSpecParser as ChainSpecParser>::parse(val).map_err(|err| {
+        <Self as ChainSpecParser>::parse(val).map_err(|err| {
             let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
             let possible_values = Self::SUPPORTED_CHAINS.join(", ");
             clap::Error::raw(
