@@ -1289,7 +1289,7 @@ impl RpcServerConfig {
     ///
     /// If both are on the same port, they are combined into one server.
     pub async fn start(
-        &mut self,
+        self,
         modules: &TransportRpcModules,
     ) -> Result<RpcServerHandle, RpcError> {
         let mut http_handle = None;
