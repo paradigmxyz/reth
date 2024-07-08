@@ -32,7 +32,12 @@ pub(crate) fn peek(chain: &Chain) {
         if let Some(ephemeral_pub) = crypto::to_verifying_key(&announcement.ephemeralPubKey) {
             let view_tag = announcement.metadata[0];
             if crypto::is_ours(&view, &ephemeral_pub, view_tag) {
-                info!(?ephemeral_pub, announcer = ?announcement.caller, "One of us! One of us!");
+                info!(
+                    ?ephemeral_pub,
+                    announcer = ?announcement.caller,
+                    stealth_address = ?announcement.stealthAddress,
+                    "🎉 One of us! One of us! 🎉"
+                );
             }
         }
     }
