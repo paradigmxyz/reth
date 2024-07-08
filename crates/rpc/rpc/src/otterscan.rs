@@ -7,9 +7,12 @@ use reth_rpc_eth_api::helpers::TraceExt;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_rpc_types::{
-    trace::otterscan::{
-        BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
-        OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+    trace::{
+        otterscan::{
+            BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
+            OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+        },
+        parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
     BlockTransactions, Header, Transaction,
 };
