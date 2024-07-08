@@ -8,13 +8,15 @@ use crate::{
     commands::{
         debug_cmd, import,
         node::{self, NoArgs},
-        stage,
     },
+    macros::block_executor,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
 use reth_chainspec::ChainSpec;
-use reth_cli_commands::{config_cmd, db, dump_genesis, init_cmd, init_state, p2p, prune, recover};
+use reth_cli_commands::{
+    config_cmd, db, dump_genesis, init_cmd, init_state, p2p, prune, recover, stage,
+};
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
@@ -159,7 +161,9 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Stage(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+            Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
+                command.execute(ctx, |chain_spec| block_executor!(chain_spec))
+            }),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),

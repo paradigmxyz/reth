@@ -1,15 +1,19 @@
 //! Database debugging tool
-use crate::{args::DatadirArgs, dirs::DataDirPath};
+use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
+use reth_chainspec::ChainSpec;
 use reth_db::{init_db, mdbx::DatabaseArguments, tables, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, models::ClientVersion, table::TableImporter,
     transaction::DbTx,
 };
 use reth_db_common::DbTool;
-use reth_node_core::dirs::PlatformPath;
-use std::path::PathBuf;
+use reth_evm::execute::BlockExecutorProvider;
+use reth_node_core::{
+    args::DatadirArgs,
+    dirs::{DataDirPath, PlatformPath},
+};
+use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
 mod hashing_storage;
@@ -72,16 +76,29 @@ macro_rules! handle_stage {
         let output_datadir = output_datadir.with_chain($tool.chain().chain, DatadirArgs::default());
         $stage_fn($tool, *from, *to, output_datadir, *dry_run).await?
     }};
+
+    ($stage_fn:ident, $tool:expr, $command:expr, $executor:expr) => {{
+        let StageCommand { output_datadir, from, to, dry_run, .. } = $command;
+        let output_datadir = output_datadir.with_chain($tool.chain().chain, DatadirArgs::default());
+        $stage_fn($tool, *from, *to, output_datadir, *dry_run, $executor).await?
+    }};
 }
 
 impl Command {
     /// Execute `dump-stage` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute<E, F>(self, executor: F) -> eyre::Result<()>
+    where
+        E: BlockExecutorProvider,
+        F: FnOnce(Arc<ChainSpec>) -> E,
+    {
         let Environment { provider_factory, .. } = self.env.init(AccessRights::RO)?;
         let tool = DbTool::new(provider_factory)?;
 
         match &self.command {
-            Stages::Execution(cmd) => handle_stage!(dump_execution_stage, &tool, cmd),
+            Stages::Execution(cmd) => {
+                let executor = executor(tool.chain());
+                handle_stage!(dump_execution_stage, &tool, cmd, executor)
+            }
             Stages::StorageHashing(cmd) => handle_stage!(dump_hashing_storage_stage, &tool, cmd),
             Stages::AccountHashing(cmd) => handle_stage!(dump_hashing_account_stage, &tool, cmd),
             Stages::Merkle(cmd) => handle_stage!(dump_merkle_stage, &tool, cmd),
