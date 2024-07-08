@@ -289,19 +289,6 @@ where
     extend_rpc_modules.extend_rpc_modules(ctx)?;
 
     let server_config = config.rpc.rpc_server_config();
-    // let cloned_modules = modules.clone();
-    // let launch_rpc = server_config.start(&cloned_modules).await?;
-
-    // if let Some(path) = launch_rpc.ipc_endpoint() {
-    //     info!(target: "reth::cli", %path, "RPC IPC server started");
-    // }
-    // if let Some(addr) = launch_rpc.http_local_addr() {
-    //     info!(target: "reth::cli", url=%addr, "RPC HTTP server started");
-    // }
-    // if let Some(addr) = launch_rpc.ws_local_addr() {
-    //     info!(target: "reth::cli", url=%addr, "RPC WS server started");
-    // }
-    //let launch_rpc = modules.clone().start_server(server_config).map_ok(|handle| {
     let cloned_modules = modules.clone();
     let launch_rpc = server_config.start(&cloned_modules).map_ok(|handle| {
         if let Some(path) = handle.ipc_endpoint() {
@@ -327,7 +314,6 @@ where
     });
 
     // launch servers concurrently
-    //let handles = RethRpcServerHandles { rpc: launch_rpc, auth: launch_auth.await? };
     let (rpc, auth) = futures::future::try_join(launch_rpc, launch_auth).await?;
     let handles = RethRpcServerHandles { rpc, auth };
 

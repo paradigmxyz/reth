@@ -115,7 +115,7 @@
 //!
 //!     // start the servers
 //!     let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
-//!     let mut config = RpcServerConfig::default();
+//!     let config = RpcServerConfig::default();
 //!
 //!     let (_rpc_handle, _auth_handle) =
 //!         try_join!(config.start(&modules), auth_module.start_server(auth_config),).unwrap();
