@@ -8170,6 +8170,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-tokio-util",
  "reth-tracing",
+ "rustc-hash 2.0.0",
  "thiserror",
  "tokio",
  "tracing",
