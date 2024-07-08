@@ -233,12 +233,14 @@ pub enum PersistenceAction {
 pub struct PersistenceHandle {
     /// The channel used to communicate with the persistence service
     sender: Sender<PersistenceAction>,
+    /// The last persisted block number.
+    last_persisted_block_number: u64,
 }
 
 impl PersistenceHandle {
     /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
     pub const fn new(sender: Sender<PersistenceAction>) -> Self {
-        Self { sender }
+        Self { sender, last_persisted_block_number: 0 }
     }
 
     /// Sends a specific [`PersistenceAction`] in the contained channel. The caller is responsible
@@ -255,12 +257,19 @@ impl PersistenceHandle {
     ///
     /// This returns the latest hash that has been saved, allowing removal of that block and any
     /// previous blocks from in-memory data structures.
-    pub async fn save_blocks(&self, blocks: Vec<ExecutedBlock>) -> B256 {
+    pub async fn save_blocks(&mut self, blocks: Vec<ExecutedBlock>) -> B256 {
+        if blocks.is_empty() {
+            return B256::default();
+        }
+        let last_block_number =
+            blocks.last().expect("at this point blocks is not empty").block().number;
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(PersistenceAction::SaveBlocks((blocks, tx)))
             .expect("should be able to send");
-        rx.await.expect("todo: err handling")
+        let hash = rx.await.expect("todo: err handling");
+        self.last_persisted_block_number = last_block_number;
+        hash
     }
 
     /// Tells the persistence service to remove blocks above a certain block number. The removed
@@ -270,7 +279,9 @@ impl PersistenceHandle {
         self.sender
             .send(PersistenceAction::RemoveBlocksAbove((block_num, tx)))
             .expect("should be able to send");
-        rx.await.expect("todo: err handling")
+        let hash = rx.await.expect("todo: err handling");
+        self.last_persisted_block_number = block_num;
+        hash
     }
 
     /// Tells the persistence service to remove block data before the given hash, according to the
@@ -280,6 +291,8 @@ impl PersistenceHandle {
         self.sender
             .send(PersistenceAction::PruneBefore((block_num, tx)))
             .expect("should be able to send");
-        rx.await.expect("todo: err handling")
+        let hash = rx.await.expect("todo: err handling");
+        self.last_persisted_block_number = 0;
+        hash
     }
 }

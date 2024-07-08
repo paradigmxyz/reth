@@ -2,7 +2,7 @@ use crate::{
     backfill::BackfillAction,
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
-    persistence::{PersistenceAction, PersistenceHandle},
+    persistence::PersistenceHandle,
 };
 use reth_beacon_consensus::{
     BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated,
@@ -305,7 +305,7 @@ where
         outgoing
     }
 
-    fn run(mut self) {
+    async fn run(mut self) {
         loop {
             while let Ok(msg) = self.incoming.recv() {
                 match msg {
@@ -350,7 +350,7 @@ where
             }
 
             if self.should_persist() {
-                self.persist_state();
+                self.persist_state().await;
             }
         }
     }
@@ -361,21 +361,10 @@ where
         false
     }
 
-    fn persist_state(&self) {
+    async fn persist_state(&mut self) {
         let blocks_to_persist = self.get_blocks_to_persist();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        let action = PersistenceAction::SaveBlocks((blocks_to_persist, sender));
-        self.persistence.send_action(action).unwrap();
 
-        // Handle the response from the persistence task
-        tokio::spawn(async move {
-            match receiver.await {
-                Ok(_response) => {}
-                Err(e) => {
-                    error!("Failed to persist data: {e}");
-                }
-            }
-        });
+        self.persistence.save_blocks(blocks_to_persist).await;
     }
 
     const fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
