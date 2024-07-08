@@ -259,8 +259,7 @@ where
         payload_validator: ExecutionPayloadValidator,
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         outgoing: UnboundedSender<EngineApiEvent>,
-        block_buffer_limit: u32,
-        max_invalid_header_cache_length: u32,
+        state: EngineApiTreeState,
     ) -> Self {
         Self {
             provider,
@@ -270,7 +269,7 @@ where
             incoming,
             outgoing,
             is_pipeline_active: false,
-            state: EngineApiTreeState::new(block_buffer_limit, max_invalid_header_cache_length),
+            state,
             _marker: PhantomData,
         }
     }
@@ -282,8 +281,7 @@ where
         consensus: Arc<dyn Consensus>,
         payload_validator: ExecutionPayloadValidator,
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
-        block_buffer_limit: u32,
-        max_invalid_header_cache_length: u32,
+        state: EngineApiTreeState,
     ) -> UnboundedSender<EngineApiEvent> {
         let (outgoing, rx) = tokio::sync::mpsc::unbounded_channel();
         let task = Self::new(
@@ -293,8 +291,7 @@ where
             payload_validator,
             incoming,
             outgoing.clone(),
-            block_buffer_limit,
-            max_invalid_header_cache_length,
+            state,
         );
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
         outgoing
