@@ -97,7 +97,12 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
 
 /// Converts [`ExecutionPayloadV4`] to [Block]
 pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, PayloadError> {
-    let ExecutionPayloadV4 { payload_inner, deposit_requests, withdrawal_requests } = payload;
+    let ExecutionPayloadV4 {
+        payload_inner,
+        deposit_requests,
+        withdrawal_requests,
+        consolidation_requests,
+    } = payload;
     let mut block = try_payload_v3_to_block(payload_inner)?;
 
     // attach requests with asc type identifiers
@@ -105,6 +110,7 @@ pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, Pay
         .into_iter()
         .map(Request::DepositRequest)
         .chain(withdrawal_requests.into_iter().map(Request::WithdrawalRequest))
+        .chain(consolidation_requests.into_iter().map(Request::ConsolidationRequest))
         .collect::<Vec<_>>();
 
     let requests_root = proofs::calculate_requests_root(&requests);
@@ -211,10 +217,10 @@ pub fn block_to_payload_v3(value: SealedBlock) -> (ExecutionPayloadV3, Option<B2
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV4`]
 pub fn block_to_payload_v4(mut value: SealedBlock) -> ExecutionPayloadV4 {
-    let (deposit_requests, withdrawal_requests) =
+    let (deposit_requests, withdrawal_requests, consolidation_requests) =
         value.requests.take().unwrap_or_default().into_iter().fold(
-            (Vec::new(), Vec::new()),
-            |(mut deposits, mut withdrawals), request| {
+            (Vec::new(), Vec::new(), Vec::new()),
+            |(mut deposits, mut withdrawals, mut consolidation_requests), request| {
                 match request {
                     Request::DepositRequest(r) => {
                         deposits.push(r);
@@ -222,16 +228,20 @@ pub fn block_to_payload_v4(mut value: SealedBlock) -> ExecutionPayloadV4 {
                     Request::WithdrawalRequest(r) => {
                         withdrawals.push(r);
                     }
+                    Request::ConsolidationRequest(r) => {
+                        consolidation_requests.push(r);
+                    }
                     _ => {}
                 };
 
-                (deposits, withdrawals)
+                (deposits, withdrawals, consolidation_requests)
             },
         );
 
     ExecutionPayloadV4 {
         deposit_requests,
         withdrawal_requests,
+        consolidation_requests,
         payload_inner: block_to_payload_v3(value).0,
     }
 }
