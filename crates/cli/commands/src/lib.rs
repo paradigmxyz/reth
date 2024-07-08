@@ -17,5 +17,6 @@ pub mod init_state;
 pub mod p2p;
 pub mod prune;
 pub mod recover;
+pub mod stage;
 #[cfg(feature = "dev")]
 pub mod test_vectors;
