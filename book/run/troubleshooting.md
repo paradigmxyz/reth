@@ -150,8 +150,6 @@ If your hardware performance is significantly lower than these reference numbers
    Parent sees throughput for 1 random readers     = 5597659.65 kB/sec
    Children see throughput for 1 random writers    =  220248.53 kB/sec
    Parent sees throughput for 1 random writers     =  219112.26 kB/sec
-   ```
-### RAM Speed and Health Testing
 
 1. Check RAM speed with [lshw](https://linux.die.net/man/1/lshw):
    ```bash
