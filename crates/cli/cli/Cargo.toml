@@ -16,19 +16,9 @@ workspace = true
 reth-cli-runner.workspace = true
 reth-chainspec.workspace = true
 
-# eth
-alloy-genesis.workspace = true
-
-
 # misc
 clap.workspace = true
-shellexpand.workspace = true
-serde_json.workspace = true
 eyre.workspace = true
 
-[features]
-optimism = [
-    "reth-chainspec/optimism",
-]
 
 

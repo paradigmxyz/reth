@@ -2,14 +2,6 @@ use clap::builder::TypedValueParser;
 use reth_chainspec::ChainSpec;
 use std::sync::Arc;
 
-/// Ethereum chain specification parser.
-#[cfg(not(feature = "optimism"))]
-pub mod eth;
-
-/// Optimism chain specification parser.
-#[cfg(feature = "optimism")]
-pub mod optimism;
-
 /// Trait for parsing chain specifications.
 ///
 /// This trait extends [`clap::builder::TypedValueParser`] to provide a parser for chain
