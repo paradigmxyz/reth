@@ -268,7 +268,9 @@ mod tests {
     use crate::{
         pool::pending::PendingPool,
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
+        Priority,
     };
+    use reth_primitives::U256;
 
     #[test]
     fn test_best_iter() {
@@ -477,5 +479,121 @@ mod tests {
 
         // No more transactions should be returned
         assert!(best.next().is_none());
+    }
+
+    #[test]
+    fn test_best_add_transaction_with_next_nonce() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add 5 transactions with increasing nonces to the pool
+        let num_tx = 5;
+        let tx = MockTransaction::eip1559();
+        for nonce in 0..num_tx {
+            let tx = tx.clone().rng_hash().with_nonce(nonce);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        // Create a BestTransactions iterator from the pool
+        let mut best = pool.best();
+
+        // Use a broadcast channel for transaction updates
+        let (tx_sender, tx_receiver) =
+            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
+        best.new_transaction_receiver = Some(tx_receiver);
+
+        // Create a new transaction with nonce 5 and validate it
+        let new_tx = MockTransaction::eip1559().rng_hash().with_nonce(5);
+        let valid_new_tx = f.validated(new_tx);
+
+        // Send the new transaction through the broadcast channel
+        let pending_tx = PendingTransaction {
+            submission_id: 10,
+            transaction: Arc::new(valid_new_tx.clone()),
+            priority: Priority::Value(U256::from(1000)),
+        };
+        tx_sender.send(pending_tx.clone()).unwrap();
+
+        // Add new transactions to the iterator
+        best.add_new_transactions();
+
+        // Verify that the new transaction has been added to the 'all' map
+        assert_eq!(best.all.len(), 6);
+        assert!(best.all.contains_key(valid_new_tx.id()));
+
+        // Verify that the new transaction has been added to the 'independent' set
+        assert_eq!(best.independent.len(), 2);
+        assert!(best.independent.contains(&pending_tx));
+    }
+
+    #[test]
+    fn test_best_add_transaction_with_ancestor() {
+        // Initialize a new PendingPool with default MockOrdering and MockTransactionFactory
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add 5 transactions with increasing nonces to the pool
+        let num_tx = 5;
+        let tx = MockTransaction::eip1559();
+        for nonce in 0..num_tx {
+            let tx = tx.clone().rng_hash().with_nonce(nonce);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        // Create a BestTransactions iterator from the pool
+        let mut best = pool.best();
+
+        // Use a broadcast channel for transaction updates
+        let (tx_sender, tx_receiver) =
+            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
+        best.new_transaction_receiver = Some(tx_receiver);
+
+        // Create a new transaction with nonce 5 and validate it
+        let base_tx1 = MockTransaction::eip1559().rng_hash().with_nonce(5);
+        let valid_new_tx1 = f.validated(base_tx1.clone());
+
+        // Send the new transaction through the broadcast channel
+        let pending_tx1 = PendingTransaction {
+            submission_id: 10,
+            transaction: Arc::new(valid_new_tx1.clone()),
+            priority: Priority::Value(U256::from(1000)),
+        };
+        tx_sender.send(pending_tx1.clone()).unwrap();
+
+        // Add new transactions to the iterator
+        best.add_new_transactions();
+
+        // Verify that the new transaction has been added to the 'all' map
+        assert_eq!(best.all.len(), 6);
+        assert!(best.all.contains_key(valid_new_tx1.id()));
+
+        // Verify that the new transaction has been added to the 'independent' set
+        assert_eq!(best.independent.len(), 2);
+        assert!(best.independent.contains(&pending_tx1));
+
+        // Attempt to add a new transaction with a different nonce (not a duplicate)
+        let base_tx2 = base_tx1.with_nonce(6);
+        let valid_new_tx2 = f.validated(base_tx2);
+
+        // Send the new transaction through the broadcast channel
+        let pending_tx2 = PendingTransaction {
+            submission_id: 11, // Different submission ID
+            transaction: Arc::new(valid_new_tx2.clone()),
+            priority: Priority::Value(U256::from(1000)),
+        };
+        tx_sender.send(pending_tx2.clone()).unwrap();
+
+        // Add new transactions to the iterator
+        best.add_new_transactions();
+
+        // Verify that the new transaction has been added to 'all'
+        assert_eq!(best.all.len(), 7);
+        assert!(best.all.contains_key(valid_new_tx2.id()));
+
+        // Verify that the new transaction has not been added to the 'independent' set
+        assert_eq!(best.independent.len(), 2);
+        assert!(!best.independent.contains(&pending_tx2));
     }
 }
