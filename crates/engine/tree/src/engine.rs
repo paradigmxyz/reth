@@ -3,6 +3,7 @@
 use crate::{
     chain::{ChainHandler, FromOrchestrator, HandlerEvent},
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
+    tree::TreeEvent,
 };
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::BeaconEngineMessage;
@@ -150,7 +151,6 @@ pub struct EngineApiRequestHandler<T: EngineTypes> {
     to_tree: Sender<FromEngine<BeaconEngineMessage<T>>>,
     /// channel to receive messages from the tree.
     from_tree: UnboundedReceiver<EngineApiEvent>,
-    // TODO add db controller
 }
 
 impl<T> EngineApiRequestHandler<T>
@@ -178,13 +178,16 @@ where
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
-        todo!("poll tree and handle db")
+        todo!("poll tree")
     }
 }
 
 /// Events emitted by the engine API handler.
 #[derive(Debug)]
-pub enum EngineApiEvent {}
+pub enum EngineApiEvent {
+    /// Bubbled from tree.
+    FromTree(TreeEvent),
+}
 
 #[derive(Debug)]
 pub enum FromEngine<Req> {
