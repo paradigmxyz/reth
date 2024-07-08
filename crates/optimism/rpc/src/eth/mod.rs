@@ -20,7 +20,7 @@ use reth_rpc_types::SyncStatus;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
 use std::future::Future;
-use tokio::sync::Mutex;
+use tokio::sync::{AcquireError, Mutex, OwnedSemaphorePermit};
 
 /// OP-Reth `Eth` API implementation.
 ///
@@ -107,6 +107,19 @@ impl<Eth: SpawnBlocking> SpawnBlocking for OpEthApi<Eth> {
 
     fn tracing_task_pool(&self) -> &BlockingTaskPool {
         self.inner.tracing_task_pool()
+    }
+
+    fn acquire_owned(
+        &self,
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
+        self.inner.acquire_owned()
+    }
+
+    fn acquire_many_owned(
+        &self,
+        n: u32,
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
+        self.inner.acquire_many_owned(n)
     }
 }
 
