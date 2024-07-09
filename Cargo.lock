@@ -6671,11 +6671,12 @@ dependencies = [
 name = "reth-cli-util"
 version = "1.0.1"
 dependencies = [
+ "alloy-eips",
+ "alloy-primitives",
  "eyre",
  "proptest",
+ "rand 0.8.5",
  "reth-fs-util",
- "reth-network",
- "reth-primitives",
  "secp256k1",
  "thiserror",
 ]
