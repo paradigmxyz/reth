@@ -5,7 +5,7 @@ use crate::{
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
 use reth_basic_payload_builder::*;
-use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
+use reth_chainspec::{EthereumHardforks, OptimismHardfork};
 use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
@@ -22,7 +22,6 @@ use revm::{
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit, State,
 };
-use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
@@ -31,16 +30,14 @@ pub struct OptimismPayloadBuilder<EvmConfig> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
     compute_pending_block: bool,
-    /// The rollup's chain spec.
-    chain_spec: Arc<ChainSpec>,
     /// The type responsible for creating the evm.
     evm_config: EvmConfig,
 }
 
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     /// `OptimismPayloadBuilder` constructor.
-    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        Self { compute_pending_block: true, chain_spec, evm_config }
+    pub const fn new(evm_config: EvmConfig) -> Self {
+        Self { compute_pending_block: true, evm_config }
     }
 
     /// Sets the rollup's compute pending block configuration option.
@@ -57,12 +54,6 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     /// Returns the rollup's compute pending block configuration option.
     pub const fn is_compute_pending_block(&self) -> bool {
         self.compute_pending_block
-    }
-
-    /// Sets the rollup's chainspec.
-    pub fn set_chain_spec(mut self, chain_spec: Arc<ChainSpec>) -> Self {
-        self.chain_spec = chain_spec;
-        self
     }
 }
 
