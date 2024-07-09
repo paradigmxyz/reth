@@ -27,8 +27,6 @@ use crate::{
 pub struct StaticFileTask<DB> {
     /// The db / static file provider to use
     provider: ProviderFactory<DB>,
-    /// The static file producer to use
-    static_file_producer: StaticFileProducerInner<DB>,
     /// Handle for the database task
     database_handle: PersistenceHandle,
     /// Incoming requests to write static files
@@ -92,8 +90,9 @@ where
         header_writer.commit()?;
         transactions_writer.commit()?;
 
+        // TODO: do we care about the mpsc error here?
         // send a command to the db task to update the checkpoints for headers / bodies
-        self.database_handle
+        let _ = self.database_handle
             .send_action(PersistenceAction::UpdateTransactionMeta((block.number, sender)));
 
         Ok(())

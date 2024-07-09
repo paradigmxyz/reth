@@ -5,8 +5,7 @@ use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::B256;
 use reth_provider::{
-    bundle_state::HashedStateChanges, BlockWriter, HistoryWriter, OriginalValuesKnown,
-    ProviderFactory, StageCheckpointWriter, StateWriter,
+    bundle_state::HashedStateChanges, BlockExecutionWriter, BlockWriter, HistoryWriter, OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateWriter
 };
 use reth_prune::{PruneProgress, Pruner};
 use reth_stages::{StageCheckpoint, StageId};
@@ -105,9 +104,17 @@ impl<DB: Database> Persistence<DB> {
         Ok(())
     }
 
-    /// Removes the blocks above the give block number from the database, returning them.
-    fn remove_blocks_above(&self, _block_number: u64) -> B256 {
-        todo!("implement this")
+    /// Removes block data above the given block number from the database.
+    ///
+    /// This will then send a command to the static file task, to remove the actual block data.
+    ///
+    /// Returns the block hash for the lowest block removed from the database.
+    fn remove_blocks_above(&self, block_number: u64) -> ProviderResult<B256> {
+        let mut provider_rw = self.provider.provider_rw()?;
+        // TODO: allow unbounded? need an api that just removes, and does not
+        // return - this chain could be quite large
+        provider_rw.get_or_take_block_and_execution_range(range);
+        // provider_rw.into_ok
     }
 
     /// Prunes block data before the given block hash according to the configured prune
@@ -119,7 +126,7 @@ impl<DB: Database> Persistence<DB> {
 
     /// Updates checkpoints related to block headers and bodies. This should be called by the static
     /// file task, after new transactions have been successfully written to disk.
-    fn update_transaction_meta(&mut self, block_num: u64) -> ProviderResult<()> {
+    fn update_transaction_meta(&self, block_num: u64) -> ProviderResult<()> {
         let provider_rw = self.provider.provider_rw()?;
         provider_rw.save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(block_num))?;
         provider_rw.save_stage_checkpoint(StageId::Bodies, StageCheckpoint::new(block_num))?;
@@ -160,7 +167,7 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove((new_tip_num, sender)) => {
-                    let output = self.remove_blocks_above(new_tip_num);
+                    let output = self.remove_blocks_above(new_tip_num).expect("todo: handle erorrs");
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(output);
@@ -182,10 +189,10 @@ where
                     let _ = sender.send(res);
                 }
                 PersistenceAction::UpdateTransactionMeta((block_num, sender)) => {
-                    let res = self.update_transaction_meta(block_num);
+                    self.update_transaction_meta(block_num).expect("todo: handle errors");
 
                     // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(res);
+                    let _ = sender.send(());
                 }
             }
         }
