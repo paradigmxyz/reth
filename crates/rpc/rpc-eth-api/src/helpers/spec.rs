@@ -1,7 +1,9 @@
 //! Loads chain metadata.
 
+use std::sync::Arc;
+
 use futures::Future;
-use reth_chainspec::ChainInfo;
+use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::RethResult;
 use reth_primitives::{Address, U64};
 use reth_rpc_types::SyncStatus;
@@ -28,4 +30,7 @@ pub trait EthApiSpec: Send + Sync {
 
     /// Returns the [`SyncStatus`] of the network
     fn sync_status(&self) -> RethResult<SyncStatus>;
+
+    /// Returns the configured [`ChainSpec`].
+    fn chain_spec(&self) -> Arc<ChainSpec>;
 }
