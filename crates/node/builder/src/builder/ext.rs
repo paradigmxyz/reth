@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, mem, pin::Pin, sync::Arc};
+use std::{marker::PhantomData, pin::Pin, sync::Arc};
 
 use auto_impl::auto_impl;
 use derive_more::Deref;
@@ -40,12 +40,7 @@ pub trait NodeComponentsBuilderExt: Send {
     /// Creates the transaction pool.
     fn build(
         self,
-        stage: Box<
-            dyn StageExtComponentsBuild<
-                Self::Output,
-                Components = DynInitializedComponentsExt<Self::Output>,
-            >,
-        >,
+        stage: Box<dyn StageExtComponentsBuild<Node = Self::Output>>,
     ) -> Pin<Box<dyn Future<Output = eyre::Result<Self::Output>> + Send>>;
 }
 
@@ -63,12 +58,7 @@ where
 
     fn build(
         self,
-        mut stage: Box<
-            dyn StageExtComponentsBuild<
-                Self::Output,
-                Components = DynInitializedComponentsExt<Self::Output>,
-            >,
-        >,
+        mut stage: Box<dyn StageExtComponentsBuild<Node = Self::Output>>,
     ) -> Pin<Box<dyn Future<Output = eyre::Result<Self::Output>> + Send>> {
         Box::pin(async move {
             if let Some(builder) = stage.build_pipeline() {
@@ -81,55 +71,59 @@ where
                 builder.await?
             }
 
-            Ok(stage.components().node().clone())
-        }) as Pin<Box<dyn Future<Output = eyre::Result<Self::Output>> + Send>>
+            Ok(NodeAdapterExt {
+                core: stage.components().core().node().clone(),
+                tree: None,
+                pipeline: None,
+                engine: None,
+                rpc: stage.components_mut().rpc_mut().take(),
+            })
+        })
     }
 }
 
 /// Staging environment for building extension components. Allows to control when components are
 /// built, w.r.t. their inter-dependencies.
-pub trait StageExtComponentsBuild<N: FullNodeComponentsExt>: Send {
-    type Components: InitializedComponentsExt<Node = N> + Sized + 'static;
+pub trait StageExtComponentsBuild: Send {
+    type Node: FullNodeComponentsExt;
 
-    fn components(&self) -> &Self::Components;
+    fn components(&self) -> &DynInitializedComponentsExt<Self::Node>;
 
-    fn components_mut(&mut self) -> &mut Self::Components;
+    fn components_mut(&mut self) -> &mut DynInitializedComponentsExt<Self::Node>;
 
-    fn engine_shutdown_rx(&mut self) -> <N::Engine as EngineComponent<N::Core>>::ShutdownRx {
-        if let Some(rx) = self.components_mut().engine_mut().map(|engine| engine.shutdown_rx_mut())
-        {
-            return mem::take(rx)
-        }
-        <N::Engine as EngineComponent<N::Core>>::ShutdownRx::default()
-    }
+    fn ctx_builder(&mut self, b: Box<dyn ExtComponentCtxBuilder<Self::Node>>);
 
-    fn ctx_builder(&mut self, b: Box<dyn ExtComponentCtxBuilder<N>>);
+    fn pipeline_builder(&mut self, b: Box<dyn OnComponentsInitializedHook<Self::Node>>);
 
-    fn pipeline_builder(&mut self, b: Box<dyn OnComponentsInitializedHook<N>>);
+    fn engine_builder(&mut self, b: Box<dyn OnComponentsInitializedHook<Self::Node>>);
 
-    fn engine_builder(&mut self, b: Box<dyn OnComponentsInitializedHook<N>>);
-
-    fn rpc_builder(&mut self, b: Box<dyn OnComponentsInitializedHook<N>>);
+    fn rpc_builder(&mut self, b: Box<dyn OnComponentsInitializedHook<Self::Node>>);
 
     /// Sets the hook that is run to configure the rpc modules.
-    fn extend_rpc_modules(&mut self, hook: Box<dyn ExtendRpcModules<N::Core>>) {
+    fn extend_rpc_modules(
+        &mut self,
+        hook: Box<dyn ExtendRpcModules<<Self::Node as FullNodeComponentsExt>::Core>>,
+    ) {
         _ = self
             .components_mut()
             .rpc_add_ons_mut()
-            .get_or_insert(&mut RpcHooks::new())
+            .get_or_insert(RpcHooks::new())
             .set_extend_rpc_modules(hook)
     }
 
     /// Sets the hook that is run once the rpc server is started.
-    fn on_rpc_started(&mut self, hook: Box<dyn OnRpcStarted<N::Core>>) {
+    fn on_rpc_started(
+        &mut self,
+        hook: Box<dyn OnRpcStarted<<Self::Node as FullNodeComponentsExt>::Core>>,
+    ) {
         _ = self
             .components_mut()
             .rpc_add_ons_mut()
-            .get_or_insert(&mut RpcHooks::new())
+            .get_or_insert(RpcHooks::new())
             .set_on_rpc_started(hook)
     }
 
-    fn build_ctx(&mut self) -> ExtBuilderContext<'_, N>;
+    fn build_ctx(&mut self) -> ExtBuilderContext<'_, Self::Node>;
 
     fn build_pipeline(&mut self) -> Option<Pin<Box<dyn Future<Output = eyre::Result<()>> + Send>>>;
 
@@ -139,10 +133,8 @@ pub trait StageExtComponentsBuild<N: FullNodeComponentsExt>: Send {
 }
 
 #[allow(missing_debug_implementations)]
-#[derive(Deref)]
 pub struct ExtComponentsBuildStage<N: FullNodeComponentsExt> {
     pub core_ctx: LaunchContextWith<Attached<WithConfigs, ()>>,
-    #[deref]
     pub components: DynInitializedComponentsExt<N>,
     pub ctx_builder: Box<dyn ExtComponentCtxBuilder<N>>,
     pub pipeline_builder: Option<Box<dyn OnComponentsInitializedHook<N>>>,
@@ -173,7 +165,7 @@ impl<N: FullNodeComponentsExt> ExtComponentsBuildStage<N> {
     }
 }
 
-impl<N> StageExtComponentsBuild<N> for ExtComponentsBuildStage<N>
+impl<N> StageExtComponentsBuild for ExtComponentsBuildStage<N>
 where
     N: FullNodeComponentsExt + 'static,
     N::Core: FullNodeComponents,
@@ -182,13 +174,13 @@ where
     N::Engine: EngineComponent<N::Core> + 'static,
     N::Rpc: RpcComponent<N::Core> + 'static,
 {
-    type Components = DynInitializedComponentsExt<N>;
+    type Node = N;
 
-    fn components(&self) -> &Self::Components {
+    fn components(&self) -> &DynInitializedComponentsExt<Self::Node> {
         &self.components
     }
 
-    fn components_mut(&mut self) -> &mut Self::Components {
+    fn components_mut(&mut self) -> &mut DynInitializedComponentsExt<Self::Node> {
         &mut self.components
     }
 
@@ -284,12 +276,12 @@ pub trait InitializedComponentsExt: Send {
     fn engine(&self) -> Option<&<Self::Node as FullNodeComponentsExt>::Engine>;
     fn rpc(&self) -> Option<&<Self::Node as FullNodeComponentsExt>::Rpc>;
 
-    fn pipeline_mut(&mut self) -> Option<&mut <Self::Node as FullNodeComponentsExt>::Pipeline>;
-    fn engine_mut(&mut self) -> Option<&mut <Self::Node as FullNodeComponentsExt>::Engine>;
-    fn rpc_mut(&mut self) -> Option<&mut <Self::Node as FullNodeComponentsExt>::Rpc>;
+    fn pipeline_mut(&mut self) -> &mut Option<<Self::Node as FullNodeComponentsExt>::Pipeline>;
+    fn engine_mut(&mut self) -> &mut Option<<Self::Node as FullNodeComponentsExt>::Engine>;
+    fn rpc_mut(&mut self) -> &mut Option<<Self::Node as FullNodeComponentsExt>::Rpc>;
     fn rpc_add_ons_mut(
         &mut self,
-    ) -> Option<&mut RpcHooks<<Self::Node as FullNodeComponentsExt>::Core>>;
+    ) -> &mut Option<RpcHooks<<Self::Node as FullNodeComponentsExt>::Core>>;
 }
 
 impl<T> InitializedComponents for T
@@ -374,16 +366,16 @@ impl<N: FullNodeComponentsExt> InitializedComponentsExt for WithComponentsExt<N>
         self.rpc.as_ref()
     }
 
-    fn pipeline_mut(&mut self) -> Option<&mut N::Pipeline> {
-        self.pipeline.as_mut()
+    fn pipeline_mut(&mut self) -> &mut Option<N::Pipeline> {
+        &mut self.pipeline
     }
-    fn engine_mut(&mut self) -> Option<&mut N::Engine> {
-        self.engine.as_mut()
+    fn engine_mut(&mut self) -> &mut Option<N::Engine> {
+        &mut self.engine
     }
-    fn rpc_mut(&mut self) -> Option<&mut N::Rpc> {
-        self.rpc.as_mut()
+    fn rpc_mut(&mut self) -> &mut Option<N::Rpc> {
+        &mut self.rpc
     }
-    fn rpc_add_ons_mut(&mut self) -> Option<&mut RpcHooks<N::Core>> {
-        self.rpc_add_ons.as_mut()
+    fn rpc_add_ons_mut(&mut self) -> &mut Option<RpcHooks<N::Core>> {
+        &mut self.rpc_add_ons
     }
 }

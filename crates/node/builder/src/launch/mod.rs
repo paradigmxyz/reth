@@ -301,7 +301,7 @@ where
         );
 
         let consensus_engine_shutdown_rx =
-            ctx.right().consensus_engine_shutdown().expect("should be launched");
+            ctx.right().engine_mut().shutdown_rx_mut().take().expect("should be launched");
         // temp here until building other components moved into `OnComponentsInitializedHook`s, will
         // be called in `LaunchContextWith::with_components -> NodeAdapterExt`
         let node = ctx.right().build().await;

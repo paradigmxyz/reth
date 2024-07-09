@@ -39,11 +39,8 @@ use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
 
 use crate::{
-    common::{ExtBuilderContext, WithConfigs},
-    components::NodeComponentsBuilder,
-    node::FullNode,
-    rpc::{RethRpcServerHandles, RpcContext},
-    DefaultNodeLauncher, Node, NodeHandle,
+    common::WithConfigs, components::NodeComponentsBuilder, node::FullNode, DefaultNodeLauncher,
+    ExtBuilderContext, Node, NodeHandle,
 };
 
 /// The adapter type for a reth node with the builtin provider type

@@ -2,7 +2,6 @@
 
 use std::{fmt, marker::PhantomData, ops};
 
-use auto_impl::auto_impl;
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -169,7 +168,8 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 
 /// An intermediary type for `FullNodeComponentsExt`, that isn't `Clone`.
 pub trait FullNodeComponentsExt: FullNodeTypes + Clone + 'static {
-    type Core: FullNodeComponents;
+    type Core: FullNodeComponents<EngineTypes = Self::EngineTypes, Provider = Self::Provider>
+        + 'static;
     type Tree: Send;
     type Pipeline: PipelineComponent;
     type Engine: EngineComponent<Self::Core> + 'static;
@@ -197,7 +197,6 @@ pub trait FullNodeComponentsExt: FullNodeTypes + Clone + 'static {
 impl<T> FullNodeComponents for T
 where
     T: FullNodeComponentsExt,
-    T::Core: FullNodeComponents<EngineTypes = T::EngineTypes, Provider = T::Provider>,
 {
     type Pool = <T::Core as FullNodeComponents>::Pool;
     type Evm = <T::Core as FullNodeComponents>::Evm;

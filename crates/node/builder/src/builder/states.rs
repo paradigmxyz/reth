@@ -21,13 +21,12 @@ use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskExecutor;
 
 use crate::{
-    common::ExtBuilderContext,
     components::{NodeComponents, NodeComponentsBuilder},
     exex::BoxedLaunchExEx,
     hooks::NodeHooks,
     launch::LaunchNode,
     rpc::RpcHooks,
-    EngineAdapter, FullNode, PipelineAdapter, RpcAdapter,
+    EngineAdapter, ExtBuilderContext, FullNode, NodeHandle, PipelineAdapter, RpcAdapter,
 };
 
 /// A node builder that also has the configured types.
@@ -227,14 +226,14 @@ where
     /// Launches the node with the given launcher.
     pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
     where
-        L: LaunchNode<Self, Node = Output>,
+        L: LaunchNode<Self, Node = NodeHandle<Output>>,
     {
         launcher.launch_node(self).await
     }
 }
 
 /// Additional node extensions.
-pub(crate) struct NodeAddOns<Node: FullNodeComponents> {
+pub(crate) struct NodeAddOns<Node: FullNodeComponentsExt> {
     /// Additional `NodeHooks` that are called at specific points in the node's launch lifecycle.
     pub(crate) hooks: NodeHooks<Node>,
     /// The `ExExs` (execution extensions) of the node.
@@ -256,17 +255,6 @@ pub struct NodeAdapterExt<
     pub rpc: Option<RpcAdapter<Node>>,
 }
 
-impl<Node, BT, C> NodeAdapterExt<Node, BT, C>
-where
-    Node: FullNodeComponents,
-    BT: FullBlockchainTreeEngine + 'static,
-    C: FullClient + 'static,
-{
-    pub fn new(core: Node) -> Self {
-        Self { core, tree: None, pipeline: None, engine: None, rpc: None }
-    }
-}
-
 impl<N, BT, C> FullNodeComponentsExt for NodeAdapterExt<N, BT, C>
 where
     N: FullNodeComponents,
@@ -280,7 +268,7 @@ where
     type Rpc = RpcAdapter<N>;
 
     fn from_core(core: Self::Core) -> Self {
-        Self::new(core)
+        Self { core, tree: None, pipeline: None, engine: None, rpc: None }
     }
 
     fn core(&self) -> &Self::Core {

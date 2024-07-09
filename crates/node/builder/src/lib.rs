@@ -20,7 +20,9 @@ pub mod components;
 
 mod builder;
 pub use builder::*;
-pub use ext::{InitializedComponentsExt, NodeComponentsBuilderExt, StageExtComponentsBuild};
+pub use ext::{
+    ExtBuilderContext, InitializedComponentsExt, NodeComponentsBuilderExt, StageExtComponentsBuild,
+};
 
 pub mod engine;
 pub use engine::EngineAdapter;
