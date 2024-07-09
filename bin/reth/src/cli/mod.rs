@@ -6,7 +6,7 @@ use crate::{
         LogArgs,
     },
     commands::{
-        debug_cmd, import,
+        debug_cmd,
         node::{self, NoArgs},
     },
     macros::block_executor,
@@ -15,7 +15,7 @@ use crate::{
 use clap::{value_parser, Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli_commands::{
-    config_cmd, db, dump_genesis, init_cmd, init_state, p2p, prune, recover, stage,
+    config_cmd, db, dump_genesis, import, init_cmd, init_state, p2p, prune, recover, stage,
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
@@ -152,7 +152,9 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             }
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Import(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Import(command) => runner.run_blocking_until_ctrl_c(
+                command.execute(|chain_spec| block_executor!(chain_spec)),
+            ),
             #[cfg(feature = "optimism")]
             Commands::ImportOp(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             #[cfg(feature = "optimism")]
