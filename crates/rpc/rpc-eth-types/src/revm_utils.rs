@@ -63,7 +63,7 @@ where
         .unwrap_or_default())
 }
 
-/// Helper type for representing the fees of a [`TransactionRequest`]
+/// Helper type for representing the fees of a [`reth_rpc_types::TransactionRequest`]
 #[derive(Debug)]
 pub struct CallFees {
     /// EIP-1559 priority fee
@@ -82,7 +82,7 @@ pub struct CallFees {
 // === impl CallFees ===
 
 impl CallFees {
-    /// Ensures the fields of a [`TransactionRequest`] are not conflicting.
+    /// Ensures the fields of a [`reth_rpc_types::TransactionRequest`] are not conflicting.
     ///
     /// # EIP-4844 transactions
     ///
