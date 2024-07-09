@@ -7071,6 +7071,7 @@ dependencies = [
  "reth-errors",
  "reth-ethereum-consensus",
  "reth-evm",
+ "reth-exex-types",
  "reth-metrics",
  "reth-network-p2p",
  "reth-payload-builder",

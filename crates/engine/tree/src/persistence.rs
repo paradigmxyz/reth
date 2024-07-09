@@ -279,9 +279,9 @@ impl PersistenceHandle {
         self.sender
             .send(PersistenceAction::RemoveBlocksAbove((block_num, tx)))
             .expect("should be able to send");
-        let hash = rx.await.expect("todo: err handling");
+        let removed_blocks = rx.await.expect("todo: err handling");
         self.last_persisted_block_number = block_num;
-        hash
+        removed_blocks
     }
 
     /// Tells the persistence service to remove block data before the given hash, according to the
@@ -304,5 +304,34 @@ impl PersistenceHandle {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::persistence::Persistence;
+    use reth_chainspec::MAINNET;
+    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
+    use reth_exex_types::FinishedExExHeight;
+    use reth_primitives::B256;
+    use reth_provider::{providers::StaticFileProvider, ProviderFactory};
+    use reth_prune::Pruner;
+
+    #[tokio::test]
+    async fn test_save_blocks_empty() {
+        let db = create_test_rw_db();
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
+        let provider = ProviderFactory::new(
+            db,
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
+        );
+        let (finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+
+        let pruner = Pruner::new(provider.clone(), vec![], 5, 0, 5, None, finished_exex_height_rx);
+
+        let mut persistence_handle = Persistence::spawn_new(provider, pruner);
+
+        let blocks = vec![];
+
+        let hash = persistence_handle.save_blocks(blocks).await;
+
+        assert_eq!(hash, B256::default());
+    }
 }
