@@ -14,6 +14,7 @@ pub mod db;
 pub mod dump_genesis;
 pub mod init_cmd;
 pub mod init_state;
+pub mod node;
 pub mod p2p;
 pub mod prune;
 pub mod recover;

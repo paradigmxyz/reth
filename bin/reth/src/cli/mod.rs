@@ -5,17 +5,16 @@ use crate::{
         utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
         LogArgs,
     },
-    commands::{
-        debug_cmd, import,
-        node::{self, NoArgs},
-    },
+    commands::{debug_cmd, import},
     macros::block_executor,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli_commands::{
-    config_cmd, db, dump_genesis, init_cmd, init_state, p2p, prune, recover, stage,
+    config_cmd, db, dump_genesis, init_cmd, init_state,
+    node::{self, NoArgs},
+    p2p, prune, recover, stage,
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
