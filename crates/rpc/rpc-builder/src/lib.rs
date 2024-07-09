@@ -1117,7 +1117,7 @@ where
 /// Once the [`RpcModule`] is built via [`RpcModuleBuilder`] the servers can be started, See also
 /// [`ServerBuilder::build`] and [`Server::start`](jsonrpsee::server::Server::start).
 #[derive(Debug)]
-pub struct RpcServerConfig<HttpMiddleware = Identity, RpcMiddleware = Identity> {
+pub struct RpcServerConfig<RpcMiddleware = Identity> {
     /// Configs for JSON-RPC Http.
     http_server_config: Option<ServerBuilder<Identity, Identity>>,
     /// Allowed CORS Domains for http
@@ -1136,15 +1136,13 @@ pub struct RpcServerConfig<HttpMiddleware = Identity, RpcMiddleware = Identity> 
     ipc_endpoint: Option<String>,
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
-    /// solala
+    /// Configurable middleware
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
-    /// solala
-    http_middleware: tower::ServiceBuilder<HttpMiddleware>,
 }
 
 // === impl RpcServerConfig ===
 
-impl Default for RpcServerConfig<Identity, Identity> {
+impl Default for RpcServerConfig<Identity> {
     fn default() -> Self {
         Self {
             http_server_config: None,
@@ -1157,33 +1155,19 @@ impl Default for RpcServerConfig<Identity, Identity> {
             ipc_endpoint: None,
             jwt_secret: None,
             rpc_middleware: RpcServiceBuilder::new(),
-            http_middleware: tower::ServiceBuilder::new(),
         }
     }
 }
 
-use jsonrpsee::server::{
-    middleware::rpc::{RpcService, RpcServiceT},
-    TowerService,
-};
-use tower::{Layer, Service};
+use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceT};
+use tower::Layer;
 
-impl<HttpMiddleware, RpcMiddleware> RpcServerConfig<HttpMiddleware, RpcMiddleware> 
-    where
+impl<RpcMiddleware> RpcServerConfig<RpcMiddleware>
+where
     RpcMiddleware: for<'a> Layer<RpcService, Service: RpcServiceT<'a>> + Clone + Send + 'static,
-    HttpMiddleware: Layer<
-            //TowerServiceNoHttp<RpcMiddleware>,
-            TowerService<RpcMiddleware, HttpMiddleware>,
-            Service: Service<
-                String,
-                Response = Option<String>,
-                Error = Box<dyn std::error::Error + Send + Sync + 'static>,
-                Future: Send + Unpin,
-            > + Send,
-        > + Send
-        + 'static,
+    <RpcMiddleware as Layer<RpcService>>::Service: Send,
+    <RpcMiddleware as Layer<RpcService>>::Service: std::marker::Sync,
 {
-
     /// Configures the http server
     ///
     /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
@@ -1371,7 +1355,11 @@ impl<HttpMiddleware, RpcMiddleware> RpcServerConfig<HttpMiddleware, RpcMiddlewar
 
             if let Some(builder) = self.http_server_config {
                 let server = builder
-                    .set_http_middleware(self.http_middleware)
+                    .set_http_middleware(
+                        tower::ServiceBuilder::new()
+                            .option_layer(Self::maybe_cors_layer(cors)?)
+                            .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
+                    )
                     .set_rpc_middleware(self.rpc_middleware)
                     .build(http_socket_addr)
                     .await
@@ -1403,11 +1391,17 @@ impl<HttpMiddleware, RpcMiddleware> RpcServerConfig<HttpMiddleware, RpcMiddlewar
         let mut http_local_addr = None;
         let mut http_server = None;
 
+        let rpc_middleware_clone = self.rpc_middleware.clone();
+
         if let Some(builder) = self.ws_server_config {
             let server = builder
                 .ws_only()
-                .set_http_middleware(self.http_middleware)
-                .set_rpc_middleware(self.rpc_middleware)
+                .set_http_middleware(
+                    tower::ServiceBuilder::new()
+                        .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
+                        .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
+                )
+                .set_rpc_middleware(rpc_middleware_clone.clone())
                 .build(ws_socket_addr)
                 .await
                 .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
@@ -1423,8 +1417,12 @@ impl<HttpMiddleware, RpcMiddleware> RpcServerConfig<HttpMiddleware, RpcMiddlewar
         if let Some(builder) = self.http_server_config {
             let server = builder
                 .http_only()
-                .set_http_middleware(self.http_middleware)
-                .set_rpc_middleware(self.rpc_middleware)
+                .set_http_middleware(
+                    tower::ServiceBuilder::new()
+                        .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
+                        .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
+                )
+                .set_rpc_middleware(rpc_middleware_clone)
                 .build(http_socket_addr)
                 .await
                 .map_err(|err| RpcError::server_error(err, ServerKind::Http(http_socket_addr)))?;
