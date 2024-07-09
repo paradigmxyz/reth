@@ -304,16 +304,20 @@ impl PersistenceHandle {
 
 #[cfg(test)]
 mod tests {
-    use crate::persistence::Persistence;
+    use super::*;
     use reth_chainspec::MAINNET;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_exex_types::FinishedExExHeight;
-    use reth_primitives::B256;
-    use reth_provider::{providers::StaticFileProvider, ProviderFactory};
+    use reth_primitives::{
+        Address, Block, Receipts, Requests, SealedBlockWithSenders, TransactionSigned, B256,
+    };
+    use reth_provider::{providers::StaticFileProvider, ExecutionOutcome, ProviderFactory};
     use reth_prune::Pruner;
+    use reth_trie::{updates::TrieUpdates, HashedPostState};
+    use revm::db::BundleState;
+    use std::sync::Arc;
 
-    #[tokio::test]
-    async fn test_save_blocks_empty() {
+    fn default_persistence_handle() -> PersistenceHandle {
         let db = create_test_rw_db();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
         let provider = ProviderFactory::new(
@@ -326,12 +330,50 @@ mod tests {
 
         let pruner = Pruner::new(provider.clone(), vec![], 5, 0, 5, None, finished_exex_height_rx);
 
-        let mut persistence_handle = Persistence::spawn_new(provider, pruner);
+        Persistence::spawn_new(provider, pruner)
+    }
+
+    #[tokio::test]
+    async fn test_save_blocks_empty() {
+        let mut persistence_handle = default_persistence_handle();
 
         let blocks = vec![];
 
         let hash = persistence_handle.save_blocks(blocks).await;
 
         assert_eq!(hash, B256::default());
+    }
+
+    #[tokio::test]
+    async fn test_save_blocks_single_block() {
+        let mut persistence_handle = default_persistence_handle();
+
+        let mut block = Block::default();
+        let sender = Address::random();
+        let tx = TransactionSigned::default();
+        block.body.push(tx);
+        let block_hash = block.hash_slow();
+        let block_number = block.number;
+        let sealed = block.seal_slow();
+        let sealed_with_senders =
+            SealedBlockWithSenders::new(sealed.clone(), vec![sender]).unwrap();
+
+        let executed = ExecutedBlock::new(
+            Arc::new(sealed),
+            Arc::new(sealed_with_senders.senders),
+            Arc::new(ExecutionOutcome::new(
+                BundleState::default(),
+                Receipts { receipt_vec: vec![] },
+                block_number,
+                vec![Requests::default()],
+            )),
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+        );
+        let blocks = vec![executed];
+
+        let actual_hash = persistence_handle.save_blocks(blocks).await;
+
+        assert_eq!(block_hash, actual_hash);
     }
 }

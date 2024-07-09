@@ -58,6 +58,16 @@ pub struct ExecutedBlock {
 }
 
 impl ExecutedBlock {
+    pub(crate) const fn new(
+        block: Arc<SealedBlock>,
+        senders: Arc<Vec<Address>>,
+        execution_output: Arc<ExecutionOutcome>,
+        hashed_state: Arc<HashedPostState>,
+        trie: Arc<TrieUpdates>,
+    ) -> Self {
+        Self { block, senders, execution_output, hashed_state, trie }
+    }
+
     /// Returns a reference to the executed block.
     pub(crate) fn block(&self) -> &SealedBlock {
         &self.block
