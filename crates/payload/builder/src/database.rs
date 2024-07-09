@@ -35,7 +35,7 @@ use std::{
 pub struct CachedReads {
     accounts: HashMap<Address, CachedAccount>,
     contracts: HashMap<B256, Bytecode>,
-    block_hashes: HashMap<U256, B256>,
+    block_hashes: HashMap<u64, B256>,
 }
 
 // === impl CachedReads ===
@@ -114,7 +114,7 @@ impl<'a, DB: DatabaseRef> Database for CachedReadsDbMut<'a, DB> {
         }
     }
 
-    fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
         let code = match self.cached.block_hashes.entry(number) {
             Entry::Occupied(entry) => *entry.get(),
             Entry::Vacant(entry) => *entry.insert(self.db.block_hash_ref(number)?),
@@ -148,7 +148,7 @@ impl<'a, DB: DatabaseRef> DatabaseRef for CachedReadsDBRef<'a, DB> {
         self.inner.borrow_mut().storage(address, index)
     }
 
-    fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         self.inner.borrow_mut().block_hash(number)
     }
 }
