@@ -7981,16 +7981,22 @@ name = "reth-optimism-rpc"
 version = "1.0.1"
 dependencies = [
  "alloy-primitives",
+ "jsonrpsee",
  "parking_lot 0.12.3",
  "reth-chainspec",
  "reth-errors",
  "reth-evm",
+ "reth-evm-optimism",
+ "reth-primitives",
  "reth-provider",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
+ "reth-rpc-server-types",
  "reth-rpc-types",
  "reth-tasks",
  "reth-transaction-pool",
+ "revm",
+ "thiserror",
  "tokio",
 ]
 

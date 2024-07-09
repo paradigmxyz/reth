@@ -763,6 +763,22 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         ))
     }
 
+    /// Remove list of entries from the table. Returns the number of entries removed.
+    #[inline]
+    pub fn remove<T: Table>(
+        &self,
+        range: impl RangeBounds<T::Key>,
+    ) -> Result<usize, DatabaseError> {
+        let mut entries = 0;
+        let mut cursor_write = self.tx.cursor_write::<T>()?;
+        let mut walker = cursor_write.walk_range(range)?;
+        while walker.next().transpose()?.is_some() {
+            walker.delete_current()?;
+            entries += 1;
+        }
+        Ok(entries)
+    }
+
     /// Return list of entries from table
     ///
     /// If TAKE is true, opened cursor would be write and it would delete all values from db.
@@ -894,7 +910,9 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             // Remove TransactionBlocks index if there are transaction present
             if !transactions.is_empty() {
                 let tx_id_range = transactions.first().unwrap().0..=transactions.last().unwrap().0;
-                self.get_or_take::<tables::TransactionBlocks, TAKE>(tx_id_range)?;
+                // NOTE: we are in this branch because `TAKE` is true, so we can use the `remove`
+                // method
+                self.remove::<tables::TransactionBlocks>(tx_id_range)?;
             }
         }
 
@@ -959,7 +977,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         if TAKE {
             // rm HeaderTerminalDifficulties
-            self.get_or_take::<tables::HeaderTerminalDifficulties, TAKE>(range)?;
+            // NOTE: we are in this branch because `TAKE` is true, so we can use the `remove` method
+            self.remove::<tables::HeaderTerminalDifficulties>(range)?;
             // rm HeaderNumbers
             let mut header_number_cursor = self.tx.cursor_write::<tables::HeaderNumbers>()?;
             for (_, hash) in &block_header_hashes {
@@ -1078,13 +1097,16 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     }
 
     /// Unwind a table forward by a [`Walker`][reth_db_api::cursor::Walker] on another table
-    pub fn unwind_table_by_walker<T1, T2>(&self, start_at: T1::Key) -> Result<(), DatabaseError>
+    pub fn unwind_table_by_walker<T1, T2>(
+        &self,
+        range: impl RangeBounds<T1::Key>,
+    ) -> Result<(), DatabaseError>
     where
         T1: Table,
         T2: Table<Key = T1::Value>,
     {
         let mut cursor = self.tx.cursor_write::<T1>()?;
-        let mut walker = cursor.walk(Some(start_at))?;
+        let mut walker = cursor.walk_range(range)?;
         while let Some((_, value)) = walker.next().transpose()? {
             self.tx.delete::<T2>(value, None)?;
         }
@@ -2609,7 +2631,8 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
         // that is why it is deleted afterwards.
         if TAKE {
             // rm block bodies
-            self.get_or_take::<tables::BlockBodyIndices, TAKE>(range)?;
+            // NOTE: we are in this branch because `TAKE` is true, so we can use the `remove` method
+            self.remove::<tables::BlockBodyIndices>(range)?;
 
             // Update pipeline progress
             if let Some(fork_number) = unwind_to {
