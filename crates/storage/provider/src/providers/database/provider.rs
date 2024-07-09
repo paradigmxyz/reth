@@ -960,7 +960,14 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         }
     }
 
-    /// Remove requested block transactions, without returning them
+    /// Remove requested block transactions, without returning them.
+    ///
+    /// This will remove block data for the given range from the following tables:
+    /// * [`BlockBodyIndices`](tables::BlockBodyIndices)
+    /// * [`Transactions`](tables::Transactions)
+    /// * [`TransactionSenders`](tables::TransactionSenders)
+    /// * [`TransactionHashNumbers`](tables::TransactionHashNumbers)
+    /// * [`TransactionBlocks`](tables::TransactionBlocks)
     pub(crate) fn remove_block_transaction_range(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
@@ -981,13 +988,14 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             return Ok(())
         }
 
-        // Get transactions and senders
+        // Get transactions so we can then remove
         let transactions = self
             .take::<tables::Transactions>(first_transaction..=last_transaction)?
             .into_iter()
             .map(|(id, tx)| (id, tx.into()))
             .collect::<Vec<(u64, TransactionSigned)>>();
 
+        // remove senders
         self.remove::<tables::TransactionSenders>(first_transaction..=last_transaction)?;
 
         // Remove TransactionHashNumbers
@@ -1146,6 +1154,40 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         }
 
         Ok(block_tx)
+    }
+
+    /// Remove the given range of blocks, without returning any of the blocks.
+    ///
+    /// This will remove block data for the given range from the following tables:
+    /// * [`HeaderNumbers`](tables::HeaderNumbers)
+    /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
+    /// * [`BlockOmmers`](tables::BlockOmmers)
+    /// * [`BlockWithdrawals`](tables::BlockWithdrawals)
+    /// * [`BlockRequests`](tables::BlockRequests)
+    /// * [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties)
+    ///
+    /// This will also remove transaction data according to
+    /// [`remove_block_transaction_range`](Self::remove_block_transaction_range).
+    pub fn remove_take_block_range(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> ProviderResult<()> {
+        let block_headers = self.remove::<tables::Headers>(range.clone())?;
+        if block_headers == 0 {
+            return Ok(())
+        }
+
+        self.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
+            range.clone(),
+        )?;
+        self.remove::<tables::CanonicalHeaders>(range.clone())?;
+        self.remove::<tables::BlockOmmers>(range.clone())?;
+        self.remove::<tables::BlockWithdrawals>(range.clone())?;
+        self.remove::<tables::BlockRequests>(range.clone())?;
+        self.remove_block_transaction_range(range.clone())?;
+        self.remove::<tables::HeaderTerminalDifficulties>(range)?;
+
+        Ok(())
     }
 
     /// Get or unwind the given range of blocks.
