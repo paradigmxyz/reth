@@ -44,6 +44,9 @@ use tracing::*;
 mod memory_overlay;
 pub use memory_overlay::MemoryOverlayStateProvider;
 
+/// Maximum number of blocks to be kept in memory without triggering persistence.
+const PERSISTENCE_THRESHOLD: u64 = 512;
+
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug)]
 pub struct ExecutedBlock {
@@ -120,6 +123,11 @@ impl TreeState {
                 );
             }
         }
+    }
+
+    /// Returns the maximum block number stored.
+    pub(crate) fn max_block_number(&self) -> BlockNumber {
+        *self.blocks_by_number.last_key_value().unwrap_or((&BlockNumber::default(), &vec![])).0
     }
 }
 
@@ -357,8 +365,9 @@ where
 
     /// Returns true if the canonical chain length minus the last persisted
     /// block is more than the persistence threshold.
-    const fn should_persist(&self) -> bool {
-        false
+    fn should_persist(&self) -> bool {
+        self.state.tree_state.max_block_number() - self.persistence.last_persisted_block_number() >
+            PERSISTENCE_THRESHOLD
     }
 
     async fn persist_state(&mut self) {

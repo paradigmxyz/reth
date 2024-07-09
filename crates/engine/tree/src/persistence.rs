@@ -295,4 +295,14 @@ impl PersistenceHandle {
         self.last_persisted_block_number = 0;
         hash
     }
+
+    /// Last persisted block number getter.
+    pub const fn last_persisted_block_number(&self) -> u64 {
+        self.last_persisted_block_number
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 }
