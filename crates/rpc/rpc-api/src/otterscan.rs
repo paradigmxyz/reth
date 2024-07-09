@@ -43,7 +43,7 @@ pub trait Otterscan {
     /// Extract all variations of calls, contract creation and self-destructs and returns a call
     /// tree.
     #[method(name = "traceTransaction")]
-    async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<TraceEntry>;
+    async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<Option<Vec<TraceEntry>>>;
 
     /// Tailor-made and expanded version of eth_getBlockByNumber for block details page in
     /// Otterscan.
