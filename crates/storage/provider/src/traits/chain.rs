@@ -2,7 +2,7 @@
 
 use crate::{BlockReceipts, Chain};
 use auto_impl::auto_impl;
-use reth_primitives::SealedBlockWithSenders;
+use reth_primitives::{SealedBlockWithSenders, SealedHeader};
 use std::{
     pin::Pin,
     sync::Arc,
@@ -34,7 +34,7 @@ pub trait CanonStateSubscriptions: Send + Sync {
     }
 }
 
-/// A Stream of [CanonStateNotification].
+/// A Stream of [`CanonStateNotification`].
 #[derive(Debug)]
 #[pin_project::pin_project]
 pub struct CanonStateNotificationStream {
@@ -137,5 +137,44 @@ impl CanonStateNotification {
             self.committed().receipts_with_attachment().into_iter().map(|receipt| (receipt, false)),
         );
         receipts
+    }
+}
+
+/// A type that allows to register finalized block related event subscriptions
+/// and get notified when a new finalized block header is available.
+pub trait FinalizedBlockHeaderSubscription: Send + Sync {
+    /// Get notified when a new finalized block header is available.
+    fn subscribe_to_finalized_header(&self) -> broadcast::Receiver<SealedHeader>;
+
+    /// Convenience method to get a stream of finalized block headers.
+    fn finalized_header_stream(&self) -> FinalizedBlockHeaderStream {
+        FinalizedBlockHeaderStream {
+            st: BroadcastStream::new(self.subscribe_to_finalized_header()),
+        }
+    }
+}
+
+/// A Stream of [`SealedHeader`].
+#[derive(Debug)]
+#[pin_project::pin_project]
+pub struct FinalizedBlockHeaderStream {
+    #[pin]
+    st: BroadcastStream<SealedHeader>,
+}
+
+impl Stream for FinalizedBlockHeaderStream {
+    type Item = SealedHeader;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            return match ready!(self.as_mut().project().st.poll_next(cx)) {
+                Some(Ok(notification)) => Poll::Ready(Some(notification)),
+                Some(Err(err)) => {
+                    debug!(%err, "finalized header notification stream lagging behind");
+                    continue
+                }
+                None => Poll::Ready(None),
+            }
+        }
     }
 }
