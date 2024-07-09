@@ -779,26 +779,45 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         Ok(entries)
     }
 
-    /// Return list of entries from table
+    /// Return a list of entries from the table, based on the given range.
     ///
-    /// If TAKE is true, opened cursor would be write and it would delete all values from db.
+    /// If TAKE is true, opened cursor will delete and return the entries for the given range.
+    /// Otherwise, they will just be returned.
     #[inline]
     pub fn get_or_take<T: Table, const TAKE: bool>(
         &self,
         range: impl RangeBounds<T::Key>,
     ) -> Result<Vec<KeyValue<T>>, DatabaseError> {
         if TAKE {
-            let mut cursor_write = self.tx.cursor_write::<T>()?;
-            let mut walker = cursor_write.walk_range(range)?;
-            let mut items = Vec::new();
-            while let Some(i) = walker.next().transpose()? {
-                walker.delete_current()?;
-                items.push(i)
-            }
-            Ok(items)
+            self.take::<T>(range)
         } else {
-            self.tx.cursor_read::<T>()?.walk_range(range)?.collect::<Result<Vec<_>, _>>()
+            self.get::<T>(range)
         }
+    }
+
+    /// Return a list of entries from the table, based on the given range.
+    #[inline]
+    pub fn get<T: Table>(
+        &self,
+        range: impl RangeBounds<T::Key>,
+    ) -> Result<Vec<KeyValue<T>>, DatabaseError> {
+        self.tx.cursor_read::<T>()?.walk_range(range)?.collect::<Result<Vec<_>, _>>()
+    }
+
+    /// Return a list of entries from the table, and remove them, based on the given range.
+    #[inline]
+    pub fn take<T: Table>(
+        &self,
+        range: impl RangeBounds<T::Key>,
+    ) -> Result<Vec<KeyValue<T>>, DatabaseError> {
+        let mut cursor_write = self.tx.cursor_write::<T>()?;
+        let mut walker = cursor_write.walk_range(range)?;
+        let mut items = Vec::new();
+        while let Some(i) = walker.next().transpose()? {
+            walker.delete_current()?;
+            items.push(i)
+        }
+        Ok(items)
     }
 
     /// Get requested blocks transaction with signer
