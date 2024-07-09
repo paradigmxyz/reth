@@ -779,6 +779,74 @@ pub trait Call: LoadState + SpawnBlocking {
         }
     }
 
+    /// Configures a new [`TxEnv`]  for the [`TransactionRequest`]
+    ///
+    /// All [`TxEnv`] fields are derived from the given [`TransactionRequest`], if fields are
+    /// `None`, they fall back to the [`BlockEnv`]'s settings.
+    fn create_txn_env(
+        &self,
+        block_env: &BlockEnv,
+        request: TransactionRequest,
+    ) -> EthResult<TxEnv> {
+        // Ensure that if versioned hashes are set, they're not empty
+        if request.blob_versioned_hashes.as_ref().map_or(false, |hashes| hashes.is_empty()) {
+            return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+        }
+
+        let TransactionRequest {
+            from,
+            to,
+            gas_price,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            gas,
+            value,
+            input,
+            nonce,
+            access_list,
+            chain_id,
+            blob_versioned_hashes,
+            max_fee_per_blob_gas,
+            ..
+        } = request;
+
+        let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
+            CallFees::ensure_fees(
+                gas_price.map(U256::from),
+                max_fee_per_gas.map(U256::from),
+                max_priority_fee_per_gas.map(U256::from),
+                block_env.basefee,
+                blob_versioned_hashes.as_deref(),
+                max_fee_per_blob_gas.map(U256::from),
+                block_env.get_blob_gasprice().map(U256::from),
+            )?;
+
+        let gas_limit = gas.unwrap_or_else(|| block_env.gas_limit.min(U256::from(u64::MAX)).to());
+        let env = TxEnv {
+            gas_limit: gas_limit
+                .try_into()
+                .map_err(|_| RpcInvalidTransactionError::GasUintOverflow)?,
+            nonce,
+            caller: from.unwrap_or_default(),
+            gas_price,
+            gas_priority_fee: max_priority_fee_per_gas,
+            transact_to: to.unwrap_or(TxKind::Create),
+            value: value.unwrap_or_default(),
+            data: input.try_into_unique_input()?.unwrap_or_default(),
+            chain_id,
+            access_list: access_list
+                .map(reth_rpc_types::AccessList::into_flattened)
+                .unwrap_or_default(),
+            // EIP-4844 fields
+            blob_hashes: blob_versioned_hashes.unwrap_or_default(),
+            max_fee_per_blob_gas,
+            #[cfg(feature = "optimism")]
+            optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
+        };
+
+        Ok(env)
+    }
+
     /// Creates a new [`EnvWithHandlerCfg`] to be used for executing the [`TransactionRequest`] in
     /// `eth_call`.
     ///
@@ -789,71 +857,7 @@ pub trait Call: LoadState + SpawnBlocking {
         block: BlockEnv,
         request: TransactionRequest,
     ) -> EthResult<EnvWithHandlerCfg> {
-        /// Configures a new [`TxEnv`]  for the [`TransactionRequest`]
-        ///
-        /// All [`TxEnv`] fields are derived from the given [`TransactionRequest`], if fields are
-        /// `None`, they fall back to the [`BlockEnv`]'s settings.
-        fn create_txn_env(block_env: &BlockEnv, request: TransactionRequest) -> EthResult<TxEnv> {
-            // Ensure that if versioned hashes are set, they're not empty
-            if request.blob_versioned_hashes.as_ref().map_or(false, |hashes| hashes.is_empty()) {
-                return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
-            }
-
-            let TransactionRequest {
-                from,
-                to,
-                gas_price,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                gas,
-                value,
-                input,
-                nonce,
-                access_list,
-                chain_id,
-                blob_versioned_hashes,
-                max_fee_per_blob_gas,
-                ..
-            } = request;
-
-            let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
-                CallFees::ensure_fees(
-                    gas_price.map(U256::from),
-                    max_fee_per_gas.map(U256::from),
-                    max_priority_fee_per_gas.map(U256::from),
-                    block_env.basefee,
-                    blob_versioned_hashes.as_deref(),
-                    max_fee_per_blob_gas.map(U256::from),
-                    block_env.get_blob_gasprice().map(U256::from),
-                )?;
-
-            let gas_limit =
-                gas.unwrap_or_else(|| block_env.gas_limit.min(U256::from(u64::MAX)).to());
-            let env = TxEnv {
-                gas_limit: gas_limit
-                    .try_into()
-                    .map_err(|_| RpcInvalidTransactionError::GasUintOverflow)?,
-                nonce,
-                caller: from.unwrap_or_default(),
-                gas_price,
-                gas_priority_fee: max_priority_fee_per_gas,
-                transact_to: to.unwrap_or(TxKind::Create),
-                value: value.unwrap_or_default(),
-                data: input.try_into_unique_input()?.unwrap_or_default(),
-                chain_id,
-                access_list: access_list
-                    .map(reth_rpc_types::AccessList::into_flattened)
-                    .unwrap_or_default(),
-                // EIP-4844 fields
-                blob_hashes: blob_versioned_hashes.unwrap_or_default(),
-                max_fee_per_blob_gas,
-                #[cfg(feature = "optimism")]
-                optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
-            };
-
-            Ok(env)
-        }
-        let tx = create_txn_env(&block, request)?;
+        let tx = self.create_txn_env(&block, request)?;
         Ok(EnvWithHandlerCfg::new_with_cfg_env(cfg, block, tx))
     }
 
