@@ -386,8 +386,16 @@ where
         self.persistence.save_blocks(blocks_to_persist).await;
     }
 
-    const fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
-        Vec::new()
+    fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
+        let start = self.persistence.last_persisted_block_number() + 1;
+        let end = start + PERSISTENCE_THRESHOLD;
+
+        self.state
+            .tree_state
+            .blocks_by_number
+            .range(start..end)
+            .flat_map(|(_, blocks)| blocks.iter().cloned())
+            .collect()
     }
 
     /// Return block from database or in-memory state by hash.
