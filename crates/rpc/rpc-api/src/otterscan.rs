@@ -5,7 +5,7 @@ use reth_rpc_types::{
         BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
         TransactionsWithReceipts,
     },
-    Header, Transaction,
+    Header,
 };
 
 /// Otterscan rpc interface.
@@ -43,7 +43,7 @@ pub trait Otterscan {
     /// Extract all variations of calls, contract creation and self-destructs and returns a call
     /// tree.
     #[method(name = "traceTransaction")]
-    async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<TraceEntry>;
+    async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<Option<Vec<TraceEntry>>>;
 
     /// Tailor-made and expanded version of eth_getBlockByNumber for block details page in
     /// Otterscan.
@@ -87,7 +87,7 @@ pub trait Otterscan {
         &self,
         sender: Address,
         nonce: u64,
-    ) -> RpcResult<Option<Transaction>>;
+    ) -> RpcResult<Option<TxHash>>;
 
     /// Gets the transaction hash and the address who created a contract.
     #[method(name = "getContractCreator")]

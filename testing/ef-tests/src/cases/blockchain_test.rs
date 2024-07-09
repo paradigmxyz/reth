@@ -187,7 +187,7 @@ pub fn should_skip(path: &Path) -> bool {
         | "ValueOverflow.json"
         | "ValueOverflowParis.json"
 
-        // txbyte is of type 02 and we dont parse tx bytes for this test to fail.
+        // txbyte is of type 02 and we don't parse tx bytes for this test to fail.
         | "typeTwoBerlin.json"
 
         // Test checks if nonce overflows. We are handling this correctly but we are not parsing

@@ -79,7 +79,7 @@ async fn main() -> eyre::Result<()> {
     // Start the server & keep it alive
     let server_args =
         RpcServerConfig::http(Default::default()).with_http_address("0.0.0.0:8545".parse()?);
-    let _handle = server_args.start(server).await?;
+    let _handle = server_args.start(&server).await?;
     futures::future::pending::<()>().await;
 
     Ok(())

@@ -1,22 +1,27 @@
 use super::setup;
-use crate::macros::block_executor;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, table::TableImporter, transaction::DbTx,
 };
 use reth_db_common::DbTool;
+use reth_evm::{execute::BlockExecutorProvider, noop::NoopBlockExecutorProvider};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
-use reth_provider::{providers::StaticFileProvider, ChainSpecProvider, ProviderFactory};
+use reth_provider::{providers::StaticFileProvider, ProviderFactory};
 use reth_stages::{stages::ExecutionStage, Stage, StageCheckpoint, UnwindInput};
 use tracing::info;
 
-pub(crate) async fn dump_execution_stage<DB: Database>(
+pub(crate) async fn dump_execution_stage<DB, E>(
     db_tool: &DbTool<DB>,
     from: u64,
     to: u64,
     output_datadir: ChainPath<DataDirPath>,
     should_run: bool,
-) -> eyre::Result<()> {
+    executor: E,
+) -> eyre::Result<()>
+where
+    DB: Database,
+    E: BlockExecutorProvider,
+{
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
     import_tables_with_range(&output_db, db_tool, from, to)?;
@@ -32,6 +37,7 @@ pub(crate) async fn dump_execution_stage<DB: Database>(
             ),
             to,
             from,
+            executor,
         )?;
     }
 
@@ -127,8 +133,7 @@ fn unwind_and_copy<DB: Database>(
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.provider_rw()?;
 
-    let executor = block_executor!(db_tool.chain());
-    let mut exec_stage = ExecutionStage::new_with_executor(executor);
+    let mut exec_stage = ExecutionStage::new_with_executor(NoopBlockExecutorProvider::default());
 
     exec_stage.unwind(
         &provider,
@@ -150,14 +155,18 @@ fn unwind_and_copy<DB: Database>(
 }
 
 /// Try to re-execute the stage without committing
-fn dry_run<DB: Database>(
+fn dry_run<DB, E>(
     output_provider_factory: ProviderFactory<DB>,
     to: u64,
     from: u64,
-) -> eyre::Result<()> {
+    executor: E,
+) -> eyre::Result<()>
+where
+    DB: Database,
+    E: BlockExecutorProvider,
+{
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 
-    let executor = block_executor!(output_provider_factory.chain_spec());
     let mut exec_stage = ExecutionStage::new_with_executor(executor);
 
     let input =

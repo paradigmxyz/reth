@@ -48,7 +48,7 @@ impl OnForkChoiceUpdated {
 
     /// Creates a new instance of `OnForkChoiceUpdated` if the forkchoice update succeeded and no
     /// payload attributes were provided.
-    pub(crate) fn valid(status: PayloadStatus) -> Self {
+    pub fn valid(status: PayloadStatus) -> Self {
         Self {
             forkchoice_status: ForkchoiceStatus::from_payload_status(&status.status),
             fut: Either::Left(futures::future::ready(Ok(ForkchoiceUpdated::new(status)))),
@@ -57,7 +57,7 @@ impl OnForkChoiceUpdated {
 
     /// Creates a new instance of `OnForkChoiceUpdated` with the given payload status, if the
     /// forkchoice update failed due to an invalid payload.
-    pub(crate) fn with_invalid(status: PayloadStatus) -> Self {
+    pub fn with_invalid(status: PayloadStatus) -> Self {
         Self {
             forkchoice_status: ForkchoiceStatus::from_payload_status(&status.status),
             fut: Either::Left(futures::future::ready(Ok(ForkchoiceUpdated::new(status)))),
@@ -66,7 +66,7 @@ impl OnForkChoiceUpdated {
 
     /// Creates a new instance of `OnForkChoiceUpdated` if the forkchoice update failed because the
     /// given state is considered invalid
-    pub(crate) fn invalid_state() -> Self {
+    pub fn invalid_state() -> Self {
         Self {
             forkchoice_status: ForkchoiceStatus::Invalid,
             fut: Either::Left(futures::future::ready(Err(ForkchoiceUpdateError::InvalidState))),
@@ -75,7 +75,7 @@ impl OnForkChoiceUpdated {
 
     /// Creates a new instance of `OnForkChoiceUpdated` if the forkchoice update was successful but
     /// payload attributes were invalid.
-    pub(crate) fn invalid_payload_attributes() -> Self {
+    pub fn invalid_payload_attributes() -> Self {
         Self {
             // This is valid because this is only reachable if the state and payload is valid
             forkchoice_status: ForkchoiceStatus::Valid,
@@ -86,7 +86,7 @@ impl OnForkChoiceUpdated {
     }
 
     /// If the forkchoice update was successful and no payload attributes were provided, this method
-    pub(crate) const fn updated_with_pending_payload_id(
+    pub const fn updated_with_pending_payload_id(
         payload_status: PayloadStatus,
         pending_payload_id: oneshot::Receiver<Result<PayloadId, PayloadBuilderError>>,
     ) -> Self {

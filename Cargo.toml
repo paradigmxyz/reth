@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 rust-version = "1.79"
 license = "MIT OR Apache-2.0"
@@ -402,6 +402,7 @@ alloy-rpc-types-txpool = { version = "0.1", default-features = false }
 alloy-serde = { version = "0.1", default-features = false }
 alloy-rpc-types-engine = { version = "0.1", default-features = false }
 alloy-rpc-types-eth = { version = "0.1", default-features = false }
+alloy-rpc-types-mev = { version = "0.1", default-features = false }
 alloy-rpc-types-trace = { version = "0.1", default-features = false }
 alloy-genesis = { version = "0.1", default-features = false }
 alloy-node-bindings = { version = "0.1", default-features = false }

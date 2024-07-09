@@ -1,19 +1,20 @@
 //! Main `stage` command
 //!
 //! Stage debugging tool
-use crate::{
-    args::{NetworkArgs, StageEnum},
-    macros::block_executor,
-    prometheus_exporter,
-};
+use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
+use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
+use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
+use reth_node_core::{
+    args::{NetworkArgs, StageEnum},
+    prometheus_exporter,
+};
 use reth_provider::{
     ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
     StaticFileWriter,
@@ -83,7 +84,11 @@ pub struct Command {
 
 impl Command {
     /// Execute `stage` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute<E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
+    where
+        E: BlockExecutorProvider,
+        F: FnOnce(Arc<ChainSpec>) -> E,
+    {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
         let _ = fdlimit::raise_fd_limit();
@@ -163,24 +168,21 @@ impl Command {
                     })),
                     None,
                 ),
-                StageEnum::Execution => {
-                    let executor = block_executor!(provider_factory.chain_spec());
-                    (
-                        Box::new(ExecutionStage::new(
-                            executor,
-                            ExecutionStageThresholds {
-                                max_blocks: Some(batch_size),
-                                max_changes: None,
-                                max_cumulative_gas: None,
-                                max_duration: None,
-                            },
-                            config.stages.merkle.clean_threshold,
-                            prune_modes,
-                            ExExManagerHandle::empty(),
-                        )),
-                        None,
-                    )
-                }
+                StageEnum::Execution => (
+                    Box::new(ExecutionStage::new(
+                        executor(provider_factory.chain_spec()),
+                        ExecutionStageThresholds {
+                            max_blocks: Some(batch_size),
+                            max_changes: None,
+                            max_cumulative_gas: None,
+                            max_duration: None,
+                        },
+                        config.stages.merkle.clean_threshold,
+                        prune_modes,
+                        ExExManagerHandle::empty(),
+                    )),
+                    None,
+                ),
                 StageEnum::TxLookup => (
                     Box::new(TransactionLookupStage::new(
                         TransactionLookupConfig { chunk_size: batch_size },
