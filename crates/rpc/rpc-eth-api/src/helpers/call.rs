@@ -1,7 +1,6 @@
 //! Loads a pending block from database. Helper trait for `eth_` transaction, call and trace RPC
 //! methods.
 
-use alloy_eips::eip7702::Authorization;
 use futures::Future;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::{
@@ -808,7 +807,7 @@ pub trait Call: LoadState + SpawnBlocking {
             chain_id,
             blob_versioned_hashes,
             max_fee_per_blob_gas,
-            authorization_list,
+            // authorization_list,
             ..
         } = request;
 
@@ -841,28 +840,8 @@ pub trait Call: LoadState + SpawnBlocking {
             blob_hashes: blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas,
             // EIP-7702 fields
-            authorization_list: authorization_list
-                .map(|list| {
-                    revm_primitives::eip7702::AuthorizationList::Signed(
-                        list.0
-                            .into_iter()
-                            .map(|a| Authorization {
-                                chain_id: a.chain_id,
-                                address: a.address,
-                                nonce: a.nonce,
-                            }
-                            // TODO
-                //         .into_signed(
-                // Signature { y_parity: a.y_parity,
-                //         r: a.r,
-                //         s: a.s
-                    
-                // })
-                        )
-                            .collect::<Vec<_>>(),
-                    )
-                })
-                .unwrap_or_default(),
+            authorization_list: None,
+            // authorization_list: TODO
             #[cfg(feature = "optimism")]
             optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
         };
