@@ -1,13 +1,20 @@
-use std::{marker::PhantomData, mem, pin::Pin};
+use std::{marker::PhantomData, mem, pin::Pin, sync::Arc};
 
 use auto_impl::auto_impl;
 use derive_more::Deref;
 use futures::Future;
 use reth_beacon_consensus::FullBlockchainTreeEngine;
+use reth_blockchain_tree::BlockchainTreeConfig;
+use reth_chainspec::Head;
+use reth_consensus::Consensus;
 use reth_network_p2p::{headers::client::HeadersClient, BodiesClient};
 use reth_node_api::{
-    EngineComponent, FullNodeComponents, FullNodeComponentsExt, PipelineComponent, RpcComponent,
+    EngineComponent, FullNodeComponents, FullNodeComponentsExt, FullNodeTypes, PipelineComponent,
+    RpcComponent,
 };
+use reth_provider::ProviderFactory;
+use reth_stages::MetricEvent;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{
     common::{Attached, InitializedComponents, LaunchContextWith, WithConfigs},
@@ -18,7 +25,13 @@ use crate::{
 
 /// Type alias for extension component build context, holds the initialized core components.
 pub type ExtBuilderContext<'a, Node: FullNodeComponentsExt> =
-    LaunchContextWith<Attached<WithConfigs, &'a mut Box<dyn InitializedComponentsExt<Node>>>>;
+    LaunchContextWith<Attached<WithConfigs, &'a mut DynInitializedComponentsExt<Node>>>;
+
+pub type DynInitializedComponentsExt<N: FullNodeComponentsExt> =
+    Box<dyn InitializedComponentsExt<Node = N, Core = DynInitializedComponents<N>>>;
+
+pub type DynInitializedComponents<N: FullNodeComponentsExt> =
+    Box<dyn InitializedComponents<Node = N::Core, BlockchainTree = N::Tree>>;
 
 /// A type that knows how to build the transaction pool.
 pub trait NodeComponentsBuilderExt: Send {
@@ -30,7 +43,7 @@ pub trait NodeComponentsBuilderExt: Send {
         stage: Box<
             dyn StageExtComponentsBuild<
                 Self::Output,
-                Components = Box<dyn InitializedComponentsExt<Self::Output>>,
+                Components = DynInitializedComponentsExt<Self::Output>,
             >,
         >,
     ) -> Pin<Box<dyn Future<Output = eyre::Result<Self::Output>> + Send>>;
@@ -53,7 +66,7 @@ where
         mut stage: Box<
             dyn StageExtComponentsBuild<
                 Self::Output,
-                Components = Box<dyn InitializedComponentsExt<Self::Output>>,
+                Components = DynInitializedComponentsExt<Self::Output>,
             >,
         >,
     ) -> Pin<Box<dyn Future<Output = eyre::Result<Self::Output>> + Send>> {
@@ -76,7 +89,7 @@ where
 /// Staging environment for building extension components. Allows to control when components are
 /// built, w.r.t. their inter-dependencies.
 pub trait StageExtComponentsBuild<N: FullNodeComponentsExt>: Send {
-    type Components: InitializedComponentsExt<N> + Sized + 'static;
+    type Components: InitializedComponentsExt<Node = N> + Sized + 'static;
 
     fn components(&self) -> &Self::Components;
 
@@ -99,7 +112,7 @@ pub trait StageExtComponentsBuild<N: FullNodeComponentsExt>: Send {
     fn rpc_builder(&mut self, b: Box<dyn OnComponentsInitializedHook<N>>);
 
     /// Sets the hook that is run to configure the rpc modules.
-    fn extend_rpc_modules(&mut self, hook: Box<dyn ExtendRpcModules<N>>) {
+    fn extend_rpc_modules(&mut self, hook: Box<dyn ExtendRpcModules<N::Core>>) {
         _ = self
             .components_mut()
             .rpc_add_ons_mut()
@@ -108,7 +121,7 @@ pub trait StageExtComponentsBuild<N: FullNodeComponentsExt>: Send {
     }
 
     /// Sets the hook that is run once the rpc server is started.
-    fn on_rpc_started(&mut self, hook: Box<dyn OnRpcStarted<N>>) {
+    fn on_rpc_started(&mut self, hook: Box<dyn OnRpcStarted<N::Core>>) {
         _ = self
             .components_mut()
             .rpc_add_ons_mut()
@@ -130,12 +143,12 @@ pub trait StageExtComponentsBuild<N: FullNodeComponentsExt>: Send {
 pub struct ExtComponentsBuildStage<N: FullNodeComponentsExt> {
     pub core_ctx: LaunchContextWith<Attached<WithConfigs, ()>>,
     #[deref]
-    pub components: Box<dyn InitializedComponentsExt<N>>,
+    pub components: DynInitializedComponentsExt<N>,
     pub ctx_builder: Box<dyn ExtComponentCtxBuilder<N>>,
     pub pipeline_builder: Option<Box<dyn OnComponentsInitializedHook<N>>>,
     pub engine_builder: Option<Box<dyn OnComponentsInitializedHook<N>>>,
     pub rpc_builder: Option<Box<dyn OnComponentsInitializedHook<N>>>,
-    pub rpc_add_ons: Option<RpcHooks<N>>,
+    pub rpc_add_ons: Option<RpcHooks<N::Core>>,
 }
 
 impl<N: FullNodeComponentsExt> ExtComponentsBuildStage<N> {
@@ -145,8 +158,8 @@ impl<N: FullNodeComponentsExt> ExtComponentsBuildStage<N> {
         components: C,
     ) -> Self
     where
-        C: InitializedComponentsExt<N> + 'static,
         B: ExtComponentCtxBuilder<N> + 'static,
+        C: InitializedComponentsExt<Node = N, Core = DynInitializedComponents<N>> + 'static,
     {
         Self {
             core_ctx,
@@ -163,17 +176,13 @@ impl<N: FullNodeComponentsExt> ExtComponentsBuildStage<N> {
 impl<N> StageExtComponentsBuild<N> for ExtComponentsBuildStage<N>
 where
     N: FullNodeComponentsExt + 'static,
-    Box<(dyn InitializedComponentsExt<N> + 'static)>:
-        InitializedComponents + InitializedComponentsExt<N>,
     N::Core: FullNodeComponents,
     N::Tree: FullBlockchainTreeEngine + Clone + 'static,
     N::Pipeline: PipelineComponent + Send + Sync + Unpin + Clone + 'static,
     N::Engine: EngineComponent<N::Core> + 'static,
     N::Rpc: RpcComponent<N::Core> + 'static,
-    Box<dyn ExtendRpcModules<N>>: ExtendRpcModules<N>,
-    Box<dyn OnRpcStarted<N>>: OnRpcStarted<N>,
 {
-    type Components = Box<dyn InitializedComponentsExt<N>>;
+    type Components = DynInitializedComponentsExt<N>;
 
     fn components(&self) -> &Self::Components {
         &self.components
@@ -229,7 +238,7 @@ pub trait ExtComponentCtxBuilder<N: FullNodeComponentsExt>: Send {
     fn build_ctx<'a>(
         &self,
         core_ctx: LaunchContextWith<Attached<WithConfigs, ()>>,
-        components: &'a mut Box<dyn InitializedComponentsExt<N>>,
+        components: &'a mut DynInitializedComponentsExt<N>,
     ) -> ExtBuilderContext<'a, N>;
 }
 
@@ -238,14 +247,14 @@ where
     N: FullNodeComponentsExt,
     F: Fn(
             LaunchContextWith<Attached<WithConfigs, ()>>,
-            &mut Box<dyn InitializedComponentsExt<N>>,
+            &mut DynInitializedComponentsExt<N>,
         ) -> ExtBuilderContext<'_, N>
         + Send,
 {
     fn build_ctx<'a>(
         &self,
         core_ctx: LaunchContextWith<Attached<WithConfigs, ()>>,
-        components: &'a mut Box<dyn InitializedComponentsExt<N>>,
+        components: &'a mut DynInitializedComponentsExt<N>,
     ) -> ExtBuilderContext<'a, N> {
         self(core_ctx, components)
     }
@@ -253,7 +262,7 @@ where
 
 pub fn build_ctx<'a, N: FullNodeComponentsExt>(
     core_ctx: LaunchContextWith<Attached<WithConfigs, ()>>,
-    components: &'a mut Box<dyn InitializedComponentsExt<N>>,
+    components: &'a mut DynInitializedComponentsExt<N>,
 ) -> ExtBuilderContext<'a, N> {
     ExtBuilderContext {
         inner: core_ctx.inner.clone(),
@@ -263,9 +272,14 @@ pub fn build_ctx<'a, N: FullNodeComponentsExt>(
 
 /// Builds extensions components.
 #[auto_impl(&mut, Box)]
-pub trait InitializedComponentsExt<N: FullNodeComponentsExt>:
-    InitializedComponents<Node = N, BlockchainTree = N::Tree>
-{
+pub trait InitializedComponentsExt: Send {
+    type Node: FullNodeComponentsExt;
+    type Core: InitializedComponents<
+        Node = <Self::Node as FullNodeComponentsExt>::Core,
+        BlockchainTree = <Self::Node as FullNodeComponentsExt>::Tree,
+    >;
+
+    fn core(&self) -> &Self::Core;
     fn pipeline(&self) -> Option<&<Self::Node as FullNodeComponentsExt>::Pipeline>;
     fn engine(&self) -> Option<&<Self::Node as FullNodeComponentsExt>::Engine>;
     fn rpc(&self) -> Option<&<Self::Node as FullNodeComponentsExt>::Rpc>;
@@ -273,27 +287,63 @@ pub trait InitializedComponentsExt<N: FullNodeComponentsExt>:
     fn pipeline_mut(&mut self) -> Option<&mut <Self::Node as FullNodeComponentsExt>::Pipeline>;
     fn engine_mut(&mut self) -> Option<&mut <Self::Node as FullNodeComponentsExt>::Engine>;
     fn rpc_mut(&mut self) -> Option<&mut <Self::Node as FullNodeComponentsExt>::Rpc>;
-    fn rpc_add_ons_mut(&self) -> Option<&mut RpcHooks<N>>;
+    fn rpc_add_ons_mut(
+        &mut self,
+    ) -> Option<&mut RpcHooks<<Self::Node as FullNodeComponentsExt>::Core>>;
+}
 
-    fn take_rpc_hooks(&mut self) -> RpcHooks<N>;
+impl<T> InitializedComponents for T
+where
+    T: InitializedComponentsExt,
+{
+    type Node = <T::Core as InitializedComponents>::Node;
+    type BlockchainTree = <T::Core as InitializedComponents>::BlockchainTree;
+
+    fn head(&self) -> Head {
+        self.core().head()
+    }
+
+    fn provider_factory(&self) -> &ProviderFactory<<Self::Node as FullNodeTypes>::DB> {
+        self.core().provider_factory()
+    }
+
+    fn blockchain_db(&self) -> &Self::BlockchainTree {
+        self.core().blockchain_db()
+    }
+
+    fn consensus(&self) -> Arc<dyn Consensus> {
+        self.core().consensus()
+    }
+
+    fn sync_metrics_tx(&self) -> UnboundedSender<MetricEvent> {
+        self.core().sync_metrics_tx()
+    }
+
+    fn tree_config(&self) -> &BlockchainTreeConfig {
+        self.core().tree_config()
+    }
+
+    fn node(&self) -> &Self::Node {
+        self.core().node()
+    }
 }
 
 #[allow(missing_debug_implementations)]
 #[derive(Deref)]
 pub struct WithComponentsExt<N: FullNodeComponentsExt> {
     #[deref]
-    pub core: Box<dyn InitializedComponents<Node = N, BlockchainTree = N::Tree>>,
+    pub core: DynInitializedComponents<N>,
     pub pipeline: Option<N::Pipeline>,
     pub engine: Option<N::Engine>,
     pub engine_shutdown_rx: Option<<N::Engine as EngineComponent<N::Core>>::ShutdownRx>,
     pub rpc: Option<N::Rpc>,
-    pub rpc_add_ons: Option<RpcHooks<N>>,
+    pub rpc_add_ons: Option<RpcHooks<N::Core>>,
 }
 
 impl<N: FullNodeComponentsExt> WithComponentsExt<N> {
     pub fn new<C>(core: C) -> Self
     where
-        C: InitializedComponents<Node = N, BlockchainTree = N::Tree> + 'static,
+        C: InitializedComponents<Node = N::Core, BlockchainTree = N::Tree> + 'static,
     {
         Self {
             core: Box::new(core),
@@ -306,7 +356,14 @@ impl<N: FullNodeComponentsExt> WithComponentsExt<N> {
     }
 }
 
-impl<N: FullNodeComponentsExt> InitializedComponentsExt<N> for WithComponentsExt<N> {
+impl<N: FullNodeComponentsExt> InitializedComponentsExt for WithComponentsExt<N> {
+    type Node = N;
+    type Core = DynInitializedComponents<N>;
+
+    fn core(&self) -> &Self::Core {
+        &self.core
+    }
+
     fn pipeline(&self) -> Option<&N::Pipeline> {
         self.pipeline.as_ref()
     }
@@ -326,11 +383,7 @@ impl<N: FullNodeComponentsExt> InitializedComponentsExt<N> for WithComponentsExt
     fn rpc_mut(&mut self) -> Option<&mut N::Rpc> {
         self.rpc.as_mut()
     }
-    fn rpc_add_ons_mut(&self) -> Option<&RpcHooks<N>> {
-        self.rpc_add_ons.as_ref()
-    }
-
-    fn take_rpc_hooks(&mut self) -> RpcHooks<N> {
-        self.rpc_add_ons.take().unwrap_or(RpcHooks::new())
+    fn rpc_add_ons_mut(&mut self) -> Option<&mut RpcHooks<N::Core>> {
+        self.rpc_add_ons.as_mut()
     }
 }

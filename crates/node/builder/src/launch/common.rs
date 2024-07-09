@@ -43,14 +43,13 @@ use tokio::sync::{
 
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
-    ext::{self, ExtComponentsBuildStage, InitializedComponentsExt, WithComponentsExt},
+    ext::{
+        self, DynInitializedComponentsExt, ExtComponentsBuildStage, InitializedComponentsExt,
+        WithComponentsExt,
+    },
     hooks::OnComponentsInitializedHook,
     BuilderContext, NodeAdapter, NodeAdapterExt, StageExtComponentsBuild,
 };
-
-/// Type alias for extension component build context, holds the initialized core components.
-pub type ExtBuilderContext<'a, Node: FullNodeComponentsExt> =
-    LaunchContextWith<Attached<WithConfigs, &'a mut Box<dyn InitializedComponentsExt<Node>>>>;
 
 /// Reusable setup for launching a node.
 ///
@@ -251,6 +250,7 @@ impl<L, R> LaunchContextWith<Attached<L, R>> {
         &mut self.attachment.right
     }
 }
+
 impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     /// Adjust certain settings in the config to make sure they are set correctly
     ///
@@ -620,10 +620,8 @@ where
         Box<
             dyn StageExtComponentsBuild<
                 NodeAdapterExt<NodeAdapter<T, CB::Components>, BT, C>,
-                Components = Box<
-                    dyn InitializedComponentsExt<
-                        NodeAdapterExt<NodeAdapter<T, CB::Components>, BT, C>,
-                    >,
+                Components = DynInitializedComponentsExt<
+                    NodeAdapterExt<NodeAdapter<T, CB::Components>, BT, C>,
                 >,
             >,
         >,
@@ -682,7 +680,7 @@ where
             },
             blockchain_db,
             tree_config: self.right().tree_config,
-            node_adapter: NodeAdapterExt::new(node_adapter),
+            node_adapter,
             head,
             consensus,
         };
@@ -690,11 +688,15 @@ where
         let launch_ctx =
             LaunchContextWith { inner: self.inner, attachment: self.attachment.clone_left(()) };
 
-        let ext_components_staging = ExtComponentsBuildStage::new(
+        let mut ext_components_staging = ExtComponentsBuildStage::new(
             launch_ctx,
             ext::build_ctx,
             WithComponentsExt::new(components_container),
         );
+
+        if let Some(rpc_builder) = on_components_initialized.into_iter().next() {
+            ext_components_staging.rpc_builder(rpc_builder)
+        }
 
         Ok(Box::new(ext_components_staging))
     }
@@ -847,7 +849,7 @@ pub struct WithMeteredProviders<DB, T> {
 
 pub trait InitializedComponents: Send {
     type Node: FullNodeComponents;
-    type BlockchainTree;
+    type BlockchainTree: Send;
 
     /// Returns the current head block.
     fn head(&self) -> Head;
@@ -869,43 +871,6 @@ pub trait InitializedComponents: Send {
 
     /// Returns the core components.
     fn node(&self) -> &Self::Node;
-}
-
-impl<T> InitializedComponents for T
-where
-    T: ops::Deref + Send,
-    <T as ops::Deref>::Target: InitializedComponents + Send,
-{
-    type Node = <<T as ops::Deref>::Target as InitializedComponents>::Node;
-    type BlockchainTree = <<T as ops::Deref>::Target as InitializedComponents>::BlockchainTree;
-
-    fn head(&self) -> Head {
-        self.deref().head()
-    }
-
-    fn provider_factory(&self) -> &ProviderFactory<<Self::Node as FullNodeTypes>::DB> {
-        self.deref().provider_factory()
-    }
-
-    fn blockchain_db(&self) -> &Self::BlockchainTree {
-        self.deref().blockchain_db()
-    }
-
-    fn consensus(&self) -> Arc<dyn Consensus> {
-        self.deref().consensus()
-    }
-
-    fn sync_metrics_tx(&self) -> UnboundedSender<MetricEvent> {
-        self.deref().sync_metrics_tx()
-    }
-
-    fn tree_config(&self) -> &BlockchainTreeConfig {
-        self.deref().tree_config()
-    }
-
-    fn node(&self) -> &Self::Node {
-        self.deref().node()
-    }
 }
 
 /// Helper container to bundle the metered providers container and [`NodeAdapter`].

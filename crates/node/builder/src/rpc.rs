@@ -377,7 +377,7 @@ where
                 engine_api,
                 ctx.node_config(),
                 jwt_secret,
-                ctx.right().take_rpc_hooks(),
+                ctx.right().rpc_add_ons_mut().take().unwrap_or(RpcHooks::new()),
             )
             .await?;
 

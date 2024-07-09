@@ -170,7 +170,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 /// An intermediary type for `FullNodeComponentsExt`, that isn't `Clone`.
 pub trait FullNodeComponentsExt: FullNodeTypes + Clone + 'static {
     type Core: FullNodeComponents;
-    type Tree;
+    type Tree: Send;
     type Pipeline: PipelineComponent;
     type Engine: EngineComponent<Self::Core> + 'static;
     type Rpc: RpcComponent<Self::Core> + 'static;
