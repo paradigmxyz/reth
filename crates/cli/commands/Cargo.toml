@@ -25,6 +25,7 @@ reth-exex.workspace = true
 reth-fs-util.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
+reth-node-builder.workspace = true
 reth-node-core.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
@@ -66,6 +67,9 @@ metrics-process.workspace = true
 proptest = { workspace = true, optional = true }
 arbitrary = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
+
+[dev-dependencies]
+reth-discv4.workspace = true
 
 [features]
 default = []
