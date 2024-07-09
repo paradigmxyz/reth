@@ -1,9 +1,9 @@
 //! Common receipts pruning logic shared between user and static file pruning segments.
 //!
-//! - [`crate::segments::user::Receipts`] is responsible for pruning according to the
-//!   user-configured settings
-//! - [`crate::segments::static_file::Receipts`] is responsible for pruning after static file
-//!   producer has finished
+//! - [`crate::segments::user::Receipts`] is responsible for pruning receipts according to the
+//!   user-configured settings (for example, on a full node or with a custom prune config)
+//! - [`crate::segments::static_file::Receipts`] is responsible for pruning receipts on an archive
+//!   node after static file producer has finished
 
 use crate::{
     segments::{PruneInput, PruneOutput, PruneOutputCheckpoint},
