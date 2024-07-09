@@ -960,6 +960,53 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         }
     }
 
+    /// Remove requested block transactions, without returning them
+    pub(crate) fn remove_block_transaction_range(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> ProviderResult<()> {
+        // Raad range of block bodies to get all transactions id's of this range.
+        let block_bodies = self.take::<tables::BlockBodyIndices>(range)?;
+
+        if block_bodies.is_empty() {
+            return Ok(())
+        }
+
+        // Compute the first and last tx ID in the range
+        let first_transaction = block_bodies.first().expect("If we have headers").1.first_tx_num();
+        let last_transaction = block_bodies.last().expect("Not empty").1.last_tx_num();
+
+        // If this is the case then all of the blocks in the range are empty
+        if last_transaction < first_transaction {
+            return Ok(())
+        }
+
+        // Get transactions and senders
+        let transactions = self
+            .take::<tables::Transactions>(first_transaction..=last_transaction)?
+            .into_iter()
+            .map(|(id, tx)| (id, tx.into()))
+            .collect::<Vec<(u64, TransactionSigned)>>();
+
+        self.remove::<tables::TransactionSenders>(first_transaction..=last_transaction)?;
+
+        // Remove TransactionHashNumbers
+        let mut tx_hash_cursor = self.tx.cursor_write::<tables::TransactionHashNumbers>()?;
+        for (_, tx) in &transactions {
+            if tx_hash_cursor.seek_exact(tx.hash())?.is_some() {
+                tx_hash_cursor.delete_current()?;
+            }
+        }
+
+        // Remove TransactionBlocks index if there are transaction present
+        if !transactions.is_empty() {
+            let tx_id_range = transactions.first().unwrap().0..=transactions.last().unwrap().0;
+            self.remove::<tables::TransactionBlocks>(tx_id_range)?;
+        }
+
+        Ok(())
+    }
+
     /// Get requested blocks transaction with senders, also removing them from the database
     pub(crate) fn take_block_transaction_range(
         &self,
