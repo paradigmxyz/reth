@@ -27,6 +27,7 @@ reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
 reth-node-builder.workspace = true
 reth-node-core.workspace = true
+reth-node-events.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
@@ -35,8 +36,9 @@ reth-static-file-types.workspace = true
 reth-static-file.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 
-tokio.workspace = true
 itertools.workspace = true
+futures.workspace = true
+tokio.workspace = true
 
 # misc
 ahash = "0.8"
