@@ -820,8 +820,8 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         Ok(items)
     }
 
-    /// Get requested blocks transaction with signer
-    pub(crate) fn get_take_block_transaction_range<const TAKE: bool>(
+    /// Get requested blocks transaction with senders
+    pub(crate) fn get_block_transaction_range(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> ProviderResult<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>> {
@@ -843,14 +843,13 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
 
         // Get transactions and senders
         let transactions = self
-            .get_or_take::<tables::Transactions, TAKE>(first_transaction..=last_transaction)?
+            .get::<tables::Transactions>(first_transaction..=last_transaction)?
             .into_iter()
             .map(|(id, tx)| (id, tx.into()))
             .collect::<Vec<(u64, TransactionSigned)>>();
 
-        let mut senders = self.get_or_take::<tables::TransactionSenders, TAKE>(
-            first_transaction..=last_transaction,
-        )?;
+        let mut senders =
+            self.get::<tables::TransactionSenders>(first_transaction..=last_transaction)?;
 
         // Recover senders manually if not found in db
         // NOTE: Transactions are always guaranteed to be in the database whereas
@@ -917,22 +916,158 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
             );
         }
 
+        // Merge transaction into blocks
+        let mut block_tx = Vec::with_capacity(block_bodies.len());
+        let mut senders = senders.into_iter();
+        let mut transactions = transactions.into_iter();
+        for (block_number, block_body) in block_bodies {
+            let mut one_block_tx = Vec::with_capacity(block_body.tx_count as usize);
+            for _ in block_body.tx_num_range() {
+                let tx = transactions.next();
+                let sender = senders.next();
+
+                let recovered = match (tx, sender) {
+                    (Some((tx_id, tx)), Some((sender_tx_id, sender))) => {
+                        if tx_id != sender_tx_id {
+                            Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
+                        } else {
+                            Ok(TransactionSignedEcRecovered::from_signed_transaction(tx, sender))
+                        }
+                    }
+                    (Some((tx_id, _)), _) | (_, Some((tx_id, _))) => {
+                        Err(ProviderError::MismatchOfTransactionAndSenderId { tx_id })
+                    }
+                    (None, None) => Err(ProviderError::BlockBodyTransactionCount),
+                }?;
+                one_block_tx.push(recovered)
+            }
+            block_tx.push((block_number, one_block_tx));
+        }
+
+        Ok(block_tx)
+    }
+
+    /// Get requested blocks transaction with senders, also removing them from the database if TAKE
+    /// is true
+    pub(crate) fn get_take_block_transaction_range<const TAKE: bool>(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> ProviderResult<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>> {
         if TAKE {
-            // Remove TransactionHashNumbers
-            let mut tx_hash_cursor = self.tx.cursor_write::<tables::TransactionHashNumbers>()?;
-            for (_, tx) in &transactions {
-                if tx_hash_cursor.seek_exact(tx.hash())?.is_some() {
-                    tx_hash_cursor.delete_current()?;
+            self.get_block_transaction_range(range)
+        } else {
+            self.take_block_transaction_range(range)
+        }
+    }
+
+    /// Get requested blocks transaction with senders, also removing them from the database
+    pub(crate) fn take_block_transaction_range(
+        &self,
+        range: impl RangeBounds<BlockNumber> + Clone,
+    ) -> ProviderResult<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>> {
+        // Raad range of block bodies to get all transactions id's of this range.
+        let block_bodies = self.get::<tables::BlockBodyIndices>(range)?;
+
+        if block_bodies.is_empty() {
+            return Ok(Vec::new())
+        }
+
+        // Compute the first and last tx ID in the range
+        let first_transaction = block_bodies.first().expect("If we have headers").1.first_tx_num();
+        let last_transaction = block_bodies.last().expect("Not empty").1.last_tx_num();
+
+        // If this is the case then all of the blocks in the range are empty
+        if last_transaction < first_transaction {
+            return Ok(block_bodies.into_iter().map(|(n, _)| (n, Vec::new())).collect())
+        }
+
+        // Get transactions and senders
+        let transactions = self
+            .take::<tables::Transactions>(first_transaction..=last_transaction)?
+            .into_iter()
+            .map(|(id, tx)| (id, tx.into()))
+            .collect::<Vec<(u64, TransactionSigned)>>();
+
+        let mut senders =
+            self.take::<tables::TransactionSenders>(first_transaction..=last_transaction)?;
+
+        // Recover senders manually if not found in db
+        // NOTE: Transactions are always guaranteed to be in the database whereas
+        // senders might be pruned.
+        if senders.len() != transactions.len() {
+            if senders.len() > transactions.len() {
+                error!(target: "providers::db", senders=%senders.len(), transactions=%transactions.len(),
+                    first_tx=%first_transaction, last_tx=%last_transaction,
+                    "unexpected senders and transactions mismatch");
+            }
+            let missing = transactions.len().saturating_sub(senders.len());
+            senders.reserve(missing);
+            // Find all missing senders, their corresponding tx numbers and indexes to the original
+            // `senders` vector at which the recovered senders will be inserted.
+            let mut missing_senders = Vec::with_capacity(missing);
+            {
+                let mut senders = senders.iter().peekable();
+
+                // `transactions` contain all entries. `senders` contain _some_ of the senders for
+                // these transactions. Both are sorted and indexed by `TxNumber`.
+                //
+                // The general idea is to iterate on both `transactions` and `senders`, and advance
+                // the `senders` iteration only if it matches the current `transactions` entry's
+                // `TxNumber`. Otherwise, add the transaction to the list of missing senders.
+                for (i, (tx_number, transaction)) in transactions.iter().enumerate() {
+                    if let Some((sender_tx_number, _)) = senders.peek() {
+                        if sender_tx_number == tx_number {
+                            // If current sender's `TxNumber` matches current transaction's
+                            // `TxNumber`, advance the senders iterator.
+                            senders.next();
+                        } else {
+                            // If current sender's `TxNumber` doesn't match current transaction's
+                            // `TxNumber`, add it to missing senders.
+                            missing_senders.push((i, tx_number, transaction));
+                        }
+                    } else {
+                        // If there's no more senders left, but we're still iterating over
+                        // transactions, add them to missing senders
+                        missing_senders.push((i, tx_number, transaction));
+                    }
                 }
             }
 
-            // Remove TransactionBlocks index if there are transaction present
-            if !transactions.is_empty() {
-                let tx_id_range = transactions.first().unwrap().0..=transactions.last().unwrap().0;
-                // NOTE: we are in this branch because `TAKE` is true, so we can use the `remove`
-                // method
-                self.remove::<tables::TransactionBlocks>(tx_id_range)?;
+            // Recover senders
+            let recovered_senders = TransactionSigned::recover_signers(
+                missing_senders.iter().map(|(_, _, tx)| *tx).collect::<Vec<_>>(),
+                missing_senders.len(),
+            )
+            .ok_or(ProviderError::SenderRecoveryError)?;
+
+            // Insert recovered senders along with tx numbers at the corresponding indexes to the
+            // original `senders` vector
+            for ((i, tx_number, _), sender) in missing_senders.into_iter().zip(recovered_senders) {
+                // Insert will put recovered senders at necessary positions and shift the rest
+                senders.insert(i, (*tx_number, sender));
             }
+
+            // Debug assertions which are triggered during the test to ensure that all senders are
+            // present and sorted
+            debug_assert_eq!(senders.len(), transactions.len(), "missing one or more senders");
+            debug_assert!(
+                senders.iter().tuple_windows().all(|(a, b)| a.0 < b.0),
+                "senders not sorted"
+            );
+        }
+
+        // Remove TransactionHashNumbers
+        let mut tx_hash_cursor = self.tx.cursor_write::<tables::TransactionHashNumbers>()?;
+        for (_, tx) in &transactions {
+            if tx_hash_cursor.seek_exact(tx.hash())?.is_some() {
+                tx_hash_cursor.delete_current()?;
+            }
+        }
+
+        // Remove TransactionBlocks index if there are transaction present
+        if !transactions.is_empty() {
+            let tx_id_range = transactions.first().unwrap().0..=transactions.last().unwrap().0;
+            self.remove::<tables::TransactionBlocks>(tx_id_range)?;
         }
 
         // Merge transaction into blocks
