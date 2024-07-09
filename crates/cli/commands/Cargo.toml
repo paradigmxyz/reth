@@ -36,12 +36,21 @@ reth-trie = { workspace = true, features = ["metrics"] }
 
 tokio.workspace = true
 itertools.workspace = true
+enr.workspace = true
+
+# crypto
+secp256k1 = { workspace = true, default-features = false, features = [
+    "global-context",
+    "recovery",
+    "serde",
+] }
 
 # misc
 ahash = "0.8"
 human_bytes = "0.4.1"
 eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
+chrono = { workspace = true, features = ["serde"] }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
