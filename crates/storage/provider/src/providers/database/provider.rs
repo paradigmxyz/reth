@@ -1065,7 +1065,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     /// * [`TransactionSenders`](tables::TransactionSenders)
     /// * [`TransactionHashNumbers`](tables::TransactionHashNumbers)
     /// * [`TransactionBlocks`](tables::TransactionBlocks)
-    pub(crate) fn remove_block_transaction_range(
+    pub fn remove_block_transaction_range(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> ProviderResult<()> {
@@ -1120,7 +1120,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     /// * [`TransactionSenders`](tables::TransactionSenders)
     /// * [`TransactionHashNumbers`](tables::TransactionHashNumbers)
     /// * [`TransactionBlocks`](tables::TransactionBlocks)
-    pub(crate) fn take_block_transaction_range(
+    pub fn take_block_transaction_range(
         &self,
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> ProviderResult<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>> {
