@@ -10,21 +10,10 @@ use std::{ffi::OsStr, fs, path::PathBuf, sync::Arc};
 /// to a json file, or a json formatted string in-memory. The json needs to be a Genesis struct.
 fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> {
     Ok(match s {
-        #[cfg(not(feature = "optimism"))]
         "mainnet" => MAINNET.clone(),
-        #[cfg(not(feature = "optimism"))]
         "sepolia" => SEPOLIA.clone(),
-        #[cfg(not(feature = "optimism"))]
         "holesky" => HOLESKY.clone(),
         "dev" => DEV.clone(),
-        #[cfg(feature = "optimism")]
-        "optimism" => OP_MAINNET.clone(),
-        #[cfg(feature = "optimism")]
-        "optimism_sepolia" | "optimism-sepolia" => OP_SEPOLIA.clone(),
-        #[cfg(feature = "optimism")]
-        "base" => BASE_MAINNET.clone(),
-        #[cfg(feature = "optimism")]
-        "base_sepolia" | "base-sepolia" => BASE_SEPOLIA.clone(),
         _ => {
             // try to read json from path first
             let raw = match fs::read_to_string(PathBuf::from(shellexpand::full(s)?.into_owned())) {
