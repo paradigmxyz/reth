@@ -12,14 +12,14 @@ use crate::{
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{
     constants::{eip4844::MAX_BLOBS_PER_BLOCK, ETHEREUM_BLOCK_GAS_LIMIT},
-    Address, GotExpected, InvalidTransactionError, SealedBlock, TxKind, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID, U256,
+    GotExpected, InvalidTransactionError, SealedBlock, TxKind, EIP1559_TX_TYPE_ID,
+    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm::{
     interpreter::gas::validate_initial_tx_gas,
-    primitives::{EnvKzgSettings, SpecId},
+    primitives::{AccessListItem, EnvKzgSettings, SpecId},
 };
 use std::{
     marker::PhantomData,
@@ -712,12 +712,11 @@ pub fn ensure_intrinsic_gas<T: PoolTransaction>(
     transaction: &T,
     is_shanghai: bool,
 ) -> Result<(), InvalidPoolTransactionError> {
-    let access_list = transaction.access_list().map(|list| list.flattened()).unwrap_or_default();
     if transaction.gas_limit() <
         calculate_intrinsic_gas_after_merge(
             transaction.input(),
             &transaction.kind(),
-            &access_list,
+            transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
             is_shanghai,
         )
     {
@@ -734,11 +733,11 @@ pub fn ensure_intrinsic_gas<T: PoolTransaction>(
 pub fn calculate_intrinsic_gas_after_merge(
     input: &[u8],
     kind: &TxKind,
-    access_list: &[(Address, Vec<U256>)],
+    access_list: &[AccessListItem],
     is_shanghai: bool,
 ) -> u64 {
     let spec_id = if is_shanghai { SpecId::SHANGHAI } else { SpecId::MERGE };
-    validate_initial_tx_gas(spec_id, input, kind.is_create(), access_list)
+    validate_initial_tx_gas(spec_id, input, kind.is_create(), access_list, 0)
 }
 
 #[cfg(test)]
