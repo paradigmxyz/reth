@@ -4,7 +4,7 @@
 use futures::Future;
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit};
 
 /// Executes code on a blocking thread.
 pub trait SpawnBlocking: Clone + Send + Sync + 'static {
@@ -17,6 +17,17 @@ pub trait SpawnBlocking: Clone + Send + Sync + 'static {
     ///
     /// Thread pool access in default trait method implementations.
     fn tracing_task_pool(&self) -> &BlockingTaskPool;
+
+    /// See also [`Semaphore::acquire_owned`](`tokio::sync::Semaphore::acquire_owned`).
+    fn acquire_owned(
+        &self,
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send;
+
+    /// See also  [`Semaphore::acquire_many_owned`](`tokio::sync::Semaphore::acquire_many_owned`).
+    fn acquire_many_owned(
+        &self,
+        n: u32,
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send;
 
     /// Executes the future on a new blocking task.
     ///

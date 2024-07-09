@@ -11,7 +11,10 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
-    system_calls::{apply_beacon_root_contract_call, apply_withdrawal_requests_contract_call},
+    system_calls::{
+        apply_beacon_root_contract_call, apply_consolidation_requests_contract_call,
+        apply_withdrawal_requests_contract_call,
+    },
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -223,7 +226,11 @@ where
             let withdrawal_requests =
                 apply_withdrawal_requests_contract_call(&self.evm_config, &mut evm)?;
 
-            [deposit_requests, withdrawal_requests].concat()
+            // Collect all EIP-7251 requests
+            let consolidation_requests =
+                apply_consolidation_requests_contract_call(&self.evm_config, &mut evm)?;
+
+            [deposit_requests, withdrawal_requests, consolidation_requests].concat()
         } else {
             vec![]
         };

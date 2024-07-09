@@ -6,10 +6,10 @@ use reth_chainspec::ChainSpec;
 use reth_consensus_common::validation::validate_block_pre_execution;
 use reth_network_p2p::{
     bodies::client::BodiesClient,
-    headers::client::{HeadersClient, HeadersRequest},
+    headers::client::{HeadersClient, HeadersDirection, HeadersRequest},
     priority::Priority,
 };
-use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedBlock, SealedHeader};
+use reth_primitives::{BlockHashOrNumber, SealedBlock, SealedHeader};
 use reth_rpc_types::engine::{JwtError, JwtSecret};
 use std::{
     env::VarError,

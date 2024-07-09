@@ -87,12 +87,6 @@ toml = { workspace = true, features = ["display"] }
 # metrics
 metrics-process.workspace = true
 
-# test vectors generation
-proptest.workspace = true
-arbitrary.workspace = true
-proptest-arbitrary-interop.workspace = true
-
-
 # async
 tokio = { workspace = true, features = [
     "sync",
@@ -122,9 +116,10 @@ libc = "0.2"
 reth-discv4.workspace = true
 
 
-
 [features]
 default = ["jemalloc"]
+
+dev = ["reth-cli-commands/dev"]
 
 asm-keccak = ["reth-primitives/asm-keccak"]
 

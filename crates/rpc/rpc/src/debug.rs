@@ -6,8 +6,7 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, Withdrawals,
-    B256, U256,
+    Address, Block, BlockId, BlockNumberOrTag, Bytes, TransactionSignedEcRecovered, B256, U256,
 };
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory,
@@ -16,7 +15,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::helpers::{Call, EthApiSpec, EthTransactions, TraceExt};
-use reth_rpc_eth_types::{revm_utils::prepare_call_env, EthApiError, EthResult, StateCacheDb};
+use reth_rpc_eth_types::{EthApiError, EthResult, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     state::EvmOverrides,
@@ -504,7 +503,7 @@ where
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                        let env = prepare_call_env(
+                        let env = this.eth_api().prepare_call_env(
                             cfg.clone(),
                             block_env.clone(),
                             tx,
@@ -674,17 +673,14 @@ where
 
     /// Handler for `debug_getRawBlock`
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
-        let block = self.inner.provider.block_by_id(block_id).to_rpc_result()?;
-
+        let block = self
+            .inner
+            .provider
+            .block_by_id(block_id)
+            .to_rpc_result()?
+            .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
         let mut res = Vec::new();
-        if let Some(mut block) = block {
-            // In RPC withdrawals are always present
-            if block.withdrawals.is_none() {
-                block.withdrawals = Some(Withdrawals::default());
-            }
-            block.encode(&mut res);
-        }
-
+        block.encode(&mut res);
         Ok(res.into())
     }
 

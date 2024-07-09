@@ -1,0 +1,53 @@
+diff --git a/internal/libdocker/builder.go b/internal/libdocker/builder.go
+index 4731c9d..d717f52 100644
+--- a/internal/libdocker/builder.go
++++ b/internal/libdocker/builder.go
+@@ -7,9 +7,7 @@ import (
+ 	"fmt"
+ 	"io"
+ 	"io/fs"
+-	"os"
+ 	"path/filepath"
+-	"strings"
+ 
+ 	"github.com/ethereum/hive/internal/libhive"
+ 	docker "github.com/fsouza/go-dockerclient"
+@@ -53,24 +51,8 @@ func (b *Builder) BuildClientImage(ctx context.Context, client libhive.ClientDes
+ 
+ // BuildSimulatorImage builds a docker image of a simulator.
+ func (b *Builder) BuildSimulatorImage(ctx context.Context, name string) (string, error) {
+-	dir := b.config.Inventory.SimulatorDirectory(name)
+-	buildContextPath := dir
+-	buildDockerfile := "Dockerfile"
+-	// build context dir of simulator can be overridden with "hive_context.txt" file containing the desired build path
+-	if contextPathBytes, err := os.ReadFile(filepath.Join(filepath.FromSlash(dir), "hive_context.txt")); err == nil {
+-		buildContextPath = filepath.Join(dir, strings.TrimSpace(string(contextPathBytes)))
+-		if strings.HasPrefix(buildContextPath, "../") {
+-			return "", fmt.Errorf("cannot access build directory outside of Hive root: %q", buildContextPath)
+-		}
+-		if p, err := filepath.Rel(buildContextPath, filepath.Join(filepath.FromSlash(dir), "Dockerfile")); err != nil {
+-			return "", fmt.Errorf("failed to derive relative simulator Dockerfile path: %v", err)
+-		} else {
+-			buildDockerfile = p
+-		}
+-	}
+ 	tag := fmt.Sprintf("hive/simulators/%s:latest", name)
+-	err := b.buildImage(ctx, buildContextPath, buildDockerfile, tag, nil)
+-	return tag, err
++	return tag, nil
+ }
+ 
+ // BuildImage creates a container by archiving the given file system,
+diff --git a/internal/libdocker/proxy.go b/internal/libdocker/proxy.go
+index a53e5af..0bb2ea9 100644
+--- a/internal/libdocker/proxy.go
++++ b/internal/libdocker/proxy.go
+@@ -16,7 +16,7 @@ const hiveproxyTag = "hive/hiveproxy"
+ 
+ // Build builds the hiveproxy image.
+ func (cb *ContainerBackend) Build(ctx context.Context, b libhive.Builder) error {
+-	return b.BuildImage(ctx, hiveproxyTag, hiveproxy.Source)
++	return nil
+ }
+ 
+ // ServeAPI starts the API server.

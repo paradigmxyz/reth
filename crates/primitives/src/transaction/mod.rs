@@ -640,8 +640,8 @@ impl Transaction {
         }
     }
 
-    /// Returns the [TxEip7702] variant if the transaction is an EIP-7702 transaction.
-    pub fn as_eip7702(&self) -> Option<&TxEip7702> {
+    /// Returns the [`TxEip7702`] variant if the transaction is an EIP-7702 transaction.
+    pub const fn as_eip7702(&self) -> Option<&TxEip7702> {
         match self {
             Self::Eip7702(tx) => Some(tx),
             _ => None,

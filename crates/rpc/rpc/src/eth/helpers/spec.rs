@@ -1,4 +1,6 @@
-use reth_chainspec::ChainInfo;
+use std::sync::Arc;
+
+use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
@@ -61,5 +63,9 @@ where
             SyncStatus::None
         };
         Ok(status)
+    }
+
+    fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.inner.provider().chain_spec()
     }
 }

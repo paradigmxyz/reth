@@ -104,7 +104,7 @@ impl TxEip7702 {
         self.input.len() // input
     }
 
-    /// Decodes the inner [TxEip7702] fields from RLP bytes.
+    /// Decodes the inner [`TxEip7702`] fields from RLP bytes.
     ///
     /// NOTE: This assumes a RLP header has already been decoded, and _just_ decodes the following
     /// RLP fields in the following order:

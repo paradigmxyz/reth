@@ -1,9 +1,9 @@
 //! Command that initializes the node by importing a chain from a file.
-use crate::{macros::block_executor, version::SHORT_VERSION};
+use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
+use reth_chainspec::ChainSpec;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::tables;
@@ -13,10 +13,12 @@ use reth_downloaders::{
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
+use reth_node_core::version::SHORT_VERSION;
 use reth_node_events::node::NodeEvent;
 use reth_primitives::B256;
 use reth_provider::{
@@ -54,7 +56,11 @@ pub struct ImportCommand {
 
 impl ImportCommand {
     /// Execute `import` command
-    pub async fn execute(self) -> eyre::Result<()> {
+    pub async fn execute<E, F>(self, executor: F) -> eyre::Result<()>
+    where
+        E: BlockExecutorProvider,
+        F: FnOnce(Arc<ChainSpec>) -> E,
+    {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         if self.no_state {
@@ -68,6 +74,7 @@ impl ImportCommand {
 
         let Environment { provider_factory, config, .. } = self.env.init(AccessRights::RW)?;
 
+        let executor = executor(provider_factory.chain_spec());
         let consensus = Arc::new(EthBeaconConsensus::new(self.env.chain.clone()));
         info!(target: "reth::cli", "Consensus engine initialized");
 
@@ -96,6 +103,7 @@ impl ImportCommand {
                 Arc::new(file_client),
                 StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
                 self.no_state,
+                executor.clone(),
             )?;
 
             // override the tip
@@ -152,17 +160,19 @@ impl ImportCommand {
 ///
 /// If configured to execute, all stages will run. Otherwise, only stages that don't require state
 /// will run.
-pub fn build_import_pipeline<DB, C>(
+pub fn build_import_pipeline<DB, C, E>(
     config: &Config,
     provider_factory: ProviderFactory<DB>,
     consensus: &Arc<C>,
     file_client: Arc<FileClient>,
     static_file_producer: StaticFileProducer<DB>,
     disable_exec: bool,
+    executor: E,
 ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
 where
     DB: Database + Clone + Unpin + 'static,
     C: Consensus + 'static,
+    E: BlockExecutorProvider,
 {
     if !file_client.has_canonical_blocks() {
         eyre::bail!("unable to import non canonical blocks");
@@ -192,7 +202,6 @@ where
         .expect("failed to set download range");
 
     let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-    let executor = block_executor!(provider_factory.chain_spec());
 
     let max_block = file_client.max_block().unwrap_or(0);
 

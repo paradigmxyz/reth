@@ -1,10 +1,10 @@
 use super::setup;
-use crate::macros::block_executor;
 use eyre::Result;
 use reth_config::config::EtlConfig;
 use reth_db::{tables, DatabaseEnv};
 use reth_db_api::{database::Database, table::TableImporter};
 use reth_db_common::DbTool;
+use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_primitives::BlockNumber;
@@ -86,11 +86,9 @@ fn unwind_and_copy<DB: Database>(
 
     MerkleStage::default_unwind().unwind(&provider, unwind)?;
 
-    let executor = block_executor!(db_tool.chain());
-
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(
-        executor,
+        NoopBlockExecutorProvider::default(), // Not necessary for unwinding.
         ExecutionStageThresholds {
             max_blocks: Some(u64::MAX),
             max_changes: None,

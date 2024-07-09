@@ -2,6 +2,7 @@
 //! RPC methods.
 
 use futures::Future;
+use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{Address, BlockId, Bytes, Header, B256, U256};
 use reth_provider::{BlockIdReader, StateProvider, StateProviderBox, StateProviderFactory};
@@ -102,12 +103,19 @@ pub trait EthState: LoadState + SpawnBlocking {
             return Err(EthApiError::ExceedsMaxProofWindow)
         }
 
-        Ok(self.spawn_blocking_io(move |this| {
-            let state = this.state_at_block_id(block_id)?;
-            let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
-            let proof = state.proof(&BundleState::default(), address, &storage_keys)?;
-            Ok(from_primitive_account_proof(proof))
-        }))
+        Ok(async move {
+            let _permit = self
+                .acquire_owned()
+                .await
+                .map_err(|err| EthApiError::Internal(RethError::other(err)))?;
+            self.spawn_blocking_io(move |this| {
+                let state = this.state_at_block_id(block_id)?;
+                let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
+                let proof = state.proof(&BundleState::default(), address, &storage_keys)?;
+                Ok(from_primitive_account_proof(proof))
+            })
+            .await
+        })
     }
 }
 

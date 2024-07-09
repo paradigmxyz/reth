@@ -53,8 +53,9 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
 pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let server = builder.build(TransportRpcModuleConfig::set_http(modules), EthApiBuild::build);
-    server
-        .start_server(RpcServerConfig::http(Default::default()).with_http_address(test_address()))
+    RpcServerConfig::http(Default::default())
+        .with_http_address(test_address())
+        .start(&server)
         .await
         .unwrap()
 }
@@ -63,8 +64,9 @@ pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHan
 pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let server = builder.build(TransportRpcModuleConfig::set_ws(modules), EthApiBuild::build);
-    server
-        .start_server(RpcServerConfig::ws(Default::default()).with_ws_address(test_address()))
+    RpcServerConfig::ws(Default::default())
+        .with_http_address(test_address())
+        .start(&server)
         .await
         .unwrap()
 }
@@ -77,13 +79,11 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
         TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
         EthApiBuild::build,
     );
-    server
-        .start_server(
-            RpcServerConfig::ws(Default::default())
-                .with_ws_address(test_address())
-                .with_http(Default::default())
-                .with_http_address(test_address()),
-        )
+    RpcServerConfig::ws(Default::default())
+        .with_ws_address(test_address())
+        .with_http(Default::default())
+        .with_http_address(test_address())
+        .start(&server)
         .await
         .unwrap()
 }
@@ -97,13 +97,11 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
         EthApiBuild::build,
     );
     let addr = test_address();
-    server
-        .start_server(
-            RpcServerConfig::ws(Default::default())
-                .with_ws_address(addr)
-                .with_http(Default::default())
-                .with_http_address(addr),
-        )
+    RpcServerConfig::ws(Default::default())
+        .with_ws_address(addr)
+        .with_http(Default::default())
+        .with_http_address(addr)
+        .start(&server)
         .await
         .unwrap()
 }

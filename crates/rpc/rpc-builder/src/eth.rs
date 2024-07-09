@@ -14,7 +14,7 @@ use reth_rpc_eth_types::{
 };
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
-    DEFAULT_MAX_LOGS_PER_RESPONSE,
+    DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_PROOF_PERMITS,
 };
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
@@ -159,6 +159,8 @@ pub struct EthConfig {
     pub stale_filter_ttl: Duration,
     /// Settings for the fee history cache
     pub fee_history_cache: FeeHistoryCacheConfig,
+    /// The maximum number of getproof calls that can be executed concurrently.
+    pub proof_permits: usize,
 }
 
 impl EthConfig {
@@ -183,6 +185,7 @@ impl Default for EthConfig {
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             fee_history_cache: FeeHistoryCacheConfig::default(),
+            proof_permits: DEFAULT_PROOF_PERMITS,
         }
     }
 }
@@ -227,6 +230,12 @@ impl EthConfig {
     /// Configures the maximum proof window for historical proof generation.
     pub const fn eth_proof_window(mut self, window: u64) -> Self {
         self.eth_proof_window = window;
+        self
+    }
+
+    /// Configures the number of getproof requests
+    pub const fn proof_permits(mut self, permits: usize) -> Self {
+        self.proof_permits = permits;
         self
     }
 }
@@ -285,6 +294,7 @@ impl EthApiBuild {
             fee_history_cache,
             ctx.evm_config.clone(),
             None,
+            ctx.config.proof_permits,
         )
     }
 }

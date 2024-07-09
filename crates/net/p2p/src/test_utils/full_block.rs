@@ -6,10 +6,10 @@ use crate::{
     priority::Priority,
 };
 use parking_lot::Mutex;
+use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives::{
-    BlockBody, BlockHashOrNumber, BlockNumHash, Header, HeadersDirection, SealedBlock,
-    SealedHeader, B256,
+    BlockBody, BlockHashOrNumber, BlockNumHash, Header, SealedBlock, SealedHeader, B256,
 };
 use std::{collections::HashMap, sync::Arc};
 

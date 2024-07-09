@@ -113,7 +113,6 @@ impl Command {
         // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
         #[cfg(feature = "optimism")]
         let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
-            provider_factory.chain_spec(),
             reth_node_optimism::OptimismEvmConfig::default(),
         );
 

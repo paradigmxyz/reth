@@ -18,6 +18,9 @@ pub use version::EthVersion;
 pub mod message;
 pub use message::{EthMessage, EthMessageID, ProtocolMessage};
 
+pub mod header;
+pub use header::*;
+
 pub mod blocks;
 pub use blocks::*;
 
