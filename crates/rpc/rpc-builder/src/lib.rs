@@ -1162,7 +1162,27 @@ impl Default for RpcServerConfig<Identity, Identity> {
     }
 }
 
-impl<HttpMiddleware, RpcMiddleware> RpcServerConfig<HttpMiddleware, RpcMiddleware> {
+use jsonrpsee::server::{
+    middleware::rpc::{RpcService, RpcServiceT},
+    TowerService,
+};
+use tower::{Layer, Service};
+
+impl<HttpMiddleware, RpcMiddleware> RpcServerConfig<HttpMiddleware, RpcMiddleware> 
+    where
+    RpcMiddleware: for<'a> Layer<RpcService, Service: RpcServiceT<'a>> + Clone + Send + 'static,
+    HttpMiddleware: Layer<
+            //TowerServiceNoHttp<RpcMiddleware>,
+            TowerService<RpcMiddleware, HttpMiddleware>,
+            Service: Service<
+                String,
+                Response = Option<String>,
+                Error = Box<dyn std::error::Error + Send + Sync + 'static>,
+                Future: Send + Unpin,
+            > + Send,
+        > + Send
+        + 'static,
+{
 
     /// Configures the http server
     ///
