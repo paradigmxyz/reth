@@ -1,6 +1,6 @@
 use alloy_primitives::BlockNumber;
 use reth_prune_types::{PruneProgress, PruneSegment};
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 
 /// An event emitted by a [Pruner][crate::Pruner].
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -11,6 +11,6 @@ pub enum PrunerEvent {
     Finished {
         tip_block_number: BlockNumber,
         elapsed: Duration,
-        stats: BTreeMap<PruneSegment, (PruneProgress, usize)>,
+        stats: Vec<(PruneSegment, usize, PruneProgress)>,
     },
 }

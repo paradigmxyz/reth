@@ -1,7 +1,9 @@
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, B256, U256,
 };
-use reth_storage_api::{AccountReader, BlockHashReader, StateProvider, StateRootProvider};
+use reth_storage_api::{
+    AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, AccountProof};
 use revm::db::BundleState;
@@ -76,6 +78,17 @@ impl StateRootProvider for StateProviderTest {
     }
 }
 
+impl StateProofProvider for StateProviderTest {
+    fn proof(
+        &self,
+        _state: &BundleState,
+        _address: Address,
+        _slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        unimplemented!("proof generation is not supported")
+    }
+}
+
 impl StateProvider for StateProviderTest {
     fn storage(
         &self,
@@ -87,9 +100,5 @@ impl StateProvider for StateProviderTest {
 
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         Ok(self.contracts.get(&code_hash).cloned())
-    }
-
-    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        unimplemented!("proof generation is not supported")
     }
 }

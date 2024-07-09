@@ -172,8 +172,9 @@ impl<TX: DbTx + 'static> DatabaseProvider<TX> {
 }
 
 impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
-    #[cfg(any(test, feature = "test-utils"))]
-    /// Inserts an historical block. Used for setting up test environments
+    // TODO: uncomment below, once `reth debug_cmd` has been feature gated with dev.
+    // #[cfg(any(test, feature = "test-utils"))]
+    /// Inserts an historical block. **Used for setting up test environments**
     pub fn insert_historical_block(
         &self,
         block: SealedBlockWithSenders,
@@ -2040,7 +2041,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         header: &Header,
-        _evm_config: EvmConfig,
+        evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
         EvmConfig: ConfigureEvmEnv,
@@ -2048,7 +2049,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        EvmConfig::fill_cfg_and_block_env(
+        evm_config.fill_cfg_and_block_env(
             cfg,
             block_env,
             &self.chain_spec,
@@ -2076,7 +2077,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         &self,
         cfg: &mut CfgEnvWithHandlerCfg,
         header: &Header,
-        _evm_config: EvmConfig,
+        evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
         EvmConfig: ConfigureEvmEnv,
@@ -2084,7 +2085,7 @@ impl<TX: DbTx> EvmEnvProvider for DatabaseProvider<TX> {
         let total_difficulty = self
             .header_td_by_number(header.number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number.into()))?;
-        EvmConfig::fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
+        evm_config.fill_cfg_env(cfg, &self.chain_spec, header, total_difficulty);
         Ok(())
     }
 }
@@ -2399,7 +2400,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     block_hash: end_block_hash,
                 })))
             }
-            trie_updates.flush(&self.tx)?;
+            trie_updates.write_to_database(&self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertMerkleTree);
 
@@ -2595,7 +2596,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
                     block_hash: parent_hash,
                 })))
             }
-            trie_updates.flush(&self.tx)?;
+            trie_updates.write_to_database(&self.tx)?;
         }
 
         // get blocks
@@ -2797,7 +2798,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
         // insert hashes and intermediate merkle nodes
         {
             HashedStateChanges(hashed_state).write_to_db(&self.tx)?;
-            trie_updates.flush(&self.tx)?;
+            trie_updates.write_to_database(&self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 

@@ -15,7 +15,6 @@ Commands:
   db            Database debugging utilities
   stage         Manipulate individual stages
   p2p           P2P Debugging utilities
-  test-vectors  Generate Test Vectors
   config        Write config to stdout
   debug         Various debug routines
   recover       Scripts for node recovery
@@ -28,7 +27,7 @@ Options:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
+              mainnet, sepolia, holesky, dev
 
           [default: mainnet]
 

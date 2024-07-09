@@ -7,6 +7,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
+    system_calls::apply_beacon_root_contract_call,
     ConfigureEvm,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -16,7 +17,7 @@ use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
-    state_change::{apply_beacon_root_contract_call, post_block_balance_increments},
+    state_change::post_block_balance_increments,
     Evm, State,
 };
 use revm_primitives::{
@@ -122,6 +123,7 @@ where
     {
         // apply pre execution changes
         apply_beacon_root_contract_call(
+            &self.evm_config,
             &self.chain_spec,
             block.timestamp,
             block.number,
@@ -270,7 +272,7 @@ where
     fn evm_env_for_block(&self, header: &Header, total_difficulty: U256) -> EnvWithHandlerCfg {
         let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
         let mut block_env = BlockEnv::default();
-        EvmConfig::fill_cfg_and_block_env(
+        self.executor.evm_config.fill_cfg_and_block_env(
             &mut cfg,
             &mut block_env,
             self.chain_spec(),

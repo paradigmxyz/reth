@@ -41,16 +41,18 @@ use reth_eth_wire::{
     capability::{Capabilities, CapabilityMessage},
     DisconnectReason, EthVersion, Status,
 };
+use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{EthProtocolInfo, NetworkStatus, PeerInfo, ReputationChangeKind};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_primitives::ForkId;
-use reth_provider::{BlockNumReader, BlockReader};
+use reth_storage_api::BlockNumReader;
 use reth_tasks::shutdown::GracefulShutdown;
 use reth_tokio_util::EventSender;
 use secp256k1::SecretKey;
 use std::{
     net::SocketAddr,
+    path::Path,
     pin::Pin,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -336,11 +338,28 @@ where
         self.swarm.state().peers().iter_peers()
     }
 
+    /// Returns the number of peers in the peer set.
+    pub fn num_known_peers(&self) -> usize {
+        self.swarm.state().peers().num_known_peers()
+    }
+
     /// Returns a new [`PeersHandle`] that can be cloned and shared.
     ///
     /// The [`PeersHandle`] can be used to interact with the network's peer set.
     pub fn peers_handle(&self) -> PeersHandle {
         self.swarm.state().peers().handle()
+    }
+
+    /// Collect the peers from the [`NetworkManager`] and write them to the given
+    /// `persistent_peers_file`.
+    pub fn write_peers_to_file(&self, persistent_peers_file: &Path) -> Result<(), FsPathError> {
+        let known_peers = self.all_peers().collect::<Vec<_>>();
+        let known_peers = serde_json::to_string_pretty(&known_peers).map_err(|e| {
+            FsPathError::WriteJson { source: e, path: persistent_peers_file.to_path_buf() }
+        })?;
+        persistent_peers_file.parent().map(fs::create_dir_all).transpose()?;
+        fs::write(persistent_peers_file, known_peers)?;
+        Ok(())
     }
 
     /// Returns a new [`FetchClient`] that can be cloned and shared.
@@ -926,7 +945,7 @@ where
 
 impl<C> NetworkManager<C>
 where
-    C: BlockReader + Unpin,
+    C: BlockNumReader + Unpin,
 {
     /// Drives the [`NetworkManager`] future until a [`GracefulShutdown`] signal is received.
     ///
@@ -955,7 +974,7 @@ where
 
 impl<C> Future for NetworkManager<C>
 where
-    C: BlockReader + Unpin,
+    C: BlockNumReader + Unpin,
 {
     type Output = ();
 

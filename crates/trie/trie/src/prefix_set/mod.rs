@@ -8,6 +8,35 @@ use std::{
 mod loader;
 pub use loader::PrefixSetLoader;
 
+/// Collection of mutable prefix sets.
+#[derive(Default, Debug)]
+pub struct TriePrefixSetsMut {
+    /// A set of account prefixes that have changed.
+    pub account_prefix_set: PrefixSetMut,
+    /// A map containing storage changes with the hashed address as key and a set of storage key
+    /// prefixes as the value.
+    pub storage_prefix_sets: HashMap<B256, PrefixSetMut>,
+    /// A set of hashed addresses of destroyed accounts.
+    pub destroyed_accounts: HashSet<B256>,
+}
+
+impl TriePrefixSetsMut {
+    /// Returns a `TriePrefixSets` with the same elements as these sets.
+    ///
+    /// If not yet sorted, the elements will be sorted and deduplicated.
+    pub fn freeze(self) -> TriePrefixSets {
+        TriePrefixSets {
+            account_prefix_set: self.account_prefix_set.freeze(),
+            storage_prefix_sets: self
+                .storage_prefix_sets
+                .into_iter()
+                .map(|(hashed_address, prefix_set)| (hashed_address, prefix_set.freeze()))
+                .collect(),
+            destroyed_accounts: self.destroyed_accounts,
+        }
+    }
+}
+
 /// Collection of trie prefix sets.
 #[derive(Default, Debug)]
 pub struct TriePrefixSets {
@@ -100,6 +129,15 @@ impl PrefixSetMut {
     pub fn insert(&mut self, nibbles: Nibbles) {
         self.sorted = false;
         self.keys.push(nibbles);
+    }
+
+    /// Extend prefix set keys with contents of provided iterator.
+    pub fn extend<I>(&mut self, nibbles_iter: I)
+    where
+        I: IntoIterator<Item = Nibbles>,
+    {
+        self.sorted = false;
+        self.keys.extend(nibbles_iter);
     }
 
     /// Returns the number of elements in the set.

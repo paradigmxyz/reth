@@ -1,14 +1,10 @@
 //! Implements the `GetBlockHeaders`, `GetBlockBodies`, `BlockHeaders`, and `BlockBodies` message
 //! types.
 
+use crate::HeadersDirection;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs_derive::{add_arbitrary_tests, derive_arbitrary};
-#[cfg(any(test, feature = "arbitrary"))]
-use reth_primitives::generate_valid_header;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use reth_primitives::{BlockBody, BlockHashOrNumber, Header, B256};
 
 /// A request for a peer to return block headers starting at the requested block.
 /// The peer must return at most [`limit`](#structfield.limit) headers.
@@ -21,7 +17,7 @@ use serde::{Deserialize, Serialize};
 /// in the direction specified by [`reverse`](#structfield.reverse).
 #[derive_arbitrary(rlp)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GetBlockHeaders {
     /// The block number or hash that the peer should start returning headers from.
     pub start_block: BlockHashOrNumber,
@@ -41,7 +37,7 @@ pub struct GetBlockHeaders {
 
 /// The response to [`GetBlockHeaders`], containing headers if any headers were found.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[add_arbitrary_tests(rlp, 10)]
 pub struct BlockHeaders(
     /// The requested headers.
@@ -55,7 +51,7 @@ impl<'a> arbitrary::Arbitrary<'a> for BlockHeaders {
         let mut headers = Vec::with_capacity(headers_count);
 
         for _ in 0..headers_count {
-            headers.push(generate_valid_header(
+            headers.push(reth_primitives::generate_valid_header(
                 u.arbitrary()?,
                 u.arbitrary()?,
                 u.arbitrary()?,
@@ -77,7 +73,7 @@ impl From<Vec<Header>> for BlockHeaders {
 /// A request for a peer to return block bodies for the given block hashes.
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GetBlockBodies(
     /// The block hashes to request bodies for.
     pub Vec<B256>,
@@ -93,7 +89,7 @@ impl From<Vec<B256>> for GetBlockBodies {
 /// any were found.
 #[derive_arbitrary(rlp, 16)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlockBodies(
     /// The requested block bodies, each of which should correspond to a hash in the request.
     pub Vec<BlockBody>,
@@ -107,11 +103,14 @@ impl From<Vec<BlockBody>> for BlockBodies {
 
 #[cfg(test)]
 mod tests {
-    use crate::{message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders};
+    use crate::{
+        message::RequestPair, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
+        HeadersDirection,
+    };
     use alloy_rlp::{Decodable, Encodable};
     use reth_primitives::{
-        hex, BlockHashOrNumber, Header, HeadersDirection, Signature, Transaction,
-        TransactionSigned, TxKind, TxLegacy, U256,
+        hex, BlockHashOrNumber, Header, Signature, Transaction, TransactionSigned, TxKind,
+        TxLegacy, U256,
     };
     use std::str::FromStr;
 

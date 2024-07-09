@@ -7,13 +7,13 @@ use crate::{
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
-    BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
-    Receipts,
+    BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts,
+    HeadersDirection, NodeData, Receipts,
 };
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection};
-use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
+use reth_primitives::{BlockBody, BlockHashOrNumber, Header};
+use reth_storage_api::{BlockReader, HeaderProvider, ReceiptProvider};
 use std::{
     future::Future,
     pin::Pin,

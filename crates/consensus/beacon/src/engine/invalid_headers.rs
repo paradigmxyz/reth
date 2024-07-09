@@ -23,7 +23,8 @@ pub struct InvalidHeaderCache {
 }
 
 impl InvalidHeaderCache {
-    pub(crate) fn new(max_length: u32) -> Self {
+    /// Invalid header cache constructor.
+    pub fn new(max_length: u32) -> Self {
         Self { headers: LruMap::new(ByLength::new(max_length)), metrics: Default::default() }
     }
 

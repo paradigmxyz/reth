@@ -234,7 +234,7 @@ where
     let block_id = BlockId::Number(BlockNumberOrTag::default());
 
     DebugApiClient::raw_header(client, block_id).await.unwrap();
-    DebugApiClient::raw_block(client, block_id).await.unwrap();
+    DebugApiClient::raw_block(client, block_id).await.unwrap_err();
     DebugApiClient::raw_transaction(client, B256::default()).await.unwrap();
     DebugApiClient::raw_receipts(client, block_id).await.unwrap();
     assert!(is_unimplemented(DebugApiClient::bad_blocks(client).await.err().unwrap()));
@@ -295,11 +295,13 @@ where
     let address = Address::default();
     let sender = Address::default();
     let tx_hash = TxHash::default();
-    let block_number = BlockNumberOrTag::default();
+    let block_number = 1;
     let page_number = 1;
     let page_size = 10;
     let nonce = 1;
     let block_hash = B256::default();
+
+    OtterscanClient::get_header_by_number(client, block_number).await.unwrap();
 
     OtterscanClient::has_code(client, address, None).await.unwrap();
 
@@ -309,9 +311,7 @@ where
 
     OtterscanClient::get_transaction_error(client, tx_hash).await.unwrap();
 
-    assert!(is_unimplemented(
-        OtterscanClient::trace_transaction(client, tx_hash).await.err().unwrap()
-    ));
+    OtterscanClient::trace_transaction(client, tx_hash).await.unwrap();
 
     OtterscanClient::get_block_details(client, block_number).await.unwrap();
 
@@ -334,15 +334,11 @@ where
             .err()
             .unwrap()
     ));
-    assert!(is_unimplemented(
-        OtterscanClient::get_transaction_by_sender_and_nonce(client, sender, nonce,)
-            .await
-            .err()
-            .unwrap()
-    ));
-    assert!(is_unimplemented(
-        OtterscanClient::get_contract_creator(client, address).await.err().unwrap()
-    ));
+    assert!(OtterscanClient::get_transaction_by_sender_and_nonce(client, sender, nonce)
+        .await
+        .err()
+        .is_none());
+    assert!(OtterscanClient::get_contract_creator(client, address).await.unwrap().is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -552,7 +548,7 @@ async fn test_eth_logs_args() {
     let client = handle.http_client().unwrap();
 
     let mut params = ArrayParams::default();
-    params.insert( serde_json::json!({"blockHash":"0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"})).unwrap();
+    params.insert(serde_json::json!({"blockHash":"0x58dc57ab582b282c143424bd01e8d923cddfdcda9455bad02a29522f6274a948"})).unwrap();
 
     let resp = client.request::<Vec<Log>, _>("eth_getLogs", params).await;
     // block does not exist

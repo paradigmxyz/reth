@@ -10,10 +10,7 @@ use reth_exex_types::FinishedExExHeight;
 use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
 use reth_prune_types::{PruneLimiter, PruneProgress, PruneSegment};
 use reth_tokio_util::{EventSender, EventStream};
-use std::{
-    collections::BTreeMap,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use tracing::debug;
 
@@ -23,7 +20,7 @@ pub type PrunerResult = Result<PruneProgress, PrunerError>;
 /// The pruner type itself with the result of [`Pruner::run`]
 pub type PrunerWithResult<DB> = (Pruner<DB>, PrunerResult);
 
-type PrunerStats = BTreeMap<PruneSegment, (PruneProgress, usize)>;
+type PrunerStats = Vec<(PruneSegment, usize, PruneProgress)>;
 
 /// Pruning routine. Main pruning logic happens in [`Pruner::run`].
 #[derive(Debug)]
@@ -233,7 +230,7 @@ impl<DB: Database> Pruner<DB> {
                 if output.pruned > 0 {
                     limiter.increment_deleted_entries_count_by(output.pruned);
                     pruned += output.pruned;
-                    stats.insert(segment.segment(), (output.progress, output.pruned));
+                    stats.push((segment.segment(), output.pruned, output.progress));
                 }
             } else {
                 debug!(target: "pruner", segment = ?segment.segment(), purpose = ?segment.purpose(), "Nothing to prune for the segment");

@@ -1,7 +1,7 @@
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use futures::{Future, FutureExt};
-pub use reth_eth_wire_types::BlockHeaders;
-use reth_primitives::{BlockHashOrNumber, Header, HeadersDirection};
+pub use reth_eth_wire_types::{BlockHeaders, HeadersDirection};
+use reth_primitives::{BlockHashOrNumber, Header};
 use std::{
     fmt::Debug,
     pin::Pin,

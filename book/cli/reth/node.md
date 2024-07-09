@@ -15,7 +15,7 @@ Options:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
+              mainnet, sepolia, holesky, dev
 
           [default: mainnet]
 
@@ -312,6 +312,16 @@ RPC:
           Maximum gas limit for `eth_call` and call tracing RPC methods
 
           [default: 50000000]
+
+      --rpc.eth-proof-window <RPC_ETH_PROOF_WINDOW>
+          The maximum proof window for historical proof generation. This value allows for generating historical proofs up to configured number of blocks from current tip (up to `tip - window`)
+
+          [default: 0]
+
+      --rpc.proof-permits <COUNT>
+          Maximum number of concurrent getproof requests
+
+          [default: 25]
 
 RPC State Cache:
       --rpc-cache.max-blocks <MAX_BLOCKS>

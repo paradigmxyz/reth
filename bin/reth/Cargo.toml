@@ -31,6 +31,7 @@ reth-transaction-pool.workspace = true
 reth-beacon-consensus.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-commands.workspace = true
+reth-cli-util.workspace = true
 reth-consensus-common.workspace = true
 reth-blockchain-tree.workspace = true
 reth-rpc-builder.workspace = true
@@ -67,6 +68,8 @@ reth-consensus.workspace = true
 reth-optimism-primitives.workspace = true
 reth-engine-util.workspace = true
 reth-prune.workspace = true
+reth-stages-api.workspace = true
+reth-optimism-cli = { workspace = true, optional = true }
 
 # crypto
 alloy-rlp.workspace = true
@@ -83,12 +86,6 @@ toml = { workspace = true, features = ["display"] }
 
 # metrics
 metrics-process.workspace = true
-
-# test vectors generation
-proptest.workspace = true
-arbitrary.workspace = true
-proptest-arbitrary-interop.workspace = true
-
 
 # async
 tokio = { workspace = true, features = [
@@ -119,9 +116,10 @@ libc = "0.2"
 reth-discv4.workspace = true
 
 
-
 [features]
 default = ["jemalloc"]
+
+dev = ["reth-cli-commands/dev"]
 
 asm-keccak = ["reth-primitives/asm-keccak"]
 
@@ -135,6 +133,8 @@ min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
 optimism = [
+    "dep:reth-optimism-cli",
+    "reth-optimism-cli?/optimism",
     "reth-primitives/optimism",
     "reth-rpc/optimism",
     "reth-provider/optimism",

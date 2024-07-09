@@ -24,7 +24,7 @@ use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
 pub const RPC_DEFAULT_GAS_CAP: GasCap = GasCap(constants::gas_oracle::RPC_DEFAULT_GAS_CAP);
 
 /// Settings for the [`GasPriceOracle`]
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GasPriceOracleConfig {
     /// The number of populated blocks to produce the gas price estimate
