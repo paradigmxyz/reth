@@ -1498,18 +1498,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         Ok(blocks)
     }
 
-    /// Get or unwind the given range of blocks.
-    pub fn get_take_block_range<const TAKE: bool>(
-        &self,
-        range: impl RangeBounds<BlockNumber> + Clone,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
-        if TAKE {
-            self.take_block_range(range)
-        } else {
-            self.get_block_range(range)
-        }
-    }
-
     /// Unwind table by some number key.
     /// Returns number of rows unwound.
     ///
