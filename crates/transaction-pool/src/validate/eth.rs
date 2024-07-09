@@ -716,7 +716,7 @@ pub fn ensure_intrinsic_gas<T: PoolTransaction>(
         calculate_intrinsic_gas_after_merge(
             transaction.input(),
             &transaction.kind(),
-            transaction.access_list().map(|list| list.0.as_slice()).as_deref().unwrap_or(&[]),
+            transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
             is_shanghai,
         )
     {
