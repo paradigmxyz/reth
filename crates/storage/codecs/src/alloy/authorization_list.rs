@@ -2,7 +2,7 @@ use core::ops::Deref;
 
 use crate::Compact;
 use alloy_eips::eip7702::{Authorization as AlloyAuthorization, SignedAuthorization};
-use alloy_primitives::{Address, ChainId, U256};
+use alloy_primitives::{Address, ChainId, Parity, U256};
 use bytes::Buf;
 use reth_codecs_derive::main_codec;
 
@@ -61,7 +61,7 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let y = buf.get_u8() == 1;
+        let y = alloy_primitives::Parity::Parity(buf.get_u8() == 1);
         let r = U256::from_le_slice(&buf[0..32]);
         buf.advance(32);
         let s = U256::from_le_slice(&buf[0..32]);
@@ -111,7 +111,7 @@ mod tests {
                 chain_id: auth.chain_id,
                 address: auth.address,
                 nonce: auth.nonce.into(),
-            }.into_signed(signature);
+            }.into_signed(signature.with_parity(alloy_primitives::Parity::Parity(signature.v().y_parity())));
 
             let mut compacted_auth = Vec::<u8>::new();
             let len = auth.clone().to_compact(&mut compacted_auth);
