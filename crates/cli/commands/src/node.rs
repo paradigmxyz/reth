@@ -1,17 +1,20 @@
 //! Main node command for launching a node
 
-use crate::args::{
-    utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
-    DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs, PruningArgs,
-    RpcServerArgs, TxPoolArgs,
-};
 use clap::{value_parser, Args, Parser};
 use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
 use reth_db::{init_db, DatabaseEnv};
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::{node_config::NodeConfig, version};
+use reth_node_core::{
+    args::{
+        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
+        PruningArgs, RpcServerArgs, TxPoolArgs,
+    },
+    node_config::NodeConfig,
+    version,
+};
 use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
 
 /// Start the node
@@ -303,7 +306,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))] // dev mode not yet supported in op-reth
     fn parse_dev() {
         let cmd = NodeCommand::<NoArgs>::parse_from(["reth", "--dev"]);
         let chain = reth_chainspec::DEV.clone();
