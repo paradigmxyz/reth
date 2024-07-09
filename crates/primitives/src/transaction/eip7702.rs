@@ -243,16 +243,14 @@ impl<'a> arbitrary::Arbitrary<'a> for TxEip7702 {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         use arbitrary::Arbitrary;
         #[derive(Arbitrary)]
-        struct AbitrarySignedAuth {
+        struct ArbitrarySignedAuth {
             chain_id: ChainId,
             address: alloy_primitives::Address,
             nonce: Option<u64>,
-            y: bool,
-            r: U256,
-            s: U256,
+            signature: alloy_primitives::Signature,
         }
 
-        let iter = u.arbitrary_iter::<AbitrarySignedAuth>()?;
+        let iter = u.arbitrary_iter::<ArbitrarySignedAuth>()?;
         let mut authorization_list = Vec::new();
         for auth in iter {
             let auth = auth?;
@@ -263,8 +261,9 @@ impl<'a> arbitrary::Arbitrary<'a> for TxEip7702 {
                     nonce: auth.nonce.into(),
                 }
                 .into_signed(
-                    alloy_primitives::Signature::from_rs_and_parity(auth.r, auth.s, auth.y)
-                        .expect("arbitrary generated invalid eip-7702 signature"),
+                    auth.signature.with_parity(alloy_primitives::Parity::Parity(
+                        auth.signature.v().y_parity(),
+                    )),
                 ),
             );
         }

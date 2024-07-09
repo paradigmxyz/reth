@@ -28,7 +28,7 @@ impl Compact for AlloyAuthorization {
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (authorization, _) = Authorization::from_compact(buf, len);
+        let (authorization, buf) = Authorization::from_compact(buf, len);
         let alloy_authorization = Self {
             chain_id: authorization.chain_id,
             address: authorization.address,
