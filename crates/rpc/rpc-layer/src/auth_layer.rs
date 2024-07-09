@@ -232,7 +232,7 @@ mod tests {
 
         let body = r#"{"jsonrpc": "2.0", "method": "greet_melkor", "params": [], "id": 1}"#;
         let response = client
-            .post(&format!("http://{AUTH_ADDR}:{AUTH_PORT}"))
+            .post(format!("http://{AUTH_ADDR}:{AUTH_PORT}"))
             .bearer_auth(jwt.unwrap_or_default())
             .body(body)
             .header(header::CONTENT_TYPE, "application/json")
