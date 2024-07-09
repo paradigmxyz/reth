@@ -144,9 +144,19 @@ impl ProcessUID {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    // helper to ensure some tests are run serially
+    static SERIAL: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn serial_lock() -> MutexGuard<'static, ()> {
+        SERIAL.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     #[test]
     fn test_lock() {
+        let _guard = serial_lock();
+
         let temp_dir = tempfile::tempdir().unwrap();
 
         let lock = StorageLock::try_acquire(temp_dir.path()).unwrap();
@@ -178,6 +188,8 @@ mod tests {
 
     #[test]
     fn test_drop_lock() {
+        let _guard = serial_lock();
+
         let temp_dir = tempfile::tempdir().unwrap();
         let lock_file = temp_dir.path().join(LOCKFILE_NAME);
 
