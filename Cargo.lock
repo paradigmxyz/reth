@@ -6298,6 +6298,7 @@ dependencies = [
  "jsonrpsee",
  "libc",
  "metrics-process",
+ "num_cpus",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
