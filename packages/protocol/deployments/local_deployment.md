@@ -11,28 +11,18 @@ brew install kurtosis-tech/tap/kurtosis-cli
 
 ### 1. Define the network config parameters
 
-Create a `network_param.json` file.
+Create a `network_param.yaml` file.
 
 ```shell
-{
-  "participants": [
-    {
-      "el_type": "reth",
-      "el_image": "ghcr.io/paradigmxyz/reth",# We can use custom image, like ethpandaops/reth:main-9c0bc84 with MacOs with M1 chip or taiko.xyz/taiko-reth for example
-      "cl_type": "lighthouse",
-      "cl_image": "sigp/lighthouse:latest",
-      "count": 1
-    },
-    {
-      "el_type": "reth",
-      "el_image": "ghcr.io/paradigmxyz/reth", # We can use custom image, like ethpandaops/reth:main-9c0bc84 with MacOs with M1 chip or taiko.xyz/taiko-reth for example
-      "cl_type": "teku",
-      "cl_image": "consensys/teku:latest",
-      "count": 1
-    }
-  ],
-  "launch_additional_services": false
-}
+participants:
+  - el_type: reth
+    el_image: ghcr.io/paradigmxyz/reth # We can use custom image, like ethpandaops/reth:main-9c0bc84 with MacOs with M1 chip or taiko.xyz/taiko-reth for example
+    cl_type: lighthouse
+    cl_image: sigp/lighthouse:latest
+  - el_type: reth
+    el_image: ghcr.io/paradigmxyz/reth # We can use custom image, like ethpandaops/reth:main-9c0bc84 with MacOs with M1 chip or taiko.xyz/taiko-reth for example
+    cl_type: teku
+    cl_image: consensys/teku:latest
 ```
 
 ### 2. Spin up the network
@@ -41,7 +31,7 @@ Create a `network_param.json` file.
 kurtosis run github.com/ethpandaops/ethereum-package --args-file YOUR_NETWORK_FILE/network_params.json
 ```
 
-It will show you a lot of information in the terminal - along with the genesis info, network id, addresses with pre-funded ETH, etc.
+It will show you a lot og information in the terminal - along with the genesis info, network id, addresses with pre-funded ETH, etc.
 
 ### 3. Set .env vars and run deployment script
 Paste one PK and ADDR pair from anvil output to .env file and set the correct corresponding (PRIVATE_KEY and MAINNET_CONTRACT_OWNER) variables.
