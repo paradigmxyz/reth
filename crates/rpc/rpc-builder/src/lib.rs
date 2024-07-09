@@ -1162,25 +1162,7 @@ impl Default for RpcServerConfig<Identity, Identity> {
     }
 }
 
-impl<HttpMiddleware, RpcMiddleware> RpcServerConfig<HttpMiddleware, RpcMiddleware>
-where
-    RpcMiddleware: for<'a> tower::Layer<
-            jsonrpsee::server::middleware::rpc::RpcService,
-            Service: jsonrpsee::server::middleware::rpc::RpcServiceT<'a>,
-        > + Clone
-        + Send
-        + 'static,
-    HttpMiddleware: tower::Layer<
-            reth_ipc::server::TowerServiceNoHttp<RpcMiddleware>,
-            Service: tower::Service<
-                String,
-                Response = Option<String>,
-                Error = Box<dyn std::error::Error + Send + Sync + 'static>,
-                Future: Send + Unpin,
-            > + Send,
-        > + Send
-        + 'static,
-{
+impl<HttpMiddleware, RpcMiddleware> RpcServerConfig<HttpMiddleware, RpcMiddleware> {
     /// Configures the http server
     ///
     /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
