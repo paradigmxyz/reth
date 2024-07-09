@@ -718,7 +718,7 @@ mod tests {
                 Ok(_)
             );
 
-            let senders = provider.get_or_take::<tables::TransactionSenders, true>(range.clone());
+            let senders = provider.take::<tables::TransactionSenders>(range.clone());
             assert_eq!(
                 senders,
                 Ok(range

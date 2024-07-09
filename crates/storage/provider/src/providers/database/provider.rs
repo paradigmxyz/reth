@@ -620,7 +620,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let start_block_number = *range.start();
 
         // We are not removing block meta as it is used to get block changesets.
-        let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range.clone())?;
+        let block_bodies = self.get::<tables::BlockBodyIndices>(range.clone())?;
 
         // get transaction receipts
         let from_transaction_num =
@@ -826,7 +826,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         range: impl RangeBounds<BlockNumber> + Clone,
     ) -> ProviderResult<Vec<(BlockNumber, Vec<TransactionSignedEcRecovered>)>> {
         // Raad range of block bodies to get all transactions id's of this range.
-        let block_bodies = self.get_or_take::<tables::BlockBodyIndices, false>(range)?;
+        let block_bodies = self.get::<tables::BlockBodyIndices>(range)?;
 
         if block_bodies.is_empty() {
             return Ok(Vec::new())
