@@ -5,7 +5,8 @@ use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::B256;
 use reth_provider::{
-    bundle_state::HashedStateChanges, BlockExecutionWriter, BlockWriter, HistoryWriter, OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateWriter
+    bundle_state::HashedStateChanges, BlockWriter, HistoryWriter, OriginalValuesKnown,
+    ProviderFactory, StageCheckpointWriter, StateWriter,
 };
 use reth_prune::{PruneProgress, Pruner};
 use reth_stages::{StageCheckpoint, StageId};
@@ -110,11 +111,9 @@ impl<DB: Database> Persistence<DB> {
     ///
     /// Returns the block hash for the lowest block removed from the database.
     fn remove_blocks_above(&self, block_number: u64) -> ProviderResult<B256> {
-        let mut provider_rw = self.provider.provider_rw()?;
-        // TODO: allow unbounded? need an api that just removes, and does not
-        // return - this chain could be quite large
-        provider_rw.get_or_take_block_and_execution_range(range);
-        // provider_rw.into_ok
+        todo!("depends on PR")
+        // let mut provider_rw = self.provider.provider_rw()?;
+        // provider_rw.get_or_take_block_and_execution_range(range);
     }
 
     /// Prunes block data before the given block hash according to the configured prune
@@ -167,7 +166,8 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 PersistenceAction::RemoveBlocksAbove((new_tip_num, sender)) => {
-                    let output = self.remove_blocks_above(new_tip_num).expect("todo: handle erorrs");
+                    let output =
+                        self.remove_blocks_above(new_tip_num).expect("todo: handle erorrs");
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(output);

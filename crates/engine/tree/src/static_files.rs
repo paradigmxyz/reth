@@ -4,7 +4,7 @@ use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256};
 use reth_provider::{ProviderFactory, StaticFileProviderFactory, StaticFileWriter};
-use reth_static_file::StaticFileProducerInner;
+use reth_prune::PruneModes;
 use std::sync::{
     mpsc::{Receiver, SendError, Sender},
     Arc,
@@ -31,6 +31,8 @@ pub struct StaticFileTask<DB> {
     database_handle: PersistenceHandle,
     /// Incoming requests to write static files
     incoming: Receiver<StaticFileAction>,
+    /// The pruning configuration
+    pruning: PruneModes,
 }
 
 impl<DB> StaticFileTask<DB>
@@ -80,8 +82,6 @@ where
             tx_number += 1;
         }
 
-        // TODO: what's the point of setting the segment in `get_writer` if i can just use
-        // `append_transaction` on header_writer anyways?
         // increment block for both segments
         header_writer.increment_block(StaticFileSegment::Headers, block.number)?;
         transactions_writer.increment_block(StaticFileSegment::Transactions, block.number)?;
@@ -92,13 +92,74 @@ where
 
         // TODO: do we care about the mpsc error here?
         // send a command to the db task to update the checkpoints for headers / bodies
-        let _ = self.database_handle
+        let _ = self
+            .database_handle
             .send_action(PersistenceAction::UpdateTransactionMeta((block.number, sender)));
 
         Ok(())
     }
 
-    fn write_execution_data(&self, blocks: Vec<ExecutedBlock>) -> ProviderResult<()> {
+    /// Write execution-related block data to static files.
+    ///
+    /// This will then send a command to the db task, that it should write new data, and update the
+    /// checkpoints for execution and beyond.
+    fn write_execution_data(
+        &self,
+        blocks: Vec<ExecutedBlock>,
+        sender: oneshot::Sender<B256>,
+    ) -> ProviderResult<()> {
+        if blocks.is_empty() {
+            return Ok(())
+        }
+        let provider = self.provider.static_file_provider();
+
+        // NOTE: checked non-empty above
+        let first_block = blocks.first().unwrap().block();
+        let last_block = blocks.last().unwrap().block();
+
+        let mut receipts_writer =
+            provider.get_writer(first_block.number, StaticFileSegment::Receipts)?;
+        for (num, receipts) in blocks
+            .iter()
+            .map(|block| (block.block().number, block.execution_outcome().receipts.clone()))
+        {
+            debug_assert!(receipts.len() == 1);
+            // TODO: should we also assert that the receipt is not None here, that means the
+            // receipt is pruned
+            for receipt in receipts.first().unwrap().iter().flatten() {
+                receipts_writer.append_receipt(num, receipt.clone())?;
+            }
+        }
+
+        // TODO: do we care about the mpsc error here?
+        // send a command to the db task to update the checkpoints for execution etc.
+        let _ = self.database_handle.send_action(PersistenceAction::SaveBlocks((blocks, sender)));
+
+        Ok(())
+    }
+
+    /// Removes the blocks above the given block number from static files. Also removes related
+    /// receipt and header data.
+    ///
+    /// This is meant to be called by the db task, as this should only be done after related data
+    /// is removed from the database, and checkpoints are updated.
+    ///
+    /// Returns the hash of the lowest removed block.
+    fn remove_blocks_above(
+        &self,
+        block_num: u64,
+        sender: oneshot::Sender<B256>,
+    ) -> ProviderResult<()> {
+        let provider = self.provider.static_file_provider();
+
+        // get the writers
+        let mut _header_writer = provider.get_writer(block_num, StaticFileSegment::Headers)?;
+        let mut _transactions_writer =
+            provider.get_writer(block_num, StaticFileSegment::Transactions)?;
+        let mut _receipts_writer = provider.get_writer(block_num, StaticFileSegment::Receipts)?;
+
+        // TODO: how do we delete s.t. `block_num` is the start? Additionally, do we need to index
+        // by tx num for the transactions segment?
         todo!("implement me")
     }
 }
@@ -122,14 +183,16 @@ where
                     self.log_transactions(block, start_tx_number, td, response_sender)
                         .expect("todo: handle errors");
                     todo!("implement me")
-                    // let _ = response_sender.send(());
                 }
                 StaticFileAction::RemoveBlocksAbove((block_num, response_sender)) => {
+                    self.remove_blocks_above(block_num, response_sender)
+                        .expect("todo: handle errors");
                     todo!("implement me")
                 }
                 StaticFileAction::WriteExecutionData((blocks, response_sender)) => {
-                    self.write_execution_data(blocks).expect("todo: handle errors");
-                    let _ = response_sender.send(());
+                    self.write_execution_data(blocks, response_sender)
+                        .expect("todo: handle errors");
+                    todo!("implement me")
                 }
             }
         }
@@ -150,7 +213,7 @@ pub enum StaticFileAction {
     ///
     /// This will then send a command to the db task, that it should write new data, and update the
     /// checkpoints for execution and beyond.
-    WriteExecutionData((Vec<ExecutedBlock>, oneshot::Sender<()>)),
+    WriteExecutionData((Vec<ExecutedBlock>, oneshot::Sender<B256>)),
 
     /// Removes the blocks above the given block number from static files. Also removes related
     /// receipt and header data.
