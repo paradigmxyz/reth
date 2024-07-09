@@ -15,7 +15,7 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::helpers::{Call, EthApiSpec, EthTransactions, TraceExt};
-use reth_rpc_eth_types::{revm_utils::prepare_call_env, EthApiError, EthResult, StateCacheDb};
+use reth_rpc_eth_types::{EthApiError, EthResult, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     state::EvmOverrides,
@@ -503,7 +503,7 @@ where
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                        let env = prepare_call_env(
+                        let env = this.eth_api().prepare_call_env(
                             cfg.clone(),
                             block_env.clone(),
                             tx,
