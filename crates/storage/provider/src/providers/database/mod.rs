@@ -703,7 +703,7 @@ mod tests {
     }
 
     #[test]
-    fn get_take_block_transaction_range_recover_senders() {
+    fn take_block_transaction_range_recover_senders() {
         let factory = create_test_provider_factory();
 
         let mut rng = generators::rng();
@@ -733,7 +733,7 @@ mod tests {
             let db_senders = provider.senders_by_tx_range(range);
             assert_eq!(db_senders, Ok(vec![]));
 
-            let result = provider.get_take_block_transaction_range::<true>(0..=0);
+            let result = provider.take_block_transaction_range(0..=0);
             assert_eq!(
                 result,
                 Ok(vec![(

@@ -13,20 +13,10 @@ pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
     fn get_block_and_execution_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Chain> {
-        self.get_or_take_block_and_execution_range::<false>(range)
-    }
+    ) -> ProviderResult<Chain>;
 
     /// Take range of blocks and its execution result
     fn take_block_and_execution_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Chain> {
-        self.get_or_take_block_and_execution_range::<true>(range)
-    }
-
-    /// Return range of blocks and its execution result
-    fn get_or_take_block_and_execution_range<const TAKE: bool>(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain>;
