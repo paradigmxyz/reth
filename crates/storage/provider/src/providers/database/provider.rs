@@ -1078,13 +1078,16 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     }
 
     /// Unwind a table forward by a [`Walker`][reth_db_api::cursor::Walker] on another table
-    pub fn unwind_table_by_walker<T1, T2>(&self, start_at: T1::Key) -> Result<(), DatabaseError>
+    pub fn unwind_table_by_walker<T1, T2>(
+        &self,
+        range: impl RangeBounds<T1::Key>,
+    ) -> Result<(), DatabaseError>
     where
         T1: Table,
         T2: Table<Key = T1::Value>,
     {
         let mut cursor = self.tx.cursor_write::<T1>()?;
-        let mut walker = cursor.walk(Some(start_at))?;
+        let mut walker = cursor.walk_range(range)?;
         while let Some((_, value)) = walker.next().transpose()? {
             self.tx.delete::<T2>(value, None)?;
         }
