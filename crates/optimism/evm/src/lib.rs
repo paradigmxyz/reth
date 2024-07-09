@@ -66,6 +66,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
             // blob fields can be None for this tx
             blob_hashes: Vec::new(),
             max_fee_per_blob_gas: None,
+            authorization_list: None,
             optimism: OptimismFields {
                 source_hash: None,
                 mint: None,

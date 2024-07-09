@@ -165,12 +165,11 @@ pub fn create_txn_env(block_env: &BlockEnv, request: TransactionRequest) -> EthR
         value: value.unwrap_or_default(),
         data: input.try_into_unique_input()?.unwrap_or_default(),
         chain_id,
-        access_list: access_list
-            .map(reth_rpc_types::AccessList::into_flattened)
-            .unwrap_or_default(),
+        access_list: access_list.unwrap_or_default().into(),
         // EIP-4844 fields
         blob_hashes: blob_versioned_hashes.unwrap_or_default(),
         max_fee_per_blob_gas,
+        authorization_list: None,
         #[cfg(feature = "optimism")]
         optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
     };
