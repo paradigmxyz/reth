@@ -10,23 +10,30 @@ repository.workspace = true
 [lints]
 
 [dependencies]
-reth-db = { workspace = true, features = ["mdbx"] }
-reth-db-api.workspace = true
-reth-provider.workspace = true
-reth-primitives.workspace = true
-reth-node-core.workspace = true
-reth-fs-util.workspace = true
-reth-db-common.workspace = true
-reth-static-file-types.workspace = true
 reth-beacon-consensus.workspace = true
 reth-chainspec.workspace = true
+reth-cli-runner.workspace = true
+reth-cli-util.workspace = true
 reth-config.workspace = true
+reth-consensus.workspace = true
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-db-api.workspace = true
+reth-db-common.workspace = true
 reth-downloaders.workspace = true
 reth-evm.workspace = true
+reth-exex.workspace = true
+reth-fs-util.workspace = true
+reth-network = { workspace = true, features = ["serde"] }
+reth-network-p2p.workspace = true
+reth-node-core.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-prune.workspace = true
 reth-stages.workspace = true
+reth-static-file-types.workspace = true
 reth-static-file.workspace = true
+reth-trie = { workspace = true, features = ["metrics"] }
 
-confy.workspace = true
 tokio.workspace = true
 itertools.workspace = true
 
@@ -38,6 +45,12 @@ clap = { workspace = true, features = ["derive", "env"] }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+backon.workspace = true
+
+# io
+fdlimit.workspace = true
+confy.workspace = true
+toml = { workspace = true, features = ["display"] }
 
 # tui
 comfy-table = "7.0"
@@ -45,3 +58,21 @@ crossterm = "0.27.0"
 ratatui = { version = "0.27", default-features = false, features = [
     "crossterm",
 ] }
+
+# metrics
+metrics-process.workspace = true
+
+# reth test-vectors
+proptest = { workspace = true, optional = true }
+arbitrary = { workspace = true, optional = true }
+proptest-arbitrary-interop = { workspace = true, optional = true }
+
+[features]
+default = []
+dev = [
+    "dep:proptest",
+    "dep:arbitrary",
+    "dep:proptest-arbitrary-interop",
+    "reth-primitives/arbitrary",
+    "reth-db-api/arbitrary"
+]

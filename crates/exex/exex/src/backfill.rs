@@ -1,17 +1,17 @@
-use reth_db_api::database::Database;
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
 use reth_node_api::FullNodeComponents;
 use reth_primitives::{Block, BlockNumber, BlockWithSenders, Receipt};
 use reth_primitives_traits::format_gas_throughput;
-use reth_provider::{Chain, FullProvider, ProviderError, TransactionVariant};
+use reth_provider::{
+    BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
+};
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::{debug, trace};
 use std::{
-    marker::PhantomData,
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
@@ -51,14 +51,13 @@ impl<E, P> BackfillJobFactory<E, P> {
 
 impl<E: Clone, P: Clone> BackfillJobFactory<E, P> {
     /// Creates a new backfill job for the given range.
-    pub fn backfill<DB>(&self, range: RangeInclusive<BlockNumber>) -> BackfillJob<E, DB, P> {
+    pub fn backfill(&self, range: RangeInclusive<BlockNumber>) -> BackfillJob<E, P> {
         BackfillJob {
             executor: self.executor.clone(),
             provider: self.provider.clone(),
             prune_modes: self.prune_modes.clone(),
             range,
             thresholds: self.thresholds.clone(),
-            _db: PhantomData,
         }
     }
 }
@@ -80,20 +79,18 @@ impl BackfillJobFactory<(), ()> {
 /// It implements [`Iterator`] that executes blocks in batches according to the provided thresholds
 /// and yields [`Chain`]
 #[derive(Debug)]
-pub struct BackfillJob<E, DB, P> {
+pub struct BackfillJob<E, P> {
     executor: E,
     provider: P,
     prune_modes: PruneModes,
     thresholds: ExecutionStageThresholds,
     range: RangeInclusive<BlockNumber>,
-    _db: PhantomData<DB>,
 }
 
-impl<E, DB, P> Iterator for BackfillJob<E, DB, P>
+impl<E, P> Iterator for BackfillJob<E, P>
 where
     E: BlockExecutorProvider,
-    DB: Database,
-    P: FullProvider<DB>,
+    P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     type Item = Result<Chain, BlockExecutionError>;
 
@@ -106,11 +103,10 @@ where
     }
 }
 
-impl<E, DB, P> BackfillJob<E, DB, P>
+impl<E, P> BackfillJob<E, P>
 where
     E: BlockExecutorProvider,
-    DB: Database,
-    P: FullProvider<DB>,
+    P: BlockReader + HeaderProvider + StateProviderFactory,
 {
     fn execute_range(&mut self) -> Result<Chain, BlockExecutionError> {
         let mut executor = self.executor.batch_executor(StateProviderDatabase::new(
@@ -197,21 +193,16 @@ where
     }
 }
 
-impl<E, DB, P> BackfillJob<E, DB, P> {
+impl<E, P> BackfillJob<E, P> {
     /// Converts the backfill job into a single block backfill job.
-    pub fn into_single_blocks(self) -> SingleBlockBackfillJob<E, DB, P> {
+    pub fn into_single_blocks(self) -> SingleBlockBackfillJob<E, P> {
         self.into()
     }
 }
 
-impl<E, DB, P> From<BackfillJob<E, DB, P>> for SingleBlockBackfillJob<E, DB, P> {
-    fn from(value: BackfillJob<E, DB, P>) -> Self {
-        Self {
-            executor: value.executor,
-            provider: value.provider,
-            range: value.range,
-            _db: PhantomData,
-        }
+impl<E, P> From<BackfillJob<E, P>> for SingleBlockBackfillJob<E, P> {
+    fn from(value: BackfillJob<E, P>) -> Self {
+        Self { executor: value.executor, provider: value.provider, range: value.range }
     }
 }
 
@@ -220,18 +211,16 @@ impl<E, DB, P> From<BackfillJob<E, DB, P>> for SingleBlockBackfillJob<E, DB, P> 
 /// It implements [`Iterator`] which executes a block each time the
 /// iterator is advanced and yields ([`BlockWithSenders`], [`BlockExecutionOutput`])
 #[derive(Debug)]
-pub struct SingleBlockBackfillJob<E, DB, P> {
+pub struct SingleBlockBackfillJob<E, P> {
     executor: E,
     provider: P,
     range: RangeInclusive<BlockNumber>,
-    _db: PhantomData<DB>,
 }
 
-impl<E, DB, P> Iterator for SingleBlockBackfillJob<E, DB, P>
+impl<E, P> Iterator for SingleBlockBackfillJob<E, P>
 where
     E: BlockExecutorProvider,
-    DB: Database,
-    P: FullProvider<DB>,
+    P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     type Item = Result<(BlockWithSenders, BlockExecutionOutput<Receipt>), BlockExecutionError>;
 
@@ -240,11 +229,10 @@ where
     }
 }
 
-impl<E, DB, P> SingleBlockBackfillJob<E, DB, P>
+impl<E, P> SingleBlockBackfillJob<E, P>
 where
     E: BlockExecutorProvider,
-    DB: Database,
-    P: FullProvider<DB>,
+    P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     fn execute_block(
         &self,

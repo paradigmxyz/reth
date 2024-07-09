@@ -11,14 +11,14 @@ use reth_chainspec::DEV;
 use reth_chainspec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
 
 #[cfg(not(feature = "optimism"))]
-use reth_chainspec::{GOERLI, HOLESKY, MAINNET, SEPOLIA};
+use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
 
 #[cfg(feature = "optimism")]
 /// Chains supported by op-reth. First value should be used as the default.
 pub const SUPPORTED_CHAINS: &[&str] = &["optimism", "optimism-sepolia", "base", "base-sepolia"];
 #[cfg(not(feature = "optimism"))]
 /// Chains supported by reth. First value should be used as the default.
-pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "goerli", "holesky", "dev"];
+pub const SUPPORTED_CHAINS: &[&str] = &["mainnet", "sepolia", "holesky", "dev"];
 
 /// The help info for the --chain flag
 pub fn chain_help() -> String {
@@ -33,8 +33,6 @@ pub fn chain_value_parser(s: &str) -> eyre::Result<Arc<ChainSpec>, eyre::Error> 
     Ok(match s {
         #[cfg(not(feature = "optimism"))]
         "mainnet" => MAINNET.clone(),
-        #[cfg(not(feature = "optimism"))]
-        "goerli" => GOERLI.clone(),
         #[cfg(not(feature = "optimism"))]
         "sepolia" => SEPOLIA.clone(),
         #[cfg(not(feature = "optimism"))]

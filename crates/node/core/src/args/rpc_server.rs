@@ -166,6 +166,10 @@ pub struct RpcServerArgs {
     )]
     pub rpc_eth_proof_window: u64,
 
+    /// Maximum number of concurrent getproof requests.
+    #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = constants::DEFAULT_PROOF_PERMITS)]
+    pub rpc_proof_permits: usize,
+
     /// State cache configuration.
     #[command(flatten)]
     pub rpc_state_cache: RpcStateCacheArgs,
@@ -299,6 +303,7 @@ impl Default for RpcServerArgs {
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
+            rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
         }
     }
 }

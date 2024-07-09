@@ -40,6 +40,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
     }
 
     fn fill_tx_env_system_contract_call(
+        &self,
         env: &mut Env,
         caller: Address,
         contract: Address,
@@ -65,6 +66,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
             // blob fields can be None for this tx
             blob_hashes: Vec::new(),
             max_fee_per_blob_gas: None,
+            authorization_list: None,
             optimism: OptimismFields {
                 source_hash: None,
                 mint: None,
@@ -83,6 +85,7 @@ impl ConfigureEvmEnv for OptimismEvmConfig {
     }
 
     fn fill_cfg_env(
+        &self,
         cfg_env: &mut CfgEnvWithHandlerCfg,
         chain_spec: &ChainSpec,
         header: &Header,
@@ -143,7 +146,7 @@ mod tests {
         let chain_spec = ChainSpec::default();
         let total_difficulty = U256::ZERO;
 
-        OptimismEvmConfig::fill_cfg_and_block_env(
+        OptimismEvmConfig::default().fill_cfg_and_block_env(
             &mut cfg_env,
             &mut block_env,
             &chain_spec,

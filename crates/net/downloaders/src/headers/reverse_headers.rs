@@ -10,16 +10,14 @@ use reth_consensus::Consensus;
 use reth_network_p2p::{
     error::{DownloadError, DownloadResult, PeerRequestResult},
     headers::{
-        client::{HeadersClient, HeadersRequest},
+        client::{HeadersClient, HeadersDirection, HeadersRequest},
         downloader::{validate_header_download, HeaderDownloader, SyncTarget},
         error::{HeadersDownloaderError, HeadersDownloaderResult},
     },
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{
-    BlockHashOrNumber, BlockNumber, GotExpected, Header, HeadersDirection, SealedHeader, B256,
-};
+use reth_primitives::{BlockHashOrNumber, BlockNumber, GotExpected, Header, SealedHeader, B256};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     cmp::{Ordering, Reverse},

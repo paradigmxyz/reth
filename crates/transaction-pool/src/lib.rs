@@ -148,7 +148,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![warn(clippy::missing_const_for_fn)]
 
 use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;

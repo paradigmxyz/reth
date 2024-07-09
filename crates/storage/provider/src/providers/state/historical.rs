@@ -274,8 +274,17 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
 
 impl<'b, TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'b, TX> {
     /// Get account and storage proofs.
-    fn proof(&self, _address: Address, _slots: &[B256]) -> ProviderResult<AccountProof> {
-        Err(ProviderError::StateRootNotAvailableForHistoricalBlock)
+    fn proof(
+        &self,
+        state: &BundleState,
+        address: Address,
+        slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        let mut revert_state = self.revert_state()?;
+        revert_state.extend(HashedPostState::from_bundle_state(&state.state));
+        revert_state
+            .account_proof(self.tx, address, slots)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 

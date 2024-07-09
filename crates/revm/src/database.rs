@@ -121,7 +121,7 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
     /// Note: It safely casts the `number` to `u64`.
-    fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
         DatabaseRef::block_hash_ref(self, number)
     }
 }
@@ -154,11 +154,8 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Retrieves the block hash for a given block number.
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
-    fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         // Get the block hash or default hash with an attempt to convert U256 block number to u64
-        Ok(self
-            .0
-            .block_hash(number.try_into().map_err(|_| Self::Error::BlockNumberOverflow(number))?)?
-            .unwrap_or_default())
+        Ok(self.0.block_hash(number)?.unwrap_or_default())
     }
 }

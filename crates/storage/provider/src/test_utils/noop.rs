@@ -328,7 +328,12 @@ impl StateRootProvider for NoopProvider {
 }
 
 impl StateProofProvider for NoopProvider {
-    fn proof(&self, address: Address, _slots: &[B256]) -> ProviderResult<AccountProof> {
+    fn proof(
+        &self,
+        _state: &BundleState,
+        address: Address,
+        _slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
         Ok(AccountProof::new(address))
     }
 }
