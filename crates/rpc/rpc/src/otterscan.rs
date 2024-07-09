@@ -261,15 +261,14 @@ where
             return Ok(None)
         }
 
+        // perform a binary search over the block range to find the block in which the sender's
+        // nonce reached the requested nonce.
         let num = binary_search(1, self.eth.block_number()?.saturating_to(), |mid| {
             Box::pin(async move {
-                let mid_nonce = EthApiServer::transaction_count(
-                    &self.eth,
-                    sender,
-                    Some(BlockId::Number(BlockNumberOrTag::Number(mid))),
-                )
-                .await?
-                .saturating_to::<u64>();
+                let mid_nonce =
+                    EthApiServer::transaction_count(&self.eth, sender, Some(mid.into()))
+                        .await?
+                        .saturating_to::<u64>();
 
                 // The `transaction_count` returns the `nonce` after the transaction was
                 // executed, which is the state of the account after the block, and we need to find
@@ -283,7 +282,7 @@ where
         let Some(BlockTransactions::Full(transactions)) =
             self.eth.block_by_number(num.into(), true).await?.map(|block| block.inner.transactions)
         else {
-            return Err(internal_rpc_err("block is not full"));
+            return Err(EthApiError::UnknownBlockNumber.into());
         };
 
         Ok(transactions
