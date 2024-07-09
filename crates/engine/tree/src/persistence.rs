@@ -167,7 +167,7 @@ where
             match action {
                 PersistenceAction::RemoveBlocksAbove((new_tip_num, sender)) => {
                     let output =
-                        self.remove_blocks_above(new_tip_num).expect("todo: handle erorrs");
+                        self.remove_blocks_above(new_tip_num).expect("todo: handle errors");
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(output);
