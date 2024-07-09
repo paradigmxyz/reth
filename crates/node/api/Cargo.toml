@@ -21,3 +21,6 @@ reth-network.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
+
+# misc
+auto_impl.workspace = true

@@ -7510,6 +7510,7 @@ dependencies = [
 name = "reth-node-api"
 version = "1.0.0"
 dependencies = [
+ "auto_impl",
  "reth-db-api",
  "reth-engine-primitives",
  "reth-evm",

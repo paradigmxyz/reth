@@ -2,6 +2,7 @@
 
 use std::{fmt, marker::PhantomData, ops};
 
+use auto_impl::auto_impl;
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -76,7 +77,7 @@ pub trait FullNodeTypes: NodeTypes + 'static {
 
 impl<T> FullNodeTypes for T
 where
-    T: NodeTypes + ops::Deref,
+    T: ops::Deref + Send + Sync + Unpin + 'static,
     <T as ops::Deref>::Target: FullNodeTypes,
 {
     type DB = <<T as ops::Deref>::Target as FullNodeTypes>::DB;
@@ -195,39 +196,39 @@ pub trait FullNodeComponentsExt: FullNodeTypes + Clone + 'static {
 
 impl<T> FullNodeComponents for T
 where
-    T: FullNodeComponentsExt + ops::Deref,
-    T::Target: FullNodeComponents<Provider = T::Provider, EngineTypes = T::EngineTypes>,
+    T: FullNodeComponentsExt,
+    T::Core: FullNodeComponents<EngineTypes = T::EngineTypes, Provider = T::Provider>,
 {
-    type Pool = <T::Target as FullNodeComponents>::Pool;
-    type Evm = <T::Target as FullNodeComponents>::Evm;
-    type Executor = <T::Target as FullNodeComponents>::Executor;
+    type Pool = <T::Core as FullNodeComponents>::Pool;
+    type Evm = <T::Core as FullNodeComponents>::Evm;
+    type Executor = <T::Core as FullNodeComponents>::Executor;
 
     fn pool(&self) -> &Self::Pool {
-        self.deref().pool()
+        self.core().pool()
     }
 
     fn evm_config(&self) -> &Self::Evm {
-        self.deref().evm_config()
+        self.core().evm_config()
     }
 
     fn block_executor(&self) -> &Self::Executor {
-        self.deref().block_executor()
+        self.core().block_executor()
     }
 
     fn provider(&self) -> &Self::Provider {
-        self.deref().provider()
+        self.core().provider()
     }
 
     fn network(&self) -> &NetworkHandle {
-        self.deref().network()
+        self.core().network()
     }
 
     fn payload_builder(&self) -> &PayloadBuilderHandle<Self::EngineTypes> {
-        self.deref().payload_builder()
+        self.core().payload_builder()
     }
 
     fn task_executor(&self) -> &TaskExecutor {
-        self.deref().task_executor()
+        self.core().task_executor()
     }
 }
 

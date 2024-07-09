@@ -267,45 +267,6 @@ where
     }
 }
 
-impl<Node, BT, C> FullNodeComponents for NodeAdapterExt<Node, BT, C>
-where
-    Node: FullNodeComponents,
-    BT: FullBlockchainTreeEngine + Clone + 'static,
-    C: FullClient + Clone + 'static,
-{
-    type Pool = Node::Pool;
-    type Evm = Node::Evm;
-    type Executor = Node::Executor;
-
-    fn pool(&self) -> &Self::Pool {
-        self.core.pool()
-    }
-
-    fn evm_config(&self) -> &Self::Evm {
-        self.core.evm_config()
-    }
-
-    fn block_executor(&self) -> &Self::Executor {
-        self.core.block_executor()
-    }
-
-    fn provider(&self) -> &<Self as FullNodeTypes>::Provider {
-        self.core.provider()
-    }
-
-    fn network(&self) -> &NetworkHandle {
-        self.core.network()
-    }
-
-    fn payload_builder(&self) -> &PayloadBuilderHandle<Node::EngineTypes> {
-        self.core.payload_builder()
-    }
-
-    fn task_executor(&self) -> &TaskExecutor {
-        self.core.task_executor()
-    }
-}
-
 impl<N, BT, C> FullNodeComponentsExt for NodeAdapterExt<N, BT, C>
 where
     N: FullNodeComponents,
