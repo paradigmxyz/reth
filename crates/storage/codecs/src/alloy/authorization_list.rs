@@ -47,18 +47,20 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
         // todo(onbjerg): add `SignedAuthorization::into_parts(self) -> (Auth, Signature)`
         let (auth, signature) = (self.deref().clone(), self.signature());
         let (v, r, s) = (signature.v(), signature.r(), signature.s());
-        auth.to_compact(&mut buffer);
         buf.put_u8(v.y_parity_byte());
         buf.put_slice(r.as_le_slice());
         buf.put_slice(s.as_le_slice());
+
+        // to_compact doesn't write the len to buffer.
+        // By placing it as last, we don't need to store it either.
+        auth.to_compact(&mut buffer);
 
         let total_len = buffer.len();
         buf.put(buffer.as_slice());
         total_len
     }
 
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (auth, mut buf) = AlloyAuthorization::from_compact(buf, len);
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         let y = buf.get_u8() == 1;
         let r = U256::from_le_slice(&buf[0..32]);
         buf.advance(32);
@@ -67,6 +69,8 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
 
         let signature = alloy_primitives::Signature::from_rs_and_parity(r, s, y)
             .expect("invalid authorization signature");
+        let (auth, buf) = AlloyAuthorization::from_compact(buf, len);
+
         (auth.into_signed(signature), buf)
     }
 }
@@ -75,6 +79,8 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
 mod tests {
     use super::*;
     use alloy_primitives::{address, b256};
+    use proptest::proptest;
+    use proptest_arbitrary_interop::arb;
 
     #[test]
     fn test_roundtrip_compact_authorization_list_item() {
@@ -96,5 +102,22 @@ mod tests {
         let (decoded_authorization, _) =
             SignedAuthorization::from_compact(&compacted_authorization, len);
         assert_eq!(authorization, decoded_authorization);
+    }
+
+    proptest! {
+        #[test]
+        fn test_roundtrip_compact_authorization(auth in arb::<Authorization>(), signature in arb::<alloy_primitives::Signature>()) {
+            let auth = AlloyAuthorization {
+                chain_id: auth.chain_id,
+                address: auth.address,
+                nonce: auth.nonce.into(),
+            }.into_signed(signature);
+
+            let mut compacted_auth = Vec::<u8>::new();
+            let len = auth.clone().to_compact(&mut compacted_auth);
+
+            let (decoded_auth, _) = SignedAuthorization::<alloy_primitives::Signature>::from_compact(&compacted_auth, len);
+            assert_eq!(auth, decoded_auth);
+        }
     }
 }
