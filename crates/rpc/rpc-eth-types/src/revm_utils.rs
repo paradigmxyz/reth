@@ -63,77 +63,6 @@ where
         .unwrap_or_default())
 }
 
-/// Applies the given state overrides (a set of [`AccountOverride`]) to the [`CacheDB`].
-pub fn apply_state_overrides<DB>(overrides: StateOverride, db: &mut CacheDB<DB>) -> EthResult<()>
-where
-    DB: DatabaseRef,
-    EthApiError: From<<DB as DatabaseRef>::Error>,
-{
-    for (account, account_overrides) in overrides {
-        apply_account_override(account, account_overrides, db)?;
-    }
-    Ok(())
-}
-
-/// Applies a single [`AccountOverride`] to the [`CacheDB`].
-fn apply_account_override<DB>(
-    account: Address,
-    account_override: AccountOverride,
-    db: &mut CacheDB<DB>,
-) -> EthResult<()>
-where
-    DB: DatabaseRef,
-    EthApiError: From<<DB as DatabaseRef>::Error>,
-{
-    // we need to fetch the account via the `DatabaseRef` to not update the state of the account,
-    // which is modified via `Database::basic_ref`
-    let mut account_info = DatabaseRef::basic_ref(db, account)?.unwrap_or_default();
-
-    if let Some(nonce) = account_override.nonce {
-        account_info.nonce = nonce.to();
-    }
-    if let Some(code) = account_override.code {
-        account_info.code = Some(Bytecode::new_raw(code));
-    }
-    if let Some(balance) = account_override.balance {
-        account_info.balance = balance;
-    }
-
-    db.insert_account_info(account, account_info);
-
-    // We ensure that not both state and state_diff are set.
-    // If state is set, we must mark the account as "NewlyCreated", so that the old storage
-    // isn't read from
-    match (account_override.state, account_override.state_diff) {
-        (Some(_), Some(_)) => return Err(EthApiError::BothStateAndStateDiffInOverride(account)),
-        (None, None) => {
-            // nothing to do
-        }
-        (Some(new_account_state), None) => {
-            db.replace_account_storage(
-                account,
-                new_account_state
-                    .into_iter()
-                    .map(|(slot, value)| {
-                        (U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0))
-                    })
-                    .collect(),
-            )?;
-        }
-        (None, Some(account_state_diff)) => {
-            for (slot, value) in account_state_diff {
-                db.insert_account_storage(
-                    account,
-                    U256::from_be_bytes(slot.0),
-                    U256::from_be_bytes(value.0),
-                )?;
-            }
-        }
-    };
-
-    Ok(())
-}
-
 /// Helper type for representing the fees of a [`TransactionRequest`]
 #[derive(Debug)]
 pub struct CallFees {
@@ -296,6 +225,77 @@ pub fn apply_block_overrides(overrides: BlockOverrides, env: &mut BlockEnv) {
     if let Some(base_fee) = base_fee {
         env.basefee = base_fee;
     }
+}
+
+/// Applies the given state overrides (a set of [`AccountOverride`]) to the [`CacheDB`].
+pub fn apply_state_overrides<DB>(overrides: StateOverride, db: &mut CacheDB<DB>) -> EthResult<()>
+where
+    DB: DatabaseRef,
+    EthApiError: From<<DB as DatabaseRef>::Error>,
+{
+    for (account, account_overrides) in overrides {
+        apply_account_override(account, account_overrides, db)?;
+    }
+    Ok(())
+}
+
+/// Applies a single [`AccountOverride`] to the [`CacheDB`].
+fn apply_account_override<DB>(
+    account: Address,
+    account_override: AccountOverride,
+    db: &mut CacheDB<DB>,
+) -> EthResult<()>
+where
+    DB: DatabaseRef,
+    EthApiError: From<<DB as DatabaseRef>::Error>,
+{
+    // we need to fetch the account via the `DatabaseRef` to not update the state of the account,
+    // which is modified via `Database::basic_ref`
+    let mut account_info = DatabaseRef::basic_ref(db, account)?.unwrap_or_default();
+
+    if let Some(nonce) = account_override.nonce {
+        account_info.nonce = nonce.to();
+    }
+    if let Some(code) = account_override.code {
+        account_info.code = Some(Bytecode::new_raw(code));
+    }
+    if let Some(balance) = account_override.balance {
+        account_info.balance = balance;
+    }
+
+    db.insert_account_info(account, account_info);
+
+    // We ensure that not both state and state_diff are set.
+    // If state is set, we must mark the account as "NewlyCreated", so that the old storage
+    // isn't read from
+    match (account_override.state, account_override.state_diff) {
+        (Some(_), Some(_)) => return Err(EthApiError::BothStateAndStateDiffInOverride(account)),
+        (None, None) => {
+            // nothing to do
+        }
+        (Some(new_account_state), None) => {
+            db.replace_account_storage(
+                account,
+                new_account_state
+                    .into_iter()
+                    .map(|(slot, value)| {
+                        (U256::from_be_bytes(slot.0), U256::from_be_bytes(value.0))
+                    })
+                    .collect(),
+            )?;
+        }
+        (None, Some(account_state_diff)) => {
+            for (slot, value) in account_state_diff {
+                db.insert_account_storage(
+                    account,
+                    U256::from_be_bytes(slot.0),
+                    U256::from_be_bytes(value.0),
+                )?;
+            }
+        }
+    };
+
+    Ok(())
 }
 
 #[cfg(test)]
