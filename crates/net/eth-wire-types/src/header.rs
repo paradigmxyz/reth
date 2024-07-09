@@ -2,7 +2,7 @@
 
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
-use reth_codecs::derive_arbitrary;
+use reth_codecs_derive::derive_arbitrary;
 
 /// Represents the direction for a headers request depending on the `reverse` field of the request.
 /// > The response must contain a number of block headers, of rising number when reverse is 0,
