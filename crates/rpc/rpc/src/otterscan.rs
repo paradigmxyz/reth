@@ -17,7 +17,7 @@ use reth_rpc_types::{
     BlockTransactions, Header, Transaction,
 };
 use revm_inspectors::{
-    tracing::TracingInspectorConfig,
+    tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
 };
 use revm_primitives::ExecutionResult;
@@ -101,8 +101,34 @@ where
     }
 
     /// Handler for `ots_traceTransaction`
-    async fn trace_transaction(&self, _tx_hash: TxHash) -> RpcResult<TraceEntry> {
-        Err(internal_rpc_err("unimplemented"))
+    async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<Option<Vec<TraceEntry>>> {
+        let traces = self
+            .eth
+            .spawn_trace_transaction_in_block(
+                tx_hash,
+                TracingInspectorConfig::default_parity(),
+                move |_tx_info, inspector, _, _| Ok(inspector.into_traces().into_nodes()),
+            )
+            .await?
+            .map(|traces| {
+                traces
+                    .into_iter()
+                    .map(|CallTraceNode { trace, .. }| TraceEntry {
+                        r#type: if trace.is_selfdestruct() {
+                            "SELFDESTRUCT".to_string()
+                        } else {
+                            trace.kind.to_string()
+                        },
+                        depth: trace.depth as u32,
+                        from: trace.caller,
+                        to: trace.address,
+                        value: trace.value,
+                        input: trace.data,
+                        output: trace.output,
+                    })
+                    .collect::<Vec<_>>()
+            });
+        Ok(traces)
     }
 
     /// Handler for `ots_getBlockDetails`
