@@ -1116,8 +1116,8 @@ where
 ///
 /// Once the [`RpcModule`] is built via [`RpcModuleBuilder`] the servers can be started, See also
 /// [`ServerBuilder::build`] and [`Server::start`](jsonrpsee::server::Server::start).
-#[derive(Default, Debug)]
-pub struct RpcServerConfig {
+#[derive(Debug)]
+pub struct RpcServerConfig<HttpMiddleware = Identity, RpcMiddleware = Identity> {
     /// Configs for JSON-RPC Http.
     http_server_config: Option<ServerBuilder<Identity, Identity>>,
     /// Allowed CORS Domains for http
@@ -1136,26 +1136,51 @@ pub struct RpcServerConfig {
     ipc_endpoint: Option<String>,
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
+    /// solala
+    rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
+    /// solala
+    http_middleware: tower::ServiceBuilder<HttpMiddleware>,
 }
 
 // === impl RpcServerConfig ===
 
-impl RpcServerConfig {
-    /// Creates a new config with only http set
-    pub fn http(config: ServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_http(config)
+impl Default for RpcServerConfig<Identity, Identity> {
+    fn default() -> Self {
+        Self {
+            http_server_config: None,
+            http_cors_domains: None,
+            http_addr: None,
+            ws_server_config: None,
+            ws_cors_domains: None,
+            ws_addr: None,
+            ipc_server_config: None,
+            ipc_endpoint: None,
+            jwt_secret: None,
+            rpc_middleware: RpcServiceBuilder::new(),
+            http_middleware: tower::ServiceBuilder::new(),
+        }
     }
+}
 
-    /// Creates a new config with only ws set
-    pub fn ws(config: ServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_ws(config)
-    }
-
-    /// Creates a new config with only ipc set
-    pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_ipc(config)
-    }
-
+impl<HttpMiddleware, RpcMiddleware> RpcServerConfig<HttpMiddleware, RpcMiddleware>
+where
+    RpcMiddleware: for<'a> tower::Layer<
+            jsonrpsee::server::middleware::rpc::RpcService,
+            Service: jsonrpsee::server::middleware::rpc::RpcServiceT<'a>,
+        > + Clone
+        + Send
+        + 'static,
+    HttpMiddleware: tower::Layer<
+            reth_ipc::server::TowerServiceNoHttp<RpcMiddleware>,
+            Service: tower::Service<
+                String,
+                Response = Option<String>,
+                Error = Box<dyn std::error::Error + Send + Sync + 'static>,
+                Future: Send + Unpin,
+            > + Send,
+        > + Send
+        + 'static,
+{
     /// Configures the http server
     ///
     /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
