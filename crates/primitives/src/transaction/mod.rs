@@ -257,7 +257,7 @@ impl Transaction {
         }
     }
 
-    /// Returns the [`AuthorizationList`] of the transaction.
+    /// Returns the [`SignedAuthorization`] list of the transaction.
     ///
     /// Returns `None` if this transaction is not EIP-7702.
     pub fn authorization_list(
