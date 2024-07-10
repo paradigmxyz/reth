@@ -10,15 +10,14 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+use chainspec::OpChainSpecParser;
 use clap::{command, value_parser, Parser};
 use commands::Commands;
 use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::node::NoArgs;
 use reth_node_core::{
-    args::{
-        utils::{chain_help, chain_value_parser, SUPPORTED_CHAINS},
-        LogArgs,
-    },
+    args::{utils::chain_help, LogArgs},
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use std::{ffi::OsString, fmt, sync::Arc};
@@ -46,8 +45,8 @@ pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
         long,
         value_name = "CHAIN_OR_PATH",
         long_help = chain_help(),
-        default_value = SUPPORTED_CHAINS[0],
-        value_parser = chain_value_parser,
+        default_value = OpChainSpecParser::SUPPORTED_CHAINS[0],
+        value_parser = OpChainSpecParser::default(),
         global = true,
     )]
     chain: Arc<ChainSpec>,
