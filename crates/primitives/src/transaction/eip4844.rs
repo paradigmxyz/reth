@@ -84,8 +84,9 @@ pub struct TxEip4844 {
     pub max_fee_per_blob_gas: u128,
 
     /// Unlike other transaction types, where the `input` field has two uses depending on whether
-    /// or not the `to` field is [`TxKind::Create`] or [`TxKind::Call`], EIP-4844 transactions
-    /// cannot be [`TxKind::Create`] transactions.
+    /// or not the `to` field is [`Create`](crate::TxKind::Create) or
+    /// [`Call`](crate::TxKind::Call), EIP-4844 transactions cannot be
+    /// [`Create`](crate::TxKind::Create) transactions.
     ///
     /// This means the `input` field has a single use, as data: An unlimited size byte array
     /// specifying the input data of the message call, formally Td.
