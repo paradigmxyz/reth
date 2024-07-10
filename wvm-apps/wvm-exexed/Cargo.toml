@@ -27,6 +27,7 @@ serde = { version = "1.0", features = ["derive"] }
 ###
 repository = { path = "crates/repository" }
 bigquery = { path = "crates/bigquery" }
+lambda = { path = "crates/lambda" }
 exex-etl = { path = "crates/exex-etl" }
 types = { path = "crates/types" }
 
