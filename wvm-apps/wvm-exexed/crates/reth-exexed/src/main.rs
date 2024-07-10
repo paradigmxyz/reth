@@ -1,5 +1,5 @@
 use bigquery::client::BigQueryConfig;
-use exex_lambda::exex_lambda_processor;
+use lambda::lambda::exex_lambda_processor;
 use repository::state_repository;
 use reth::api::FullNodeComponents;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};

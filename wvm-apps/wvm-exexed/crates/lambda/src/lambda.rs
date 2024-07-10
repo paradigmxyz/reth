@@ -64,7 +64,8 @@ pub async fn exex_lambda_processor<Node: FullNodeComponents>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{address, is_transaction_to_sequencer};
+    use reth::primitives::address;
+    use crate::lambda::is_transaction_to_sequencer;
 
     #[test]
     fn check_for_seq_address() {

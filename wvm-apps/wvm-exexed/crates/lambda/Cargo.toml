@@ -1,5 +1,5 @@
 [package]
-name = "exex-lambda"
+name = "lambda"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,12 +9,8 @@ rust-version.workspace = true
 [dependencies]
 reth.workspace = true
 reth-exex.workspace = true
-reth-node-api.workspace = true
 reth-node-ethereum.workspace = true
 reth-tracing.workspace = true
-eyre.workspace = true
-futures.workspace = true
-tokio.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 reqwest.workspace = true
