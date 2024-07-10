@@ -1,5 +1,3 @@
-use core::ops::Deref;
-
 use crate::Compact;
 use alloy_eips::eip7702::{Authorization as AlloyAuthorization, SignedAuthorization};
 use alloy_primitives::{Address, ChainId, U256};

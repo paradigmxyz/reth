@@ -184,7 +184,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
             Some(TxType::Eip7702) => {
                 // this is currently unsupported as it is not present in alloy due to missing rpc
                 // specs
-                Err(ConversionError::Custom("Unsupported".to_string()))
+                Err(ConversionError::Custom("Unimplemented".to_string()))
                 /*
                 // EIP-7702
                 Ok(Transaction::Eip7702(TxEip7702 {
