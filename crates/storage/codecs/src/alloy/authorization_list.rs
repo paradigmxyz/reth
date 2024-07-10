@@ -71,8 +71,6 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
 mod tests {
     use super::*;
     use alloy_primitives::{address, b256};
-    use proptest::proptest;
-    use proptest_arbitrary_interop::arb;
 
     #[test]
     fn test_roundtrip_compact_authorization_list_item() {
