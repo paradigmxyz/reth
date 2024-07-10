@@ -1,4 +1,6 @@
-use crate::{metrics::EngineApiMetrics, EngineApiError, EngineApiResult};
+use crate::{
+    capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
+};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
@@ -18,7 +20,7 @@ use reth_rpc_types::engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
     ExecutionPayloadBodiesV2, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
     ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    TransitionConfiguration, CAPABILITIES,
+    TransitionConfiguration,
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1, convert_to_payload_body_v2,
@@ -56,6 +58,8 @@ struct EngineApiInner<Provider, EngineT: EngineTypes> {
     metrics: EngineApiMetrics,
     /// Identification of the execution client used by the consensus client
     client: ClientVersionV1,
+    /// The list of all supported Engine capabilities available over the engine endpoint.
+    capabilities: EngineCapabilities,
 }
 
 impl<Provider, EngineT> EngineApi<Provider, EngineT>
@@ -71,6 +75,7 @@ where
         payload_store: PayloadStore<EngineT>,
         task_spawner: Box<dyn TaskSpawner>,
         client: ClientVersionV1,
+        capabilities: EngineCapabilities,
     ) -> Self {
         let inner = Arc::new(EngineApiInner {
             provider,
@@ -80,6 +85,7 @@ where
             task_spawner,
             metrics: EngineApiMetrics::default(),
             client,
+            capabilities,
         });
         Self { inner }
     }
@@ -896,7 +902,7 @@ where
     /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
-        Ok(CAPABILITIES.iter().cloned().map(str::to_owned).collect())
+        Ok(self.inner.capabilities.list())
     }
 }
 
@@ -949,6 +955,7 @@ mod tests {
             payload_store.into(),
             task_executor,
             client,
+            EngineCapabilities::default(),
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)
