@@ -58,9 +58,9 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
                     max_fee_per_blob_gas < self.base_fee_per_blob_gas as u128
                 }) {
                     crate::traits::BestTransactions::mark_invalid(self, &best);
-                    continue
+                    continue;
                 };
-                return Some(best)
+                return Some(best);
             }
         }
     }
@@ -121,7 +121,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
                 Err(TryRecvError::Lagged(_)) => {
                     // Handle the case where the receiver lagged too far behind.
                     // `num_skipped` indicates the number of messages that were skipped.
-                    continue
+                    continue;
                 }
 
                 // this case is still better than the existing iterator behavior where no new
@@ -181,7 +181,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                     "[{:?}] skipping invalid transaction",
                     hash
                 );
-                continue
+                continue;
             }
 
             // Insert transactions that just got unlocked.
@@ -194,7 +194,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                 // transactions are returned
                 self.mark_invalid(&best.transaction)
             } else {
-                return Some(best.transaction)
+                return Some(best.transaction);
             }
         }
     }
@@ -228,7 +228,7 @@ where
         loop {
             let best = self.best.next()?;
             if (self.predicate)(&best) {
-                return Some(best)
+                return Some(best);
             } else {
                 self.best.mark_invalid(&best);
             }

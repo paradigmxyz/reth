@@ -32,7 +32,7 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
                 let request_length = headers.len() as u64;
 
                 if request_length <= 1 && request.limit != request_length {
-                    return true
+                    return true;
                 }
 
                 match request.start {
@@ -61,10 +61,10 @@ impl EthResponseValidator for RequestResult<Vec<Header>> {
     fn reputation_change_err(&self) -> Option<ReputationChangeKind> {
         if let Err(err) = self {
             match err {
-                RequestError::ChannelClosed |
-                RequestError::ConnectionDropped |
-                RequestError::UnsupportedCapability |
-                RequestError::BadResponse => None,
+                RequestError::ChannelClosed
+                | RequestError::ConnectionDropped
+                | RequestError::UnsupportedCapability
+                | RequestError::BadResponse => None,
                 RequestError::Timeout => Some(ReputationChangeKind::Timeout),
             }
         } else {

@@ -39,10 +39,10 @@ pub trait StateProvider: BlockHashReader + AccountReader + StateRootProvider + S
 
         if let Some(code_hash) = acc.bytecode_hash {
             if code_hash == KECCAK_EMPTY {
-                return Ok(None)
+                return Ok(None);
             }
             // Get the code from the code hash
-            return self.bytecode_by_hash(code_hash)
+            return self.bytecode_by_hash(code_hash);
         }
 
         // Return `None` if no code hash is set

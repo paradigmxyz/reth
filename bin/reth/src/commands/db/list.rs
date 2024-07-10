@@ -62,7 +62,7 @@ impl Command {
             .as_ref()
             .map(|search| {
                 if let Some(search) = search.strip_prefix("0x") {
-                    return hex::decode(search).unwrap()
+                    return hex::decode(search).unwrap();
                 }
                 search.as_bytes().to_vec()
             })

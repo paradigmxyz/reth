@@ -127,7 +127,7 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
                     Poll::Ready(None) => {
                         // channel closed, this means [TaskDownloader] was dropped, so we can also
                         // exit
-                        return Poll::Ready(())
+                        return Poll::Ready(());
                     }
                     Poll::Ready(Some(update)) => match update {
                         DownloaderUpdates::UpdateSyncGap(head, target) => {
@@ -153,7 +153,7 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
                             if this.headers_tx.send_item(headers).is_err() {
                                 // channel closed, this means [TaskDownloader] was dropped, so we
                                 // can also exit
-                                return Poll::Ready(())
+                                return Poll::Ready(());
                             }
                         }
                         None => return Poll::Pending,
@@ -162,7 +162,7 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
                 Err(_) => {
                     // channel closed, this means [TaskDownloader] was dropped, so
                     // we can also exit
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 }
             }
         }

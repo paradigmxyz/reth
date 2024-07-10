@@ -91,7 +91,7 @@ impl FromStr for NatResolver {
                 let Some(ip) = s.strip_prefix("extip:") else {
                     return Err(ParseNatResolverError::UnknownVariant(format!(
                         "Unknown Nat Resolver: {s}"
-                    )))
+                    )));
                 };
                 Self::ExternalIp(ip.parse::<IpAddr>()?)
             }

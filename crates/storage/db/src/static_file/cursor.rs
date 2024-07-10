@@ -32,7 +32,7 @@ impl<'a> StaticFileCursor<'a> {
         mask: usize,
     ) -> ProviderResult<Option<Vec<&'_ [u8]>>> {
         if self.jar().rows() == 0 {
-            return Ok(None)
+            return Ok(None);
         }
 
         let row = match key_or_num {
@@ -40,7 +40,7 @@ impl<'a> StaticFileCursor<'a> {
             KeyOrNumber::Number(n) => match self.jar().user_header().start() {
                 Some(offset) => {
                     if offset > n {
-                        return Ok(None)
+                        return Ok(None);
                     }
                     self.row_by_number_with_cols((n - offset) as usize, mask)
                 }

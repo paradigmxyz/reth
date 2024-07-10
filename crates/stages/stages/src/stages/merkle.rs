@@ -105,7 +105,7 @@ impl MerkleStage {
             provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
 
         if buf.is_empty() {
-            return Ok(None)
+            return Ok(None);
         }
 
         let (checkpoint, _) = MerkleCheckpoint::from_compact(&buf, buf.len());
@@ -151,7 +151,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let threshold = match self {
             Self::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-                return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
+                return Ok(ExecOutput::done(StageCheckpoint::new(input.target())));
             }
             Self::Execution { clean_threshold } => *clean_threshold,
             #[cfg(any(test, feature = "test-utils"))]
@@ -202,8 +202,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             }
             .unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (provider.count_entries::<tables::HashedAccounts>()? +
-                    provider.count_entries::<tables::HashedStorages>()?)
+                total: (provider.count_entries::<tables::HashedAccounts>()?
+                    + provider.count_entries::<tables::HashedStorages>()?)
                     as u64,
             });
 
@@ -234,7 +234,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                             .checkpoint()
                             .with_entities_stage_checkpoint(entities_checkpoint),
                         done: false,
-                    })
+                    });
                 }
                 StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
                     updates.flush(tx)?;
@@ -254,8 +254,8 @@ impl<DB: Database> Stage<DB> for MerkleStage {
                     })?;
             updates.flush(provider.tx_ref())?;
 
-            let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
-                provider.count_entries::<tables::HashedStorages>()?)
+            let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()?
+                + provider.count_entries::<tables::HashedStorages>()?)
                 as u64;
 
             let entities_checkpoint = EntitiesCheckpoint {
@@ -291,14 +291,14 @@ impl<DB: Database> Stage<DB> for MerkleStage {
         let range = input.unwind_block_range();
         if matches!(self, Self::Execution { .. }) {
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) });
         }
 
         let mut entities_checkpoint =
             input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (tx.entries::<tables::HashedAccounts>()? +
-                    tx.entries::<tables::HashedStorages>()?) as u64,
+                total: (tx.entries::<tables::HashedAccounts>()?
+                    + tx.entries::<tables::HashedStorages>()?) as u64,
             });
 
         if input.unwind_to == 0 {
@@ -310,7 +310,7 @@ impl<DB: Database> Stage<DB> for MerkleStage {
             return Ok(UnwindOutput {
                 checkpoint: StageCheckpoint::new(input.unwind_to)
                     .with_entities_stage_checkpoint(entities_checkpoint),
-            })
+            });
         }
 
         // Unwind trie only if there are transitions
@@ -620,7 +620,7 @@ mod tests {
                         rev_changeset_walker.next().transpose().unwrap()
                     {
                         if bn_address.block_number() < target_block {
-                            break
+                            break;
                         }
 
                         tree.entry(keccak256(bn_address.address()))
@@ -651,7 +651,7 @@ mod tests {
                         rev_changeset_walker.next().transpose().unwrap()
                     {
                         if block_number < target_block {
-                            break
+                            break;
                         }
 
                         if let Some(acc) = account_before_tx.info {

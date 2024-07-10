@@ -1,4 +1,5 @@
 use bigquery::client::BigQueryConfig;
+use exex_lambda::exex_lambda_processor;
 use repository::state_repository;
 use reth::api::FullNodeComponents;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification};
@@ -75,6 +76,7 @@ fn main() -> eyre::Result<()> {
 
                 Ok(exex_etl_processor(ctx, state_repo, state_processor))
             })
+            .install_exex("exex-lambda", |ctx| async move { Ok(exex_lambda_processor(ctx)) })
             .launch()
             .await?;
 

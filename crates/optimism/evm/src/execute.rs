@@ -146,19 +146,19 @@ where
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas &&
-                (is_regolith || !transaction.is_system_transaction())
+            if transaction.gas_limit() > block_available_gas
+                && (is_regolith || !transaction.is_system_transaction())
             {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into())
+                .into());
             }
 
             // An optimism block should never contain blob transactions.
             if matches!(transaction.tx_type(), TxType::Eip4844) {
-                return Err(OptimismBlockExecutionError::BlobTransactionRejected.into())
+                return Err(OptimismBlockExecutionError::BlobTransactionRejected.into());
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -209,8 +209,9 @@ where
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
                 // receipt hashes should be computed when set. The state transition process ensures
                 // this is only set for post-Canyon deposit transactions.
-                deposit_receipt_version: (transaction.is_deposit() &&
-                    self.chain_spec
+                deposit_receipt_version: (transaction.is_deposit()
+                    && self
+                        .chain_spec
                         .is_fork_active_at_timestamp(Hardfork::Canyon, block.timestamp))
                 .then_some(1),
             });

@@ -37,7 +37,7 @@ impl MustIncludeKey {
         if enr.get_raw_rlp(self.key).is_none() {
             return FilterOutcome::Ignore {
                 reason: format!("{} fork required", String::from_utf8_lossy(self.key)),
-            }
+            };
         }
         FilterOutcome::Ok
     }
@@ -72,7 +72,7 @@ impl MustNotIncludeKeys {
                         "{} forks not allowed",
                         self.keys.iter().map(|key| String::from_utf8_lossy(key.key)).format(",")
                     ),
-                }
+                };
             }
         }
 

@@ -22,3 +22,4 @@ repository = { path = "../repository" }
 bigquery = { path = "../bigquery" }
 exex-etl = { path = "../exex-etl" }
 types = { path = "../types" }
+exex-lambda = { path = "../exex-lambda" }

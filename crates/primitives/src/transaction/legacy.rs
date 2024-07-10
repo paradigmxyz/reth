@@ -58,12 +58,12 @@ impl TxLegacy {
     /// Outputs the length of the transaction's fields, without a RLP header or length of the
     /// eip155 fields.
     pub(crate) fn fields_len(&self) -> usize {
-        self.nonce.length() +
-            self.gas_price.length() +
-            self.gas_limit.length() +
-            self.to.length() +
-            self.value.length() +
-            self.input.0.length()
+        self.nonce.length()
+            + self.gas_price.length()
+            + self.gas_limit.length()
+            + self.to.length()
+            + self.value.length()
+            + self.input.0.length()
     }
 
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header or

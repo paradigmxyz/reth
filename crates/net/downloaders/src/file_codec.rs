@@ -29,7 +29,7 @@ impl Decoder for BlockFileCodec {
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         if src.is_empty() {
-            return Ok(None)
+            return Ok(None);
         }
 
         let buf_slice = &mut src.as_ref();
