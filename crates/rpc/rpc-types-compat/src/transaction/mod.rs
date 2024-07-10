@@ -92,8 +92,6 @@ fn fill(
         input: signed_tx.input().clone(),
         chain_id,
         access_list,
-        // TODO(onbjerg): there is no EIP-7702 RPC spec yet, so we can't implement this yet
-        // authorization_list,
         transaction_type: Some(signed_tx.tx_type() as u8),
 
         // These fields are set to None because they are not stored as part of the transaction
