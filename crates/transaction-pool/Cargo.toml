@@ -15,12 +15,12 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-eth-wire-types.workspace = true
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = ["c-kzg"] }
 reth-execution-types.workspace = true
 reth-fs-util.workspace = true
 reth-provider.workspace = true
 reth-tasks.workspace = true
-revm.workspace = true
+revm = { workspace = true, features = ["c-kzg"] }
 
 # ethereum
 alloy-rlp.workspace = true

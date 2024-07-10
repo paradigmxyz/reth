@@ -36,4 +36,4 @@ serde_json.workspace = true
 
 [features]
 default = ["std"]
-std = []
+std = ["reth-revm/std"]

@@ -18,7 +18,7 @@ reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
-reth-nippy-jar.workspace = true
+reth-nippy-jar = { workspace = true, optional = true }
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-tracing.workspace = true
@@ -76,13 +76,15 @@ paste.workspace = true
 assert_matches.workspace = true
 
 [features]
-default = ["mdbx"]
+default = ["mdbx", "static-file", "std"]
+std = ["reth-primitives/std"]
 mdbx = ["dep:reth-libmdbx", "dep:eyre"]
 test-utils = ["dep:tempfile", "arbitrary"]
 bench = []
 arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
 optimism = []
 disable-lock = []
+static-file = ["dep:reth-nippy-jar"]
 
 [[bench]]
 name = "hash_keys"

@@ -4,6 +4,9 @@ use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::mem;
 use reth_codecs::{main_codec, Compact};
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]

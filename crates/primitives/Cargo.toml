@@ -33,7 +33,8 @@ secp256k1 = { workspace = true, features = [
     "global-context",
     "recovery",
     "rand",
-] }
+], optional = true }
+k256 = { version = "0.13.3", default-features = false, features = ["ecdsa"], optional = true }
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
@@ -51,6 +52,7 @@ zstd = { version = "0.13", features = ["experimental"], optional = true }
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
+cfg-if = "1.0.0"
 # proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -84,7 +86,7 @@ pprof = { workspace = true, features = [
 secp256k1.workspace = true
 
 [features]
-default = ["c-kzg", "zstd-codec", "alloy-compat", "std"]
+default = ["c-kzg", "zstd-codec", "alloy-compat", "std", "secp256k1"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "reth-primitives-traits/arbitrary",
@@ -98,6 +100,8 @@ arbitrary = [
     "dep:proptest",
     "zstd-codec",
 ]
+secp256k1 = ["dep:secp256k1"]
+k256 = ["dep:k256"]
 c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg"]
 zstd-codec = ["dep:zstd"]
 optimism = [

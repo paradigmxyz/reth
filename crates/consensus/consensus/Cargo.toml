@@ -20,5 +20,5 @@ thiserror-no-std = {workspace = true, default-features = false }
 
 [features]
 default = ["std"]
-std = ["thiserror-no-std/std"]
+std = ["thiserror-no-std/std", "reth-primitives/std"]
 test-utils = []

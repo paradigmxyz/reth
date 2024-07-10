@@ -17,8 +17,13 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-pub use reth_codecs_derive::*;
+#[cfg(not(feature = "std"))]
+extern crate alloc;
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
+pub use reth_codecs_derive::*;
 use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, U256};
 use bytes::Buf;
 

@@ -22,7 +22,7 @@ reth-errors.workspace = true
 reth-storage-errors.workspace = true
 reth-storage-api.workspace = true
 reth-network-p2p.workspace = true
-reth-db = { workspace = true, features = ["mdbx"] }
+reth-db = { workspace = true, features = ["mdbx", "static-file"] }
 reth-db-api.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true

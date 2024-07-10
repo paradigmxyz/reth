@@ -309,7 +309,7 @@ reth-evm = { path = "crates/evm" }
 reth-evm-ethereum = { path = "crates/ethereum/evm" }
 reth-evm-optimism = { path = "crates/optimism/evm" }
 reth-execution-errors = { path = "crates/evm/execution-errors" }
-reth-execution-types = { path = "crates/evm/execution-types" }
+reth-execution-types = { path = "crates/evm/execution-types", default-features = false }
 reth-exex = { path = "crates/exex/exex" }
 reth-exex-test-utils = { path = "crates/exex/test-utils" }
 reth-exex-types = { path = "crates/exex/types" }
@@ -326,7 +326,7 @@ reth-network-api = { path = "crates/net/network-api" }
 reth-network-types = { path = "crates/net/network-types" }
 reth-network-peers = { path = "crates/net/peers", default-features = false }
 reth-network-p2p = { path = "crates/net/p2p" }
-reth-nippy-jar = { path = "crates/storage/nippy-jar" }
+reth-nippy-jar = { path = "crates/storage/nippy-jar", default-features = false }
 reth-node-api = { path = "crates/node/api" }
 reth-node-builder = { path = "crates/node/builder" }
 reth-node-core = { path = "crates/node/core" }
@@ -341,12 +341,12 @@ reth-optimism-rpc = { path = "crates/optimism/rpc" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
-reth-primitives = { path = "crates/primitives" }
+reth-primitives = { path = "crates/primitives", default-features = false }
 reth-primitives-traits = { path = "crates/primitives-traits" }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types" }
-reth-revm = { path = "crates/revm" }
+reth-revm = { path = "crates/revm", default-features = false }
 reth-rpc = { path = "crates/rpc/rpc" }
 reth-rpc-api = { path = "crates/rpc/rpc-api" }
 reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
@@ -363,27 +363,26 @@ reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types" }
 reth-static-file = { path = "crates/static-file/static-file" }
 reth-static-file-types = { path = "crates/static-file/types" }
-reth-storage-api = { path = "crates/storage/storage-api" }
+reth-storage-api = { path = "crates/storage/storage-api", default-features = false }
 reth-storage-errors = { path = "crates/storage/errors" }
 reth-tasks = { path = "crates/tasks" }
 reth-testing-utils = { path = "testing/testing-utils" }
 reth-tokio-util = { path = "crates/tokio-util" }
 reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
-reth-trie = { path = "crates/trie/trie" }
+reth-trie = { path = "crates/trie/trie", default-features = false }
 reth-trie-common = { path = "crates/trie/common" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "11.0.0", features = [
+revm = { path = "../bluealloy-revm/crates/revm", features = [
     "std",
-    "secp256k1",
-    "blst",
+    "kzg-rs",
 ], default-features = false }
-revm-primitives = { version = "6.0.0", features = [
-    "std",
+revm-primitives = { path = "../bluealloy-revm/crates/primitives", features = [
+    "std"
 ], default-features = false }
-revm-inspectors = "0.4"
+revm-inspectors = { path = "../revm-inspectors" } 
 
 # eth
 alloy-chains = "0.1.15"

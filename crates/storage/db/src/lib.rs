@@ -18,7 +18,10 @@
 mod implementation;
 pub mod lockfile;
 mod metrics;
+
+#[cfg(feature = "static-file")]
 pub mod static_file;
+
 pub mod tables;
 mod utils;
 pub mod version;

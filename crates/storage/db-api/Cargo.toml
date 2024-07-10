@@ -65,6 +65,8 @@ paste.workspace = true
 assert_matches.workspace = true
 
 [features]
+default = ["std"]
+std = ["reth-primitives/std"]
 test-utils = ["arbitrary"]
 arbitrary = [
     "reth-primitives/arbitrary",
