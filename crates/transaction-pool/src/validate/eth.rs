@@ -12,14 +12,14 @@ use crate::{
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{
     constants::{eip4844::MAX_BLOBS_PER_BLOCK, ETHEREUM_BLOCK_GAS_LIMIT},
-    GotExpected, InvalidTransactionError, SealedBlock, TxKind, EIP1559_TX_TYPE_ID,
+    GotExpected, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID,
     EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm::{
     interpreter::gas::validate_initial_tx_gas,
-    primitives::{AccessListItem, EnvKzgSettings, SpecId},
+    primitives::{EnvKzgSettings, SpecId},
 };
 use std::{
     marker::PhantomData,
@@ -266,8 +266,6 @@ where
             }
         }
 
-        // 7702 check
-        // TODO: get num auth items
         if transaction.is_eip7702() {
             // Cancun fork is required for 7702 txs
             if !self.fork_tracker.is_prague_activated() {
