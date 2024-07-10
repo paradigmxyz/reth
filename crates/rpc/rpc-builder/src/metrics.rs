@@ -25,6 +25,7 @@ pub(crate) struct RpcRequestMetrics {
     inner: Arc<RpcServerMetricsInner>,
 }
 
+#[allow(dead_code)]
 impl RpcRequestMetrics {
     pub(crate) fn new(module: &RpcModule<()>, transport: RpcTransport) -> Self {
         Self {
