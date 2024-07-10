@@ -6674,6 +6674,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "eyre",
+ "libc",
  "proptest",
  "rand 0.8.5",
  "reth-fs-util",
