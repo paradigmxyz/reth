@@ -43,7 +43,6 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let mut buffer = Vec::new();
         // todo(onbjerg): add `SignedAuthorization::into_parts(self) -> (Auth, Signature)`
         let (auth, signature) = (self.deref().clone(), self.signature());
         let (v, r, s) = (signature.v(), signature.r(), signature.s());
@@ -53,11 +52,7 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
 
         // to_compact doesn't write the len to buffer.
         // By placing it as last, we don't need to store it either.
-        auth.to_compact(&mut buffer);
-
-        let total_len = buffer.len();
-        buf.put(buffer.as_slice());
-        total_len
+        1 + 32 + 32 + auth.to_compact(buf)
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
