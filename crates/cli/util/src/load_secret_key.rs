@@ -1,12 +1,15 @@
 use reth_fs_util::{self as fs, FsPathError};
-use reth_network::config::rng_secret_key;
-use reth_primitives::hex::encode as hex_encode;
 use secp256k1::{Error as SecretKeyBaseError, SecretKey};
 use std::{
     io,
     path::{Path, PathBuf},
 };
 use thiserror::Error;
+
+/// Convenience function to create a new random [`SecretKey`]
+pub fn rng_secret_key() -> SecretKey {
+    SecretKey::new(&mut rand::thread_rng())
+}
 
 /// Errors returned by loading a [`SecretKey`], including IO errors.
 #[derive(Error, Debug)]
@@ -50,7 +53,7 @@ pub fn get_secret_key(secret_key_path: &Path) -> Result<SecretKey, SecretKeyErro
             }
 
             let secret = rng_secret_key();
-            let hex = hex_encode(secret.as_ref());
+            let hex = alloy_primitives::hex::encode(secret.as_ref());
             fs::write(secret_key_path, hex)?;
             Ok(secret)
         }
