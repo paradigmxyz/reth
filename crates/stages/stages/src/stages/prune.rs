@@ -6,6 +6,17 @@ use reth_stages_api::{
 };
 use tracing::info;
 
+/// The prune stage that runs the pruner with the provided prune modes.
+///
+/// There are two main reasons to have this stage when running a full node:
+/// - Sender Recovery stage inserts a lot of data into the database that's only needed for the
+///   Execution stage. Pruner will clean up the unneeded recovered senders.
+/// - Pruning during the live sync can take a significant amount of time, especially history
+///   segments. If we can prune as much data as possible in one go before starting the live sync, we
+///   should do it.
+///
+/// `commit_threshold` is the maximum number of entries to prune before committing
+/// progress to the database.
 #[derive(Debug)]
 pub struct PruneStage {
     prune_modes: PruneModes,
@@ -13,6 +24,7 @@ pub struct PruneStage {
 }
 
 impl PruneStage {
+    /// Crate new prune stage with the given prune modes and commit threshold.
     pub const fn new(prune_modes: PruneModes, commit_threshold: usize) -> Self {
         Self { prune_modes, commit_threshold }
     }
@@ -78,17 +90,22 @@ mod tests {
     #[derive(Default)]
     struct FinishTestRunner {
         db: TestStageDB,
+        prune_modes: PruneModes,
+        commit_threshold: usize,
     }
 
     impl StageTestRunner for FinishTestRunner {
-        type S = FinishStage;
+        type S = PruneStage;
 
         fn db(&self) -> &TestStageDB {
             &self.db
         }
 
         fn stage(&self) -> Self::S {
-            FinishStage
+            PruneStage {
+                prune_modes: self.prune_modes.clone(),
+                commit_threshold: self.commit_threshold,
+            }
         }
     }
 

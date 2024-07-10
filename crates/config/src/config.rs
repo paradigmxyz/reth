@@ -71,6 +71,7 @@ pub struct StageConfig {
     pub sender_recovery: SenderRecoveryConfig,
     /// Execution stage configuration.
     pub execution: ExecutionConfig,
+    /// Prune stage configuration.
     pub prune: PruneStageConfig,
     /// Account Hashing stage configuration.
     pub account_hashing: HashingConfig,
@@ -233,7 +234,7 @@ impl From<ExecutionConfig> for ExecutionStageThresholds {
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(default)]
 pub struct PruneStageConfig {
-    /// The maximum number of entries to rune before committing progress to the database.
+    /// The maximum number of entries to prune before committing progress to the database.
     pub commit_threshold: usize,
 }
 
