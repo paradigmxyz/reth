@@ -25,6 +25,8 @@ reth-static-file.workspace = true
 reth-execution-types.workspace = true
 reth-node-core.workspace = true
 reth-primitives.workspace = true
+
+reth-chainspec.workspace = true
 reth-stages-types.workspace = true
 reth-node-events.workspace = true
 reth-network-p2p.workspace = true
@@ -32,7 +34,6 @@ reth-errors.workspace = true
 reth-config.workspace = true
 reth-evm-optimism.workspace = true
 reth-cli.workspace = true
-reth-chainspec.workspace = true
 
 # eth
 alloy-genesis.workspace = true
