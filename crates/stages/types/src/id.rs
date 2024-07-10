@@ -16,6 +16,7 @@ pub enum StageId {
     SenderRecovery,
     /// Execution stage in the process.
     Execution,
+    Prune,
     /// Merkle unwind stage in the process.
     MerkleUnwind,
     /// Account hashing stage in the process.
@@ -38,11 +39,12 @@ pub enum StageId {
 
 impl StageId {
     /// All supported Stages
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Headers,
         Self::Bodies,
         Self::SenderRecovery,
         Self::Execution,
+        Self::Prune,
         Self::MerkleUnwind,
         Self::AccountHashing,
         Self::StorageHashing,
@@ -54,8 +56,9 @@ impl StageId {
     ];
 
     /// Stages that require state.
-    pub const STATE_REQUIRED: [Self; 7] = [
+    pub const STATE_REQUIRED: [Self; 8] = [
         Self::Execution,
+        Self::Prune,
         Self::MerkleUnwind,
         Self::AccountHashing,
         Self::StorageHashing,
@@ -73,6 +76,7 @@ impl StageId {
             Self::Bodies => "Bodies",
             Self::SenderRecovery => "SenderRecovery",
             Self::Execution => "Execution",
+            Self::Prune => "Prune",
             Self::MerkleUnwind => "MerkleUnwind",
             Self::AccountHashing => "AccountHashing",
             Self::StorageHashing => "StorageHashing",

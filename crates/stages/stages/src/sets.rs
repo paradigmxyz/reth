@@ -36,8 +36,8 @@
 use crate::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TransactionLookupStage,
+        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, PruneStage,
+        SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -65,6 +65,7 @@ use tokio::sync::watch;
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
 /// - [`ExecutionStage`]
+/// - [`PruneStage`] (execute)
 /// - [`MerkleStage`] (unwind)
 /// - [`AccountHashingStage`]
 /// - [`StorageHashingStage`]
@@ -122,7 +123,7 @@ where
     E: BlockExecutorProvider,
 {
     /// Appends the default offline stages and default finish stage to the given builder.
-    pub fn add_offline_stages<DB: Database>(
+    pub fn add_offline_stages<DB: Database + 'static>(
         default_offline: StageSetBuilder<DB>,
         executor_factory: E,
         stages_config: StageConfig,
@@ -247,13 +248,14 @@ where
 /// A combination of (in order)
 ///
 /// - [`ExecutionStages`]
+/// - [`PruneStage`]
 /// - [`HashingStages`]
 /// - [`HistoryIndexingStages`]
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct OfflineStages<EF> {
     /// Executor factory needs for execution stage
-    pub executor_factory: EF,
+    executor_factory: EF,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
     /// Prune configuration for every segment that can be pruned
@@ -274,7 +276,7 @@ impl<EF> OfflineStages<EF> {
 impl<E, DB> StageSet<DB> for OfflineStages<E>
 where
     E: BlockExecutorProvider,
-    DB: Database,
+    DB: Database + 'static,
 {
     fn builder(self) -> StageSetBuilder<DB> {
         ExecutionStages::new(
@@ -283,6 +285,10 @@ where
             self.prune_modes.clone(),
         )
         .builder()
+        .add_stage(PruneStage::new(
+            self.prune_modes.clone(),
+            self.stages_config.prune.commit_threshold,
+        ))
         .add_set(HashingStages { stages_config: self.stages_config.clone() })
         .add_set(HistoryIndexingStages {
             stages_config: self.stages_config.clone(),
