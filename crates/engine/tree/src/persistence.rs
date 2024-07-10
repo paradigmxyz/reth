@@ -9,7 +9,7 @@ use reth_provider::{
     ProviderFactory, StageCheckpointWriter, StateWriter,
 };
 use reth_prune::{PruneProgress, Pruner};
-use reth_stages::{StageCheckpoint, StageId};
+use reth_stages_types::{StageCheckpoint, StageId};
 use std::sync::mpsc::{Receiver, SendError, Sender};
 use tokio::sync::oneshot;
 use tracing::debug;

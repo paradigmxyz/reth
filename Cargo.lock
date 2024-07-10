@@ -7074,6 +7074,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-stages",
  "reth-stages-api",
+ "reth-stages-types",
  "reth-static-file",
  "reth-tasks",
  "reth-tokio-util",
