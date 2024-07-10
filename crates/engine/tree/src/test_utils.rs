@@ -99,7 +99,7 @@ pub(crate) fn get_executed_block_with_number(block_number: BlockNumber) -> Execu
         Arc::new(sealed_with_senders.senders),
         Arc::new(ExecutionOutcome::new(
             BundleState::default(),
-            Receipts { receipt_vec: vec![] },
+            Receipts { receipt_vec: vec![vec![]] },
             block_number,
             vec![Requests::default()],
         )),
