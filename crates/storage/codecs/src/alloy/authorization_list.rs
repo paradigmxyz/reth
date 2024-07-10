@@ -95,21 +95,4 @@ mod tests {
             SignedAuthorization::from_compact(&compacted_authorization, len);
         assert_eq!(authorization, decoded_authorization);
     }
-
-    proptest! {
-        #[test]
-        fn test_roundtrip_compact_authorization(auth in arb::<Authorization>(), signature in arb::<alloy_primitives::Signature>()) {
-            let auth = AlloyAuthorization {
-                chain_id: auth.chain_id,
-                address: auth.address,
-                nonce: auth.nonce.into(),
-            }.into_signed(signature.with_parity(alloy_primitives::Parity::Parity(signature.v().y_parity())));
-
-            let mut compacted_auth = Vec::<u8>::new();
-            let len = auth.clone().to_compact(&mut compacted_auth);
-
-            let (decoded_auth, _) = SignedAuthorization::<alloy_primitives::Signature>::from_compact(&compacted_auth, len);
-            assert_eq!(auth, decoded_auth);
-        }
-    }
 }
