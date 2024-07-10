@@ -949,6 +949,155 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     pub fn commit(self) -> ProviderResult<bool> {
         Ok(self.tx.commit()?)
     }
+
+    /// Remove the last N blocks of state, recreating the [`ExecutionOutcome`].
+    ///
+    /// The latest state will be unwound
+    ///
+    /// 1. Iterate over the [`BlockBodyIndices`][tables::BlockBodyIndices] table to get all the
+    ///    transaction ids.
+    /// 2. Iterate over the [`StorageChangeSets`][tables::StorageChangeSets] table and the
+    ///    [`AccountChangeSets`][tables::AccountChangeSets] tables in reverse order to reconstruct
+    ///    the changesets.
+    ///    - In order to have both the old and new values in the changesets, we also access the
+    ///      plain state tables.
+    /// 3. While iterating over the changeset tables, if we encounter a new account or storage slot,
+    ///    we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the plain state
+    ///     3. Save the old value to the local state
+    /// 4. While iterating over the changeset tables, if we encounter an account/storage slot we
+    ///    have seen before we:
+    ///     1. Take the old value from the changeset
+    ///     2. Take the new value from the local state
+    ///     3. Set the local state to the value in the changeset
+    pub fn remove_state(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<()> {
+        if range.is_empty() {
+            return Ok(())
+        }
+
+        // We are not removing block meta as it is used to get block changesets.
+        let block_bodies = self.get::<tables::BlockBodyIndices>(range.clone())?;
+
+        // get transaction receipts
+        let from_transaction_num =
+            block_bodies.first().expect("already checked if there are blocks").1.first_tx_num();
+        let to_transaction_num =
+            block_bodies.last().expect("already checked if there are blocks").1.last_tx_num();
+
+        let storage_range = BlockNumberAddress::range(range.clone());
+
+        let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
+        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
+
+        // iterate previous value and get plain state value to create changeset
+        // Double option around Account represent if Account state is know (first option) and
+        // account is removed (Second Option)
+
+        let mut state: BundleStateInit = HashMap::new();
+
+        // This is not working for blocks that are not at tip. as plain state is not the last
+        // state of end range. We should rename the functions or add support to access
+        // History state. Accessing history state can be tricky but we are not gaining
+        // anything.
+        let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
+        let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+        let mut reverts: RevertsInit = HashMap::new();
+
+        // add account changeset changes
+        for (block_number, account_before) in account_changeset.into_iter().rev() {
+            let AccountBeforeTx { info: old_info, address } = account_before;
+            match state.entry(address) {
+                hash_map::Entry::Vacant(entry) => {
+                    let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
+                    entry.insert((old_info, new_info, HashMap::new()));
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    // overwrite old account state.
+                    entry.get_mut().0 = old_info;
+                }
+            }
+            // insert old info into reverts.
+            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
+        }
+
+        // add storage changeset changes
+        for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
+            let BlockNumberAddress((block_number, address)) = block_and_address;
+            // get account state or insert from plain state.
+            let account_state = match state.entry(address) {
+                hash_map::Entry::Vacant(entry) => {
+                    let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
+                    entry.insert((present_info, present_info, HashMap::new()))
+                }
+                hash_map::Entry::Occupied(entry) => entry.into_mut(),
+            };
+
+            // match storage.
+            match account_state.2.entry(old_storage.key) {
+                hash_map::Entry::Vacant(entry) => {
+                    let new_storage = plain_storage_cursor
+                        .seek_by_key_subkey(address, old_storage.key)?
+                        .filter(|storage| storage.key == old_storage.key)
+                        .unwrap_or_default();
+                    entry.insert((old_storage.value, new_storage.value));
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().0 = old_storage.value;
+                }
+            };
+
+            reverts
+                .entry(block_number)
+                .or_default()
+                .entry(address)
+                .or_default()
+                .1
+                .push(old_storage);
+        }
+
+        // iterate over local plain state remove all account and all storages.
+        for (address, (old_account, new_account, storage)) in &state {
+            // revert account if needed.
+            if old_account != new_account {
+                let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
+                if let Some(account) = old_account {
+                    plain_accounts_cursor.upsert(*address, *account)?;
+                } else if existing_entry.is_some() {
+                    plain_accounts_cursor.delete_current()?;
+                }
+            }
+
+            // revert storages
+            for (storage_key, (old_storage_value, _new_storage_value)) in storage {
+                let storage_entry = StorageEntry { key: *storage_key, value: *old_storage_value };
+                // delete previous value
+                // TODO: This does not use dupsort features
+                if plain_storage_cursor
+                    .seek_by_key_subkey(*address, *storage_key)?
+                    .filter(|s| s.key == *storage_key)
+                    .is_some()
+                {
+                    plain_storage_cursor.delete_current()?
+                }
+
+                // insert value if needed
+                if *old_storage_value != U256::ZERO {
+                    plain_storage_cursor.upsert(*address, storage_entry)?;
+                }
+            }
+        }
+
+        // iterate over block body and remove receipts
+        self.remove::<tables::Receipts>(from_transaction_num..=to_transaction_num)?;
+
+        Ok(())
+    }
+
     /// Take the last N blocks of state, recreating the [`ExecutionOutcome`].
     ///
     /// The latest state will be unwound and returned back with all the blocks
@@ -3091,6 +3240,94 @@ impl<DB: Database> BlockExecutionWriter for DatabaseProviderRW<DB> {
         }
 
         Ok(Chain::new(blocks, execution_state, None))
+    }
+
+    fn remove_block_and_execution_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<()> {
+        let storage_range = BlockNumberAddress::range(range.clone());
+
+        // Unwind account hashes. Add changed accounts to account prefix set.
+        let hashed_addresses = self.unwind_account_hashing(range.clone())?;
+        let mut account_prefix_set = PrefixSetMut::with_capacity(hashed_addresses.len());
+        let mut destroyed_accounts = HashSet::default();
+        for (hashed_address, account) in hashed_addresses {
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            if account.is_none() {
+                destroyed_accounts.insert(hashed_address);
+            }
+        }
+
+        // Unwind account history indices.
+        self.unwind_account_history_indices(range.clone())?;
+
+        // Unwind storage hashes. Add changed account and storage keys to corresponding prefix
+        // sets.
+        let mut storage_prefix_sets = HashMap::<B256, PrefixSet>::default();
+        let storage_entries = self.unwind_storage_hashing(storage_range.clone())?;
+        for (hashed_address, hashed_slots) in storage_entries {
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            let mut storage_prefix_set = PrefixSetMut::with_capacity(hashed_slots.len());
+            for slot in hashed_slots {
+                storage_prefix_set.insert(Nibbles::unpack(slot));
+            }
+            storage_prefix_sets.insert(hashed_address, storage_prefix_set.freeze());
+        }
+
+        // Unwind storage history indices.
+        self.unwind_storage_history_indices(storage_range)?;
+
+        // Calculate the reverted merkle root.
+        // This is the same as `StateRoot::incremental_root_with_updates`, only the prefix sets
+        // are pre-loaded.
+        let prefix_sets = TriePrefixSets {
+            account_prefix_set: account_prefix_set.freeze(),
+            storage_prefix_sets,
+            destroyed_accounts,
+        };
+        let (new_state_root, trie_updates) = StateRoot::from_tx(&self.tx)
+            .with_prefix_sets(prefix_sets)
+            .root_with_updates()
+            .map_err(Into::<reth_db::DatabaseError>::into)?;
+
+        let parent_number = range.start().saturating_sub(1);
+        let parent_state_root = self
+            .header_by_number(parent_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?
+            .state_root;
+
+        // state root should be always correct as we are reverting state.
+        // but for sake of double verification we will check it again.
+        if new_state_root != parent_state_root {
+            let parent_hash = self
+                .block_hash(parent_number)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
+            return Err(ProviderError::UnwindStateRootMismatch(Box::new(RootMismatch {
+                root: GotExpected { got: new_state_root, expected: parent_state_root },
+                block_number: parent_number,
+                block_hash: parent_hash,
+            })))
+        }
+        trie_updates.write_to_database(&self.tx)?;
+
+        // get blocks
+        let blocks = self.take_block_range(range.clone())?;
+        let unwind_to = blocks.first().map(|b| b.number.saturating_sub(1));
+
+        // remove execution res
+        self.remove_state(range.clone())?;
+
+        // remove block bodies it is needed for both get block range and get block execution results
+        // that is why it is deleted afterwards.
+        self.remove::<tables::BlockBodyIndices>(range)?;
+
+        // Update pipeline progress
+        if let Some(fork_number) = unwind_to {
+            self.update_pipeline_stages(fork_number, true)?;
+        }
+
+        Ok(())
     }
 }
 
