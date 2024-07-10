@@ -7182,6 +7182,15 @@ dependencies = [
 [[package]]
 name = "reth-ethereum-cli"
 version = "1.0.1"
+dependencies = [
+ "alloy-genesis",
+ "clap",
+ "eyre",
+ "reth-chainspec",
+ "reth-cli",
+ "serde_json",
+ "shellexpand",
+]
 
 [[package]]
 name = "reth-ethereum-consensus"
@@ -7910,10 +7919,13 @@ dependencies = [
 name = "reth-optimism-cli"
 version = "1.0.1"
 dependencies = [
+ "alloy-genesis",
  "alloy-primitives",
  "clap",
  "eyre",
  "futures-util",
+ "reth-chainspec",
+ "reth-cli",
  "reth-cli-commands",
  "reth-config",
  "reth-consensus",
@@ -7934,6 +7946,8 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file",
  "reth-static-file-types",
+ "serde_json",
+ "shellexpand",
  "tokio",
  "tracing",
 ]

@@ -65,7 +65,7 @@ once_cell.workspace = true
 
 # io
 dirs-next = "2.0.0"
-shellexpand = "3.0.0"
+shellexpand.workspace = true
 serde_json.workspace = true
 
 # http/rpc

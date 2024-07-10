@@ -21,5 +21,5 @@ pub trait ChainSpecParser: TypedValueParser<Value = Arc<ChainSpec>> + Default {
     ///
     /// This function will return an error if the input string cannot be parsed into a valid
     /// [`ChainSpec`].
-    fn parse(&self, s: &str) -> eyre::Result<Arc<ChainSpec>>;
+    fn parse(s: &str) -> eyre::Result<Arc<ChainSpec>>;
 }

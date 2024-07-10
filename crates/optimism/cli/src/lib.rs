@@ -10,6 +10,8 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+/// Optimism chain specification parser.
+pub mod chainspec;
 /// Optimism CLI commands.
 pub mod commands;
 pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
