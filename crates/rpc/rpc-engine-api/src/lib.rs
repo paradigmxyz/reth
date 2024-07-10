@@ -12,6 +12,9 @@
 /// The Engine API implementation.
 mod engine_api;
 
+/// Engine API capabilities.
+pub mod capabilities;
+
 /// The Engine API message type.
 mod message;
 

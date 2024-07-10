@@ -11,7 +11,7 @@ use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
     EthApiBuild, RpcModuleBuilder, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
 };
-use reth_rpc_engine_api::EngineApi;
+use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_layer::JwtSecret;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
@@ -44,6 +44,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         spawn_test_payload_service().into(),
         Box::<TokioTaskExecutor>::default(),
         client,
+        EngineCapabilities::default(),
     );
     let module = AuthRpcModule::new(engine_api);
     module.start_server(config).await.unwrap()
