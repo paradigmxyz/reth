@@ -317,7 +317,7 @@ mod tests {
         })]
 
         #[test]
-        fn fuzz_in_memory_nodes(init_state: BTreeMap<B256, U256>, updated_state: BTreeMap<B256, U256>) {
+        fn fuzz_in_memory_nodes(mut init_state: BTreeMap<B256, U256>, mut updated_state: BTreeMap<B256, U256>) {
             let factory = create_test_provider_factory();
             let provider = factory.provider_rw().unwrap();
             let mut hashed_account_cursor = provider.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
@@ -342,14 +342,14 @@ mod tests {
             // Compute root with in-memory trie nodes overlay
             let (state_root, _) = StateRoot::from_tx(provider.tx_ref())
                 .with_prefix_sets(TriePrefixSets { account_prefix_set: changes.freeze(), ..Default::default() })
-                .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(provider.tx_ref(), &trie_updates.clone().into_sorted()))
+                .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(provider.tx_ref(), &trie_updates.into_sorted()))
                 .root_with_updates()
                 .unwrap();
 
             // Verify the result
             let mut state = BTreeMap::default();
-            state.append(&mut init_state.clone());
-            state.append(&mut updated_state.clone());
+            state.append(&mut init_state);
+            state.append(&mut updated_state);
             let expected_root = state_root_prehashed(
                 state.iter().map(|(&key, &balance)| (key, (Account { balance, ..Default::default() }, std::iter::empty())))
             );
