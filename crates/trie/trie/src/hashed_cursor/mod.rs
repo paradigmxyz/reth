@@ -26,6 +26,7 @@ pub trait HashedCursorFactory {
 }
 
 /// The cursor for iterating over hashed entries.
+#[auto_impl::auto_impl(&mut, Box)]
 pub trait HashedCursor {
     /// Value returned by the cursor.
     type Value: std::fmt::Debug;
