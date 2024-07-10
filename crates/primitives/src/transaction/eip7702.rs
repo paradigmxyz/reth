@@ -62,10 +62,13 @@ pub struct TxEip7702 {
     /// the code referenced by `address`. These also include a `chain_id` (which
     /// can be set to zero and not evaluated) as well as an optional `nonce`.
     pub authorization_list: Vec<SignedAuthorization<alloy_primitives::Signature>>,
-    /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
-    /// Some). pub init: An unlimited size byte array specifying the
-    /// EVM-code for the account initialisation procedure CREATE,
-    /// data: An unlimited size byte array specifying the
+    /// Input has two uses depending if the transaction `to` field is [`TxKind::Create`] or
+    /// [`TxKind::Call`].
+    ///
+    /// Input as init code, or if `to` is [`TxKind::Create`]: An unlimited size byte array
+    /// specifying the EVM-code for the account initialisation procedure `CREATE`
+    ///
+    /// Input as data, or if `to` is [`TxKind::Call`]: An unlimited size byte array specifying the
     /// input data of the message call, formally Td.
     pub input: Bytes,
 }
