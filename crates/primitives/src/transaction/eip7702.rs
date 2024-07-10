@@ -258,17 +258,24 @@ impl<'a> arbitrary::Arbitrary<'a> for TxEip7702 {
             let auth = auth?;
 
             let sig = alloy_primitives::Signature::from_rs_and_parity(
-                auth.r,auth.s,
-                alloy_primitives::Parity::Parity(
-                    auth.parity,
-                )
-            ).unwrap_or_else(|_|{
+                auth.r,
+                auth.s,
+                alloy_primitives::Parity::Parity(auth.parity),
+            )
+            .unwrap_or_else(|_| {
                 // Give a default one if the randomly generated one failed
                 alloy_primitives::Signature::from_rs_and_parity(
-                    alloy_primitives::b256!("1fd474b1f9404c0c5df43b7620119ffbc3a1c3f942c73b6e14e9f55255ed9b1d").into(),
-                    alloy_primitives::b256!("29aca24813279a901ec13b5f7bb53385fa1fc627b946592221417ff74a49600d").into(),
+                    alloy_primitives::b256!(
+                        "1fd474b1f9404c0c5df43b7620119ffbc3a1c3f942c73b6e14e9f55255ed9b1d"
+                    )
+                    .into(),
+                    alloy_primitives::b256!(
+                        "29aca24813279a901ec13b5f7bb53385fa1fc627b946592221417ff74a49600d"
+                    )
+                    .into(),
                     false,
-                ).unwrap()
+                )
+                .unwrap()
             });
 
             authorization_list.push(
@@ -277,9 +284,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TxEip7702 {
                     address: auth.address,
                     nonce: auth.nonce.into(),
                 }
-                .into_signed(
-                    sig
-                ),
+                .into_signed(sig),
             );
         }
 
@@ -324,8 +329,6 @@ mod tests {
         Address, Bytes, Transaction, TransactionSigned, U256,
     };
     use alloy_rlp::{Decodable, Encodable};
-    use proptest_arbitrary_interop::arb;
-    use reth_codecs::Compact;
 
     #[test]
     fn test_decode_create() {
