@@ -43,8 +43,7 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        // todo(onbjerg): add `SignedAuthorization::into_parts(self) -> (Auth, Signature)`
-        let (auth, signature) = (self.deref().clone(), self.signature());
+        let (auth, signature) = self.into_parts();
         let (v, r, s) = (signature.v(), signature.r(), signature.s());
         buf.put_u8(v.y_parity_byte());
         buf.put_slice(r.as_le_slice());

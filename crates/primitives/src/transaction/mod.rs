@@ -264,10 +264,8 @@ impl Transaction {
         &self,
     ) -> Option<&[SignedAuthorization<alloy_primitives::Signature>]> {
         match self {
-            Self::Legacy(_) | Self::Eip2930(_) | Self::Eip1559(_) | Self::Eip4844(_) => None,
             Self::Eip7702(tx) => Some(&tx.authorization_list),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(_) => None,
+            _ => None,
         }
     }
 
@@ -1110,7 +1108,7 @@ impl TransactionSigned {
         // `from` address.
         #[cfg(feature = "optimism")]
         if let Transaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from);
+            return Some(from)
         }
         let signature_hash = self.signature_hash();
         self.signature.recover_signer_unchecked(signature_hash)
@@ -1305,7 +1303,7 @@ impl TransactionSigned {
         // check the new length, compared to the original length and the header length
         let decoded = remaining_len - data.len();
         if decoded != transaction_payload_len {
-            return Err(RlpError::UnexpectedLength);
+            return Err(RlpError::UnexpectedLength)
         }
 
         let tx_length = header.payload_length + header.length();

@@ -153,8 +153,6 @@ pub fn transaction_to_call_request(tx: TransactionSignedEcRecovered) -> Transact
         access_list,
         max_fee_per_blob_gas,
         blob_versioned_hashes,
-        // TODO(onbjerg): there is no EIP-7702 rpc spec yet, so this field does not exist
-        // authorization_list,
         transaction_type: Some(tx_type.into()),
         sidecar: None,
     }
