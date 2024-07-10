@@ -384,7 +384,7 @@ where
         }
     }
 
-    /// Launches the node and returns a handle to it.
+    /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(
         self,
     ) -> eyre::Result<NodeHandle<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>> {

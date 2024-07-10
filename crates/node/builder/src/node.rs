@@ -24,6 +24,9 @@ pub trait Node<N: FullNodeTypes>: NodeTypes + Clone {
     /// The type that builds the node's components.
     type ComponentsBuilder: NodeComponentsBuilder<N>;
 
+    // TODO define nodeAddons types, that will create the rpc setup for example ethAPI
+    type NodeAddon;
+
     /// Returns a [`NodeComponentsBuilder`] for the node.
     fn components_builder(self) -> Self::ComponentsBuilder;
 }

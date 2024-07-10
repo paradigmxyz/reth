@@ -150,6 +150,7 @@ pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsBuilder
     /// container for type specific components
     pub(crate) components_builder: CB,
     /// Additional node extensions.
+    // TODO make Addons generic over NodeAdapter + context
     pub(crate) add_ons: NodeAddOns<NodeAdapter<T, CB::Components>>,
 }
 
@@ -237,11 +238,40 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
 }
 
 /// Additional node extensions.
-pub(crate) struct NodeAddOns<Node: FullNodeComponents> {
+///
+/// At this point we consider all necessary components defined.
+pub(crate) struct NodeAddOns<Node: FullNodeComponents, Ctx = ()> {
     /// Additional `NodeHooks` that are called at specific points in the node's launch lifecycle.
+    pub hooks: NodeHooks<Node>,
+    /// Additional RPC hooks.
+    pub rpc: RpcHooks<Node>,
+    /// The `ExExs` (execution extensions) of the node.
+    pub exexs: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
+    /// Additional user-defined context, such as:
+    /// - RPC
+    /// - Additional hooks that can be invoked when the node is launched.
+    // TODO: perhaps rename to addon
+    pub ctx: Ctx,
+}
+
+/// Additional context addon that captures settings required for a regular, ethereum or optimism
+/// node that make use of engine API and RPC.
+pub struct EngineApiAddon<Node: FullNodeComponents, EthApi> {
+    rpc: RpcAddon<Node, EthApi>,
+    // TODO anything rpc specific we need here? if not, maybe this type is redundant and engine can
+    // be enforced via the launcher type entirely
+}
+
+/// Captures node specific addons that can be installed on top of the type configured node and are
+/// required for launching the node, such as RPC.
+pub struct RpcAddon<Node: FullNodeComponents, EthApi> {
+    // TODO enforce the the ethAPI builder trait
+    eth_api_builder: EthApi,
+    /// Additional `NodeHooks` that are called at specific points in the node's launch lifecycle.
+    // TODO make hooks generic over ethapi config
     pub(crate) hooks: NodeHooks<Node>,
     /// Additional RPC hooks.
     pub(crate) rpc: RpcHooks<Node>,
-    /// The `ExExs` (execution extensions) of the node.
-    pub(crate) exexs: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
 }
+
+// TODO impl install hook functions.

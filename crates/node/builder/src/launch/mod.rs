@@ -41,7 +41,8 @@ pub use exex::ExExLauncher;
 
 /// A general purpose trait that launches a new node of any kind.
 ///
-/// Acts as a node factory.
+/// Acts as a node factory that targets a certain node configuration and returns a handle to the
+/// node.
 ///
 /// This is essentially the launch logic for a node.
 ///
@@ -80,6 +81,7 @@ impl DefaultNodeLauncher {
     }
 }
 
+// TODO enforce the nodeaddons type in `NodeBuilderWithComponents`
 impl<T, CB> LaunchNode<NodeBuilderWithComponents<T, CB>> for DefaultNodeLauncher
 where
     T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
@@ -95,7 +97,7 @@ where
         let NodeBuilderWithComponents {
             adapter: NodeTypesAdapter { database },
             components_builder,
-            add_ons: NodeAddOns { hooks, rpc, exexs: installed_exex },
+            add_ons: NodeAddOns { hooks, rpc, exexs: installed_exex, ctx },
             config,
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
