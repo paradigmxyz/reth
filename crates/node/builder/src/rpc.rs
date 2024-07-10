@@ -5,6 +5,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use auto_impl::auto_impl;
 use futures::TryFutureExt;
 use reth_network::NetworkHandle;
 use reth_node_api::FullNodeComponents;
@@ -14,7 +15,7 @@ use reth_rpc::eth::EthApi;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
-    EthApiBuild, RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
+    EthApiBuilderCtx, RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_layer::JwtSecret;
 use reth_tasks::TaskExecutor;
@@ -328,4 +329,76 @@ where
     on_rpc_started.on_rpc_started(ctx, handles.clone())?;
 
     Ok((handles, registry))
+}
+
+/// Builds core `eth` namespace API to run on the RPC server
+/// ([`EthApiServer`](reth_rpc::eth::EthApiServer)).
+#[auto_impl(Arc)]
+pub trait EthApiBuilder<N: FullNodeComponents>: Send + Sync + Unpin + 'static {
+    type Output;
+
+    fn build_eth_api(
+        &self,
+        ctx: &EthApiBuilderCtx<
+            N::Provider,
+            N::Pool,
+            N::Evm,
+            NetworkHandle,
+            TaskExecutor,
+            N::Provider,
+        >,
+    ) -> Self::Output;
+}
+
+impl<N, F, EthApi> EthApiBuilder<N> for F
+where
+    N: FullNodeComponents,
+    F: Fn(
+            &EthApiBuilderCtx<
+                N::Provider,
+                N::Pool,
+                N::Evm,
+                NetworkHandle,
+                TaskExecutor,
+                N::Provider,
+            >,
+        ) -> EthApi
+        + Send
+        + Sync
+        + Unpin
+        + 'static,
+{
+    type Output = EthApi;
+
+    fn build_eth_api(
+        &self,
+        ctx: &EthApiBuilderCtx<
+            N::Provider,
+            N::Pool,
+            N::Evm,
+            NetworkHandle,
+            TaskExecutor,
+            N::Provider,
+        >,
+    ) -> Self::Output {
+        self(ctx)
+    }
+}
+
+impl<N: FullNodeComponents> EthApiBuilder<N> for Option<()> {
+    type Output = ();
+
+    fn build_eth_api(
+        &self,
+        _ctx: &EthApiBuilderCtx<
+            N::Provider,
+            N::Pool,
+            N::Evm,
+            NetworkHandle,
+            TaskExecutor,
+            N::Provider,
+        >,
+    ) -> Self::Output {
+        ()
+    }
 }

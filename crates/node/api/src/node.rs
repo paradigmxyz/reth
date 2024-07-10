@@ -145,3 +145,13 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Returns the task executor.
     fn task_executor(&self) -> &TaskExecutor;
 }
+
+/// Customizable node add-on types.
+pub trait NodeAddOns<N: FullNodeComponents>: Send + Sync + Unpin + Clone + 'static {
+    /// The `reth_rpc_eth_api::EthApiServer` type to use.
+    type EthApi: Send;
+}
+
+impl<N: FullNodeComponents> NodeAddOns<N> for () {
+    type EthApi = ();
+}

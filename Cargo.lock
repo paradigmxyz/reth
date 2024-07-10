@@ -7704,6 +7704,7 @@ name = "reth-node-builder"
 version = "1.0.1"
 dependencies = [
  "aquamarine",
+ "auto_impl",
  "backon",
  "confy",
  "eyre",
@@ -7839,6 +7840,8 @@ dependencies = [
  "reth-node-core",
  "reth-payload-builder",
  "reth-provider",
+ "reth-rpc-builder",
+ "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
  "serde_json",

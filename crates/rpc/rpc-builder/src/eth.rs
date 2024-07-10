@@ -1,12 +1,11 @@
 use std::{fmt::Debug, time::Duration};
 
 use reth_evm::ConfigureEvm;
-use reth_network_api::NetworkInfo;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, EvmEnvProvider,
-    FullRpcProvider, StateProviderFactory,
+    StateProviderFactory,
 };
-use reth_rpc::{eth::EthFilterConfig, EthApi, EthFilter, EthPubSub};
+use reth_rpc::{eth::EthFilterConfig, EthFilter, EthPubSub};
 use reth_rpc_eth_types::{
     cache::cache_new_blocks_task, fee_history::fee_history_cache_new_blocks_task, EthStateCache,
     EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
@@ -16,15 +15,14 @@ use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
     DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_PROOF_PERMITS,
 };
-use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
-use reth_transaction_pool::TransactionPool;
+use reth_tasks::TaskSpawner;
 use serde::{Deserialize, Serialize};
 
 /// Default value for stale filter ttl
 const DEFAULT_STALE_FILTER_TTL: Duration = Duration::from_secs(5 * 60);
 
 /// Alias for function that builds the core `eth` namespace API.
-pub type EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi> =
+pub type DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi> =
     Box<dyn FnOnce(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi>;
 
 /// Handlers for core, filter and pubsub `eth` namespace APIs.
@@ -80,7 +78,7 @@ pub struct EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig,
     config: EthConfig,
     executor: Tasks,
     events: Events,
-    eth_api_builder: EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
+    eth_api_builder: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
 }
 
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
@@ -261,41 +259,24 @@ pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events> {
     pub cache: EthStateCache,
 }
 
-/// Ethereum layer one `eth` RPC server builder.
-#[derive(Default, Debug, Clone, Copy)]
-pub struct EthApiBuild;
-
-impl EthApiBuild {
-    /// Builds the [`EthApiServer`](reth_rpc_eth_api::EthApiServer), for given context.
-    pub fn build<Provider, Pool, EvmConfig, Network, Tasks, Events>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
-    ) -> EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, EvmConfig, Network, Tasks, Events>
+    EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>
+where
+    Provider: BlockReaderIdExt + Clone,
+{
+    /// Returns a new [`FeeHistoryCache`] for the context.
+    pub fn new_fee_history_cache(&self) -> FeeHistoryCache
     where
-        Provider: FullRpcProvider,
-        Pool: TransactionPool,
-        Network: NetworkInfo + Clone,
-        Tasks: TaskSpawner + Clone + 'static,
+        Provider: ChainSpecProvider + 'static,
+        Tasks: TaskSpawner,
         Events: CanonStateSubscriptions,
-        EvmConfig: ConfigureEvm,
     {
-        let gas_oracle = GasPriceOracleBuilder::build(ctx);
-        let fee_history_cache = FeeHistoryCacheBuilder::build(ctx);
+        FeeHistoryCacheBuilder::build(self)
+    }
 
-        EthApi::with_spawner(
-            ctx.provider.clone(),
-            ctx.pool.clone(),
-            ctx.network.clone(),
-            ctx.cache.clone(),
-            gas_oracle,
-            ctx.config.rpc_gas_cap,
-            ctx.config.eth_proof_window,
-            Box::new(ctx.executor.clone()),
-            BlockingTaskPool::build().expect("failed to build blocking task pool"),
-            fee_history_cache,
-            ctx.evm_config.clone(),
-            None,
-            ctx.config.proof_permits,
-        )
+    /// Returns a new [`GasPriceOracle`] for the context.
+    pub fn new_gas_price_oracle(&self) -> GasPriceOracle<Provider> {
+        GasPriceOracleBuilder::build(self)
     }
 }
 

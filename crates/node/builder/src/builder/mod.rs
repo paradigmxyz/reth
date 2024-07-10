@@ -2,13 +2,13 @@
 
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
-use crate::{
-    common::WithConfigs,
-    components::NodeComponentsBuilder,
-    node::FullNode,
-    rpc::{RethRpcServerHandles, RpcContext},
-    DefaultNodeLauncher, Node, NodeHandle,
-};
+pub mod add_ons;
+mod states;
+
+pub use states::*;
+
+use std::sync::Arc;
+
 use futures::Future;
 use reth_chainspec::ChainSpec;
 use reth_cli_util::get_secret_key;
@@ -20,7 +20,7 @@ use reth_exex::ExExContext;
 use reth_network::{
     NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
-use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
+use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
@@ -32,11 +32,15 @@ use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
-pub use states::*;
-use std::sync::Arc;
 use tracing::{info, trace, warn};
 
-mod states;
+use crate::{
+    common::WithConfigs,
+    components::NodeComponentsBuilder,
+    node::FullNode,
+    rpc::{RethRpcServerHandles, RpcContext},
+    DefaultNodeLauncher, Node, NodeAddOnBuilders, NodeHandle,
+};
 
 /// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -212,11 +216,13 @@ where
     pub fn node<N>(
         self,
         node: N,
-    ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>
+    ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types().with_components(node.components_builder())
+        self.with_types()
+            .with_components(node.components_builder())
+            .with_add_ons(node.add_on_builders())
     }
 }
 
@@ -259,11 +265,15 @@ where
     pub fn node<N>(
         self,
         node: N,
-    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>>
+    ) -> WithLaunchContext<
+        NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+    >
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types().with_components(node.components_builder())
+        self.with_types()
+            .with_components(node.components_builder())
+            .with_add_ons(node.add_on_builders())
     }
 
     /// Launches a preconfigured [Node]
@@ -298,7 +308,7 @@ where
     pub fn with_components<CB>(
         self,
         components_builder: CB,
-    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
+    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, ()>>
     where
         CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     {
@@ -309,11 +319,35 @@ where
     }
 }
 
-impl<T, DB, CB> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
+impl<T, DB, CB> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, ()>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: NodeTypes,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
+{
+    /// Advances the state of the node builder to the next state where all components are configured
+    pub fn with_add_ons<AO>(
+        self,
+        add_on_builders: Arc<
+            dyn NodeAddOnBuilders<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>, AO>,
+        >,
+    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
+    where
+        AO: NodeAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
+    {
+        WithLaunchContext {
+            builder: self.builder.with_add_ons(add_on_builders),
+            task_executor: self.task_executor,
+        }
+    }
+}
+
+impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
+where
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    T: NodeTypes,
+    CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
+    AO: NodeAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
 {
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(self, hook: F) -> Self

@@ -199,8 +199,7 @@ pub mod error;
 /// Eth utils
 pub mod eth;
 pub use eth::{
-    EthApiBuild, EthApiBuilderCtx, EthConfig, EthHandlers, FeeHistoryCacheBuilder,
-    GasPriceOracleBuilder,
+    EthApiBuilderCtx, EthConfig, EthHandlers, FeeHistoryCacheBuilder, GasPriceOracleBuilder,
 };
 
 // Rpc server metrics

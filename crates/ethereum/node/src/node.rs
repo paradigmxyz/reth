@@ -1,6 +1,7 @@
 //! Ethereum Node types config.
 
-use crate::{EthEngineTypes, EthEvmConfig};
+use std::sync::Arc;
+
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -9,22 +10,26 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
+use reth_node_api::FullNodeComponents;
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
         PayloadServiceBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes},
-    BuilderContext, Node, PayloadBuilderConfig, PayloadTypes,
+    AddOnBuildersAdapter, BuilderContext, Node, NodeAdapter, NodeAddOnBuilders,
+    PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
+use reth_tasks::pool::BlockingTaskPool;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
     TransactionValidationTaskExecutor,
 };
-use std::sync::Arc;
+
+use crate::{EthEngineTypes, EthEvmConfig};
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -57,11 +62,23 @@ impl EthereumNode {
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
     }
+
+    pub fn add_ons<Node, AddOns>() -> Rc<dyn NodeAddOnBuilders<Node, AddOns>> {
+        Arc::new(AddOnBuildersAdapter {
+            eth_api_builder: Box::new(EthereumApiBuilder::build_eth_api),
+        })
+    }
 }
 
 impl NodeTypes for EthereumNode {
     type Primitives = ();
     type Engine = EthEngineTypes;
+}
+
+pub struct EthereumAddOns;
+
+impl<N: FullNodeComponents> AddOns<N> for EthereumAddOns {
+    type EthApi = EthApi<N::Provider, N::Pool, NetworkHandle, N::Evm>;
 }
 
 impl<N> Node<N> for EthereumNode
@@ -77,8 +94,21 @@ where
         EthereumConsensusBuilder,
     >;
 
-    fn components_builder(self) -> Self::ComponentsBuilder {
+    type AddOns = EthereumAddOns;
+
+    fn components_builder(&self) -> Self::ComponentsBuilder {
         Self::components()
+    }
+
+    fn add_on_builders(
+        &self,
+    ) -> Arc<
+        dyn NodeAddOnBuilders<
+            NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+            Self::AddOns,
+        >,
+    > {
+        Self::add_ons()
     }
 }
 
@@ -266,5 +296,39 @@ where
         } else {
             Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
         }
+    }
+}
+
+/// Ethereum layer one `eth` RPC server builder.
+#[derive(Default, Debug, Clone, Copy)]
+pub struct EthereumApiBuilder;
+
+impl<Node> EthApiBuilder<Node> for EthereumApiBuilder {
+    /// Builds the [`EthApiServer`](reth_rpc_eth_api::EthApiServer), for given context.
+    fn build_eth_api(
+        ctx: &EthApiBuilderCtx<
+            Node::Provider,
+            Node::Pool,
+            Node::Evm,
+            NetworkHandle,
+            TaskExecutor,
+            Node::Provider,
+        >,
+    ) -> EthApi<Node::Provider, Node::Pool, NetworkHandle, Node::Evm> {
+        EthApi::with_spawner(
+            ctx.provider.clone(),
+            ctx.pool.clone(),
+            ctx.network.clone(),
+            ctx.cache.clone(),
+            ctx.new_gas_price_oracle(),
+            ctx.config.rpc_gas_cap,
+            ctx.config.eth_proof_window,
+            Box::new(ctx.executor.clone()),
+            BlockingTaskPool::build().expect("failed to build blocking task pool"),
+            ctx.new_fee_history_cache(),
+            ctx.evm_config.clone(),
+            None,
+            ctx.config.proof_permits,
+        )
     }
 }

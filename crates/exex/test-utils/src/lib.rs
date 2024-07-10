@@ -125,8 +125,9 @@ where
         TestExecutorBuilder,
         TestConsensusBuilder,
     >;
+    type AddOns = EthereumAddOns;
 
-    fn components_builder(self) -> Self::ComponentsBuilder {
+    fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(TestPoolBuilder::default())
@@ -134,6 +135,17 @@ where
             .network(EthereumNetworkBuilder::default())
             .executor(TestExecutorBuilder::default())
             .consensus(TestConsensusBuilder::default())
+    }
+
+    fn add_on_builders(
+        &self,
+    ) -> Arc<
+        dyn NodeAddOnBuilders<
+            NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+            Self::AddOns,
+        >,
+    > {
+        EthereumNode::add_ons()
     }
 }
 

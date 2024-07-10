@@ -17,7 +17,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use std::convert::Infallible;
+use std::{convert::Infallible, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -28,7 +28,7 @@ use reth::{
     builder::{
         components::{ComponentsBuilder, PayloadServiceBuilder},
         node::NodeTypes,
-        BuilderContext, FullNodeTypes, Node, NodeBuilder, PayloadBuilderConfig,
+        BuilderContext, FullNodeTypes, Node, NodeAddOnBuilders, NodeBuilder, PayloadBuilderConfig,
     },
     primitives::revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     providers::{CanonStateSubscriptions, StateProviderFactory},
@@ -46,7 +46,8 @@ use reth_node_api::{
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::node::{
-    EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder, EthereumPoolBuilder,
+    EthereumAddOns, EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
+    EthereumPoolBuilder,
 };
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderHandle,
@@ -212,8 +213,9 @@ where
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
     >;
+    type AddOns = EthereumAddOns;
 
-    fn components_builder(self) -> Self::ComponentsBuilder {
+    fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(EthereumPoolBuilder::default())
@@ -221,6 +223,17 @@ where
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
+    }
+
+    fn add_on_builders(
+        &self,
+    ) -> Arc<
+        dyn NodeAddOnBuilders<
+            NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+            Self::AddOns,
+        >,
+    > {
+        EthereumNode::add_ons()
     }
 }
 

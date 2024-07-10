@@ -5,21 +5,22 @@
 //! The node builder process is essentially a state machine that transitions through various states
 //! before the node can be launched.
 
-use crate::{
-    components::{NodeComponents, NodeComponentsBuilder},
-    exex::BoxedLaunchExEx,
-    hooks::NodeHooks,
-    launch::LaunchNode,
-    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
-    FullNode,
-};
+use std::{fmt, future::Future, sync::Arc};
+
 use reth_exex::ExExContext;
 use reth_network::NetworkHandle;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
-use std::{fmt, future::Future};
+
+use crate::{
+    components::{NodeComponents, NodeComponentsBuilder},
+    hooks::NodeHooks,
+    launch::LaunchNode,
+    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
+    AddOns, FullNode, NodeAddOnBuilders, RpcAddOns,
+};
 
 /// A node builder that also has the configured types.
 pub struct NodeBuilderWithTypes<T: FullNodeTypes> {
@@ -36,7 +37,7 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     }
 
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB>
+    pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB, ()>
     where
         CB: NodeComponentsBuilder<T>,
     {
@@ -46,9 +47,9 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             config,
             adapter,
             components_builder,
-            add_ons: NodeAddOns {
+            add_ons: AddOns {
                 hooks: NodeHooks::default(),
-                rpc: RpcHooks::new(),
+                rpc: RpcAddOns { eth_api_builder: Arc::new(None), hooks: RpcHooks::new() },
                 exexs: Vec::new(),
             },
         }
@@ -142,7 +143,11 @@ impl<T: FullNodeTypes, C: NodeComponents<T>> Clone for NodeAdapter<T, C> {
 /// A fully type configured node builder.
 ///
 /// Supports adding additional addons to the node.
-pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> {
+pub struct NodeBuilderWithComponents<
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
+> {
     /// All settings for how the node should be configured.
     pub(crate) config: NodeConfig,
     /// Adapter for the underlying node types and database
@@ -150,11 +155,46 @@ pub struct NodeBuilderWithComponents<T: FullNodeTypes, CB: NodeComponentsBuilder
     /// container for type specific components
     pub(crate) components_builder: CB,
     /// Additional node extensions.
-    // TODO make Addons generic over NodeAdapter + context
-    pub(crate) add_ons: NodeAddOns<NodeAdapter<T, CB::Components>>,
+    pub(crate) add_ons: AddOns<NodeAdapter<T, CB::Components>, AO>,
 }
 
-impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T, CB> {
+impl<T, CB> NodeBuilderWithComponents<T, CB, ()>
+where
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+{
+    /// Advances the state of the node builder to the next state where all components are configured
+    pub fn with_add_ons<AO>(
+        self,
+        add_on_builders: Arc<dyn NodeAddOnBuilders<NodeAdapter<T, CB::Components>, AO>>,
+    ) -> NodeBuilderWithComponents<T, CB, AO>
+    where
+        AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
+    {
+        let Self { config, adapter, components_builder, .. } = self;
+
+        NodeBuilderWithComponents {
+            config,
+            adapter,
+            components_builder,
+            add_ons: AddOns {
+                hooks: NodeHooks::default(),
+                exexs: Vec::new(),
+                rpc: RpcAddOns {
+                    eth_api_builder: add_on_builders.eth_api_builder(),
+                    hooks: RpcHooks::new(),
+                },
+            },
+        }
+    }
+}
+
+impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
+where
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
+{
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
@@ -183,7 +223,7 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
             + Send
             + 'static,
     {
-        self.add_ons.rpc.set_on_rpc_started(hook);
+        self.add_ons.rpc.hooks.set_on_rpc_started(hook);
         self
     }
 
@@ -194,7 +234,7 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
             + Send
             + 'static,
     {
-        self.add_ons.rpc.set_extend_rpc_modules(hook);
+        self.add_ons.rpc.hooks.set_extend_rpc_modules(hook);
         self
     }
 
@@ -235,43 +275,6 @@ impl<T: FullNodeTypes, CB: NodeComponentsBuilder<T>> NodeBuilderWithComponents<T
     pub const fn check_launch(self) -> Self {
         self
     }
-}
-
-/// Additional node extensions.
-///
-/// At this point we consider all necessary components defined.
-pub(crate) struct NodeAddOns<Node: FullNodeComponents, Ctx = ()> {
-    /// Additional `NodeHooks` that are called at specific points in the node's launch lifecycle.
-    pub hooks: NodeHooks<Node>,
-    /// Additional RPC hooks.
-    pub rpc: RpcHooks<Node>,
-    /// The `ExExs` (execution extensions) of the node.
-    pub exexs: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
-    /// Additional user-defined context, such as:
-    /// - RPC
-    /// - Additional hooks that can be invoked when the node is launched.
-    // TODO: perhaps rename to addon
-    pub ctx: Ctx,
-}
-
-/// Additional context addon that captures settings required for a regular, ethereum or optimism
-/// node that make use of engine API and RPC.
-pub struct EngineApiAddon<Node: FullNodeComponents, EthApi> {
-    rpc: RpcAddon<Node, EthApi>,
-    // TODO anything rpc specific we need here? if not, maybe this type is redundant and engine can
-    // be enforced via the launcher type entirely
-}
-
-/// Captures node specific addons that can be installed on top of the type configured node and are
-/// required for launching the node, such as RPC.
-pub struct RpcAddon<Node: FullNodeComponents, EthApi> {
-    // TODO enforce the the ethAPI builder trait
-    eth_api_builder: EthApi,
-    /// Additional `NodeHooks` that are called at specific points in the node's launch lifecycle.
-    // TODO make hooks generic over ethapi config
-    pub(crate) hooks: NodeHooks<Node>,
-    /// Additional RPC hooks.
-    pub(crate) rpc: RpcHooks<Node>,
 }
 
 // TODO impl install hook functions.
