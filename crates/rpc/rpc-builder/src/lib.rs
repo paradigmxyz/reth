@@ -204,7 +204,9 @@ pub use eth::{
 };
 
 // Rpc server metrics
-mod metrics;
+//mod metrics;
+#[allow(missing_docs)]
+pub mod metrics;
 
 /// Convenience function for starting a server in one step.
 #[allow(clippy::too_many_arguments)]
@@ -1116,8 +1118,8 @@ where
 ///
 /// Once the [`RpcModule`] is built via [`RpcModuleBuilder`] the servers can be started, See also
 /// [`ServerBuilder::build`] and [`Server::start`](jsonrpsee::server::Server::start).
-#[derive(Default, Debug)]
-pub struct RpcServerConfig {
+#[derive(Debug)]
+pub struct RpcServerConfig<RpcMiddleware = Identity> {
     /// Configs for JSON-RPC Http.
     http_server_config: Option<ServerBuilder<Identity, Identity>>,
     /// Allowed CORS Domains for http
@@ -1136,24 +1138,67 @@ pub struct RpcServerConfig {
     ipc_endpoint: Option<String>,
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
+    /// Configurable RPC middleware
+    rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
 }
 
 // === impl RpcServerConfig ===
 
-impl RpcServerConfig {
+impl Default for RpcServerConfig<Identity> {
+    /// Create a new config instance
+    fn default() -> Self {
+        Self {
+            http_server_config: None,
+            http_cors_domains: None,
+            http_addr: None,
+            ws_server_config: None,
+            ws_cors_domains: None,
+            ws_addr: None,
+            ipc_server_config: None,
+            ipc_endpoint: None,
+            jwt_secret: None,
+            rpc_middleware: RpcServiceBuilder::new(),
+        }
+    }
+}
+
+use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceT};
+use tower::Layer;
+
+impl<RpcMiddleware> RpcServerConfig<RpcMiddleware>
+where
+    RpcMiddleware: for<'a> Layer<RpcService, Service: RpcServiceT<'a>> + Clone + Send + 'static,
+    <RpcMiddleware as Layer<RpcService>>::Service: Send + std::marker::Sync,
+{
+    /// Configure rpc middleware
+    pub fn set_rpc_middleware<T>(self, rpc_middleware: RpcServiceBuilder<T>) -> RpcServerConfig<T> {
+        RpcServerConfig {
+            http_server_config: self.http_server_config,
+            http_cors_domains: self.http_cors_domains,
+            http_addr: self.http_addr,
+            ws_server_config: self.ws_server_config,
+            ws_cors_domains: self.ws_cors_domains,
+            ws_addr: self.ws_addr,
+            ipc_server_config: self.ipc_server_config,
+            ipc_endpoint: self.ipc_endpoint,
+            jwt_secret: self.jwt_secret,
+            rpc_middleware,
+        }
+    }
+
     /// Creates a new config with only http set
-    pub fn http(config: ServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_http(config)
+    pub fn http(config: ServerBuilder<Identity, Identity>) -> RpcServerConfig<Identity> {
+        RpcServerConfig::<Identity>::default().with_http(config)
     }
 
     /// Creates a new config with only ws set
-    pub fn ws(config: ServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_ws(config)
+    pub fn ws(config: ServerBuilder<Identity, Identity>) -> RpcServerConfig<Identity> {
+        RpcServerConfig::<Identity>::default().with_ws(config)
     }
 
     /// Creates a new config with only ipc set
-    pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_ipc(config)
+    pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> RpcServerConfig<Identity> {
+        RpcServerConfig::<Identity>::default().with_ipc(config)
     }
 
     /// Configures the http server
@@ -1348,16 +1393,7 @@ impl RpcServerConfig {
                             .option_layer(Self::maybe_cors_layer(cors)?)
                             .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                     )
-                    .set_rpc_middleware(
-                        RpcServiceBuilder::new().layer(
-                            modules
-                                .http
-                                .as_ref()
-                                .or(modules.ws.as_ref())
-                                .map(RpcRequestMetrics::same_port)
-                                .unwrap_or_default(),
-                        ),
-                    )
+                    .set_rpc_middleware(self.rpc_middleware)
                     .build(http_socket_addr)
                     .await
                     .map_err(|err| {
@@ -1387,6 +1423,7 @@ impl RpcServerConfig {
         let mut ws_server = None;
         let mut http_local_addr = None;
         let mut http_server = None;
+        let rpc_middleware_clone = self.rpc_middleware.clone();
 
         if let Some(builder) = self.ws_server_config {
             let server = builder
@@ -1396,10 +1433,7 @@ impl RpcServerConfig {
                         .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                 )
-                .set_rpc_middleware(
-                    RpcServiceBuilder::new()
-                        .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
-                )
+                .set_rpc_middleware(rpc_middleware_clone.clone())
                 .build(ws_socket_addr)
                 .await
                 .map_err(|err| RpcError::server_error(err, ServerKind::WS(ws_socket_addr)))?;
@@ -1420,11 +1454,7 @@ impl RpcServerConfig {
                         .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                 )
-                .set_rpc_middleware(
-                    RpcServiceBuilder::new().layer(
-                        modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
-                    ),
-                )
+                .set_rpc_middleware(rpc_middleware_clone)
                 .build(http_socket_addr)
                 .await
                 .map_err(|err| RpcError::server_error(err, ServerKind::Http(http_socket_addr)))?;
@@ -1591,7 +1621,7 @@ pub struct TransportRpcModules<Context = ()> {
     /// The original config
     config: TransportRpcModuleConfig,
     /// rpcs module for http
-    http: Option<RpcModule<Context>>,
+    pub http: Option<RpcModule<Context>>,
     /// rpcs module for ws
     ws: Option<RpcModule<Context>>,
     /// rpcs module for ipc

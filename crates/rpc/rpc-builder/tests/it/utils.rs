@@ -4,12 +4,14 @@ use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_chainspec::MAINNET;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm_ethereum::EthEvmConfig;
+
 use reth_network_api::noop::NoopNetwork;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
-    EthApiBuild, RpcModuleBuilder, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
+    EthApiBuild, Identity, RpcModuleBuilder, RpcServerConfig, RpcServerHandle,
+    TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_layer::JwtSecret;
@@ -18,6 +20,10 @@ use reth_rpc_types::engine::{ClientCode, ClientVersionV1};
 use reth_tasks::TokioTaskExecutor;
 use reth_transaction_pool::test_utils::{TestPool, TestPoolBuilder};
 use tokio::sync::mpsc::unbounded_channel;
+
+//use reth_ipc::server::RpcServiceBuilder;
+use jsonrpsee::server::RpcServiceBuilder;
+use reth_rpc_builder::metrics::RpcRequestMetrics;
 
 /// Localhost with port 0 so a free port is used.
 pub const fn test_address() -> SocketAddr {
@@ -54,8 +60,11 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
 pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let server = builder.build(TransportRpcModuleConfig::set_http(modules), EthApiBuild::build);
-    RpcServerConfig::http(Default::default())
+    let rpc_middleware = RpcServiceBuilder::new()
+        .layer(server.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default());
+    RpcServerConfig::<Identity>::http(Default::default())
         .with_http_address(test_address())
+        .set_rpc_middleware(rpc_middleware)
         .start(&server)
         .await
         .unwrap()
@@ -65,7 +74,7 @@ pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHan
 pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let server = builder.build(TransportRpcModuleConfig::set_ws(modules), EthApiBuild::build);
-    RpcServerConfig::ws(Default::default())
+    RpcServerConfig::<Identity>::ws(Default::default())
         .with_http_address(test_address())
         .start(&server)
         .await
@@ -80,7 +89,7 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
         TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
         EthApiBuild::build,
     );
-    RpcServerConfig::ws(Default::default())
+    RpcServerConfig::<Identity>::ws(Default::default())
         .with_ws_address(test_address())
         .with_http(Default::default())
         .with_http_address(test_address())
@@ -98,7 +107,7 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
         EthApiBuild::build,
     );
     let addr = test_address();
-    RpcServerConfig::ws(Default::default())
+    RpcServerConfig::<Identity>::ws(Default::default())
         .with_ws_address(addr)
         .with_http(Default::default())
         .with_http_address(addr)

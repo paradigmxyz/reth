@@ -3069,6 +3069,7 @@ dependencies = [
  "reth-db-api",
  "reth-node-ethereum",
  "reth-provider",
+ "reth-rpc-builder",
  "tokio",
 ]
 

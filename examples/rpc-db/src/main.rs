@@ -35,6 +35,9 @@ use reth::{blockchain_tree::noop::NoopBlockchainTree, tasks::TokioTaskExecutor};
 use reth_node_ethereum::EthEvmConfig;
 use reth_provider::test_utils::TestCanonStateSubscriptions;
 
+use jsonrpsee::server::RpcServiceBuilder;
+use reth_rpc_builder::{metrics::RpcRequestMetrics, Identity};
+
 // Custom rpc extension
 pub mod myrpc_ext;
 
@@ -77,9 +80,13 @@ async fn main() -> eyre::Result<()> {
     server.merge_configured(custom_rpc.into_rpc())?;
 
     // Start the server & keep it alive
-    let server_args =
-        RpcServerConfig::http(Default::default()).with_http_address("0.0.0.0:8545".parse()?);
-    let _handle = server_args.start(&server).await?;
+    let rpc_middleware = RpcServiceBuilder::new()
+        .layer(server.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default());
+    let _handle = RpcServerConfig::<Identity>::http(Default::default())
+        .with_http_address("0.0.0.0:8545".parse()?)
+        .set_rpc_middleware(rpc_middleware)
+        .start(&server)
+        .await?;
     futures::future::pending::<()>().await;
 
     Ok(())

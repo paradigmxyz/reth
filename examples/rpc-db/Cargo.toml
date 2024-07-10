@@ -16,3 +16,5 @@ reth-node-ethereum.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 tokio = { workspace = true, features = ["full"] }
 eyre.workspace = true
+
+reth-rpc-builder.workspace = true
