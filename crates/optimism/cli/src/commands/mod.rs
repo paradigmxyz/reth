@@ -42,10 +42,6 @@ pub enum Commands<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// P2P Debugging utilities
     #[command(name = "p2p")]
     P2P(p2p::Command),
-    /// Generate Test Vectors
-    #[cfg(feature = "dev")]
-    #[command(name = "test-vectors")]
-    TestVectors(reth_cli_commands::test_vectors::Command),
     /// Write config to stdout
     #[command(name = "config")]
     Config(config_cmd::Command),
