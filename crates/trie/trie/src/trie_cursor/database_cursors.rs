@@ -30,7 +30,7 @@ impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
 
 /// A cursor over the account trie.
 #[derive(Debug)]
-pub struct DatabaseAccountTrieCursor<C>(C);
+pub struct DatabaseAccountTrieCursor<C>(pub(crate) C);
 
 impl<C> DatabaseAccountTrieCursor<C> {
     /// Create a new account trie cursor.
@@ -59,6 +59,11 @@ where
         Ok(self.0.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1 .0)))
     }
 
+    /// Move the cursor to the next entry and return it.
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        Ok(self.0.next()?.map(|value| (value.0 .0, value.1 .0)))
+    }
+
     /// Retrieves the current key in the cursor.
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.0.current()?.map(|(k, _)| k.0))
@@ -83,7 +88,7 @@ impl<C> DatabaseStorageTrieCursor<C> {
 
 impl<C> TrieCursor for DatabaseStorageTrieCursor<C>
 where
-    C: DbDupCursorRO<tables::StoragesTrie> + DbCursorRO<tables::StoragesTrie> + Send + Sync,
+    C: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send + Sync,
 {
     /// Seeks an exact match for the given key in the storage trie.
     fn seek_exact(
@@ -106,6 +111,11 @@ where
             .cursor
             .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(key))?
             .map(|value| (value.nibbles.0, value.node)))
+    }
+
+    /// Move the cursor to the next entry and return it.
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        Ok(self.cursor.next_dup()?.map(|(_, v)| (v.nibbles.0, v.node)))
     }
 
     /// Retrieves the current value in the storage trie cursor.
