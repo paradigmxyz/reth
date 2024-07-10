@@ -266,9 +266,6 @@ where
             }
         }
 
-        // intrinsic gas checks
-        let is_shanghai = self.fork_tracker.is_shanghai_activated();
-
         // 7702 check
         // TODO: get num auth items
         if transaction.is_eip7702() {
@@ -281,7 +278,7 @@ where
             }
         }
 
-        if let Err(err) = ensure_intrinsic_gas(&transaction, is_shanghai) {
+        if let Err(err) = ensure_intrinsic_gas(&transaction, &self.fork_tracker) {
             return TransactionValidationOutcome::Invalid(transaction, err)
         }
 
@@ -723,28 +720,28 @@ impl EthTransactionValidatorBuilder {
 
 /// Keeps track of whether certain forks are activated
 #[derive(Debug)]
-pub(crate) struct ForkTracker {
+pub struct ForkTracker {
     /// Tracks if shanghai is activated at the block's timestamp.
-    pub(crate) shanghai: AtomicBool,
+    pub shanghai: AtomicBool,
     /// Tracks if cancun is activated at the block's timestamp.
-    pub(crate) cancun: AtomicBool,
+    pub cancun: AtomicBool,
     /// Tracks if prague is activated at the block's timestamp.
-    pub(crate) prague: AtomicBool,
+    pub prague: AtomicBool,
 }
 
 impl ForkTracker {
     /// Returns `true` if Shanghai fork is activated.
-    pub(crate) fn is_shanghai_activated(&self) -> bool {
+    pub fn is_shanghai_activated(&self) -> bool {
         self.shanghai.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Returns `true` if Cancun fork is activated.
-    pub(crate) fn is_cancun_activated(&self) -> bool {
+    pub fn is_cancun_activated(&self) -> bool {
         self.cancun.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Returns `true` if Prague fork is activated.
-    pub(crate) fn is_prague_activated(&self) -> bool {
+    pub fn is_prague_activated(&self) -> bool {
         self.prague.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
@@ -767,37 +764,32 @@ pub fn ensure_max_init_code_size<T: PoolTransaction>(
 
 /// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
 ///
-/// See also [`calculate_intrinsic_gas_after_merge`]
-pub fn ensure_intrinsic_gas<T: PoolTransaction>(
+/// Caution: This only checks past the Merge hardfork.
+pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     transaction: &T,
-    is_shanghai: bool,
+    fork_tracker: &ForkTracker,
 ) -> Result<(), InvalidPoolTransactionError> {
-    if transaction.gas_limit() <
-        calculate_intrinsic_gas_after_merge(
-            transaction.input(),
-            &transaction.kind(),
-            transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
-            is_shanghai,
-        )
-    {
+    let spec_id = if fork_tracker.is_prague_activated() {
+        SpecId::PRAGUE
+    } else if fork_tracker.is_shanghai_activated() {
+        SpecId::SHANGHAI
+    } else {
+        SpecId::MERGE
+    };
+
+    let gas_after_merge = validate_initial_tx_gas(
+        spec_id,
+        transaction.input(),
+        transaction.kind().is_create(),
+        transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
+        transaction.authorization_count() as u64,
+    );
+
+    if transaction.gas_limit() < gas_after_merge {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
     } else {
         Ok(())
     }
-}
-
-/// Calculates the Intrinsic Gas usage for a Transaction
-///
-/// Caution: This only checks past the Merge hardfork.
-#[inline]
-pub fn calculate_intrinsic_gas_after_merge(
-    input: &[u8],
-    kind: &TxKind,
-    access_list: &[AccessListItem],
-    is_shanghai: bool,
-) -> u64 {
-    let spec_id = if is_shanghai { SpecId::SHANGHAI } else { SpecId::MERGE };
-    validate_initial_tx_gas(spec_id, input, kind.is_create(), access_list, 0)
 }
 
 #[cfg(test)]
@@ -824,10 +816,14 @@ mod tests {
     #[tokio::test]
     async fn validate_transaction() {
         let transaction = get_transaction();
+        let mut fork_tracker =
+            ForkTracker { shanghai: false.into(), cancun: false.into(), prague: false.into() };
 
-        let res = ensure_intrinsic_gas(&transaction, false);
+        let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
         assert!(res.is_ok());
-        let res = ensure_intrinsic_gas(&transaction, true);
+
+        fork_tracker.shanghai = true.into();
+        let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
         assert!(res.is_ok());
 
         let provider = MockEthProvider::default();

@@ -871,6 +871,9 @@ pub trait EthPoolTransaction: PoolTransaction {
         blob: &BlobTransactionSidecar,
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError>;
+
+    /// Returns the number of authorizations this transaction has.
+    fn authorization_count(&self) -> usize;
 }
 
 /// The default [`PoolTransaction`] for the [Pool](crate::Pool) for Ethereum.
@@ -1128,6 +1131,13 @@ impl EthPoolTransaction for EthPooledTransaction {
         match &self.transaction.transaction {
             Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
             _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.tx_type())),
+        }
+    }
+
+    fn authorization_count(&self) -> usize {
+        match &self.transaction.transaction {
+            Transaction::Eip7702(tx) => tx.authorization_list.len(),
+            _ => 0,
         }
     }
 }
