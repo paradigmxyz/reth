@@ -1,26 +1,5 @@
 use std::collections::HashSet;
 
-// The list of all supported Engine capabilities available over the engine endpoint.
-///
-/// Latest spec: Prague
-#[derive(Debug, Clone)]
-pub struct EngineCapabilities {
-    inner: HashSet<String>,
-}
-
-impl EngineCapabilities {
-    /// Returns the list of all supported Engine capabilities.
-    pub fn list(&self) -> Vec<String> {
-        self.inner.iter().cloned().collect()
-    }
-}
-
-impl Default for EngineCapabilities {
-    fn default() -> Self {
-        Self { inner: CAPABILITIES.iter().cloned().map(str::to_owned).collect() }
-    }
-}
-
 /// The list of all supported Engine capabilities available over the engine endpoint.
 pub const CAPABILITIES: &[&str] = &[
     "engine_forkchoiceUpdatedV1",
@@ -38,4 +17,32 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_newPayloadV4",
     "engine_getPayloadBodiesByHashV1",
     "engine_getPayloadBodiesByRangeV1",
+    "engine_getPayloadBodiesByHashV2",
+    "engine_getPayloadBodiesByRangeV2",
 ];
+
+// The list of all supported Engine capabilities available over the engine endpoint.
+///
+/// Latest spec: Prague
+#[derive(Debug, Clone)]
+pub struct EngineCapabilities {
+    inner: HashSet<String>,
+}
+
+impl EngineCapabilities {
+    /// Returns the list of all supported Engine capabilities for Prague spec.
+    fn prague() -> Self {
+        Self { inner: CAPABILITIES.iter().cloned().map(str::to_owned).collect() }
+    }
+
+    /// Returns the list of all supported Engine capabilities.
+    pub fn list(&self) -> Vec<String> {
+        self.inner.iter().cloned().collect()
+    }
+}
+
+impl Default for EngineCapabilities {
+    fn default() -> Self {
+        Self::prague()
+    }
+}
