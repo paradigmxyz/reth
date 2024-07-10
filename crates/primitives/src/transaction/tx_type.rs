@@ -213,7 +213,6 @@ impl Decodable for TxType {
     }
 }
 
-// TODO(eip7702): check these tests
 #[cfg(test)]
 mod tests {
     use rand::Rng;
