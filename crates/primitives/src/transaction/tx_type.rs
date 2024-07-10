@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(TxType::try_from(U64::from(126)).unwrap(), TxType::Deposit);
 
         // For transactions with unsupported values
-        assert!(TxType::try_from(U64::from(4)).is_err());
+        assert!(TxType::try_from(U64::from(5)).is_err());
     }
 
     #[test]
