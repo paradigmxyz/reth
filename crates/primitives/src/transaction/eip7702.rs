@@ -12,7 +12,7 @@ use std::mem;
 #[main_codec(no_arbitrary, add_arbitrary_tests)]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TxEip7702 {
-    /// Added as EIP-pub 155: Simple replay attack protection
+    /// Added as EIP-155: Simple replay attack protection
     pub chain_id: ChainId,
     /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
     pub nonce: u64,
