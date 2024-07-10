@@ -4,10 +4,11 @@ use tracing::{debug, info};
 use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::{init_db, DatabaseEnv, tables, transaction::DbTx};
 use reth_primitives::{BlockNumber, Header};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::thread::JoinHandle;
+use std::time::Duration;
 use reth_blockchain_tree::{BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals};
 use reth_blockchain_tree::noop::NoopBlockchainTree;
 use reth_consensus::{Consensus, PostExecutionInput};
@@ -22,7 +23,7 @@ use reth_revm::database::StateProviderDatabase;
 use crate::beacon_consensus::EthBeaconConsensus;
 use crate::macros::block_executor;
 use crate::primitives::{BlockHashOrNumber, U256};
-use crate::providers::{BlockNumReader, OriginalValuesKnown, ProviderError, StateProviderFactory, TransactionVariant};
+use crate::providers::{BlockNumReader, OriginalValuesKnown, ProviderError, ProviderResult, StateProviderFactory, TransactionVariant};
 
 /// EVM commands
 #[derive(Debug, Parser)]
@@ -42,7 +43,7 @@ impl EvmCommand {
     pub async fn execute(self) -> Result<()> {
         info!(target: "reth::cli", "Executing EVM command...");
 
-        let Environment { provider_factory, config, data_dir } = self.env.init(AccessRights::RO)?;
+        let Environment { provider_factory, .. } = self.env.init(AccessRights::RO)?;
 
         let consensus: Arc<dyn Consensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
@@ -75,7 +76,36 @@ impl EvmCommand {
         // 计算每个线程处理的区间大小
         let range_per_thread = (self.end_number - self.begin_number + 1) / thread_count as u64;
 
-        let mut threads: Vec<JoinHandle<bool>> = Vec::with_capacity(thread_count);
+        let mut threads: Vec<JoinHandle<Result<bool>>> = Vec::with_capacity(thread_count);
+
+
+        // 创建共享 gas 计数器
+        let cumulative_gas = Arc::new(Mutex::new(0));
+        let block_counter = Arc::new(Mutex::new(0));
+
+        // 创建状态输出线程
+        {
+            let cumulative_gas = Arc::clone(&cumulative_gas);
+            let block_counter = Arc::clone(&block_counter);
+
+            thread::spawn(move || {
+                let mut previous_cumulative_gas:u64 = 0;
+                let mut previous_block_counter:u64 = 0;
+                loop {
+                    thread::sleep(Duration::from_secs(1));
+
+                    let current_cumulative_gas =  cumulative_gas.lock().unwrap();
+                    let diff = *current_cumulative_gas - previous_cumulative_gas;
+                    previous_cumulative_gas = current_cumulative_gas.clone();
+                    let diff_in_g = diff as f64 / 1_000_000_000_000.0;
+
+                    let current_block_counter =  block_counter.lock().unwrap();
+                    let diff_block = *current_block_counter - previous_block_counter;
+                    previous_block_counter = current_block_counter.clone();
+                    info!(target: "reth::cli", "Processed gas: {} G block: {}", diff_in_g, diff_block);
+                }
+            });
+        }
 
         for i in 0..thread_count as u64 {
             let thread_start = self.begin_number + i * range_per_thread;
@@ -85,30 +115,44 @@ impl EvmCommand {
                 thread_start + range_per_thread - 1
             };
 
+            let cumulative_gas = Arc::clone(&cumulative_gas);
+            let block_counter = Arc::clone(&block_counter);
+
+            let provider_factory = provider_factory.clone();
+            let blockchain_db = blockchain_db.clone();
+            let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(thread_start-1)?);
+            let executor = block_executor!(provider_factory.chain_spec()).clone();
+
+            let mut executor = executor.batch_executor(db, PruneModes::none());
+
             threads.push(thread::spawn(move || {
-
-                let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(thread_start-1)?);
-                let executor = block_executor!(provider_factory.chain_spec()).executor(db);
-
                 for target in thread_start..=thread_end {
-
-                    let td = provider.header_td_by_number(target)?
+                    let td = blockchain_db.header_td_by_number(target)?
                         .ok_or_else(|| ProviderError::HeaderNotFound(target.into()))?;
 
-                    let block =  provider.sealed_block_with_senders(target.into(), TransactionVariant::WithHash)?
+                    let block =  blockchain_db.sealed_block_with_senders(target.into(), TransactionVariant::WithHash)?
                         .ok_or_else(|| ProviderError::HeaderNotFound(target.into()))?;
 
-                    let BlockExecutionOutput { state, receipts, requests, .. } =
-                        executor.execute((&block.clone().unseal(),td).into())?;
+                    executor.execute_and_verify_one((&block.clone().unseal(),td).into())?;
 
-                    let consensus: Arc<dyn Consensus> =
-                        Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
-                    consensus.validate_block_post_execution(&block.clone().unseal(), PostExecutionInput::new(&receipts, &requests))?;
+
+                    // 增加 gas 计数器
+                    let mut cumulative_gas = cumulative_gas.lock().unwrap();
+                    *cumulative_gas += block.block.gas_used;
+                    let mut block_counter = block_counter.lock().unwrap();
+                    *block_counter += 1;
+
                 }
-            });
+                Ok(true)
+            }));
         }
 
-        threads.into_iter().all(|b| b.join().unwrap());
+        for thread in threads {
+            match thread.join() {
+                Ok(result) => result?,
+                Err(e) => return Err(eyre::eyre!("Thread join error: {:?}", e)),
+            };
+        }
 
         Ok(())
     }
