@@ -18,16 +18,16 @@ use crate::{
 
 /// Writes finalized blocks to reth's static files.
 ///
-/// This is meant to be a spawned task that listens for various incoming finalization operations,
+/// This is meant to be a spawned service that listens for various incoming finalization operations,
 /// and writing to or producing new static files.
 ///
 /// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
 /// blocking file operations in an endless loop.
 #[derive(Debug)]
-pub struct StaticFileTask<DB> {
+pub struct StaticFileService<DB> {
     /// The db / static file provider to use
     provider: ProviderFactory<DB>,
-    /// Handle for the database task
+    /// Handle for the database service
     database_handle: PersistenceHandle,
     /// Incoming requests to write static files
     incoming: Receiver<StaticFileAction>,
@@ -35,21 +35,21 @@ pub struct StaticFileTask<DB> {
     pruning: PruneModes,
 }
 
-impl<DB> StaticFileTask<DB>
+impl<DB> StaticFileService<DB>
 where
     DB: Database + 'static,
 {
-    /// Create a new static file task, spawning it, and returning a [`StaticFileTaskHandle`].
-    fn spawn_new(provider: ProviderFactory<DB>) -> StaticFileTaskHandle {
+    /// Create a new static file service, spawning it, and returning a [`StaticFileServiceHandle`].
+    fn spawn_new(provider: ProviderFactory<DB>) -> StaticFileServiceHandle {
         todo!("implement initialization first");
         // let (tx, rx) = std::sync::mpsc::channel();
-        // let task = Self::new(provider, rx);
+        // let service = Self::new(provider, rx);
         // std::thread::Builder::new()
-        //     .name("StaticFile Task".to_string())
-        //     .spawn(|| task.run())
+        //     .name("StaticFile Service".to_string())
+        //     .spawn(|| service.run())
         //     .unwrap();
 
-        // StaticFileTaskHandle::new(tx)
+        // StaticFileServiceHandle::new(tx)
     }
 
     // TODO: some things about this are a bit weird, and just to make the underlying static file
@@ -57,7 +57,7 @@ where
     // data or a db lookup. Maybe we can use a db read here
     /// Writes the transactions to static files, to act as a log.
     ///
-    /// This will then send a command to the db task, that it should update the checkpoints for
+    /// This will then send a command to the db service, that it should update the checkpoints for
     /// headers and block bodies.
     fn log_transactions(
         &self,
@@ -91,7 +91,7 @@ where
         transactions_writer.commit()?;
 
         // TODO: do we care about the mpsc error here?
-        // send a command to the db task to update the checkpoints for headers / bodies
+        // send a command to the db service to update the checkpoints for headers / bodies
         let _ = self
             .database_handle
             .send_action(PersistenceAction::UpdateTransactionMeta((block.number, sender)));
@@ -101,8 +101,8 @@ where
 
     /// Write execution-related block data to static files.
     ///
-    /// This will then send a command to the db task, that it should write new data, and update the
-    /// checkpoints for execution and beyond.
+    /// This will then send a command to the db service, that it should write new data, and update
+    /// the checkpoints for execution and beyond.
     fn write_execution_data(
         &self,
         blocks: Vec<ExecutedBlock>,
@@ -132,7 +132,7 @@ where
         }
 
         // TODO: do we care about the mpsc error here?
-        // send a command to the db task to update the checkpoints for execution etc.
+        // send a command to the db service to update the checkpoints for execution etc.
         let _ = self.database_handle.send_action(PersistenceAction::SaveBlocks((blocks, sender)));
 
         Ok(())
@@ -141,7 +141,7 @@ where
     /// Removes the blocks above the given block number from static files. Also removes related
     /// receipt and header data.
     ///
-    /// This is meant to be called by the db task, as this should only be done after related data
+    /// This is meant to be called by the db service, as this should only be done after related data
     /// is removed from the database, and checkpoints are updated.
     ///
     /// Returns the hash of the lowest removed block.
@@ -164,7 +164,7 @@ where
     }
 }
 
-impl<DB> StaticFileTask<DB>
+impl<DB> StaticFileService<DB>
 where
     DB: Database + 'static,
 {
@@ -199,41 +199,41 @@ where
     }
 }
 
-/// A signal to the static file task that some data should be copied from the DB to static files.
+/// A signal to the static file service that some data should be copied from the DB to static files.
 #[derive(Debug)]
 pub enum StaticFileAction {
     /// The given block has been added to the canonical chain, its transactions and headers will be
     /// persisted for durability.
     ///
-    /// This will then send a command to the db task, that it should update the checkpoints for
+    /// This will then send a command to the db service, that it should update the checkpoints for
     /// headers and block bodies.
     LogTransactions((Arc<SealedBlock>, u64, U256, oneshot::Sender<()>)),
 
     /// Write execution-related block data to static files.
     ///
-    /// This will then send a command to the db task, that it should write new data, and update the
-    /// checkpoints for execution and beyond.
+    /// This will then send a command to the db service, that it should write new data, and update
+    /// the checkpoints for execution and beyond.
     WriteExecutionData((Vec<ExecutedBlock>, oneshot::Sender<B256>)),
 
     /// Removes the blocks above the given block number from static files. Also removes related
     /// receipt and header data.
     ///
-    /// This is meant to be called by the db task, as this should only be done after related data
-    /// is removed from the database, and checkpoints are updated.
+    /// This is meant to be called by the db service, as this should only be done after related
+    /// data is removed from the database, and checkpoints are updated.
     ///
     /// Returns the hash of the lowest removed block.
     RemoveBlocksAbove((u64, oneshot::Sender<B256>)),
 }
 
-/// A handle to the static file task
+/// A handle to the static file service
 #[derive(Debug, Clone)]
-pub struct StaticFileTaskHandle {
-    /// The channel used to communicate with the static file task
+pub struct StaticFileServiceHandle {
+    /// The channel used to communicate with the static file service
     sender: Sender<StaticFileAction>,
 }
 
-impl StaticFileTaskHandle {
-    /// Create a new [`StaticFileTaskHandle`] from a [`Sender<StaticFileTaskAction>`].
+impl StaticFileServiceHandle {
+    /// Create a new [`StaticFileServiceHandle`] from a [`Sender<StaticFileAction>`].
     pub const fn new(sender: Sender<StaticFileAction>) -> Self {
         Self { sender }
     }

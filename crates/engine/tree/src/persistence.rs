@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::{static_files::StaticFileTaskHandle, tree::ExecutedBlock};
+use crate::{static_files::StaticFileServiceHandle, tree::ExecutedBlock};
 use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::B256;
@@ -16,10 +16,10 @@ use tracing::debug;
 
 /// Writes parts of reth's in memory tree state to the database.
 ///
-/// This is meant to be a spawned task that listens for various incoming persistence operations,
+/// This is meant to be a spawned service that listens for various incoming persistence operations,
 /// performing those actions on disk, and returning the result in a channel.
 ///
-/// There are two types of operations this task can perform:
+/// There are two types of operations this service can perform:
 /// - Writing executed blocks to disk, returning the hash of the latest block that was inserted.
 /// - Removing blocks from disk, returning the removed blocks.
 ///
@@ -31,18 +31,18 @@ pub struct Persistence<DB> {
     provider: ProviderFactory<DB>,
     /// Incoming requests to persist stuff
     incoming: Receiver<PersistenceAction>,
-    /// Handle for the static file task.
-    static_file_handle: StaticFileTaskHandle,
+    /// Handle for the static file service.
+    static_file_handle: StaticFileServiceHandle,
     /// The pruner
     pruner: Pruner<DB>,
 }
 
 impl<DB: Database> Persistence<DB> {
-    /// Create a new persistence task
+    /// Create a new persistence service
     const fn new(
         provider: ProviderFactory<DB>,
         incoming: Receiver<PersistenceAction>,
-        static_file_handle: StaticFileTaskHandle,
+        static_file_handle: StaticFileServiceHandle,
         pruner: Pruner<DB>,
     ) -> Self {
         Self { provider, incoming, static_file_handle, pruner }
@@ -106,10 +106,13 @@ impl<DB: Database> Persistence<DB> {
     }
 
     /// Removes block data above the given block number from the database.
+    /// This is exclusive, i.e., it only removes blocks above `block_number`, and does not remove
+    /// `block_number`.
     ///
-    /// This will then send a command to the static file task, to remove the actual block data.
+    /// Returns the block hash for the lowest block removed from the database, which should be
+    /// the hash for `block_number + 1`.
     ///
-    /// Returns the block hash for the lowest block removed from the database.
+    /// This will then send a command to the static file service, to remove the actual block data.
     fn remove_blocks_above(&self, block_number: u64) -> ProviderResult<B256> {
         todo!("depends on PR")
         // let mut provider_rw = self.provider.provider_rw()?;
@@ -124,7 +127,7 @@ impl<DB: Database> Persistence<DB> {
     }
 
     /// Updates checkpoints related to block headers and bodies. This should be called by the static
-    /// file task, after new transactions have been successfully written to disk.
+    /// file service, after new transactions have been successfully written to disk.
     fn update_transaction_meta(&self, block_num: u64) -> ProviderResult<()> {
         let provider_rw = self.provider.provider_rw()?;
         provider_rw.save_stage_checkpoint(StageId::Headers, StageCheckpoint::new(block_num))?;
@@ -138,17 +141,17 @@ impl<DB> Persistence<DB>
 where
     DB: Database + 'static,
 {
-    /// Create a new persistence task, spawning it, and returning a [`PersistenceHandle`].
+    /// Create a new persistence service, spawning it, and returning a [`PersistenceHandle`].
     fn spawn_new(
         provider: ProviderFactory<DB>,
-        static_file_handle: StaticFileTaskHandle,
+        static_file_handle: StaticFileServiceHandle,
         pruner: Pruner<DB>,
     ) -> PersistenceHandle {
         let (tx, rx) = std::sync::mpsc::channel();
-        let task = Self::new(provider, rx, static_file_handle, pruner);
+        let service = Self::new(provider, rx, static_file_handle, pruner);
         std::thread::Builder::new()
-            .name("Persistence Task".to_string())
-            .spawn(|| task.run())
+            .name("Persistence Service".to_string())
+            .spawn(|| service.run())
             .unwrap();
 
         PersistenceHandle::new(tx)
@@ -199,7 +202,7 @@ where
     }
 }
 
-/// A signal to the persistence task that part of the tree state can be persisted.
+/// A signal to the persistence service that part of the tree state can be persisted.
 #[derive(Debug)]
 pub enum PersistenceAction {
     /// The section of tree state that should be persisted. These blocks are expected in order of
@@ -210,12 +213,12 @@ pub enum PersistenceAction {
     SaveBlocks((Vec<ExecutedBlock>, oneshot::Sender<B256>)),
 
     /// Updates checkpoints related to block headers and bodies. This should be called by the
-    /// static file task, after new transactions have been successfully written to disk.
+    /// static file service, after new transactions have been successfully written to disk.
     UpdateTransactionMeta((u64, oneshot::Sender<()>)),
 
     /// Removes block data above the given block number from the database.
     ///
-    /// This will then send a command to the static file task, to remove the actual block data.
+    /// This will then send a command to the static file service, to remove the actual block data.
     ///
     /// Returns the block hash for the lowest block removed from the database.
     RemoveBlocksAbove((u64, oneshot::Sender<B256>)),
@@ -225,10 +228,10 @@ pub enum PersistenceAction {
     PruneBefore((u64, oneshot::Sender<PruneProgress>)),
 }
 
-/// A handle to the persistence task
+/// A handle to the persistence service
 #[derive(Debug, Clone)]
 pub struct PersistenceHandle {
-    /// The channel used to communicate with the persistence task
+    /// The channel used to communicate with the persistence service
     sender: Sender<PersistenceAction>,
 }
 
@@ -247,7 +250,7 @@ impl PersistenceHandle {
         self.sender.send(action)
     }
 
-    /// Tells the persistence task to save a certain list of finalized blocks. The blocks are
+    /// Tells the persistence service to save a certain list of finalized blocks. The blocks are
     /// assumed to be ordered by block number.
     ///
     /// This returns the latest hash that has been saved, allowing removal of that block and any
@@ -260,8 +263,8 @@ impl PersistenceHandle {
         rx.await.expect("todo: err handling")
     }
 
-    /// Tells the persistence task to remove blocks above a certain block number. The removed blocks
-    /// are returned by the task.
+    /// Tells the persistence service to remove blocks above a certain block number. The removed
+    /// blocks are returned by the service.
     pub async fn remove_blocks_above(&self, block_num: u64) -> B256 {
         let (tx, rx) = oneshot::channel();
         self.sender
@@ -270,7 +273,7 @@ impl PersistenceHandle {
         rx.await.expect("todo: err handling")
     }
 
-    /// Tells the persistence task to remove block data before the given hash, according to the
+    /// Tells the persistence service to remove block data before the given hash, according to the
     /// configured prune config.
     pub async fn prune_before(&self, block_num: u64) -> PruneProgress {
         let (tx, rx) = oneshot::channel();
