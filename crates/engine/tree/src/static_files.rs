@@ -141,6 +141,12 @@ where
     /// Removes the blocks above the given block number from static files. Also removes related
     /// receipt and header data.
     ///
+    /// This is exclusive, i.e., it only removes blocks above `block_number`, and does not remove
+    /// `block_number`.
+    ///
+    /// Returns the block hash for the lowest block removed from the database, which should be
+    /// the hash for `block_number + 1`.
+    ///
     /// This is meant to be called by the db service, as this should only be done after related data
     /// is removed from the database, and checkpoints are updated.
     ///
