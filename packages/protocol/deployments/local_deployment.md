@@ -31,7 +31,7 @@ participants:
 kurtosis run github.com/ethpandaops/ethereum-package --args-file YOUR_NETWORK_FILE/network_params.json
 ```
 
-It will show you a lot og information in the terminal - along with the genesis info, network id, addresses with pre-funded ETH, etc.
+It will show you a lot of information in the terminal - along with the genesis info, network id, addresses with pre-funded ETH, etc.
 
 ### 3. Set .env vars and run deployment script
 Paste one PK and ADDR pair from anvil output to .env file and set the correct corresponding (PRIVATE_KEY and MAINNET_CONTRACT_OWNER) variables.
