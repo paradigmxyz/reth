@@ -1,5 +1,5 @@
 use reth_db_api::database::Database;
-use reth_provider::{DatabaseProviderRW, PruneCheckpointReader};
+use reth_provider::DatabaseProviderRW;
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
@@ -47,18 +47,11 @@ impl<DB: Database> Stage<DB> for PruneStage {
             .build();
 
         let result = pruner.run(provider, input.target())?;
-        let lowest_pruned_block = provider
-            .get_prune_checkpoints()?
-            .into_iter()
-            .map(|(_, checkpoint)| checkpoint.block_number)
-            .min()
-            .flatten()
-            .unwrap_or_else(|| input.target());
-
-        Ok(ExecOutput {
-            checkpoint: StageCheckpoint::new(lowest_pruned_block),
-            done: result.is_finished(),
-        })
+        if result.is_finished() {
+            Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
+        } else {
+            Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
+        }
     }
 
     fn unwind(
