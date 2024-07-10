@@ -6,18 +6,24 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-exclude.workspace = true
+
+[lints]
+workspace = true
 
 [dependencies]
+# reth
 reth-fs-util.workspace = true
-reth-network.workspace = true
-reth-primitives.workspace = true
-secp256k1.workspace = true
+
+# eth
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+
+secp256k1 = { workspace = true, features = ["rand"] }
+rand.workspace = true
+
+# misc
 thiserror.workspace = true
 eyre.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
-
-[lints]
-workspace = true
