@@ -6,6 +6,7 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
 use reth_network_api::{NetworkInfo, PeerKind, Peers};
 use reth_network_peers::{id2pk, AnyNode, NodeRecord};
+use reth_primitives::EthereumHardfork;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::admin::{
@@ -105,7 +106,7 @@ where
     async fn node_info(&self) -> RpcResult<NodeInfo> {
         let enode = self.network.local_node_record();
         let status = self.network.network_status().await.to_rpc_result()?;
-        let config = ChainConfig {
+        let mut config = ChainConfig {
             chain_id: self.chain_spec.chain.id(),
             terminal_total_difficulty_passed: self
                 .chain_spec
@@ -113,6 +114,44 @@ where
                 .is_some(),
             ..self.chain_spec.genesis().config.clone()
         };
+
+        config.homestead_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Homestead);
+        config.dao_fork_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Dao);
+        config.eip150_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Tangerine);
+        config.eip155_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::SpuriousDragon);
+        config.eip158_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::SpuriousDragon);
+        config.byzantium_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Byzantium);
+        config.constantinople_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Constantinople);
+        config.petersburg_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Petersburg);
+        config.istanbul_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Istanbul);
+        config.muir_glacier_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::MuirGlacier);
+        config.berlin_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Berlin);
+        config.london_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::London);
+        config.arrow_glacier_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::ArrowGlacier);
+        config.gray_glacier_block =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::GrayGlacier);
+
+        config.shanghai_time =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Shanghai);
+        config.cancun_time =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Cancun);
+        config.prague_time =
+            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Prague);
+        config.terminal_total_difficulty =
+            self.chain_spec.hardforks.fork(EthereumHardfork::Paris).ttd();
 
         if let Ok(pk) = id2pk(enode.id) {
             Ok(NodeInfo {
