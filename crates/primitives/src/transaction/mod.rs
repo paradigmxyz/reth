@@ -1,6 +1,6 @@
 //! Transaction types.
 
-#[cfg(any(feature = "arbitrary", feature = "zstd-codec"))]
+#[cfg(any(feature = "arbitrary", not(feature = "no-zstd")))]
 use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
 use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind, B256, U256};
 
@@ -907,7 +907,7 @@ impl TransactionSignedNoHash {
     }
 }
 
-#[cfg(feature = "zstd-codec")]
+#[cfg(not(feature = "no-zstd"))]
 impl Compact for TransactionSignedNoHash {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
@@ -971,7 +971,7 @@ impl Compact for TransactionSignedNoHash {
     }
 }
 
-#[cfg(not(feature = "zstd-codec"))]
+#[cfg(feature = "no-zstd")]
 impl Compact for TransactionSignedNoHash {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
@@ -1019,7 +1019,7 @@ fn from_compact_zstd_unaware(mut buf: &[u8], _len: usize) -> (TransactionSignedN
     let zstd_bit = bitflags >> 3;
     assert_eq!(
         zstd_bit, 0,
-        "zstd-codec feature is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag"
+        "no-zstd feature is enabled, cannot decode `TransactionSignedNoHash` with zstd flag"
     );
 
     let transaction_type = bitflags >> 1;
@@ -2105,7 +2105,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "zstd-codec feature is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag"
+        expected = "no-zstd feature is enabled, cannot decode `TransactionSignedNoHash` with zstd flag"
     )]
     fn transaction_signed_zstd_encoded_no_zstd_decode() {
         let signature = Signature {
