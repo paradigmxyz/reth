@@ -63,7 +63,9 @@ reth-tracing = { workspace = true, optional = true }
 [dev-dependencies]
 # reth
 reth-db = { workspace = true, features = ["test-utils"] }
+reth-exex-types.workspace = true
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
+reth-prune.workspace = true
 reth-prune-types.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
