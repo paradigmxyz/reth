@@ -1,0 +1,30 @@
+[package]
+name = "gpu-art"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+metal = "0.29.0"
+objc = "0.2.7"
+reth.workspace = true
+reth-exex.workspace = true
+reth-node-api.workspace = true
+reth-node-ethereum.workspace = true
+reth-primitives.workspace = true
+reth-tracing.workspace = true
+eyre.workspace = true
+reth-execution-types.workspace = true
+image = "0.25.1"
+
+[dev-dependencies]
+reth-exex-test-utils.workspace = true
+tokio.workspace = true
+
+
+[lints]
+workspace = true
