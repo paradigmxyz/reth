@@ -3,11 +3,9 @@
 use std::io;
 
 use jsonrpsee::server::RpcServiceBuilder;
-use reth_rpc_builder::metrics::RpcRequestMetrics;
-use tower::layer::util::Identity;
-
 use reth_rpc_builder::{
     error::{RpcError, ServerKind, WsHttpSamePortError},
+    metrics::RpcRequestMetrics,
     EthApiBuild, RpcServerConfig, TransportRpcModuleConfig,
 };
 use reth_rpc_server_types::RethRpcModule;
@@ -34,7 +32,7 @@ async fn test_http_addr_in_use() {
         .build(TransportRpcModuleConfig::set_http(vec![RethRpcModule::Admin]), EthApiBuild::build);
     let rpc_middleware = RpcServiceBuilder::new()
         .layer(server.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default());
-    let result = RpcServerConfig::<Identity>::http(Default::default())
+    let result = RpcServerConfig::http(Default::default())
         .with_http_address(addr)
         .set_rpc_middleware(rpc_middleware)
         .start(&server)
@@ -50,10 +48,7 @@ async fn test_ws_addr_in_use() {
     let builder = test_rpc_builder();
     let server = builder
         .build(TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Admin]), EthApiBuild::build);
-    let result = RpcServerConfig::<Identity>::ws(Default::default())
-        .with_ws_address(addr)
-        .start(&server)
-        .await;
+    let result = RpcServerConfig::ws(Default::default()).with_ws_address(addr).start(&server).await;
     let err = result.unwrap_err();
     assert!(is_addr_in_use_kind(&err, ServerKind::WS(addr)), "{err}");
 }
@@ -75,7 +70,6 @@ async fn test_launch_same_port_different_modules() {
         EthApiBuild::build,
     );
     let addr = test_address();
-    //let res = RpcServerConfig::<Identity>::ws(Default::default())
     let res = RpcServerConfig::ws(Default::default())
         .with_ws_address(addr)
         .with_http(Default::default())
@@ -98,7 +92,6 @@ async fn test_launch_same_port_same_cors() {
         EthApiBuild::build,
     );
     let addr = test_address();
-    //let res = RpcServerConfig::<Identity>::ws(Default::default())
     let res = RpcServerConfig::ws(Default::default())
         .with_ws_address(addr)
         .with_http(Default::default())
@@ -119,7 +112,6 @@ async fn test_launch_same_port_different_cors() {
         EthApiBuild::build,
     );
     let addr = test_address();
-    //let res = RpcServerConfig::<Identity>::ws(Default::default())
     let res = RpcServerConfig::ws(Default::default())
         .with_ws_address(addr)
         .with_http(Default::default())

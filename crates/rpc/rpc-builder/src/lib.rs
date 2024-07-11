@@ -143,7 +143,10 @@ use error::{ConflictingModules, RpcError, ServerKind};
 use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
-    server::{AlreadyStoppedError, IdProvider, RpcServiceBuilder, ServerHandle},
+    server::{
+        middleware::rpc::{RpcService, RpcServiceT},
+        AlreadyStoppedError, IdProvider, RpcServiceBuilder, ServerHandle,
+    },
     Methods, RpcModule,
 };
 use reth_engine_primitives::EngineTypes;
@@ -169,6 +172,7 @@ use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
+use tower::Layer;
 use tower_http::cors::CorsLayer;
 
 use crate::{
@@ -204,7 +208,6 @@ pub use eth::{
 };
 
 // Rpc server metrics
-//mod metrics;
 #[allow(missing_docs)]
 pub mod metrics;
 
@@ -1165,8 +1168,17 @@ impl Default for RpcServerConfig<Identity> {
 impl RpcServerConfig<Identity> {
     /// Creates a new config with only http set
     pub fn http(config: ServerBuilder<Identity, Identity>) -> Self {
-        //RpcServerConfig::<Identity>::default().with_http(config)
         Self::default().with_http(config)
+    }
+
+    /// Creates a new config with only ws set
+    pub fn ws(config: ServerBuilder<Identity, Identity>) -> Self {
+        Self::default().with_ws(config)
+    }
+
+    /// Creates a new config with only ipc set
+    pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> Self {
+        Self::default().with_ipc(config)
     }
 
     /// Configures the http server
@@ -1179,11 +1191,6 @@ impl RpcServerConfig<Identity> {
         self
     }
 
-    /// Creates a new config with only ws set
-    pub fn ws(config: ServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_ws(config)
-    }
-
     /// Configures the ws server
     ///
     /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
@@ -1191,11 +1198,6 @@ impl RpcServerConfig<Identity> {
     pub fn with_ws(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
         self.ws_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
-    }
-
-    /// Creates a new config with only ipc set
-    pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> Self {
-        Self::default().with_ipc(config)
     }
 
     /// Configures the ipc server
@@ -1207,9 +1209,6 @@ impl RpcServerConfig<Identity> {
         self
     }
 }
-
-use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceT};
-use tower::Layer;
 
 impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Configure rpc middleware
