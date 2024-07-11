@@ -148,7 +148,7 @@ impl TreeState {
 pub struct EngineApiTreeState {
     /// Tracks the state of the blockchain tree.
     tree_state: TreeState,
-    /// Tracks the received forkchoice state updates received by the CL.
+    /// Tracks the forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// Buffer of detached blocks.
     buffer: BlockBuffer,
@@ -387,7 +387,10 @@ where
 
         let last_persisted_hash = self.persistence.save_blocks(blocks_to_persist).await;
         if let Some(block) = self.state.tree_state.block_by_hash(last_persisted_hash) {
-            self.last_persisted_block_number = block.number;
+            let last_persisted_block_number = block.number;
+            self.last_persisted_block_number = last_persisted_block_number;
+
+            self.remove_persisted_blocks_from_memory(last_persisted_block_number);
         } else {
             error!("could not find persisted block with hash {last_persisted_hash} in memory");
         }
@@ -403,6 +406,25 @@ where
             .range(start..end)
             .flat_map(|(_, blocks)| blocks.iter().cloned())
             .collect()
+    }
+
+    fn remove_persisted_blocks_from_memory(&mut self, last_persisted_block_number: BlockNumber) {
+        let keys_to_remove: Vec<BlockNumber> = self
+            .state
+            .tree_state
+            .blocks_by_number
+            .range(..=last_persisted_block_number)
+            .map(|(&k, _)| k)
+            .collect();
+
+        for key in keys_to_remove {
+            if let Some(blocks) = self.state.tree_state.blocks_by_number.remove(&key) {
+                // Remove corresponding blocks from blocks_by_hash
+                for block in blocks {
+                    self.state.tree_state.blocks_by_hash.remove(&block.block().hash());
+                }
+            }
+        }
     }
 
     /// Return block from database or in-memory state by hash.
