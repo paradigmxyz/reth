@@ -33,12 +33,12 @@ pub struct RethRpcServerHandles {
 }
 
 /// Contains hooks that are called during the rpc setup.
-pub(crate) struct RpcHooks<Node: FullNodeComponents> {
-    pub(crate) on_rpc_started: Box<dyn OnRpcStarted<Node>>,
+pub(crate) struct RpcHooks<Node: FullNodeComponents, EthApi> {
+    pub(crate) on_rpc_started: Box<dyn OnRpcStarted<Node, EthApi>>,
     pub(crate) extend_rpc_modules: Box<dyn ExtendRpcModules<Node>>,
 }
 
-impl<Node: FullNodeComponents> RpcHooks<Node> {
+impl<Node: FullNodeComponents> RpcHooks<Node, EthApi> {
     /// Creates a new, empty [`RpcHooks`] instance for the given node type.
     pub(crate) fn new() -> Self {
         Self { on_rpc_started: Box::<()>::default(), extend_rpc_modules: Box::<()>::default() }
@@ -47,7 +47,7 @@ impl<Node: FullNodeComponents> RpcHooks<Node> {
     /// Sets the hook that is run once the rpc server is started.
     pub(crate) fn set_on_rpc_started<F>(&mut self, hook: F) -> &mut Self
     where
-        F: OnRpcStarted<Node> + 'static,
+        F: OnRpcStarted<Node, EthApi> + 'static,
     {
         self.on_rpc_started = Box::new(hook);
         self
@@ -57,7 +57,7 @@ impl<Node: FullNodeComponents> RpcHooks<Node> {
     #[allow(unused)]
     pub(crate) fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
-        F: OnRpcStarted<Node> + 'static,
+        F: OnRpcStarted<Node, EthApi> + 'static,
     {
         self.set_on_rpc_started(hook);
         self
@@ -83,7 +83,7 @@ impl<Node: FullNodeComponents> RpcHooks<Node> {
     }
 }
 
-impl<Node: FullNodeComponents> fmt::Debug for RpcHooks<Node> {
+impl<Node: FullNodeComponents> fmt::Debug for RpcHooks<Node, EthApi> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RpcHooks")
             .field("on_rpc_started", &"...")
@@ -93,33 +93,33 @@ impl<Node: FullNodeComponents> fmt::Debug for RpcHooks<Node> {
 }
 
 /// Event hook that is called once the rpc server is started.
-pub trait OnRpcStarted<Node: FullNodeComponents>: Send {
+pub trait OnRpcStarted<Node: FullNodeComponents, EthApi>: Send {
     /// The hook that is called once the rpc server is started.
     fn on_rpc_started(
         self: Box<Self>,
-        ctx: RpcContext<'_, Node>,
+        ctx: RpcContext<'_, Node, EthApi>,
         handles: RethRpcServerHandles,
     ) -> eyre::Result<()>;
 }
 
-impl<Node, F> OnRpcStarted<Node> for F
+impl<Node, EthApi, F> OnRpcStarted<Node, EthApi> for F
 where
-    F: FnOnce(RpcContext<'_, Node>, RethRpcServerHandles) -> eyre::Result<()> + Send,
+    F: FnOnce(RpcContext<'_, Node, EthApi>, RethRpcServerHandles) -> eyre::Result<()> + Send,
     Node: FullNodeComponents,
 {
     fn on_rpc_started(
         self: Box<Self>,
-        ctx: RpcContext<'_, Node>,
+        ctx: RpcContext<'_, Node, EthApi>,
         handles: RethRpcServerHandles,
     ) -> eyre::Result<()> {
         (*self)(ctx, handles)
     }
 }
 
-impl<Node: FullNodeComponents> OnRpcStarted<Node> for () {
+impl<Node: FullNodeComponents, EthApi> OnRpcStarted<Node, EthApi> for () {
     fn on_rpc_started(
         self: Box<Self>,
-        _: RpcContext<'_, Node>,
+        _: RpcContext<'_, Node, EthApi>,
         _: RethRpcServerHandles,
     ) -> eyre::Result<()> {
         Ok(())
@@ -127,49 +127,49 @@ impl<Node: FullNodeComponents> OnRpcStarted<Node> for () {
 }
 
 /// Event hook that is called when the rpc server is started.
-pub trait ExtendRpcModules<Node: FullNodeComponents>: Send {
+pub trait ExtendRpcModules<Node: FullNodeComponents, EthApi>: Send {
     /// The hook that is called once the rpc server is started.
-    fn extend_rpc_modules(self: Box<Self>, ctx: RpcContext<'_, Node>) -> eyre::Result<()>;
+    fn extend_rpc_modules(self: Box<Self>, ctx: RpcContext<'_, Node, EthApi>) -> eyre::Result<()>;
 }
 
-impl<Node, F> ExtendRpcModules<Node> for F
+impl<Node, EthApi, F> ExtendRpcModules<Node, EthApi> for F
 where
-    F: FnOnce(RpcContext<'_, Node>) -> eyre::Result<()> + Send,
+    F: FnOnce(RpcContext<'_, Node, EthApi>) -> eyre::Result<()> + Send,
     Node: FullNodeComponents,
 {
-    fn extend_rpc_modules(self: Box<Self>, ctx: RpcContext<'_, Node>) -> eyre::Result<()> {
+    fn extend_rpc_modules(self: Box<Self>, ctx: RpcContext<'_, Node, EthApi>) -> eyre::Result<()> {
         (*self)(ctx)
     }
 }
 
-impl<Node: FullNodeComponents> ExtendRpcModules<Node> for () {
-    fn extend_rpc_modules(self: Box<Self>, _: RpcContext<'_, Node>) -> eyre::Result<()> {
+impl<Node: FullNodeComponents, EthApi> ExtendRpcModules<Node> for () {
+    fn extend_rpc_modules(self: Box<Self>, _: RpcContext<'_, Node, EthApi>) -> eyre::Result<()> {
         Ok(())
     }
 }
 
 /// Helper wrapper type to encapsulate the [`RpcRegistryInner`] over components trait.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(clippy::type_complexity)]
-pub struct RpcRegistry<Node: FullNodeComponents> {
+pub struct RpcRegistry<Node: FullNodeComponents, EthApi> {
     pub(crate) registry: RpcRegistryInner<
         Node::Provider,
         Node::Pool,
         NetworkHandle,
         TaskExecutor,
         Node::Provider,
-        EthApi<Node::Provider, Node::Pool, NetworkHandle, Node::Evm>,
+        EthApi,
     >,
 }
 
-impl<Node: FullNodeComponents> Deref for RpcRegistry<Node> {
+impl<Node: FullNodeComponents, EthApi> Deref for RpcRegistry<Node, EthApi> {
     type Target = RpcRegistryInner<
         Node::Provider,
         Node::Pool,
         NetworkHandle,
         TaskExecutor,
         Node::Provider,
-        EthApi<Node::Provider, Node::Pool, NetworkHandle, Node::Evm>,
+        EthApi,
     >;
 
     fn deref(&self) -> &Self::Target {
@@ -177,15 +177,9 @@ impl<Node: FullNodeComponents> Deref for RpcRegistry<Node> {
     }
 }
 
-impl<Node: FullNodeComponents> DerefMut for RpcRegistry<Node> {
+impl<Node: FullNodeComponents, EthApi> DerefMut for RpcRegistry<Node, EthApi> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.registry
-    }
-}
-
-impl<Node: FullNodeComponents> Clone for RpcRegistry<Node> {
-    fn clone(&self) -> Self {
-        Self { registry: self.registry.clone() }
     }
 }
 
@@ -197,7 +191,7 @@ impl<Node: FullNodeComponents> Clone for RpcRegistry<Node> {
 /// transport modules [`TransportRpcModules`] as well as configured authenticated methods
 /// [`AuthRpcModule`].
 #[allow(missing_debug_implementations)]
-pub struct RpcContext<'a, Node: FullNodeComponents> {
+pub struct RpcContext<'a, Node: FullNodeComponents, EthApi> {
     /// The node components.
     pub(crate) node: Node,
 
@@ -207,7 +201,7 @@ pub struct RpcContext<'a, Node: FullNodeComponents> {
     /// A Helper type the holds instances of the configured modules.
     ///
     /// This provides easy access to rpc handlers, such as [`RpcRegistryInner::eth_api`].
-    pub registry: &'a mut RpcRegistry<Node>,
+    pub registry: &'a mut RpcRegistry<Node, EthApi>,
     /// Holds installed modules per transport type.
     ///
     /// This can be used to merge additional modules into the configured transports (http, ipc,
@@ -219,7 +213,7 @@ pub struct RpcContext<'a, Node: FullNodeComponents> {
     pub auth_module: &'a mut AuthRpcModule,
 }
 
-impl<'a, Node: FullNodeComponents> RpcContext<'a, Node> {
+impl<'a, Node: FullNodeComponents, EthApi> RpcContext<'a, Node, EthApi> {
     /// Returns the config of the node.
     pub const fn config(&self) -> &NodeConfig {
         self.config
@@ -252,13 +246,13 @@ impl<'a, Node: FullNodeComponents> RpcContext<'a, Node> {
 }
 
 /// Launch the rpc servers.
-pub(crate) async fn launch_rpc_servers<Node, Engine>(
+pub(crate) async fn launch_rpc_servers<Node, Engine, EthApi>(
     node: Node,
     engine_api: Engine,
     config: &NodeConfig,
     jwt_secret: JwtSecret,
-    hooks: RpcHooks<Node>,
-) -> eyre::Result<(RethRpcServerHandles, RpcRegistry<Node>)>
+    hooks: RpcHooks<Node, EthApi>,
+) -> eyre::Result<(RethRpcServerHandles, RpcRegistry<Node, EthApi>)>
 where
     Node: FullNodeComponents + Clone,
     Engine: EngineApiServer<Node::Engine>,

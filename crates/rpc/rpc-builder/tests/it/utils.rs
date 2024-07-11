@@ -9,7 +9,7 @@ use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
-    EthApiBuild, RpcModuleBuilder, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
+    RpcModuleBuilder, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_layer::JwtSecret;

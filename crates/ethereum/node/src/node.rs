@@ -298,37 +298,3 @@ where
         }
     }
 }
-
-/// Ethereum layer one `eth` RPC server builder.
-#[derive(Default, Debug, Clone, Copy)]
-pub struct EthereumApiBuilder;
-
-impl<Node> EthApiBuilder<Node> for EthereumApiBuilder {
-    /// Builds the [`EthApiServer`](reth_rpc_eth_api::EthApiServer), for given context.
-    fn build_eth_api(
-        ctx: &EthApiBuilderCtx<
-            Node::Provider,
-            Node::Pool,
-            Node::Evm,
-            NetworkHandle,
-            TaskExecutor,
-            Node::Provider,
-        >,
-    ) -> EthApi<Node::Provider, Node::Pool, NetworkHandle, Node::Evm> {
-        EthApi::with_spawner(
-            ctx.provider.clone(),
-            ctx.pool.clone(),
-            ctx.network.clone(),
-            ctx.cache.clone(),
-            ctx.new_gas_price_oracle(),
-            ctx.config.rpc_gas_cap,
-            ctx.config.eth_proof_window,
-            Box::new(ctx.executor.clone()),
-            BlockingTaskPool::build().expect("failed to build blocking task pool"),
-            ctx.new_fee_history_cache(),
-            ctx.evm_config.clone(),
-            None,
-            ctx.config.proof_permits,
-        )
-    }
-}

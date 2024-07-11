@@ -1,6 +1,7 @@
 //! Traits for configuring a node.
 
-use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
+use std::marker::PhantomData;
+
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -11,7 +12,8 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
-use std::marker::PhantomData;
+
+use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
 
 /// The type that configures the essential types of an ethereum like node.
 ///
@@ -149,9 +151,26 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 /// Customizable node add-on types.
 pub trait NodeAddOns<N: FullNodeComponents>: Send + Sync + Unpin + Clone + 'static {
     /// The `reth_rpc_eth_api::EthApiServer` type to use.
-    type EthApi: Send;
+    type EthApi: BuilderProvider<N> + Send;
 }
 
 impl<N: FullNodeComponents> NodeAddOns<N> for () {
     type EthApi = ();
+}
+
+/// Returns the [`EthApiServer`](reth_rpc::eth::EthApiServer) builder.
+pub trait BuilderProvider<N: FullNodeComponents>: Send {
+    /// Context required to build type.
+    type Ctx<'a>;
+
+    /// Returns builder for type.
+    fn builder<'a>() -> Box<dyn FnOnce(Self::Ctx<'a>) -> Self>;
+}
+
+impl<N: FullNodeComponents> BuilderProvider<N> for () {
+    type Ctx<'a> = ();
+
+    fn builder<'a>() -> Box<dyn FnOnce(Self::Ctx<'a>) -> Self> {
+        Box::new(|_| ())
+    }
 }

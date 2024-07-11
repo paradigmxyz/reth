@@ -24,7 +24,7 @@ pub struct NodeTestContext<Node>
 where
     Node: FullNodeComponents,
 {
-    pub inner: FullNode<Node>,
+    pub inner: FullNode<Node, AddOns>,
     pub payload: PayloadTestContext<Node::Engine>,
     pub network: NetworkTestContext,
     pub engine_api: EngineApiTestContext<Node::Engine>,
@@ -36,7 +36,7 @@ where
     Node: FullNodeComponents,
 {
     /// Creates a new test node
-    pub async fn new(node: FullNode<Node>) -> eyre::Result<Self> {
+    pub async fn new(node: FullNode<Node, AddOns>) -> eyre::Result<Self> {
         let builder = node.payload_builder.clone();
 
         Ok(Self {

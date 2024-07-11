@@ -10,7 +10,7 @@ use reth::{
 use reth_primitives::{Bytes, B256};
 
 pub struct RpcTestContext<Node: FullNodeComponents> {
-    pub inner: RpcRegistry<Node>,
+    pub inner: RpcRegistry<Node, EthApi>,
 }
 
 impl<Node: FullNodeComponents> RpcTestContext<Node> {

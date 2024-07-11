@@ -107,7 +107,7 @@ where
 ///
 /// This can be used to interact with the launched node.
 #[derive(Debug, Clone)]
-pub struct FullNode<Node: FullNodeComponents> {
+pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     /// The evm configuration.
     pub evm_config: Node::Evm,
     /// The executor of the node.
@@ -125,14 +125,18 @@ pub struct FullNode<Node: FullNodeComponents> {
     /// Handles to the node's rpc servers
     pub rpc_server_handles: RethRpcServerHandles,
     /// The configured rpc namespaces
-    pub rpc_registry: RpcRegistry<Node>,
+    pub rpc_registry: RpcRegistry<Node, AddOns::EthApi>,
     /// The initial node config.
     pub config: NodeConfig,
     /// The data dir of the node.
     pub data_dir: ChainPath<DataDirPath>,
 }
 
-impl<Node: FullNodeComponents> FullNode<Node> {
+impl<Node, AddOns> FullNode<Node, AddOns>
+where
+    Node: FullNodeComponents,
+    AddOns: NodeAddOns<Node>,
+{
     /// Returns the [`ChainSpec`] of the node.
     pub fn chain_spec(&self) -> Arc<ChainSpec> {
         self.provider.chain_spec()

@@ -16,7 +16,7 @@ use crate::{
 /// At this point we consider all necessary components defined.
 pub struct AddOns<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     /// Additional `NodeHooks` that are called at specific points in the node's launch lifecycle.
-    pub hooks: NodeHooks<Node>,
+    pub hooks: NodeHooks<Node, AddOns>,
     /// The `ExExs` (execution extensions) of the node.
     pub exexs: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
     /// Additional RPC add ons.
@@ -37,7 +37,7 @@ pub struct RpcAddOns<Node: FullNodeComponents, EthApi: Send> {
     // TODO enforce the the ethAPI builder trait
     pub eth_api_builder: Arc<dyn EthApiBuilder<Node, Output = EthApi>>,
     /// Additional RPC hooks.
-    pub hooks: RpcHooks<Node>,
+    pub hooks: RpcHooks<Node, EthApi>,
 }
 
 /// Aggregates builders for the customizable node add-ons.
