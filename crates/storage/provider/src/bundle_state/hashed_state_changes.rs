@@ -1,8 +1,9 @@
+use crate::DatabaseProviderRW;
 use itertools::Itertools;
-use reth_db::tables;
+use reth_db::{tables, Database};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
     DatabaseError,
 };
 use reth_primitives::{StorageEntry, U256};
@@ -14,10 +15,14 @@ pub struct HashedStateChanges(pub HashedPostState);
 
 impl HashedStateChanges {
     /// Write the bundle state to the database.
-    pub fn write_to_db<TX: DbTxMut + DbTx>(self, tx: &TX) -> Result<(), DatabaseError> {
+    pub fn write_to_db<DB>(self, provider: &DatabaseProviderRW<DB>) -> Result<(), DatabaseError>
+    where
+        DB: Database,
+    {
         // Write hashed account updates.
         let sorted_accounts = self.0.accounts.into_iter().sorted_unstable_by_key(|(key, _)| *key);
-        let mut hashed_accounts_cursor = tx.cursor_write::<tables::HashedAccounts>()?;
+        let mut hashed_accounts_cursor =
+            provider.tx_ref().cursor_write::<tables::HashedAccounts>()?;
         for (hashed_address, account) in sorted_accounts {
             if let Some(account) = account {
                 hashed_accounts_cursor.upsert(hashed_address, account)?;
@@ -28,7 +33,8 @@ impl HashedStateChanges {
 
         // Write hashed storage changes.
         let sorted_storages = self.0.storages.into_iter().sorted_by_key(|(key, _)| *key);
-        let mut hashed_storage_cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
+        let mut hashed_storage_cursor =
+            provider.tx_ref().cursor_dup_write::<tables::HashedStorages>()?;
         for (hashed_address, storage) in sorted_storages {
             if storage.wiped && hashed_storage_cursor.seek_exact(hashed_address)?.is_some() {
                 hashed_storage_cursor.delete_current_duplicates()?;
@@ -59,6 +65,7 @@ impl HashedStateChanges {
 mod tests {
     use super::*;
     use crate::test_utils::create_test_provider_factory;
+    use reth_db_api::transaction::DbTx;
     use reth_primitives::{keccak256, Account, Address, B256};
     use reth_trie::HashedStorage;
 
@@ -95,7 +102,7 @@ mod tests {
         hashed_state.storages.insert(destroyed_address_hashed, HashedStorage::new(true));
 
         let provider_rw = provider_factory.provider_rw().unwrap();
-        assert_eq!(HashedStateChanges(hashed_state).write_to_db(provider_rw.tx_ref()), Ok(()));
+        assert_eq!(HashedStateChanges(hashed_state).write_to_db(&provider_rw), Ok(()));
         provider_rw.commit().unwrap();
 
         let provider = provider_factory.provider().unwrap();

@@ -3270,7 +3270,7 @@ impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
 
         // insert hashes and intermediate merkle nodes
         {
-            HashedStateChanges(hashed_state).write_to_db(&self.tx)?;
+            HashedStateChanges(hashed_state).write_to_db(self)?;
             trie_updates.write_to_database(&self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertHashes);
