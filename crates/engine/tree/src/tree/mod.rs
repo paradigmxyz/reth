@@ -373,22 +373,19 @@ where
                 let blocks_to_persist = self.get_blocks_to_persist();
                 let (tx, rx) = oneshot::channel();
                 self.persistence.save_blocks(blocks_to_persist, tx);
-                self.persistence_state.in_progress = true;
-                self.persistence_state.rx = Some(rx);
+                self.persistence_state.start(rx);
             }
 
-            // Check if persistence has completed
-            if let Some(rx) = self.persistence_state.rx.as_mut() {
-                if let Ok(last_persisted_hash) = rx.try_recv() {
-                    if let Some(block) = self.state.tree_state.block_by_hash(last_persisted_hash) {
-                        let last_persisted_block_number = block.number;
-                        self.persistence_state.last_persisted_hash = Some(last_persisted_hash);
-                        self.persistence_state.last_persisted_block_number = block.number;
-                        self.persistence_state.in_progress = false;
-                        self.persistence_state.rx = None;
+            if let Some(rx) = self.persistence_state.receiver() {
+                // Check if persistence has completed
+                if let Ok(last_persisted_block_hash) = rx.try_recv() {
+                    if let Some(block) =
+                        self.state.tree_state.block_by_hash(last_persisted_block_hash)
+                    {
+                        self.persistence_state.finish(last_persisted_block_hash, block.number);
                         self.remove_persisted_blocks_from_memory();
                     } else {
-                        error!("could not find persisted block with hash {last_persisted_hash} in memory");
+                        error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
                     }
                 }
             }
@@ -850,7 +847,7 @@ where
 struct PersistenceState {
     /// Hash of the last block persisted. A None value means no persistance task
     /// has run yet.
-    last_persisted_hash: Option<B256>,
+    last_persisted_block_hash: Option<B256>,
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistance task in progress.
     rx: Option<oneshot::Receiver<B256>>,
@@ -859,7 +856,26 @@ struct PersistenceState {
 }
 
 impl PersistenceState {
-    fn in_progress(&self) -> bool {
+    /// Determines if there is a persistance task in progress by checking if the
+    /// receiver is set.
+    const fn in_progress(&self) -> bool {
         self.rx.is_some()
+    }
+
+    /// Sets state for a started persistance task.
+    fn start(&mut self, rx: oneshot::Receiver<B256>) {
+        self.rx = Some(rx);
+    }
+
+    /// Sets state for a finished persistance task.
+    fn finish(&mut self, last_persisted_block_hash: B256, last_persisted_block_number: u64) {
+        self.rx = None;
+        self.last_persisted_block_number = last_persisted_block_number;
+        self.last_persisted_block_hash = Some(last_persisted_block_hash);
+    }
+
+    /// Returns an usable receiver if a persistence task is in progress.
+    fn receiver(&mut self) -> Option<&mut oneshot::Receiver<B256>> {
+        self.rx.as_mut()
     }
 }
