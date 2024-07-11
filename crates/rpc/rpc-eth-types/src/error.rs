@@ -498,6 +498,7 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
             InvalidTransactionError::Eip2930Disabled |
             InvalidTransactionError::Eip1559Disabled |
             InvalidTransactionError::Eip4844Disabled |
+            InvalidTransactionError::Eip7702Disabled |
             InvalidTransactionError::TxTypeNotSupported => Self::TxTypeNotSupported,
             InvalidTransactionError::GasUintOverflow => Self::GasUintOverflow,
             InvalidTransactionError::GasTooLow => Self::GasTooLow,
