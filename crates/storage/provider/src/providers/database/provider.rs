@@ -618,70 +618,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         let mut senders =
             self.get::<tables::TransactionSenders>(first_transaction..=last_transaction)?;
 
-        // Recover senders manually if not found in db
-        // NOTE: Transactions are always guaranteed to be in the database whereas
-        // senders might be pruned.
-        if senders.len() != transactions.len() {
-            if senders.len() > transactions.len() {
-                error!(target: "providers::db", senders=%senders.len(), transactions=%transactions.len(),
-                    first_tx=%first_transaction, last_tx=%last_transaction,
-                    "unexpected senders and transactions mismatch");
-            }
-            let missing = transactions.len().saturating_sub(senders.len());
-            senders.reserve(missing);
-            // Find all missing senders, their corresponding tx numbers and indexes to the original
-            // `senders` vector at which the recovered senders will be inserted.
-            let mut missing_senders = Vec::with_capacity(missing);
-            {
-                let mut senders = senders.iter().peekable();
-
-                // `transactions` contain all entries. `senders` contain _some_ of the senders for
-                // these transactions. Both are sorted and indexed by `TxNumber`.
-                //
-                // The general idea is to iterate on both `transactions` and `senders`, and advance
-                // the `senders` iteration only if it matches the current `transactions` entry's
-                // `TxNumber`. Otherwise, add the transaction to the list of missing senders.
-                for (i, (tx_number, transaction)) in transactions.iter().enumerate() {
-                    if let Some((sender_tx_number, _)) = senders.peek() {
-                        if sender_tx_number == tx_number {
-                            // If current sender's `TxNumber` matches current transaction's
-                            // `TxNumber`, advance the senders iterator.
-                            senders.next();
-                        } else {
-                            // If current sender's `TxNumber` doesn't match current transaction's
-                            // `TxNumber`, add it to missing senders.
-                            missing_senders.push((i, tx_number, transaction));
-                        }
-                    } else {
-                        // If there's no more senders left, but we're still iterating over
-                        // transactions, add them to missing senders
-                        missing_senders.push((i, tx_number, transaction));
-                    }
-                }
-            }
-
-            // Recover senders
-            let recovered_senders = TransactionSigned::recover_signers(
-                missing_senders.iter().map(|(_, _, tx)| *tx).collect::<Vec<_>>(),
-                missing_senders.len(),
-            )
-            .ok_or(ProviderError::SenderRecoveryError)?;
-
-            // Insert recovered senders along with tx numbers at the corresponding indexes to the
-            // original `senders` vector
-            for ((i, tx_number, _), sender) in missing_senders.into_iter().zip(recovered_senders) {
-                // Insert will put recovered senders at necessary positions and shift the rest
-                senders.insert(i, (*tx_number, sender));
-            }
-
-            // Debug assertions which are triggered during the test to ensure that all senders are
-            // present and sorted
-            debug_assert_eq!(senders.len(), transactions.len(), "missing one or more senders");
-            debug_assert!(
-                senders.iter().tuple_windows().all(|(a, b)| a.0 < b.0),
-                "senders not sorted"
-            );
-        }
+        recover_block_senders(&mut senders, &transactions, first_transaction, last_transaction)?;
 
         // Merge transaction into blocks
         let mut block_tx = Vec::with_capacity(block_bodies.len());
@@ -1389,70 +1326,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut senders =
             self.take::<tables::TransactionSenders>(first_transaction..=last_transaction)?;
 
-        // Recover senders manually if not found in db
-        // NOTE: Transactions are always guaranteed to be in the database whereas
-        // senders might be pruned.
-        if senders.len() != transactions.len() {
-            if senders.len() > transactions.len() {
-                error!(target: "providers::db", senders=%senders.len(), transactions=%transactions.len(),
-                    first_tx=%first_transaction, last_tx=%last_transaction,
-                    "unexpected senders and transactions mismatch");
-            }
-            let missing = transactions.len().saturating_sub(senders.len());
-            senders.reserve(missing);
-            // Find all missing senders, their corresponding tx numbers and indexes to the original
-            // `senders` vector at which the recovered senders will be inserted.
-            let mut missing_senders = Vec::with_capacity(missing);
-            {
-                let mut senders = senders.iter().peekable();
-
-                // `transactions` contain all entries. `senders` contain _some_ of the senders for
-                // these transactions. Both are sorted and indexed by `TxNumber`.
-                //
-                // The general idea is to iterate on both `transactions` and `senders`, and advance
-                // the `senders` iteration only if it matches the current `transactions` entry's
-                // `TxNumber`. Otherwise, add the transaction to the list of missing senders.
-                for (i, (tx_number, transaction)) in transactions.iter().enumerate() {
-                    if let Some((sender_tx_number, _)) = senders.peek() {
-                        if sender_tx_number == tx_number {
-                            // If current sender's `TxNumber` matches current transaction's
-                            // `TxNumber`, advance the senders iterator.
-                            senders.next();
-                        } else {
-                            // If current sender's `TxNumber` doesn't match current transaction's
-                            // `TxNumber`, add it to missing senders.
-                            missing_senders.push((i, tx_number, transaction));
-                        }
-                    } else {
-                        // If there's no more senders left, but we're still iterating over
-                        // transactions, add them to missing senders
-                        missing_senders.push((i, tx_number, transaction));
-                    }
-                }
-            }
-
-            // Recover senders
-            let recovered_senders = TransactionSigned::recover_signers(
-                missing_senders.iter().map(|(_, _, tx)| *tx).collect::<Vec<_>>(),
-                missing_senders.len(),
-            )
-            .ok_or(ProviderError::SenderRecoveryError)?;
-
-            // Insert recovered senders along with tx numbers at the corresponding indexes to the
-            // original `senders` vector
-            for ((i, tx_number, _), sender) in missing_senders.into_iter().zip(recovered_senders) {
-                // Insert will put recovered senders at necessary positions and shift the rest
-                senders.insert(i, (*tx_number, sender));
-            }
-
-            // Debug assertions which are triggered during the test to ensure that all senders are
-            // present and sorted
-            debug_assert_eq!(senders.len(), transactions.len(), "missing one or more senders");
-            debug_assert!(
-                senders.iter().tuple_windows().all(|(a, b)| a.0 < b.0),
-                "senders not sorted"
-            );
-        }
+        recover_block_senders(&mut senders, &transactions, first_transaction, last_transaction)?;
 
         // Remove TransactionHashNumbers
         let mut tx_hash_cursor = self.tx.cursor_write::<tables::TransactionHashNumbers>()?;
@@ -3576,6 +3450,82 @@ impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, block_number)?)
     }
+}
+
+/// Helper method to recover senders for any blocks in the db which do not have senders. This
+/// compares the length of the input senders [`Vec`], with the length of given transactions [`Vec`],
+/// and will add to the input senders vec if there are more transactions.
+///
+/// NOTE: This will modify the input senders list, which is why a mutable reference is required.
+fn recover_block_senders(
+    senders: &mut Vec<(u64, Address)>,
+    transactions: &[(u64, TransactionSigned)],
+    first_transaction: u64,
+    last_transaction: u64,
+) -> ProviderResult<()> {
+    // Recover senders manually if not found in db
+    // NOTE: Transactions are always guaranteed to be in the database whereas
+    // senders might be pruned.
+    if senders.len() != transactions.len() {
+        if senders.len() > transactions.len() {
+            error!(target: "providers::db", senders=%senders.len(), transactions=%transactions.len(),
+                first_tx=%first_transaction, last_tx=%last_transaction,
+                "unexpected senders and transactions mismatch");
+        }
+        let missing = transactions.len().saturating_sub(senders.len());
+        senders.reserve(missing);
+        // Find all missing senders, their corresponding tx numbers and indexes to the original
+        // `senders` vector at which the recovered senders will be inserted.
+        let mut missing_senders = Vec::with_capacity(missing);
+        {
+            let mut senders = senders.iter().peekable();
+
+            // `transactions` contain all entries. `senders` contain _some_ of the senders for
+            // these transactions. Both are sorted and indexed by `TxNumber`.
+            //
+            // The general idea is to iterate on both `transactions` and `senders`, and advance
+            // the `senders` iteration only if it matches the current `transactions` entry's
+            // `TxNumber`. Otherwise, add the transaction to the list of missing senders.
+            for (i, (tx_number, transaction)) in transactions.iter().enumerate() {
+                if let Some((sender_tx_number, _)) = senders.peek() {
+                    if sender_tx_number == tx_number {
+                        // If current sender's `TxNumber` matches current transaction's
+                        // `TxNumber`, advance the senders iterator.
+                        senders.next();
+                    } else {
+                        // If current sender's `TxNumber` doesn't match current transaction's
+                        // `TxNumber`, add it to missing senders.
+                        missing_senders.push((i, tx_number, transaction));
+                    }
+                } else {
+                    // If there's no more senders left, but we're still iterating over
+                    // transactions, add them to missing senders
+                    missing_senders.push((i, tx_number, transaction));
+                }
+            }
+        }
+
+        // Recover senders
+        let recovered_senders = TransactionSigned::recover_signers(
+            missing_senders.iter().map(|(_, _, tx)| *tx).collect::<Vec<_>>(),
+            missing_senders.len(),
+        )
+        .ok_or(ProviderError::SenderRecoveryError)?;
+
+        // Insert recovered senders along with tx numbers at the corresponding indexes to the
+        // original `senders` vector
+        for ((i, tx_number, _), sender) in missing_senders.into_iter().zip(recovered_senders) {
+            // Insert will put recovered senders at necessary positions and shift the rest
+            senders.insert(i, (*tx_number, sender));
+        }
+
+        // Debug assertions which are triggered during the test to ensure that all senders are
+        // present and sorted
+        debug_assert_eq!(senders.len(), transactions.len(), "missing one or more senders");
+        debug_assert!(senders.iter().tuple_windows().all(|(a, b)| a.0 < b.0), "senders not sorted");
+    }
+
+    Ok(())
 }
 
 fn range_size_hint(range: &impl RangeBounds<TxNumber>) -> Option<usize> {
