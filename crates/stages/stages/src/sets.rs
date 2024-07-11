@@ -65,7 +65,6 @@ use tokio::sync::watch;
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
 /// - [`ExecutionStage`]
-/// - [`PruneStage`] (execute)
 /// - [`MerkleStage`] (unwind)
 /// - [`AccountHashingStage`]
 /// - [`StorageHashingStage`]
@@ -73,6 +72,7 @@ use tokio::sync::watch;
 /// - [`TransactionLookupStage`]
 /// - [`IndexStorageHistoryStage`]
 /// - [`IndexAccountHistoryStage`]
+/// - [`PruneStage`] (execute)
 /// - [`FinishStage`]
 #[derive(Debug)]
 pub struct DefaultStages<Provider, H, B, EF> {
@@ -248,9 +248,9 @@ where
 /// A combination of (in order)
 ///
 /// - [`ExecutionStages`]
-/// - [`PruneStage`]
 /// - [`HashingStages`]
 /// - [`HistoryIndexingStages`]
+/// - [`PruneStage`]
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct OfflineStages<EF> {
@@ -284,22 +284,24 @@ where
             self.stages_config.clone(),
             self.prune_modes.clone(),
         )
-        .builder();
+        .builder()
+        .add_set(HashingStages { stages_config: self.stages_config.clone() })
+        .add_set(HistoryIndexingStages {
+            stages_config: self.stages_config.clone(),
+            prune_modes: self.prune_modes.clone(),
+        });
 
         // If any prune modes are set, add the prune stage.
         if !self.prune_modes.is_empty() {
+            // Prune stage should be added after all hashing stages, because otherwise it will
+            // delete
             builder = builder.add_stage(PruneStage::new(
                 self.prune_modes.clone(),
                 self.stages_config.prune.commit_threshold,
             ));
         }
 
-        builder.add_set(HashingStages { stages_config: self.stages_config.clone() }).add_set(
-            HistoryIndexingStages {
-                stages_config: self.stages_config.clone(),
-                prune_modes: self.prune_modes,
-            },
-        )
+        builder
     }
 }
 
