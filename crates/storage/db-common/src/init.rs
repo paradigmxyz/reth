@@ -24,7 +24,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
     io::BufRead,
-    ops::DerefMut,
     sync::Arc,
 };
 use tracing::{debug, error, info, trace};
@@ -117,7 +116,7 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
     let static_file_provider = factory.static_file_provider();
     insert_genesis_header::<DB>(tx, &static_file_provider, chain.clone())?;
 
-    insert_genesis_state::<DB>(tx, alloc.len(), alloc.iter())?;
+    insert_genesis_state::<DB>(&provider_rw, alloc.len(), alloc.iter())?;
 
     // insert sync stage
     for stage in StageId::ALL {
@@ -132,16 +131,16 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
 
 /// Inserts the genesis state into the database.
 pub fn insert_genesis_state<'a, 'b, DB: Database>(
-    tx: &<DB as Database>::TXMut,
+    provider: &DatabaseProviderRW<DB>,
     capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
 ) -> ProviderResult<()> {
-    insert_state::<DB>(tx, capacity, alloc, 0)
+    insert_state::<DB>(provider, capacity, alloc, 0)
 }
 
 /// Inserts state at given block into database.
 pub fn insert_state<'a, 'b, DB: Database>(
-    tx: &<DB as Database>::TXMut,
+    provider: &DatabaseProviderRW<DB>,
     capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
     block: u64,
@@ -203,7 +202,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
         Vec::new(),
     );
 
-    execution_outcome.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;
+    execution_outcome.write_to_storage(provider, None, OriginalValuesKnown::Yes)?;
 
     trace!(target: "reth::cli", "Inserted state");
 
@@ -435,9 +434,8 @@ fn dump_state<DB: Database>(
             )?;
 
             // block is already written to static files
-            let tx = provider_rw.deref_mut().tx_mut();
             insert_state::<DB>(
-                tx,
+                provider_rw,
                 accounts.len(),
                 accounts.iter().map(|(address, account)| (address, account)),
                 block,

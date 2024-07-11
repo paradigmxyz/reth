@@ -102,7 +102,7 @@ impl Command {
                     Default::default(),
                 )?;
                 let alloc = &self.env.chain.genesis().alloc;
-                insert_genesis_state::<DatabaseEnv>(tx, alloc.len(), alloc.iter())?;
+                insert_genesis_state(&provider_rw, alloc.len(), alloc.iter())?;
             }
             StageEnum::AccountHashing => {
                 tx.clear::<tables::HashedAccounts>()?;

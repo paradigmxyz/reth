@@ -358,11 +358,7 @@ where
 
         let time = Instant::now();
         // write output
-        state.write_to_storage(
-            provider.tx_ref(),
-            static_file_producer,
-            OriginalValuesKnown::Yes,
-        )?;
+        state.write_to_storage(&provider, static_file_producer, OriginalValuesKnown::Yes)?;
         let db_write_duration = time.elapsed();
         debug!(
             target: "sync::stages::execution",
