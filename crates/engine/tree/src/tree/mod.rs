@@ -4,7 +4,6 @@ use crate::{
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
     persistence::PersistenceHandle,
 };
-use parking_lot::Mutex;
 use reth_beacon_consensus::{
     BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated,
 };
@@ -253,17 +252,6 @@ pub enum TreeAction {
     MakeCanonical(B256),
 }
 
-/// The state of the persistence task.
-struct PersistenceState {
-    /// True if there is a persistence operation in progress.
-    in_progress: bool,
-    /// Hash of the last block persisted.
-    last_persisted_hash: Option<B256>,
-    /// Receiver end of channel where the result of the persistence task will be
-    /// sent when done.
-    rx: Option<oneshot::Receiver<B256>>,
-}
-
 #[derive(Debug)]
 pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     provider: P,
@@ -274,10 +262,9 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
     outgoing: UnboundedSender<EngineApiEvent>,
     persistence: PersistenceHandle,
+    persistence_state: PersistenceState,
     /// (tmp) The flag indicating whether the pipeline is active.
     is_pipeline_active: bool,
-    /// The last persisted block number.
-    last_persisted_block_number: u64,
     _marker: PhantomData<T>,
 }
 
@@ -306,9 +293,9 @@ where
             incoming,
             outgoing,
             persistence,
+            persistence_state: PersistenceState::default(),
             is_pipeline_active: false,
             state,
-            last_persisted_block_number: 0,
             _marker: PhantomData,
         }
     }
@@ -339,12 +326,6 @@ where
     }
 
     fn run(mut self) {
-        let persistence_state = Arc::new(Mutex::new(PersistenceState {
-            in_progress: false,
-            last_persisted_hash: None,
-            rx: None,
-        }));
-
         loop {
             while let Ok(msg) = self.incoming.recv() {
                 match msg {
@@ -388,27 +369,29 @@ where
                 }
             }
 
-            if self.should_persist() {
-                let mut state = persistence_state.lock();
-                if !state.in_progress {
-                    let blocks_to_persist = self.get_blocks_to_persist();
-                    let (tx, rx) = oneshot::channel();
-                    self.persistence.save_blocks(blocks_to_persist, tx);
-                    state.in_progress = true;
-                    state.rx = Some(rx);
-                }
+            if self.should_persist(self.persistence_state.last_persisted_block_number) &&
+                !self.persistence_state.in_progress
+            {
+                let blocks_to_persist =
+                    self.get_blocks_to_persist(self.persistence_state.last_persisted_block_number);
+                let (tx, rx) = oneshot::channel();
+                self.persistence.save_blocks(blocks_to_persist, tx);
+                self.persistence_state.in_progress = true;
+                self.persistence_state.rx = Some(rx);
             }
 
             // Check if persistence has completed
-            let mut state = persistence_state.lock();
-            if let Some(rx) = state.rx.as_mut() {
+            if let Some(rx) = self.persistence_state.rx.as_mut() {
                 if let Ok(last_persisted_hash) = rx.try_recv() {
-                    state.last_persisted_hash = Some(last_persisted_hash);
-                    state.in_progress = false;
-                    state.rx = None;
-                    drop(state);
-
-                    self.handle_persistence_completion(last_persisted_hash);
+                    if let Some(block) = self.state.tree_state.block_by_hash(last_persisted_hash) {
+                        let last_persisted_block_number = block.number;
+                        self.persistence_state.last_persisted_hash = Some(last_persisted_hash);
+                        self.persistence_state.last_persisted_block_number = block.number;
+                        self.persistence_state.in_progress = false;
+                        self.persistence_state.rx = None;
+                    } else {
+                        error!("could not find persisted block with hash {last_persisted_hash} in memory");
+                    }
                 }
             }
         }
@@ -416,13 +399,16 @@ where
 
     /// Returns true if the canonical chain length minus the last persisted
     /// block is more than the persistence threshold.
-    fn should_persist(&self) -> bool {
-        self.state.tree_state.max_block_number() - self.last_persisted_block_number >
+    fn should_persist(&self, last_persisted_block_number: BlockNumber) -> bool {
+        self.state.tree_state.max_block_number() - last_persisted_block_number >
             PERSISTENCE_THRESHOLD
     }
 
-    fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
-        let start = self.last_persisted_block_number + 1;
+    fn get_blocks_to_persist(
+        &self,
+        last_persisted_block_number: BlockNumber,
+    ) -> Vec<ExecutedBlock> {
+        let start = last_persisted_block_number + 1;
         let end = start + PERSISTENCE_THRESHOLD;
 
         self.state
@@ -431,16 +417,6 @@ where
             .range(start..end)
             .flat_map(|(_, blocks)| blocks.iter().cloned())
             .collect()
-    }
-
-    fn handle_persistence_completion(&mut self, last_persisted_hash: B256) {
-        if let Some(block) = self.state.tree_state.block_by_hash(last_persisted_hash) {
-            let last_persisted_block_number = block.number;
-            self.last_persisted_block_number = last_persisted_block_number;
-            self.remove_persisted_blocks_from_memory(last_persisted_block_number);
-        } else {
-            error!("could not find persisted block with hash {last_persisted_hash} in memory");
-        }
     }
 
     fn remove_persisted_blocks_from_memory(&mut self, last_persisted_block_number: BlockNumber) {
@@ -871,4 +847,18 @@ where
 
         todo!()
     }
+}
+
+/// The state of the persistence task.
+#[derive(Default, Debug)]
+struct PersistenceState {
+    /// True if there is a persistence operation in progress.
+    in_progress: bool,
+    /// Hash of the last block persisted.
+    last_persisted_hash: Option<B256>,
+    /// Receiver end of channel where the result of the persistence task will be
+    /// sent when done.
+    rx: Option<oneshot::Receiver<B256>>,
+    /// The last persisted block number.
+    last_persisted_block_number: u64,
 }
