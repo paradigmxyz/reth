@@ -322,8 +322,8 @@ pub fn init_from_state_dump<DB: Database>(
     let collector = parse_accounts(&mut reader, etl_config)?;
 
     // write state to db
-    let mut provider_rw = factory.provider_rw()?;
-    dump_state(collector, &mut provider_rw, block)?;
+    let provider_rw = factory.provider_rw()?;
+    dump_state(collector, &provider_rw, block)?;
 
     // compute and compare state root. this advances the stage checkpoints.
     let computed_state_root = compute_state_root(&provider_rw)?;
@@ -397,7 +397,7 @@ fn parse_accounts(
 /// Takes a [`Collector`] and processes all accounts.
 fn dump_state<DB: Database>(
     mut collector: Collector<Address, GenesisAccount>,
-    provider_rw: &mut DatabaseProviderRW<DB>,
+    provider_rw: &DatabaseProviderRW<DB>,
     block: u64,
 ) -> Result<(), eyre::Error> {
     let accounts_len = collector.len();

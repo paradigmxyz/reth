@@ -3264,7 +3264,7 @@ impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        execution_outcome.write_to_storage(&self, None, OriginalValuesKnown::No)?;
+        execution_outcome.write_to_storage(self, None, OriginalValuesKnown::No)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
         // insert hashes and intermediate merkle nodes
