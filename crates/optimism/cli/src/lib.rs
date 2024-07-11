@@ -26,6 +26,10 @@ use std::{ffi::OsString, fmt, sync::Arc};
 pub mod chainspec;
 /// Optimism CLI commands.
 pub mod commands;
+/// Module with a codec for reading and encoding receipts in files.
+///
+/// Enables decoding and encoding `HackReceipt` type. See <https://github.com/testinprod-io/op-geth/pull/1>.
+pub mod file_codec_ovm_receipt;
 pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
 
 /// The main reth cli interface.

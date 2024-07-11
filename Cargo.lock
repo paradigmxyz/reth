@@ -7926,6 +7926,7 @@ version = "1.0.1"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
+ "alloy-rlp",
  "clap",
  "eyre",
  "futures-util",
@@ -7954,6 +7955,7 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 

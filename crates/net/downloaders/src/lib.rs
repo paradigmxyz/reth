@@ -46,10 +46,5 @@ pub mod receipt_file_client;
 /// Enables decoding and encoding `Block` types within file contexts.
 pub mod file_codec;
 
-/// Module with a codec for reading and encoding receipts in files.
-///
-/// Enables decoding and encoding `HackReceipt` type. See <https://github.com/testinprod-io/op-geth/pull/1>.
-pub mod file_codec_ovm_receipt;
-
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
