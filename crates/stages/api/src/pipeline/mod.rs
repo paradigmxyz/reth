@@ -256,8 +256,8 @@ where
             // Run the pruner so we don't potentially end up with higher height in the database vs
             // static files during a pipeline unwind
             let mut pruner = PrunerBuilder::new(Default::default())
-                .prune_delete_limit(usize::MAX)
-                .build(self.provider_factory.clone());
+                .delete_limit_per_block(usize::MAX)
+                .build_with_provider_factory(self.provider_factory.clone());
 
             pruner.run(prune_tip)?;
         }

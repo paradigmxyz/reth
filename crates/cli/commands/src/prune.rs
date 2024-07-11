@@ -30,8 +30,8 @@ impl PruneCommand {
             info!(target: "reth::cli", ?prune_tip, ?prune_config, "Pruning data from database...");
             // Run the pruner according to the configuration, and don't enforce any limits on it
             let mut pruner = PrunerBuilder::new(prune_config)
-                .prune_delete_limit(usize::MAX)
-                .build(provider_factory);
+                .delete_limit_per_block(usize::MAX)
+                .build_with_provider_factory(provider_factory);
 
             pruner.run(prune_tip)?;
             info!(target: "reth::cli", "Pruned data from database");
