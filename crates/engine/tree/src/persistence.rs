@@ -229,7 +229,7 @@ pub enum PersistenceAction {
 }
 
 /// A handle to the persistence service
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PersistenceHandle {
     /// The channel used to communicate with the persistence service
     sender: Sender<PersistenceAction>,
@@ -254,13 +254,16 @@ impl PersistenceHandle {
     /// assumed to be ordered by block number.
     ///
     /// This returns the latest hash that has been saved, allowing removal of that block and any
-    /// previous blocks from in-memory data structures.
-    pub async fn save_blocks(&self, blocks: Vec<ExecutedBlock>) -> B256 {
-        let (tx, rx) = oneshot::channel();
+    /// previous blocks from in-memory data structures. This value is returned in the receiver end
+    /// of the sender argument.
+    pub fn save_blocks(&self, blocks: Vec<ExecutedBlock>, tx: oneshot::Sender<B256>) {
+        if blocks.is_empty() {
+            let _ = tx.send(B256::default());
+            return;
+        }
         self.sender
             .send(PersistenceAction::SaveBlocks((blocks, tx)))
             .expect("should be able to send");
-        rx.await.expect("todo: err handling")
     }
 
     /// Tells the persistence service to remove blocks above a certain block number. The removed
@@ -281,5 +284,88 @@ impl PersistenceHandle {
             .send(PersistenceAction::PruneBefore((block_num, tx)))
             .expect("should be able to send");
         rx.await.expect("todo: err handling")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_chainspec::MAINNET;
+    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
+    use reth_exex_types::FinishedExExHeight;
+    use reth_primitives::{
+        Address, Block, Receipts, Requests, SealedBlockWithSenders, TransactionSigned, B256,
+    };
+    use reth_provider::{providers::StaticFileProvider, ExecutionOutcome, ProviderFactory};
+    use reth_prune::Pruner;
+    use reth_trie::{updates::TrieUpdates, HashedPostState};
+    use revm::db::BundleState;
+    use std::sync::{mpsc::channel, Arc};
+
+    fn default_persistence_handle() -> PersistenceHandle {
+        let db = create_test_rw_db();
+        let (_static_dir, static_dir_path) = create_test_static_files_dir();
+        let provider = ProviderFactory::new(
+            db,
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir_path).unwrap(),
+        );
+        let (finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+
+        let pruner = Pruner::new(provider.clone(), vec![], 5, 0, 5, None, finished_exex_height_rx);
+
+        let (static_file_sender, _static_file_receiver) = channel();
+        let static_file_handle = StaticFileServiceHandle::new(static_file_sender);
+
+        Persistence::spawn_new(provider, static_file_handle, pruner)
+    }
+
+    #[tokio::test]
+    async fn test_save_blocks_empty() {
+        let persistence_handle = default_persistence_handle();
+
+        let blocks = vec![];
+        let (tx, rx) = oneshot::channel();
+
+        persistence_handle.save_blocks(blocks, tx);
+
+        let hash = rx.await.unwrap();
+        assert_eq!(hash, B256::default());
+    }
+
+    #[tokio::test]
+    async fn test_save_blocks_single_block() {
+        let persistence_handle = default_persistence_handle();
+
+        let mut block = Block::default();
+        let sender = Address::random();
+        let tx = TransactionSigned::default();
+        block.body.push(tx);
+        let block_hash = block.hash_slow();
+        let block_number = block.number;
+        let sealed = block.seal_slow();
+        let sealed_with_senders =
+            SealedBlockWithSenders::new(sealed.clone(), vec![sender]).unwrap();
+
+        let executed = ExecutedBlock::new(
+            Arc::new(sealed),
+            Arc::new(sealed_with_senders.senders),
+            Arc::new(ExecutionOutcome::new(
+                BundleState::default(),
+                Receipts { receipt_vec: vec![] },
+                block_number,
+                vec![Requests::default()],
+            )),
+            Arc::new(HashedPostState::default()),
+            Arc::new(TrieUpdates::default()),
+        );
+        let blocks = vec![executed];
+        let (tx, rx) = oneshot::channel();
+
+        persistence_handle.save_blocks(blocks, tx);
+
+        let actual_hash = rx.await.unwrap();
+        assert_eq!(block_hash, actual_hash);
     }
 }
