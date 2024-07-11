@@ -950,7 +950,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         Ok(self.tx.commit()?)
     }
 
-    /// Remove the last N blocks of state, recreating the [`ExecutionOutcome`].
+    /// Remove the last N blocks of state.
     ///
     /// The latest state will be unwound
     ///
@@ -3323,8 +3323,8 @@ impl<DB: Database> BlockExecutionWriter for DatabaseProviderRW<DB> {
         self.remove::<tables::BlockBodyIndices>(range)?;
 
         // Update pipeline progress
-        if let Some(fork_number) = unwind_to {
-            self.update_pipeline_stages(fork_number, true)?;
+        if let Some(block_number) = unwind_to {
+            self.update_pipeline_stages(block_number, true)?;
         }
 
         Ok(())
