@@ -12,7 +12,7 @@ pub enum StageId {
     Bodies,
     SenderRecovery,
     Execution,
-    Prune,
+    PruneSenderRecovery,
     MerkleUnwind,
     AccountHashing,
     StorageHashing,
@@ -20,6 +20,7 @@ pub enum StageId {
     TransactionLookup,
     IndexStorageHistory,
     IndexAccountHistory,
+    Prune,
     Finish,
     /// Other custom stage with a provided string identifier.
     Other(&'static str),
@@ -27,12 +28,12 @@ pub enum StageId {
 
 impl StageId {
     /// All supported Stages
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Headers,
         Self::Bodies,
         Self::SenderRecovery,
         Self::Execution,
-        Self::Prune,
+        Self::PruneSenderRecovery,
         Self::MerkleUnwind,
         Self::AccountHashing,
         Self::StorageHashing,
@@ -40,19 +41,21 @@ impl StageId {
         Self::TransactionLookup,
         Self::IndexStorageHistory,
         Self::IndexAccountHistory,
+        Self::Prune,
         Self::Finish,
     ];
 
     /// Stages that require state.
-    pub const STATE_REQUIRED: [Self; 8] = [
+    pub const STATE_REQUIRED: [Self; 9] = [
         Self::Execution,
-        Self::Prune,
+        Self::PruneSenderRecovery,
         Self::MerkleUnwind,
         Self::AccountHashing,
         Self::StorageHashing,
         Self::MerkleExecute,
         Self::IndexStorageHistory,
         Self::IndexAccountHistory,
+        Self::Prune,
     ];
 
     /// Return stage id formatted as string.
@@ -64,7 +67,7 @@ impl StageId {
             Self::Bodies => "Bodies",
             Self::SenderRecovery => "SenderRecovery",
             Self::Execution => "Execution",
-            Self::Prune => "Prune",
+            Self::PruneSenderRecovery => "PruneSenderRecovery",
             Self::MerkleUnwind => "MerkleUnwind",
             Self::AccountHashing => "AccountHashing",
             Self::StorageHashing => "StorageHashing",
@@ -72,6 +75,7 @@ impl StageId {
             Self::TransactionLookup => "TransactionLookup",
             Self::IndexAccountHistory => "IndexAccountHistory",
             Self::IndexStorageHistory => "IndexStorageHistory",
+            Self::Prune => "Prune",
             Self::Finish => "Finish",
             Self::Other(s) => s,
         }

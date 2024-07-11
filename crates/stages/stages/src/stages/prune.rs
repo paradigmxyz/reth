@@ -1,6 +1,6 @@
 use reth_db_api::database::Database;
 use reth_provider::DatabaseProviderRW;
-use reth_prune::{PruneModes, PrunerBuilder};
+use reth_prune::{PruneMode, PruneModes, PrunerBuilder};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
@@ -61,6 +61,45 @@ impl<DB: Database> Stage<DB> for PruneStage {
     ) -> Result<UnwindOutput, StageError> {
         info!(target: "sync::stages::prune::unwind", "Stage is always skipped");
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+    }
+}
+
+/// The prune sender recovery stage that runs the pruner with the provided `PruneMode` for the
+/// `SenderRecovery` segment.
+///
+/// Under the hood, this stage has the same functionality as [`PruneStage`].
+#[derive(Debug)]
+pub struct PruneSenderRecoveryStage(PruneStage);
+
+impl PruneSenderRecoveryStage {
+    /// Create new prune sender recovery stage with the given prune mode and commit threshold.
+    pub fn new(prune_mode: PruneMode, commit_threshold: usize) -> Self {
+        Self(PruneStage::new(
+            PruneModes { sender_recovery: Some(prune_mode), ..PruneModes::none() },
+            commit_threshold,
+        ))
+    }
+}
+
+impl<DB: Database> Stage<DB> for PruneSenderRecoveryStage {
+    fn id(&self) -> StageId {
+        StageId::PruneSenderRecovery
+    }
+
+    fn execute(
+        &mut self,
+        provider: &DatabaseProviderRW<DB>,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError> {
+        self.0.execute(provider, input)
+    }
+
+    fn unwind(
+        &mut self,
+        provider: &DatabaseProviderRW<DB>,
+        input: UnwindInput,
+    ) -> Result<UnwindOutput, StageError> {
+        self.0.unwind(provider, input)
     }
 }
 

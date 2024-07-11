@@ -36,8 +36,8 @@
 use crate::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, PruneStage,
-        SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
+        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, PruneSenderRecoveryStage,
+        PruneStage, SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -65,6 +65,7 @@ use tokio::sync::watch;
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
 /// - [`ExecutionStage`]
+/// - [`PruneSenderRecoveryStage`] (execute)
 /// - [`MerkleStage`] (unwind)
 /// - [`AccountHashingStage`]
 /// - [`StorageHashingStage`]
@@ -248,6 +249,7 @@ where
 /// A combination of (in order)
 ///
 /// - [`ExecutionStages`]
+/// - [`PruneSenderRecoveryStage`]
 /// - [`HashingStages`]
 /// - [`HistoryIndexingStages`]
 /// - [`PruneStage`]
@@ -284,12 +286,22 @@ where
             self.stages_config.clone(),
             self.prune_modes.clone(),
         )
-        .builder()
-        .add_set(HashingStages { stages_config: self.stages_config.clone() })
-        .add_set(HistoryIndexingStages {
-            stages_config: self.stages_config.clone(),
-            prune_modes: self.prune_modes.clone(),
-        });
+        .builder();
+
+        // If sender recovery prune mode is set, add the prune sender recovery stage.
+        if let Some(prune_mode) = self.prune_modes.sender_recovery {
+            builder = builder.add_stage(PruneSenderRecoveryStage::new(
+                prune_mode,
+                self.stages_config.prune.commit_threshold,
+            ));
+        }
+
+        builder = builder
+            .add_set(HashingStages { stages_config: self.stages_config.clone() })
+            .add_set(HistoryIndexingStages {
+                stages_config: self.stages_config.clone(),
+                prune_modes: self.prune_modes.clone(),
+            });
 
         // If any prune modes are set, add the prune stage.
         if !self.prune_modes.is_empty() {
