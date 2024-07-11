@@ -56,7 +56,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        prune_delete_limit: 3500,
+        prune_delete_limit: 20000,
     }
     .into()
 });
@@ -78,7 +78,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
     }
     .into()
 });
@@ -98,7 +98,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
     }
     .into()
 });
@@ -143,7 +143,7 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ]
             .into(),
         ),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
         ..Default::default()
     }
     .into()
@@ -168,7 +168,7 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ]
             .into(),
         ),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
         ..Default::default()
     }
     .into()
@@ -193,7 +193,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ]
             .into(),
         ),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
         ..Default::default()
     }
     .into()
@@ -218,7 +218,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ]
             .into(),
         ),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
         ..Default::default()
     }
     .into()
@@ -300,9 +300,7 @@ pub struct ChainSpec {
     /// The parameters that configure how a block's base fee is computed
     pub base_fee_params: BaseFeeParamsKind,
 
-    /// The delete limit for pruner, per block. In the actual pruner run it will be multiplied by
-    /// the amount of blocks between pruner runs to account for the difference in amount of new
-    /// data coming in.
+    /// The delete limit for pruner, per run.
     pub prune_delete_limit: usize,
 }
 
