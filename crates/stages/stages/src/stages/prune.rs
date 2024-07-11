@@ -42,8 +42,7 @@ impl<DB: Database> Stage<DB> for PruneStage {
     ) -> Result<ExecOutput, StageError> {
         let mut pruner = PrunerBuilder::default()
             .segments(self.prune_modes.clone())
-            .prune_max_blocks_per_run(1)
-            .delete_limit_per_block(self.commit_threshold)
+            .delete_limit(self.commit_threshold)
             .build();
 
         let result = pruner.run(provider, input.target())?;
