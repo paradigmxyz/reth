@@ -21,7 +21,6 @@ impl StateWriter for ExecutionOutcome {
     where
         DB: Database,
     {
-        let tx = provider_rw.tx_ref();
         let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
 
         StateReverts(reverts).write_to_db(provider_rw, self.first_block)?;
