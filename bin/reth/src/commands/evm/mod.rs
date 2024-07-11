@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use eyre::Result;
-use tracing::info;
+use tracing::{info, Instrument};
 use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -138,16 +138,19 @@ impl EvmCommand {
 
             let mut executor = executor.batch_executor(db, PruneModes::none());
 
+            let mut td = blockchain_db.header_td_by_number(thread_start)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(thread_start.into()))?;
+
             threads.push(thread::spawn(move || {
                 for target in thread_start..=thread_end {
-                    let td = blockchain_db.header_td_by_number(target)?
-                        .ok_or_else(|| ProviderError::HeaderNotFound(target.into()))?;
 
                     let block =  blockchain_db.sealed_block_with_senders(target.into(), TransactionVariant::WithHash)?
                         .ok_or_else(|| ProviderError::HeaderNotFound(target.into()))?;
 
                     executor.execute_and_verify_one((&block.clone().unseal(),td).into())?;
 
+                    //td
+                    td += block.header.difficulty;
 
                     // 增加 gas 计数器
                     let mut cumulative_gas = cumulative_gas.lock().unwrap();
