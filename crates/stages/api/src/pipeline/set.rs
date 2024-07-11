@@ -117,7 +117,7 @@ where
     /// Adds the given [`Stage`] at the end of this set if it's [`Some`].
     ///
     /// If the stage was already in the group, it is removed from its previous place.
-    pub fn add_stage_if<S: Stage<DB> + 'static>(self, stage: Option<S>) -> Self {
+    pub fn add_stage_opt<S: Stage<DB> + 'static>(self, stage: Option<S>) -> Self {
         if let Some(stage) = stage {
             self.add_stage(stage)
         } else {

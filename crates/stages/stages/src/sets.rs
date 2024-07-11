@@ -49,7 +49,7 @@ use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::
 use reth_primitives::B256;
 use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::PruneModes;
-use std::sync::Arc;
+use std::{ops::Not, sync::Arc};
 use tokio::sync::watch;
 
 /// A set containing all stages to run a fully syncing instance of reth.
@@ -288,7 +288,7 @@ where
         )
         .builder()
         // If sender recovery prune mode is set, add the prune sender recovery stage.
-        .add_stage_if(self.prune_modes.sender_recovery.map(|prune_mode| {
+        .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
             PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
         }))
         .add_set(HashingStages { stages_config: self.stages_config.clone() })
@@ -297,7 +297,7 @@ where
             prune_modes: self.prune_modes.clone(),
         })
         // If any prune modes are set, add the prune stage.
-        .add_stage_if((!self.prune_modes.is_empty()).then(|| {
+        .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
             // Prune stage should be added after all hashing stages, because otherwise it will
             // delete
             PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
