@@ -807,6 +807,7 @@ pub trait Call: LoadState + SpawnBlocking {
             chain_id,
             blob_versioned_hashes,
             max_fee_per_blob_gas,
+            // authorization_list,
             ..
         } = request;
 
@@ -838,7 +839,9 @@ pub trait Call: LoadState + SpawnBlocking {
             // EIP-4844 fields
             blob_hashes: blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas,
+            // EIP-7702 fields
             authorization_list: None,
+            // authorization_list: TODO
             #[cfg(feature = "optimism")]
             optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
         };
