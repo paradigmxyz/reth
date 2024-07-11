@@ -845,29 +845,29 @@ where
 /// The state of the persistence task.
 #[derive(Default, Debug)]
 struct PersistenceState {
-    /// Hash of the last block persisted. A None value means no persistance task
+    /// Hash of the last block persisted. A None value means no persistence task
     /// has run yet.
     last_persisted_block_hash: Option<B256>,
     /// Receiver end of channel where the result of the persistence task will be
-    /// sent when done. A None value means there's no persistance task in progress.
+    /// sent when done. A None value means there's no persistence task in progress.
     rx: Option<oneshot::Receiver<B256>>,
     /// The last persisted block number.
     last_persisted_block_number: u64,
 }
 
 impl PersistenceState {
-    /// Determines if there is a persistance task in progress by checking if the
+    /// Determines if there is a persistence task in progress by checking if the
     /// receiver is set.
     const fn in_progress(&self) -> bool {
         self.rx.is_some()
     }
 
-    /// Sets state for a started persistance task.
+    /// Sets state for a started persistence task.
     fn start(&mut self, rx: oneshot::Receiver<B256>) {
         self.rx = Some(rx);
     }
 
-    /// Sets state for a finished persistance task.
+    /// Sets state for a finished persistence task.
     fn finish(&mut self, last_persisted_block_hash: B256, last_persisted_block_number: u64) {
         self.rx = None;
         self.last_persisted_block_number = last_persisted_block_number;
