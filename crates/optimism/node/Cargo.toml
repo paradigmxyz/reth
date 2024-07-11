@@ -23,7 +23,7 @@ reth-rpc-types.workspace = true
 reth-rpc.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-node-api.workspace = true
-reth-node-builder.workspace = true
+reth-node-builder = { workspace = true, features = ["zstd"] } 
 reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true

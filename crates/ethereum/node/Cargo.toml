@@ -16,7 +16,7 @@ reth-payload-builder.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-ethereum-payload-builder.workspace = true
-reth-node-builder.workspace = true
+reth-node-builder = { workspace = true, features = ["zstd"] } 
 reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true

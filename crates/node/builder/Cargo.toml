@@ -81,4 +81,5 @@ tempfile.workspace = true
 
 [features]
 default = []
+zstd = ["reth-primitives/zstd"]
 test-utils = ["reth-db/test-utils"]
