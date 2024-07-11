@@ -313,7 +313,15 @@ mod tests {
         let (finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
-        let pruner = Pruner::new(provider.clone(), vec![], 5, 0, 5, None, finished_exex_height_rx);
+        let pruner = Pruner::<_, ProviderFactory<_>>::new(
+            provider.clone(),
+            vec![],
+            5,
+            0,
+            5,
+            None,
+            finished_exex_height_rx,
+        );
 
         let (static_file_sender, _static_file_receiver) = channel();
         let static_file_handle = StaticFileServiceHandle::new(static_file_sender);
