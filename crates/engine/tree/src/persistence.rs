@@ -321,8 +321,8 @@ mod tests {
         Persistence::spawn_new(provider, static_file_handle, pruner)
     }
 
-    #[test]
-    fn test_save_blocks_empty() {
+    #[tokio::test]
+    async fn test_save_blocks_empty() {
         let persistence_handle = default_persistence_handle();
 
         let blocks = vec![];
@@ -330,12 +330,12 @@ mod tests {
 
         persistence_handle.save_blocks(blocks, tx);
 
-        let hash = rx.blocking_recv().unwrap();
+        let hash = rx.await.unwrap();
         assert_eq!(hash, B256::default());
     }
 
-    #[test]
-    fn test_save_blocks_single_block() {
+    #[tokio::test]
+    async fn test_save_blocks_single_block() {
         let persistence_handle = default_persistence_handle();
 
         let mut block = Block::default();
@@ -365,7 +365,7 @@ mod tests {
 
         persistence_handle.save_blocks(blocks, tx);
 
-        let actual_hash = rx.blocking_recv().unwrap();
+        let actual_hash = rx.await.unwrap();
         assert_eq!(block_hash, actual_hash);
     }
 }
