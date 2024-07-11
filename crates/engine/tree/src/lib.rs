@@ -28,6 +28,8 @@ pub mod engine;
 pub mod metrics;
 /// The background writer task for batch db writes.
 pub mod persistence;
+/// The background writer task for static file writes.
+pub mod static_files;
 /// Support for interacting with the blockchain tree.
 pub mod tree;
 

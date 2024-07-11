@@ -1,26 +1,26 @@
 //! OP-Reth `eth_` endpoint implementation.
 
+pub mod receipt;
+pub mod transaction;
+
+mod block;
+mod pending_block;
+
+use std::{future::Future, sync::Arc};
+
 use alloy_primitives::{Address, U64};
-use reth_chainspec::ChainInfo;
+use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::RethResult;
 use reth_evm::ConfigureEvm;
-use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider, StateProviderFactory,
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderFactory};
+use reth_rpc_eth_api::helpers::{
+    Call, EthApiSpec, EthCall, EthFees, EthState, LoadFee, LoadState, SpawnBlocking, Trace,
 };
-use reth_rpc_eth_api::{
-    helpers::{
-        Call, EthApiSpec, EthBlocks, EthCall, EthFees, EthSigner, EthState, EthTransactions,
-        LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, LoadState, LoadTransaction,
-        SpawnBlocking, Trace,
-    },
-    RawTransactionForwarder,
-};
-use reth_rpc_eth_types::{EthStateCache, PendingBlock};
+use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types::SyncStatus;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
-use std::future::Future;
-use tokio::sync::{AcquireError, Mutex, OwnedSemaphorePermit};
+use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// OP-Reth `Eth` API implementation.
 ///
@@ -68,35 +68,9 @@ impl<Eth: EthApiSpec> EthApiSpec for OpEthApi<Eth> {
     fn sync_status(&self) -> RethResult<SyncStatus> {
         self.inner.sync_status()
     }
-}
 
-impl<Eth: LoadBlock> LoadBlock for OpEthApi<Eth> {
-    fn provider(&self) -> impl BlockReaderIdExt {
-        LoadBlock::provider(&self.inner)
-    }
-
-    fn cache(&self) -> &reth_rpc_eth_types::EthStateCache {
-        self.inner.cache()
-    }
-}
-
-impl<Eth: LoadPendingBlock> LoadPendingBlock for OpEthApi<Eth> {
-    fn provider(
-        &self,
-    ) -> impl BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory {
-        self.inner.provider()
-    }
-
-    fn pool(&self) -> impl TransactionPool {
-        self.inner.pool()
-    }
-
-    fn pending_block(&self) -> &Mutex<Option<PendingBlock>> {
-        self.inner.pending_block()
-    }
-
-    fn evm_config(&self) -> &impl ConfigureEvm {
-        self.inner.evm_config()
+    fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.inner.chain_spec()
     }
 }
 
@@ -120,12 +94,6 @@ impl<Eth: SpawnBlocking> SpawnBlocking for OpEthApi<Eth> {
         n: u32,
     ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
         self.inner.acquire_many_owned(n)
-    }
-}
-
-impl<Eth: LoadReceipt> LoadReceipt for OpEthApi<Eth> {
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
     }
 }
 
@@ -168,42 +136,6 @@ impl<Eth: LoadState> LoadState for OpEthApi<Eth> {
 
     fn pool(&self) -> impl TransactionPool {
         LoadState::pool(&self.inner)
-    }
-}
-
-impl<Eth: LoadTransaction> LoadTransaction for OpEthApi<Eth> {
-    type Pool = Eth::Pool;
-
-    fn provider(&self) -> impl reth_provider::TransactionsProvider {
-        LoadTransaction::provider(&self.inner)
-    }
-
-    fn cache(&self) -> &EthStateCache {
-        LoadTransaction::cache(&self.inner)
-    }
-
-    fn pool(&self) -> &Self::Pool {
-        LoadTransaction::pool(&self.inner)
-    }
-}
-
-impl<Eth: EthTransactions> EthTransactions for OpEthApi<Eth> {
-    fn provider(&self) -> impl BlockReaderIdExt {
-        EthTransactions::provider(&self.inner)
-    }
-
-    fn raw_tx_forwarder(&self) -> Option<std::sync::Arc<dyn RawTransactionForwarder>> {
-        self.inner.raw_tx_forwarder()
-    }
-
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
-        self.inner.signers()
-    }
-}
-
-impl<Eth: EthBlocks> EthBlocks for OpEthApi<Eth> {
-    fn provider(&self) -> impl HeaderProvider {
-        EthBlocks::provider(&self.inner)
     }
 }
 

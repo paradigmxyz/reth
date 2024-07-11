@@ -40,8 +40,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
+    use super::*;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives::{
         constants::ETHEREUM_BLOCK_GAS_LIMIT, Address, StorageKey, StorageValue, U256,
@@ -54,8 +53,7 @@ mod tests {
     use reth_rpc_server_types::constants::{DEFAULT_ETH_PROOF_WINDOW, DEFAULT_PROOF_PERMITS};
     use reth_tasks::pool::BlockingTaskPool;
     use reth_transaction_pool::test_utils::testing_pool;
-
-    use super::*;
+    use std::collections::HashMap;
 
     #[tokio::test]
     async fn test_storage() {

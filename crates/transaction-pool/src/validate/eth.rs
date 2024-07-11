@@ -12,14 +12,14 @@ use crate::{
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{
     constants::{eip4844::MAX_BLOBS_PER_BLOCK, ETHEREUM_BLOCK_GAS_LIMIT},
-    GotExpected, InvalidTransactionError, SealedBlock, TxKind, EIP1559_TX_TYPE_ID,
-    EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    GotExpected, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm::{
     interpreter::gas::validate_initial_tx_gas,
-    primitives::{AccessListItem, EnvKzgSettings, SpecId},
+    primitives::{EnvKzgSettings, SpecId},
 };
 use std::{
     marker::PhantomData,
@@ -119,6 +119,8 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     eip1559: bool,
     /// Fork indicator whether we are using EIP-4844 blob transactions.
     eip4844: bool,
+    /// Fork indicator whether we are using EIP-7702 type transactions.
+    eip7702: bool,
     /// The current max gas limit
     block_gas_limit: u64,
     /// Minimum priority fee to enforce for acceptance into the pool.
@@ -182,6 +184,15 @@ where
                     return TransactionValidationOutcome::Invalid(
                         transaction,
                         InvalidTransactionError::Eip4844Disabled.into(),
+                    )
+                }
+            }
+            EIP7702_TX_TYPE_ID => {
+                // Reject EIP-7702 transactions.
+                if !self.eip7702 {
+                    return TransactionValidationOutcome::Invalid(
+                        transaction,
+                        InvalidTransactionError::Eip7702Disabled.into(),
                     )
                 }
             }
@@ -255,9 +266,17 @@ where
             }
         }
 
-        // intrinsic gas checks
-        let is_shanghai = self.fork_tracker.is_shanghai_activated();
-        if let Err(err) = ensure_intrinsic_gas(&transaction, is_shanghai) {
+        if transaction.is_eip7702() {
+            // Cancun fork is required for 7702 txs
+            if !self.fork_tracker.is_prague_activated() {
+                return TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidTransactionError::TxTypeNotSupported.into(),
+                )
+            }
+        }
+
+        if let Err(err) = ensure_intrinsic_gas(&transaction, &self.fork_tracker) {
             return TransactionValidationOutcome::Invalid(transaction, err)
         }
 
@@ -407,6 +426,10 @@ where
         if self.chain_spec.is_shanghai_active_at_timestamp(new_tip_block.timestamp) {
             self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
         }
+
+        if self.chain_spec.is_prague_active_at_timestamp(new_tip_block.timestamp) {
+            self.fork_tracker.prague.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 
@@ -418,12 +441,16 @@ pub struct EthTransactionValidatorBuilder {
     shanghai: bool,
     /// Fork indicator whether we are in the Cancun hardfork.
     cancun: bool,
+    /// Fork indicator whether we are in the Cancun hardfork.
+    prague: bool,
     /// Whether using EIP-2718 type transactions is allowed
     eip2718: bool,
     /// Whether using EIP-1559 type transactions is allowed
     eip1559: bool,
     /// Whether using EIP-4844 type transactions is allowed
     eip4844: bool,
+    /// Whether using EIP-7702 type transactions is allowed
+    eip7702: bool,
     /// The current max gas limit
     block_gas_limit: u64,
     /// Minimum priority fee to enforce for acceptance into the pool.
@@ -464,12 +491,16 @@ impl EthTransactionValidatorBuilder {
             eip2718: true,
             eip1559: true,
             eip4844: true,
+            eip7702: true,
 
             // shanghai is activated by default
             shanghai: true,
 
             // cancun is activated by default
             cancun: true,
+
+            // prague not yet activated
+            prague: false,
         }
     }
 
@@ -501,6 +532,17 @@ impl EthTransactionValidatorBuilder {
     /// Set the Shanghai fork.
     pub const fn set_shanghai(mut self, shanghai: bool) -> Self {
         self.shanghai = shanghai;
+        self
+    }
+
+    /// Disables the Prague fork.
+    pub const fn no_prague(self) -> Self {
+        self.set_prague(false)
+    }
+
+    /// Set the Prague fork.
+    pub const fn set_prague(mut self, prague: bool) -> Self {
+        self.prague = prague;
         self
     }
 
@@ -591,9 +633,11 @@ impl EthTransactionValidatorBuilder {
             chain_spec,
             shanghai,
             cancun,
+            prague,
             eip2718,
             eip1559,
             eip4844,
+            eip7702,
             block_gas_limit,
             minimum_priority_fee,
             kzg_settings,
@@ -602,8 +646,11 @@ impl EthTransactionValidatorBuilder {
             ..
         } = self;
 
-        let fork_tracker =
-            ForkTracker { shanghai: AtomicBool::new(shanghai), cancun: AtomicBool::new(cancun) };
+        let fork_tracker = ForkTracker {
+            shanghai: AtomicBool::new(shanghai),
+            cancun: AtomicBool::new(cancun),
+            prague: AtomicBool::new(prague),
+        };
 
         let inner = EthTransactionValidatorInner {
             chain_spec,
@@ -612,6 +659,7 @@ impl EthTransactionValidatorBuilder {
             eip1559,
             fork_tracker,
             eip4844,
+            eip7702,
             block_gas_limit,
             minimum_priority_fee,
             blob_store: Box::new(blob_store),
@@ -670,22 +718,29 @@ impl EthTransactionValidatorBuilder {
 
 /// Keeps track of whether certain forks are activated
 #[derive(Debug)]
-pub(crate) struct ForkTracker {
+pub struct ForkTracker {
     /// Tracks if shanghai is activated at the block's timestamp.
-    pub(crate) shanghai: AtomicBool,
+    pub shanghai: AtomicBool,
     /// Tracks if cancun is activated at the block's timestamp.
-    pub(crate) cancun: AtomicBool,
+    pub cancun: AtomicBool,
+    /// Tracks if prague is activated at the block's timestamp.
+    pub prague: AtomicBool,
 }
 
 impl ForkTracker {
     /// Returns `true` if Shanghai fork is activated.
-    pub(crate) fn is_shanghai_activated(&self) -> bool {
+    pub fn is_shanghai_activated(&self) -> bool {
         self.shanghai.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Returns `true` if Cancun fork is activated.
-    pub(crate) fn is_cancun_activated(&self) -> bool {
+    pub fn is_cancun_activated(&self) -> bool {
         self.cancun.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns `true` if Prague fork is activated.
+    pub fn is_prague_activated(&self) -> bool {
+        self.prague.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -707,37 +762,32 @@ pub fn ensure_max_init_code_size<T: PoolTransaction>(
 
 /// Ensures that gas limit of the transaction exceeds the intrinsic gas of the transaction.
 ///
-/// See also [`calculate_intrinsic_gas_after_merge`]
-pub fn ensure_intrinsic_gas<T: PoolTransaction>(
+/// Caution: This only checks past the Merge hardfork.
+pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     transaction: &T,
-    is_shanghai: bool,
+    fork_tracker: &ForkTracker,
 ) -> Result<(), InvalidPoolTransactionError> {
-    if transaction.gas_limit() <
-        calculate_intrinsic_gas_after_merge(
-            transaction.input(),
-            &transaction.kind(),
-            transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
-            is_shanghai,
-        )
-    {
+    let spec_id = if fork_tracker.is_prague_activated() {
+        SpecId::PRAGUE
+    } else if fork_tracker.is_shanghai_activated() {
+        SpecId::SHANGHAI
+    } else {
+        SpecId::MERGE
+    };
+
+    let gas_after_merge = validate_initial_tx_gas(
+        spec_id,
+        transaction.input(),
+        transaction.kind().is_create(),
+        transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
+        transaction.authorization_count() as u64,
+    );
+
+    if transaction.gas_limit() < gas_after_merge {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
     } else {
         Ok(())
     }
-}
-
-/// Calculates the Intrinsic Gas usage for a Transaction
-///
-/// Caution: This only checks past the Merge hardfork.
-#[inline]
-pub fn calculate_intrinsic_gas_after_merge(
-    input: &[u8],
-    kind: &TxKind,
-    access_list: &[AccessListItem],
-    is_shanghai: bool,
-) -> u64 {
-    let spec_id = if is_shanghai { SpecId::SHANGHAI } else { SpecId::MERGE };
-    validate_initial_tx_gas(spec_id, input, kind.is_create(), access_list, 0)
 }
 
 #[cfg(test)]
@@ -764,10 +814,14 @@ mod tests {
     #[tokio::test]
     async fn validate_transaction() {
         let transaction = get_transaction();
+        let mut fork_tracker =
+            ForkTracker { shanghai: false.into(), cancun: false.into(), prague: false.into() };
 
-        let res = ensure_intrinsic_gas(&transaction, false);
+        let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
         assert!(res.is_ok());
-        let res = ensure_intrinsic_gas(&transaction, true);
+
+        fork_tracker.shanghai = true.into();
+        let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
         assert!(res.is_ok());
 
         let provider = MockEthProvider::default();

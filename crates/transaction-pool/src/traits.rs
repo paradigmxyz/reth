@@ -14,7 +14,7 @@ use reth_primitives::{
     BlobTransactionSidecar, BlobTransactionValidationError, FromRecoveredPooledTransaction,
     IntoRecoveredTransaction, PooledTransactionsElement, PooledTransactionsElementEcRecovered,
     SealedBlock, Transaction, TransactionSignedEcRecovered, TryFromRecoveredTransaction, TxHash,
-    TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, U256,
+    TxKind, B256, EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, U256,
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -842,6 +842,11 @@ pub trait PoolTransaction:
         self.tx_type() == EIP4844_TX_TYPE_ID
     }
 
+    /// Returns true if the transaction is an EIP-7702 transaction.
+    fn is_eip7702(&self) -> bool {
+        self.tx_type() == EIP7702_TX_TYPE_ID
+    }
+
     /// Returns the length of the rlp encoded transaction object
     ///
     /// Note: Implementations should cache this value.
@@ -866,6 +871,9 @@ pub trait EthPoolTransaction: PoolTransaction {
         blob: &BlobTransactionSidecar,
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError>;
+
+    /// Returns the number of authorizations this transaction has.
+    fn authorization_count(&self) -> usize;
 }
 
 /// The default [`PoolTransaction`] for the [Pool](crate::Pool) for Ethereum.
@@ -936,6 +944,9 @@ impl EthPooledTransaction {
             }
             Transaction::Eip4844(t) => {
                 blob_sidecar = EthBlobTransactionSidecar::Missing;
+                U256::from(t.max_fee_per_gas).saturating_mul(U256::from(t.gas_limit))
+            }
+            Transaction::Eip7702(t) => {
                 U256::from(t.max_fee_per_gas).saturating_mul(U256::from(t.gas_limit))
             }
             _ => U256::ZERO,
@@ -1024,6 +1035,7 @@ impl PoolTransaction for EthPooledTransaction {
             Transaction::Eip2930(tx) => tx.gas_price,
             Transaction::Eip1559(tx) => tx.max_fee_per_gas,
             Transaction::Eip4844(tx) => tx.max_fee_per_gas,
+            Transaction::Eip7702(tx) => tx.max_fee_per_gas,
             _ => 0,
         }
     }
@@ -1041,6 +1053,7 @@ impl PoolTransaction for EthPooledTransaction {
             Transaction::Legacy(_) | Transaction::Eip2930(_) => None,
             Transaction::Eip1559(tx) => Some(tx.max_priority_fee_per_gas),
             Transaction::Eip4844(tx) => Some(tx.max_priority_fee_per_gas),
+            Transaction::Eip7702(tx) => Some(tx.max_priority_fee_per_gas),
             _ => None,
         }
     }
@@ -1120,6 +1133,13 @@ impl EthPoolTransaction for EthPooledTransaction {
             _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.tx_type())),
         }
     }
+
+    fn authorization_count(&self) -> usize {
+        match &self.transaction.transaction {
+            Transaction::Eip7702(tx) => tx.authorization_list.len(),
+            _ => 0,
+        }
+    }
 }
 
 impl TryFromRecoveredTransaction for EthPooledTransaction {
@@ -1130,7 +1150,7 @@ impl TryFromRecoveredTransaction for EthPooledTransaction {
     ) -> Result<Self, Self::Error> {
         // ensure we can handle the transaction type and its format
         match tx.tx_type() as u8 {
-            0..=EIP1559_TX_TYPE_ID => {
+            0..=EIP1559_TX_TYPE_ID | EIP7702_TX_TYPE_ID => {
                 // supported
             }
             EIP4844_TX_TYPE_ID => {

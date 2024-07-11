@@ -6618,6 +6618,7 @@ dependencies = [
  "crossterm",
  "eyre",
  "fdlimit",
+ "futures",
  "human_bytes",
  "itertools 0.13.0",
  "metrics-process",
@@ -6633,13 +6634,16 @@ dependencies = [
  "reth-db",
  "reth-db-api",
  "reth-db-common",
+ "reth-discv4",
  "reth-downloaders",
  "reth-evm",
  "reth-exex",
  "reth-fs-util",
  "reth-network",
  "reth-network-p2p",
+ "reth-node-builder",
  "reth-node-core",
+ "reth-node-events",
  "reth-primitives",
  "reth-provider",
  "reth-prune",
@@ -6667,11 +6671,13 @@ dependencies = [
 name = "reth-cli-util"
 version = "1.0.1"
 dependencies = [
+ "alloy-eips",
+ "alloy-primitives",
  "eyre",
+ "libc",
  "proptest",
+ "rand 0.8.5",
  "reth-fs-util",
- "reth-network",
- "reth-primitives",
  "secp256k1",
  "thiserror",
 ]
@@ -7078,6 +7084,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-stages",
  "reth-stages-api",
+ "reth-stages-types",
  "reth-static-file",
  "reth-tasks",
  "reth-tokio-util",
@@ -7177,6 +7184,15 @@ dependencies = [
 [[package]]
 name = "reth-ethereum-cli"
 version = "1.0.1"
+dependencies = [
+ "alloy-genesis",
+ "clap",
+ "eyre",
+ "reth-chainspec",
+ "reth-cli",
+ "serde_json",
+ "shellexpand",
+]
 
 [[package]]
 name = "reth-ethereum-consensus"
@@ -7432,6 +7448,7 @@ dependencies = [
 name = "reth-fs-util"
 version = "1.0.1"
 dependencies = [
+ "serde",
  "serde_json",
  "thiserror",
 ]
@@ -7905,10 +7922,13 @@ dependencies = [
 name = "reth-optimism-cli"
 version = "1.0.1"
 dependencies = [
+ "alloy-genesis",
  "alloy-primitives",
  "clap",
  "eyre",
  "futures-util",
+ "reth-chainspec",
+ "reth-cli",
  "reth-cli-commands",
  "reth-config",
  "reth-consensus",
@@ -7929,6 +7949,8 @@ dependencies = [
  "reth-stages-types",
  "reth-static-file",
  "reth-static-file-types",
+ "serde_json",
+ "shellexpand",
  "tokio",
  "tracing",
 ]
@@ -7977,16 +7999,22 @@ name = "reth-optimism-rpc"
 version = "1.0.1"
 dependencies = [
  "alloy-primitives",
+ "jsonrpsee",
  "parking_lot 0.12.3",
  "reth-chainspec",
  "reth-errors",
  "reth-evm",
+ "reth-evm-optimism",
+ "reth-primitives",
  "reth-provider",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
+ "reth-rpc-server-types",
  "reth-rpc-types",
  "reth-tasks",
  "reth-transaction-pool",
+ "revm",
+ "thiserror",
  "tokio",
 ]
 

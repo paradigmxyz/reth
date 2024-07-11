@@ -317,7 +317,7 @@ where
         // First unwind the db tables, until the unwind_to block number. use the walker to unwind
         // HeaderNumbers based on the index in CanonicalHeaders
         provider.unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
-            input.unwind_to,
+            input.unwind_to..,
         )?;
         provider.unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
         provider.unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
