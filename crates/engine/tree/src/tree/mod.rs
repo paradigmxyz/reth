@@ -45,7 +45,7 @@ mod memory_overlay;
 pub use memory_overlay::MemoryOverlayStateProvider;
 
 /// Maximum number of blocks to be kept in memory without triggering persistence.
-const PERSISTENCE_THRESHOLD: u64 = 512;
+const PERSISTENCE_THRESHOLD: u64 = 256;
 
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug)]
