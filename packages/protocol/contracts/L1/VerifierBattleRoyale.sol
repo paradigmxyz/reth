@@ -29,12 +29,13 @@ contract VerifierBattleRoyale is EssentialContract {
     /// @dev Struct representing transition to be proven.
     struct ProofData {
         IVerifier verifier;
-        TaikoData.Transition transition;
+        TaikoData.Transition transition; // This differs from BasedOperator ! Mainly because of
+            // transition comparison for the battle!!
         bytes proof;
     }
 
     struct ProofBatch {
-        TaikoData.BlockMetadata _block;
+        TaikoData.BlockMetadata blockMetadata;
         ProofData[] proofs;
         address prover;
     }
@@ -67,8 +68,8 @@ contract VerifierBattleRoyale is EssentialContract {
             IVerifier verifier = proofBatch.proofs[i].verifier;
             require(verifierRegistry.isVerifier(address(verifier)), "invalid verifier");
             verifier.verifyProof(
-                proofBatch._block,
                 proofBatch.proofs[i].transition,
+                keccak256(abi.encode(proofBatch.blockMetadata)),
                 proofBatch.prover,
                 proofBatch.proofs[i].proof
             );

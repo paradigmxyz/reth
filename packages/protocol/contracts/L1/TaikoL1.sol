@@ -26,8 +26,8 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
     /// @notice Initializes the rollup.
     /// @param _addressManager The {AddressManager} address.
     /// @param _genesisBlockHash The block hash of the genesis block.
-    function init(address _addressManager, bytes32 _genesisBlockHash) external initializer {
-        __Essential_init(_addressManager);
+    function init(address _owner, address _addressManager, bytes32 _genesisBlockHash) external initializer {
+        __Essential_init(_owner, _addressManager);
 
         TaikoData.Config memory config = getConfig();
         require(isConfigValid(config), "invalid config");
@@ -57,7 +57,7 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         payable
         nonReentrant
         whenNotPaused
-        onlyFromNamed("operator")
+        //onlyFromNamed("operator")
         returns (TaikoData.BlockMetadata memory _block)
     {
         TaikoData.Config memory config = getConfig();

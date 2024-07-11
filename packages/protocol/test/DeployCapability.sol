@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: MIT
-//  _____     _ _         _         _
-// |_   _|_ _(_) |_____  | |   __ _| |__ ___
-//   | |/ _` | | / / _ \ | |__/ _` | '_ (_-<
-//   |_|\__,_|_|_\_\___/ |____\__,_|_.__/__/
 
-pragma solidity ^0.8.20;
+pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
@@ -13,7 +9,6 @@ import "forge-std/console2.sol";
 import "forge-std/Script.sol";
 
 import "../contracts/common/AddressManager.sol";
-import "../contracts/libs/LibDeploy.sol";
 
 /// @title DeployCapability
 abstract contract DeployCapability is Script {
@@ -23,13 +18,12 @@ abstract contract DeployCapability is Script {
         string memory name,
         address impl,
         bytes memory data,
-        address registerTo,
-        address owner
+        address registerTo
     )
         internal
         returns (address proxy)
     {
-        proxy = LibDeploy.deployERC1967Proxy(impl, owner, data);
+        proxy = address(new ERC1967Proxy(impl, data));
 
         if (registerTo != address(0)) {
             AddressManager(registerTo).setAddress(
@@ -58,7 +52,7 @@ abstract contract DeployCapability is Script {
         internal
         returns (address proxy)
     {
-        return deployProxy(name, impl, data, address(0), address(0));
+        return deployProxy(name, impl, data, address(0));
     }
 
     function register(address registerTo, string memory name, address addr) internal {

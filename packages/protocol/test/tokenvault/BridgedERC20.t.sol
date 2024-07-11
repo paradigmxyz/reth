@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.24;
 
 import "../TaikoTest.sol";
 
@@ -12,7 +12,7 @@ contract TestBridgedERC20 is TaikoTest {
         manager = deployProxy({
             name: "address_manager",
             impl: address(new AddressManager()),
-            data: bytes.concat(AddressManager.init.selector)
+            data: abi.encodeCall(AddressManager.init, (address(0)))
         });
 
         register(manager, "erc20_vault", vault);
@@ -23,15 +23,6 @@ contract TestBridgedERC20 is TaikoTest {
 
         vm.expectRevert();
         btoken.changeMigrationStatus(Emma, false);
-
-        vm.startPrank(owner);
-        btoken.changeMigrationStatus(Emma, false);
-        btoken.changeMigrationStatus(address(0), false);
-        btoken.changeMigrationStatus(address(0), true);
-        btoken.changeMigrationStatus(Emma, true);
-        vm.expectRevert();
-        btoken.changeMigrationStatus(Emma, true);
-        vm.stopPrank();
 
         vm.startPrank(vault);
         btoken.changeMigrationStatus(Frank, false);
@@ -44,22 +35,23 @@ contract TestBridgedERC20 is TaikoTest {
         vm.stopPrank();
     }
 
-    function test_20Vault_migration___only_vault_can_min_burn_when_migration_off() public {
+    function test_20Vault_migration___only_vault_can_min__but_cannot_burn_when_migration_off()
+        public
+    {
         BridgedERC20 btoken = deployBridgedToken("BAR");
         // only erc20_vault can brun and mint
-        vm.startPrank(vault);
+        vm.prank(vault, vault);
         btoken.mint(Bob, 1000);
-        btoken.burn(Bob, 600);
-        assertEq(btoken.balanceOf(Bob), 400);
+        //Vault cannot burn only if it owns the tokens
+        vm.expectRevert();
+        vm.prank(Bob, Bob);
+        btoken.burn(600);
+        assertEq(btoken.balanceOf(Bob), 1000);
         vm.stopPrank();
 
-        // Owner cannot burn/mint
-        vm.startPrank(owner);
-        vm.expectRevert();
+        // Owner can burn/mint
+        vm.prank(owner, owner);
         btoken.mint(Bob, 1000);
-        vm.expectRevert();
-        btoken.burn(Bob, 100);
-        vm.stopPrank();
     }
 
     function test_20Vault_migration__old_to_new() public {
@@ -88,9 +80,9 @@ contract TestBridgedERC20 is TaikoTest {
         vm.expectRevert();
         oldToken.mint(Bob, 10);
 
-        // 2. burning can be done by anyone
-        vm.prank(randAddress());
-        oldToken.burn(Bob, 10);
+        // but can be done by the token owner - if migrating out phase
+        vm.prank(Bob);
+        oldToken.burn(10);
         assertEq(oldToken.balanceOf(Bob), 90);
         assertEq(newToken.balanceOf(Bob), 210);
 
@@ -101,25 +93,31 @@ contract TestBridgedERC20 is TaikoTest {
         newToken.mint(Bob, 10);
 
         vm.prank(owner);
-        vm.expectRevert();
         newToken.mint(Bob, 10);
 
         vm.prank(vault);
         newToken.mint(Bob, 15);
-        assertEq(newToken.balanceOf(Bob), 225);
+        assertEq(newToken.balanceOf(Bob), 235);
 
-        // 2. Nobody can burn except the vault
+        // Vault can only burn if it owns the tokens
+        vm.prank(vault);
+        vm.expectRevert();
+        newToken.burn(25);
+        assertEq(newToken.balanceOf(Bob), 235);
+
+        // Imitate current bridge-back operation, as Bob gave approval (for bridging back) and then
+        // ERC20Vault does the "transfer and burn"
         vm.prank(Bob);
-        vm.expectRevert();
-        newToken.burn(Bob, 10);
+        newToken.approve(vault, 25);
 
-        vm.prank(owner);
-        vm.expectRevert();
-        newToken.burn(Bob, 10);
+        // Following the "transfer and burn" pattern
+        vm.prank(vault);
+        newToken.transferFrom(Bob, vault, 25);
 
         vm.prank(vault);
-        newToken.burn(Bob, 25);
-        assertEq(newToken.balanceOf(Bob), 200);
+        newToken.burn(25);
+
+        assertEq(newToken.balanceOf(Bob), 210);
     }
 
     function deployBridgedToken(string memory name) internal returns (BridgedERC20) {
@@ -130,12 +128,11 @@ contract TestBridgedERC20 is TaikoTest {
             deployProxy({
                 name: "bridged_token1",
                 impl: address(new BridgedERC20()),
-                data: bytes.concat(
-                    BridgedERC20.init.selector,
-                    abi.encode(address(manager), srcToken, srcChainId, srcDecimals, name, name)
+                data: abi.encodeCall(
+                    BridgedERC20.init,
+                    (owner, address(manager), srcToken, srcChainId, srcDecimals, name, name)
                 ),
-                registerTo: manager,
-                owner: owner
+                registerTo: manager
             })
         );
     }

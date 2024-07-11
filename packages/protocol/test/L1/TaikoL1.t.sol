@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import "./TaikoL1TestBase.sol";
 
 contract TaikoL1Test is TaikoL1TestBase {
-    function deployTaikoL1() internal override returns (TaikoL1) {
+    function deployTaikoL1(address addressManager) internal override returns (TaikoL1) {
         return
             TaikoL1(payable(deployProxy({ name: "taiko", impl: address(new TaikoL1()), data: "" })));
     }
@@ -85,5 +85,9 @@ contract TaikoL1Test is TaikoL1TestBase {
         vm.warp(block.timestamp + 129 * 12);
 
         proposeBlock(Alice, Alice, meta, TaikoErrors.L1_INVALID_L1_STATE_BLOCK.selector);
+    }
+
+    function test_print_genesis_hash() external pure {
+        console2.logBytes32(keccak256("GENESIS_BLOCK_HASH"));
     }
 }
