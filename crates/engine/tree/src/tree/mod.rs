@@ -369,7 +369,7 @@ where
                 }
             }
 
-            if self.should_persist() && !self.persistence_state.in_progress {
+            if self.should_persist() && !self.persistence_state.in_progress() {
                 let blocks_to_persist = self.get_blocks_to_persist();
                 let (tx, rx) = oneshot::channel();
                 self.persistence.save_blocks(blocks_to_persist, tx);
@@ -848,13 +848,18 @@ where
 /// The state of the persistence task.
 #[derive(Default, Debug)]
 struct PersistenceState {
-    /// True if there is a persistence operation in progress.
-    in_progress: bool,
-    /// Hash of the last block persisted.
+    /// Hash of the last block persisted. A None value means no persistance task
+    /// has run yet.
     last_persisted_hash: Option<B256>,
     /// Receiver end of channel where the result of the persistence task will be
-    /// sent when done.
+    /// sent when done. A None value means there's no persistance task in progress.
     rx: Option<oneshot::Receiver<B256>>,
     /// The last persisted block number.
     last_persisted_block_number: u64,
+}
+
+impl PersistenceState {
+    fn in_progress(&self) -> bool {
+        self.rx.is_some()
+    }
 }
