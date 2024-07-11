@@ -379,7 +379,8 @@ where
             if self.persistence_state.in_progress() {
                 let rx = self
                     .persistence_state
-                    .receiver()
+                    .rx
+                    .as_mut()
                     .expect("if a persistence task is in progress Receiver must be Some");
                 // Check if persistence has completed
                 if let Ok(last_persisted_block_hash) = rx.try_recv() {
@@ -876,10 +877,5 @@ impl PersistenceState {
         self.rx = None;
         self.last_persisted_block_number = last_persisted_block_number;
         self.last_persisted_block_hash = Some(last_persisted_block_hash);
-    }
-
-    /// Returns an usable receiver if a persistence task is in progress.
-    fn receiver(&mut self) -> Option<&mut oneshot::Receiver<B256>> {
-        self.rx.as_mut()
     }
 }
