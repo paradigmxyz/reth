@@ -90,7 +90,7 @@ where
     /// database table.
     fn write_headers<DB: Database>(
         &mut self,
-        tx: &<DB as Database>::TXMut,
+        provider: &DatabaseProviderRW<DB>,
         static_file_provider: StaticFileProvider,
     ) -> Result<BlockNumber, StageError> {
         let total_headers = self.header_collector.len();
@@ -143,7 +143,8 @@ where
 
         info!(target: "sync::stages::headers", total = total_headers, "Writing headers hash index");
 
-        let mut cursor_header_numbers = tx.cursor_write::<RawTable<tables::HeaderNumbers>>()?;
+        let mut cursor_header_numbers =
+            provider.tx_ref().cursor_write::<RawTable<tables::HeaderNumbers>>()?;
         let mut first_sync = false;
 
         // If we only have the genesis block hash, then we are at first sync, and we can remove it,
@@ -281,7 +282,7 @@ where
         // Write the headers and related tables to DB from ETL space
         let to_be_processed = self.hash_collector.len() as u64;
         let last_header_number =
-            self.write_headers::<DB>(provider.tx_ref(), provider.static_file_provider().clone())?;
+            self.write_headers(provider, provider.static_file_provider().clone())?;
 
         // Clear ETL collectors
         self.hash_collector.clear();
