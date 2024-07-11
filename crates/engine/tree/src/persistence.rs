@@ -142,7 +142,7 @@ where
         provider: ProviderFactory<DB>,
         static_file_handle: StaticFileServiceHandle,
         pruner: Pruner<DB, ProviderFactory<DB>>,
-    ) -> PersistenceHandle {
+    ) -> PersistenceHandleImpl {
         let (tx, rx) = std::sync::mpsc::channel();
         let service = Self::new(provider, rx, static_file_handle, pruner);
         std::thread::Builder::new()
@@ -150,7 +150,7 @@ where
             .spawn(|| service.run())
             .unwrap();
 
-        PersistenceHandle::new(tx)
+        PersistenceHandleImpl::new(tx)
     }
 }
 
@@ -224,25 +224,36 @@ pub enum PersistenceAction {
     PruneBefore((u64, oneshot::Sender<PruneProgress>)),
 }
 
+#[async_trait::async_trait]
+pub trait PersistenceHandle: Send + Sync {
+    fn send_action(&self, action: PersistenceAction) -> Result<(), SendError<PersistenceAction>>;
+
+    fn save_blocks(&self, blocks: Vec<ExecutedBlock>, tx: oneshot::Sender<B256>);
+
+    async fn remove_blocks_above(&self, block_num: u64) -> B256;
+
+    async fn prune_before(&self, block_num: u64) -> PruneProgress;
+}
+
 /// A handle to the persistence service
 #[derive(Debug)]
-pub struct PersistenceHandle {
+pub struct PersistenceHandleImpl {
     /// The channel used to communicate with the persistence service
     sender: Sender<PersistenceAction>,
 }
 
-impl PersistenceHandle {
+impl PersistenceHandleImpl {
     /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
     pub const fn new(sender: Sender<PersistenceAction>) -> Self {
         Self { sender }
     }
+}
 
+#[async_trait::async_trait]
+impl PersistenceHandle for PersistenceHandleImpl {
     /// Sends a specific [`PersistenceAction`] in the contained channel. The caller is responsible
     /// for creating any channels for the given action.
-    pub fn send_action(
-        &self,
-        action: PersistenceAction,
-    ) -> Result<(), SendError<PersistenceAction>> {
+    fn send_action(&self, action: PersistenceAction) -> Result<(), SendError<PersistenceAction>> {
         self.sender.send(action)
     }
 
@@ -252,7 +263,7 @@ impl PersistenceHandle {
     /// This returns the latest hash that has been saved, allowing removal of that block and any
     /// previous blocks from in-memory data structures. This value is returned in the receiver end
     /// of the sender argument.
-    pub fn save_blocks(&self, blocks: Vec<ExecutedBlock>, tx: oneshot::Sender<B256>) {
+    fn save_blocks(&self, blocks: Vec<ExecutedBlock>, tx: oneshot::Sender<B256>) {
         if blocks.is_empty() {
             let _ = tx.send(B256::default());
             return;
@@ -264,7 +275,7 @@ impl PersistenceHandle {
 
     /// Tells the persistence service to remove blocks above a certain block number. The removed
     /// blocks are returned by the service.
-    pub async fn remove_blocks_above(&self, block_num: u64) -> B256 {
+    async fn remove_blocks_above(&self, block_num: u64) -> B256 {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(PersistenceAction::RemoveBlocksAbove((block_num, tx)))
@@ -274,7 +285,7 @@ impl PersistenceHandle {
 
     /// Tells the persistence service to remove block data before the given hash, according to the
     /// configured prune config.
-    pub async fn prune_before(&self, block_num: u64) -> PruneProgress {
+    async fn prune_before(&self, block_num: u64) -> PruneProgress {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(PersistenceAction::PruneBefore((block_num, tx)))
@@ -286,19 +297,16 @@ impl PersistenceHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::get_executed_block_with_number;
     use reth_chainspec::MAINNET;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_exex_types::FinishedExExHeight;
-    use reth_primitives::{
-        Address, Block, Receipts, Requests, SealedBlockWithSenders, TransactionSigned, B256,
-    };
-    use reth_provider::{providers::StaticFileProvider, ExecutionOutcome, ProviderFactory};
+    use reth_primitives::B256;
+    use reth_provider::{providers::StaticFileProvider, ProviderFactory};
     use reth_prune::Pruner;
-    use reth_trie::{updates::TrieUpdates, HashedPostState};
-    use revm::db::BundleState;
-    use std::sync::{mpsc::channel, Arc};
+    use std::sync::mpsc::channel;
 
-    fn default_persistence_handle() -> PersistenceHandle {
+    fn default_persistence_handle() -> PersistenceHandleImpl {
         let db = create_test_rw_db();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
         let provider = ProviderFactory::new(
@@ -340,29 +348,10 @@ mod tests {
     #[tokio::test]
     async fn test_save_blocks_single_block() {
         let persistence_handle = default_persistence_handle();
+        let block_number = 5;
+        let executed = get_executed_block_with_number(block_number);
+        let block_hash = executed.block().hash();
 
-        let mut block = Block::default();
-        let sender = Address::random();
-        let tx = TransactionSigned::default();
-        block.body.push(tx);
-        let block_hash = block.hash_slow();
-        let block_number = block.number;
-        let sealed = block.seal_slow();
-        let sealed_with_senders =
-            SealedBlockWithSenders::new(sealed.clone(), vec![sender]).unwrap();
-
-        let executed = ExecutedBlock::new(
-            Arc::new(sealed),
-            Arc::new(sealed_with_senders.senders),
-            Arc::new(ExecutionOutcome::new(
-                BundleState::default(),
-                Receipts { receipt_vec: vec![] },
-                block_number,
-                vec![Requests::default()],
-            )),
-            Arc::new(HashedPostState::default()),
-            Arc::new(TrieUpdates::default()),
-        );
         let blocks = vec![executed];
         let (tx, rx) = oneshot::channel();
 

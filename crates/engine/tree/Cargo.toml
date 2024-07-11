@@ -42,6 +42,7 @@ reth-trie.workspace = true
 revm.workspace = true
 
 # common
+async-trait.workspace = true
 futures.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
 tokio-stream = { workspace = true, features = ["sync"] }
@@ -63,6 +64,8 @@ reth-tracing = { workspace = true, optional = true }
 [dev-dependencies]
 # reth
 reth-db = { workspace = true, features = ["test-utils"] }
+reth-ethereum-engine-primitives.workspace = true
+reth-evm = { workspace = true, features = ["test-utils"] }
 reth-exex-types.workspace = true
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-prune.workspace = true

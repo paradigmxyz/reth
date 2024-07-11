@@ -48,7 +48,7 @@ pub use memory_overlay::MemoryOverlayStateProvider;
 const PERSISTENCE_THRESHOLD: u64 = 256;
 
 /// Represents an executed block stored in-memory.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutedBlock {
     block: Arc<SealedBlock>,
     senders: Arc<Vec<Address>>,
@@ -252,7 +252,6 @@ pub enum TreeAction {
     MakeCanonical(B256),
 }
 
-#[derive(Debug)]
 pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     provider: P,
     executor_provider: E,
@@ -261,7 +260,7 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     state: EngineApiTreeState,
     incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
     outgoing: UnboundedSender<EngineApiEvent>,
-    persistence: PersistenceHandle,
+    persistence: Arc<dyn PersistenceHandle>,
     persistence_state: PersistenceState,
     /// (tmp) The flag indicating whether the pipeline is active.
     is_pipeline_active: bool,
@@ -283,7 +282,7 @@ where
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         outgoing: UnboundedSender<EngineApiEvent>,
         state: EngineApiTreeState,
-        persistence: PersistenceHandle,
+        persistence: Arc<dyn PersistenceHandle>,
     ) -> Self {
         Self {
             provider,
@@ -308,7 +307,7 @@ where
         payload_validator: ExecutionPayloadValidator,
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         state: EngineApiTreeState,
-        persistence: PersistenceHandle,
+        persistence: Arc<dyn PersistenceHandle>,
     ) -> UnboundedSender<EngineApiEvent> {
         let (outgoing, rx) = tokio::sync::mpsc::unbounded_channel();
         let task = Self::new(
@@ -876,5 +875,135 @@ impl PersistenceState {
         self.rx = None;
         self.last_persisted_block_number = last_persisted_block_number;
         self.last_persisted_block_hash = last_persisted_block_hash;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{persistence::PersistenceAction, test_utils::get_executed_blocks};
+
+    use reth_beacon_consensus::EthBeaconConsensus;
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_evm::test_utils::MockExecutorProvider;
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_prune::PruneProgress;
+    use std::sync::{
+        mpsc::{channel, SendError},
+        Mutex,
+    };
+    use tokio::sync::mpsc::unbounded_channel;
+
+    struct PersistenceHandleMock {
+        blocks_sender: Arc<Mutex<Option<oneshot::Sender<Vec<ExecutedBlock>>>>>,
+    }
+
+    impl PersistenceHandleMock {
+        fn new() -> (Self, oneshot::Receiver<Vec<ExecutedBlock>>) {
+            let (sender, receiver) = oneshot::channel();
+            (Self { blocks_sender: Arc::new(Mutex::new(Some(sender))) }, receiver)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl PersistenceHandle for PersistenceHandleMock {
+        fn send_action(
+            &self,
+            action: PersistenceAction,
+        ) -> Result<(), SendError<PersistenceAction>> {
+            Ok(())
+        }
+
+        fn save_blocks(&self, blocks: Vec<ExecutedBlock>, tx: oneshot::Sender<B256>) {
+            if let Some(sender) = self.blocks_sender.lock().unwrap().take() {
+                let _ = sender.send(blocks);
+            }
+
+            // Mock implementation: send a dummy B256 value
+            let _ = tx.send(B256::default());
+        }
+
+        async fn remove_blocks_above(&self, block_num: u64) -> B256 {
+            B256::default()
+        }
+
+        async fn prune_before(&self, block_num: u64) -> PruneProgress {
+            PruneProgress::Finished
+        }
+    }
+
+    fn get_default_tree(
+        persistence_handle: PersistenceHandleMock,
+        tree_state: TreeState,
+    ) -> EngineApiTreeHandlerImpl<MockEthProvider, MockExecutorProvider, EthEngineTypes> {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(MAINNET.genesis.clone())
+                .paris_activated()
+                .build(),
+        );
+        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
+
+        let provider = MockEthProvider::default();
+        let executor_factory = MockExecutorProvider::default();
+        executor_factory.extend(vec![ExecutionOutcome::default()]);
+
+        let payload_validator = ExecutionPayloadValidator::new(chain_spec);
+
+        let (_to_tree_tx, to_tree_rx) = channel();
+        let (from_tree_tx, from_tree_rx) = unbounded_channel();
+
+        let engine_api_tree_state = EngineApiTreeState {
+            invalid_headers: InvalidHeaderCache::new(10),
+            buffer: BlockBuffer::new(10),
+            tree_state,
+            forkchoice_state_tracker: ForkchoiceStateTracker::default(),
+        };
+
+        EngineApiTreeHandlerImpl::new(
+            provider,
+            executor_factory,
+            consensus,
+            payload_validator,
+            to_tree_rx,
+            from_tree_tx,
+            engine_api_tree_state,
+            Arc::new(persistence_handle),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_tree_persist_blocks() {
+        // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
+        // persistence task.
+        let mut blocks = get_executed_blocks(PERSISTENCE_THRESHOLD + 1);
+
+        let mut blocks_by_hash = HashMap::new();
+        let mut blocks_by_number = BTreeMap::new();
+        for block in &blocks {
+            blocks_by_hash.insert(block.block().hash(), block.clone());
+            blocks_by_number
+                .entry(block.block().number)
+                .or_insert_with(Vec::new)
+                .push(block.clone());
+        }
+        let tree_state = TreeState { blocks_by_hash, blocks_by_number };
+
+        let (persistence_handle, blocks_receiver) = PersistenceHandleMock::new();
+
+        let tree = get_default_tree(persistence_handle, tree_state);
+        std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| tree.run()).unwrap();
+
+        let saved_blocks = tokio::time::timeout(std::time::Duration::from_secs(5), blocks_receiver)
+            .await
+            .expect("Timeout waiting for blocks to be saved")
+            .expect("Failed to receive saved blocks");
+
+        // only PERSISTENCE_THRESHOLD will be persisted
+        blocks.pop();
+        assert_eq!(saved_blocks, blocks);
+        assert_eq!(saved_blocks.len() as u64, PERSISTENCE_THRESHOLD);
     }
 }

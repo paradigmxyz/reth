@@ -23,12 +23,11 @@ use crate::{
 ///
 /// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
 /// blocking file operations in an endless loop.
-#[derive(Debug)]
 pub struct StaticFileService<DB> {
     /// The db / static file provider to use
     provider: ProviderFactory<DB>,
     /// Handle for the database service
-    database_handle: PersistenceHandle,
+    database_handle: Arc<dyn PersistenceHandle>,
     /// Incoming requests to write static files
     incoming: Receiver<StaticFileAction>,
     /// The pruning configuration
