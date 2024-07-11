@@ -1,15 +1,13 @@
-use std::sync::Arc;
-
-use crate::{providers::StaticFileProviderRWRefMut, DatabaseProviderRW, ProviderFactory};
+use crate::{providers::StaticFileProviderRWRefMut, DatabaseProviderRW};
 use derive_more::Display;
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::DbCursorRO,
     tables,
     transaction::{DbTx, DbTxMut},
     Database, DatabaseError,
 };
 use reth_errors::{ProviderError, ProviderResult};
-use reth_primitives::{Block, BlockNumber, Receipt, StaticFileSegment};
+use reth_primitives::BlockNumber;
 use reth_storage_api::ReceiptWriter;
 use sf::SfWriter;
 use thiserror;
@@ -35,7 +33,6 @@ enum StorageError {
     ProviderError(#[from] ProviderError),
 }
 
-/// 
 #[derive(Debug)]
 pub struct StorageWriter<'a, 'b, DB: Database> {
     db: Option<&'a DatabaseProviderRW<DB>>,
@@ -90,6 +87,7 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
         let mut storage_type = if self.db().prune_modes_ref().has_receipts_pruning() {
             StorageType::Database(self.db().tx_ref().cursor_write::<tables::Receipts>()?)
         } else {
+            // TODO: error handle
             self.ensure_sf().unwrap();
             StorageType::StaticFile(self.sf())
         };

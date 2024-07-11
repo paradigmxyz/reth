@@ -1,8 +1,7 @@
-use crate::providers::static_file::metrics::StaticFileProviderOperation;
-
 use super::{
     manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics, StaticFileProvider,
 };
+use crate::providers::static_file::metrics::StaticFileProviderOperation;
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
 use reth_db_api::models::CompactU256;
@@ -12,7 +11,6 @@ use reth_primitives::{
     BlockHash, BlockNumber, Header, Receipt, StaticFileSegment, TransactionSignedNoHash, TxNumber,
     U256,
 };
-use reth_storage_api::ReceiptWriter;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     path::{Path, PathBuf},

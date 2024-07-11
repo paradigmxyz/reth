@@ -8,9 +8,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 pub use reth_execution_types::*;
-use reth_primitives::StaticFileSegment;
-use reth_storage_api::ReceiptWriter;
-use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_storage_errors::provider::ProviderResult;
 pub use revm::db::states::OriginalValuesKnown;
 
 impl StateWriter for ExecutionOutcome {

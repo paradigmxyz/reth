@@ -1,14 +1,9 @@
-use std::marker::PhantomData;
-
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
-    table::Table,
     tables,
-    transaction::DbTxMut,
-    Database,
 };
 use reth_errors::ProviderResult;
-use reth_primitives::{Block, BlockNumber, Receipt, TxNumber};
+use reth_primitives::{BlockNumber, Receipt, TxNumber};
 use reth_storage_api::ReceiptWriter;
 
 pub(crate) struct DatabaseWriter<'a, W>(pub &'a mut W);
