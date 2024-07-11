@@ -15,12 +15,12 @@ pub struct PrunerBuilder {
     block_interval: usize,
     /// Pruning configuration for every part of the data that can be pruned.
     segments: PruneModes,
-    /// The number of blocks that can be re-orged.
-    max_reorg_depth: usize,
+    /// The maximum number of blocks that can be pruned per run.
+    prune_max_blocks_per_run: usize,
     /// The delete limit for pruner, per block. In the actual pruner run it will be multiplied by
     /// the amount of blocks between pruner runs to account for the difference in amount of new
     /// data coming in.
-    prune_delete_limit: usize,
+    delete_limit_per_block: usize,
     /// Time a pruner job can run before timing out.
     timeout: Option<Duration>,
     /// The finished height of all `ExEx`'s.
@@ -51,14 +51,14 @@ impl PrunerBuilder {
     }
 
     /// Sets the number of blocks that can be re-orged.
-    pub const fn max_reorg_depth(mut self, max_reorg_depth: usize) -> Self {
-        self.max_reorg_depth = max_reorg_depth;
+    pub const fn prune_max_blocks_per_run(mut self, prune_max_blocks_per_run: usize) -> Self {
+        self.prune_max_blocks_per_run = prune_max_blocks_per_run;
         self
     }
 
     /// Sets the delete limit for pruner, per block.
-    pub const fn prune_delete_limit(mut self, prune_delete_limit: usize) -> Self {
-        self.prune_delete_limit = prune_delete_limit;
+    pub const fn delete_limit_per_block(mut self, delete_limit_per_block: usize) -> Self {
+        self.delete_limit_per_block = delete_limit_per_block;
         self
     }
 
@@ -80,16 +80,33 @@ impl PrunerBuilder {
         self
     }
 
-    /// Builds a [Pruner] from the current configuration.
-    pub fn build<DB: Database>(self, provider_factory: ProviderFactory<DB>) -> Pruner<DB> {
+    /// Builds a [Pruner] from the current configuration with the given provider factory.
+    pub fn build_with_provider_factory<DB: Database>(
+        self,
+        provider_factory: ProviderFactory<DB>,
+    ) -> Pruner<DB, ProviderFactory<DB>> {
         let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
 
-        Pruner::new(
+        Pruner::<_, ProviderFactory<DB>>::new(
             provider_factory,
             segments.into_vec(),
             self.block_interval,
-            self.prune_delete_limit,
-            self.max_reorg_depth,
+            self.delete_limit_per_block,
+            self.prune_max_blocks_per_run,
+            self.timeout,
+            self.finished_exex_height,
+        )
+    }
+
+    /// Builds a [Pruner] from the current configuration.
+    pub fn build<DB: Database>(self) -> Pruner<DB, ()> {
+        let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
+
+        Pruner::<_, ()>::new(
+            segments.into_vec(),
+            self.block_interval,
+            self.delete_limit_per_block,
+            self.prune_max_blocks_per_run,
             self.timeout,
             self.finished_exex_height,
         )
@@ -101,8 +118,8 @@ impl Default for PrunerBuilder {
         Self {
             block_interval: 5,
             segments: PruneModes::none(),
-            max_reorg_depth: 64,
-            prune_delete_limit: MAINNET.prune_delete_limit,
+            prune_max_blocks_per_run: 64,
+            delete_limit_per_block: MAINNET.prune_delete_limit,
             timeout: None,
             finished_exex_height: watch::channel(FinishedExExHeight::NoExExs).1,
         }

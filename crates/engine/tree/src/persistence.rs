@@ -34,7 +34,7 @@ pub struct Persistence<DB> {
     /// Handle for the static file service.
     static_file_handle: StaticFileServiceHandle,
     /// The pruner
-    pruner: Pruner<DB>,
+    pruner: Pruner<DB, ProviderFactory<DB>>,
 }
 
 impl<DB: Database> Persistence<DB> {
@@ -43,7 +43,7 @@ impl<DB: Database> Persistence<DB> {
         provider: ProviderFactory<DB>,
         incoming: Receiver<PersistenceAction>,
         static_file_handle: StaticFileServiceHandle,
-        pruner: Pruner<DB>,
+        pruner: Pruner<DB, ProviderFactory<DB>>,
     ) -> Self {
         Self { provider, incoming, static_file_handle, pruner }
     }
@@ -145,7 +145,7 @@ where
     fn spawn_new(
         provider: ProviderFactory<DB>,
         static_file_handle: StaticFileServiceHandle,
-        pruner: Pruner<DB>,
+        pruner: Pruner<DB, ProviderFactory<DB>>,
     ) -> PersistenceHandle {
         let (tx, rx) = std::sync::mpsc::channel();
         let service = Self::new(provider, rx, static_file_handle, pruner);
@@ -313,7 +313,15 @@ mod tests {
         let (finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
-        let pruner = Pruner::new(provider.clone(), vec![], 5, 0, 5, None, finished_exex_height_rx);
+        let pruner = Pruner::<_, ProviderFactory<_>>::new(
+            provider.clone(),
+            vec![],
+            5,
+            0,
+            5,
+            None,
+            finished_exex_height_rx,
+        );
 
         let (static_file_sender, _static_file_receiver) = channel();
         let static_file_handle = StaticFileServiceHandle::new(static_file_sender);

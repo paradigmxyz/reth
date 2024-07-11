@@ -329,7 +329,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     /// Returns an initialized [`PrunerBuilder`] based on the configured [`PruneConfig`]
     pub fn pruner_builder(&self) -> PrunerBuilder {
         PrunerBuilder::new(self.prune_config().unwrap_or_default())
-            .prune_delete_limit(self.chain_spec().prune_delete_limit)
+            .delete_limit_per_block(self.chain_spec().prune_delete_limit)
             .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
     }
 
