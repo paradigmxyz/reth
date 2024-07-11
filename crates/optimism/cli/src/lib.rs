@@ -7,8 +7,6 @@
 )]
 #![cfg_attr(all(not(test), feature = "optimism"), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
 
 /// Optimism chain specification parser.
 pub mod chainspec;
@@ -126,11 +124,11 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     ///
     /// ```no_run
     /// use reth::cli::Cli;
-    /// use reth_node_ethereum::EthereumNode;
+    /// use reth_node_optimism::OptimismNode;
     ///
     /// Cli::parse_args()
     ///     .run(|builder, _| async move {
-    ///         let handle = builder.launch_node(EthereumNode::default()).await?;
+    ///         let handle = builder.launch_node(OptimismNode::default()).await?;
     ///
     ///         handle.wait_for_node_exit().await
     ///     })

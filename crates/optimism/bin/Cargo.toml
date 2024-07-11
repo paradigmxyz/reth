@@ -11,13 +11,15 @@ exclude.workspace = true
 [dependencies]
 reth-node-builder.workspace = true
 reth-cli-util.workspace = true
-reth-node-optimism.workspace = true
 reth-optimism-cli.workspace = true
 reth-tracing.workspace = true
+reth-node-optimism = { workspace = true, optional = true, features = [
+    "optimism",
+] }
 clap = { workspace = true, features = ["derive", "env"] }
 
 [target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { version = "0.5.0", optional = true }
+tikv-jemallocator = { workspace = true, optional = true }
 
 [lints]
 workspace = true
@@ -33,6 +35,4 @@ default = ["jemalloc"]
 jemalloc = ["dep:tikv-jemallocator"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 
-optimism = [
-    "reth-optimism-cli/optimism",
-]
+
