@@ -2,6 +2,7 @@ use crate::{
     backfill::BackfillAction,
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
+    persistence::PersistenceHandle,
 };
 use reth_beacon_consensus::{
     BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated,
@@ -37,11 +38,14 @@ use std::{
     marker::PhantomData,
     sync::{mpsc::Receiver, Arc},
 };
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tracing::*;
 
 mod memory_overlay;
 pub use memory_overlay::MemoryOverlayStateProvider;
+
+/// Maximum number of blocks to be kept in memory without triggering persistence.
+const PERSISTENCE_THRESHOLD: u64 = 256;
 
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug)]
@@ -54,6 +58,16 @@ pub struct ExecutedBlock {
 }
 
 impl ExecutedBlock {
+    pub(crate) const fn new(
+        block: Arc<SealedBlock>,
+        senders: Arc<Vec<Address>>,
+        execution_output: Arc<ExecutionOutcome>,
+        hashed_state: Arc<HashedPostState>,
+        trie: Arc<TrieUpdates>,
+    ) -> Self {
+        Self { block, senders, execution_output, hashed_state, trie }
+    }
+
     /// Returns a reference to the executed block.
     pub(crate) fn block(&self) -> &SealedBlock {
         &self.block
@@ -120,6 +134,11 @@ impl TreeState {
             }
         }
     }
+
+    /// Returns the maximum block number stored.
+    pub(crate) fn max_block_number(&self) -> BlockNumber {
+        *self.blocks_by_number.last_key_value().unwrap_or((&BlockNumber::default(), &vec![])).0
+    }
 }
 
 /// Tracks the state of the engine api internals.
@@ -129,7 +148,7 @@ impl TreeState {
 pub struct EngineApiTreeState {
     /// Tracks the state of the blockchain tree.
     tree_state: TreeState,
-    /// Tracks the received forkchoice state updates received by the CL.
+    /// Tracks the forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// Buffer of detached blocks.
     buffer: BlockBuffer,
@@ -242,6 +261,8 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     state: EngineApiTreeState,
     incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
     outgoing: UnboundedSender<EngineApiEvent>,
+    persistence: PersistenceHandle,
+    persistence_state: PersistenceState,
     /// (tmp) The flag indicating whether the pipeline is active.
     is_pipeline_active: bool,
     _marker: PhantomData<T>,
@@ -262,6 +283,7 @@ where
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         outgoing: UnboundedSender<EngineApiEvent>,
         state: EngineApiTreeState,
+        persistence: PersistenceHandle,
     ) -> Self {
         Self {
             provider,
@@ -270,6 +292,8 @@ where
             payload_validator,
             incoming,
             outgoing,
+            persistence,
+            persistence_state: PersistenceState::default(),
             is_pipeline_active: false,
             state,
             _marker: PhantomData,
@@ -284,6 +308,7 @@ where
         payload_validator: ExecutionPayloadValidator,
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         state: EngineApiTreeState,
+        persistence: PersistenceHandle,
     ) -> UnboundedSender<EngineApiEvent> {
         let (outgoing, rx) = tokio::sync::mpsc::unbounded_channel();
         let task = Self::new(
@@ -294,6 +319,7 @@ where
             incoming,
             outgoing.clone(),
             state,
+            persistence,
         );
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
         outgoing
@@ -340,6 +366,71 @@ where
                             }
                         }
                     }
+                }
+            }
+
+            if self.should_persist() && !self.persistence_state.in_progress() {
+                let blocks_to_persist = self.get_blocks_to_persist();
+                let (tx, rx) = oneshot::channel();
+                self.persistence.save_blocks(blocks_to_persist, tx);
+                self.persistence_state.start(rx);
+            }
+
+            if self.persistence_state.in_progress() {
+                let rx = self
+                    .persistence_state
+                    .rx
+                    .as_mut()
+                    .expect("if a persistence task is in progress Receiver must be Some");
+                // Check if persistence has completed
+                if let Ok(last_persisted_block_hash) = rx.try_recv() {
+                    if let Some(block) =
+                        self.state.tree_state.block_by_hash(last_persisted_block_hash)
+                    {
+                        self.persistence_state.finish(last_persisted_block_hash, block.number);
+                        self.remove_persisted_blocks_from_memory();
+                    } else {
+                        error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Returns true if the canonical chain length minus the last persisted
+    /// block is more than the persistence threshold.
+    fn should_persist(&self) -> bool {
+        self.state.tree_state.max_block_number() -
+            self.persistence_state.last_persisted_block_number >
+            PERSISTENCE_THRESHOLD
+    }
+
+    fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
+        let start = self.persistence_state.last_persisted_block_number + 1;
+        let end = start + PERSISTENCE_THRESHOLD;
+
+        self.state
+            .tree_state
+            .blocks_by_number
+            .range(start..end)
+            .flat_map(|(_, blocks)| blocks.iter().cloned())
+            .collect()
+    }
+
+    fn remove_persisted_blocks_from_memory(&mut self) {
+        let keys_to_remove: Vec<BlockNumber> = self
+            .state
+            .tree_state
+            .blocks_by_number
+            .range(..=self.persistence_state.last_persisted_block_number)
+            .map(|(&k, _)| k)
+            .collect();
+
+        for key in keys_to_remove {
+            if let Some(blocks) = self.state.tree_state.blocks_by_number.remove(&key) {
+                // Remove corresponding blocks from blocks_by_hash
+                for block in blocks {
+                    self.state.tree_state.blocks_by_hash.remove(&block.block().hash());
                 }
             }
         }
@@ -753,5 +844,37 @@ where
         }
 
         todo!()
+    }
+}
+
+/// The state of the persistence task.
+#[derive(Default, Debug)]
+struct PersistenceState {
+    /// Hash of the last block persisted.
+    last_persisted_block_hash: B256,
+    /// Receiver end of channel where the result of the persistence task will be
+    /// sent when done. A None value means there's no persistence task in progress.
+    rx: Option<oneshot::Receiver<B256>>,
+    /// The last persisted block number.
+    last_persisted_block_number: u64,
+}
+
+impl PersistenceState {
+    /// Determines if there is a persistence task in progress by checking if the
+    /// receiver is set.
+    const fn in_progress(&self) -> bool {
+        self.rx.is_some()
+    }
+
+    /// Sets state for a started persistence task.
+    fn start(&mut self, rx: oneshot::Receiver<B256>) {
+        self.rx = Some(rx);
+    }
+
+    /// Sets state for a finished persistence task.
+    fn finish(&mut self, last_persisted_block_hash: B256, last_persisted_block_number: u64) {
+        self.rx = None;
+        self.last_persisted_block_number = last_persisted_block_number;
+        self.last_persisted_block_hash = last_persisted_block_hash;
     }
 }

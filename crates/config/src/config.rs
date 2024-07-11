@@ -71,6 +71,8 @@ pub struct StageConfig {
     pub sender_recovery: SenderRecoveryConfig,
     /// Execution stage configuration.
     pub execution: ExecutionConfig,
+    /// Prune stage configuration.
+    pub prune: PruneStageConfig,
     /// Account Hashing stage configuration.
     pub account_hashing: HashingConfig,
     /// Storage Hashing stage configuration.
@@ -225,6 +227,20 @@ impl From<ExecutionConfig> for ExecutionStageThresholds {
             max_cumulative_gas: config.max_cumulative_gas,
             max_duration: config.max_duration,
         }
+    }
+}
+
+/// Prune stage configuration.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(default)]
+pub struct PruneStageConfig {
+    /// The maximum number of entries to prune before committing progress to the database.
+    pub commit_threshold: usize,
+}
+
+impl Default for PruneStageConfig {
+    fn default() -> Self {
+        Self { commit_threshold: 1_000_000 }
     }
 }
 

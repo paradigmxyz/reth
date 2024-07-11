@@ -26,7 +26,7 @@ use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, B256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-    ExecutionOutcome,
+    ExecutionOutcome, ProviderFactory,
 };
 use reth_prune::Pruner;
 use reth_prune_types::PruneModes;
@@ -400,7 +400,7 @@ where
         let blockchain_provider =
             BlockchainProvider::with_latest(provider_factory.clone(), tree, latest);
 
-        let pruner = Pruner::new(
+        let pruner = Pruner::<_, ProviderFactory<_>>::new(
             provider_factory.clone(),
             vec![],
             5,
