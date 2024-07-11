@@ -41,7 +41,7 @@ impl<DB: fmt::Debug> fmt::Debug for PruneHook<DB> {
 impl<DB: Database + 'static> PruneHook<DB> {
     /// Create a new instance
     pub fn new(
-        pruner: Pruner<ProviderFactory<DB>, DB>,
+        pruner: Pruner<DB, ProviderFactory<DB>>,
         pruner_task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         Self {
@@ -155,9 +155,9 @@ impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
 #[derive(Debug)]
 enum PrunerState<DB> {
     /// Pruner is idle.
-    Idle(Option<Pruner<ProviderFactory<DB>, DB>>),
+    Idle(Option<Pruner<DB, ProviderFactory<DB>>>),
     /// Pruner is running and waiting for a response
-    Running(oneshot::Receiver<PrunerWithResult<ProviderFactory<DB>, DB>>),
+    Running(oneshot::Receiver<PrunerWithResult<DB, ProviderFactory<DB>>>),
 }
 
 #[derive(reth_metrics::Metrics)]

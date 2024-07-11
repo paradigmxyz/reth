@@ -84,10 +84,10 @@ impl PrunerBuilder {
     pub fn build_with_provider_factory<DB: Database>(
         self,
         provider_factory: ProviderFactory<DB>,
-    ) -> Pruner<ProviderFactory<DB>, DB> {
+    ) -> Pruner<DB, ProviderFactory<DB>> {
         let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
 
-        Pruner::<ProviderFactory<DB>, _>::new(
+        Pruner::<_, ProviderFactory<DB>>::new(
             provider_factory,
             segments.into_vec(),
             self.block_interval,
@@ -99,10 +99,10 @@ impl PrunerBuilder {
     }
 
     /// Builds a [Pruner] from the current configuration.
-    pub fn build<DB: Database>(self) -> Pruner<(), DB> {
+    pub fn build<DB: Database>(self) -> Pruner<DB, ()> {
         let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
 
-        Pruner::<(), _>::new(
+        Pruner::<_, ()>::new(
             segments.into_vec(),
             self.block_interval,
             self.delete_limit_per_block,

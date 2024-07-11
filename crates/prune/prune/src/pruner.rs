@@ -26,7 +26,7 @@ type PrunerStats = Vec<(PruneSegment, usize, PruneProgress)>;
 
 /// Pruning routine. Main pruning logic happens in [`Pruner::run`].
 #[derive(Debug)]
-pub struct Pruner<PF, DB> {
+pub struct Pruner<DB, PF> {
     /// Provider factory. If pruner is initialized without it, it will be set to `()`.
     provider_factory: PF,
     segments: Vec<Box<dyn Segment<DB>>>,
@@ -51,7 +51,7 @@ pub struct Pruner<PF, DB> {
     event_sender: EventSender<PrunerEvent>,
 }
 
-impl<DB> Pruner<(), DB> {
+impl<DB> Pruner<DB, ()> {
     /// Creates a new [Pruner] without a provider factory.
     pub fn new(
         segments: Vec<Box<dyn Segment<DB>>>,
@@ -76,7 +76,7 @@ impl<DB> Pruner<(), DB> {
     }
 }
 
-impl<DB: Database> Pruner<ProviderFactory<DB>, DB> {
+impl<DB: Database> Pruner<DB, ProviderFactory<DB>> {
     /// Crates a new pruner with the given provider factory.
     pub fn new(
         provider_factory: ProviderFactory<DB>,
@@ -102,7 +102,7 @@ impl<DB: Database> Pruner<ProviderFactory<DB>, DB> {
     }
 }
 
-impl<S, DB: Database> Pruner<S, DB> {
+impl<DB: Database, S> Pruner<DB, S> {
     /// Listen for events on the pruner.
     pub fn events(&self) -> EventStream<PrunerEvent> {
         self.event_sender.new_listener()
@@ -353,7 +353,7 @@ impl<S, DB: Database> Pruner<S, DB> {
     }
 }
 
-impl<DB: Database> Pruner<(), DB> {
+impl<DB: Database> Pruner<DB, ()> {
     /// Run the pruner with the given provider. This will only prune data up to the highest finished
     /// ExEx height, if there are no ExExes.
     ///
@@ -369,7 +369,7 @@ impl<DB: Database> Pruner<(), DB> {
     }
 }
 
-impl<DB: Database> Pruner<ProviderFactory<DB>, DB> {
+impl<DB: Database> Pruner<DB, ProviderFactory<DB>> {
     /// Run the pruner. This will only prune data up to the highest finished ExEx height, if there
     /// are no ExExes.
     ///
@@ -406,7 +406,7 @@ mod tests {
         let (finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
 
-        let mut pruner = Pruner::<ProviderFactory<_>, _>::new(
+        let mut pruner = Pruner::<_, ProviderFactory<_>>::new(
             provider_factory,
             vec![],
             5,

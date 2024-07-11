@@ -400,7 +400,7 @@ where
         let blockchain_provider =
             BlockchainProvider::with_latest(provider_factory.clone(), tree, latest);
 
-        let pruner = Pruner::<ProviderFactory<_>, _>::new(
+        let pruner = Pruner::<_, ProviderFactory<_>>::new(
             provider_factory.clone(),
             vec![],
             5,

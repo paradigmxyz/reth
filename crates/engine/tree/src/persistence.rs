@@ -34,7 +34,7 @@ pub struct Persistence<DB> {
     /// Handle for the static file service.
     static_file_handle: StaticFileServiceHandle,
     /// The pruner
-    pruner: Pruner<ProviderFactory<DB>, DB>,
+    pruner: Pruner<DB, ProviderFactory<DB>>,
 }
 
 impl<DB: Database> Persistence<DB> {
@@ -43,7 +43,7 @@ impl<DB: Database> Persistence<DB> {
         provider: ProviderFactory<DB>,
         incoming: Receiver<PersistenceAction>,
         static_file_handle: StaticFileServiceHandle,
-        pruner: Pruner<ProviderFactory<DB>, DB>,
+        pruner: Pruner<DB, ProviderFactory<DB>>,
     ) -> Self {
         Self { provider, incoming, static_file_handle, pruner }
     }
@@ -145,7 +145,7 @@ where
     fn spawn_new(
         provider: ProviderFactory<DB>,
         static_file_handle: StaticFileServiceHandle,
-        pruner: Pruner<ProviderFactory<DB>, DB>,
+        pruner: Pruner<DB, ProviderFactory<DB>>,
     ) -> PersistenceHandle {
         let (tx, rx) = std::sync::mpsc::channel();
         let service = Self::new(provider, rx, static_file_handle, pruner);
