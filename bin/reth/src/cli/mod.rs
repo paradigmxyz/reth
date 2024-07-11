@@ -20,7 +20,6 @@ use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
-use crate::commands::evm::EvmCommand;
 
 /// Re-export of the `reth_node_core` types specifically in the `cli` module.
 ///

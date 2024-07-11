@@ -1,29 +1,24 @@
+//! Main evm command for launching a evm tools
+
 use clap::Parser;
 use eyre::Result;
-use tracing::{debug, info};
+use tracing::info;
 use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
-use reth_db::{init_db, DatabaseEnv, tables, transaction::DbTx};
-use reth_primitives::{BlockNumber, Header};
 use std::sync::{Arc, Mutex};
-use std::path::{Path, PathBuf};
 use std::thread;
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use reth_blockchain_tree::{BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals};
-use reth_blockchain_tree::noop::NoopBlockchainTree;
-use reth_consensus::{Consensus, PostExecutionInput};
-use reth_consensus_common::validation;
-use reth_db_api::database::Database;
-use reth_evm::execute::{BatchExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor};
-use reth_execution_types::ExecutionOutcome;
-use reth_provider::{BlockReader, ChainSpecProvider, HeaderProvider, HistoricalStateProviderRef, LatestStateProviderRef, StaticFileProviderFactory};
+use reth_consensus::Consensus;
+use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+use reth_provider::{BlockReader, ChainSpecProvider, HeaderProvider};
 use reth_provider::providers::BlockchainProvider;
 use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
+use reth_stages::format_gas_throughput;
 use crate::beacon_consensus::EthBeaconConsensus;
 use crate::macros::block_executor;
-use crate::primitives::{BlockHashOrNumber, U256};
-use crate::providers::{BlockNumReader, OriginalValuesKnown, ProviderError, ProviderResult, StateProviderFactory, TransactionVariant};
+use crate::providers::{BlockNumReader, ProviderError, StateProviderFactory, TransactionVariant};
 
 /// EVM commands
 #[derive(Debug, Parser)]
@@ -81,28 +76,45 @@ impl EvmCommand {
 
         // 创建共享 gas 计数器
         let cumulative_gas = Arc::new(Mutex::new(0));
-        let block_counter = Arc::new(Mutex::new(0));
+        let block_counter = Arc::new(Mutex::new(self.begin_number));
+        let txs_counter = Arc::new(Mutex::new(0));
 
         // 创建状态输出线程
         {
             let cumulative_gas = Arc::clone(&cumulative_gas);
             let block_counter = Arc::clone(&block_counter);
+            let txs_counter = Arc::clone(&txs_counter);
+            let start = Instant::now();
 
             thread::spawn(move || {
                 let mut previous_cumulative_gas:u64 = 0;
                 let mut previous_block_counter:u64 = 0;
+                let mut previous_txs_counter:u64 = 0;
                 loop {
                     thread::sleep(Duration::from_secs(1));
 
                     let current_cumulative_gas =  cumulative_gas.lock().unwrap();
-                    let diff = *current_cumulative_gas - previous_cumulative_gas;
-                    previous_cumulative_gas = current_cumulative_gas.clone();
-                    let diff_in_g = diff as f64 / 1_000_000_000_000.0;
+                    let diff_gas = *current_cumulative_gas - previous_cumulative_gas;
+                    previous_cumulative_gas = *current_cumulative_gas;
 
                     let current_block_counter =  block_counter.lock().unwrap();
                     let diff_block = *current_block_counter - previous_block_counter;
-                    previous_block_counter = current_block_counter.clone();
-                    info!(target: "reth::cli", "Processed gas: {} G block: {}", diff_in_g, diff_block);
+                    previous_block_counter = *current_block_counter;
+
+                    let current_txs_counter =  txs_counter.lock().unwrap();
+                    let diff_txs = *current_txs_counter - previous_txs_counter;
+                    previous_txs_counter = *current_txs_counter;
+
+                    info!(
+                        target:"exex::evm",
+                        blocks = ?current_block_counter,
+                        txs = ?current_txs_counter,
+                        blockTPS = ?diff_block,
+                        TPS = ?diff_txs,
+                        throughput = format_gas_throughput(diff_gas, Duration::from_secs(1)),
+                        time = ?start.elapsed(),
+                        "Execution progress"
+                     );
                 }
             });
         }
@@ -117,6 +129,7 @@ impl EvmCommand {
 
             let cumulative_gas = Arc::clone(&cumulative_gas);
             let block_counter = Arc::clone(&block_counter);
+            let txs_counter = Arc::clone(&txs_counter);
 
             let provider_factory = provider_factory.clone();
             let blockchain_db = blockchain_db.clone();
@@ -139,8 +152,12 @@ impl EvmCommand {
                     // 增加 gas 计数器
                     let mut cumulative_gas = cumulative_gas.lock().unwrap();
                     *cumulative_gas += block.block.gas_used;
+                    // block
                     let mut block_counter = block_counter.lock().unwrap();
                     *block_counter += 1;
+                    // txs
+                    let mut txs_counter = txs_counter.lock().unwrap();
+                    *txs_counter += block.block.raw_transactions().len() as u64
 
                 }
                 Ok(true)
