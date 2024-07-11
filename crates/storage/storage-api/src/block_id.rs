@@ -129,3 +129,6 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
         self.finalized_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.hash))
     }
 }
+
+#[cfg(test)]
+fn _object_safe(_: Box<dyn BlockIdReader>) {}

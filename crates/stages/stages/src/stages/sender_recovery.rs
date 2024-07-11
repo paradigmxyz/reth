@@ -84,10 +84,8 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             })
         }
 
-        let tx = provider.tx_ref();
-
         // Acquire the cursor for inserting elements
-        let mut senders_cursor = tx.cursor_write::<tables::TransactionSenders>()?;
+        let mut senders_cursor = provider.tx_ref().cursor_write::<tables::TransactionSenders>()?;
 
         info!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders");
 
@@ -98,7 +96,7 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
             .collect::<Vec<Range<u64>>>();
 
         for range in batch {
-            recover_range(range, provider, tx, &mut senders_cursor)?;
+            recover_range(range, provider, &mut senders_cursor)?;
         }
 
         Ok(ExecOutput {
@@ -130,14 +128,15 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 }
 
-fn recover_range<DB: Database>(
+fn recover_range<DB, CURSOR>(
     tx_range: Range<u64>,
     provider: &DatabaseProviderRW<DB>,
-    tx: &<DB as Database>::TXMut,
-    senders_cursor: &mut <<DB as Database>::TXMut as DbTxMut>::CursorMut<
-        tables::TransactionSenders,
-    >,
-) -> Result<(), StageError> {
+    senders_cursor: &mut CURSOR,
+) -> Result<(), StageError>
+where
+    DB: Database,
+    CURSOR: DbCursorRW<tables::TransactionSenders>,
+{
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders batch");
 
     // Preallocate channels
@@ -193,7 +192,8 @@ fn recover_range<DB: Database>(
                     return match *error {
                         SenderRecoveryStageError::FailedRecovery(err) => {
                             // get the block number for the bad transaction
-                            let block_number = tx
+                            let block_number = provider
+                                .tx_ref()
                                 .get::<tables::TransactionBlocks>(err.tx)?
                                 .ok_or(ProviderError::BlockNumberForTransactionIndexNotFound)?;
 

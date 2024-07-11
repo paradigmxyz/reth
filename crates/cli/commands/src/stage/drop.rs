@@ -2,7 +2,7 @@
 use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::Parser;
 use itertools::Itertools;
-use reth_db::{static_file::iter_static_files, tables, DatabaseEnv};
+use reth_db::{static_file::iter_static_files, tables};
 use reth_db_api::transaction::DbTxMut;
 use reth_db_common::{
     init::{insert_genesis_header, insert_genesis_history, insert_genesis_state},
@@ -68,7 +68,7 @@ impl Command {
                     StageId::Headers.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.env.chain)?;
+                insert_genesis_header(&provider_rw, &static_file_provider, self.env.chain)?;
             }
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
@@ -81,7 +81,7 @@ impl Command {
                     StageId::Bodies.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.env.chain)?;
+                insert_genesis_header(&provider_rw, &static_file_provider, self.env.chain)?;
             }
             StageEnum::Senders => {
                 tx.clear::<tables::TransactionSenders>()?;
@@ -168,7 +168,7 @@ impl Command {
                     StageId::TransactionLookup.to_string(),
                     Default::default(),
                 )?;
-                insert_genesis_header::<DatabaseEnv>(tx, &static_file_provider, self.env.chain)?;
+                insert_genesis_header(&provider_rw, &static_file_provider, self.env.chain)?;
             }
         }
 
