@@ -281,39 +281,27 @@ where
     DB: Database + 'static,
 {
     fn builder(self) -> StageSetBuilder<DB> {
-        let mut builder = ExecutionStages::new(
+        ExecutionStages::new(
             self.executor_factory,
             self.stages_config.clone(),
             self.prune_modes.clone(),
         )
-        .builder();
-
+        .builder()
         // If sender recovery prune mode is set, add the prune sender recovery stage.
-        if let Some(prune_mode) = self.prune_modes.sender_recovery {
-            builder = builder.add_stage(PruneSenderRecoveryStage::new(
-                prune_mode,
-                self.stages_config.prune.commit_threshold,
-            ));
-        }
-
-        builder = builder
-            .add_set(HashingStages { stages_config: self.stages_config.clone() })
-            .add_set(HistoryIndexingStages {
-                stages_config: self.stages_config.clone(),
-                prune_modes: self.prune_modes.clone(),
-            });
-
+        .add_stage_if(self.prune_modes.sender_recovery.map(|prune_mode| {
+            PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
+        }))
+        .add_set(HashingStages { stages_config: self.stages_config.clone() })
+        .add_set(HistoryIndexingStages {
+            stages_config: self.stages_config.clone(),
+            prune_modes: self.prune_modes.clone(),
+        })
         // If any prune modes are set, add the prune stage.
-        if !self.prune_modes.is_empty() {
+        .add_stage_if((!self.prune_modes.is_empty()).then(|| {
             // Prune stage should be added after all hashing stages, because otherwise it will
             // delete
-            builder = builder.add_stage(PruneStage::new(
-                self.prune_modes.clone(),
-                self.stages_config.prune.commit_threshold,
-            ));
-        }
-
-        builder
+            PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
+        }))
     }
 }
 
