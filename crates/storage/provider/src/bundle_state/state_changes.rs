@@ -1,8 +1,9 @@
+use crate::DatabaseProviderRW;
 use rayon::slice::ParallelSliceMut;
-use reth_db::tables;
+use reth_db::{tables, Database};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
 };
 use reth_primitives::{Bytecode, StorageEntry, U256};
 use reth_storage_errors::db::DatabaseError;
@@ -20,7 +21,10 @@ impl From<StateChangeset> for StateChanges {
 
 impl StateChanges {
     /// Write the bundle state to the database.
-    pub fn write_to_db<TX: DbTxMut + DbTx>(mut self, tx: &TX) -> Result<(), DatabaseError> {
+    pub fn write_to_db<DB>(mut self, provider: &DatabaseProviderRW<DB>) -> Result<(), DatabaseError>
+    where
+        DB: Database,
+    {
         // sort all entries so they can be written to database in more performant way.
         // and take smaller memory footprint.
         self.0.accounts.par_sort_by_key(|a| a.0);
@@ -29,7 +33,7 @@ impl StateChanges {
 
         // Write new account state
         tracing::trace!(target: "provider::bundle_state", len = self.0.accounts.len(), "Writing new account state");
-        let mut accounts_cursor = tx.cursor_write::<tables::PlainAccountState>()?;
+        let mut accounts_cursor = provider.tx_ref().cursor_write::<tables::PlainAccountState>()?;
         // write account to database.
         for (address, account) in self.0.accounts {
             if let Some(account) = account {
@@ -43,14 +47,15 @@ impl StateChanges {
 
         // Write bytecode
         tracing::trace!(target: "provider::bundle_state", len = self.0.contracts.len(), "Writing bytecodes");
-        let mut bytecodes_cursor = tx.cursor_write::<tables::Bytecodes>()?;
+        let mut bytecodes_cursor = provider.tx_ref().cursor_write::<tables::Bytecodes>()?;
         for (hash, bytecode) in self.0.contracts {
             bytecodes_cursor.upsert(hash, Bytecode(bytecode))?;
         }
 
         // Write new storage state and wipe storage if needed.
         tracing::trace!(target: "provider::bundle_state", len = self.0.storage.len(), "Writing new storage state");
-        let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
+        let mut storages_cursor =
+            provider.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
         for PlainStorageChangeset { address, wipe_storage, storage } in self.0.storage {
             // Wiping of storage.
             if wipe_storage && storages_cursor.seek_exact(address)?.is_some() {
