@@ -24,12 +24,12 @@ impl StateWriter for ExecutionOutcome {
         let tx = provider_rw.tx_ref();
         let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
 
-        StateReverts(reverts).write_to_db(tx, self.first_block)?;
+        StateReverts(reverts).write_to_db(provider_rw, self.first_block)?;
 
         StorageWriter::new(Some(provider_rw), static_file_producer)
             .write_blocks_receipts(self.first_block, self.receipts.into_iter())?;
 
-        StateChanges(plain_state).write_to_db(tx)?;
+        StateChanges(plain_state).write_to_db(provider_rw)?;
 
         Ok(())
     }
@@ -109,13 +109,11 @@ mod tests {
         assert!(plain_state.storage.is_empty());
         assert!(plain_state.contracts.is_empty());
         StateChanges(plain_state)
-            .write_to_db(provider.tx_ref())
+            .write_to_db(&provider)
             .expect("Could not write plain state to DB");
 
         assert_eq!(reverts.storage, [[]]);
-        StateReverts(reverts)
-            .write_to_db(provider.tx_ref(), 1)
-            .expect("Could not write reverts to DB");
+        StateReverts(reverts).write_to_db(&provider, 1).expect("Could not write reverts to DB");
 
         let reth_account_a = account_a.into();
         let reth_account_b = account_b.into();
@@ -175,16 +173,14 @@ mod tests {
         );
         assert!(plain_state.contracts.is_empty());
         StateChanges(plain_state)
-            .write_to_db(provider.tx_ref())
+            .write_to_db(&provider)
             .expect("Could not write plain state to DB");
 
         assert_eq!(
             reverts.storage,
             [[PlainStorageRevert { address: address_b, wiped: true, storage_revert: vec![] }]]
         );
-        StateReverts(reverts)
-            .write_to_db(provider.tx_ref(), 2)
-            .expect("Could not write reverts to DB");
+        StateReverts(reverts).write_to_db(&provider, 2).expect("Could not write reverts to DB");
 
         // Check new plain state for account B
         assert_eq!(
