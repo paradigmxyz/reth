@@ -42,7 +42,7 @@ pub const DEFAULT_SECONDS_LOOKUP_INTERVAL: u64 = 60;
 /// Default is 100 counts.
 pub const DEFAULT_COUNT_BOOTSTRAP_LOOKUPS: u64 = 100;
 
-/// Default duration of look up interval, for pulse look ups at bootstrap.
+/// Default duration of the pulse lookup interval at bootstrap.
 ///
 /// Default is 5 seconds.
 pub const DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL: u64 = 5;
