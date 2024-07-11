@@ -369,11 +369,8 @@ where
                 }
             }
 
-            if self.should_persist(self.persistence_state.last_persisted_block_number) &&
-                !self.persistence_state.in_progress
-            {
-                let blocks_to_persist =
-                    self.get_blocks_to_persist(self.persistence_state.last_persisted_block_number);
+            if self.should_persist() && !self.persistence_state.in_progress {
+                let blocks_to_persist = self.get_blocks_to_persist();
                 let (tx, rx) = oneshot::channel();
                 self.persistence.save_blocks(blocks_to_persist, tx);
                 self.persistence_state.in_progress = true;
@@ -389,6 +386,7 @@ where
                         self.persistence_state.last_persisted_block_number = block.number;
                         self.persistence_state.in_progress = false;
                         self.persistence_state.rx = None;
+                        self.remove_persisted_blocks_from_memory();
                     } else {
                         error!("could not find persisted block with hash {last_persisted_hash} in memory");
                     }
@@ -399,16 +397,14 @@ where
 
     /// Returns true if the canonical chain length minus the last persisted
     /// block is more than the persistence threshold.
-    fn should_persist(&self, last_persisted_block_number: BlockNumber) -> bool {
-        self.state.tree_state.max_block_number() - last_persisted_block_number >
+    fn should_persist(&self) -> bool {
+        self.state.tree_state.max_block_number() -
+            self.persistence_state.last_persisted_block_number >
             PERSISTENCE_THRESHOLD
     }
 
-    fn get_blocks_to_persist(
-        &self,
-        last_persisted_block_number: BlockNumber,
-    ) -> Vec<ExecutedBlock> {
-        let start = last_persisted_block_number + 1;
+    fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
+        let start = self.persistence_state.last_persisted_block_number + 1;
         let end = start + PERSISTENCE_THRESHOLD;
 
         self.state
@@ -419,12 +415,12 @@ where
             .collect()
     }
 
-    fn remove_persisted_blocks_from_memory(&mut self, last_persisted_block_number: BlockNumber) {
+    fn remove_persisted_blocks_from_memory(&mut self) {
         let keys_to_remove: Vec<BlockNumber> = self
             .state
             .tree_state
             .blocks_by_number
-            .range(..=last_persisted_block_number)
+            .range(..=self.persistence_state.last_persisted_block_number)
             .map(|(&k, _)| k)
             .collect();
 
