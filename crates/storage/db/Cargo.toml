@@ -40,7 +40,7 @@ metrics.workspace = true
 
 # misc
 bytes.workspace = true
-page_size = "0.6.0"
+page_size = { version = "0.6.0", optional = true }
 thiserror.workspace = true
 tempfile = { workspace = true, optional = true }
 derive_more.workspace = true
@@ -76,7 +76,7 @@ paste.workspace = true
 assert_matches.workspace = true
 
 [features]
-default = ["mdbx", "static-file", "std"]
+default = ["mdbx", "static-file", "std", "page-size"]
 std = ["reth-primitives/std"]
 mdbx = ["dep:reth-libmdbx", "dep:eyre"]
 test-utils = ["dep:tempfile", "arbitrary"]
@@ -85,6 +85,7 @@ arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
 optimism = []
 disable-lock = []
 static-file = ["dep:reth-nippy-jar"]
+page-size = ["dep:page_size"]
 
 [[bench]]
 name = "hash_keys"

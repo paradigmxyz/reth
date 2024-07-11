@@ -3,6 +3,7 @@
 use std::path::Path;
 
 /// Returns the default page size that can be used in this OS.
+#[cfg(feature = "page_size")]
 pub(crate) fn default_page_size() -> usize {
     let os_page_size = page_size::get();
 
@@ -14,6 +15,11 @@ pub(crate) fn default_page_size() -> usize {
     let min_page_size = 4096;
 
     os_page_size.clamp(min_page_size, libmdbx_max_page_size)
+}
+
+#[cfg(not(feature = "page_size"))]
+pub(crate) fn default_page_size() -> usize {
+    0
 }
 
 /// Check if a db is empty. It does not provide any information on the
