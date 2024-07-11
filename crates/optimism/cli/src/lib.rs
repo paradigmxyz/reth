@@ -39,7 +39,6 @@ use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::node::NoArgs;
 use reth_cli_runner::CliRunner;
-use reth_cli_util as _;
 use reth_db::DatabaseEnv;
 use reth_evm_optimism::OpExecutorProvider;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
@@ -47,7 +46,6 @@ use reth_node_core::{
     args::{utils::chain_help, LogArgs},
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use reth_node_optimism as _;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, sync::Arc};
 use tracing::info;

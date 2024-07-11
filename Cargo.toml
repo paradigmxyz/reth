@@ -137,7 +137,7 @@ members = [
     "examples/txpool-tracing/",
     "examples/custom-rlpx-subprotocol",
     "testing/ef-tests/",
-    "testing/testing-utils",
+    "testing/testing-utils", "crates/optimism/bin",
 ]
 default-members = ["bin/reth"]
 

@@ -38,8 +38,6 @@ reth-evm-optimism.workspace = true
 reth-cli.workspace = true
 reth-cli-runner.workspace = true
 reth-node-builder.workspace = true
-reth-cli-util.workspace = true
-reth-node-optimism.workspace = true
 reth-tracing.workspace = true
 
 
@@ -72,6 +70,3 @@ eyre.workspace = true
     "reth-evm-optimism/optimism",
  ] 
 
-[[bin]]
-name = "op-reth"
-path = "src/main.rs"

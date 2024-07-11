@@ -5232,6 +5232,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "op-reth"
+version = "1.0.1"
+dependencies = [
+ "clap",
+ "reth-cli-util",
+ "reth-node-builder",
+ "reth-node-optimism",
+ "reth-optimism-cli",
+ "reth-tracing",
+ "tikv-jemallocator",
+]
+
+[[package]]
 name = "opaque-debug"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7835,7 +7848,6 @@ dependencies = [
  "reth-cli",
  "reth-cli-commands",
  "reth-cli-runner",
- "reth-cli-util",
  "reth-config",
  "reth-consensus",
  "reth-db",
@@ -7848,7 +7860,6 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-events",
- "reth-node-optimism",
  "reth-optimism-primitives",
  "reth-primitives",
  "reth-provider",
