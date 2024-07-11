@@ -150,7 +150,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
         {
             cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
                 cfg_env: cfg,
-                handler_cfg: HandlerCfg { spec_id, is_optimism: chain_spec.is_optimism() },
+                handler_cfg: HandlerCfg { spec_id, is_optimism: true },
             };
         }
 
