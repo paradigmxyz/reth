@@ -16,7 +16,7 @@ pub struct PrunerBuilder {
     /// Pruning configuration for every part of the data that can be pruned.
     segments: PruneModes,
     /// The delete limit for pruner, per run.
-    prune_delete_limit: usize,
+    delete_limit: usize,
     /// Time a pruner job can run before timing out.
     timeout: Option<Duration>,
     /// The finished height of all `ExEx`'s.
@@ -47,8 +47,8 @@ impl PrunerBuilder {
     }
 
     /// Sets the delete limit for pruner, per run.
-    pub const fn prune_delete_limit(mut self, prune_delete_limit: usize) -> Self {
-        self.prune_delete_limit = prune_delete_limit;
+    pub const fn delete_limit(mut self, prune_delete_limit: usize) -> Self {
+        self.delete_limit = prune_delete_limit;
         self
     }
 
@@ -70,15 +70,31 @@ impl PrunerBuilder {
         self
     }
 
-    /// Builds a [Pruner] from the current configuration.
-    pub fn build<DB: Database>(self, provider_factory: ProviderFactory<DB>) -> Pruner<DB> {
+    /// Builds a [Pruner] from the current configuration with the given provider factory.
+    pub fn build_with_provider_factory<DB: Database>(
+        self,
+        provider_factory: ProviderFactory<DB>,
+    ) -> Pruner<DB, ProviderFactory<DB>> {
         let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
 
-        Pruner::new(
+        Pruner::<_, ProviderFactory<DB>>::new(
             provider_factory,
             segments.into_vec(),
             self.block_interval,
-            self.prune_delete_limit,
+            self.delete_limit,
+            self.timeout,
+            self.finished_exex_height,
+        )
+    }
+
+    /// Builds a [Pruner] from the current configuration.
+    pub fn build<DB: Database>(self) -> Pruner<DB, ()> {
+        let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
+
+        Pruner::<_, ()>::new(
+            segments.into_vec(),
+            self.block_interval,
+            self.delete_limit,
             self.timeout,
             self.finished_exex_height,
         )
@@ -90,7 +106,7 @@ impl Default for PrunerBuilder {
         Self {
             block_interval: 5,
             segments: PruneModes::none(),
-            prune_delete_limit: MAINNET.prune_delete_limit,
+            delete_limit: MAINNET.prune_delete_limit,
             timeout: None,
             finished_exex_height: watch::channel(FinishedExExHeight::NoExExs).1,
         }
