@@ -119,7 +119,7 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the
-    /// [`NodeCommand`](node::NodeCommand).
+    /// [`NodeCommand`](reth_cli_commands::node::NodeCommand).
     ///
     ///
     /// # Example
