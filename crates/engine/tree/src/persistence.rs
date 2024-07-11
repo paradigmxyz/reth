@@ -254,18 +254,16 @@ impl PersistenceHandle {
     /// assumed to be ordered by block number.
     ///
     /// This returns the latest hash that has been saved, allowing removal of that block and any
-    /// previous blocks from in-memory data structures.
-    pub async fn save_blocks(&self, blocks: Vec<ExecutedBlock>) -> B256 {
+    /// previous blocks from in-memory data structures. This value is returned in the receiver end
+    /// of the sender argument.
+    pub fn save_blocks(&self, blocks: Vec<ExecutedBlock>, tx: oneshot::Sender<B256>) {
         if blocks.is_empty() {
-            return B256::default();
+            let _ = tx.send(B256::default());
+            return;
         }
-        let last_block_number =
-            blocks.last().expect("at this point blocks is not empty").block().number;
-        let (tx, rx) = oneshot::channel();
         self.sender
             .send(PersistenceAction::SaveBlocks((blocks, tx)))
             .expect("should be able to send");
-        rx.await.expect("todo: err handling")
     }
 
     /// Tells the persistence service to remove blocks above a certain block number. The removed
@@ -323,19 +321,21 @@ mod tests {
         Persistence::spawn_new(provider, static_file_handle, pruner)
     }
 
-    #[tokio::test]
-    async fn test_save_blocks_empty() {
+    #[test]
+    fn test_save_blocks_empty() {
         let persistence_handle = default_persistence_handle();
 
         let blocks = vec![];
+        let (tx, rx) = oneshot::channel();
 
-        let hash = persistence_handle.save_blocks(blocks).await;
+        persistence_handle.save_blocks(blocks, tx);
 
+        let hash = rx.blocking_recv().unwrap();
         assert_eq!(hash, B256::default());
     }
 
-    #[tokio::test]
-    async fn test_save_blocks_single_block() {
+    #[test]
+    fn test_save_blocks_single_block() {
         let persistence_handle = default_persistence_handle();
 
         let mut block = Block::default();
@@ -361,9 +361,11 @@ mod tests {
             Arc::new(TrieUpdates::default()),
         );
         let blocks = vec![executed];
+        let (tx, rx) = oneshot::channel();
 
-        let actual_hash = persistence_handle.save_blocks(blocks).await;
+        persistence_handle.save_blocks(blocks, tx);
 
+        let actual_hash = rx.blocking_recv().unwrap();
         assert_eq!(block_hash, actual_hash);
     }
 }
