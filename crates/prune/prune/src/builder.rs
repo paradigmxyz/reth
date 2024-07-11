@@ -15,12 +15,8 @@ pub struct PrunerBuilder {
     block_interval: usize,
     /// Pruning configuration for every part of the data that can be pruned.
     segments: PruneModes,
-    /// The maximum number of blocks that can be pruned per run.
-    prune_max_blocks_per_run: usize,
-    /// The delete limit for pruner, per block. In the actual pruner run it will be multiplied by
-    /// the amount of blocks between pruner runs to account for the difference in amount of new
-    /// data coming in.
-    delete_limit_per_block: usize,
+    /// The delete limit for pruner, per run.
+    delete_limit: usize,
     /// Time a pruner job can run before timing out.
     timeout: Option<Duration>,
     /// The finished height of all `ExEx`'s.
@@ -50,15 +46,9 @@ impl PrunerBuilder {
         self
     }
 
-    /// Sets the number of blocks that can be re-orged.
-    pub const fn prune_max_blocks_per_run(mut self, prune_max_blocks_per_run: usize) -> Self {
-        self.prune_max_blocks_per_run = prune_max_blocks_per_run;
-        self
-    }
-
-    /// Sets the delete limit for pruner, per block.
-    pub const fn delete_limit_per_block(mut self, delete_limit_per_block: usize) -> Self {
-        self.delete_limit_per_block = delete_limit_per_block;
+    /// Sets the delete limit for pruner, per run.
+    pub const fn delete_limit(mut self, prune_delete_limit: usize) -> Self {
+        self.delete_limit = prune_delete_limit;
         self
     }
 
@@ -91,8 +81,7 @@ impl PrunerBuilder {
             provider_factory,
             segments.into_vec(),
             self.block_interval,
-            self.delete_limit_per_block,
-            self.prune_max_blocks_per_run,
+            self.delete_limit,
             self.timeout,
             self.finished_exex_height,
         )
@@ -105,8 +94,7 @@ impl PrunerBuilder {
         Pruner::<_, ()>::new(
             segments.into_vec(),
             self.block_interval,
-            self.delete_limit_per_block,
-            self.prune_max_blocks_per_run,
+            self.delete_limit,
             self.timeout,
             self.finished_exex_height,
         )
@@ -118,8 +106,7 @@ impl Default for PrunerBuilder {
         Self {
             block_interval: 5,
             segments: PruneModes::none(),
-            prune_max_blocks_per_run: 64,
-            delete_limit_per_block: MAINNET.prune_delete_limit,
+            delete_limit: MAINNET.prune_delete_limit,
             timeout: None,
             finished_exex_height: watch::channel(FinishedExExHeight::NoExExs).1,
         }

@@ -37,11 +37,8 @@ pub struct Pruner<DB, PF> {
     /// number is updated with the tip block number the pruner was called with. It's used in
     /// conjunction with `min_block_interval` to determine when the pruning needs to be initiated.
     previous_tip_block_number: Option<BlockNumber>,
-    /// Maximum total entries to prune (delete from database) per block.
-    delete_limit_per_block: usize,
-    /// Maximum number of blocks to be pruned per run, as an additional restriction to
-    /// `previous_tip_block_number`.
-    prune_max_blocks_per_run: usize,
+    /// Maximum total entries to prune (delete from database) per run.
+    delete_limit: usize,
     /// Maximum time for a one pruner run.
     timeout: Option<Duration>,
     /// The finished height of all `ExEx`'s.
@@ -56,8 +53,7 @@ impl<DB> Pruner<DB, ()> {
     pub fn new(
         segments: Vec<Box<dyn Segment<DB>>>,
         min_block_interval: usize,
-        delete_limit_per_block: usize,
-        prune_max_blocks_per_run: usize,
+        delete_limit: usize,
         timeout: Option<Duration>,
         finished_exex_height: watch::Receiver<FinishedExExHeight>,
     ) -> Self {
@@ -66,8 +62,7 @@ impl<DB> Pruner<DB, ()> {
             segments,
             min_block_interval,
             previous_tip_block_number: None,
-            delete_limit_per_block,
-            prune_max_blocks_per_run,
+            delete_limit,
             timeout,
             finished_exex_height,
             metrics: Metrics::default(),
@@ -82,8 +77,7 @@ impl<DB: Database> Pruner<DB, ProviderFactory<DB>> {
         provider_factory: ProviderFactory<DB>,
         segments: Vec<Box<dyn Segment<DB>>>,
         min_block_interval: usize,
-        delete_limit_per_block: usize,
-        prune_max_blocks_per_run: usize,
+        delete_limit: usize,
         timeout: Option<Duration>,
         finished_exex_height: watch::Receiver<FinishedExExHeight>,
     ) -> Self {
@@ -92,8 +86,7 @@ impl<DB: Database> Pruner<DB, ProviderFactory<DB>> {
             segments,
             min_block_interval,
             previous_tip_block_number: None,
-            delete_limit_per_block,
-            prune_max_blocks_per_run,
+            delete_limit,
             timeout,
             finished_exex_height,
             metrics: Metrics::default(),
@@ -130,25 +123,7 @@ impl<DB: Database, S> Pruner<DB, S> {
         debug!(target: "pruner", %tip_block_number, "Pruner started");
         let start = Instant::now();
 
-        // Multiply `self.delete_limit` (number of rows to delete per block) by number of blocks
-        // since last pruner run. `self.previous_tip_block_number` is close to
-        // `tip_block_number`, usually within `self.block_interval` blocks, so
-        // `delete_limit` will not be too high. If it's too high, we additionally limit it by
-        // `self.prune_max_blocks_per_run`.
-        //
-        // Also see docs for `self.previous_tip_block_number`.
-        let blocks_since_last_run = self
-            .previous_tip_block_number
-            .map_or(1, |previous_tip_block_number| {
-                // Saturating subtraction is needed for the case when the chain was reverted,
-                // meaning current block number might be less than the previous tip
-                // block number.
-                tip_block_number.saturating_sub(previous_tip_block_number) as usize
-            })
-            .min(self.prune_max_blocks_per_run);
-
-        let mut limiter = PruneLimiter::default()
-            .set_deleted_entries_limit(self.delete_limit_per_block * blocks_since_last_run);
+        let mut limiter = PruneLimiter::default().set_deleted_entries_limit(self.delete_limit);
         if let Some(timeout) = self.timeout {
             limiter = limiter.set_time_limit(timeout);
         };
@@ -411,7 +386,6 @@ mod tests {
             vec![],
             5,
             0,
-            5,
             None,
             finished_exex_height_rx,
         );

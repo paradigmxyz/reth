@@ -314,7 +314,6 @@ mod tests {
             vec![],
             5,
             0,
-            5,
             None,
             finished_exex_height_rx,
         );
