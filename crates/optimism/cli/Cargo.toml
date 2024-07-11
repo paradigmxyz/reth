@@ -71,3 +71,7 @@ eyre.workspace = true
     "reth-primitives/optimism",
     "reth-evm-optimism/optimism",
  ] 
+
+[[bin]]
+name = "op-reth"
+path = "src/main.rs"
