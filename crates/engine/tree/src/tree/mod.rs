@@ -376,7 +376,11 @@ where
                 self.persistence_state.start(rx);
             }
 
-            if let Some(rx) = self.persistence_state.receiver() {
+            if self.persistence_state.in_progress() {
+                let rx = self
+                    .persistence_state
+                    .receiver()
+                    .expect("if a persistence task is in progress Receiver must be Some");
                 // Check if persistence has completed
                 if let Ok(last_persisted_block_hash) = rx.try_recv() {
                     if let Some(block) =
