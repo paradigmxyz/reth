@@ -1,5 +1,7 @@
 use crate::BlockIdReader;
-use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag, Receipt, TxHash, TxNumber};
+use reth_primitives::{
+    BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, Receipt, TxHash, TxNumber,
+};
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeBounds;
 
@@ -64,5 +66,16 @@ pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdReader {
         number_or_tag: BlockNumberOrTag,
     ) -> ProviderResult<Option<Vec<Receipt>>> {
         self.receipts_by_block_id(number_or_tag.into())
+    }
+}
+
+pub trait ReceiptWriter {
+    fn append_block_receipts(
+        &mut self,
+        first_tx_index: TxNumber,
+        block_number: BlockNumber,
+        receipts: Vec<Option<Receipt>>,
+    ) -> ProviderResult<()> {
+        todo!()
     }
 }

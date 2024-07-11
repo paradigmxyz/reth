@@ -12,6 +12,7 @@ use reth_primitives::{
     BlockHash, BlockNumber, Header, Receipt, StaticFileSegment, TransactionSignedNoHash, TxNumber,
     U256,
 };
+use reth_storage_api::ReceiptWriter;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     path::{Path, PathBuf},

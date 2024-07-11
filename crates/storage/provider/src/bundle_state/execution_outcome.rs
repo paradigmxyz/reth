@@ -1,63 +1,69 @@
-use crate::{providers::StaticFileProviderRWRefMut, StateChanges, StateReverts, StateWriter};
-use reth_db::tables;
+use crate::{providers::StaticFileProviderRWRefMut, writer::StorageWriter, StateChanges, StateReverts, StateWriter};
+use reth_db::{tables, Database};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     transaction::{DbTx, DbTxMut},
 };
+use reth_storage_api::ReceiptWriter;
 pub use reth_execution_types::*;
 use reth_primitives::StaticFileSegment;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 pub use revm::db::states::OriginalValuesKnown;
 
 impl StateWriter for ExecutionOutcome {
-    fn write_to_storage<TX>(
+    fn write_to_storage<TX, DB>(
         self,
         tx: &TX,
         mut static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
         is_value_known: OriginalValuesKnown,
     ) -> ProviderResult<()>
     where
+    DB: Database,
         TX: DbTxMut + DbTx,
     {
         let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
 
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
 
-        // write receipts
-        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-        let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
+        StorageWriter::<DB>::new().with_tx(tx).with_sf(static_file_producer).write_blocks_receipts(
+            self.first_block, self.receipts.into_iter()
+        )?;
 
-        // ATTENTION: Any potential future refactor or change to how this loop works should keep in
-        // mind that the static file producer must always call `increment_block` even if the block
-        // has no receipts. Keeping track of the exact block range of the segment is needed for
-        // consistency, querying and file range segmentation.
-        let blocks = self.receipts.into_iter().enumerate();
-        for (idx, receipts) in blocks {
-            let block_number = self.first_block + idx as u64;
-            let first_tx_index = bodies_cursor
-                .seek_exact(block_number)?
-                .map(|(_, indices)| indices.first_tx_num())
-                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
+        // // write receipts
+        // let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+        // let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
 
-            if let Some(static_file_producer) = &mut static_file_producer {
-                // Increment block on static file header.
-                static_file_producer.increment_block(StaticFileSegment::Receipts, block_number)?;
-                let receipts = receipts.into_iter().enumerate().map(|(tx_idx, receipt)| {
-                    Ok((
-                        first_tx_index + tx_idx as u64,
-                        receipt
-                            .expect("receipt should not be filtered when saving to static files."),
-                    ))
-                });
-                static_file_producer.append_receipts(receipts)?;
-            } else if !receipts.is_empty() {
-                for (tx_idx, receipt) in receipts.into_iter().enumerate() {
-                    if let Some(receipt) = receipt {
-                        receipts_cursor.append(first_tx_index + tx_idx as u64, receipt)?;
-                    }
-                }
-            }
-        }
+        // // ATTENTION: Any potential future refactor or change to how this loop works should keep in
+        // // mind that the static file producer must always call `increment_block` even if the block
+        // // has no receipts. Keeping track of the exact block range of the segment is needed for
+        // // consistency, querying and file range segmentation.
+        // let blocks = self.receipts.into_iter().enumerate();
+        // for (idx, receipts) in blocks {
+        //     let block_number = self.first_block + idx as u64;
+        //     let first_tx_index = bodies_cursor
+        //         .seek_exact(block_number)?
+        //         .map(|(_, indices)| indices.first_tx_num())
+        //         .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
+
+        //     if let Some(static_file_producer) = &mut static_file_producer {
+        //         // Increment block on static file header.
+        //         static_file_producer.increment_block(StaticFileSegment::Receipts, block_number)?;
+        //         let receipts = receipts.into_iter().enumerate().map(|(tx_idx, receipt)| {
+        //             Ok((
+        //                 first_tx_index + tx_idx as u64,
+        //                 receipt
+        //                     .expect("receipt should not be filtered when saving to static files."),
+        //             ))
+        //         });
+        //         static_file_producer.append_receipts(receipts)?;
+        //     } else if !receipts.is_empty() {
+        //         for (tx_idx, receipt) in receipts.into_iter().enumerate() {
+        //             if let Some(receipt) = receipt {
+        //                 receipts_cursor.append(first_tx_index + tx_idx as u64, receipt)?;
+        //             }
+        //         }
+        //     }
+        // }
 
         StateChanges(plain_state).write_to_db(tx)?;
 
