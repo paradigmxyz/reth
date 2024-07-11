@@ -229,7 +229,7 @@ pub enum PersistenceAction {
 }
 
 /// A handle to the persistence service
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PersistenceHandle {
     /// The channel used to communicate with the persistence service
     sender: Sender<PersistenceAction>,
