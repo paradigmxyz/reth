@@ -14,6 +14,12 @@ pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain>;
+
+    /// Remove range of blocks and its execution result
+    fn remove_block_and_execution_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<()>;
 }
 
 /// BlockExecution Writer
