@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-eth-wire-types.workspace = true
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = ["std", "c-kzg"] }
 reth-execution-types.workspace = true
 reth-fs-util.workspace = true
 reth-provider.workspace = true
