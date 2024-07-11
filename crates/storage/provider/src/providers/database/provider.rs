@@ -15,7 +15,7 @@ use crate::{
 };
 use itertools::{izip, Itertools};
 use reth_chainspec::{ChainInfo, ChainSpec, EthereumHardforks};
-use reth_db::{tables, BlockNumberList};
+use reth_db::{tables, BlockNumberList, PlainAccountState, PlainStorageState};
 use reth_db_api::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, RangeWalker},
@@ -850,18 +850,69 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         let storage_changeset = self.get::<tables::StorageChangeSets>(storage_range)?;
         let account_changeset = self.get::<tables::AccountChangeSets>(range)?;
 
-        // iterate previous value and get plain state value to create changeset
-        // Double option around Account represent if Account state is know (first option) and
-        // account is removed (Second Option)
-
-        let mut state: BundleStateInit = HashMap::new();
-
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
         // History state. Accessing history state can be tricky but we are not gaining
         // anything.
         let mut plain_accounts_cursor = self.tx.cursor_read::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_read::<tables::PlainStorageState>()?;
+
+        let (state, reverts) = self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            &mut plain_accounts_cursor,
+            &mut plain_storage_cursor,
+        )?;
+
+        // iterate over block body and create ExecutionResult
+        let mut receipt_iter =
+            self.get::<tables::Receipts>(from_transaction_num..=to_transaction_num)?.into_iter();
+
+        let mut receipts = Vec::new();
+        // loop break if we are at the end of the blocks.
+        for (_, block_body) in block_bodies {
+            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
+            for _ in block_body.tx_num_range() {
+                if let Some((_, receipt)) = receipt_iter.next() {
+                    block_receipts.push(Some(receipt));
+                }
+            }
+            receipts.push(block_receipts);
+        }
+
+        Ok(ExecutionOutcome::new_init(
+            state,
+            reverts,
+            Vec::new(),
+            receipts.into(),
+            start_block_number,
+            Vec::new(),
+        ))
+    }
+
+    /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
+    /// [`PlainAccountState`] and [`PlainStorageState`] tables, based on the given storage and
+    /// account changesets.
+    fn populate_bundle_state<A, S>(
+        &self,
+        account_changeset: Vec<(u64, AccountBeforeTx)>,
+        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
+        plain_accounts_cursor: &mut A,
+        plain_storage_cursor: &mut S,
+    ) -> ProviderResult<(BundleStateInit, RevertsInit)>
+    where
+        A: DbCursorRO<PlainAccountState>,
+        S: DbDupCursorRO<PlainStorageState>,
+    {
+        // iterate previous value and get plain state value to create changeset
+        // Double option around Account represent if Account state is know (first option) and
+        // account is removed (Second Option)
+        let mut state: BundleStateInit = HashMap::new();
+
+        // This is not working for blocks that are not at tip. as plain state is not the last
+        // state of end range. We should rename the functions or add support to access
+        // History state. Accessing history state can be tricky but we are not gaining
+        // anything.
 
         let mut reverts: RevertsInit = HashMap::new();
 
@@ -917,30 +968,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
                 .push(old_storage);
         }
 
-        // iterate over block body and create ExecutionResult
-        let mut receipt_iter =
-            self.get::<tables::Receipts>(from_transaction_num..=to_transaction_num)?.into_iter();
-
-        let mut receipts = Vec::new();
-        // loop break if we are at the end of the blocks.
-        for (_, block_body) in block_bodies {
-            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
-            for _ in block_body.tx_num_range() {
-                if let Some((_, receipt)) = receipt_iter.next() {
-                    block_receipts.push(Some(receipt));
-                }
-            }
-            receipts.push(block_receipts);
-        }
-
-        Ok(ExecutionOutcome::new_init(
-            state,
-            reverts,
-            Vec::new(),
-            receipts.into(),
-            start_block_number,
-            Vec::new(),
-        ))
+        Ok((state, reverts))
     }
 }
 
@@ -990,12 +1018,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
         let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
 
-        // iterate previous value and get plain state value to create changeset
-        // Double option around Account represent if Account state is know (first option) and
-        // account is removed (Second Option)
-
-        let mut state: BundleStateInit = HashMap::new();
-
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
         // History state. Accessing history state can be tricky but we are not gaining
@@ -1003,59 +1025,12 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
-        let mut reverts: RevertsInit = HashMap::new();
-
-        // add account changeset changes
-        for (block_number, account_before) in account_changeset.into_iter().rev() {
-            let AccountBeforeTx { info: old_info, address } = account_before;
-            match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((old_info, new_info, HashMap::new()));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    // overwrite old account state.
-                    entry.get_mut().0 = old_info;
-                }
-            }
-            // insert old info into reverts.
-            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
-        }
-
-        // add storage changeset changes
-        for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
-            let BlockNumberAddress((block_number, address)) = block_and_address;
-            // get account state or insert from plain state.
-            let account_state = match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((present_info, present_info, HashMap::new()))
-                }
-                hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            };
-
-            // match storage.
-            match account_state.2.entry(old_storage.key) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_storage = plain_storage_cursor
-                        .seek_by_key_subkey(address, old_storage.key)?
-                        .filter(|storage| storage.key == old_storage.key)
-                        .unwrap_or_default();
-                    entry.insert((old_storage.value, new_storage.value));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().0 = old_storage.value;
-                }
-            };
-
-            reverts
-                .entry(block_number)
-                .or_default()
-                .entry(address)
-                .or_default()
-                .1
-                .push(old_storage);
-        }
+        let (state, _) = self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            &mut plain_accounts_cursor,
+            &mut plain_storage_cursor,
+        )?;
 
         // iterate over local plain state remove all account and all storages.
         for (address, (old_account, new_account, storage)) in &state {
@@ -1139,12 +1114,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
         let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
 
-        // iterate previous value and get plain state value to create changeset
-        // Double option around Account represent if Account state is know (first option) and
-        // account is removed (Second Option)
-
-        let mut state: BundleStateInit = HashMap::new();
-
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
         // History state. Accessing history state can be tricky but we are not gaining
@@ -1152,59 +1121,14 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
-        let mut reverts: RevertsInit = HashMap::new();
-
-        // add account changeset changes
-        for (block_number, account_before) in account_changeset.into_iter().rev() {
-            let AccountBeforeTx { info: old_info, address } = account_before;
-            match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((old_info, new_info, HashMap::new()));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    // overwrite old account state.
-                    entry.get_mut().0 = old_info;
-                }
-            }
-            // insert old info into reverts.
-            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
-        }
-
-        // add storage changeset changes
-        for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
-            let BlockNumberAddress((block_number, address)) = block_and_address;
-            // get account state or insert from plain state.
-            let account_state = match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((present_info, present_info, HashMap::new()))
-                }
-                hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            };
-
-            // match storage.
-            match account_state.2.entry(old_storage.key) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_storage = plain_storage_cursor
-                        .seek_by_key_subkey(address, old_storage.key)?
-                        .filter(|storage| storage.key == old_storage.key)
-                        .unwrap_or_default();
-                    entry.insert((old_storage.value, new_storage.value));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().0 = old_storage.value;
-                }
-            };
-
-            reverts
-                .entry(block_number)
-                .or_default()
-                .entry(address)
-                .or_default()
-                .1
-                .push(old_storage);
-        }
+        // populate bundle state and reverts from changesets / state cursors, to iterate over,
+        // remove, and return later
+        let (state, reverts) = self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            &mut plain_accounts_cursor,
+            &mut plain_storage_cursor,
+        )?;
 
         // iterate over local plain state remove all account and all storages.
         for (address, (old_account, new_account, storage)) in &state {
