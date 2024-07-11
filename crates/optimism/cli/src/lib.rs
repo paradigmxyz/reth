@@ -34,13 +34,30 @@ use std::{ffi::OsString, fmt, sync::Arc};
 use chainspec::OpChainSpecParser;
 use clap::{command, value_parser, Parser};
 use commands::Commands;
+use futures_util::Future;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::node::NoArgs;
+use reth_cli_runner::CliRunner;
+use reth_db::DatabaseEnv;
+use reth_evm_optimism::OpExecutorProvider;
+use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::{utils::chain_help, LogArgs},
     version::{LONG_VERSION, SHORT_VERSION},
 };
+use reth_tracing::FileWorkerGuard;
+use std::{ffi::OsString, fmt, sync::Arc};
+use tracing::info;
+
+/// Optimism binary entrypoint.
+pub mod bin;
+
+/// Optimism chain specification parser.
+pub mod chainspec;
+/// Optimism CLI commands.
+pub mod commands;
+pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
 
 /// The main reth cli interface.
 ///
@@ -98,5 +115,93 @@ impl Cli {
         T: Into<OsString> + Clone,
     {
         Self::try_parse_from(itr)
+    }
+}
+
+impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
+    /// Execute the configured cli command.
+    ///
+    /// This accepts a closure that is used to launch the node via the
+    /// [`NodeCommand`](node::NodeCommand).
+    ///
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use reth::cli::Cli;
+    /// use reth_node_ethereum::EthereumNode;
+    ///
+    /// Cli::parse_args()
+    ///     .run(|builder, _| async move {
+    ///         let handle = builder.launch_node(EthereumNode::default()).await?;
+    ///
+    ///         handle.wait_for_node_exit().await
+    ///     })
+    ///     .unwrap();
+    /// ```
+    ///
+    /// # Example
+    ///
+    /// Parse additional CLI arguments for the node command and use it to configure the node.
+    ///
+    /// ```no_run
+    /// use clap::Parser;
+    /// use reth::cli::Cli;
+    ///
+    /// #[derive(Debug, Parser)]
+    /// pub struct MyArgs {
+    ///     pub enable: bool,
+    /// }
+    ///
+    /// Cli::parse()
+    ///     .run(|builder, my_args: MyArgs| async move {
+    ///         // launch the node
+    ///
+    ///         Ok(())
+    ///     })
+    ///     .unwrap();
+    /// ````
+    pub fn run<L, Fut>(mut self, launcher: L) -> eyre::Result<()>
+    where
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>>>, Ext) -> Fut,
+        Fut: Future<Output = eyre::Result<()>>,
+    {
+        // add network name to logs dir
+        self.logs.log_file_directory =
+            self.logs.log_file_directory.join(self.chain.chain.to_string());
+
+        let _guard = self.init_tracing()?;
+        info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
+
+        let runner = CliRunner::default();
+        match self.command {
+            Commands::Node(command) => {
+                runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
+            }
+            Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::ImportOp(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::ImportReceiptsOp(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute())
+            }
+            Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
+            Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
+                command.execute(ctx, |chain_spec| OpExecutorProvider::optimism(chain_spec))
+            }),
+            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::Recover(command) => runner.run_command_until_exit(|ctx| command.execute(ctx)),
+            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute()),
+        }
+    }
+
+    /// Initializes tracing with the configured options.
+    ///
+    /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
+    /// that all logs are flushed to disk.
+    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
+        let guard = self.logs.init_tracing()?;
+        Ok(guard)
     }
 }
