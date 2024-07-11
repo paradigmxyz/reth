@@ -1162,14 +1162,56 @@ impl Default for RpcServerConfig<Identity> {
     }
 }
 
+impl RpcServerConfig<Identity> {
+    /// Creates a new config with only http set
+    pub fn http(config: ServerBuilder<Identity, Identity>) -> Self {
+        //RpcServerConfig::<Identity>::default().with_http(config)
+        Self::default().with_http(config)
+    }
+
+    /// Configures the http server
+    ///
+    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
+    /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
+    pub fn with_http(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
+        self.http_server_config =
+            Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
+        self
+    }
+
+    /// Creates a new config with only ws set
+    pub fn ws(config: ServerBuilder<Identity, Identity>) -> Self {
+        Self::default().with_ws(config)
+    }
+
+    /// Configures the ws server
+    ///
+    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
+    /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
+    pub fn with_ws(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
+        self.ws_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
+        self
+    }
+
+    /// Creates a new config with only ipc set
+    pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> Self {
+        Self::default().with_ipc(config)
+    }
+
+    /// Configures the ipc server
+    ///
+    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
+    /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
+    pub fn with_ipc(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
+        self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
+        self
+    }
+}
+
 use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceT};
 use tower::Layer;
 
-impl<RpcMiddleware> RpcServerConfig<RpcMiddleware>
-where
-    RpcMiddleware: for<'a> Layer<RpcService, Service: RpcServiceT<'a>> + Clone + Send + 'static,
-    <RpcMiddleware as Layer<RpcService>>::Service: Send + std::marker::Sync,
-{
+impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Configure rpc middleware
     pub fn set_rpc_middleware<T>(self, rpc_middleware: RpcServiceBuilder<T>) -> RpcServerConfig<T> {
         RpcServerConfig {
@@ -1186,40 +1228,9 @@ where
         }
     }
 
-    /// Creates a new config with only http set
-    pub fn http(config: ServerBuilder<Identity, Identity>) -> RpcServerConfig<Identity> {
-        RpcServerConfig::<Identity>::default().with_http(config)
-    }
-
-    /// Creates a new config with only ws set
-    pub fn ws(config: ServerBuilder<Identity, Identity>) -> RpcServerConfig<Identity> {
-        RpcServerConfig::<Identity>::default().with_ws(config)
-    }
-
-    /// Creates a new config with only ipc set
-    pub fn ipc(config: IpcServerBuilder<Identity, Identity>) -> RpcServerConfig<Identity> {
-        RpcServerConfig::<Identity>::default().with_ipc(config)
-    }
-
-    /// Configures the http server
-    ///
-    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
-    /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
-    pub fn with_http(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
-        self.http_server_config =
-            Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
-        self
-    }
-
     /// Configure the cors domains for http _and_ ws
     pub fn with_cors(self, cors_domain: Option<String>) -> Self {
         self.with_http_cors(cors_domain.clone()).with_ws_cors(cors_domain)
-    }
-
-    /// Configure the cors domains for HTTP
-    pub fn with_http_cors(mut self, cors_domain: Option<String>) -> Self {
-        self.http_cors_domains = cors_domain;
-        self
     }
 
     /// Configure the cors domains for WS
@@ -1228,12 +1239,9 @@ where
         self
     }
 
-    /// Configures the ws server
-    ///
-    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
-    /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
-    pub fn with_ws(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
-        self.ws_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
+    /// Configure the cors domains for HTTP
+    pub fn with_http_cors(mut self, cors_domain: Option<String>) -> Self {
+        self.http_cors_domains = cors_domain;
         self
     }
 
@@ -1252,15 +1260,6 @@ where
     /// [`reth_rpc_server_types::constants::DEFAULT_WS_RPC_PORT`]
     pub const fn with_ws_address(mut self, addr: SocketAddr) -> Self {
         self.ws_addr = Some(addr);
-        self
-    }
-
-    /// Configures the ipc server
-    ///
-    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
-    /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
-    pub fn with_ipc(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
-        self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
 
@@ -1337,7 +1336,11 @@ where
     /// If both http and ws are on the same port, they are combined into one server.
     ///
     /// Returns the [`RpcServerHandle`] with the handle to the started servers.
-    pub async fn start(self, modules: &TransportRpcModules) -> Result<RpcServerHandle, RpcError> {
+    pub async fn start(self, modules: &TransportRpcModules) -> Result<RpcServerHandle, RpcError>
+    where
+        RpcMiddleware: for<'a> Layer<RpcService, Service: RpcServiceT<'a>> + Clone + Send + 'static,
+        <RpcMiddleware as Layer<RpcService>>::Service: Send + std::marker::Sync,
+    {
         let mut http_handle = None;
         let mut ws_handle = None;
         let mut ipc_handle = None;

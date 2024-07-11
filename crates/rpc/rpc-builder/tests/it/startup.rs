@@ -75,7 +75,8 @@ async fn test_launch_same_port_different_modules() {
         EthApiBuild::build,
     );
     let addr = test_address();
-    let res = RpcServerConfig::<Identity>::ws(Default::default())
+    //let res = RpcServerConfig::<Identity>::ws(Default::default())
+    let res = RpcServerConfig::ws(Default::default())
         .with_ws_address(addr)
         .with_http(Default::default())
         .with_http_address(addr)
@@ -97,7 +98,8 @@ async fn test_launch_same_port_same_cors() {
         EthApiBuild::build,
     );
     let addr = test_address();
-    let res = RpcServerConfig::<Identity>::ws(Default::default())
+    //let res = RpcServerConfig::<Identity>::ws(Default::default())
+    let res = RpcServerConfig::ws(Default::default())
         .with_ws_address(addr)
         .with_http(Default::default())
         .with_cors(Some("*".to_string()))
@@ -117,7 +119,8 @@ async fn test_launch_same_port_different_cors() {
         EthApiBuild::build,
     );
     let addr = test_address();
-    let res = RpcServerConfig::<Identity>::ws(Default::default())
+    //let res = RpcServerConfig::<Identity>::ws(Default::default())
+    let res = RpcServerConfig::ws(Default::default())
         .with_ws_address(addr)
         .with_http(Default::default())
         .with_cors(Some("*".to_string()))
