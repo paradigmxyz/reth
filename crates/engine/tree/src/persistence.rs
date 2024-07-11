@@ -79,11 +79,7 @@ impl<DB: Database> Persistence<DB> {
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
             let execution_outcome = block.execution_outcome().clone();
-            execution_outcome.write_to_storage(
-                provider_rw.tx_ref(),
-                None,
-                OriginalValuesKnown::No,
-            )?;
+            execution_outcome.write_to_storage(&provider_rw, None, OriginalValuesKnown::No)?;
 
             // insert hashes and intermediate merkle nodes
             {

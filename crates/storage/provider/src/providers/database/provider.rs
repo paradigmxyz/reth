@@ -171,7 +171,7 @@ impl<TX: DbTx + 'static> DatabaseProvider<TX> {
     }
 }
 
-impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
+impl<DB: Database> DatabaseProviderRW<DB> {
     // TODO: uncomment below, once `reth debug_cmd` has been feature gated with dev.
     // #[cfg(any(test, feature = "test-utils"))]
     /// Inserts an historical block. **Used for setting up test environments**
@@ -2990,7 +2990,7 @@ impl<TX: DbTxMut + DbTx> HistoryWriter for DatabaseProvider<TX> {
     }
 }
 
-impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
+impl<DB: Database> BlockExecutionWriter for DatabaseProviderRW<DB> {
     fn get_block_and_execution_range(
         &self,
         range: RangeInclusive<BlockNumber>,
@@ -3093,7 +3093,7 @@ impl<TX: DbTxMut + DbTx> BlockExecutionWriter for DatabaseProvider<TX> {
     }
 }
 
-impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
+impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,
@@ -3264,7 +3264,7 @@ impl<TX: DbTxMut + DbTx> BlockWriter for DatabaseProvider<TX> {
 
         // Write state and changesets to the database.
         // Must be written after blocks because of the receipt lookup.
-        execution_outcome.write_to_storage(self.tx_ref(), None, OriginalValuesKnown::No)?;
+        execution_outcome.write_to_storage(self, None, OriginalValuesKnown::No)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
         // insert hashes and intermediate merkle nodes
