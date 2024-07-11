@@ -69,6 +69,12 @@ impl Drop for GracefulShutdownGuard {
     }
 }
 
+impl Clone for GracefulShutdownGuard {
+    fn clone(&self) -> Self {
+        Self::new(Arc::clone(&self.0))
+    }
+}
+
 /// A Future that resolves when the shutdown event has been fired.
 #[derive(Debug, Clone)]
 pub struct Shutdown(Shared<oneshot::Receiver<()>>);

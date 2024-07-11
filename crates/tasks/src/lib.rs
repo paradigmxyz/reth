@@ -713,6 +713,30 @@ mod tests {
     }
 
     #[test]
+    fn test_manager_graceful_shutdown_clone() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let handle = runtime.handle().clone();
+        let manager = TaskManager::new(handle);
+        let executor = manager.executor();
+
+        let val = Arc::new(AtomicBool::new(false));
+        let c = val.clone();
+        executor.spawn_critical_with_graceful_shutdown_signal(
+            "grace clone",
+            |shutdown| async move {
+                let guard2 = shutdown.clone();
+                let _guard = shutdown.await;
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                drop(guard2);
+                c.store(true, Ordering::Relaxed);
+            },
+        );
+
+        manager.graceful_shutdown();
+        assert!(val.load(Ordering::Relaxed));
+    }
+
+    #[test]
     fn test_manager_graceful_shutdown() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let handle = runtime.handle().clone();
