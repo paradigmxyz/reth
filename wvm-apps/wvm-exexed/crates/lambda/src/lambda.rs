@@ -19,14 +19,16 @@ fn is_transaction_to_sequencer(to: Address) -> bool {
     to == addr
 }
 
-fn process_tx_sequencer(tx: &TransactionSigned, txs: &mut Vec<String>) {
+fn process_tx_sequencer(tx: &TransactionSigned) -> Option<String> {
     if let Some(to) = tx.transaction.to() {
         let is_tx_to_seq = is_transaction_to_sequencer(to);
         let is_input_empty = tx.transaction.input().is_empty();
         if is_tx_to_seq && !is_input_empty {
-            txs.push(tx.hash.to_string());
+            return Some(tx.hash.to_string());
         }
     }
+
+    None
 }
 
 pub async fn exex_lambda_processor<Node: FullNodeComponents>(
@@ -42,7 +44,10 @@ pub async fn exex_lambda_processor<Node: FullNodeComponents>(
             let last_block = committed_chain.tip();
 
             for tx in last_block.body.iter() {
-                process_tx_sequencer(tx, &mut txs);
+                let potential_hash = process_tx_sequencer(tx);
+                if let Some(tx_hash) = potential_hash {
+                    txs.push(tx_hash);
+                }
             }
 
             let payload = json!({
@@ -64,8 +69,8 @@ pub async fn exex_lambda_processor<Node: FullNodeComponents>(
 
 #[cfg(test)]
 mod tests {
-    use reth::primitives::address;
     use crate::lambda::is_transaction_to_sequencer;
+    use reth::primitives::address;
 
     #[test]
     fn check_for_seq_address() {

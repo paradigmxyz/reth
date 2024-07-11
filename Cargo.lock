@@ -3031,23 +3031,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "exex-lambda"
-version = "0.2.0-beta.9"
-dependencies = [
- "eyre",
- "futures",
- "reqwest 0.12.5",
- "reth",
- "reth-exex",
- "reth-node-api",
- "reth-node-ethereum",
- "reth-tracing",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "exex-minimal"
 version = "0.0.0"
 dependencies = [
@@ -4739,6 +4722,20 @@ checksum = "47a3633291834c4fbebf8673acbc1b04ec9d151418ff9b8e26dcd79129928758"
 dependencies = [
  "digest 0.10.7",
  "sha3-asm",
+]
+
+[[package]]
+name = "lambda"
+version = "0.2.0-beta.9"
+dependencies = [
+ "eyre",
+ "reqwest 0.12.5",
+ "reth",
+ "reth-exex",
+ "reth-node-ethereum",
+ "reth-tracing",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -7916,9 +7913,9 @@ version = "0.2.0-beta.9"
 dependencies = [
  "bigquery",
  "exex-etl",
- "exex-lambda",
  "eyre",
  "futures",
+ "lambda",
  "repository",
  "reth",
  "reth-exex",
@@ -11896,6 +11893,7 @@ dependencies = [
  "futures",
  "gcp-bigquery-client 0.17.1",
  "indexmap 2.2.6",
+ "lambda",
  "repository",
  "reth",
  "reth-exex",
