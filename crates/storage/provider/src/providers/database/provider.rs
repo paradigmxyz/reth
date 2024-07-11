@@ -971,10 +971,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
     ///     1. Take the old value from the changeset
     ///     2. Take the new value from the local state
     ///     3. Set the local state to the value in the changeset
-    pub fn remove_state(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<()> {
+    pub fn remove_state(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
         if range.is_empty() {
             return Ok(())
         }
