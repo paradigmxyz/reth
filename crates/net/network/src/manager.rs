@@ -77,7 +77,7 @@ use tracing::{debug, error, trace, warn};
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<C> {
     /// The type that manages the actual network part, which includes connections.
-    swarm: Swarm<C>,
+    swarm: Swarm,
     /// Underlying network handle that can be shared.
     handle: NetworkHandle,
     /// Receiver half of the command channel set up between this type and the [`NetworkHandle`]
@@ -112,6 +112,7 @@ pub struct NetworkManager<C> {
     metrics: NetworkMetrics,
     /// Disconnect metrics for the Network
     disconnect_metrics: DisconnectMetrics,
+    _phantom: std::marker::PhantomData<C>,
 }
 
 // === impl NetworkManager ===
@@ -162,7 +163,7 @@ impl<C> NetworkManager<C> {
 
 impl<C> NetworkManager<C>
 where
-    C: BlockNumReader,
+    C: BlockNumReader + 'static,
 {
     /// Creates the manager of a new network.
     ///
@@ -242,7 +243,7 @@ where
         );
 
         let state =
-            NetworkState::new(client, discovery, peers_manager, Arc::clone(&num_active_peers));
+            NetworkState::new(crate::state::BlockNumReader::new(client), discovery, peers_manager, Arc::clone(&num_active_peers));
 
         let swarm = Swarm::new(incoming, sessions, state);
 
@@ -275,6 +276,7 @@ where
             num_active_peers,
             metrics: Default::default(),
             disconnect_metrics: Default::default(),
+            _phantom: Default::default(),
         })
     }
 
@@ -942,7 +944,7 @@ where
 
 impl<C> NetworkManager<C>
 where
-    C: BlockNumReader + Unpin,
+    C: BlockNumReader + Unpin + 'static,
 {
     /// Drives the [`NetworkManager`] future until a [`GracefulShutdown`] signal is received.
     ///
@@ -971,7 +973,7 @@ where
 
 impl<C> Future for NetworkManager<C>
 where
-    C: BlockNumReader + Unpin,
+    C: BlockNumReader + Unpin + 'static,
 {
     type Output = ();
 

@@ -121,7 +121,7 @@ impl<C> NetworkConfig<C> {
 
 impl<C> NetworkConfig<C>
 where
-    C: BlockNumReader,
+    C: BlockNumReader + 'static,
 {
     /// Convenience method for calling [`NetworkManager::new`].
     pub async fn manager(self) -> Result<NetworkManager<C>, NetworkError> {
