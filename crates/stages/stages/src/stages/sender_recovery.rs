@@ -128,12 +128,13 @@ impl<DB: Database> Stage<DB> for SenderRecoveryStage {
     }
 }
 
-fn recover_range<DB: Database, CURSOR>(
+fn recover_range<DB, CURSOR>(
     tx_range: Range<u64>,
     provider: &DatabaseProviderRW<DB>,
     senders_cursor: &mut CURSOR,
 ) -> Result<(), StageError>
 where
+    DB: Database,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Recovering senders batch");
