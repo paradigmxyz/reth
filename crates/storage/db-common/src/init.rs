@@ -115,7 +115,7 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
     // Insert header
     let tx = provider_rw.tx_ref();
     let static_file_provider = factory.static_file_provider();
-    insert_genesis_header::<DB>(tx, &static_file_provider, chain.clone())?;
+    insert_genesis_header(&provider_rw, &static_file_provider, chain.clone())?;
 
     insert_genesis_state::<DB>(tx, alloc.len(), alloc.iter())?;
 
@@ -274,7 +274,7 @@ pub fn insert_history<'a, 'b, DB: Database>(
 
 /// Inserts header for the genesis state.
 pub fn insert_genesis_header<DB: Database>(
-    tx: &<DB as Database>::TXMut,
+    provider: &DatabaseProviderRW<DB>,
     static_file_provider: &StaticFileProvider,
     chain: Arc<ChainSpec>,
 ) -> ProviderResult<()> {
@@ -290,8 +290,8 @@ pub fn insert_genesis_header<DB: Database>(
         Err(e) => return Err(e),
     }
 
-    tx.put::<tables::HeaderNumbers>(block_hash, 0)?;
-    tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
+    provider.tx_ref().put::<tables::HeaderNumbers>(block_hash, 0)?;
+    provider.tx_ref().put::<tables::BlockBodyIndices>(0, Default::default())?;
 
     Ok(())
 }
