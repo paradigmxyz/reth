@@ -150,11 +150,7 @@ impl Command {
                 ),
             ));
             executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
-            executor.finalize().write_to_storage(
-                provider_rw.tx_ref(),
-                None,
-                OriginalValuesKnown::Yes,
-            )?;
+            executor.finalize().write_to_storage(&provider_rw, None, OriginalValuesKnown::Yes)?;
 
             let checkpoint = Some(StageCheckpoint::new(
                 block_number.checked_sub(1).ok_or(eyre::eyre!("GenesisBlockHasNoParent"))?,

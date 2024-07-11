@@ -1,69 +1,35 @@
-use crate::{providers::StaticFileProviderRWRefMut, writer::StorageWriter, StateChanges, StateReverts, StateWriter};
+use crate::{
+    providers::StaticFileProviderRWRefMut, writer::StorageWriter, DatabaseProviderRW, StateChanges,
+    StateReverts, StateWriter,
+};
 use reth_db::{tables, Database};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     transaction::{DbTx, DbTxMut},
 };
-use reth_storage_api::ReceiptWriter;
 pub use reth_execution_types::*;
 use reth_primitives::StaticFileSegment;
+use reth_storage_api::ReceiptWriter;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 pub use revm::db::states::OriginalValuesKnown;
 
 impl StateWriter for ExecutionOutcome {
-    fn write_to_storage<TX, DB>(
+    fn write_to_storage<DB>(
         self,
-        tx: &TX,
-        mut static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
+        provider_rw: &DatabaseProviderRW<DB>,
+        static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
         is_value_known: OriginalValuesKnown,
     ) -> ProviderResult<()>
     where
-    DB: Database,
-        TX: DbTxMut + DbTx,
+        DB: Database,
     {
+        let tx = provider_rw.tx_ref();
         let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
 
         StateReverts(reverts).write_to_db(tx, self.first_block)?;
 
-        StorageWriter::<DB>::new().with_tx(tx).with_sf(static_file_producer).write_blocks_receipts(
-            self.first_block, self.receipts.into_iter()
-        )?;
-
-        // // write receipts
-        // let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-        // let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
-
-        // // ATTENTION: Any potential future refactor or change to how this loop works should keep in
-        // // mind that the static file producer must always call `increment_block` even if the block
-        // // has no receipts. Keeping track of the exact block range of the segment is needed for
-        // // consistency, querying and file range segmentation.
-        // let blocks = self.receipts.into_iter().enumerate();
-        // for (idx, receipts) in blocks {
-        //     let block_number = self.first_block + idx as u64;
-        //     let first_tx_index = bodies_cursor
-        //         .seek_exact(block_number)?
-        //         .map(|(_, indices)| indices.first_tx_num())
-        //         .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
-
-        //     if let Some(static_file_producer) = &mut static_file_producer {
-        //         // Increment block on static file header.
-        //         static_file_producer.increment_block(StaticFileSegment::Receipts, block_number)?;
-        //         let receipts = receipts.into_iter().enumerate().map(|(tx_idx, receipt)| {
-        //             Ok((
-        //                 first_tx_index + tx_idx as u64,
-        //                 receipt
-        //                     .expect("receipt should not be filtered when saving to static files."),
-        //             ))
-        //         });
-        //         static_file_producer.append_receipts(receipts)?;
-        //     } else if !receipts.is_empty() {
-        //         for (tx_idx, receipt) in receipts.into_iter().enumerate() {
-        //             if let Some(receipt) = receipt {
-        //                 receipts_cursor.append(first_tx_index + tx_idx as u64, receipt)?;
-        //             }
-        //         }
-        //     }
-        // }
+        StorageWriter::new(Some(provider_rw), static_file_producer)
+            .write_blocks_receipts(self.first_block, self.receipts.into_iter())?;
 
         StateChanges(plain_state).write_to_db(tx)?;
 
@@ -296,7 +262,7 @@ mod tests {
         state.merge_transitions(BundleRetention::Reverts);
 
         ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new())
-            .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
+            .write_to_storage(&provider, None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         // Check plain storage state
@@ -394,7 +360,7 @@ mod tests {
 
         state.merge_transitions(BundleRetention::Reverts);
         ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 2, Vec::new())
-            .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
+            .write_to_storage(&provider, None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         assert_eq!(
@@ -458,7 +424,7 @@ mod tests {
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
         ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new())
-            .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
+            .write_to_storage(&provider, None, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -604,7 +570,7 @@ mod tests {
         let bundle = state.take_bundle();
 
         ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new())
-            .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
+            .write_to_storage(&provider, None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
@@ -767,7 +733,7 @@ mod tests {
         )]));
         init_state.merge_transitions(BundleRetention::Reverts);
         ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new())
-            .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
+            .write_to_storage(&provider, None, OriginalValuesKnown::Yes)
             .expect("Could not write init bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -812,7 +778,7 @@ mod tests {
         // Commit block #1 changes to the database.
         state.merge_transitions(BundleRetention::Reverts);
         ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new())
-            .write_to_storage(provider.tx_ref(), None, OriginalValuesKnown::Yes)
+            .write_to_storage(&provider, None, OriginalValuesKnown::Yes)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider

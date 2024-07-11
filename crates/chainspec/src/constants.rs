@@ -7,6 +7,3 @@ pub(crate) const MAINNET_DEPOSIT_CONTRACT: DepositContract = DepositContract::ne
     11052984,
     b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
 );
-
-#[cfg(feature = "optimism")]
-pub(crate) mod optimism;

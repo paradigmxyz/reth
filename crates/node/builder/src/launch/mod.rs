@@ -231,14 +231,12 @@ where
 
         let initial_target = ctx.node_config().debug.tip;
 
-        let mut pruner_builder =
-            ctx.pruner_builder().max_reorg_depth(ctx.tree_config().max_reorg_depth() as usize);
+        let mut pruner_builder = ctx.pruner_builder();
         if let Some(exex_manager_handle) = &exex_manager_handle {
             pruner_builder =
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
         }
-
-        let pruner = pruner_builder.build(ctx.provider_factory().clone());
+        let pruner = pruner_builder.build_with_provider_factory(ctx.provider_factory().clone());
 
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");

@@ -23,11 +23,6 @@ use reth_trie_common::root::state_root_ref_unhashed;
 #[cfg(feature = "std")]
 use std::sync::Arc;
 
-#[cfg(feature = "optimism")]
-use crate::constants::optimism::{
-    BASE_SEPOLIA_BASE_FEE_PARAMS, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS, OP_BASE_FEE_PARAMS,
-    OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
-};
 pub use alloy_eips::eip1559::BaseFeeParams;
 #[cfg(feature = "optimism")]
 use reth_ethereum_forks::OptimismHardfork;
@@ -56,7 +51,7 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        prune_delete_limit: 3500,
+        prune_delete_limit: 20000,
     }
     .into()
 });
@@ -78,7 +73,7 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
     }
     .into()
 });
@@ -98,7 +93,7 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
     }
     .into()
 });
@@ -138,12 +133,12 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         hardforks: OptimismHardfork::op_mainnet(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (EthereumHardfork::London.boxed(), OP_BASE_FEE_PARAMS),
-                (OptimismHardfork::Canyon.boxed(), OP_CANYON_BASE_FEE_PARAMS),
+                (EthereumHardfork::London.boxed(), BaseFeeParams::optimism()),
+                (OptimismHardfork::Canyon.boxed(), BaseFeeParams::optimism_canyon()),
             ]
             .into(),
         ),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
         ..Default::default()
     }
     .into()
@@ -163,12 +158,12 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         hardforks: OptimismHardfork::op_sepolia(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (EthereumHardfork::London.boxed(), OP_SEPOLIA_BASE_FEE_PARAMS),
-                (OptimismHardfork::Canyon.boxed(), OP_SEPOLIA_CANYON_BASE_FEE_PARAMS),
+                (EthereumHardfork::London.boxed(), BaseFeeParams::optimism_sepolia()),
+                (OptimismHardfork::Canyon.boxed(), BaseFeeParams::optimism_sepolia_canyon()),
             ]
             .into(),
         ),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
         ..Default::default()
     }
     .into()
@@ -188,12 +183,12 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         hardforks: OptimismHardfork::base_sepolia(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (EthereumHardfork::London.boxed(), BASE_SEPOLIA_BASE_FEE_PARAMS),
-                (OptimismHardfork::Canyon.boxed(), BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS),
+                (EthereumHardfork::London.boxed(), BaseFeeParams::base_sepolia()),
+                (OptimismHardfork::Canyon.boxed(), BaseFeeParams::base_sepolia_canyon()),
             ]
             .into(),
         ),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
         ..Default::default()
     }
     .into()
@@ -213,12 +208,12 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         hardforks: OptimismHardfork::base_mainnet(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (EthereumHardfork::London.boxed(), OP_BASE_FEE_PARAMS),
-                (OptimismHardfork::Canyon.boxed(), OP_CANYON_BASE_FEE_PARAMS),
+                (EthereumHardfork::London.boxed(), BaseFeeParams::optimism()),
+                (OptimismHardfork::Canyon.boxed(), BaseFeeParams::optimism()),
             ]
             .into(),
         ),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
         ..Default::default()
     }
     .into()
@@ -300,9 +295,7 @@ pub struct ChainSpec {
     /// The parameters that configure how a block's base fee is computed
     pub base_fee_params: BaseFeeParamsKind,
 
-    /// The delete limit for pruner, per block. In the actual pruner run it will be multiplied by
-    /// the amount of blocks between pruner runs to account for the difference in amount of new
-    /// data coming in.
+    /// The delete limit for pruner, per run.
     pub prune_delete_limit: usize,
 }
 

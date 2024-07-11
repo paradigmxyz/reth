@@ -35,63 +35,34 @@ enum StorageError {
     ProviderError(#[from] ProviderError),
 }
 
-// struct StorageWriter<'a, 'b, DB: Database>(Arc<StorageWriterInner<'a, 'b, DB>>);
-
+/// 
 #[derive(Debug)]
-pub struct StorageWriter<'a, 'b, DB, TX> {
-    database_rw: Option<&'a DatabaseProviderRW<DB>>,
-    tx: Option<&'a TX>,
+pub struct StorageWriter<'a, 'b, DB: Database> {
+    db: Option<&'a DatabaseProviderRW<DB>>,
     sf: Option<StaticFileProviderRWRefMut<'b>>,
-    has_receipt_pruning: bool
 }
 
-impl<'a, 'b, DB: Database, TX: DbTxMut> StorageWriter<'a, 'b, DB, TX> {
+impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
+    /// Creates a new instance of [`StorageWriter`].
     pub fn new(
+        db: Option<&'a DatabaseProviderRW<DB>>,
+        sf: Option<StaticFileProviderRWRefMut<'b>>,
     ) -> Self {
-        Self { database_rw: None, sf: None, tx: None, has_receipt_pruning: false }
+        Self { db, sf }
     }
 
-    pub fn with_tx(mut self, tx: &'a TX) -> Self {
-        self.tx = Some(tx);
-        self
+    fn db(&self) -> &DatabaseProviderRW<DB> {
+        self.db.as_ref().expect("should exist")
     }
 
-    pub fn with_database_rw(mut self, database_rw: &'a DatabaseProviderRW<DB>) -> Self {
-        self.database_rw = Some(database_rw);
-        self
-    }
-
-    pub fn with_sf(mut self, sf: Option<StaticFileProviderRWRefMut<'b>>) -> Self {
-        self.sf = sf;
-        self
-    }
-
-
-    fn sf<'s>(&'s mut self) -> &'b mut StaticFileProviderRWRefMut<'_>
-    where
-        's: 'b,
-    {
+    fn sf(&mut self) -> &mut StaticFileProviderRWRefMut<'b> {
         self.sf.as_mut().expect("should exist")
     }
 }
 
-impl<'a, 'b, DB: Database, TX: DbTxMut> StorageWriter<'a, 'b, DB, TX> {
-    fn db_tx<'s>(&'s self) -> &'a TX
-    where
-        's: 'a,
-    {
-        self.tx.clone().unwrap_or_else(|| self.database_rw.as_ref().expect("should exist").tx_ref())
-    }
-
-    fn ensure_db_tx(&self) -> Result<(), StorageError> {
-        if self.database_rw.is_none() && self.tx.is_none() {
-            return Err(StorageError::MissingDatabaseWriter)
-        }
-        Ok(())
-    }
-
+impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
     fn ensure_db(&self) -> Result<(), StorageError> {
-        if self.database_rw.is_none() {
+        if self.db.is_none() {
             return Err(StorageError::MissingDatabaseWriter)
         }
         Ok(())
@@ -104,29 +75,27 @@ impl<'a, 'b, DB: Database, TX: DbTxMut> StorageWriter<'a, 'b, DB, TX> {
         Ok(())
     }
 
-    pub fn write_blocks_receipts<'s>(
-        &'s mut self,
-        first_block_number: BlockNumber,
+    /// Writes receipts block by block.
+    pub fn write_blocks_receipts(
+        mut self,
+        initial_block_number: BlockNumber,
         blocks: impl Iterator<Item = Vec<Option<reth_primitives::Receipt>>>,
-    ) -> ProviderResult<()>
-    where
-        's: 'b,
-        's: 'a
-    {
-        self.ensure_db_tx().unwrap();
-        let mut bodies_cursor = self.db_tx().cursor_read::<tables::BlockBodyIndices>()?;
+    ) -> ProviderResult<()> {
+        // TODO: error handle
+        self.ensure_db().unwrap();
+        let mut bodies_cursor = self.db().tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
 
         // If there is any kind of receipt pruning, then we store the receipts to database instead
         // of static file.
-        let mut storage_type = if self.has_receipt_pruning {
-            StorageType::Database(self.db_tx().cursor_write::<tables::Receipts>()?)
+        let mut storage_type = if self.db().prune_modes_ref().has_receipts_pruning() {
+            StorageType::Database(self.db().tx_ref().cursor_write::<tables::Receipts>()?)
         } else {
             self.ensure_sf().unwrap();
-            StorageType::StaticFile(SfWriter(self.sf()))
+            StorageType::StaticFile(self.sf())
         };
 
         for (idx, receipts) in blocks.enumerate() {
-            let block_number = first_block_number + idx as u64;
+            let block_number = initial_block_number + idx as u64;
 
             // TODO: move to block provider fn
             let first_tx_index = bodies_cursor
@@ -143,7 +112,7 @@ impl<'a, 'b, DB: Database, TX: DbTxMut> StorageWriter<'a, 'b, DB, TX> {
                     )?;
                 }
                 StorageType::StaticFile(sf) => {
-                    sf.append_block_receipts(first_tx_index, block_number, receipts)?;
+                    SfWriter(*sf).append_block_receipts(first_tx_index, block_number, receipts)?;
                 }
             };
         }

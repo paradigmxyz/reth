@@ -5,7 +5,7 @@ use reth_storage_api::ReceiptWriter;
 
 pub(crate) struct SfWriter<'a, W>(pub &'a mut W);
 
-impl<'a> ReceiptWriter for SfWriter<'a, StaticFileProviderRWRefMut<'a>> {
+impl<'a> ReceiptWriter for SfWriter<'a, StaticFileProviderRWRefMut<'_>> {
     fn append_block_receipts(
         &mut self,
         first_tx_index: TxNumber,
