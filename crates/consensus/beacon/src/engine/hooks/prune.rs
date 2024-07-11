@@ -9,7 +9,8 @@ use metrics::Counter;
 use reth_db_api::database::Database;
 use reth_errors::{RethError, RethResult};
 use reth_primitives::BlockNumber;
-use reth_prune::{Pruner, PrunerError, PrunerWithResult, WithProviderFactory};
+use reth_provider::ProviderFactory;
+use reth_prune::{Pruner, PrunerError, PrunerWithResult};
 use reth_tasks::TaskSpawner;
 use std::{
     fmt,
@@ -40,7 +41,7 @@ impl<DB: fmt::Debug> fmt::Debug for PruneHook<DB> {
 impl<DB: Database + 'static> PruneHook<DB> {
     /// Create a new instance
     pub fn new(
-        pruner: Pruner<WithProviderFactory<DB>, DB>,
+        pruner: Pruner<ProviderFactory<DB>, DB>,
         pruner_task_spawner: Box<dyn TaskSpawner>,
     ) -> Self {
         Self {
@@ -154,9 +155,9 @@ impl<DB: Database + 'static> EngineHook for PruneHook<DB> {
 #[derive(Debug)]
 enum PrunerState<DB> {
     /// Pruner is idle.
-    Idle(Option<Pruner<WithProviderFactory<DB>, DB>>),
+    Idle(Option<Pruner<ProviderFactory<DB>, DB>>),
     /// Pruner is running and waiting for a response
-    Running(oneshot::Receiver<PrunerWithResult<WithProviderFactory<DB>, DB>>),
+    Running(oneshot::Receiver<PrunerWithResult<ProviderFactory<DB>, DB>>),
 }
 
 #[derive(reth_metrics::Metrics)]

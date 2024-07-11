@@ -257,8 +257,7 @@ where
             // static files during a pipeline unwind
             let mut pruner = PrunerBuilder::new(Default::default())
                 .delete_limit_per_block(usize::MAX)
-                .build()
-                .with_provider(self.provider_factory.clone());
+                .build_with_provider_factory(self.provider_factory.clone());
 
             pruner.run(prune_tip)?;
         }

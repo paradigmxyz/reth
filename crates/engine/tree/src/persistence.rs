@@ -8,7 +8,7 @@ use reth_provider::{
     bundle_state::HashedStateChanges, BlockWriter, HistoryWriter, OriginalValuesKnown,
     ProviderFactory, StageCheckpointWriter, StateWriter,
 };
-use reth_prune::{PruneProgress, Pruner, WithProviderFactory};
+use reth_prune::{PruneProgress, Pruner};
 use std::sync::mpsc::{Receiver, SendError, Sender};
 use tokio::sync::oneshot;
 use tracing::debug;
@@ -31,7 +31,7 @@ pub struct Persistence<DB> {
     /// Incoming requests to persist stuff
     incoming: Receiver<PersistenceAction>,
     /// The pruner
-    pruner: Pruner<WithProviderFactory<DB>, DB>,
+    pruner: Pruner<ProviderFactory<DB>, DB>,
 }
 
 impl<DB: Database> Persistence<DB> {
@@ -39,7 +39,7 @@ impl<DB: Database> Persistence<DB> {
     const fn new(
         provider: ProviderFactory<DB>,
         incoming: Receiver<PersistenceAction>,
-        pruner: Pruner<WithProviderFactory<DB>, DB>,
+        pruner: Pruner<ProviderFactory<DB>, DB>,
     ) -> Self {
         Self { provider, incoming, pruner }
     }
@@ -127,7 +127,7 @@ where
     /// Create a new persistence task, spawning it, and returning a [`PersistenceHandle`].
     fn spawn_new(
         provider: ProviderFactory<DB>,
-        pruner: Pruner<WithProviderFactory<DB>, DB>,
+        pruner: Pruner<ProviderFactory<DB>, DB>,
     ) -> PersistenceHandle {
         let (tx, rx) = std::sync::mpsc::channel();
         let task = Self::new(provider, rx, pruner);

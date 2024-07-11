@@ -26,7 +26,7 @@ use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_primitives::{BlockNumber, B256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-    ExecutionOutcome,
+    ExecutionOutcome, ProviderFactory,
 };
 use reth_prune::Pruner;
 use reth_prune_types::PruneModes;
@@ -400,15 +400,15 @@ where
         let blockchain_provider =
             BlockchainProvider::with_latest(provider_factory.clone(), tree, latest);
 
-        let pruner = Pruner::new(
+        let pruner = Pruner::<ProviderFactory<_>, _>::new(
+            provider_factory.clone(),
             vec![],
             5,
             self.base_config.chain_spec.prune_delete_limit,
             config.max_reorg_depth() as usize,
             None,
             watch::channel(FinishedExExHeight::NoExExs).1,
-        )
-        .with_provider(provider_factory.clone());
+        );
 
         let mut hooks = EngineHooks::new();
         hooks.add(PruneHook::new(pruner, Box::<TokioTaskExecutor>::default()));

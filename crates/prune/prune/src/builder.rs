@@ -1,8 +1,9 @@
-use crate::{segments::SegmentSet, Pruner, WithoutProviderFactory};
+use crate::{segments::SegmentSet, Pruner};
 use reth_chainspec::MAINNET;
 use reth_config::PruneConfig;
 use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
+use reth_provider::ProviderFactory;
 use reth_prune_types::PruneModes;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -79,11 +80,29 @@ impl PrunerBuilder {
         self
     }
 
-    /// Builds a [Pruner] from the current configuration.
-    pub fn build<DB: Database>(self) -> Pruner<WithoutProviderFactory, DB> {
+    /// Builds a [Pruner] from the current configuration with the given provider factory.
+    pub fn build_with_provider_factory<DB: Database>(
+        self,
+        provider_factory: ProviderFactory<DB>,
+    ) -> Pruner<ProviderFactory<DB>, DB> {
         let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
 
-        Pruner::new(
+        Pruner::<ProviderFactory<DB>, _>::new(
+            provider_factory,
+            segments.into_vec(),
+            self.block_interval,
+            self.delete_limit_per_block,
+            self.prune_max_blocks_per_run,
+            self.timeout,
+            self.finished_exex_height,
+        )
+    }
+
+    /// Builds a [Pruner] from the current configuration.
+    pub fn build<DB: Database>(self) -> Pruner<(), DB> {
+        let segments = SegmentSet::<DB>::from_prune_modes(self.segments);
+
+        Pruner::<(), _>::new(
             segments.into_vec(),
             self.block_interval,
             self.delete_limit_per_block,

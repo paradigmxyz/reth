@@ -20,9 +20,7 @@ use crate::metrics::Metrics;
 pub use builder::PrunerBuilder;
 pub use error::PrunerError;
 pub use event::PrunerEvent;
-pub use pruner::{
-    Pruner, PrunerResult, PrunerWithResult, WithProviderFactory, WithoutProviderFactory,
-};
+pub use pruner::{Pruner, PrunerResult, PrunerWithResult};
 
 // Re-export prune types
 #[doc(inline)]
