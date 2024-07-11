@@ -279,21 +279,27 @@ where
     DB: Database + 'static,
 {
     fn builder(self) -> StageSetBuilder<DB> {
-        ExecutionStages::new(
+        let mut builder = ExecutionStages::new(
             self.executor_factory,
             self.stages_config.clone(),
             self.prune_modes.clone(),
         )
-        .builder()
-        .add_stage(PruneStage::new(
-            self.prune_modes.clone(),
-            self.stages_config.prune.commit_threshold,
-        ))
-        .add_set(HashingStages { stages_config: self.stages_config.clone() })
-        .add_set(HistoryIndexingStages {
-            stages_config: self.stages_config.clone(),
-            prune_modes: self.prune_modes,
-        })
+        .builder();
+
+        // If any prune modes are set, add the prune stage.
+        if !self.prune_modes.is_empty() {
+            builder = builder.add_stage(PruneStage::new(
+                self.prune_modes.clone(),
+                self.stages_config.prune.commit_threshold,
+            ));
+        }
+
+        builder.add_set(HashingStages { stages_config: self.stages_config.clone() }).add_set(
+            HistoryIndexingStages {
+                stages_config: self.stages_config.clone(),
+                prune_modes: self.prune_modes,
+            },
+        )
     }
 }
 
