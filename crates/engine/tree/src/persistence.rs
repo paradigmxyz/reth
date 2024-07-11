@@ -233,14 +233,12 @@ pub enum PersistenceAction {
 pub struct PersistenceHandle {
     /// The channel used to communicate with the persistence service
     sender: Sender<PersistenceAction>,
-    /// The last persisted block number.
-    last_persisted_block_number: u64,
 }
 
 impl PersistenceHandle {
     /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
     pub const fn new(sender: Sender<PersistenceAction>) -> Self {
-        Self { sender, last_persisted_block_number: 0 }
+        Self { sender }
     }
 
     /// Sends a specific [`PersistenceAction`] in the contained channel. The caller is responsible
@@ -257,7 +255,7 @@ impl PersistenceHandle {
     ///
     /// This returns the latest hash that has been saved, allowing removal of that block and any
     /// previous blocks from in-memory data structures.
-    pub async fn save_blocks(&mut self, blocks: Vec<ExecutedBlock>) -> B256 {
+    pub async fn save_blocks(&self, blocks: Vec<ExecutedBlock>) -> B256 {
         if blocks.is_empty() {
             return B256::default();
         }
@@ -267,9 +265,7 @@ impl PersistenceHandle {
         self.sender
             .send(PersistenceAction::SaveBlocks((blocks, tx)))
             .expect("should be able to send");
-        let hash = rx.await.expect("todo: err handling");
-        self.last_persisted_block_number = last_block_number;
-        hash
+        rx.await.expect("todo: err handling")
     }
 
     /// Tells the persistence service to remove blocks above a certain block number. The removed
@@ -279,9 +275,7 @@ impl PersistenceHandle {
         self.sender
             .send(PersistenceAction::RemoveBlocksAbove((block_num, tx)))
             .expect("should be able to send");
-        let removed_blocks = rx.await.expect("todo: err handling");
-        self.last_persisted_block_number = block_num;
-        removed_blocks
+        rx.await.expect("todo: err handling")
     }
 
     /// Tells the persistence service to remove block data before the given hash, according to the
@@ -291,14 +285,7 @@ impl PersistenceHandle {
         self.sender
             .send(PersistenceAction::PruneBefore((block_num, tx)))
             .expect("should be able to send");
-        let hash = rx.await.expect("todo: err handling");
-        self.last_persisted_block_number = 0;
-        hash
-    }
-
-    /// Last persisted block number getter.
-    pub const fn last_persisted_block_number(&self) -> u64 {
-        self.last_persisted_block_number
+        rx.await.expect("todo: err handling")
     }
 }
 
@@ -315,7 +302,7 @@ mod tests {
     use reth_prune::Pruner;
     use reth_trie::{updates::TrieUpdates, HashedPostState};
     use revm::db::BundleState;
-    use std::sync::Arc;
+    use std::sync::{mpsc::channel, Arc};
 
     fn default_persistence_handle() -> PersistenceHandle {
         let db = create_test_rw_db();
@@ -330,12 +317,15 @@ mod tests {
 
         let pruner = Pruner::new(provider.clone(), vec![], 5, 0, 5, None, finished_exex_height_rx);
 
-        Persistence::spawn_new(provider, pruner)
+        let (static_file_sender, _static_file_receiver) = channel();
+        let static_file_handle = StaticFileServiceHandle::new(static_file_sender);
+
+        Persistence::spawn_new(provider, static_file_handle, pruner)
     }
 
     #[tokio::test]
     async fn test_save_blocks_empty() {
-        let mut persistence_handle = default_persistence_handle();
+        let persistence_handle = default_persistence_handle();
 
         let blocks = vec![];
 
@@ -346,7 +336,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_save_blocks_single_block() {
-        let mut persistence_handle = default_persistence_handle();
+        let persistence_handle = default_persistence_handle();
 
         let mut block = Block::default();
         let sender = Address::random();

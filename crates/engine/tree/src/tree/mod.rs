@@ -264,6 +264,7 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     persistence: PersistenceHandle,
     /// (tmp) The flag indicating whether the pipeline is active.
     is_pipeline_active: bool,
+    last_persisted_block_number: u64,
     _marker: PhantomData<T>,
 }
 
@@ -294,6 +295,7 @@ where
             persistence,
             is_pipeline_active: false,
             state,
+            last_persisted_block_number: 0,
             _marker: PhantomData,
         }
     }
@@ -376,18 +378,23 @@ where
     /// Returns true if the canonical chain length minus the last persisted
     /// block is more than the persistence threshold.
     fn should_persist(&self) -> bool {
-        self.state.tree_state.max_block_number() - self.persistence.last_persisted_block_number() >
+        self.state.tree_state.max_block_number() - self.last_persisted_block_number >
             PERSISTENCE_THRESHOLD
     }
 
     async fn persist_state(&mut self) {
         let blocks_to_persist = self.get_blocks_to_persist();
 
-        self.persistence.save_blocks(blocks_to_persist).await;
+        let last_persisted_hash = self.persistence.save_blocks(blocks_to_persist).await;
+        if let Some(block) = self.state.tree_state.block_by_hash(last_persisted_hash) {
+            self.last_persisted_block_number = block.number;
+        } else {
+            error!("could not find persisted block with hash {last_persisted_hash} in memory");
+        }
     }
 
     fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
-        let start = self.persistence.last_persisted_block_number() + 1;
+        let start = self.last_persisted_block_number + 1;
         let end = start + PERSISTENCE_THRESHOLD;
 
         self.state
