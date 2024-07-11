@@ -11,7 +11,9 @@ exclude.workspace = true
 [dependencies]
 reth-node-builder.workspace = true
 reth-cli-util.workspace = true
-reth-optimism-cli.workspace = true
+reth-optimism-cli = { workspace = true, optional = true, features = [
+    "optimism",
+] }
 reth-tracing.workspace = true
 reth-node-optimism = { workspace = true, optional = true, features = [
     "optimism",
