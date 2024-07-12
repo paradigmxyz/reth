@@ -1,5 +1,5 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Address, BlockId, Bytes, TxHash, B256};
+use reth_primitives::{Address, Bytes, TxHash, B256};
 use reth_rpc_types::{
     trace::otterscan::{
         BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
@@ -24,7 +24,7 @@ pub trait Otterscan {
 
     /// Check if a certain address contains a deployed code.
     #[method(name = "hasCode")]
-    async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool>;
+    async fn has_code(&self, address: Address, block_number: Option<u64>) -> RpcResult<bool>;
 
     /// Very simple API versioning scheme. Every time we add a new capability, the number is
     /// incremented. This allows for Otterscan to check if the node contains all API it

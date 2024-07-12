@@ -1,7 +1,7 @@
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_primitives::{Address, BlockId, BlockNumberOrTag, TxHash, B256};
+use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::helpers::TraceExt;
 use reth_rpc_eth_types::EthApiError;
@@ -49,8 +49,8 @@ where
     }
 
     /// Handler for `ots_hasCode`
-    async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool> {
-        self.eth.get_code(address, block_number).await.map(|code| !code.is_empty())
+    async fn has_code(&self, address: Address, block_number: Option<u64>) -> RpcResult<bool> {
+        self.eth.get_code(address, block_number.map(Into::into)).await.map(|code| !code.is_empty())
     }
 
     /// Handler for `ots_getApiLevel`
@@ -152,9 +152,8 @@ where
         page_size: usize,
     ) -> RpcResult<OtsBlockTransactions> {
         // retrieve full block and its receipts
-        let block_number = BlockNumberOrTag::Number(block_number);
-        let block = self.eth.block_by_number(block_number, true);
-        let receipts = self.eth.block_receipts(BlockId::Number(block_number));
+        let block = self.eth.block_by_number(block_number.into(), true);
+        let receipts = self.eth.block_receipts(block_number.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
         let mut block = block.ok_or_else(|| internal_rpc_err("block not found"))?;
