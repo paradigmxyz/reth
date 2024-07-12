@@ -5,7 +5,9 @@ use futures::Future;
 use reth_errors::RethError;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{Address, BlockId, Bytes, Header, B256, U256};
-use reth_provider::{BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory};
+use reth_provider::{
+    BlockIdReader, ChainSpecProvider, StateProvider, StateProviderBox, StateProviderFactory,
+};
 use reth_rpc_eth_types::{
     EthApiError, EthResult, EthStateCache, PendingBlockEnv, RpcInvalidTransactionError,
 };

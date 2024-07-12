@@ -111,7 +111,8 @@ where
 
         let base_fee = initialized_block_env.basefee.to::<u64>();
         let block_number = initialized_block_env.number.to::<u64>();
-        let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
+        let block_gas_limit: u64 =
+            initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
 
         // apply eip-4788 pre block contract call
         pre_block_beacon_root_contract_call(
@@ -255,9 +256,9 @@ where
     debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
 
     let mut cumulative_gas_used = 0;
-    let block_gas_limit: u64 = attributes
-        .gas_limit
-        .unwrap_or_else(|| initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit));
+    let block_gas_limit: u64 = attributes.gas_limit.unwrap_or_else(|| {
+        initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit)
+    });
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
     let mut executed_txs = Vec::with_capacity(attributes.transactions.len());
