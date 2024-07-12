@@ -11,13 +11,10 @@ exclude.workspace = true
 [dependencies]
 reth-node-builder.workspace = true
 reth-cli-util.workspace = true
-reth-optimism-cli = { workspace = true, optional = true, features = [
-    "optimism",
-] }
+reth-optimism-cli.workspace = true
 reth-tracing.workspace = true
-reth-node-optimism = { workspace = true, optional = true, features = [
-    "optimism",
-] }
+reth-node-optimism.workspace = true
+
 clap = { workspace = true, features = ["derive", "env"] }
 
 [target.'cfg(unix)'.dependencies]
