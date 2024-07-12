@@ -75,9 +75,9 @@ use tracing::{debug, error, trace, warn};
 /// include_mmd!("docs/mermaid/network-manager.mmd")
 #[derive(Debug)]
 #[must_use = "The NetworkManager does nothing unless polled"]
-pub struct NetworkManager<C> {
+pub struct NetworkManager {
     /// The type that manages the actual network part, which includes connections.
-    swarm: Swarm<C>,
+    swarm: Swarm,
     /// Underlying network handle that can be shared.
     handle: NetworkHandle,
     /// Receiver half of the command channel set up between this type and the [`NetworkHandle`]
@@ -115,7 +115,7 @@ pub struct NetworkManager<C> {
 }
 
 // === impl NetworkManager ===
-impl<C> NetworkManager<C> {
+impl NetworkManager {
     /// Sets the dedicated channel for events indented for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent>) {
@@ -160,15 +160,14 @@ impl<C> NetworkManager<C> {
     }
 }
 
-impl<C> NetworkManager<C>
-where
-    C: BlockNumReader,
-{
+impl NetworkManager {
     /// Creates the manager of a new network.
     ///
     /// The [`NetworkManager`] is an endless future that needs to be polled in order to advance the
     /// state of the entire network.
-    pub async fn new(config: NetworkConfig<C>) -> Result<Self, NetworkError> {
+    pub async fn new<C: BlockNumReader + 'static>(
+        config: NetworkConfig<C>,
+    ) -> Result<Self, NetworkError> {
         let NetworkConfig {
             client,
             secret_key,
@@ -241,8 +240,12 @@ where
             extra_protocols,
         );
 
-        let state =
-            NetworkState::new(client, discovery, peers_manager, Arc::clone(&num_active_peers));
+        let state = NetworkState::new(
+            crate::state::BlockNumReader::new(client),
+            discovery,
+            peers_manager,
+            Arc::clone(&num_active_peers),
+        );
 
         let swarm = Swarm::new(incoming, sessions, state);
 
@@ -306,15 +309,15 @@ where
     ///         .split_with_handle();
     /// }
     /// ```
-    pub async fn builder(
+    pub async fn builder<C: BlockNumReader + 'static>(
         config: NetworkConfig<C>,
-    ) -> Result<NetworkBuilder<C, (), ()>, NetworkError> {
+    ) -> Result<NetworkBuilder<(), ()>, NetworkError> {
         let network = Self::new(config).await?;
         Ok(network.into_builder())
     }
 
     /// Create a [`NetworkBuilder`] to configure all components of the network
-    pub const fn into_builder(self) -> NetworkBuilder<C, (), ()> {
+    pub const fn into_builder(self) -> NetworkBuilder<(), ()> {
         NetworkBuilder { network: self, transactions: (), request_handler: () }
     }
 
@@ -940,10 +943,7 @@ where
     }
 }
 
-impl<C> NetworkManager<C>
-where
-    C: BlockNumReader + Unpin,
-{
+impl NetworkManager {
     /// Drives the [`NetworkManager`] future until a [`GracefulShutdown`] signal is received.
     ///
     /// This invokes the given function `shutdown_hook` while holding the graceful shutdown guard.
@@ -969,10 +969,7 @@ where
     }
 }
 
-impl<C> Future for NetworkManager<C>
-where
-    C: BlockNumReader + Unpin,
-{
+impl Future for NetworkManager {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

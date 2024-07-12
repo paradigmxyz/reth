@@ -674,7 +674,7 @@ async fn test_rejected_by_already_connect() {
 async fn new_random_peer(
     max_in_bound: usize,
     trusted_nodes: HashSet<NodeRecord>,
-) -> NetworkManager<NoopProvider> {
+) -> NetworkManager {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let peers_config =
         PeersConfig::default().with_max_inbound(max_in_bound).with_trusted_nodes(trusted_nodes);
@@ -683,7 +683,7 @@ async fn new_random_peer(
         .listener_port(0)
         .disable_discovery()
         .peer_config(peers_config)
-        .build(NoopProvider::default());
+        .build_with_noop_provider();
 
     NetworkManager::new(config).await.unwrap()
 }
