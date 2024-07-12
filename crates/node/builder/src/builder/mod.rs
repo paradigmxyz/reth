@@ -20,7 +20,7 @@ use reth_exex::ExExContext;
 use reth_network::{
     NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
-use reth_node_api::{BuilderProvider, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes};
+use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes};
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
@@ -40,7 +40,7 @@ use crate::{
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{EthApiBuilderProvider, RethRpcServerHandles, RpcContext},
-    DefaultNodeLauncher, EthApiBuilderCtx, Node, NodeHandle,
+    DefaultNodeLauncher, Node, NodeHandle,
 };
 
 /// The adapter type for a reth node with the builtin provider type

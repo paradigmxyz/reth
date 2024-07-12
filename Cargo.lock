@@ -7841,8 +7841,6 @@ dependencies = [
  "reth-payload-builder",
  "reth-provider",
  "reth-rpc",
- "reth-rpc-builder",
- "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
  "serde_json",

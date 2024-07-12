@@ -5,6 +5,11 @@ use reth_rpc_eth_types::{
     cache::cache_new_blocks_task, EthApiBuilderCtx, EthConfig, EthStateCache,
 };
 use reth_tasks::TaskSpawner;
+
+/// Alias for `eth` namespace API builder.
+pub type DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi> =
+    Box<dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi>;
+
 /// Handlers for core, filter and pubsub `eth` namespace APIs.
 #[derive(Debug, Clone)]
 pub struct EthHandlers<Provider, Pool, Network, Events, EthApi> {
@@ -29,8 +34,14 @@ impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Networ
         config: EthConfig,
         executor: Tasks,
         events: Events,
-        eth_api_builder: Box<
-            dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi,
+        eth_api_builder: DynEthApiBuilder<
+            Provider,
+            Pool,
+            EvmConfig,
+            Network,
+            Tasks,
+            Events,
+            EthApi,
         >,
     ) -> EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi> {
         EthHandlersBuilder {
@@ -56,8 +67,7 @@ pub struct EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig,
     config: EthConfig,
     executor: Tasks,
     events: Events,
-    eth_api_builder:
-        Box<dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi>,
+    eth_api_builder: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
 }
 
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>

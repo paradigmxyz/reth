@@ -53,7 +53,7 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
 /// Launches a new server with http only with the given modules
 pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
-    let server = builder.build(TransportRpcModuleConfig::set_http(modules), EthApiBuild::build);
+    let server = builder.build(TransportRpcModuleConfig::set_http(modules));
     RpcServerConfig::http(Default::default())
         .with_http_address(test_address())
         .start(&server)

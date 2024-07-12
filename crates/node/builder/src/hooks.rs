@@ -5,10 +5,12 @@ use reth_node_api::{FullNodeComponents, NodeAddOns};
 use crate::node::FullNode;
 
 /// Container for all the configurable hook functions.
-pub(crate) struct NodeHooks<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
-    pub(crate) on_component_initialized: Box<dyn OnComponentInitializedHook<Node>>,
-    pub(crate) on_node_started: Box<dyn OnNodeStartedHook<Node, AddOns>>,
-    pub(crate) _marker: std::marker::PhantomData<Node>,
+pub struct NodeHooks<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
+    /// Hook to run once core components are initialized.
+    pub on_component_initialized: Box<dyn OnComponentInitializedHook<Node>>,
+    /// Hook to run once the node is started.
+    pub on_node_started: Box<dyn OnNodeStartedHook<Node, AddOns>>,
+    _marker: std::marker::PhantomData<Node>,
 }
 
 impl<Node, AddOns> NodeHooks<Node, AddOns>
@@ -17,7 +19,7 @@ where
     AddOns: NodeAddOns<Node>,
 {
     /// Creates a new, empty [`NodeHooks`] instance for the given node type.
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             on_component_initialized: Box::<()>::default(),
             on_node_started: Box::<()>::default(),

@@ -29,7 +29,7 @@ pub trait Node<N: FullNodeTypes>: NodeTypes + Clone {
     /// The type that builds the node's components.
     type ComponentsBuilder: NodeComponentsBuilder<N>;
 
-    // Exposes the customizable node add-on types.
+    /// Exposes the customizable node add-on types.
     type AddOns: NodeAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
     >;
@@ -49,7 +49,7 @@ impl<N, C> AnyNode<N, C> {
     }
 
     /// Sets the node components builder.
-    pub fn components_builder<T>(&self, value: T) -> AnyNode<N, T> {
+    pub const fn components_builder<T>(&self, value: T) -> AnyNode<N, T> {
         AnyNode::<N, T>(PhantomData::<(N, ())>, value)
     }
 }

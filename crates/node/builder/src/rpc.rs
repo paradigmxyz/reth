@@ -36,9 +36,11 @@ pub struct RethRpcServerHandles {
 }
 
 /// Contains hooks that are called during the rpc setup.
-pub(crate) struct RpcHooks<Node: FullNodeComponents, EthApi> {
-    pub(crate) on_rpc_started: Box<dyn OnRpcStarted<Node, EthApi>>,
-    pub(crate) extend_rpc_modules: Box<dyn ExtendRpcModules<Node, EthApi>>,
+pub struct RpcHooks<Node: FullNodeComponents, EthApi> {
+    /// Hooks to run once RPC server is running.
+    pub on_rpc_started: Box<dyn OnRpcStarted<Node, EthApi>>,
+    /// Hooks to run to configure RPC server API.
+    pub extend_rpc_modules: Box<dyn ExtendRpcModules<Node, EthApi>>,
 }
 
 impl<Node: FullNodeComponents, EthApi> Default for RpcHooks<Node, EthApi> {
@@ -331,9 +333,11 @@ where
     Ok((handles, registry))
 }
 
+/// Provides builder for the core `eth` API type.
 pub trait EthApiBuilderProvider<N: FullNodeComponents>: BuilderProvider<N> {
     /// Returns the eth api builder.
-    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send + Sync + Unpin>;
+    #[allow(clippy::type_complexity)]
+    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send>;
 }
 
 impl<N, F> EthApiBuilderProvider<N> for F
@@ -341,7 +345,7 @@ where
     N: FullNodeComponents,
     for<'a> F: BuilderProvider<N, Ctx<'a> = &'a EthApiBuilderCtx<N>>,
 {
-    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send + Sync + Unpin> {
+    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send> {
         F::builder()
     }
 }

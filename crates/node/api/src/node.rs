@@ -165,17 +165,16 @@ pub trait BuilderProvider<N: FullNodeComponents>: Send {
     type Ctx<'a>;
 
     /// Returns builder for type.
-    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send + Sync + Unpin>;
+    #[allow(clippy::type_complexity)]
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send>;
 }
 
 impl<N: FullNodeComponents> BuilderProvider<N> for () {
     type Ctx<'a> = ();
 
-    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send + Sync + Unpin> {
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
         Box::new(noop_builder)
     }
 }
 
-fn noop_builder(_: ()) -> () {
-    ()
-}
+const fn noop_builder(_: ()) {}

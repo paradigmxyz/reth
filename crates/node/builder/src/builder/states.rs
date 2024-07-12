@@ -9,7 +9,7 @@ use std::{fmt, future::Future, marker::PhantomData};
 
 use reth_exex::ExExContext;
 use reth_network::NetworkHandle;
-use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::{
     node_config::NodeConfig,
     rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
@@ -254,8 +254,8 @@ where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-    AO::EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>,
-    AO::EthApi: FullEthApiServer + AddDevSigners,
+    AO::EthApi:
+        EthApiBuilderProvider<NodeAdapter<T, CB::Components>> + FullEthApiServer + AddDevSigners,
 {
     /// Launches the node with the given launcher.
     pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
