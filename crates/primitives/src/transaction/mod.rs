@@ -1710,7 +1710,7 @@ impl<T> WithEncoded<T> {
     }
 
     /// Get the encoded bytes
-    pub fn bytes(&self) -> Bytes {
+    pub fn encoded_bytes(&self) -> Bytes {
         self.0.clone()
     }
 
@@ -1741,7 +1741,7 @@ impl<T> WithEncoded<T> {
 }
 
 impl<T> WithEncoded<Option<T>> {
-    /// returns `None` if the inner value is `None`, otherwise returns `Some(WithPeerId<T>)`.
+    /// returns `None` if the inner value is `None`, otherwise returns `Some(WithEncoded<T>)`.
     pub fn transpose(self) -> Option<WithEncoded<T>> {
         self.1.map(|v| WithEncoded(self.0, v))
     }
