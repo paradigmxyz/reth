@@ -7903,6 +7903,7 @@ dependencies = [
  "reth-node-builder",
  "reth-optimism-consensus",
  "reth-optimism-payload-builder",
+ "reth-optimism-rpc",
  "reth-payload-builder",
  "reth-primitives",
  "reth-provider",
