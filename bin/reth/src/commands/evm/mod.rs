@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use eyre::Result;
-use tracing::info;
+use tracing::{info, debug};
 use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -71,7 +71,7 @@ impl EvmCommand {
         // 计算每个线程处理的区间大小
         let range_per_thread = (self.end_number - self.begin_number + 1) / thread_count as u64;
 
-        let mut threads: Vec<JoinHandle<Result<bool>>> = Vec::with_capacity(thread_count+1);
+        let mut threads: Vec<JoinHandle<Result<bool>>> = Vec::with_capacity(thread_count);
 
 
         // 创建共享 gas 计数器
@@ -86,7 +86,7 @@ impl EvmCommand {
             let txs_counter = Arc::clone(&txs_counter);
             let start = Instant::now();
 
-            threads.push(thread::spawn(move || {
+            thread::spawn(move || {
                 let mut previous_cumulative_gas:u64 = 0;
                 let mut previous_block_counter:u64 = 0;
                 let mut previous_txs_counter:u64 = 0;
@@ -112,14 +112,14 @@ impl EvmCommand {
                         BPS = ?diff_block,
                         TPS = ?diff_txs,
                         throughput = format_gas_throughput(diff_gas, Duration::from_secs(1)),
-                        time = humantime::format_duration(start.elapsed()).to_string(),
+                        time = ?start.elapsed(),
                         "Execution progress"
                      );
-                    if *current_block_counter == (self.end_number - self.begin_number) {
-                        return Ok(true);
+                    if *current_block_counter >= (self.end_number - self.begin_number +1) {
+                        // return Ok(true);
                     }
                 }
-            }));
+            });
         }
 
         for i in 0..thread_count as u64 {
@@ -150,24 +150,34 @@ impl EvmCommand {
 
                     let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(loop_start-1)?);
                     let executor = block_executor!(provider_factory.chain_spec()).clone();
-                    let mut executor = executor.batch_executor(db, PruneModes::none());
+                    let executor = executor.batch_executor(db, PruneModes::none());
                     let blocks = blockchain_db.block_with_senders_range(loop_start..=loop_end).unwrap();
 
-                    for block in blocks {
-                        executor.execute_and_verify_one((&block,td).into())?;
+                    debug!(
+                        target:"exex::evm",
+                        loop_start=loop_start,
+                        loop_end=loop_end,
+                        "loop"
+                    );
+                    executor.execute_and_verify_batch(blocks.iter()
+                        .map(|block| {
+                            let result = (block, td).into();
+                            td += block.header.difficulty;
+                            result
+                        })
+                        .collect::<Vec<_>>())?;
 
-                        //td
-                        td += block.header.difficulty;
-                        // 增加 gas 计数器
-                        let mut cumulative_gas = cumulative_gas.lock().unwrap();
-                        *cumulative_gas += block.block.gas_used;
-                        // block
-                        let mut block_counter = block_counter.lock().unwrap();
-                        *block_counter += 1;
-                        // txs
-                        let mut txs_counter = txs_counter.lock().unwrap();
-                        *txs_counter += block.block.body.len() as u64
-                    }
+
+                    // 增加 gas 计数器
+                    let mut cumulative_gas = cumulative_gas.lock().unwrap();
+                    *cumulative_gas += blocks.iter().map(|block| block.block.gas_used).sum::<u64>();
+                    // block
+                    let mut block_counter = block_counter.lock().unwrap();
+                    *block_counter += blocks.len() as u64;
+
+                    let mut txs_counter = txs_counter.lock().unwrap();
+                    *txs_counter += blocks.iter().map(|block| block.block.body.len()).sum::<usize>() as u64;
+
                 }
                 Ok(true)
             }));
@@ -175,7 +185,7 @@ impl EvmCommand {
 
         for thread in threads {
             match thread.join() {
-                Ok(result) => result?,
+                Ok(_) => {},
                 Err(e) => return Err(eyre::eyre!("Thread join error: {:?}", e)),
             };
         }
