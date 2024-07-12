@@ -21,8 +21,8 @@ pub use state::StateWriter;
 mod chain;
 pub use chain::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
-    CanonStateNotifications, CanonStateSubscriptions, FinalizedBlockHeaderStream,
-    FinalizedBlockHeaderSubscription,
+    CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications, ForkChoiceStream,
+    ForkChoiceSubscriptions,
 };
 
 mod spec;

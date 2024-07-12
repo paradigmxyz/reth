@@ -140,29 +140,31 @@ impl CanonStateNotification {
     }
 }
 
-/// A type that allows to register finalized block related event subscriptions
-/// and get notified when a new finalized block header is available.
-pub trait FinalizedBlockHeaderSubscription: Send + Sync {
-    /// Get notified when a new finalized block header is available.
-    fn subscribe_to_finalized_header(&self) -> broadcast::Receiver<SealedHeader>;
+/// Wrapper around a broadcast receiver that receives fork choice notifications.
+#[derive(Debug)]
+pub struct ForkChoiceNotifications(broadcast::Receiver<SealedHeader>);
 
-    /// Convenience method to get a stream of finalized block headers.
-    fn finalized_header_stream(&self) -> FinalizedBlockHeaderStream {
-        FinalizedBlockHeaderStream {
-            st: BroadcastStream::new(self.subscribe_to_finalized_header()),
-        }
+/// A type that allows to register fork choice related event subscriptions
+/// and get notified when a new fork choice is available.
+pub trait ForkChoiceSubscriptions: Send + Sync {
+    /// Get notified when a new head of the chain is selected.
+    fn subscribe_to_fork_choice(&self) -> ForkChoiceNotifications;
+
+    /// Convenience method to get a stream of the new head of the chain.
+    fn fork_choice_stream(&self) -> ForkChoiceStream {
+        ForkChoiceStream { st: BroadcastStream::new(self.subscribe_to_fork_choice().0) }
     }
 }
 
-/// A Stream of [`SealedHeader`].
+/// A stream of the fork choices in the form of [`SealedHeader`].
 #[derive(Debug)]
 #[pin_project::pin_project]
-pub struct FinalizedBlockHeaderStream {
+pub struct ForkChoiceStream {
     #[pin]
     st: BroadcastStream<SealedHeader>,
 }
 
-impl Stream for FinalizedBlockHeaderStream {
+impl Stream for ForkChoiceStream {
     type Item = SealedHeader;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
