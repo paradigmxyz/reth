@@ -15,3 +15,15 @@ pub use load_secret_key::get_secret_key;
 /// Cli parsers functions.
 pub mod parsers;
 pub use parsers::{hash_or_num_value_parser, parse_duration_from_secs, parse_socket_address};
+
+#[cfg(all(unix, any(target_env = "gnu", target_os = "macos")))]
+pub mod sigsegv_handler;
+
+/// Signal handler to extract a backtrace from stack overflow.
+///
+/// This is a no-op because this platform doesn't support our signal handler's requirements.
+#[cfg(not(all(unix, any(target_env = "gnu", target_os = "macos"))))]
+pub mod sigsegv_handler {
+    /// No-op function.
+    pub fn install() {}
+}

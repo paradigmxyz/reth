@@ -198,11 +198,7 @@ impl Consensus for EthBeaconConsensus {
                 })
             }
 
-            // Early OP exception:
-            //  * If the network is pre-Bedrock OP, ignore the extradata check.
-            if !self.chain_spec.is_optimism() {
-                validate_header_extradata(header)?;
-            }
+            validate_header_extradata(header)?;
         }
 
         Ok(())

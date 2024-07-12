@@ -360,6 +360,15 @@ pub enum RpcInvalidTransactionError {
     /// Blob transaction is a create transaction
     #[error("blob transaction is a create transaction")]
     BlobTransactionIsCreate,
+    /// EOF crate should have `to` address
+    #[error("EOF crate should have `to` address")]
+    EofCrateShouldHaveToAddress,
+    /// EIP-7702 is not enabled.
+    #[error("EIP-7702 authorization list not supported")]
+    AuthorizationListNotSupported,
+    /// EIP-7702 transaction has invalid fields set.
+    #[error("EIP-7702 authorization list has invalid fields")]
+    AuthorizationListInvalidFields,
     /// Optimism related error
     #[error(transparent)]
     #[cfg(feature = "optimism")]
@@ -454,6 +463,13 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
             InvalidTransaction::TooManyBlobs { max, have } => Self::TooManyBlobs { max, have },
             InvalidTransaction::BlobCreateTransaction => Self::BlobTransactionIsCreate,
+            InvalidTransaction::EofCrateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
+            InvalidTransaction::AuthorizationListNotSupported => {
+                Self::AuthorizationListNotSupported
+            }
+            InvalidTransaction::AuthorizationListInvalidFields => {
+                Self::AuthorizationListInvalidFields
+            }
             #[cfg(feature = "optimism")]
             InvalidTransaction::DepositSystemTxPostRegolith => {
                 Self::Optimism(OptimismInvalidTransactionError::DepositSystemTxPostRegolith)
@@ -462,8 +478,6 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::HaltedDepositPostRegolith => {
                 Self::Optimism(OptimismInvalidTransactionError::HaltedDepositPostRegolith)
             }
-            // TODO(EOF)
-            InvalidTransaction::EofCrateShouldHaveToAddress => todo!("EOF"),
         }
     }
 }
@@ -484,6 +498,7 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
             InvalidTransactionError::Eip2930Disabled |
             InvalidTransactionError::Eip1559Disabled |
             InvalidTransactionError::Eip4844Disabled |
+            InvalidTransactionError::Eip7702Disabled |
             InvalidTransactionError::TxTypeNotSupported => Self::TxTypeNotSupported,
             InvalidTransactionError::GasUintOverflow => Self::GasUintOverflow,
             InvalidTransactionError::GasTooLow => Self::GasTooLow,

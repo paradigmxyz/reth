@@ -76,8 +76,10 @@ derive_more.workspace = true
 [dev-dependencies]
 reth-evm-ethereum.workspace = true
 reth-testing-utils.workspace = true
-jsonrpsee-types.workspace = true
+reth-transaction-pool = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
 
+jsonrpsee-types.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }
 assert_matches.workspace = true
 tempfile.workspace = true

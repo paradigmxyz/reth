@@ -749,6 +749,10 @@ impl EthPoolTransaction for MockTransaction {
             _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.tx_type())),
         }
     }
+
+    fn authorization_count(&self) -> usize {
+        0
+    }
 }
 
 impl TryFromRecoveredTransaction for MockTransaction {

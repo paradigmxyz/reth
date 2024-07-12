@@ -1,36 +1,26 @@
 /// Stage IDs for all known stages.
 ///
 /// For custom stages, use [`StageId::Other`]
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StageId {
-    /// Static File stage in the process.
     #[deprecated(
         note = "Static Files are generated outside of the pipeline and do not require a separate stage"
     )]
     StaticFile,
-    /// Header stage in the process.
     Headers,
-    /// Bodies stage in the process.
     Bodies,
-    /// Sender recovery stage in the process.
     SenderRecovery,
-    /// Execution stage in the process.
     Execution,
-    /// Merkle unwind stage in the process.
+    PruneSenderRecovery,
     MerkleUnwind,
-    /// Account hashing stage in the process.
     AccountHashing,
-    /// Storage hashing stage in the process.
     StorageHashing,
-    /// Merkle execute stage in the process.
     MerkleExecute,
-    /// Transaction lookup stage in the process.
     TransactionLookup,
-    /// Index storage history stage in the process.
     IndexStorageHistory,
-    /// Index account history stage in the process.
     IndexAccountHistory,
-    /// Finish stage in the process.
+    Prune,
     Finish,
     /// Other custom stage with a provided string identifier.
     Other(&'static str),
@@ -38,11 +28,12 @@ pub enum StageId {
 
 impl StageId {
     /// All supported Stages
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 14] = [
         Self::Headers,
         Self::Bodies,
         Self::SenderRecovery,
         Self::Execution,
+        Self::PruneSenderRecovery,
         Self::MerkleUnwind,
         Self::AccountHashing,
         Self::StorageHashing,
@@ -50,18 +41,21 @@ impl StageId {
         Self::TransactionLookup,
         Self::IndexStorageHistory,
         Self::IndexAccountHistory,
+        Self::Prune,
         Self::Finish,
     ];
 
     /// Stages that require state.
-    pub const STATE_REQUIRED: [Self; 7] = [
+    pub const STATE_REQUIRED: [Self; 9] = [
         Self::Execution,
+        Self::PruneSenderRecovery,
         Self::MerkleUnwind,
         Self::AccountHashing,
         Self::StorageHashing,
         Self::MerkleExecute,
         Self::IndexStorageHistory,
         Self::IndexAccountHistory,
+        Self::Prune,
     ];
 
     /// Return stage id formatted as string.
@@ -73,6 +67,7 @@ impl StageId {
             Self::Bodies => "Bodies",
             Self::SenderRecovery => "SenderRecovery",
             Self::Execution => "Execution",
+            Self::PruneSenderRecovery => "PruneSenderRecovery",
             Self::MerkleUnwind => "MerkleUnwind",
             Self::AccountHashing => "AccountHashing",
             Self::StorageHashing => "StorageHashing",
@@ -80,6 +75,7 @@ impl StageId {
             Self::TransactionLookup => "TransactionLookup",
             Self::IndexAccountHistory => "IndexAccountHistory",
             Self::IndexStorageHistory => "IndexStorageHistory",
+            Self::Prune => "Prune",
             Self::Finish => "Finish",
             Self::Other(s) => s,
         }
