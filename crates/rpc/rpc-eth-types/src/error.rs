@@ -3,6 +3,8 @@
 use std::time::Duration;
 
 use alloy_sol_types::decode_revert_reason;
+#[cfg(feature = "optimism")]
+use jsonrpsee_types::ErrorObject;
 use reth_errors::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes};
 use reth_rpc_server_types::result::{
@@ -372,7 +374,7 @@ pub enum RpcInvalidTransactionError {
     /// Optimism related error
     #[error(transparent)]
     #[cfg(feature = "optimism")]
-    Optimism(#[from] OptimismInvalidTransactionError),
+    Optimism(#[from] Box<EthApiError>),
 }
 
 /// Optimism specific invalid transaction errors
@@ -385,6 +387,22 @@ pub enum OptimismInvalidTransactionError {
     /// A deposit transaction halted post-regolith
     #[error("deposit transaction halted after regolith")]
     HaltedDepositPostRegolith,
+}
+#[cfg(feature = "optimism")]
+impl ToRpcError for OptimismInvalidTransactionError {
+    fn to_rpc_error(&self) -> ErrorObject<'static> {
+        match self {
+            Self::DepositSystemTxPostRegolith | Self::HaltedDepositPostRegolith => {
+                internal_rpc_err(self.to_string())
+            }
+        }
+    }
+}
+#[cfg(feature = "optimism")]
+impl From<OptimismInvalidTransactionError> for EthApiError {
+    fn from(err: OptimismInvalidTransactionError) -> Self {
+        Self::other(err)
+    }
 }
 
 impl RpcInvalidTransactionError {
@@ -471,13 +489,13 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
                 Self::AuthorizationListInvalidFields
             }
             #[cfg(feature = "optimism")]
-            InvalidTransaction::DepositSystemTxPostRegolith => {
-                Self::Optimism(OptimismInvalidTransactionError::DepositSystemTxPostRegolith)
-            }
+            InvalidTransaction::DepositSystemTxPostRegolith => Self::Optimism(Box::new(
+                EthApiError::from(OptimismInvalidTransactionError::DepositSystemTxPostRegolith),
+            )),
             #[cfg(feature = "optimism")]
-            InvalidTransaction::HaltedDepositPostRegolith => {
-                Self::Optimism(OptimismInvalidTransactionError::HaltedDepositPostRegolith)
-            }
+            InvalidTransaction::HaltedDepositPostRegolith => Self::Optimism(Box::new(
+                EthApiError::from(OptimismInvalidTransactionError::HaltedDepositPostRegolith),
+            )),
         }
     }
 }
