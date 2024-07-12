@@ -1,6 +1,5 @@
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
-use jsonrpsee::server::RpcServiceBuilder;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_chainspec::MAINNET;
 use reth_ethereum_engine_primitives::EthEngineTypes;
@@ -10,7 +9,6 @@ use reth_payload_builder::test_utils::spawn_test_payload_service;
 use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
-    metrics::RpcRequestMetrics,
     EthApiBuild, RpcModuleBuilder, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
@@ -56,11 +54,8 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
 pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHandle {
     let builder = test_rpc_builder();
     let server = builder.build(TransportRpcModuleConfig::set_http(modules), EthApiBuild::build);
-    let rpc_middleware = RpcServiceBuilder::new()
-        .layer(server.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default());
     RpcServerConfig::http(Default::default())
         .with_http_address(test_address())
-        .set_rpc_middleware(rpc_middleware)
         .start(&server)
         .await
         .unwrap()

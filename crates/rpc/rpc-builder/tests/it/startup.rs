@@ -2,10 +2,8 @@
 
 use std::io;
 
-use jsonrpsee::server::RpcServiceBuilder;
 use reth_rpc_builder::{
     error::{RpcError, ServerKind, WsHttpSamePortError},
-    metrics::RpcRequestMetrics,
     EthApiBuild, RpcServerConfig, TransportRpcModuleConfig,
 };
 use reth_rpc_server_types::RethRpcModule;
@@ -30,13 +28,8 @@ async fn test_http_addr_in_use() {
     let builder = test_rpc_builder();
     let server = builder
         .build(TransportRpcModuleConfig::set_http(vec![RethRpcModule::Admin]), EthApiBuild::build);
-    let rpc_middleware = RpcServiceBuilder::new()
-        .layer(server.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default());
-    let result = RpcServerConfig::http(Default::default())
-        .with_http_address(addr)
-        .set_rpc_middleware(rpc_middleware)
-        .start(&server)
-        .await;
+    let result =
+        RpcServerConfig::http(Default::default()).with_http_address(addr).start(&server).await;
     let err = result.unwrap_err();
     assert!(is_addr_in_use_kind(&err, ServerKind::Http(addr)), "{err}");
 }
