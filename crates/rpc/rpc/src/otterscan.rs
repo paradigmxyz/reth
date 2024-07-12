@@ -49,8 +49,8 @@ where
     }
 
     /// Handler for `ots_hasCode`
-    async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool> {
-        self.eth.get_code(address, block_number).await.map(|code| !code.is_empty())
+    async fn has_code(&self, address: Address, block_number: Option<u64>) -> RpcResult<bool> {
+        self.eth.get_code(address, block_number.map(Into::into)).await.map(|code| !code.is_empty())
     }
 
     /// Handler for `ots_getApiLevel`
