@@ -132,22 +132,6 @@ min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
-optimism = [
-    "dep:reth-optimism-cli",
-    "reth-optimism-cli?/optimism",
-    "reth-primitives/optimism",
-    "reth-rpc/optimism",
-    "reth-provider/optimism",
-    "reth-beacon-consensus/optimism",
-    "reth-blockchain-tree/optimism",
-    "dep:reth-node-optimism",
-    "reth-node-core/optimism",
-    "reth-rpc-eth-types/optimism",
-]
-
-# no-op feature flag for switching between the `optimism` and default functionality in CI matrices
-ethereum = []
-
 [[bin]]
 name = "reth"
 path = "src/main.rs"
