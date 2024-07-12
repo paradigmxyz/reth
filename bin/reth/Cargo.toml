@@ -55,9 +55,6 @@ reth-static-file.workspace = true
 reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-node-api.workspace = true
-reth-node-optimism = { workspace = true, optional = true, features = [
-    "optimism",
-] }
 reth-node-core.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-db-common.workspace = true
@@ -65,11 +62,9 @@ reth-node-ethereum.workspace = true
 reth-node-builder.workspace = true
 reth-node-events.workspace = true
 reth-consensus.workspace = true
-reth-optimism-primitives.workspace = true
 reth-engine-util.workspace = true
 reth-prune.workspace = true
 reth-stages-api.workspace = true
-reth-optimism-cli = { workspace = true, optional = true }
 
 # crypto
 alloy-rlp.workspace = true

@@ -219,17 +219,6 @@ impl Command {
         let payload_config = PayloadConfig::new(
             Arc::clone(&best_block),
             Bytes::default(),
-            #[cfg(feature = "optimism")]
-            reth_node_optimism::OptimismPayloadBuilderAttributes::try_new(
-                best_block.hash(),
-                reth_rpc_types::engine::OptimismPayloadAttributes {
-                    payload_attributes: payload_attrs,
-                    transactions: None,
-                    no_tx_pool: None,
-                    gas_limit: None,
-                },
-            )?,
-            #[cfg(not(feature = "optimism"))]
             reth_payload_builder::EthPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 payload_attrs,
@@ -246,13 +235,6 @@ impl Command {
             None,
         );
 
-        #[cfg(feature = "optimism")]
-        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
-            reth_node_optimism::OptimismEvmConfig::default(),
-        )
-        .compute_pending_block();
-
-        #[cfg(not(feature = "optimism"))]
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
 
         match payload_builder.try_build(args)? {
