@@ -122,7 +122,10 @@ where
 
         macro_rules! set_block_or_time {
             ($config:expr, $field:ident, $fork:ident) => {
-                $config.$field = self.chain_spec.hardforks.fork_block(EthereumHardfork::$fork);
+                // don't overwrite if already set
+                if $config.$field.is_none() {
+                    $config.$field = self.chain_spec.hardforks.fork_block(EthereumHardfork::$fork);
+                }
             };
         }
 
