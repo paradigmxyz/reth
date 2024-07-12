@@ -1693,6 +1693,60 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     }
 }
 
+/// Generic wrapper with encoded Bytes
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WithEncoded<T>(Bytes, pub T);
+
+impl<T> From<(Bytes, T)> for WithEncoded<T> {
+    fn from(value: (Bytes, T)) -> Self {
+        Self(value.0, value.1)
+    }
+}
+
+impl<T> WithEncoded<T> {
+    /// Wraps the value with the bytes.
+    pub const fn new(bytes: Bytes, value: T) -> Self {
+        Self(bytes, value)
+    }
+
+    /// Get the encoded bytes
+    pub fn bytes(&self) -> Bytes {
+        self.0.clone()
+    }
+
+    /// Get the underlying data
+    pub const fn data(&self) -> &T {
+        &self.1
+    }
+
+    /// Returns ownership of the underlying data.
+    pub fn into_data(self) -> T {
+        self.1
+    }
+
+    /// Transform the data
+    pub fn transform<F: From<T>>(self) -> WithEncoded<F> {
+        WithEncoded(self.0, self.1.into())
+    }
+
+    /// Split the wrapper into [`Bytes`] and data tuple
+    pub fn split(self) -> (Bytes, T) {
+        (self.0, self.1)
+    }
+
+    /// Maps the inner value to a new value using the given function.
+    pub fn map<U, F: FnOnce(T) -> U>(self, op: F) -> WithEncoded<U> {
+        WithEncoded(self.0, op(self.1))
+    }
+}
+
+impl<T> WithEncoded<Option<T>> {
+    /// returns `None` if the inner value is `None`, otherwise returns `Some(WithPeerId<T>)`.
+    pub fn transpose(self) -> Option<WithEncoded<T>> {
+        self.1.map(|v| WithEncoded(self.0, v))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
