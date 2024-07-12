@@ -42,7 +42,6 @@ reth-trie.workspace = true
 revm.workspace = true
 
 # common
-async-trait.workspace = true
 futures.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
 tokio-stream = { workspace = true, features = ["sync"] }

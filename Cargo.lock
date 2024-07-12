@@ -7057,7 +7057,6 @@ version = "1.0.1"
 dependencies = [
  "aquamarine",
  "assert_matches",
- "async-trait",
  "futures",
  "metrics",
  "parking_lot 0.12.3",
