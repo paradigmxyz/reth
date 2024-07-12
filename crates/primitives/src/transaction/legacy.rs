@@ -3,6 +3,9 @@ use alloy_rlp::{length_of_length, Encodable, Header};
 use core::mem;
 use reth_codecs::{main_codec, Compact};
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// Legacy transaction.
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
