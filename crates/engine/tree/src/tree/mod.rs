@@ -916,12 +916,13 @@ mod tests {
         }
 
         fn save_blocks(&self, blocks: Vec<ExecutedBlock>, tx: oneshot::Sender<B256>) {
+            let last_hash = blocks.last().unwrap().block().hash();
+
             if let Some(sender) = self.blocks_sender.lock().unwrap().take() {
                 let _ = sender.send(blocks);
             }
 
-            // Mock implementation: send a dummy B256 value
-            let _ = tx.send(B256::default());
+            let _ = tx.send(last_hash);
         }
 
         async fn remove_blocks_above(&self, block_num: u64) -> B256 {
