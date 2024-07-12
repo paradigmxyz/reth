@@ -878,8 +878,7 @@ impl PersistenceState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{persistence::PersistenceAction, test_utils::get_executed_blocks};
-
+    use crate::{static_files::StaticFileAction, test_utils::get_executed_blocks};
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
@@ -954,7 +953,8 @@ mod tests {
         let tree_state = TreeState { blocks_by_hash, blocks_by_number };
 
         let (action_tx, action_rx) = channel();
-        let persistence_handle = PersistenceHandle::new(action_tx);
+        let (sf_action_tx, sf_action_rx) = channel();
+        let persistence_handle = PersistenceHandle::new(action_tx, sf_action_tx);
 
         let (tree, to_tree_tx) = get_default_tree(persistence_handle, tree_state);
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| tree.run()).unwrap();
@@ -962,8 +962,8 @@ mod tests {
         // send a message to the tree
         to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
 
-        let received_action = action_rx.recv().expect("Failed to receive saved blocks");
-        if let PersistenceAction::SaveBlocks((saved_blocks, _)) = received_action {
+        let received_action = sf_action_rx.recv().expect("Failed to receive saved blocks");
+        if let StaticFileAction::WriteExecutionData((saved_blocks, _)) = received_action {
             // only PERSISTENCE_THRESHOLD will be persisted
             blocks.pop();
             assert_eq!(saved_blocks, blocks);
