@@ -7070,6 +7070,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-consensus",
+ "reth-ethereum-engine-primitives",
  "reth-evm",
  "reth-exex-types",
  "reth-metrics",

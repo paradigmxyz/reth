@@ -286,17 +286,14 @@ impl PersistenceHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::get_executed_block_with_number;
     use reth_chainspec::MAINNET;
     use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_exex_types::FinishedExExHeight;
-    use reth_primitives::{
-        Address, Block, Receipts, Requests, SealedBlockWithSenders, TransactionSigned, B256,
-    };
-    use reth_provider::{providers::StaticFileProvider, ExecutionOutcome, ProviderFactory};
+    use reth_primitives::B256;
+    use reth_provider::{providers::StaticFileProvider, ProviderFactory};
     use reth_prune::Pruner;
-    use reth_trie::{updates::TrieUpdates, HashedPostState};
-    use revm::db::BundleState;
-    use std::sync::{mpsc::channel, Arc};
+    use std::sync::mpsc::channel;
 
     fn default_persistence_handle() -> PersistenceHandle {
         let db = create_test_rw_db();
@@ -340,29 +337,10 @@ mod tests {
     #[tokio::test]
     async fn test_save_blocks_single_block() {
         let persistence_handle = default_persistence_handle();
+        let block_number = 5;
+        let executed = get_executed_block_with_number(block_number);
+        let block_hash = executed.block().hash();
 
-        let mut block = Block::default();
-        let sender = Address::random();
-        let tx = TransactionSigned::default();
-        block.body.push(tx);
-        let block_hash = block.hash_slow();
-        let block_number = block.number;
-        let sealed = block.seal_slow();
-        let sealed_with_senders =
-            SealedBlockWithSenders::new(sealed.clone(), vec![sender]).unwrap();
-
-        let executed = ExecutedBlock::new(
-            Arc::new(sealed),
-            Arc::new(sealed_with_senders.senders),
-            Arc::new(ExecutionOutcome::new(
-                BundleState::default(),
-                Receipts { receipt_vec: vec![] },
-                block_number,
-                vec![Requests::default()],
-            )),
-            Arc::new(HashedPostState::default()),
-            Arc::new(TrieUpdates::default()),
-        );
         let blocks = vec![executed];
         let (tx, rx) = oneshot::channel();
 
