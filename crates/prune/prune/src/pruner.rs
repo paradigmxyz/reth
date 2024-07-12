@@ -361,22 +361,13 @@ impl<DB: Database> Pruner<DB, ProviderFactory<DB>> {
 
 #[cfg(test)]
 mod tests {
-
     use crate::Pruner;
-    use reth_chainspec::MAINNET;
-    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
     use reth_exex_types::FinishedExExHeight;
-    use reth_provider::{providers::StaticFileProvider, ProviderFactory};
+    use reth_provider::{test_utils::create_test_provider_factory, ProviderFactory};
 
     #[test]
     fn is_pruning_needed() {
-        let db = create_test_rw_db();
-        let (_static_dir, static_dir_path) = create_test_static_files_dir();
-        let provider_factory = ProviderFactory::new(
-            db,
-            MAINNET.clone(),
-            StaticFileProvider::read_write(static_dir_path).unwrap(),
-        );
+        let provider_factory = create_test_provider_factory();
 
         let (finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
