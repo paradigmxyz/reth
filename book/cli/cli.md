@@ -4,4 +4,4 @@ The Reth node is operated via the CLI by running the `reth node` command. To sto
 
 However, Reth has more commands:
 
-{{#include ./SUMMARY.md}}
+For more details, see [the additional commands summary](./SUMMARY.md).
