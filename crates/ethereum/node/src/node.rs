@@ -17,12 +17,11 @@ use reth_node_builder::{
         PayloadServiceBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes},
-    AddOnBuildersAdapter, BuilderContext, Node, NodeAdapter, NodeAddOnBuilders,
-    PayloadBuilderConfig, PayloadTypes,
+    BuilderContext, Node, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
-use reth_tasks::pool::BlockingTaskPool;
+use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
@@ -69,6 +68,8 @@ impl NodeTypes for EthereumNode {
     type Engine = EthEngineTypes;
 }
 
+/// Add ons w.r.t. l1 ethereum.
+#[derive(Debug, Clone)]
 pub struct EthereumAddOns;
 
 impl<N: FullNodeComponents> NodeAddOns<N> for EthereumAddOns {

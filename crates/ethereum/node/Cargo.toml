@@ -27,6 +27,8 @@ reth-auto-seal-consensus.workspace = true
 reth-beacon-consensus.workspace = true
 reth-rpc-builder.workspace = true
 reth-tasks.workspace = true
+reth-rpc.workspace = true
+reth-node-api.workspace = true
 
 # misc
 eyre.workspace = true

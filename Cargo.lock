@@ -7840,6 +7840,7 @@ dependencies = [
  "reth-node-core",
  "reth-payload-builder",
  "reth-provider",
+ "reth-rpc",
  "reth-rpc-builder",
  "reth-tasks",
  "reth-tracing",
