@@ -23,7 +23,7 @@ use tracing::warn;
 
 /// The default maximum duration of a read transaction.
 #[cfg(feature = "read-tx-timeouts")]
-const DEFAULT_MAX_READ_TRANSACTION_DURATION: Duration = Duration::from_secs(5 * 60);
+const DEFAULT_MAX_READ_TRANSACTION_DURATION: Duration = Duration::from_secs(5 * 60 * 60);
 
 /// An environment supports multiple databases, all residing in the same shared-memory map.
 ///

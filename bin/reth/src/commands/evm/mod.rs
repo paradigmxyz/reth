@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use eyre::Result;
-use tracing::{info, Instrument};
+use tracing::info;
 use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -18,7 +18,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages::format_gas_throughput;
 use crate::beacon_consensus::EthBeaconConsensus;
 use crate::macros::block_executor;
-use crate::providers::{BlockNumReader, ProviderError, StateProviderFactory, TransactionVariant};
+use crate::providers::{BlockNumReader, ProviderError, StateProviderFactory};
 
 /// EVM commands
 #[derive(Debug, Parser)]
@@ -71,12 +71,12 @@ impl EvmCommand {
         // 计算每个线程处理的区间大小
         let range_per_thread = (self.end_number - self.begin_number + 1) / thread_count as u64;
 
-        let mut threads: Vec<JoinHandle<Result<bool>>> = Vec::with_capacity(thread_count);
+        let mut threads: Vec<JoinHandle<Result<bool>>> = Vec::with_capacity(thread_count+1);
 
 
         // 创建共享 gas 计数器
         let cumulative_gas = Arc::new(Mutex::new(0));
-        let block_counter = Arc::new(Mutex::new(self.begin_number));
+        let block_counter = Arc::new(Mutex::new(0));
         let txs_counter = Arc::new(Mutex::new(0));
 
         // 创建状态输出线程
@@ -86,7 +86,7 @@ impl EvmCommand {
             let txs_counter = Arc::clone(&txs_counter);
             let start = Instant::now();
 
-            thread::spawn(move || {
+            threads.push(thread::spawn(move || {
                 let mut previous_cumulative_gas:u64 = 0;
                 let mut previous_block_counter:u64 = 0;
                 let mut previous_txs_counter:u64 = 0;
@@ -109,14 +109,17 @@ impl EvmCommand {
                         target:"exex::evm",
                         blocks = ?current_block_counter,
                         txs = ?current_txs_counter,
-                        blockTPS = ?diff_block,
+                        BPS = ?diff_block,
                         TPS = ?diff_txs,
                         throughput = format_gas_throughput(diff_gas, Duration::from_secs(1)),
-                        time = ?start.elapsed(),
+                        time = humantime::format_duration(start.elapsed()).to_string(),
                         "Execution progress"
                      );
+                    if *current_block_counter == (self.end_number - self.begin_number) {
+                        return Ok(true);
+                    }
                 }
-            });
+            }));
         }
 
         for i in 0..thread_count as u64 {
@@ -133,35 +136,38 @@ impl EvmCommand {
 
             let provider_factory = provider_factory.clone();
             let blockchain_db = blockchain_db.clone();
-            let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(thread_start-1)?);
-            let executor = block_executor!(provider_factory.chain_spec()).clone();
 
-            let mut executor = executor.batch_executor(db, PruneModes::none());
+
+
 
             let mut td = blockchain_db.header_td_by_number(thread_start)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(thread_start.into()))?;
 
             threads.push(thread::spawn(move || {
-                for target in thread_start..=thread_end {
 
-                    let block =  blockchain_db.sealed_block_with_senders(target.into(), TransactionVariant::WithHash)?
-                        .ok_or_else(|| ProviderError::HeaderNotFound(target.into()))?;
+                for loop_start in (thread_start..=thread_end).step_by(1000) {
+                    let loop_end = std::cmp::min(loop_start + 999, thread_end);
 
-                    executor.execute_and_verify_one((&block.clone().unseal(),td).into())?;
+                    let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(loop_start-1)?);
+                    let executor = block_executor!(provider_factory.chain_spec()).clone();
+                    let mut executor = executor.batch_executor(db, PruneModes::none());
+                    let blocks = blockchain_db.block_with_senders_range(loop_start..=loop_end).unwrap();
 
-                    //td
-                    td += block.header.difficulty;
+                    for block in blocks {
+                        executor.execute_and_verify_one((&block,td).into())?;
 
-                    // 增加 gas 计数器
-                    let mut cumulative_gas = cumulative_gas.lock().unwrap();
-                    *cumulative_gas += block.block.gas_used;
-                    // block
-                    let mut block_counter = block_counter.lock().unwrap();
-                    *block_counter += 1;
-                    // txs
-                    let mut txs_counter = txs_counter.lock().unwrap();
-                    *txs_counter += block.block.raw_transactions().len() as u64
-
+                        //td
+                        td += block.header.difficulty;
+                        // 增加 gas 计数器
+                        let mut cumulative_gas = cumulative_gas.lock().unwrap();
+                        *cumulative_gas += block.block.gas_used;
+                        // block
+                        let mut block_counter = block_counter.lock().unwrap();
+                        *block_counter += 1;
+                        // txs
+                        let mut txs_counter = txs_counter.lock().unwrap();
+                        *txs_counter += block.block.body.len() as u64
+                    }
                 }
                 Ok(true)
             }));
