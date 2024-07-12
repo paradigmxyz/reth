@@ -27,7 +27,7 @@ pub struct StaticFileService<DB> {
     /// The db / static file provider to use
     provider: ProviderFactory<DB>,
     /// Handle for the database service
-    database_handle: Arc<dyn PersistenceHandle>,
+    database_handle: PersistenceHandle,
     /// Incoming requests to write static files
     incoming: Receiver<StaticFileAction>,
     /// The pruning configuration

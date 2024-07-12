@@ -142,7 +142,7 @@ where
         provider: ProviderFactory<DB>,
         static_file_handle: StaticFileServiceHandle,
         pruner: Pruner<DB, ProviderFactory<DB>>,
-    ) -> PersistenceHandleImpl {
+    ) -> PersistenceHandle {
         let (tx, rx) = std::sync::mpsc::channel();
         let service = Self::new(provider, rx, static_file_handle, pruner);
         std::thread::Builder::new()
@@ -150,7 +150,7 @@ where
             .spawn(|| service.run())
             .unwrap();
 
-        PersistenceHandleImpl::new(tx)
+        PersistenceHandle::new(tx)
     }
 }
 
@@ -224,36 +224,24 @@ pub enum PersistenceAction {
     PruneBefore((u64, oneshot::Sender<PruneProgress>)),
 }
 
-#[async_trait::async_trait]
-pub trait PersistenceHandle: Send + Sync {
-    fn send_action(&self, action: PersistenceAction) -> Result<(), SendError<PersistenceAction>>;
-
-    fn save_blocks(&self, blocks: Vec<ExecutedBlock>, tx: oneshot::Sender<B256>);
-
-    async fn remove_blocks_above(&self, block_num: u64) -> B256;
-
-    async fn prune_before(&self, block_num: u64) -> PruneProgress;
-}
-
 /// A handle to the persistence service
 #[derive(Debug)]
-pub struct PersistenceHandleImpl {
+pub struct PersistenceHandle {
     /// The channel used to communicate with the persistence service
     sender: Sender<PersistenceAction>,
 }
 
-impl PersistenceHandleImpl {
+impl PersistenceHandle {
     /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
     pub const fn new(sender: Sender<PersistenceAction>) -> Self {
         Self { sender }
     }
-}
-
-#[async_trait::async_trait]
-impl PersistenceHandle for PersistenceHandleImpl {
     /// Sends a specific [`PersistenceAction`] in the contained channel. The caller is responsible
     /// for creating any channels for the given action.
-    fn send_action(&self, action: PersistenceAction) -> Result<(), SendError<PersistenceAction>> {
+    pub fn send_action(
+        &self,
+        action: PersistenceAction,
+    ) -> Result<(), SendError<PersistenceAction>> {
         self.sender.send(action)
     }
 
@@ -263,7 +251,7 @@ impl PersistenceHandle for PersistenceHandleImpl {
     /// This returns the latest hash that has been saved, allowing removal of that block and any
     /// previous blocks from in-memory data structures. This value is returned in the receiver end
     /// of the sender argument.
-    fn save_blocks(&self, blocks: Vec<ExecutedBlock>, tx: oneshot::Sender<B256>) {
+    pub fn save_blocks(&self, blocks: Vec<ExecutedBlock>, tx: oneshot::Sender<B256>) {
         if blocks.is_empty() {
             let _ = tx.send(B256::default());
             return;
@@ -275,7 +263,7 @@ impl PersistenceHandle for PersistenceHandleImpl {
 
     /// Tells the persistence service to remove blocks above a certain block number. The removed
     /// blocks are returned by the service.
-    async fn remove_blocks_above(&self, block_num: u64) -> B256 {
+    pub async fn remove_blocks_above(&self, block_num: u64) -> B256 {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(PersistenceAction::RemoveBlocksAbove((block_num, tx)))
@@ -285,7 +273,7 @@ impl PersistenceHandle for PersistenceHandleImpl {
 
     /// Tells the persistence service to remove block data before the given hash, according to the
     /// configured prune config.
-    async fn prune_before(&self, block_num: u64) -> PruneProgress {
+    pub async fn prune_before(&self, block_num: u64) -> PruneProgress {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(PersistenceAction::PruneBefore((block_num, tx)))
@@ -306,7 +294,7 @@ mod tests {
     use reth_prune::Pruner;
     use std::sync::mpsc::channel;
 
-    fn default_persistence_handle() -> PersistenceHandleImpl {
+    fn default_persistence_handle() -> PersistenceHandle {
         let db = create_test_rw_db();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
         let provider = ProviderFactory::new(

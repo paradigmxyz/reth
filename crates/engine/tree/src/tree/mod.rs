@@ -260,7 +260,7 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     state: EngineApiTreeState,
     incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
     outgoing: UnboundedSender<EngineApiEvent>,
-    persistence: Arc<dyn PersistenceHandle>,
+    persistence: PersistenceHandle,
     persistence_state: PersistenceState,
     /// (tmp) The flag indicating whether the pipeline is active.
     is_pipeline_active: bool,
@@ -282,7 +282,7 @@ where
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         outgoing: UnboundedSender<EngineApiEvent>,
         state: EngineApiTreeState,
-        persistence: Arc<dyn PersistenceHandle>,
+        persistence: PersistenceHandle,
     ) -> Self {
         Self {
             provider,
@@ -307,7 +307,7 @@ where
         payload_validator: ExecutionPayloadValidator,
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         state: EngineApiTreeState,
-        persistence: Arc<dyn PersistenceHandle>,
+        persistence: PersistenceHandle,
     ) -> UnboundedSender<EngineApiEvent> {
         let (outgoing, rx) = tokio::sync::mpsc::unbounded_channel();
         let task = Self::new(
@@ -888,54 +888,11 @@ mod tests {
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_prune::PruneProgress;
-    use std::sync::{
-        mpsc::{channel, SendError},
-        Mutex,
-    };
+    use std::sync::mpsc::channel;
     use tokio::sync::mpsc::unbounded_channel;
 
-    struct PersistenceHandleMock {
-        blocks_sender: Arc<Mutex<Option<oneshot::Sender<Vec<ExecutedBlock>>>>>,
-    }
-
-    impl PersistenceHandleMock {
-        fn new() -> (Self, oneshot::Receiver<Vec<ExecutedBlock>>) {
-            let (sender, receiver) = oneshot::channel();
-            (Self { blocks_sender: Arc::new(Mutex::new(Some(sender))) }, receiver)
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl PersistenceHandle for PersistenceHandleMock {
-        fn send_action(
-            &self,
-            action: PersistenceAction,
-        ) -> Result<(), SendError<PersistenceAction>> {
-            Ok(())
-        }
-
-        fn save_blocks(&self, blocks: Vec<ExecutedBlock>, tx: oneshot::Sender<B256>) {
-            let last_hash = blocks.last().unwrap().block().hash();
-
-            if let Some(sender) = self.blocks_sender.lock().unwrap().take() {
-                let _ = sender.send(blocks);
-            }
-
-            let _ = tx.send(last_hash);
-        }
-
-        async fn remove_blocks_above(&self, block_num: u64) -> B256 {
-            B256::default()
-        }
-
-        async fn prune_before(&self, block_num: u64) -> PruneProgress {
-            PruneProgress::Finished
-        }
-    }
-
     fn get_default_tree(
-        persistence_handle: PersistenceHandleMock,
+        persistence_handle: PersistenceHandle,
         tree_state: TreeState,
     ) -> EngineApiTreeHandlerImpl<MockEthProvider, MockExecutorProvider, EthEngineTypes> {
         let chain_spec = Arc::new(
@@ -971,7 +928,7 @@ mod tests {
             to_tree_rx,
             from_tree_tx,
             engine_api_tree_state,
-            Arc::new(persistence_handle),
+            persistence_handle,
         )
     }
 
@@ -992,19 +949,20 @@ mod tests {
         }
         let tree_state = TreeState { blocks_by_hash, blocks_by_number };
 
-        let (persistence_handle, blocks_receiver) = PersistenceHandleMock::new();
+        let (action_tx, action_rx) = channel();
+        let persistence_handle = PersistenceHandle::new(action_tx);
 
         let tree = get_default_tree(persistence_handle, tree_state);
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| tree.run()).unwrap();
 
-        let saved_blocks = tokio::time::timeout(std::time::Duration::from_secs(5), blocks_receiver)
-            .await
-            .expect("Timeout waiting for blocks to be saved")
-            .expect("Failed to receive saved blocks");
-
-        // only PERSISTENCE_THRESHOLD will be persisted
-        blocks.pop();
-        assert_eq!(saved_blocks, blocks);
-        assert_eq!(saved_blocks.len() as u64, PERSISTENCE_THRESHOLD);
+        let received_action = action_rx.recv().expect("Failed to receive saved blocks");
+        if let PersistenceAction::SaveBlocks((saved_blocks, _)) = received_action {
+            // only PERSISTENCE_THRESHOLD will be persisted
+            blocks.pop();
+            assert_eq!(saved_blocks, blocks);
+            assert_eq!(saved_blocks.len() as u64, PERSISTENCE_THRESHOLD);
+        } else {
+            panic!("unexpected action received {received_action:?}");
+        }
     }
 }
