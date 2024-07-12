@@ -888,6 +888,7 @@ mod tests {
     use std::sync::mpsc::{channel, Sender};
     use tokio::sync::mpsc::unbounded_channel;
 
+    #[allow(clippy::type_complexity)]
     fn get_default_tree(
         persistence_handle: PersistenceHandle,
         tree_state: TreeState,
