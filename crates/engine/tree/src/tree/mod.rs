@@ -48,7 +48,7 @@ pub use memory_overlay::MemoryOverlayStateProvider;
 const PERSISTENCE_THRESHOLD: u64 = 256;
 
 /// Represents an executed block stored in-memory.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutedBlock {
     block: Arc<SealedBlock>,
     senders: Arc<Vec<Address>>,
@@ -326,44 +326,39 @@ where
     }
 
     fn run(mut self) {
-        loop {
-            while let Ok(msg) = self.incoming.recv() {
-                match msg {
-                    FromEngine::Event(event) => match event {
-                        FromOrchestrator::BackfillSyncFinished => {
-                            todo!()
+        while let Ok(msg) = self.incoming.recv() {
+            match msg {
+                FromEngine::Event(event) => match event {
+                    FromOrchestrator::BackfillSyncFinished => {
+                        todo!()
+                    }
+                    FromOrchestrator::BackfillSyncStarted => {
+                        todo!()
+                    }
+                },
+                FromEngine::Request(request) => match request {
+                    BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                        let output = self.on_forkchoice_updated(state, payload_attrs);
+                        if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(Into::into)) {
+                            error!("Failed to send event: {err:?}");
                         }
-                        FromOrchestrator::BackfillSyncStarted => {
-                            todo!()
+                    }
+                    BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
+                        let output = self.on_new_payload(payload, cancun_fields);
+                        if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(|e| {
+                            reth_beacon_consensus::BeaconOnNewPayloadError::Internal(Box::new(e))
+                        })) {
+                            error!("Failed to send event: {err:?}");
                         }
-                    },
-                    FromEngine::Request(request) => match request {
-                        BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
-                            let output = self.on_forkchoice_updated(state, payload_attrs);
-                            if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(Into::into))
-                            {
-                                error!("Failed to send event: {err:?}");
-                            }
-                        }
-                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
-                            let output = self.on_new_payload(payload, cancun_fields);
-                            if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(|e| {
-                                reth_beacon_consensus::BeaconOnNewPayloadError::Internal(Box::new(
-                                    e,
-                                ))
-                            })) {
-                                error!("Failed to send event: {err:?}");
-                            }
-                        }
-                        BeaconEngineMessage::TransitionConfigurationExchanged => {
-                            todo!()
-                        }
-                    },
-                    FromEngine::DownloadedBlocks(blocks) => {
-                        if let Some(event) = self.on_downloaded(blocks) {
-                            if let Err(err) = self.outgoing.send(EngineApiEvent::FromTree(event)) {
-                                error!("Failed to send event: {err:?}");
-                            }
+                    }
+                    BeaconEngineMessage::TransitionConfigurationExchanged => {
+                        todo!()
+                    }
+                },
+                FromEngine::DownloadedBlocks(blocks) => {
+                    if let Some(event) = self.on_downloaded(blocks) {
+                        if let Err(err) = self.outgoing.send(EngineApiEvent::FromTree(event)) {
+                            error!("Failed to send event: {err:?}");
                         }
                     }
                 }
@@ -719,7 +714,8 @@ where
     type Engine = T;
 
     fn on_downloaded(&mut self, _blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
-        todo!()
+        debug!("not implemented");
+        None
     }
 
     fn on_new_payload(
@@ -876,5 +872,104 @@ impl PersistenceState {
         self.rx = None;
         self.last_persisted_block_number = last_persisted_block_number;
         self.last_persisted_block_hash = last_persisted_block_hash;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{persistence::PersistenceAction, test_utils::get_executed_blocks};
+
+    use reth_beacon_consensus::EthBeaconConsensus;
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_evm::test_utils::MockExecutorProvider;
+    use reth_provider::test_utils::MockEthProvider;
+    use std::sync::mpsc::{channel, Sender};
+    use tokio::sync::mpsc::unbounded_channel;
+
+    #[allow(clippy::type_complexity)]
+    fn get_default_tree(
+        persistence_handle: PersistenceHandle,
+        tree_state: TreeState,
+    ) -> (
+        EngineApiTreeHandlerImpl<MockEthProvider, MockExecutorProvider, EthEngineTypes>,
+        Sender<FromEngine<BeaconEngineMessage<EthEngineTypes>>>,
+    ) {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(MAINNET.genesis.clone())
+                .paris_activated()
+                .build(),
+        );
+        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
+
+        let provider = MockEthProvider::default();
+        let executor_factory = MockExecutorProvider::default();
+        executor_factory.extend(vec![ExecutionOutcome::default()]);
+
+        let payload_validator = ExecutionPayloadValidator::new(chain_spec);
+
+        let (to_tree_tx, to_tree_rx) = channel();
+        let (from_tree_tx, from_tree_rx) = unbounded_channel();
+
+        let engine_api_tree_state = EngineApiTreeState {
+            invalid_headers: InvalidHeaderCache::new(10),
+            buffer: BlockBuffer::new(10),
+            tree_state,
+            forkchoice_state_tracker: ForkchoiceStateTracker::default(),
+        };
+
+        (
+            EngineApiTreeHandlerImpl::new(
+                provider,
+                executor_factory,
+                consensus,
+                payload_validator,
+                to_tree_rx,
+                from_tree_tx,
+                engine_api_tree_state,
+                persistence_handle,
+            ),
+            to_tree_tx,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_tree_persist_blocks() {
+        // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
+        // persistence task.
+        let mut blocks = get_executed_blocks(PERSISTENCE_THRESHOLD + 1);
+
+        let mut blocks_by_hash = HashMap::new();
+        let mut blocks_by_number = BTreeMap::new();
+        for block in &blocks {
+            blocks_by_hash.insert(block.block().hash(), block.clone());
+            blocks_by_number
+                .entry(block.block().number)
+                .or_insert_with(Vec::new)
+                .push(block.clone());
+        }
+        let tree_state = TreeState { blocks_by_hash, blocks_by_number };
+
+        let (action_tx, action_rx) = channel();
+        let persistence_handle = PersistenceHandle::new(action_tx);
+
+        let (tree, to_tree_tx) = get_default_tree(persistence_handle, tree_state);
+        std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| tree.run()).unwrap();
+
+        // send a message to the tree
+        to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
+
+        let received_action = action_rx.recv().expect("Failed to receive saved blocks");
+        if let PersistenceAction::SaveBlocks((saved_blocks, _)) = received_action {
+            // only PERSISTENCE_THRESHOLD will be persisted
+            blocks.pop();
+            assert_eq!(saved_blocks, blocks);
+            assert_eq!(saved_blocks.len() as u64, PERSISTENCE_THRESHOLD);
+        } else {
+            panic!("unexpected action received {received_action:?}");
+        }
     }
 }
