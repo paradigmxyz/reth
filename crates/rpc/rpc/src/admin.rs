@@ -121,31 +121,35 @@ where
         };
 
         macro_rules! set_block_or_time {
-            ($config:expr, $field:ident, $fork:ident) => {
-                // don't overwrite if already set
-                if $config.$field.is_none() {
-                    $config.$field = self.chain_spec.hardforks.fork_block(EthereumHardfork::$fork);
-                }
+            ($config:expr, [$( $field:ident => $fork:ident ),* $(,)*]) => {
+                $(
+                    // don't overwrite if already set
+                    if $config.$field.is_none() {
+                        $config.$field = self.chain_spec.hardforks.fork_block(EthereumHardfork::$fork);
+                    }
+                )*
             };
         }
 
-        set_block_or_time!(config, homestead_block, Homestead);
-        set_block_or_time!(config, dao_fork_block, Dao);
-        set_block_or_time!(config, eip150_block, Tangerine);
-        set_block_or_time!(config, eip155_block, SpuriousDragon);
-        set_block_or_time!(config, eip158_block, SpuriousDragon);
-        set_block_or_time!(config, byzantium_block, Byzantium);
-        set_block_or_time!(config, constantinople_block, Constantinople);
-        set_block_or_time!(config, petersburg_block, Petersburg);
-        set_block_or_time!(config, istanbul_block, Istanbul);
-        set_block_or_time!(config, muir_glacier_block, MuirGlacier);
-        set_block_or_time!(config, berlin_block, Berlin);
-        set_block_or_time!(config, london_block, London);
-        set_block_or_time!(config, arrow_glacier_block, ArrowGlacier);
-        set_block_or_time!(config, gray_glacier_block, GrayGlacier);
-        set_block_or_time!(config, shanghai_time, Shanghai);
-        set_block_or_time!(config, cancun_time, Cancun);
-        set_block_or_time!(config, prague_time, Prague);
+        set_block_or_time!(config, [
+            homestead_block => Homestead,
+            dao_fork_block => Dao,
+            eip150_block => Tangerine,
+            eip155_block => SpuriousDragon,
+            eip158_block => SpuriousDragon,
+            byzantium_block => Byzantium,
+            constantinople_block => Constantinople,
+            petersburg_block => Petersburg,
+            istanbul_block => Istanbul,
+            muir_glacier_block => MuirGlacier,
+            berlin_block => Berlin,
+            london_block => London,
+            arrow_glacier_block => ArrowGlacier,
+            gray_glacier_block => GrayGlacier,
+            shanghai_time => Shanghai,
+            cancun_time => Cancun,
+            prague_time => Prague,
+        ]);
 
         if let Ok(pk) = id2pk(enode.id) {
             Ok(NodeInfo {
