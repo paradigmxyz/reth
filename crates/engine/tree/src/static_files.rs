@@ -23,6 +23,7 @@ use crate::{
 ///
 /// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
 /// blocking file operations in an endless loop.
+#[derive(Debug)]
 pub struct StaticFileService<DB> {
     /// The db / static file provider to use
     provider: ProviderFactory<DB>,

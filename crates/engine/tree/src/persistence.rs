@@ -236,6 +236,7 @@ impl PersistenceHandle {
     pub const fn new(sender: Sender<PersistenceAction>) -> Self {
         Self { sender }
     }
+
     /// Sends a specific [`PersistenceAction`] in the contained channel. The caller is responsible
     /// for creating any channels for the given action.
     pub fn send_action(

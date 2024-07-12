@@ -252,6 +252,7 @@ pub enum TreeAction {
     MakeCanonical(B256),
 }
 
+#[derive(Debug)]
 pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     provider: P,
     executor_provider: E,
