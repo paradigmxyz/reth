@@ -1,7 +1,6 @@
 //! Support for pruning.
 
 use crate::{
-    segments,
     segments::{PruneInput, Segment},
     Metrics, PrunerError, PrunerEvent,
 };
@@ -9,8 +8,7 @@ use alloy_primitives::BlockNumber;
 use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
 use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
-use reth_prune_types::{PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment};
-use reth_static_file_types::StaticFileSegment;
+use reth_prune_types::{PruneLimiter, PruneProgress, PruneSegment};
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
@@ -168,31 +166,27 @@ impl<DB: Database, S> Pruner<DB, S> {
         tip_block_number: BlockNumber,
         limiter: &mut PruneLimiter,
     ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
-        let static_file_segments = self.static_file_segments(provider);
-        let segments = static_file_segments
-            .iter()
-            .map(|segment| (segment, PrunePurpose::StaticFile))
-            .chain(self.segments.iter().map(|segment| (segment, PrunePurpose::User)));
-
         let mut stats = PrunerStats::new();
         let mut pruned = 0;
         let mut progress = PruneProgress::Finished;
 
-        for (segment, purpose) in segments {
+        for segment in &self.segments {
             if limiter.is_limit_reached() {
                 break
             }
 
             if let Some((to_block, prune_mode)) = segment
                 .mode()
-                .map(|mode| mode.prune_target_block(tip_block_number, segment.segment(), purpose))
+                .map(|mode| {
+                    mode.prune_target_block(tip_block_number, segment.segment(), segment.purpose())
+                })
                 .transpose()?
                 .flatten()
             {
                 debug!(
                     target: "pruner",
                     segment = ?segment.segment(),
-                    ?purpose,
+                    purpose = ?segment.purpose(),
                     %to_block,
                     ?prune_mode,
                     "Segment pruning started"
@@ -226,7 +220,7 @@ impl<DB: Database, S> Pruner<DB, S> {
                 debug!(
                     target: "pruner",
                     segment = ?segment.segment(),
-                    ?purpose,
+                    purpose = ?segment.purpose(),
                     %to_block,
                     ?prune_mode,
                     %output.pruned,
@@ -239,41 +233,11 @@ impl<DB: Database, S> Pruner<DB, S> {
                     stats.push((segment.segment(), output.pruned, output.progress));
                 }
             } else {
-                debug!(target: "pruner", segment = ?segment.segment(), ?purpose, "Nothing to prune for the segment");
+                debug!(target: "pruner", segment = ?segment.segment(), purpose = ?segment.purpose(), "Nothing to prune for the segment");
             }
         }
 
         Ok((stats, pruned, progress))
-    }
-
-    /// Returns pre-configured segments that needs to be pruned according to the highest
-    /// `static_files` for [`PruneSegment::Transactions`], [`PruneSegment::Headers`] and
-    /// [`PruneSegment::Receipts`].
-    fn static_file_segments(&self, provider: &DatabaseProviderRW<DB>) -> Vec<Box<dyn Segment<DB>>> {
-        let mut segments = Vec::<Box<dyn Segment<DB>>>::new();
-
-        let static_file_provider = provider.static_file_provider();
-
-        if let Some(to_block) =
-            static_file_provider.get_highest_static_file_block(StaticFileSegment::Transactions)
-        {
-            segments
-                .push(Box::new(segments::Transactions::new(PruneMode::before_inclusive(to_block))))
-        }
-
-        if let Some(to_block) =
-            static_file_provider.get_highest_static_file_block(StaticFileSegment::Headers)
-        {
-            segments.push(Box::new(segments::Headers::new(PruneMode::before_inclusive(to_block))))
-        }
-
-        if let Some(to_block) =
-            static_file_provider.get_highest_static_file_block(StaticFileSegment::Receipts)
-        {
-            segments.push(Box::new(segments::Receipts::new(PruneMode::before_inclusive(to_block))))
-        }
-
-        segments
     }
 
     /// Returns `true` if the pruning is needed at the provided tip block number.
