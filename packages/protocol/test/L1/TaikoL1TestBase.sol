@@ -49,7 +49,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
             deployProxy({
                 name: "address_manager",
                 impl: address(new AddressManager()),
-                data:  abi.encodeCall(AddressManager.init, (Alice))
+                data: abi.encodeCall(AddressManager.init, (Alice))
             })
         );
 
@@ -106,7 +106,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
                 data: abi.encodeCall(SgxVerifier.init, (Alice, address(addressManager)))
             })
         );
-        
+
         console2.log(address(sv1));
 
         sv2 = SgxVerifier(
@@ -148,7 +148,6 @@ abstract contract TaikoL1TestBase is TaikoTest {
         sv1.addInstances(initSgxInstances);
         sv2.addInstances(initSgxInstances);
         sv3.addInstances(initSgxInstances);
-
 
         //         address[] memory initSgxInstances = new address[](1);
         //         initSgxInstances[0] = SGX_X_0;
@@ -235,7 +234,6 @@ abstract contract TaikoL1TestBase is TaikoTest {
         L1.init(Alice, address(addressManager), GENESIS_BLOCK_HASH);
         printVariables("init  ");
         vm.stopPrank();
-
 
         // Add those 3 to verifier registry
         vm.startPrank(vr.owner());
@@ -393,8 +391,8 @@ abstract contract TaikoL1TestBase is TaikoTest {
         returns (bytes memory signature)
     {
         bytes32 digest = LibPublicInput.hashPublicInputs(
-                tran, address(sv1), newInstance, prover, metaHash, L1.getConfig().chainId
-            );
+            tran, address(sv1), newInstance, prover, metaHash, L1.getConfig().chainId
+        );
 
         uint256 signerPrivateKey;
 
@@ -518,13 +516,13 @@ abstract contract TaikoL1TestBase is TaikoTest {
         proofs[0].proof = bytes.concat(bytes4(0), bytes20(newInstance), signature);
 
         if (threeMockSGXProofs) {
-            // The order is on purpose reversed, becase of the L1_INVALID_OR_DUPLICATE_VERIFIER() check
+            // The order is on purpose reversed, becase of the L1_INVALID_OR_DUPLICATE_VERIFIER()
+            // check
             proofs[1].verifier = sv1;
             proofs[1].proof = bytes.concat(bytes4(0), bytes20(newInstance), signature);
 
             proofs[2].verifier = sv3;
             proofs[2].proof = bytes.concat(bytes4(0), bytes20(newInstance), signature);
-
         } else {
             //Todo(dani): Implement more proof and verifiers when needed/available but for now, not
             // to change the code in BasedOperator, maybe best to mock those 3
