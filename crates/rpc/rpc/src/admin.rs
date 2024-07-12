@@ -112,46 +112,37 @@ where
                 .chain_spec
                 .get_final_paris_total_difficulty()
                 .is_some(),
+            terminal_total_difficulty: self
+                .chain_spec
+                .hardforks
+                .fork(EthereumHardfork::Paris)
+                .ttd(),
             ..self.chain_spec.genesis().config.clone()
         };
 
-        config.homestead_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Homestead);
-        config.dao_fork_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Dao);
-        config.eip150_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Tangerine);
-        config.eip155_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::SpuriousDragon);
-        config.eip158_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::SpuriousDragon);
-        config.byzantium_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Byzantium);
-        config.constantinople_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Constantinople);
-        config.petersburg_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Petersburg);
-        config.istanbul_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Istanbul);
-        config.muir_glacier_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::MuirGlacier);
-        config.berlin_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Berlin);
-        config.london_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::London);
-        config.arrow_glacier_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::ArrowGlacier);
-        config.gray_glacier_block =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::GrayGlacier);
+        macro_rules! set_block_or_time {
+            ($config:expr, $field:ident, $fork:ident) => {
+                $config.$field = self.chain_spec.hardforks.fork_block(EthereumHardfork::$fork);
+            };
+        }
 
-        config.shanghai_time =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Shanghai);
-        config.cancun_time =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Cancun);
-        config.prague_time =
-            self.chain_spec.hardforks.fork_block_number_or_time(EthereumHardfork::Prague);
-        config.terminal_total_difficulty =
-            self.chain_spec.hardforks.fork(EthereumHardfork::Paris).ttd();
+        set_block_or_time!(config, homestead_block, Homestead);
+        set_block_or_time!(config, dao_fork_block, Dao);
+        set_block_or_time!(config, eip150_block, Tangerine);
+        set_block_or_time!(config, eip155_block, SpuriousDragon);
+        set_block_or_time!(config, eip158_block, SpuriousDragon);
+        set_block_or_time!(config, byzantium_block, Byzantium);
+        set_block_or_time!(config, constantinople_block, Constantinople);
+        set_block_or_time!(config, petersburg_block, Petersburg);
+        set_block_or_time!(config, istanbul_block, Istanbul);
+        set_block_or_time!(config, muir_glacier_block, MuirGlacier);
+        set_block_or_time!(config, berlin_block, Berlin);
+        set_block_or_time!(config, london_block, London);
+        set_block_or_time!(config, arrow_glacier_block, ArrowGlacier);
+        set_block_or_time!(config, gray_glacier_block, GrayGlacier);
+        set_block_or_time!(config, shanghai_time, Shanghai);
+        set_block_or_time!(config, cancun_time, Cancun);
+        set_block_or_time!(config, prague_time, Prague);
 
         if let Ok(pk) = id2pk(enode.id) {
             Ok(NodeInfo {

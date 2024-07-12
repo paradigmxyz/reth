@@ -67,8 +67,8 @@ impl ChainHardforks {
         self.map.get(fork.name()).copied()
     }
 
-    /// Retrieves fork block number or timestamp from `fork` if it exists, otherwise `None`.
-    pub fn fork_block_number_or_time<H: Hardfork>(&self, fork: H) -> Option<u64> {
+    /// Retrieves the fork block number or timestamp from `fork` if it exists, otherwise `None`.
+    pub fn fork_block<H: Hardfork>(&self, fork: H) -> Option<u64> {
         match self.fork(fork) {
             ForkCondition::Block(block) => Some(block),
             ForkCondition::TTD { fork_block, .. } => fork_block,
