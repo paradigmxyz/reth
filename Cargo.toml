@@ -386,7 +386,7 @@ revm-primitives = { version = "6.0.0", features = [
 revm-inspectors = "0.4"
 
 # eth
-alloy-chains = "0.1.15"
+alloy-chains = "0.1.18"
 alloy-primitives = "0.7.2"
 alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"

@@ -28,6 +28,7 @@ mod block;
 mod compression;
 pub mod constants;
 pub mod eip4844;
+pub mod eip7702;
 pub mod genesis;
 pub mod proofs;
 mod receipt;
@@ -68,8 +69,8 @@ pub use transaction::{
     AccessList, AccessListItem, IntoRecoveredTransaction, InvalidTransactionError, Signature,
     Transaction, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered,
     TransactionSignedNoHash, TryFromRecoveredTransaction, TxEip1559, TxEip2930, TxEip4844,
-    TxHashOrNumber, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID,
+    TxEip7702, TxHashOrNumber, TxLegacy, TxType, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
+    EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
 };
 
 // Re-exports

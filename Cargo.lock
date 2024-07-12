@@ -6674,6 +6674,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "eyre",
+ "libc",
  "proptest",
  "rand 0.8.5",
  "reth-fs-util",
@@ -7069,7 +7070,9 @@ dependencies = [
  "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-consensus",
+ "reth-ethereum-engine-primitives",
  "reth-evm",
+ "reth-exex-types",
  "reth-metrics",
  "reth-network-p2p",
  "reth-payload-builder",
@@ -7083,6 +7086,7 @@ dependencies = [
  "reth-rpc-types",
  "reth-stages",
  "reth-stages-api",
+ "reth-stages-types",
  "reth-static-file",
  "reth-tasks",
  "reth-tokio-util",
@@ -7446,6 +7450,7 @@ dependencies = [
 name = "reth-fs-util"
 version = "1.0.1"
 dependencies = [
+ "serde",
  "serde_json",
  "thiserror",
 ]
@@ -8234,6 +8239,7 @@ dependencies = [
  "alloy-eips",
  "reth-chainspec",
  "reth-consensus-common",
+ "reth-ethereum-forks",
  "reth-execution-errors",
  "reth-primitives",
  "reth-prune-types",
@@ -8578,6 +8584,7 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-prune",
  "reth-prune-types",
  "reth-revm",
  "reth-stages-api",

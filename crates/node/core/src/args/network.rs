@@ -303,13 +303,13 @@ pub struct DiscoveryArgs {
     pub discv5_addr_ipv6: Option<Ipv6Addr>,
 
     /// The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
-    /// IPv4, or `--discv5.addr` is set.
+    /// IPv4, or `--discovery.v5.addr` is set.
     #[arg(id = "discovery.v5.port", long = "discovery.v5.port", value_name = "DISCOVERY_V5_PORT",
     default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
     pub discv5_port: u16,
 
     /// The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is
-    /// IPv6, or `--discv5.addr.ipv6` is set.
+    /// IPv6, or `--discovery.addr.ipv6` is set.
     #[arg(id = "discovery.v5.port.ipv6", long = "discovery.v5.port.ipv6", value_name = "DISCOVERY_V5_PORT_IPV6",
     default_value = None, default_value_t = DEFAULT_DISCOVERY_V5_PORT)]
     pub discv5_port_ipv6: u16,
@@ -321,12 +321,12 @@ pub struct DiscoveryArgs {
 
     /// The interval in seconds at which to carry out boost lookup queries, for a fixed number of
     /// times, at bootstrap.
-    #[arg(id = "discovery.v5.bootstrap.lookup-interval", long = "discovery.v5.bootstrap.lookup-interval", value_name = "DISCOVERY_V5_bootstrap_lookup_interval",
+    #[arg(id = "discovery.v5.bootstrap.lookup-interval", long = "discovery.v5.bootstrap.lookup-interval", value_name = "DISCOVERY_V5_BOOTSTRAP_LOOKUP_INTERVAL",
         default_value_t = DEFAULT_SECONDS_BOOTSTRAP_LOOKUP_INTERVAL)]
     pub discv5_bootstrap_lookup_interval: u64,
 
     /// The number of times to carry out boost lookup queries at bootstrap.
-    #[arg(id = "discovery.v5.bootstrap.lookup-countdown", long = "discovery.v5.bootstrap.lookup-countdown", value_name = "DISCOVERY_V5_bootstrap_lookup_countdown",
+    #[arg(id = "discovery.v5.bootstrap.lookup-countdown", long = "discovery.v5.bootstrap.lookup-countdown", value_name = "DISCOVERY_V5_BOOTSTRAP_LOOKUP_COUNTDOWN",
         default_value_t = DEFAULT_COUNT_BOOTSTRAP_LOOKUPS)]
     pub discv5_bootstrap_lookup_countdown: u64,
 }

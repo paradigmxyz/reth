@@ -511,7 +511,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Creates the [`NetworkBuilder`] for the node.
-    pub async fn network_builder(&self) -> eyre::Result<NetworkBuilder<Node::Provider, (), ()>> {
+    pub async fn network_builder(&self) -> eyre::Result<NetworkBuilder<(), ()>> {
         let network_config = self.network_config()?;
         let builder = NetworkManager::builder(network_config).await?;
         Ok(builder)
@@ -521,11 +521,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
-    pub fn start_network<Pool>(
-        &self,
-        builder: NetworkBuilder<Node::Provider, (), ()>,
-        pool: Pool,
-    ) -> NetworkHandle
+    pub fn start_network<Pool>(&self, builder: NetworkBuilder<(), ()>, pool: Pool) -> NetworkHandle
     where
         Pool: TransactionPool + Unpin + 'static,
     {

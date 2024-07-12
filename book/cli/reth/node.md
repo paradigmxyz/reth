@@ -89,12 +89,12 @@ Networking:
           The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by `RLPx` address, if it's also IPv6
 
       --discovery.v5.port <DISCOVERY_V5_PORT>
-          The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discv5.addr` is set
+          The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discovery.v5.addr` is set
 
           [default: 9000]
 
       --discovery.v5.port.ipv6 <DISCOVERY_V5_PORT_IPV6>
-          The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discv5.addr.ipv6` is set
+          The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discovery.addr.ipv6` is set
 
           [default: 9000]
 
@@ -103,12 +103,12 @@ Networking:
 
           [default: 60]
 
-      --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_bootstrap_lookup_interval>
+      --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_BOOTSTRAP_LOOKUP_INTERVAL>
           The interval in seconds at which to carry out boost lookup queries, for a fixed number of times, at bootstrap
 
           [default: 5]
 
-      --discovery.v5.bootstrap.lookup-countdown <DISCOVERY_V5_bootstrap_lookup_countdown>
+      --discovery.v5.bootstrap.lookup-countdown <DISCOVERY_V5_BOOTSTRAP_LOOKUP_COUNTDOWN>
           The number of times to carry out boost lookup queries at bootstrap
 
           [default: 100]

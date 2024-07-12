@@ -10,7 +10,7 @@ use reth_primitives::{
     },
     Bytes, TransactionSignedEcRecovered, TxKind, B256, U256,
 };
-use reth_provider::StateProvider;
+use reth_provider::{ChainSpecProvider, StateProvider};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -572,7 +572,8 @@ pub trait Call: LoadState + SpawnBlocking {
         }
 
         // We can now normalize the highest gas limit to a u64
-        let mut highest_gas_limit: u64 = highest_gas_limit.try_into().unwrap_or(u64::MAX);
+        let mut highest_gas_limit: u64 =
+            highest_gas_limit.try_into().unwrap_or(self.provider().chain_spec().max_gas_limit);
 
         // If the provided gas limit is less than computed cap, use that
         env.tx.gas_limit = env.tx.gas_limit.min(highest_gas_limit);
@@ -807,6 +808,7 @@ pub trait Call: LoadState + SpawnBlocking {
             chain_id,
             blob_versioned_hashes,
             max_fee_per_blob_gas,
+            // authorization_list,
             ..
         } = request;
 
@@ -838,7 +840,9 @@ pub trait Call: LoadState + SpawnBlocking {
             // EIP-4844 fields
             blob_hashes: blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas,
+            // EIP-7702 fields
             authorization_list: None,
+            // authorization_list: TODO
             #[cfg(feature = "optimism")]
             optimism: OptimismFields { enveloped_tx: Some(Bytes::new()), ..Default::default() },
         };

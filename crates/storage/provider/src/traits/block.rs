@@ -8,25 +8,25 @@ use std::ops::RangeInclusive;
 
 /// BlockExecution Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
-pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
-    /// Get range of blocks and its execution result
-    fn get_block_and_execution_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Chain> {
-        self.get_or_take_block_and_execution_range::<false>(range)
-    }
-
+pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
     /// Take range of blocks and its execution result
     fn take_block_and_execution_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Chain> {
-        self.get_or_take_block_and_execution_range::<true>(range)
-    }
+    ) -> ProviderResult<Chain>;
 
-    /// Return range of blocks and its execution result
-    fn get_or_take_block_and_execution_range<const TAKE: bool>(
+    /// Remove range of blocks and its execution result
+    fn remove_block_and_execution_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<()>;
+}
+
+/// BlockExecution Writer
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait BlockExecutionReader: BlockReader + Send + Sync {
+    /// Get range of blocks and its execution result
+    fn get_block_and_execution_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain>;
