@@ -7704,7 +7704,6 @@ name = "reth-node-builder"
 version = "1.0.1"
 dependencies = [
  "aquamarine",
- "auto_impl",
  "backon",
  "confy",
  "eyre",
@@ -7738,6 +7737,7 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-builder",
  "reth-rpc-engine-api",
+ "reth-rpc-eth-types",
  "reth-rpc-layer",
  "reth-rpc-types",
  "reth-stages",
@@ -8274,6 +8274,7 @@ dependencies = [
  "reth-evm-optimism",
  "reth-network-api",
  "reth-network-peers",
+ "reth-node-api",
  "reth-primitives",
  "reth-provider",
  "reth-revm",

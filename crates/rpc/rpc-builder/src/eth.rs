@@ -30,7 +30,7 @@ impl<Provider, Pool, Network, Events, EthApi> EthHandlers<Provider, Pool, Networ
         executor: Tasks,
         events: Events,
         eth_api_builder: Box<
-            dyn EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Output = EthApi>,
+            dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi,
         >,
     ) -> EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi> {
         EthHandlersBuilder {
@@ -57,7 +57,7 @@ pub struct EthHandlersBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig,
     executor: Tasks,
     events: Events,
     eth_api_builder:
-        Box<dyn EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Output = EthApi>>,
+        Box<dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi>,
 }
 
 impl<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
@@ -103,7 +103,7 @@ where
             cache,
         };
 
-        let api = eth_api_builder.build_eth_api(&ctx);
+        let api = eth_api_builder(&ctx);
 
         let filter = EthFilterApiBuilder::build(&ctx);
 

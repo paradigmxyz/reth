@@ -10,7 +10,7 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
-use reth_node_api::FullNodeComponents;
+use reth_node_api::{FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
@@ -62,12 +62,6 @@ impl EthereumNode {
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
     }
-
-    pub fn add_ons<Node, AddOns>() -> Rc<dyn NodeAddOnBuilders<Node, AddOns>> {
-        Arc::new(AddOnBuildersAdapter {
-            eth_api_builder: Box::new(EthereumApiBuilder::build_eth_api),
-        })
-    }
 }
 
 impl NodeTypes for EthereumNode {
@@ -77,7 +71,7 @@ impl NodeTypes for EthereumNode {
 
 pub struct EthereumAddOns;
 
-impl<N: FullNodeComponents> AddOns<N> for EthereumAddOns {
+impl<N: FullNodeComponents> NodeAddOns<N> for EthereumAddOns {
     type EthApi = EthApi<N::Provider, N::Pool, NetworkHandle, N::Evm>;
 }
 
@@ -98,17 +92,6 @@ where
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         Self::components()
-    }
-
-    fn add_on_builders(
-        &self,
-    ) -> Arc<
-        dyn NodeAddOnBuilders<
-            NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-            Self::AddOns,
-        >,
-    > {
-        Self::add_ons()
     }
 }
 

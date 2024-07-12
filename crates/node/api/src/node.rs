@@ -150,27 +150,32 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 
 /// Customizable node add-on types.
 pub trait NodeAddOns<N: FullNodeComponents>: Send + Sync + Unpin + Clone + 'static {
-    /// The `reth_rpc_eth_api::EthApiServer` type to use.
-    type EthApi: BuilderProvider<N> + Send;
+    /// The core `eth` namespace API type to install on the RPC server (see
+    /// `reth_rpc_eth_api::EthApiServer`).
+    type EthApi: Send;
 }
 
 impl<N: FullNodeComponents> NodeAddOns<N> for () {
     type EthApi = ();
 }
 
-/// Returns the [`EthApiServer`](reth_rpc::eth::EthApiServer) builder.
+/// Returns the builder for type.
 pub trait BuilderProvider<N: FullNodeComponents>: Send {
     /// Context required to build type.
     type Ctx<'a>;
 
     /// Returns builder for type.
-    fn builder<'a>() -> Box<dyn FnOnce(Self::Ctx<'a>) -> Self>;
+    fn builder<'a>() -> Box<dyn Fn(Self::Ctx<'a>) -> Self + Send + Sync + Unpin>;
 }
 
 impl<N: FullNodeComponents> BuilderProvider<N> for () {
     type Ctx<'a> = ();
 
-    fn builder<'a>() -> Box<dyn FnOnce(Self::Ctx<'a>) -> Self> {
-        Box::new(|_| ())
+    fn builder<'a>() -> Box<dyn Fn(Self::Ctx<'a>) -> Self + Send + Sync + Unpin> {
+        Box::new(noop_builder)
     }
+}
+
+fn noop_builder(_: ()) -> () {
+    ()
 }

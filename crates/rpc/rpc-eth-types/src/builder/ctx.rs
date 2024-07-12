@@ -1,9 +1,12 @@
 //! Context required for building `eth` namespace APIs.
 
-use reth_provider::{ChainSpecProvider, CanonStateSubscriptions, BlockReaderIdExt};
+use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_tasks::TaskSpawner;
 
-use crate::{EthStateCache, fee_history::fee_history_cache_new_blocks_task, EthConfig, FeeHistoryCache, GasPriceOracle};
+use crate::{
+    fee_history::fee_history_cache_new_blocks_task, EthConfig, EthStateCache, FeeHistoryCache,
+    GasPriceOracle,
+};
 
 /// Context for building the `eth` namespace API.
 #[derive(Debug, Clone)]

@@ -16,11 +16,12 @@ use reth_beacon_consensus::{
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
-use reth_network::NetworkEvents;
-use reth_node_api::{FullNodeTypes, NodeAddOns};
+use reth_network::{NetworkEvents, NetworkHandle};
+use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes, NodeAddOns};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
+    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
@@ -41,6 +42,15 @@ use crate::{
     node::FullNode,
     AddOns, NodeBuilderWithComponents, NodeHandle,
 };
+
+pub type EthApiBuilderCtx<N: FullNodeComponents> = reth_rpc_eth_types::EthApiBuilderCtx<
+    N::Provider,
+    N::Pool,
+    N::Evm,
+    NetworkHandle,
+    TaskExecutor,
+    N::Provider,
+>;
 
 /// A general purpose trait that launches a new node of any kind.
 ///
@@ -90,8 +100,13 @@ where
     T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
+    for<'a> AO::EthApi: BuilderProvider<
+        NodeAdapter<T, CB::Components>,
+        Ctx<'a> = &'a EthApiBuilderCtx<NodeAdapter<T, CB::Components>>,
+    >,
+    AO::EthApi: FullEthApiServer + AddDevSigners,
 {
-    type Node = NodeHandle<NodeAdapter<T, CB::Components>>;
+    type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
     async fn launch_node(
         self,
@@ -318,7 +333,7 @@ where
             engine_api,
             ctx.node_config(),
             jwt_secret,
-            rpc.hooks,
+            rpc,
         )
         .await?;
 

@@ -2,12 +2,14 @@
 
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use crate::{
+    EthStateCacheConfig, FeeHistoryCacheConfig, GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
+};
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
     DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_PROOF_PERMITS,
 };
-use crate::{RPC_DEFAULT_GAS_CAP, EthStateCacheConfig, GasPriceOracleConfig, FeeHistoryCacheConfig};
+use serde::{Deserialize, Serialize};
 
 /// Default value for stale filter ttl
 pub const DEFAULT_STALE_FILTER_TTL: Duration = Duration::from_secs(5 * 60);

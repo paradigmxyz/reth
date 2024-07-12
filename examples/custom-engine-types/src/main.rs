@@ -224,17 +224,6 @@ where
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
     }
-
-    fn add_on_builders(
-        &self,
-    ) -> Arc<
-        dyn NodeAddOnBuilders<
-            NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-            Self::AddOns,
-        >,
-    > {
-        EthereumNode::add_ons()
-    }
 }
 
 /// A custom payload service builder that supports the custom engine types

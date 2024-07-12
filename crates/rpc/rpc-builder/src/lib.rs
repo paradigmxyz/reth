@@ -164,7 +164,7 @@ use reth_rpc_eth_api::{
     },
     EthApiServer, FullEthApiServer, RawTransactionForwarder,
 };
-use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
+use reth_rpc_eth_types::{EthApiBuilderCtx, EthConfig, EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
@@ -214,7 +214,9 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>(
     executor: Tasks,
     events: Events,
     evm_config: EvmConfig,
-    eth: Box<dyn EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Output = EthApi>>,
+    eth: Box<
+        dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi,
+    >,
 ) -> Result<RpcServerHandle, RpcError>
 where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
@@ -422,7 +424,7 @@ where
         module_config: TransportRpcModuleConfig,
         engine: EngineApi,
         eth: Box<
-            dyn EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Output = EthApi>,
+            dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi,
         >,
     ) -> (
         TransportRpcModules,
@@ -481,7 +483,7 @@ where
         self,
         config: RpcModuleConfig,
         eth: Box<
-            dyn EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Output = EthApi>,
+            dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi,
         >,
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi>
     where
@@ -497,7 +499,7 @@ where
         self,
         module_config: TransportRpcModuleConfig,
         eth: Box<
-            dyn EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Output = EthApi>,
+            dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi,
         >,
     ) -> TransportRpcModules<()>
     where
@@ -644,7 +646,7 @@ where
         config: RpcModuleConfig,
         evm_config: EvmConfig,
         eth_api_builder: Box<
-            dyn EthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, Output = EthApi>,
+            dyn Fn(&EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>) -> EthApi,
         >,
     ) -> Self
     where

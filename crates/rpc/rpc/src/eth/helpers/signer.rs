@@ -6,11 +6,21 @@ use alloy_dyn_abi::TypedData;
 use reth_primitives::{
     eip191_hash_message, sign_message, Address, Signature, TransactionSigned, B256,
 };
-use reth_rpc_eth_api::helpers::{signer::Result, EthSigner};
+use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
 use reth_rpc_eth_types::SignError;
 use reth_rpc_types::TypedTransactionRequest;
 use reth_rpc_types_compat::transaction::to_primitive_transaction;
 use secp256k1::SecretKey;
+
+use crate::EthApi;
+
+impl<Provider, Pool, Network, EvmConfig> AddDevSigners
+    for EthApi<Provider, Pool, Network, EvmConfig>
+{
+    fn with_dev_accounts(&self) {
+        *self.signers().write() = DevSigner::random_signers(20)
+    }
+}
 
 /// Holds developer keys
 #[derive(Debug, Clone)]

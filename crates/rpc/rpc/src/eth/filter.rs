@@ -16,7 +16,8 @@ use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
 use reth_rpc_eth_api::EthFilterApiServer;
 use reth_rpc_eth_types::{
-    logs_utils::{self, append_matching_block_logs}, EthApiError, EthFilterConfig, EthFilterError, EthStateCache, EthSubscriptionIdProvider
+    logs_utils::{self, append_matching_block_logs},
+    EthApiError, EthFilterConfig, EthFilterError, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::ToRpcResult;
 use reth_rpc_types::{

@@ -5,12 +5,15 @@
 //! The node builder process is essentially a state machine that transitions through various states
 //! before the node can be launched.
 
-use std::{fmt, future::Future, sync::Arc};
+use std::{fmt, future::Future, marker::PhantomData};
 
 use reth_exex::ExExContext;
 use reth_network::NetworkHandle;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
-use reth_node_core::node_config::NodeConfig;
+use reth_node_api::{BuilderProvider, FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
+use reth_node_core::{
+    node_config::NodeConfig,
+    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
+};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_tasks::TaskExecutor;
 
@@ -19,7 +22,7 @@ use crate::{
     hooks::NodeHooks,
     launch::LaunchNode,
     rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
-    AddOns, FullNode, NodeAddOnBuilders, RpcAddOns,
+    AddOns, FullNode, RpcAddOns,
 };
 
 /// A node builder that also has the configured types.
@@ -37,9 +40,13 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     }
 
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB, ()>
+    pub fn with_components<CB, AO>(
+        self,
+        components_builder: CB,
+    ) -> NodeBuilderWithComponents<T, CB, AO>
     where
         CB: NodeComponentsBuilder<T>,
+        AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     {
         let Self { config, adapter } = self;
 
@@ -49,7 +56,7 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             components_builder,
             add_ons: AddOns {
                 hooks: NodeHooks::default(),
-                rpc: RpcAddOns { eth_api_builder: Arc::new(None), hooks: RpcHooks::new() },
+                rpc: RpcAddOns { _eth_api: PhantomData, hooks: RpcHooks::default() },
                 exexs: Vec::new(),
             },
         }
@@ -158,37 +165,6 @@ pub struct NodeBuilderWithComponents<
     pub(crate) add_ons: AddOns<NodeAdapter<T, CB::Components>, AO>,
 }
 
-impl<T, CB> NodeBuilderWithComponents<T, CB, ()>
-where
-    T: FullNodeTypes,
-    CB: NodeComponentsBuilder<T>,
-{
-    /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_add_ons<AO>(
-        self,
-        add_on_builders: Arc<dyn NodeAddOnBuilders<NodeAdapter<T, CB::Components>, AO>>,
-    ) -> NodeBuilderWithComponents<T, CB, AO>
-    where
-        AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-    {
-        let Self { config, adapter, components_builder, .. } = self;
-
-        NodeBuilderWithComponents {
-            config,
-            adapter,
-            components_builder,
-            add_ons: AddOns {
-                hooks: NodeHooks::default(),
-                exexs: Vec::new(),
-                rpc: RpcAddOns {
-                    eth_api_builder: add_on_builders.eth_api_builder(),
-                    hooks: RpcHooks::new(),
-                },
-            },
-        }
-    }
-}
-
 impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
 where
     T: FullNodeTypes,
@@ -207,7 +183,9 @@ where
     /// Sets the hook that is run once the node has started.
     pub fn on_node_started<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(FullNode<NodeAdapter<T, CB::Components>>) -> eyre::Result<()> + Send + 'static,
+        F: FnOnce(FullNode<NodeAdapter<T, CB::Components>, AO>) -> eyre::Result<()>
+            + Send
+            + 'static,
     {
         self.add_ons.hooks.set_on_node_started(hook);
         self
@@ -217,7 +195,7 @@ where
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
         F: FnOnce(
-                RpcContext<'_, NodeAdapter<T, CB::Components>>,
+                RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>,
                 RethRpcServerHandles,
             ) -> eyre::Result<()>
             + Send
@@ -230,7 +208,7 @@ where
     /// Sets the hook that is run to configure the rpc modules.
     pub fn extend_rpc_modules<F>(mut self, hook: F) -> Self
     where
-        F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>>) -> eyre::Result<()>
+        F: FnOnce(RpcContext<'_, NodeAdapter<T, CB::Components>, AO::EthApi>) -> eyre::Result<()>
             + Send
             + 'static,
     {
@@ -253,14 +231,6 @@ where
         self
     }
 
-    /// Launches the node with the given launcher.
-    pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
-    where
-        L: LaunchNode<Self>,
-    {
-        launcher.launch_node(self).await
-    }
-
     /// Launches the node with the given closure.
     pub fn launch_with_fn<L, R>(self, launcher: L) -> R
     where
@@ -278,3 +248,20 @@ where
 }
 
 // TODO impl install hook functions.
+
+impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
+where
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+    AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
+    for<'a> AO::EthApi: BuilderProvider<NodeAdapter<T, CB::Components>>,
+    AO::EthApi: FullEthApiServer + AddDevSigners,
+{
+    /// Launches the node with the given launcher.
+    pub async fn launch_with<L>(self, launcher: L) -> eyre::Result<L::Node>
+    where
+        L: LaunchNode<Self>,
+    {
+        launcher.launch_node(self).await
+    }
+}

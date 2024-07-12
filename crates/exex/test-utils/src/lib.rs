@@ -136,17 +136,6 @@ where
             .executor(TestExecutorBuilder::default())
             .consensus(TestConsensusBuilder::default())
     }
-
-    fn add_on_builders(
-        &self,
-    ) -> Arc<
-        dyn NodeAddOnBuilders<
-            NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-            Self::AddOns,
-        >,
-    > {
-        EthereumNode::add_ons()
-    }
 }
 
 /// A shared [`TempDatabase`] used for testing

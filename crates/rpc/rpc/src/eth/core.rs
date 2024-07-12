@@ -3,18 +3,21 @@
 
 use std::sync::Arc;
 
-use reth_node_api::{BuilderProvider, FullNodeComponents};
 use derive_more::Deref;
 use futures::Future;
+use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_primitives::{BlockNumberOrTag, U256};
 use reth_provider::BlockReaderIdExt;
 use reth_rpc_eth_api::{
     helpers::{transaction::UpdateRawTxForwarder, EthSigner, SpawnBlocking},
     RawTransactionForwarder,
 };
-use reth_rpc_eth_types::{EthApiBuilderCtx, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock};
+use reth_rpc_eth_types::{
+    EthApiBuilderCtx, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
+};
 use reth_tasks::{
-    pool::{BlockingTaskGuard, BlockingTaskPool}, TaskExecutor, TaskSpawner, TokioTaskExecutor
+    pool::{BlockingTaskGuard, BlockingTaskPool},
+    TaskExecutor, TaskSpawner, TokioTaskExecutor,
 };
 use tokio::sync::{AcquireError, Mutex, OwnedSemaphorePermit};
 
@@ -161,31 +164,32 @@ where
     }
 }
 
-impl<N, Network> BuilderProvider<N> for EthApi<N::Provider, N::Pool, Network, N::Evm> where N: FullNodeComponents, Network: Send + Sync + Clone + 'static {
-    type Ctx<'a> = &'a EthApiBuilderCtx<
-    N::Provider,
-    N::Pool,
-    N::Evm,
-    Network,
-    TaskExecutor,
-    N::Provider>;
+impl<N, Network> BuilderProvider<N> for EthApi<N::Provider, N::Pool, Network, N::Evm>
+where
+    N: FullNodeComponents,
+    Network: Send + Sync + Clone + 'static,
+{
+    type Ctx<'a> =
+        &'a EthApiBuilderCtx<N::Provider, N::Pool, N::Evm, Network, TaskExecutor, N::Provider>;
 
-    fn builder<'a>() -> Box<dyn FnOnce(Self::Ctx<'a>) -> Self> {
-        Box::new(|ctx| Self::with_spawner(
-            ctx.provider.clone(),
-            ctx.pool.clone(),
-            ctx.network.clone(),
-            ctx.cache.clone(),
-            ctx.new_gas_price_oracle(),
-            ctx.config.rpc_gas_cap,
-            ctx.config.eth_proof_window,
-            Box::new(ctx.executor.clone()),
-            BlockingTaskPool::build().expect("failed to build blocking task pool"),
-            ctx.new_fee_history_cache(),
-            ctx.evm_config.clone(),
-            None,
-            ctx.config.proof_permits,
-        ))
+    fn builder<'a>() -> Box<dyn Fn(Self::Ctx<'a>) -> Self + Send + Sync + Unpin> {
+        Box::new(|ctx| {
+            Self::with_spawner(
+                ctx.provider.clone(),
+                ctx.pool.clone(),
+                ctx.network.clone(),
+                ctx.cache.clone(),
+                ctx.new_gas_price_oracle(),
+                ctx.config.rpc_gas_cap,
+                ctx.config.eth_proof_window,
+                Box::new(ctx.executor.clone()),
+                BlockingTaskPool::build().expect("failed to build blocking task pool"),
+                ctx.new_fee_history_cache(),
+                ctx.evm_config.clone(),
+                None,
+                ctx.config.proof_permits,
+            )
+        })
     }
 }
 

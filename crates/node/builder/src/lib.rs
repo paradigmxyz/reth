@@ -21,7 +21,7 @@ pub use components::{NodeComponents, NodeComponentsBuilder};
 
 mod builder;
 pub use builder::{
-    add_ons::{AddOnBuildersAdapter, AddOns, NodeAddOnBuilders, RpcAddOns},
+    add_ons::{AddOns, RpcAddOns},
     *,
 };
 

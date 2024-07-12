@@ -21,7 +21,10 @@ pub mod revm_utils;
 pub mod transaction;
 pub mod utils;
 
-pub use builder::{config::{EthFilterConfig, EthConfig}, ctx::EthApiBuilderCtx};
+pub use builder::{
+    config::{EthConfig, EthFilterConfig},
+    ctx::EthApiBuilderCtx,
+};
 pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,
     EthStateCache,
