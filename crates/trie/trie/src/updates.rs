@@ -1,6 +1,6 @@
 use crate::{
-    walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles, StorageTrieEntry,
-    StoredBranchNode, StoredNibbles, StoredNibblesSubKey,
+    trie_cursor::TrieCursorFactory, walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles,
+    StorageTrieEntry, StoredBranchNode, StoredNibbles, StoredNibblesSubKey,
 };
 use reth_db::tables;
 use reth_db_api::{
@@ -90,7 +90,7 @@ impl TrieUpdates {
     /// # Returns
     ///
     /// The number of storage trie entries updated in the database.
-    pub fn write_to_database<TX>(self, tx: &TX) -> Result<usize, reth_db::DatabaseError>
+    pub fn write_to_database<TX>(self, tx: &TX) -> Result<usize, <&TX as TrieCursorFactory>::Err>
     where
         TX: DbTx + DbTxMut,
     {
@@ -223,7 +223,7 @@ impl StorageTrieUpdates {
         self,
         tx: &TX,
         hashed_address: B256,
-    ) -> Result<usize, reth_db::DatabaseError>
+    ) -> Result<usize, <&TX as TrieCursorFactory>::Err>
     where
         TX: DbTx + DbTxMut,
     {

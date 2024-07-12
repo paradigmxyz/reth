@@ -3,7 +3,6 @@ use crate::{
     forward_cursor::ForwardInMemoryCursor, HashedAccountsSorted, HashedPostStateSorted,
     HashedStorageSorted,
 };
-use reth_db::DatabaseError;
 use reth_primitives::{Account, B256, U256};
 use std::collections::HashSet;
 
@@ -22,10 +21,11 @@ impl<'a, CF> HashedPostStateCursorFactory<'a, CF> {
 }
 
 impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorFactory<'a, CF> {
+    type Err = CF::Err;
     type AccountCursor = HashedPostStateAccountCursor<'a, CF::AccountCursor>;
     type StorageCursor = HashedPostStateStorageCursor<'a, CF::StorageCursor>;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, Self::Err> {
         let cursor = self.cursor_factory.hashed_account_cursor()?;
         Ok(HashedPostStateAccountCursor::new(cursor, &self.post_state.accounts))
     }
@@ -33,7 +33,7 @@ impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorF
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor, DatabaseError> {
+    ) -> Result<Self::StorageCursor, Self::Err> {
         let cursor = self.cursor_factory.hashed_storage_cursor(hashed_address)?;
         Ok(HashedPostStateStorageCursor::new(cursor, self.post_state.storages.get(&hashed_address)))
     }
@@ -74,7 +74,7 @@ where
         self.destroyed_accounts.contains(account)
     }
 
-    fn seek_inner(&mut self, key: B256) -> Result<Option<(B256, Account)>, DatabaseError> {
+    fn seek_inner(&mut self, key: B256) -> Result<Option<(B256, Account)>, C::Err> {
         // Take the next account from the post state with the key greater than or equal to the
         // sought key.
         let post_state_entry = self.post_state_cursor.seek(&key);
@@ -96,7 +96,7 @@ where
         Ok(Self::compare_entries(post_state_entry, db_entry))
     }
 
-    fn next_inner(&mut self, last_account: B256) -> Result<Option<(B256, Account)>, DatabaseError> {
+    fn next_inner(&mut self, last_account: B256) -> Result<Option<(B256, Account)>, C::Err> {
         // Take the next account from the post state with the key greater than the last sought key.
         let post_state_entry = self.post_state_cursor.first_after(&last_account);
 
@@ -135,6 +135,7 @@ impl<'a, C> HashedCursor for HashedPostStateAccountCursor<'a, C>
 where
     C: HashedCursor<Value = Account>,
 {
+    type Err = C::Err;
     type Value = Account;
 
     /// Seek the next entry for a given hashed account key.
@@ -145,7 +146,7 @@ where
     ///
     /// The returned account key is memoized and the cursor remains positioned at that key until
     /// [`HashedCursor::seek`] or [`HashedCursor::next`] are called.
-    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, Self::Err> {
         // Find the closes account.
         let entry = self.seek_inner(key)?;
         self.last_account = entry.as_ref().map(|entry| entry.0);
@@ -159,7 +160,7 @@ where
     ///
     /// NOTE: This function will not return any entry unless [`HashedCursor::seek`] has been
     /// called.
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, Self::Err> {
         let next = match self.last_account {
             Some(account) => {
                 let entry = self.next_inner(account)?;
@@ -210,7 +211,7 @@ where
     }
 
     /// Find the storage entry in post state or database that's greater or equal to provided subkey.
-    fn seek_inner(&mut self, subkey: B256) -> Result<Option<(B256, U256)>, DatabaseError> {
+    fn seek_inner(&mut self, subkey: B256) -> Result<Option<(B256, U256)>, C::Err> {
         // Attempt to find the account's storage in post state.
         let post_state_entry = self.post_state_cursor.as_mut().and_then(|c| c.seek(&subkey));
 
@@ -232,7 +233,7 @@ where
     }
 
     /// Find the storage entry that is right after current cursor position.
-    fn next_inner(&mut self, last_slot: B256) -> Result<Option<(B256, U256)>, DatabaseError> {
+    fn next_inner(&mut self, last_slot: B256) -> Result<Option<(B256, U256)>, C::Err> {
         // Attempt to find the account's storage in post state.
         let post_state_entry =
             self.post_state_cursor.as_mut().and_then(|c| c.first_after(&last_slot));
@@ -279,17 +280,18 @@ impl<'a, C> HashedCursor for HashedPostStateStorageCursor<'a, C>
 where
     C: HashedStorageCursor<Value = U256>,
 {
+    type Err = C::Err;
     type Value = U256;
 
     /// Seek the next account storage entry for a given hashed key pair.
-    fn seek(&mut self, subkey: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn seek(&mut self, subkey: B256) -> Result<Option<(B256, Self::Value)>, C::Err> {
         let entry = self.seek_inner(subkey)?;
         self.last_slot = entry.as_ref().map(|entry| entry.0);
         Ok(entry)
     }
 
     /// Return the next account storage entry for the current account key.
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, C::Err> {
         let next = match self.last_slot {
             Some(last_slot) => {
                 let entry = self.next_inner(last_slot)?;
@@ -311,7 +313,7 @@ where
     ///
     /// This function should be called before attempting to call [`HashedCursor::seek`] or
     /// [`HashedCursor::next`].
-    fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
+    fn is_storage_empty(&mut self) -> Result<bool, C::Err> {
         let is_empty = match &self.post_state_cursor {
             Some(cursor) => {
                 // If the storage has been wiped at any point

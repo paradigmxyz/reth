@@ -3,7 +3,6 @@ use crate::{
     forward_cursor::ForwardInMemoryCursor,
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
 };
-use reth_db::DatabaseError;
 use reth_primitives::B256;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
 use std::collections::HashSet;
@@ -25,10 +24,11 @@ impl<'a, CF> InMemoryTrieCursorFactory<'a, CF> {
 }
 
 impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<'a, CF> {
+    type Err = CF::Err;
     type AccountTrieCursor = InMemoryAccountTrieCursor<'a, CF::AccountTrieCursor>;
     type StorageTrieCursor = InMemoryStorageTrieCursor<'a, CF::StorageTrieCursor>;
 
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, Self::Err> {
         let cursor = self.cursor_factory.account_trie_cursor()?;
         Ok(InMemoryAccountTrieCursor::new(cursor, self.trie_updates))
     }
@@ -36,7 +36,7 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor, Self::Err> {
         let cursor = self.cursor_factory.storage_trie_cursor(hashed_address)?;
         Ok(InMemoryStorageTrieCursor::new(
             hashed_address,
@@ -74,21 +74,20 @@ impl<'a, C> InMemoryAccountTrieCursor<'a, C> {
 }
 
 impl<'a, C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'a, C> {
+    type Err = C::Err;
+
     fn seek_exact(
         &mut self,
         _key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
         unimplemented!()
     }
 
-    fn seek(
-        &mut self,
-        _key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn seek(&mut self, _key: Nibbles) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
         unimplemented!()
     }
 
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, Self::Err> {
         unimplemented!()
     }
 }
@@ -129,21 +128,20 @@ impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
 }
 
 impl<'a, C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'a, C> {
+    type Err = C::Err;
+
     fn seek_exact(
         &mut self,
         _key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
         unimplemented!()
     }
 
-    fn seek(
-        &mut self,
-        _key: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+    fn seek(&mut self, _key: Nibbles) -> Result<Option<(Nibbles, BranchNodeCompact)>, Self::Err> {
         unimplemented!()
     }
 
-    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    fn current(&mut self) -> Result<Option<Nibbles>, Self::Err> {
         unimplemented!()
     }
 }

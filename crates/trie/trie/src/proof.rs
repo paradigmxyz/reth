@@ -1,14 +1,16 @@
 use crate::{
-    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
+    hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::TriePrefixSetsMut,
-    trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
+    trie_cursor::{
+        DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, TrieCursor, TrieCursorFactory,
+    },
     walker::TrieWalker,
     HashBuilder, Nibbles,
 };
 use alloy_rlp::{BufMut, Encodable};
 use reth_db::tables;
-use reth_db_api::transaction::DbTx;
+use reth_db_api::{transaction::DbTx, DatabaseError};
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, B256};
 use reth_trie_common::{proof::ProofRetainer, AccountProof, StorageProof, TrieAccount};
@@ -57,6 +59,19 @@ impl<'a, TX, H> Proof<'a, TX, H>
 where
     TX: DbTx,
     H: HashedCursorFactory + Clone,
+    <<&'a TX as TrieCursorFactory>::AccountTrieCursor as TrieCursor>::Err:
+        From<<H::AccountCursor as HashedCursor>::Err>,
+    <<&'a TX as TrieCursorFactory>::StorageTrieCursor as TrieCursor>::Err:
+        From<<H::StorageCursor as HashedCursor>::Err>,
+    StateRootError: From<<&'a TX as TrieCursorFactory>::Err>
+        + From<H::Err>
+        + From<<<&'a TX as TrieCursorFactory>::AccountTrieCursor as TrieCursor>::Err>,
+    StorageRootError: From<<&'a TX as TrieCursorFactory>::Err>
+        + From<H::Err>
+        + From<<<&'a TX as TrieCursorFactory>::StorageTrieCursor as TrieCursor>::Err>
+        + From<<H::StorageCursor as HashedCursor>::Err>,
+    <H::StorageCursor as HashedCursor>::Err: From<DatabaseError>,
+    <H::AccountCursor as HashedCursor>::Err: From<DatabaseError>,
 {
     /// Generate an account proof from intermediate nodes.
     pub fn account_proof(

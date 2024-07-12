@@ -1,10 +1,12 @@
+#[cfg(feature = "metrics")]
+use crate::metrics::{StateRootMetrics, TrieRootMetrics, TrieType};
 use crate::{
-    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
+    hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, PrefixSetLoader, TriePrefixSets},
     progress::{IntermediateStateRootState, StateRootProgress},
     stats::TrieTracker,
-    trie_cursor::TrieCursorFactory,
+    trie_cursor::{TrieCursor, TrieCursorFactory},
     updates::{StorageTrieUpdates, TrieUpdates},
     walker::TrieWalker,
     HashBuilder, Nibbles, TrieAccount,
@@ -15,9 +17,6 @@ use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, BlockNumber, B256};
 use std::ops::RangeInclusive;
 use tracing::{debug, trace};
-
-#[cfg(feature = "metrics")]
-use crate::metrics::{StateRootMetrics, TrieRootMetrics, TrieType};
 
 /// `StateRoot` is used to compute the root node of a state trie.
 #[derive(Debug)]
@@ -166,6 +165,13 @@ impl<T, H> StateRoot<T, H>
 where
     T: TrieCursorFactory + Clone,
     H: HashedCursorFactory + Clone,
+    <T::AccountTrieCursor as TrieCursor>::Err: From<<H::AccountCursor as HashedCursor>::Err>,
+    <T::StorageTrieCursor as TrieCursor>::Err: From<<H::StorageCursor as HashedCursor>::Err>,
+    StateRootError: From<T::Err> + From<H::Err> + From<<T::AccountTrieCursor as TrieCursor>::Err>,
+    StorageRootError: From<T::Err>
+        + From<H::Err>
+        + From<<H::StorageCursor as HashedCursor>::Err>
+        + From<<T::StorageTrieCursor as TrieCursor>::Err>,
 {
     /// Walks the intermediate nodes of existing state trie (if any) and hashed entries. Feeds the
     /// nodes into the hash builder. Collects the updates in the process.
@@ -448,6 +454,11 @@ impl<T, H> StorageRoot<T, H>
 where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
+    <T::StorageTrieCursor as TrieCursor>::Err: From<<H::StorageCursor as HashedCursor>::Err>,
+    StorageRootError: From<T::Err>
+        + From<H::Err>
+        + From<<H::StorageCursor as HashedCursor>::Err>
+        + From<<T::StorageTrieCursor as TrieCursor>::Err>,
 {
     /// Walks the hashed storage table entries for a given address and calculates the storage root.
     ///
