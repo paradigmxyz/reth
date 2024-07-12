@@ -126,7 +126,7 @@ impl<Eth: Call> Call for OpEthApi<Eth> {
 }
 
 impl<Eth: LoadState> LoadState for OpEthApi<Eth> {
-    fn provider(&self) -> impl StateProviderFactory {
+    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider {
         LoadState::provider(&self.inner)
     }
 
