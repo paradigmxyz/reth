@@ -46,18 +46,10 @@ impl<Eth> OtterscanApi<Eth> {
         let block = block.ok_or_else(|| internal_rpc_err("block not found"))?;
         let receipts = receipts.ok_or_else(|| internal_rpc_err("receipts not found"))?;
 
+        // blob fee is burnt, so we don't need to calculate it
         let total_fees = receipts
             .iter()
-            .map(|receipt| {
-                let mut fee = receipt.gas_used.saturating_mul(receipt.effective_gas_price);
-                if let (Some(blob_gas_used), Some(blob_gas_price)) =
-                    (receipt.blob_gas_used, receipt.blob_gas_price)
-                {
-                    fee = fee.saturating_add(blob_gas_used.saturating_mul(blob_gas_price))
-                };
-
-                fee
-            })
+            .map(|receipt| receipt.gas_used.saturating_mul(receipt.effective_gas_price))
             .sum::<u128>();
 
         Ok(Some(BlockDetails::new(block, Default::default(), U256::from(total_fees))))
