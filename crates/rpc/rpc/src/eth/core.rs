@@ -172,7 +172,7 @@ where
     type Ctx<'a> =
         &'a EthApiBuilderCtx<N::Provider, N::Pool, N::Evm, Network, TaskExecutor, N::Provider>;
 
-    fn builder<'a>() -> Box<dyn Fn(Self::Ctx<'a>) -> Self + Send + Sync + Unpin> {
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send + Sync + Unpin> {
         Box::new(|ctx| {
             Self::with_spawner(
                 ctx.provider.clone(),

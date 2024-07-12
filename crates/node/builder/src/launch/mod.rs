@@ -40,6 +40,7 @@ use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     node::FullNode,
+    rpc::EthApiBuilderProvider,
     AddOns, NodeBuilderWithComponents, NodeHandle,
 };
 
@@ -94,17 +95,13 @@ impl DefaultNodeLauncher {
     }
 }
 
-// TODO enforce the nodeaddons type in `NodeBuilderWithComponents`
 impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
 where
     T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-    for<'a> AO::EthApi: BuilderProvider<
-        NodeAdapter<T, CB::Components>,
-        Ctx<'a> = &'a EthApiBuilderCtx<NodeAdapter<T, CB::Components>>,
-    >,
-    AO::EthApi: FullEthApiServer + AddDevSigners,
+    AO::EthApi:
+        EthApiBuilderProvider<NodeAdapter<T, CB::Components>> + FullEthApiServer + AddDevSigners,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 

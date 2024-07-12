@@ -165,13 +165,13 @@ pub trait BuilderProvider<N: FullNodeComponents>: Send {
     type Ctx<'a>;
 
     /// Returns builder for type.
-    fn builder<'a>() -> Box<dyn Fn(Self::Ctx<'a>) -> Self + Send + Sync + Unpin>;
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send + Sync + Unpin>;
 }
 
 impl<N: FullNodeComponents> BuilderProvider<N> for () {
     type Ctx<'a> = ();
 
-    fn builder<'a>() -> Box<dyn Fn(Self::Ctx<'a>) -> Self + Send + Sync + Unpin> {
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send + Sync + Unpin> {
         Box::new(noop_builder)
     }
 }

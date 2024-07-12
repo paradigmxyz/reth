@@ -39,7 +39,7 @@ use crate::{
     common::WithConfigs,
     components::NodeComponentsBuilder,
     node::FullNode,
-    rpc::{RethRpcServerHandles, RpcContext},
+    rpc::{EthApiBuilderProvider, RethRpcServerHandles, RpcContext},
     DefaultNodeLauncher, EthApiBuilderCtx, Node, NodeHandle,
 };
 
@@ -292,23 +292,17 @@ where
     >
     where
         N: Node<RethFullAdapter<DB, N>>,
-        for<'a> <N::AddOns as NodeAddOns<
-            NodeAdapter<
-                RethFullAdapter<DB, N>,
-                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-            >,
-        >>::EthApi: BuilderProvider<
-            NodeAdapter<
-                RethFullAdapter<DB, N>,
-                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-            >,
-        >,
         <N::AddOns as NodeAddOns<
             NodeAdapter<
                 RethFullAdapter<DB, N>,
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
-        >>::EthApi: FullEthApiServer + AddDevSigners,
+        >>::EthApi: EthApiBuilderProvider<
+            NodeAdapter<
+                RethFullAdapter<DB, N>,
+                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
+            >,
+        > + FullEthApiServer + AddDevSigners,
     {
         self.node(node).launch().await
     }
@@ -426,11 +420,9 @@ where
     T: NodeTypes,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     AO: NodeAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
-    for<'a> AO::EthApi: BuilderProvider<
-        NodeAdapter<RethFullAdapter<DB, T>, CB::Components>,
-        Ctx<'a> = &'a EthApiBuilderCtx<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
-    >,
-    AO::EthApi: FullEthApiServer + AddDevSigners,
+    AO::EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
+        + FullEthApiServer
+        + AddDevSigners,
 {
     /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(

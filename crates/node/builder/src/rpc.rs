@@ -258,8 +258,7 @@ pub(crate) async fn launch_rpc_servers<Node, Engine, EthApi>(
     add_ons: RpcAddOns<Node, EthApi>,
 ) -> eyre::Result<(RethRpcServerHandles, RpcRegistry<Node, EthApi>)>
 where
-    for<'a> EthApi: BuilderProvider<Node, Ctx<'a> = &'a EthApiBuilderCtx<Node>>,
-    EthApi: FullEthApiServer,
+    EthApi: EthApiBuilderProvider<Node> + FullEthApiServer,
     Node: FullNodeComponents + Clone,
     Engine: EngineApiServer<Node::Engine>,
 {
@@ -274,7 +273,7 @@ where
         .with_events(node.provider().clone())
         .with_executor(node.task_executor().clone())
         .with_evm_config(node.evm_config().clone())
-        .build_with_auth_server(module_config, engine_api, EthApi::builder());
+        .build_with_auth_server(module_config, engine_api, EthApi::eth_api_builder());
 
     let mut registry = RpcRegistry { registry };
     let ctx = RpcContext {
@@ -330,4 +329,19 @@ where
     on_rpc_started.on_rpc_started(ctx, handles.clone())?;
 
     Ok((handles, registry))
+}
+
+pub trait EthApiBuilderProvider<N: FullNodeComponents>: BuilderProvider<N> {
+    /// Returns the eth api builder.
+    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send + Sync + Unpin>;
+}
+
+impl<N, F> EthApiBuilderProvider<N> for F
+where
+    N: FullNodeComponents,
+    for<'a> F: BuilderProvider<N, Ctx<'a> = &'a EthApiBuilderCtx<N>>,
+{
+    fn eth_api_builder() -> Box<dyn Fn(&EthApiBuilderCtx<N>) -> Self + Send + Sync + Unpin> {
+        F::builder()
+    }
 }

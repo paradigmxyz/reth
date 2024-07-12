@@ -21,7 +21,7 @@ use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::NodeHooks,
     launch::LaunchNode,
-    rpc::{RethRpcServerHandles, RpcContext, RpcHooks},
+    rpc::{EthApiBuilderProvider, RethRpcServerHandles, RpcContext, RpcHooks},
     AddOns, FullNode, RpcAddOns,
 };
 
@@ -254,7 +254,7 @@ where
     T: FullNodeTypes,
     CB: NodeComponentsBuilder<T>,
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
-    for<'a> AO::EthApi: BuilderProvider<NodeAdapter<T, CB::Components>>,
+    AO::EthApi: EthApiBuilderProvider<NodeAdapter<T, CB::Components>>,
     AO::EthApi: FullEthApiServer + AddDevSigners,
 {
     /// Launches the node with the given launcher.
