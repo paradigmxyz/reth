@@ -196,7 +196,7 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ]
             .into(),
         ),
-        max_gas_limit: 45_000_000,
+        max_gas_limit: crate::constants::BASE_SEPOLIA_MAX_GAS_LIMIT,
         prune_delete_limit: 10000,
         ..Default::default()
     }
@@ -222,7 +222,7 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             ]
             .into(),
         ),
-        max_gas_limit: 97_500_000,
+        max_gas_limit: crate::constants::BASE_MAINNET_MAX_GAS_LIMIT,
         prune_delete_limit: 10000,
         ..Default::default()
     }
