@@ -2,6 +2,7 @@
 
 //! Optimism builder support
 
+use reth_primitives::Bytes;
 use alloy_rlp::Encodable;
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_evm_optimism::revm_spec_by_timestamp_after_bedrock;
@@ -33,10 +34,21 @@ pub struct OptimismPayloadBuilderAttributes {
     pub payload_attributes: EthPayloadBuilderAttributes,
     /// `NoTxPool` option for the generated payload
     pub no_tx_pool: bool,
-    /// Transactions for the generated payload
+    /// Decoded Transactions for the generated payload
     pub transactions: Vec<TransactionSigned>,
+    /// Encoded Transactions for the generated payload
+    pub encoded_transactions: Vec<Bytes>,
     /// The gas limit for the generated payload
     pub gas_limit: Option<u64>,
+}
+
+/// Optimism Payload Builder Attributes Helper
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OptimismPayloadBuilderAttributesHelper {
+    /// An decoded signed transaction
+    pub decoded_transaction: TransactionSigned,
+    /// An encoded signed transaction
+    pub encoded_transaction: Bytes, 
 }
 
 impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
@@ -58,6 +70,9 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             (payload_id_optimism(&parent, &attributes, &transactions), transactions)
         };
 
+        // save the encoded transactions
+        let encoded_transactions = attributes.transactions.unwrap_or_default();
+
         let payload_attributes = EthPayloadBuilderAttributes {
             id,
             parent,
@@ -72,6 +87,7 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
             payload_attributes,
             no_tx_pool: attributes.no_tx_pool.unwrap_or_default(),
             transactions,
+            encoded_transactions,
             gas_limit: attributes.gas_limit,
         })
     }

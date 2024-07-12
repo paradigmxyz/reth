@@ -66,6 +66,7 @@ pub(crate) fn optimism_payload_attributes(timestamp: u64) -> OptimismPayloadBuil
     OptimismPayloadBuilderAttributes {
         payload_attributes: EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
         transactions: vec![],
+        encoded_transactions: vec![],
         no_tx_pool: false,
         gas_limit: Some(30_000_000),
     }
