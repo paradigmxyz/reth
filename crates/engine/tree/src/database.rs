@@ -21,7 +21,7 @@ use tracing::debug;
 ///
 /// There are two types of operations this service can perform:
 /// - Writing executed blocks to disk, returning the hash of the latest block that was inserted.
-/// - Removing blocks from disk, returning the removed blocks.
+/// - Removing blocks from disk, returning the hash of the lowest block removed.
 ///
 /// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
 /// blocking database operations in an endless loop.

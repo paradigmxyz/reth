@@ -116,7 +116,6 @@ where
             .iter()
             .map(|block| (block.block().number, block.execution_outcome().receipts.clone()))
         {
-            println!("receipts len: {:?}", receipts);
             debug_assert!(receipts.len() == 1);
             // TODO: should we also assert that the receipt is not None here, that means the
             // receipt is pruned
