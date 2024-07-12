@@ -38,7 +38,7 @@ use tracing::{debug, trace};
 const PEER_BLOCK_CACHE_LIMIT: u32 = 512;
 
 /// Wrapper type for the [`BlockNumReader`] trait.
-pub struct BlockNumReader(Box<dyn reth_storage_api::BlockNumReader>);
+pub(crate) struct BlockNumReader(Box<dyn reth_storage_api::BlockNumReader>);
 
 impl BlockNumReader {
     /// Create a new instance with the given reader.
@@ -49,7 +49,9 @@ impl BlockNumReader {
 
 impl fmt::Debug for BlockNumReader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "<dyn BlockNumReader>")
+        f.debug_struct("BlockNumReader")
+            .field("inner", &"<dyn BlockNumReader>")
+            .finish()
     }
 }
 
