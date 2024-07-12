@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-consensus-common.workspace = true
 reth-chainspec.workspace = true
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = [ "optimism" ]}
 reth-consensus.workspace = true
 
 tracing.workspace = true
