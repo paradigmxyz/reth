@@ -6,7 +6,6 @@ use crate::{
         LogArgs,
     },
     commands::debug_cmd,
-    macros::block_executor,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use clap::{value_parser, Parser, Subcommand};
@@ -19,6 +18,7 @@ use reth_cli_commands::{
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
+use reth_node_ethereum::EthExecutorProvider;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
@@ -151,14 +151,13 @@ impl<Ext: clap::Args + fmt::Debug> Cli<Ext> {
             }
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::InitState(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Import(command) => runner.run_blocking_until_ctrl_c(
-                command.execute(|chain_spec| block_executor!(chain_spec)),
-            ),
+            Commands::Import(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute(EthExecutorProvider::ethereum))
+            }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute(ctx, |chain_spec| block_executor!(chain_spec))
-            }),
+            Commands::Stage(command) => runner
+                .run_command_until_exit(|ctx| command.execute(ctx, EthExecutorProvider::ethereum)),
             Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),

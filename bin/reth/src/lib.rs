@@ -31,7 +31,6 @@
 
 pub mod cli;
 pub mod commands;
-mod macros;
 
 /// Re-exported utils.
 pub mod utils {
