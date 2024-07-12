@@ -15,7 +15,7 @@ use reth_basic_payload_builder::{
     PayloadConfig, WithdrawalsOutcome,
 };
 use reth_errors::RethError;
-use reth_evm::ConfigureEvm;
+use reth_evm::ConfigureEvmGeneric;
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
@@ -62,7 +62,7 @@ impl Default for EthereumPayloadBuilder {
 // Default implementation of [PayloadBuilder] for unit type
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -247,7 +247,7 @@ pub fn default_ethereum_payload_builder<EvmConfig, Pool, Client>(
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {

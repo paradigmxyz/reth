@@ -218,7 +218,7 @@ impl<Node, EVM, Pool> PayloadServiceBuilder<Node, Pool> for OptimismPayloadBuild
 where
     Node: FullNodeTypes<Engine = OptimismEngineTypes>,
     Pool: TransactionPool + Unpin + 'static,
-    EVM: ConfigureEvm,
+    EVM: ConfigureEvmGeneric,
 {
     async fn spawn_payload_service(
         self,

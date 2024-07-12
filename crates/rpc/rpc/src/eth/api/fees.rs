@@ -7,7 +7,7 @@ use crate::{
     },
     EthApi,
 };
-use reth_evm::ConfigureEvm;
+use reth_evm::ConfigureEvmGeneric;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
@@ -21,7 +21,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    EvmConfig: ConfigureEvmGeneric + 'static,
 {
     /// Returns a suggestion for a gas price for legacy transactions.
     ///

@@ -5,7 +5,7 @@ use crate::{
         Components, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, NodeComponents,
         PayloadServiceBuilder, PoolBuilder,
     },
-    BuilderContext, ConfigureEvm, FullNodeTypes,
+    BuilderContext, ConfigureEvmGeneric, FullNodeTypes,
 };
 use reth_consensus::Consensus;
 use reth_evm::execute::BlockExecutorProvider;
@@ -369,7 +369,7 @@ where
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM, Executor, Cons>>> + Send,
     Pool: TransactionPool + Unpin + 'static,
-    EVM: ConfigureEvm,
+    EVM: ConfigureEvmGeneric,
     Executor: BlockExecutorProvider,
     Cons: Consensus + Clone + Unpin + 'static,
 {

@@ -7,7 +7,7 @@
 //!
 //! Components depend on a fully type configured node: [FullNodeTypes](crate::node::FullNodeTypes).
 
-use crate::{ConfigureEvm, FullNodeTypes};
+use crate::FullNodeTypes;
 pub use builder::*;
 pub use consensus::*;
 pub use execute::*;
@@ -15,7 +15,7 @@ pub use network::*;
 pub use payload::*;
 pub use pool::*;
 use reth_consensus::Consensus;
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmGeneric};
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::TransactionPool;
@@ -37,7 +37,7 @@ pub trait NodeComponents<NodeTypes: FullNodeTypes>: Clone + Unpin + Send + Sync 
     type Pool: TransactionPool + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm;
+    type Evm: ConfigureEvmGeneric;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider;
@@ -88,7 +88,7 @@ impl<Node, Pool, EVM, Executor, Cons> NodeComponents<Node>
 where
     Node: FullNodeTypes,
     Pool: TransactionPool + Unpin + 'static,
-    EVM: ConfigureEvm,
+    EVM: ConfigureEvmGeneric,
     Executor: BlockExecutorProvider,
     Cons: Consensus + Clone + Unpin + 'static,
 {
@@ -126,7 +126,7 @@ impl<Node, Pool, EVM, Executor, Cons> Clone for Components<Node, Pool, EVM, Exec
 where
     Node: FullNodeTypes,
     Pool: TransactionPool,
-    EVM: ConfigureEvm,
+    EVM: ConfigureEvmGeneric,
     Executor: BlockExecutorProvider,
     Cons: Consensus + Clone,
 {

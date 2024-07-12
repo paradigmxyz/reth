@@ -6,7 +6,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
-    ConfigureEvm,
+    ConfigureEvmGeneric,
 };
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_primitives::{
@@ -51,7 +51,7 @@ impl<EvmConfig> OpExecutorProvider<EvmConfig> {
 
 impl<EvmConfig> OpExecutorProvider<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
 {
     fn op_executor<DB>(&self, db: DB) -> OpBlockExecutor<EvmConfig, DB>
     where
@@ -67,7 +67,7 @@ where
 
 impl<EvmConfig> BlockExecutorProvider for OpExecutorProvider<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
 {
     type Executor<DB: Database<Error = ProviderError>> = OpBlockExecutor<EvmConfig, DB>;
 
@@ -103,7 +103,7 @@ struct OpEvmExecutor<EvmConfig> {
 
 impl<EvmConfig> OpEvmExecutor<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
 {
     /// Executes the transactions in the block and returns the receipts.
     ///
@@ -254,7 +254,7 @@ impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
     DB: Database<Error = ProviderError>,
 {
     /// Configures a new evm configuration and block environment for the given block.
@@ -336,7 +336,7 @@ where
 
 impl<EvmConfig, DB> Executor<DB> for OpBlockExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -393,7 +393,7 @@ impl<EvmConfig, DB> OpBatchExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> BatchExecutor<DB> for OpBatchExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
