@@ -1380,7 +1380,7 @@ mod tests {
     #[cfg(feature = "optimism")]
     use reth_primitives::proofs::calculate_receipt_root_optimism;
     use reth_primitives::{
-        constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH, ETHEREUM_BLOCK_GAS_LIMIT},
+        constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
         keccak256,
         proofs::calculate_transaction_root,
         revm_primitives::AccountInfo,
@@ -1599,7 +1599,7 @@ mod tests {
                         number,
                         parent_hash: parent.unwrap_or_default(),
                         gas_used: body.len() as u64 * 21_000,
-                        gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+                        gas_limit: chain_spec.max_gas_limit,
                         mix_hash: B256::random(),
                         base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
                         transactions_root,
