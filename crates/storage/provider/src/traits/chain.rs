@@ -144,7 +144,7 @@ impl CanonStateNotification {
 #[derive(Debug)]
 pub struct ForkChoiceNotifications(broadcast::Receiver<SealedHeader>);
 
-/// A type that allows to register fork choice related event subscriptions
+/// A trait that allows to register to fork choice related events
 /// and get notified when a new fork choice is available.
 pub trait ForkChoiceSubscriptions: Send + Sync {
     /// Get notified when a new head of the chain is selected.
