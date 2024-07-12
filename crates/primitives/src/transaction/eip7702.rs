@@ -1,6 +1,7 @@
 use super::access_list::AccessList;
-use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
-use alloy_eips::eip7702::SignedAuthorization;
+use crate::{
+    eip7702::SignedAuthorization, keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256,
+};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::mem;
 use reth_codecs::{main_codec, Compact};
