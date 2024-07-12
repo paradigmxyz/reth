@@ -38,7 +38,6 @@ pub fn calculate_requests_root(requests: &[Request]) -> B256 {
 }
 
 /// Calculates the receipt root for a header.
-#[cfg(feature = "optimism")]
 pub fn calculate_receipt_root_optimism(
     receipts: &[ReceiptWithBloom],
     chain_spec: &reth_chainspec::ChainSpec,
