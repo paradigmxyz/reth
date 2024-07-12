@@ -49,9 +49,7 @@ impl BlockNumReader {
 
 impl fmt::Debug for BlockNumReader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BlockNumReader")
-            .field("inner", &"<dyn BlockNumReader>")
-            .finish()
+        f.debug_struct("BlockNumReader").field("inner", &"<dyn BlockNumReader>").finish()
     }
 }
 
@@ -547,7 +545,12 @@ pub(crate) enum StateAction {
 #[cfg(test)]
 mod tests {
     use crate::{
-        discovery::Discovery, fetch::StateFetcher, message::PeerRequestSender, peers::PeersManager, state::NetworkState, PeerRequest
+        discovery::Discovery,
+        fetch::StateFetcher,
+        message::PeerRequestSender,
+        peers::PeersManager,
+        state::{BlockNumReader, NetworkState},
+        PeerRequest,
     };
     use reth_eth_wire::{
         capability::{Capabilities, Capability},
@@ -563,7 +566,6 @@ mod tests {
     };
     use tokio::sync::mpsc;
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
-    use crate::state::BlockNumReader;
 
     /// Returns a testing instance of the [`NetworkState`].
     fn state() -> NetworkState {
