@@ -376,7 +376,8 @@ impl PeersManager {
         let mut ban_duration = self.ban_duration;
         if let Some(peer) = self.peers.get(&peer_id) {
             if peer.is_trusted() || peer.is_static() {
-                // For misbehaving trusted peers, we provide a bit more leeway when penalizing them.
+                // For misbehaving trusted or static peers, we provide a bit more leeway when
+                // penalizing them.
                 ban_duration = self.backoff_durations.medium;
             }
         }
@@ -447,7 +448,7 @@ impl PeersManager {
             } else {
                 let mut reputation_change = self.reputation_weights.change(rep).as_i32();
                 if peer.is_trusted() || peer.is_static() {
-                    // exempt trusted peers from reputation slashing for
+                    // exempt trusted and static peers from reputation slashing for
                     if matches!(
                         rep,
                         ReputationChangeKind::Dropped |
