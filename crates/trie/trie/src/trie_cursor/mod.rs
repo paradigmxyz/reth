@@ -50,6 +50,9 @@ pub trait TrieCursor: Send + Sync {
     fn seek(&mut self, key: Nibbles)
         -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError>;
 
+    /// Move the cursor to the next key.
+    fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError>;
+
     /// Get the current entry.
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError>;
 }
