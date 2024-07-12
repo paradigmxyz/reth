@@ -448,7 +448,7 @@ impl SessionManager {
                         peer_id,
                         remote_addr,
                         direction,
-                    })
+                    });
                 }
 
                 let (commands_to_session, commands_rx) = mpsc::channel(self.session_command_buffer);
@@ -843,7 +843,7 @@ async fn start_pending_outbound_session(
                     error,
                 })
                 .await;
-            return
+            return;
         }
     };
     authenticate(
@@ -889,7 +889,7 @@ async fn authenticate(
                     direction,
                 })
                 .await;
-            return
+            return;
         }
     };
 

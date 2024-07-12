@@ -411,7 +411,7 @@ where
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
             trace!(target: "payload_builder", "payload building deadline reached");
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // check if the interval is reached
@@ -472,7 +472,7 @@ where
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         if let Some(ref payload) = self.best_payload {
-            return Ok(payload.clone())
+            return Ok(payload.clone());
         }
         // No payload has been built yet, but we need to return something that the CL then can
         // deliver, so we need to return an empty payload.
@@ -590,14 +590,14 @@ where
                 this.maybe_better = None;
                 if let Ok(BuildOutcome::Better { payload, .. }) = res {
                     debug!(target: "payload_builder", "resolving better payload");
-                    return Poll::Ready(Ok(payload))
+                    return Poll::Ready(Ok(payload));
                 }
             }
         }
 
         if let Some(best) = this.best_payload.take() {
             debug!(target: "payload_builder", "resolving best payload");
-            return Poll::Ready(Ok(best))
+            return Poll::Ready(Ok(best));
         }
 
         if let Some(fut) = Pin::new(&mut this.empty_payload).as_pin_mut() {
@@ -613,12 +613,12 @@ where
                         Poll::Ready(res)
                     }
                     Err(err) => Poll::Ready(Err(err.into())),
-                }
+                };
             }
         }
 
         if this.is_empty() {
-            return Poll::Ready(Err(PayloadBuilderError::MissingPayload))
+            return Poll::Ready(Err(PayloadBuilderError::MissingPayload));
         }
 
         Poll::Pending
@@ -901,11 +901,11 @@ pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
     withdrawals: Withdrawals,
 ) -> Result<WithdrawalsOutcome, DB::Error> {
     if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
-        return Ok(WithdrawalsOutcome::pre_shanghai())
+        return Ok(WithdrawalsOutcome::pre_shanghai());
     }
 
     if withdrawals.is_empty() {
-        return Ok(WithdrawalsOutcome::empty())
+        return Ok(WithdrawalsOutcome::empty());
     }
 
     let balance_increments =

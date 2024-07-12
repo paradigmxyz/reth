@@ -32,7 +32,7 @@ impl StorageLock {
 
         if let Some(pid) = parse_lock_file_pid(&path)? {
             if pid != (process::id() as usize) && System::new_all().process(pid.into()).is_some() {
-                return Err(StorageLockError::Taken(pid))
+                return Err(StorageLockError::Taken(pid));
             }
         }
 
@@ -76,7 +76,7 @@ impl StorageLockInner {
 fn parse_lock_file_pid(path: &Path) -> Result<Option<usize>, StorageLockError> {
     if path.exists() {
         let contents = reth_fs_util::read_to_string(path)?;
-        return Ok(contents.trim().parse().ok())
+        return Ok(contents.trim().parse().ok());
     }
     Ok(None)
 }

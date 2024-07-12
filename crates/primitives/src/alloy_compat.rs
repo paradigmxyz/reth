@@ -35,8 +35,8 @@ impl TryFrom<alloy_rpc_types::Block> for Block {
                         ))
                     })
                     .collect(),
-                alloy_rpc_types::BlockTransactions::Hashes(_) |
-                alloy_rpc_types::BlockTransactions::Uncle => {
+                alloy_rpc_types::BlockTransactions::Hashes(_)
+                | alloy_rpc_types::BlockTransactions::Uncle => {
                     // alloy deserializes empty blocks into `BlockTransactions::Hashes`, if the tx
                     // root is the empty root then we can just return an empty vec.
                     if block.header.transactions_root == EMPTY_TRANSACTIONS {
@@ -127,7 +127,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                     return Err(ConversionError::Eip2718Error(
                         RlpError::Custom("EIP-1559 fields are present in a legacy transaction")
                             .into(),
-                    ))
+                    ));
                 }
 
                 // extract the chain id if possible
@@ -143,7 +143,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                                 .map_err(|err| ConversionError::Eip2718Error(err.into()))?
                                 .1
                         } else {
-                            return Err(ConversionError::MissingChainId)
+                            return Err(ConversionError::MissingChainId);
                         }
                     }
                 };

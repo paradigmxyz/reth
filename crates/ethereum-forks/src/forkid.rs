@@ -136,7 +136,7 @@ impl Decodable for EnrForkIdEntry {
         let b = &mut &**buf;
         let rlp_head = Header::decode(b)?;
         if !rlp_head.list {
-            return Err(RlpError::UnexpectedString)
+            return Err(RlpError::UnexpectedString);
         }
         let started_len = b.len();
 
@@ -150,7 +150,7 @@ impl Decodable for EnrForkIdEntry {
             return Err(RlpError::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            })
+            });
         }
 
         let rem = rlp_head.payload_length - consumed;
@@ -319,7 +319,7 @@ impl ForkFilter {
         if self.current().hash == fork_id.hash {
             if fork_id.next == 0 {
                 // 1b) No remotely announced fork, connect.
-                return Ok(())
+                return Ok(());
             }
 
             let is_incompatible = if self.head.number < TIMESTAMP_BEFORE_ETHEREUM_MAINNET {
@@ -327,10 +327,10 @@ impl ForkFilter {
                 // we check if this fork is time-based or block number-based by estimating that,
                 // if fork_id.next is bigger than the old timestamp, we are dealing with a
                 // timestamp, otherwise with a block.
-                (fork_id.next > TIMESTAMP_BEFORE_ETHEREUM_MAINNET &&
-                    self.head.timestamp >= fork_id.next) ||
-                    (fork_id.next <= TIMESTAMP_BEFORE_ETHEREUM_MAINNET &&
-                        self.head.number >= fork_id.next)
+                (fork_id.next > TIMESTAMP_BEFORE_ETHEREUM_MAINNET
+                    && self.head.timestamp >= fork_id.next)
+                    || (fork_id.next <= TIMESTAMP_BEFORE_ETHEREUM_MAINNET
+                        && self.head.number >= fork_id.next)
             } else {
                 // Extra safety check to future-proof for when Ethereum has over a billion blocks.
                 let head_block_or_time = match self.cache.epoch_start {
@@ -350,7 +350,7 @@ impl ForkFilter {
             } else {
                 // 1b) Remotely announced fork not yet passed locally, connect.
                 Ok(())
-            }
+            };
         }
 
         // 2) If the remote FORK_HASH is a subset of the local past forks...
@@ -364,10 +364,10 @@ impl ForkFilter {
                         Ok(())
                     } else {
                         Err(ValidationError::RemoteStale { local: self.current(), remote: fork_id })
-                    }
+                    };
                 }
 
-                break
+                break;
             }
         }
 
@@ -375,7 +375,7 @@ impl ForkFilter {
         // with locally known future forks, connect.
         for future_fork_hash in &self.cache.future {
             if *future_fork_hash == fork_id.hash {
-                return Ok(())
+                return Ok(());
             }
         }
 

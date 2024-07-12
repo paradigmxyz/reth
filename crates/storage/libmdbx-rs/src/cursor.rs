@@ -373,7 +373,7 @@ where
     {
         let res: Result<Option<((), ())>> = self.set_range(key);
         if let Err(error) = res {
-            return Iter::Err(Some(error))
+            return Iter::Err(Some(error));
         };
         Iter::new(self, ffi::MDBX_GET_CURRENT, ffi::MDBX_NEXT)
     }
@@ -408,7 +408,7 @@ where
     {
         let res: Result<Option<((), ())>> = self.set_range(key);
         if let Err(error) = res {
-            return IterDup::Err(Some(error))
+            return IterDup::Err(Some(error));
         };
         IterDup::new(self, ffi::MDBX_GET_CURRENT)
     }
@@ -424,7 +424,7 @@ where
             Ok(Some(_)) => (),
             Ok(None) => {
                 let _: Result<Option<((), ())>> = self.last();
-                return Iter::new(self, ffi::MDBX_NEXT, ffi::MDBX_NEXT)
+                return Iter::new(self, ffi::MDBX_NEXT, ffi::MDBX_NEXT);
             }
             Err(error) => return Iter::Err(Some(error)),
         };

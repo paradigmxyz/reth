@@ -78,14 +78,14 @@ impl TxDeposit {
     /// Outputs the length of the transaction's fields, without a RLP header or length of the
     /// eip155 fields.
     pub(crate) fn fields_len(&self) -> usize {
-        self.source_hash.length() +
-            self.from.length() +
-            self.to.length() +
-            self.mint.map_or(1, |mint| mint.length()) +
-            self.value.length() +
-            self.gas_limit.length() +
-            self.is_system_transaction.length() +
-            self.input.0.length()
+        self.source_hash.length()
+            + self.from.length()
+            + self.to.length()
+            + self.mint.map_or(1, |mint| mint.length())
+            + self.value.length()
+            + self.gas_limit.length()
+            + self.is_system_transaction.length()
+            + self.input.0.length()
     }
 
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.

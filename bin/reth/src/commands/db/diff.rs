@@ -298,12 +298,12 @@ where
     ) {
         // do not bother comparing if the key is already in the discrepancies map
         if self.discrepancies.contains_key(&key) {
-            return
+            return;
         }
 
         // do not bother comparing if the key is already in the extra elements map
         if self.extra_elements.contains_key(&key) {
-            return
+            return;
         }
 
         match (first, second) {

@@ -91,14 +91,14 @@ impl TxEip2930 {
 
     /// Outputs the length of the transaction's fields, without a RLP header.
     pub(crate) fn fields_len(&self) -> usize {
-        self.chain_id.length() +
-            self.nonce.length() +
-            self.gas_price.length() +
-            self.gas_limit.length() +
-            self.to.length() +
-            self.value.length() +
-            self.input.0.length() +
-            self.access_list.length()
+        self.chain_id.length()
+            + self.nonce.length()
+            + self.gas_price.length()
+            + self.gas_limit.length()
+            + self.to.length()
+            + self.value.length()
+            + self.input.0.length()
+            + self.access_list.length()
     }
 
     /// Encodes only the transaction's fields into the desired buffer, without a RLP header.

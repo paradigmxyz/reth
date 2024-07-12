@@ -116,7 +116,7 @@ impl EnvironmentArgs {
         {
             if factory.db_ref().is_read_only() {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
-                return Ok(factory)
+                return Ok(factory);
             }
 
             let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();

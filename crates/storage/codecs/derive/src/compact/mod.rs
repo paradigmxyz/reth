@@ -118,8 +118,8 @@ fn load_field(field: &syn::Field, fields: &mut FieldList, is_enum: bool) {
             if is_enum {
                 fields.push(FieldTypes::EnumUnnamedField((ftype.to_string(), use_alt_impl)));
             } else {
-                let should_compact = is_flag_type(&ftype) ||
-                    field.attrs.iter().any(|attr| {
+                let should_compact = is_flag_type(&ftype)
+                    || field.attrs.iter().any(|attr| {
                         attr.path().segments.iter().any(|path| path.ident == "maybe_zero")
                     });
 
@@ -156,7 +156,7 @@ fn should_use_alt_impl(ftype: &String, segment: &syn::PathSegment) -> bool {
                     ]
                     .contains(&path.ident.to_string().as_str())
                     {
-                        return true
+                        return true;
                     }
                 }
             }

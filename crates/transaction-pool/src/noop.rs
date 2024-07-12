@@ -238,7 +238,7 @@ impl TransactionPool for NoopTransactionPool {
         tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
         if tx_hashes.is_empty() {
-            return Ok(vec![])
+            return Ok(vec![]);
         }
         Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
     }

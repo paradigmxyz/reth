@@ -126,6 +126,7 @@ members = [
     "wvm-apps/wvm-exexed/crates/reth-exexed/",
     "wvm-apps/wvm-exexed/crates/repository/",
     "wvm-apps/wvm-exexed/crates/exex-etl/",
+    "wvm-apps/wvm-exexed/crates/lambda/",
     "wvm-apps/wvm-exexed/crates/bigquery/",
     "wvm-apps/wvm-exexed/crates/types/",
 ]

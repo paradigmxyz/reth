@@ -93,6 +93,6 @@ optimism = [
     "reth-primitives/optimism",
     "reth-rpc-types-compat/optimism",
     "reth-provider/optimism",
-    "dep:reth-evm-optimism",
+#    "dep:reth-evm-optimism",
     "reth-evm-optimism/optimism",
 ]

@@ -260,7 +260,7 @@ impl StaticFileProvider {
             )
             .and_then(|(parsed_segment, block_range)| {
                 if parsed_segment == segment {
-                    return Some(block_range)
+                    return Some(block_range);
                 }
                 None
             }),
@@ -269,7 +269,7 @@ impl StaticFileProvider {
 
         // Return cached `LoadedJar` or insert it for the first time, and then, return it.
         if let Some(block_range) = block_range {
-            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range)?))
+            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range)?));
         }
 
         Ok(None)
@@ -378,11 +378,11 @@ impl StaticFileProvider {
         while let Some((tx_end, block_range)) = static_files_rev_iter.next() {
             if tx > *tx_end {
                 // request tx is higher than highest static file tx
-                return None
+                return None;
             }
             let tx_start = static_files_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
-                return Some(find_fixed_range(block_range.end()))
+                return Some(find_fixed_range(block_range.end()));
             }
         }
         None
@@ -442,8 +442,8 @@ impl StaticFileProvider {
                 } else if tx_index.get(&segment).map(|index| index.len()) == Some(1) {
                     // Only happens if we unwind all the txs/receipts from the first static file.
                     // Should only happen in test scenarios.
-                    if jar.user_header().expected_block_start() == 0 &&
-                        matches!(
+                    if jar.user_header().expected_block_start() == 0
+                        && matches!(
                             segment,
                             StaticFileSegment::Receipts | StaticFileSegment::Transactions
                         )
@@ -543,7 +543,7 @@ impl StaticFileProvider {
         for segment in StaticFileSegment::iter() {
             if has_receipt_pruning && segment.is_receipts() {
                 // Pruned nodes (including full node) do not store receipts as static files.
-                continue
+                continue;
             }
 
             let initial_highest_block = self.get_highest_static_file_block(segment);
@@ -585,16 +585,16 @@ impl StaticFileProvider {
                 loop {
                     if let Some(indices) = provider.block_body_indices(last_block)? {
                         if indices.last_tx_num() <= highest_tx {
-                            break
+                            break;
                         }
                     } else {
                         // If the block body indices can not be found, then it means that static
                         // files is ahead of database, and the `ensure_invariants` check will fix
                         // it by comparing with stage checkpoints.
-                        break
+                        break;
                     }
                     if last_block == 0 {
-                        break
+                        break;
                     }
                     last_block -= 1;
 
@@ -662,8 +662,8 @@ impl StaticFileProvider {
             // If there is a gap between the entry found in static file and
             // database, then we have most likely lost static file data and need to unwind so we can
             // load it again
-            if !(db_first_entry <= highest_static_file_entry ||
-                highest_static_file_entry + 1 == db_first_entry)
+            if !(db_first_entry <= highest_static_file_entry
+                || highest_static_file_entry + 1 == db_first_entry)
             {
                 info!(
                     target: "reth::providers::static_file",
@@ -673,12 +673,12 @@ impl StaticFileProvider {
                     ?segment,
                     "Setting unwind target."
                 );
-                return Ok(Some(highest_static_file_block))
+                return Ok(Some(highest_static_file_block));
             }
 
             if let Some((db_last_entry, _)) = db_cursor.last()? {
                 if db_last_entry > highest_static_file_entry {
-                    return Ok(None)
+                    return Ok(None);
                 }
             }
         }
@@ -703,7 +703,7 @@ impl StaticFileProvider {
                 ?segment,
                 "Setting unwind target."
             );
-            return Ok(Some(highest_static_file_block))
+            return Ok(Some(highest_static_file_block));
         }
 
         // If the checkpoint is behind, then we failed to do a database commit **but committed** to
@@ -767,7 +767,7 @@ impl StaticFileProvider {
             let mut range = find_fixed_range(highest_block);
             while range.end() > 0 {
                 if let Some(res) = func(self.get_or_create_jar_provider(segment, &range)?)? {
-                    return Ok(Some(res))
+                    return Ok(Some(res));
                 }
                 range = SegmentRangeInclusive::new(
                     range.start().saturating_sub(BLOCKS_PER_STATIC_FILE),
@@ -820,10 +820,10 @@ impl StaticFileProvider {
                 match get_fn(&mut cursor, number)? {
                     Some(res) => {
                         if !predicate(&res) {
-                            break 'outer
+                            break 'outer;
                         }
                         result.push(res);
-                        break 'inner
+                        break 'inner;
                     }
                     None => {
                         if retrying {
@@ -839,7 +839,7 @@ impl StaticFileProvider {
                             } else {
                                 ProviderError::MissingStaticFileTx(segment, number)
                             };
-                            return Err(err)
+                            return Err(err);
                         }
                         provider = get_provider(number)?;
                         cursor = provider.cursor()?;
@@ -922,7 +922,7 @@ impl StaticFileProvider {
         if static_file_upper_bound
             .map_or(false, |static_file_upper_bound| static_file_upper_bound >= number)
         {
-            return fetch_from_static_file(self)
+            return fetch_from_static_file(self);
         }
         fetch_from_database()
     }
@@ -1015,7 +1015,7 @@ impl StaticFileWriter for StaticFileProvider {
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_>> {
         if self.access.is_read_only() {
-            return Err(ProviderError::ReadOnlyStaticFileAccess)
+            return Err(ProviderError::ReadOnlyStaticFileAccess);
         }
 
         tracing::trace!(target: "providers::static_file", ?block, ?segment, "Getting static file writer.");
@@ -1078,7 +1078,7 @@ impl HeaderProvider for StaticFileProvider {
                 .get_two::<HeaderMask<Header, BlockHash>>(block_hash.into())?
                 .and_then(|(header, hash)| {
                     if &hash == block_hash {
-                        return Some(header)
+                        return Some(header);
                     }
                     None
                 }))
@@ -1191,7 +1191,7 @@ impl ReceiptProvider for StaticFileProvider {
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>> {
         if let Some(num) = self.transaction_id(hash)? {
-            return self.receipt(num)
+            return self.receipt(num);
         }
         Ok(None)
     }
@@ -1499,9 +1499,9 @@ impl RequestsProvider for StaticFileProvider {
 impl StatsReader for StaticFileProvider {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         match T::NAME {
-            tables::CanonicalHeaders::NAME |
-            tables::Headers::NAME |
-            tables::HeaderTerminalDifficulties::NAME => Ok(self
+            tables::CanonicalHeaders::NAME
+            | tables::Headers::NAME
+            | tables::HeaderTerminalDifficulties::NAME => Ok(self
                 .get_highest_static_file_block(StaticFileSegment::Headers)
                 .map(|block| block + 1)
                 .unwrap_or_default()

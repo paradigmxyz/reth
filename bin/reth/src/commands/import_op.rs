@@ -83,7 +83,7 @@ impl ImportOpCommand {
                 body.transactions.retain(|_| {
                     if is_dup_tx(block_number) {
                         total_filtered_out_dup_txns += 1;
-                        return false
+                        return false;
                     }
                     true
                 })
@@ -127,8 +127,8 @@ impl ImportOpCommand {
         let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
         let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
 
-        if total_decoded_blocks != total_imported_blocks ||
-            total_decoded_txns != total_imported_txns + total_filtered_out_dup_txns
+        if total_decoded_blocks != total_imported_blocks
+            || total_decoded_txns != total_imported_txns + total_filtered_out_dup_txns
         {
             error!(target: "reth::cli",
                 total_decoded_blocks,
