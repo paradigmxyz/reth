@@ -1,34 +1,29 @@
-mod account_history;
-mod headers;
-pub(super) mod history;
 mod receipts;
-mod receipts_by_logs;
-mod sender_recovery;
 mod set;
-mod storage_history;
-mod transaction_lookup;
-mod transactions;
+mod static_file;
+mod user;
 
 use crate::PrunerError;
-pub use account_history::AccountHistory;
 use alloy_primitives::{BlockNumber, TxNumber};
-pub use headers::Headers;
-pub use receipts::Receipts;
-pub use receipts_by_logs::ReceiptsByLogs;
 use reth_db_api::database::Database;
 use reth_provider::{
     errors::provider::ProviderResult, BlockReader, DatabaseProviderRW, PruneCheckpointWriter,
 };
 use reth_prune_types::{
-    PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
+    PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PrunePurpose,
+    PruneSegment,
 };
-pub use sender_recovery::SenderRecovery;
 pub use set::SegmentSet;
+pub use static_file::{
+    Headers as StaticFileHeaders, Receipts as StaticFileReceipts,
+    Transactions as StaticFileTransactions,
+};
 use std::{fmt::Debug, ops::RangeInclusive};
-pub use storage_history::StorageHistory;
 use tracing::error;
-pub use transaction_lookup::TransactionLookup;
-pub use transactions::Transactions;
+pub use user::{
+    AccountHistory, Receipts as UserReceipts, ReceiptsByLogs, SenderRecovery, StorageHistory,
+    TransactionLookup,
+};
 
 /// A segment represents a pruning of some portion of the data.
 ///
@@ -41,8 +36,11 @@ pub trait Segment<DB: Database>: Debug + Send + Sync {
     /// Segment of data that's pruned.
     fn segment(&self) -> PruneSegment;
 
-    /// Prune mode with which the segment was initialized
+    /// Prune mode with which the segment was initialized.
     fn mode(&self) -> Option<PruneMode>;
+
+    /// Purpose of the segment.
+    fn purpose(&self) -> PrunePurpose;
 
     /// Prune data for [`Self::segment`] using the provided input.
     fn prune(
