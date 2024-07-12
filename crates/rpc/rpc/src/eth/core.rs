@@ -315,10 +315,7 @@ mod tests {
     use reth_chainspec::BaseFeeParams;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{
-        constants::ETHEREUM_BLOCK_GAS_LIMIT, Block, BlockNumberOrTag, Header, TransactionSigned,
-        B256, U64,
-    };
+    use reth_primitives::{Block, BlockNumberOrTag, Header, TransactionSigned, B256, U64};
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
         BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
@@ -352,13 +349,14 @@ mod tests {
         let fee_history_cache =
             FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
 
+        let gas_cap = provider.chain_spec().max_gas_limit;
         EthApi::new(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
             cache.clone(),
             GasPriceOracle::new(provider, Default::default(), cache),
-            ETHEREUM_BLOCK_GAS_LIMIT,
+            gas_cap,
             DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
