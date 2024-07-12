@@ -4,7 +4,6 @@ use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256};
 use reth_provider::{ProviderFactory, StaticFileProviderFactory, StaticFileWriter};
-use reth_prune::PruneModes;
 use std::sync::{
     mpsc::{Receiver, SendError, Sender},
     Arc,
@@ -12,7 +11,7 @@ use std::sync::{
 use tokio::sync::oneshot;
 
 use crate::{
-    persistence::{PersistenceAction, PersistenceHandle},
+    database::{DatabaseAction, DatabaseServiceHandle},
     tree::ExecutedBlock,
 };
 
@@ -28,28 +27,22 @@ pub struct StaticFileService<DB> {
     /// The db / static file provider to use
     provider: ProviderFactory<DB>,
     /// Handle for the database service
-    database_handle: PersistenceHandle,
+    database_handle: DatabaseServiceHandle,
     /// Incoming requests to write static files
     incoming: Receiver<StaticFileAction>,
-    /// The pruning configuration
-    pruning: PruneModes,
 }
 
 impl<DB> StaticFileService<DB>
 where
     DB: Database + 'static,
 {
-    /// Create a new static file service, spawning it, and returning a [`StaticFileServiceHandle`].
-    fn spawn_new(provider: ProviderFactory<DB>) -> StaticFileServiceHandle {
-        todo!("implement initialization first");
-        // let (tx, rx) = std::sync::mpsc::channel();
-        // let service = Self::new(provider, rx);
-        // std::thread::Builder::new()
-        //     .name("StaticFile Service".to_string())
-        //     .spawn(|| service.run())
-        //     .unwrap();
-
-        // StaticFileServiceHandle::new(tx)
+    /// Create a new static file service.
+    pub const fn new(
+        provider: ProviderFactory<DB>,
+        incoming: Receiver<StaticFileAction>,
+        database_handle: DatabaseServiceHandle,
+    ) -> Self {
+        Self { provider, database_handle, incoming }
     }
 
     // TODO: some things about this are a bit weird, and just to make the underlying static file
@@ -94,7 +87,7 @@ where
         // send a command to the db service to update the checkpoints for headers / bodies
         let _ = self
             .database_handle
-            .send_action(PersistenceAction::UpdateTransactionMeta((block.number, sender)));
+            .send_action(DatabaseAction::UpdateTransactionMeta((block.number, sender)));
 
         Ok(())
     }
@@ -133,7 +126,7 @@ where
 
         // TODO: do we care about the mpsc error here?
         // send a command to the db service to update the checkpoints for execution etc.
-        let _ = self.database_handle.send_action(PersistenceAction::SaveBlocks((blocks, sender)));
+        let _ = self.database_handle.send_action(DatabaseAction::SaveBlocks((blocks, sender)));
 
         Ok(())
     }
@@ -176,7 +169,7 @@ where
 {
     /// This is the main loop, that will listen to static file actions, and write DB data to static
     /// files.
-    fn run(self) {
+    pub fn run(self) {
         // If the receiver errors then senders have disconnected, so the loop should then end.
         while let Ok(action) = self.incoming.recv() {
             match action {
