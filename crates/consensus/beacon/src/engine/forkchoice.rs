@@ -3,7 +3,7 @@ use reth_rpc_types::engine::{ForkchoiceState, PayloadStatusEnum};
 
 /// The struct that keeps track of the received forkchoice state and their status.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ForkchoiceStateTracker {
+pub struct ForkchoiceStateTracker {
     /// The latest forkchoice state that we received.
     ///
     /// Caution: this can be invalid.
@@ -20,7 +20,7 @@ impl ForkchoiceStateTracker {
     ///
     /// If the status is `VALID`, we also update the last valid forkchoice state and set the
     /// `sync_target` to `None`, since we're now fully synced.
-    pub(crate) fn set_latest(&mut self, state: ForkchoiceState, status: ForkchoiceStatus) {
+    pub fn set_latest(&mut self, state: ForkchoiceState, status: ForkchoiceStatus) {
         if status.is_valid() {
             self.set_valid(state);
         } else if status.is_syncing() {
@@ -76,7 +76,7 @@ impl ForkchoiceStateTracker {
     }
 
     /// Returns the last received `ForkchoiceState` to which we need to sync.
-    pub(crate) const fn sync_target_state(&self) -> Option<ForkchoiceState> {
+    pub const fn sync_target_state(&self) -> Option<ForkchoiceState> {
         self.last_syncing
     }
 
@@ -139,9 +139,12 @@ impl From<PayloadStatusEnum> for ForkchoiceStatus {
 
 /// A helper type to check represent hashes of a [`ForkchoiceState`]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ForkchoiceStateHash {
+pub enum ForkchoiceStateHash {
+    /// Head hash of the [`ForkchoiceState`].
     Head(B256),
+    /// Safe hash of the [`ForkchoiceState`].
     Safe(B256),
+    /// Finalized hash of the [`ForkchoiceState`].
     Finalized(B256),
 }
 

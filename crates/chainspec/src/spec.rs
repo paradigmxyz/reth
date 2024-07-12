@@ -1,12 +1,6 @@
 use crate::constants::MAINNET_DEPOSIT_CONTRACT;
 #[cfg(not(feature = "std"))]
-use alloc::{
-    collections::BTreeMap,
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, ChainKind, NamedChain};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -20,8 +14,8 @@ use reth_ethereum_forks::{
 use reth_network_peers::NodeRecord;
 use reth_primitives_traits::{
     constants::{
-        EIP1559_INITIAL_BASE_FEE, EMPTY_OMMER_ROOT_HASH, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS,
-        EMPTY_WITHDRAWALS,
+        DEV_GENESIS_HASH, EIP1559_INITIAL_BASE_FEE, EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH,
+        MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
     },
     Header, SealedHeader,
 };
@@ -29,28 +23,21 @@ use reth_trie_common::root::state_root_ref_unhashed;
 #[cfg(feature = "std")]
 use std::sync::Arc;
 
-#[cfg(feature = "optimism")]
-use crate::constants::optimism::{
-    BASE_SEPOLIA_BASE_FEE_PARAMS, BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS, OP_BASE_FEE_PARAMS,
-    OP_CANYON_BASE_FEE_PARAMS, OP_SEPOLIA_BASE_FEE_PARAMS, OP_SEPOLIA_CANYON_BASE_FEE_PARAMS,
-};
 pub use alloy_eips::eip1559::BaseFeeParams;
 #[cfg(feature = "optimism")]
 use reth_ethereum_forks::OptimismHardfork;
 use reth_network_peers::{
-    base_nodes, base_testnet_nodes, goerli_nodes, holesky_nodes, mainnet_nodes, op_nodes,
-    op_testnet_nodes, sepolia_nodes,
+    base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
+    sepolia_nodes,
 };
 
 /// The Ethereum mainnet spec
 pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
-    ChainSpec {
+    let mut spec = ChainSpec {
         chain: Chain::mainnet(),
         genesis: serde_json::from_str(include_str!("../res/genesis/mainnet.json"))
             .expect("Can't deserialize Mainnet genesis json"),
-        genesis_hash: Some(b256!(
-            "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
-        )),
+        genesis_hash: Some(MAINNET_GENESIS_HASH),
         // <https://etherscan.io/block/15537394>
         paris_block_and_final_difficulty: Some((
             15537394,
@@ -64,44 +51,19 @@ pub static MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        prune_delete_limit: 3500,
-    }
-    .into()
-});
-
-/// The Goerli spec
-pub static GOERLI: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
-    ChainSpec {
-        chain: Chain::goerli(),
-        genesis: serde_json::from_str(include_str!("../res/genesis/goerli.json"))
-            .expect("Can't deserialize Goerli genesis json"),
-        genesis_hash: Some(b256!(
-            "bf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a"
-        )),
-        // <https://goerli.etherscan.io/block/7382818>
-        paris_block_and_final_difficulty: Some((7382818, U256::from(10_790_000))),
-        hardforks: EthereumHardfork::goerli().into(),
-        // https://goerli.etherscan.io/tx/0xa3c07dc59bfdb1bfc2d50920fed2ef2c1c4e0a09fe2325dbc14e07702f965a78
-        deposit_contract: Some(DepositContract::new(
-            address!("ff50ed3d0ec03ac01d4c79aad74928bff48a7b2b"),
-            4367322,
-            b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
-        )),
-        base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        prune_delete_limit: 1700,
-    }
-    .into()
+        prune_delete_limit: 20000,
+    };
+    spec.genesis.config.dao_fork_support = true;
+    spec.into()
 });
 
 /// The Sepolia spec
 pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
-    ChainSpec {
+    let mut spec = ChainSpec {
         chain: Chain::sepolia(),
         genesis: serde_json::from_str(include_str!("../res/genesis/sepolia.json"))
             .expect("Can't deserialize Sepolia genesis json"),
-        genesis_hash: Some(b256!(
-            "25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
-        )),
+        genesis_hash: Some(SEPOLIA_GENESIS_HASH),
         // <https://sepolia.etherscan.io/block/1450409>
         paris_block_and_final_difficulty: Some((1450409, U256::from(17_000_018_015_853_232u128))),
         hardforks: EthereumHardfork::sepolia().into(),
@@ -112,20 +74,19 @@ pub static SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        prune_delete_limit: 1700,
-    }
-    .into()
+        prune_delete_limit: 10000,
+    };
+    spec.genesis.config.dao_fork_support = true;
+    spec.into()
 });
 
 /// The Holesky spec
 pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
-    ChainSpec {
+    let mut spec = ChainSpec {
         chain: Chain::holesky(),
         genesis: serde_json::from_str(include_str!("../res/genesis/holesky.json"))
             .expect("Can't deserialize Holesky genesis json"),
-        genesis_hash: Some(b256!(
-            "b5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4"
-        )),
+        genesis_hash: Some(HOLESKY_GENESIS_HASH),
         paris_block_and_final_difficulty: Some((0, U256::from(1))),
         hardforks: EthereumHardfork::holesky().into(),
         deposit_contract: Some(DepositContract::new(
@@ -134,9 +95,10 @@ pub static HOLESKY: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        prune_delete_limit: 1700,
-    }
-    .into()
+        prune_delete_limit: 10000,
+    };
+    spec.genesis.config.dao_fork_support = true;
+    spec.into()
 });
 
 /// Dev testnet specification
@@ -148,9 +110,7 @@ pub static DEV: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         chain: Chain::dev(),
         genesis: serde_json::from_str(include_str!("../res/genesis/dev.json"))
             .expect("Can't deserialize Dev testnet genesis json"),
-        genesis_hash: Some(b256!(
-            "2f980576711e3617a5e4d83dd539548ec0f7792007d505a3d2e9674833af2d7c"
-        )),
+        genesis_hash: Some(DEV_GENESIS_HASH),
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
         hardforks: DEV_HARDFORKS.clone(),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
@@ -176,12 +136,12 @@ pub static OP_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         hardforks: OptimismHardfork::op_mainnet(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (EthereumHardfork::London.boxed(), OP_BASE_FEE_PARAMS),
-                (OptimismHardfork::Canyon.boxed(), OP_CANYON_BASE_FEE_PARAMS),
+                (EthereumHardfork::London.boxed(), BaseFeeParams::optimism()),
+                (OptimismHardfork::Canyon.boxed(), BaseFeeParams::optimism_canyon()),
             ]
             .into(),
         ),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
         ..Default::default()
     }
     .into()
@@ -201,12 +161,12 @@ pub static OP_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         hardforks: OptimismHardfork::op_sepolia(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (EthereumHardfork::London.boxed(), OP_SEPOLIA_BASE_FEE_PARAMS),
-                (OptimismHardfork::Canyon.boxed(), OP_SEPOLIA_CANYON_BASE_FEE_PARAMS),
+                (EthereumHardfork::London.boxed(), BaseFeeParams::optimism_sepolia()),
+                (OptimismHardfork::Canyon.boxed(), BaseFeeParams::optimism_sepolia_canyon()),
             ]
             .into(),
         ),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
         ..Default::default()
     }
     .into()
@@ -226,12 +186,12 @@ pub static BASE_SEPOLIA: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         hardforks: OptimismHardfork::base_sepolia(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (EthereumHardfork::London.boxed(), BASE_SEPOLIA_BASE_FEE_PARAMS),
-                (OptimismHardfork::Canyon.boxed(), BASE_SEPOLIA_CANYON_BASE_FEE_PARAMS),
+                (EthereumHardfork::London.boxed(), BaseFeeParams::base_sepolia()),
+                (OptimismHardfork::Canyon.boxed(), BaseFeeParams::base_sepolia_canyon()),
             ]
             .into(),
         ),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
         ..Default::default()
     }
     .into()
@@ -251,12 +211,12 @@ pub static BASE_MAINNET: Lazy<Arc<ChainSpec>> = Lazy::new(|| {
         hardforks: OptimismHardfork::base_mainnet(),
         base_fee_params: BaseFeeParamsKind::Variable(
             vec![
-                (EthereumHardfork::London.boxed(), OP_BASE_FEE_PARAMS),
-                (OptimismHardfork::Canyon.boxed(), OP_CANYON_BASE_FEE_PARAMS),
+                (EthereumHardfork::London.boxed(), BaseFeeParams::optimism()),
+                (OptimismHardfork::Canyon.boxed(), BaseFeeParams::optimism()),
             ]
             .into(),
         ),
-        prune_delete_limit: 1700,
+        prune_delete_limit: 10000,
         ..Default::default()
     }
     .into()
@@ -296,7 +256,7 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
 
-impl std::ops::Deref for ChainSpec {
+impl core::ops::Deref for ChainSpec {
     type Target = ChainHardforks;
 
     fn deref(&self) -> &Self::Target {
@@ -338,9 +298,7 @@ pub struct ChainSpec {
     /// The parameters that configure how a block's base fee is computed
     pub base_fee_params: BaseFeeParamsKind,
 
-    /// The delete limit for pruner, per block. In the actual pruner run it will be multiplied by
-    /// the amount of blocks between pruner runs to account for the difference in amount of new
-    /// data coming in.
+    /// The delete limit for pruner, per run.
     pub prune_delete_limit: usize,
 }
 
@@ -443,12 +401,6 @@ impl ChainSpec {
         };
 
         Header {
-            parent_hash: B256::ZERO,
-            number: 0,
-            transactions_root: EMPTY_TRANSACTIONS,
-            ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            receipts_root: EMPTY_RECEIPTS,
-            logs_bloom: Default::default(),
             gas_limit: self.genesis.gas_limit as u64,
             difficulty: self.genesis.difficulty,
             nonce: self.genesis.nonce,
@@ -457,13 +409,13 @@ impl ChainSpec {
             timestamp: self.genesis.timestamp,
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,
-            gas_used: Default::default(),
             base_fee_per_gas,
             withdrawals_root,
             parent_beacon_block_root,
             blob_gas_used,
             excess_blob_gas,
             requests_root,
+            ..Default::default()
         }
     }
 
@@ -724,7 +676,6 @@ impl ChainSpec {
         let chain = self.chain;
         match chain.try_into().ok()? {
             C::Mainnet => Some(mainnet_nodes()),
-            C::Goerli => Some(goerli_nodes()),
             C::Sepolia => Some(sepolia_nodes()),
             C::Holesky => Some(holesky_nodes()),
             C::Base => Some(base_nodes()),
@@ -740,6 +691,9 @@ impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
         #[cfg(feature = "optimism")]
         let optimism_genesis_info = OptimismGenesisInfo::extract_from(&genesis);
+        #[cfg(feature = "optimism")]
+        let genesis_info =
+            optimism_genesis_info.optimism_chain_info.genesis_info.unwrap_or_default();
 
         // Block-based hardforks
         let hardfork_opts = [
@@ -757,7 +711,7 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
             (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Bedrock.boxed(), optimism_genesis_info.bedrock_block),
+            (OptimismHardfork::Bedrock.boxed(), genesis_info.bedrock_block),
         ];
         let mut hardforks = hardfork_opts
             .into_iter()
@@ -786,13 +740,13 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Regolith.boxed(), optimism_genesis_info.regolith_time),
+            (OptimismHardfork::Regolith.boxed(), genesis_info.regolith_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Canyon.boxed(), optimism_genesis_info.canyon_time),
+            (OptimismHardfork::Canyon.boxed(), genesis_info.canyon_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Ecotone.boxed(), optimism_genesis_info.ecotone_time),
+            (OptimismHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
             #[cfg(feature = "optimism")]
-            (OptimismHardfork::Fjord.boxed(), optimism_genesis_info.fjord_time),
+            (OptimismHardfork::Fjord.boxed(), genesis_info.fjord_time),
         ];
 
         let time_hardforks = time_hardfork_opts
@@ -990,6 +944,13 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Prague at genesis.
+    pub fn prague_activated(mut self) -> Self {
+        self = self.cancun_activated();
+        self.hardforks.insert(EthereumHardfork::Prague, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Enable Bedrock at genesis
     #[cfg(feature = "optimism")]
     pub fn bedrock_activated(mut self) -> Self {
@@ -1094,33 +1055,22 @@ impl DepositContract {
 #[derive(Default, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct OptimismGenesisInfo {
-    bedrock_block: Option<u64>,
-    regolith_time: Option<u64>,
-    canyon_time: Option<u64>,
-    ecotone_time: Option<u64>,
-    fjord_time: Option<u64>,
+    optimism_chain_info: op_alloy_rpc_types::genesis::OptimismChainInfo,
     #[serde(skip)]
     base_fee_params: BaseFeeParamsKind,
 }
 
 #[cfg(feature = "optimism")]
-#[derive(Debug, Eq, PartialEq, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OptimismBaseFeeInfo {
-    eip1559_elasticity: Option<u64>,
-    eip1559_denominator: Option<u64>,
-    eip1559_denominator_canyon: Option<u64>,
-}
-
-#[cfg(feature = "optimism")]
 impl OptimismGenesisInfo {
     fn extract_from(genesis: &Genesis) -> Self {
-        let mut optimism_genesis_info: Self =
-            genesis.config.extra_fields.deserialize_as().unwrap_or_default();
-
-        if let Some(Ok(optimism_base_fee_info)) =
-            genesis.config.extra_fields.get_deserialized::<OptimismBaseFeeInfo>("optimism")
-        {
+        let mut info = Self {
+            optimism_chain_info: op_alloy_rpc_types::genesis::OptimismChainInfo::extract_from(
+                &genesis.config.extra_fields,
+            )
+            .unwrap_or_default(),
+            ..Default::default()
+        };
+        if let Some(optimism_base_fee_info) = &info.optimism_chain_info.base_fee_info {
             if let (Some(elasticity), Some(denominator)) = (
                 optimism_base_fee_info.eip1559_elasticity,
                 optimism_base_fee_info.eip1559_denominator,
@@ -1145,11 +1095,11 @@ impl OptimismGenesisInfo {
                     BaseFeeParams::new(denominator as u128, elasticity as u128).into()
                 };
 
-                optimism_genesis_info.base_fee_params = base_fee_params;
+                info.base_fee_params = base_fee_params;
             }
         }
 
-        optimism_genesis_info
+        info
     }
 }
 
@@ -1467,63 +1417,6 @@ Post-merge hard forks (timestamp based):
     }
 
     #[test]
-    fn goerli_hardfork_fork_ids() {
-        test_hardfork_fork_ids(
-            &GOERLI,
-            &[
-                (
-                    EthereumHardfork::Frontier,
-                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
-                ),
-                (
-                    EthereumHardfork::Homestead,
-                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
-                ),
-                (
-                    EthereumHardfork::Tangerine,
-                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
-                ),
-                (
-                    EthereumHardfork::SpuriousDragon,
-                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
-                ),
-                (
-                    EthereumHardfork::Byzantium,
-                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
-                ),
-                (
-                    EthereumHardfork::Constantinople,
-                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
-                ),
-                (
-                    EthereumHardfork::Petersburg,
-                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
-                ),
-                (
-                    EthereumHardfork::Istanbul,
-                    ForkId { hash: ForkHash([0xc2, 0x5e, 0xfa, 0x5c]), next: 4460644 },
-                ),
-                (
-                    EthereumHardfork::Berlin,
-                    ForkId { hash: ForkHash([0x75, 0x7a, 0x1c, 0x47]), next: 5062605 },
-                ),
-                (
-                    EthereumHardfork::London,
-                    ForkId { hash: ForkHash([0xb8, 0xc6, 0x29, 0x9d]), next: 1678832736 },
-                ),
-                (
-                    EthereumHardfork::Shanghai,
-                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 1705473120 },
-                ),
-                (
-                    EthereumHardfork::Cancun,
-                    ForkId { hash: ForkHash([0x70, 0xcc, 0x14, 0xe2]), next: 0 },
-                ),
-            ],
-        );
-    }
-
-    #[test]
     fn sepolia_hardfork_fork_ids() {
         test_hardfork_fork_ids(
             &SEPOLIA,
@@ -1696,63 +1589,6 @@ Post-merge hard forks (timestamp based):
                 ),
             ],
         )
-    }
-
-    #[test]
-    fn goerli_forkids() {
-        test_fork_ids(
-            &GOERLI,
-            &[
-                (
-                    Head { number: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
-                ),
-                (
-                    Head { number: 1561650, ..Default::default() },
-                    ForkId { hash: ForkHash([0xa3, 0xf5, 0xab, 0x08]), next: 1561651 },
-                ),
-                (
-                    Head { number: 1561651, ..Default::default() },
-                    ForkId { hash: ForkHash([0xc2, 0x5e, 0xfa, 0x5c]), next: 4460644 },
-                ),
-                (
-                    Head { number: 4460643, ..Default::default() },
-                    ForkId { hash: ForkHash([0xc2, 0x5e, 0xfa, 0x5c]), next: 4460644 },
-                ),
-                (
-                    Head { number: 4460644, ..Default::default() },
-                    ForkId { hash: ForkHash([0x75, 0x7a, 0x1c, 0x47]), next: 5062605 },
-                ),
-                (
-                    Head { number: 5062605, ..Default::default() },
-                    ForkId { hash: ForkHash([0xb8, 0xc6, 0x29, 0x9d]), next: 1678832736 },
-                ),
-                (
-                    Head { number: 6000000, timestamp: 1678832735, ..Default::default() },
-                    ForkId { hash: ForkHash([0xb8, 0xc6, 0x29, 0x9d]), next: 1678832736 },
-                ),
-                // First Shanghai block
-                (
-                    Head { number: 6000001, timestamp: 1678832736, ..Default::default() },
-                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 1705473120 },
-                ),
-                // Future Shanghai block
-                (
-                    Head { number: 6500002, timestamp: 1678832736, ..Default::default() },
-                    ForkId { hash: ForkHash([0xf9, 0x84, 0x3a, 0xbf]), next: 1705473120 },
-                ),
-                // First Cancun block
-                (
-                    Head { number: 6500003, timestamp: 1705473120, ..Default::default() },
-                    ForkId { hash: ForkHash([0x70, 0xcc, 0x14, 0xe2]), next: 0 },
-                ),
-                // Future Cancun block
-                (
-                    Head { number: 6500003, timestamp: 2705473120, ..Default::default() },
-                    ForkId { hash: ForkHash([0x70, 0xcc, 0x14, 0xe2]), next: 0 },
-                ),
-            ],
-        );
     }
 
     #[test]
@@ -2911,6 +2747,8 @@ Post-merge hard forks (timestamp based):
     #[cfg(feature = "optimism")]
     #[test]
     fn parse_genesis_optimism_with_variable_base_fee_params() {
+        use op_alloy_rpc_types::genesis::OptimismBaseFeeInfo;
+
         let geth_genesis = r#"
     {
       "config": {

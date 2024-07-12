@@ -1,17 +1,23 @@
-use crate::{updates::TrieKey, BranchNodeCompact, Nibbles};
+use crate::{BranchNodeCompact, Nibbles};
 use reth_db::DatabaseError;
 use reth_primitives::B256;
+
+/// Database implementations of trie cursors.
 mod database_cursors;
+
+/// In-memory implementations of trie cursors.
+mod in_memory;
+
+/// Cursor for iterating over a subtrie.
 mod subnode;
-mod update;
 
 /// Noop trie cursor implementations.
 pub mod noop;
 
 pub use self::{
     database_cursors::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
+    in_memory::*,
     subnode::CursorSubNode,
-    update::*,
 };
 
 /// Factory for creating trie cursors.
@@ -45,5 +51,5 @@ pub trait TrieCursor: Send + Sync {
         -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError>;
 
     /// Get the current entry.
-    fn current(&mut self) -> Result<Option<TrieKey>, DatabaseError>;
+    fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError>;
 }

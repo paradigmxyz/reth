@@ -24,7 +24,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
     io::BufRead,
-    ops::DerefMut,
     sync::Arc,
 };
 use tracing::{debug, error, info, trace};
@@ -113,11 +112,10 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
     insert_genesis_history(&provider_rw, alloc.iter())?;
 
     // Insert header
-    let tx = provider_rw.tx_ref();
     let static_file_provider = factory.static_file_provider();
-    insert_genesis_header::<DB>(tx, &static_file_provider, chain.clone())?;
+    insert_genesis_header(&provider_rw, &static_file_provider, chain.clone())?;
 
-    insert_genesis_state::<DB>(tx, alloc.len(), alloc.iter())?;
+    insert_genesis_state(&provider_rw, alloc.len(), alloc.iter())?;
 
     // insert sync stage
     for stage in StageId::ALL {
@@ -132,16 +130,16 @@ pub fn init_genesis<DB: Database>(factory: ProviderFactory<DB>) -> Result<B256, 
 
 /// Inserts the genesis state into the database.
 pub fn insert_genesis_state<'a, 'b, DB: Database>(
-    tx: &<DB as Database>::TXMut,
+    provider: &DatabaseProviderRW<DB>,
     capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
 ) -> ProviderResult<()> {
-    insert_state::<DB>(tx, capacity, alloc, 0)
+    insert_state::<DB>(provider, capacity, alloc, 0)
 }
 
 /// Inserts state at given block into database.
 pub fn insert_state<'a, 'b, DB: Database>(
-    tx: &<DB as Database>::TXMut,
+    provider: &DatabaseProviderRW<DB>,
     capacity: usize,
     alloc: impl Iterator<Item = (&'a Address, &'b GenesisAccount)>,
     block: u64,
@@ -203,7 +201,7 @@ pub fn insert_state<'a, 'b, DB: Database>(
         Vec::new(),
     );
 
-    execution_outcome.write_to_storage(tx, None, OriginalValuesKnown::Yes)?;
+    execution_outcome.write_to_storage(provider, None, OriginalValuesKnown::Yes)?;
 
     trace!(target: "reth::cli", "Inserted state");
 
@@ -274,7 +272,7 @@ pub fn insert_history<'a, 'b, DB: Database>(
 
 /// Inserts header for the genesis state.
 pub fn insert_genesis_header<DB: Database>(
-    tx: &<DB as Database>::TXMut,
+    provider: &DatabaseProviderRW<DB>,
     static_file_provider: &StaticFileProvider,
     chain: Arc<ChainSpec>,
 ) -> ProviderResult<()> {
@@ -290,8 +288,8 @@ pub fn insert_genesis_header<DB: Database>(
         Err(e) => return Err(e),
     }
 
-    tx.put::<tables::HeaderNumbers>(block_hash, 0)?;
-    tx.put::<tables::BlockBodyIndices>(0, Default::default())?;
+    provider.tx_ref().put::<tables::HeaderNumbers>(block_hash, 0)?;
+    provider.tx_ref().put::<tables::BlockBodyIndices>(0, Default::default())?;
 
     Ok(())
 }
@@ -323,8 +321,8 @@ pub fn init_from_state_dump<DB: Database>(
     let collector = parse_accounts(&mut reader, etl_config)?;
 
     // write state to db
-    let mut provider_rw = factory.provider_rw()?;
-    dump_state(collector, &mut provider_rw, block)?;
+    let provider_rw = factory.provider_rw()?;
+    dump_state(collector, &provider_rw, block)?;
 
     // compute and compare state root. this advances the stage checkpoints.
     let computed_state_root = compute_state_root(&provider_rw)?;
@@ -398,7 +396,7 @@ fn parse_accounts(
 /// Takes a [`Collector`] and processes all accounts.
 fn dump_state<DB: Database>(
     mut collector: Collector<Address, GenesisAccount>,
-    provider_rw: &mut DatabaseProviderRW<DB>,
+    provider_rw: &DatabaseProviderRW<DB>,
     block: u64,
 ) -> Result<(), eyre::Error> {
     let accounts_len = collector.len();
@@ -435,9 +433,8 @@ fn dump_state<DB: Database>(
             )?;
 
             // block is already written to static files
-            let tx = provider_rw.deref_mut().tx_mut();
             insert_state::<DB>(
-                tx,
+                provider_rw,
                 accounts.len(),
                 accounts.iter().map(|(address, account)| (address, account)),
                 block,
@@ -464,19 +461,17 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
             .root_with_progress()?
         {
             StateRootProgress::Progress(state, _, updates) => {
-                let updates_len = updates.len();
+                let updated_len = updates.write_to_database(tx)?;
+                total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
                     last_account_key = %state.last_account_key,
-                    updates_len,
+                    updated_len,
                     total_flushed_updates,
                     "Flushing trie updates"
                 );
 
                 intermediate_state = Some(*state);
-                updates.flush(tx)?;
-
-                total_flushed_updates += updates_len;
 
                 if total_flushed_updates % SOFT_LIMIT_COUNT_FLUSHED_UPDATES == 0 {
                     info!(target: "reth::cli",
@@ -486,15 +481,12 @@ fn compute_state_root<DB: Database>(provider: &DatabaseProviderRW<DB>) -> eyre::
                 }
             }
             StateRootProgress::Complete(root, _, updates) => {
-                let updates_len = updates.len();
-
-                updates.flush(tx)?;
-
-                total_flushed_updates += updates_len;
+                let updated_len = updates.write_to_database(tx)?;
+                total_flushed_updates += updated_len;
 
                 trace!(target: "reth::cli",
                     %root,
-                    updates_len = updates_len,
+                    updated_len,
                     total_flushed_updates,
                     "State root has been computed"
                 );
@@ -526,7 +518,7 @@ struct GenesisAccountWithAddress {
 mod tests {
     use super::*;
     use alloy_genesis::Genesis;
-    use reth_chainspec::{Chain, GOERLI, MAINNET, SEPOLIA};
+    use reth_chainspec::{Chain, HOLESKY, MAINNET, SEPOLIA};
     use reth_db::DatabaseEnv;
     use reth_db_api::{
         cursor::DbCursorRO,
@@ -534,7 +526,7 @@ mod tests {
         table::{Table, TableRow},
         transaction::DbTx,
     };
-    use reth_primitives::{GOERLI_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
+    use reth_primitives::{HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH};
     use reth_primitives_traits::IntegerList;
     use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
 
@@ -558,21 +550,21 @@ mod tests {
     }
 
     #[test]
-    fn success_init_genesis_goerli() {
-        let genesis_hash =
-            init_genesis(create_test_provider_factory_with_chain_spec(GOERLI.clone())).unwrap();
-
-        // actual, expected
-        assert_eq!(genesis_hash, GOERLI_GENESIS_HASH);
-    }
-
-    #[test]
     fn success_init_genesis_sepolia() {
         let genesis_hash =
             init_genesis(create_test_provider_factory_with_chain_spec(SEPOLIA.clone())).unwrap();
 
         // actual, expected
         assert_eq!(genesis_hash, SEPOLIA_GENESIS_HASH);
+    }
+
+    #[test]
+    fn success_init_genesis_holesky() {
+        let genesis_hash =
+            init_genesis(create_test_provider_factory_with_chain_spec(HOLESKY.clone())).unwrap();
+
+        // actual, expected
+        assert_eq!(genesis_hash, HOLESKY_GENESIS_HASH);
     }
 
     #[test]

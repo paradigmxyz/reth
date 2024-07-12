@@ -13,7 +13,7 @@ use reth_eth_wire::{
     EthVersion, Status,
 };
 use reth_network_peers::PeerId;
-use reth_provider::{BlockNumReader, BlockReader};
+use reth_storage_api::BlockNumReader;
 use std::{
     io,
     net::SocketAddr,
@@ -247,14 +247,14 @@ where
             }
             StateAction::PeerAdded(peer_id) => return Some(SwarmEvent::PeerAdded(peer_id)),
             StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
-            StateAction::DiscoveredNode { peer_id, socket_addr, fork_id } => {
+            StateAction::DiscoveredNode { peer_id, addr, fork_id } => {
                 // Don't try to connect to peer if node is shutting down
                 if self.is_shutting_down() {
                     return None
                 }
                 // Insert peer only if no fork id or a valid fork id
                 if fork_id.map_or_else(|| true, |f| self.sessions.is_valid_fork_id(f)) {
-                    self.state_mut().peers_mut().add_peer(peer_id, socket_addr, fork_id);
+                    self.state_mut().peers_mut().add_peer(peer_id, addr, fork_id);
                 }
             }
             StateAction::DiscoveredEnrForkId { peer_id, fork_id } => {
@@ -287,7 +287,7 @@ where
 
 impl<C> Stream for Swarm<C>
 where
-    C: BlockReader + Unpin,
+    C: BlockNumReader + Unpin,
 {
     type Item = SwarmEvent;
 

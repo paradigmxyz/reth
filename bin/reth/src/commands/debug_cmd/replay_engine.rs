@@ -1,8 +1,4 @@
-use crate::{
-    args::{get_secret_key, NetworkArgs},
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
-    macros::block_executor,
-};
+use crate::{args::NetworkArgs, macros::block_executor};
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
@@ -10,7 +6,9 @@ use reth_beacon_consensus::{hooks::EngineHooks, BeaconConsensusEngine, EthBeacon
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
+use reth_cli_util::get_secret_key;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::DatabaseEnv;
@@ -85,7 +83,11 @@ impl Command {
         // Configure blockchain tree
         let tree_externals =
             TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
-        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
+        let tree = BlockchainTree::new(
+            tree_externals,
+            BlockchainTreeConfig::default(),
+            PruneModes::none(),
+        )?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // Set up the blockchain provider
@@ -111,7 +113,6 @@ impl Command {
         // Optimism's payload builder is implemented on the OptimismPayloadBuilder type.
         #[cfg(feature = "optimism")]
         let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
-            provider_factory.chain_spec(),
             reth_node_optimism::OptimismEvmConfig::default(),
         );
 
@@ -144,7 +145,7 @@ impl Command {
             network_client,
             Pipeline::builder().build(
                 provider_factory.clone(),
-                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::none()),
             ),
             blockchain_db.clone(),
             Box::new(ctx.task_executor.clone()),

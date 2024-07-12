@@ -1,6 +1,6 @@
-use reth_primitives::B256;
+use reth_primitives::{Address, B256};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::updates::TrieUpdates;
+use reth_trie::{updates::TrieUpdates, AccountProof};
 use revm::db::BundleState;
 
 /// A type that can compute the state root of a given post state.
@@ -21,4 +21,17 @@ pub trait StateRootProvider: Send + Sync {
         &self,
         bundle_state: &BundleState,
     ) -> ProviderResult<(B256, TrieUpdates)>;
+}
+
+/// A type that can generate state proof on top of a given post state.
+#[auto_impl::auto_impl(&, Box, Arc)]
+pub trait StateProofProvider: Send + Sync {
+    /// Get account and storage proofs of target keys in the `BundleState`
+    /// on top of the current state.
+    fn proof(
+        &self,
+        state: &BundleState,
+        address: Address,
+        slots: &[B256],
+    ) -> ProviderResult<AccountProof>;
 }

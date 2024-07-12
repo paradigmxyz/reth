@@ -14,7 +14,8 @@ use tracing::warn;
 const INVALID_HEADER_HIT_EVICTION_THRESHOLD: u8 = 128;
 
 /// Keeps track of invalid headers.
-pub(crate) struct InvalidHeaderCache {
+#[derive(Debug)]
+pub struct InvalidHeaderCache {
     /// This maps a header hash to a reference to its invalid ancestor.
     headers: LruMap<B256, HeaderEntry>,
     /// Metrics for the cache.
@@ -22,7 +23,8 @@ pub(crate) struct InvalidHeaderCache {
 }
 
 impl InvalidHeaderCache {
-    pub(crate) fn new(max_length: u32) -> Self {
+    /// Invalid header cache constructor.
+    pub fn new(max_length: u32) -> Self {
         Self { headers: LruMap::new(ByLength::new(max_length)), metrics: Default::default() }
     }
 
@@ -34,7 +36,7 @@ impl InvalidHeaderCache {
     ///
     /// If this is called, the hit count for the entry is incremented.
     /// If the hit count exceeds the threshold, the entry is evicted and `None` is returned.
-    pub(crate) fn get(&mut self, hash: &B256) -> Option<Arc<Header>> {
+    pub fn get(&mut self, hash: &B256) -> Option<Arc<Header>> {
         {
             let entry = self.headers.get(hash)?;
             entry.hit_count += 1;
@@ -49,7 +51,7 @@ impl InvalidHeaderCache {
     }
 
     /// Inserts an invalid block into the cache, with a given invalid ancestor.
-    pub(crate) fn insert_with_invalid_ancestor(
+    pub fn insert_with_invalid_ancestor(
         &mut self,
         header_hash: B256,
         invalid_ancestor: Arc<Header>,

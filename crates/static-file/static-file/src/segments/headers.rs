@@ -1,14 +1,14 @@
-use crate::segments::{dataset_for_compression, prepare_jar, Segment, SegmentHeader};
+use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
-use reth_db::{static_file::create_static_file_T1_T2_T3, tables, RawKey, RawTable};
+use reth_db::tables;
 use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     DatabaseProviderRO,
 };
-use reth_static_file_types::{SegmentConfig, StaticFileSegment};
+use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
-use std::{ops::RangeInclusive, path::Path};
+use std::ops::RangeInclusive;
 
 /// Static File segment responsible for [`StaticFileSegment::Headers`] part of data.
 #[derive(Debug, Default)]
@@ -53,75 +53,6 @@ impl<DB: Database> Segment<DB> for Headers {
                 static_file_writer.append_header(header, header_td.0, canonical_header)?;
             debug_assert_eq!(_static_file_block, header_block);
         }
-
-        Ok(())
-    }
-
-    fn create_static_file_file(
-        &self,
-        provider: &DatabaseProviderRO<DB>,
-        directory: &Path,
-        config: SegmentConfig,
-        block_range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<()> {
-        let range_len = block_range.clone().count();
-        let jar = prepare_jar::<DB, 3>(
-            provider,
-            directory,
-            StaticFileSegment::Headers,
-            config,
-            block_range.clone(),
-            range_len,
-            || {
-                Ok([
-                    dataset_for_compression::<DB, tables::Headers>(
-                        provider,
-                        &block_range,
-                        range_len,
-                    )?,
-                    dataset_for_compression::<DB, tables::HeaderTerminalDifficulties>(
-                        provider,
-                        &block_range,
-                        range_len,
-                    )?,
-                    dataset_for_compression::<DB, tables::CanonicalHeaders>(
-                        provider,
-                        &block_range,
-                        range_len,
-                    )?,
-                ])
-            },
-        )?;
-
-        // Generate list of hashes for filters & PHF
-        let mut cursor = provider.tx_ref().cursor_read::<RawTable<tables::CanonicalHeaders>>()?;
-        let hashes = if config.filters.has_filters() {
-            Some(
-                cursor
-                    .walk(Some(RawKey::from(*block_range.start())))?
-                    .take(range_len)
-                    .map(|row| row.map(|(_key, value)| value.into_value()).map_err(|e| e.into())),
-            )
-        } else {
-            None
-        };
-
-        create_static_file_T1_T2_T3::<
-            tables::Headers,
-            tables::HeaderTerminalDifficulties,
-            tables::CanonicalHeaders,
-            BlockNumber,
-            SegmentHeader,
-        >(
-            provider.tx_ref(),
-            block_range,
-            None,
-            // We already prepared the dictionary beforehand
-            None::<Vec<std::vec::IntoIter<Vec<u8>>>>,
-            hashes,
-            range_len,
-            jar,
-        )?;
 
         Ok(())
     }

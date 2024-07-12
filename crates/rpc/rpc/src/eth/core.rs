@@ -1,17 +1,22 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
+use futures::Future;
 use std::sync::Arc;
 
+use derive_more::Deref;
 use reth_primitives::{BlockNumberOrTag, U256};
-use reth_provider::{BlockReaderIdExt, ChainSpecProvider};
+use reth_provider::BlockReaderIdExt;
 use reth_rpc_eth_api::{
-    helpers::{EthSigner, SpawnBlocking},
+    helpers::{transaction::UpdateRawTxForwarder, EthSigner, SpawnBlocking},
     RawTransactionForwarder,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock};
-use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
-use tokio::sync::Mutex;
+use reth_tasks::{
+    pool::{BlockingTaskGuard, BlockingTaskPool},
+    TaskSpawner, TokioTaskExecutor,
+};
+use tokio::sync::{AcquireError, Mutex, OwnedSemaphorePermit};
 
 use crate::eth::DevSigner;
 
@@ -24,23 +29,15 @@ use crate::eth::DevSigner;
 /// separately in submodules. The rpc handler implementation can then delegate to the main impls.
 /// This way [`EthApi`] is not limited to [`jsonrpsee`] and can be used standalone or in other
 /// network handlers (for example ipc).
+#[derive(Deref)]
 pub struct EthApi<Provider, Pool, Network, EvmConfig> {
     /// All nested fields bundled together.
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
-    /// Sets a forwarder for `eth_sendRawTransaction`
-    ///
-    /// Note: this might be removed in the future in favor of a more generic approach.
-    pub fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
-        self.inner.raw_transaction_forwarder.write().replace(forwarder);
-    }
-}
-
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReaderIdExt + ChainSpecProvider,
+    Provider: BlockReaderIdExt,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[allow(clippy::too_many_arguments)]
@@ -51,10 +48,12 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: impl Into<GasCap>,
+        eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
         raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+        proof_permits: usize,
     ) -> Self {
         Self::with_spawner(
             provider,
@@ -63,11 +62,13 @@ where
             eth_cache,
             gas_oracle,
             gas_cap.into().into(),
+            eth_proof_window,
             Box::<TokioTaskExecutor>::default(),
             blocking_task_pool,
             fee_history_cache,
             evm_config,
             raw_transaction_forwarder,
+            proof_permits,
         )
     }
 
@@ -80,11 +81,13 @@ where
         eth_cache: EthStateCache,
         gas_oracle: GasPriceOracle<Provider>,
         gas_cap: u64,
+        eth_proof_window: u64,
         task_spawner: Box<dyn TaskSpawner>,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
         raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+        proof_permits: usize,
     ) -> Self {
         // get the block number of the latest block
         let latest_block = provider
@@ -102,6 +105,7 @@ where
             eth_cache,
             gas_oracle,
             gas_cap,
+            eth_proof_window,
             starting_block: U256::from(latest_block),
             task_spawner,
             pending_block: Default::default(),
@@ -109,44 +113,10 @@ where
             fee_history_cache,
             evm_config,
             raw_transaction_forwarder: parking_lot::RwLock::new(raw_transaction_forwarder),
+            blocking_task_guard: BlockingTaskGuard::new(proof_permits),
         };
 
         Self { inner: Arc::new(inner) }
-    }
-
-    /// Returns the state cache frontend
-    pub fn cache(&self) -> &EthStateCache {
-        &self.inner.eth_cache
-    }
-
-    /// Returns the gas oracle frontend
-    pub fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
-        &self.inner.gas_oracle
-    }
-
-    /// Returns the configured gas limit cap for `eth_call` and tracing related calls
-    pub fn gas_cap(&self) -> u64 {
-        self.inner.gas_cap
-    }
-
-    /// Returns the inner `Provider`
-    pub fn provider(&self) -> &Provider {
-        &self.inner.provider
-    }
-
-    /// Returns the inner `Network`
-    pub fn network(&self) -> &Network {
-        &self.inner.network
-    }
-
-    /// Returns the inner `Pool`
-    pub fn pool(&self) -> &Pool {
-        &self.inner.pool
-    }
-
-    /// Returns fee history cache
-    pub fn fee_history_cache(&self) -> &FeeHistoryCache {
-        &self.inner.fee_history_cache
     }
 }
 
@@ -178,6 +148,19 @@ where
     fn tracing_task_pool(&self) -> &reth_tasks::pool::BlockingTaskPool {
         self.inner.blocking_task_pool()
     }
+
+    fn acquire_owned(
+        &self,
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
+        self.blocking_task_guard.clone().acquire_owned()
+    }
+
+    fn acquire_many_owned(
+        &self,
+        n: u32,
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
+        self.blocking_task_guard.clone().acquire_many_owned(n)
+    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
@@ -206,6 +189,8 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     gas_oracle: GasPriceOracle<Provider>,
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     gas_cap: u64,
+    /// The maximum number of blocks into the past for generating state proofs.
+    eth_proof_window: u64,
     /// The block number at which the node started
     starting_block: U256,
     /// The type that can spawn tasks which would otherwise block.
@@ -220,6 +205,8 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     evm_config: EvmConfig,
     /// Allows forwarding received raw transactions
     raw_transaction_forwarder: parking_lot::RwLock<Option<Arc<dyn RawTransactionForwarder>>>,
+    /// Guard for getproof calls
+    blocking_task_guard: BlockingTaskGuard,
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig> {
@@ -300,6 +287,26 @@ impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, Ev
     pub const fn starting_block(&self) -> U256 {
         self.starting_block
     }
+
+    /// Returns the inner `Network`
+    #[inline]
+    pub const fn network(&self) -> &Network {
+        &self.network
+    }
+
+    /// The maximum number of blocks into the past for generating state proofs.
+    #[inline]
+    pub const fn eth_proof_window(&self) -> u64 {
+        self.eth_proof_window
+    }
+}
+
+impl<Provider, Pool, Network, EvmConfig> UpdateRawTxForwarder
+    for EthApiInner<Provider, Pool, Network, EvmConfig>
+{
+    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
+        self.raw_transaction_forwarder.write().replace(forwarder);
+    }
 }
 
 #[cfg(test)]
@@ -320,6 +327,7 @@ mod tests {
     use reth_rpc_eth_types::{
         EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
     };
+    use reth_rpc_server_types::constants::{DEFAULT_ETH_PROOF_WINDOW, DEFAULT_PROOF_PERMITS};
     use reth_rpc_types::FeeHistory;
     use reth_tasks::pool::BlockingTaskPool;
     use reth_testing_utils::{generators, generators::Rng};
@@ -351,10 +359,12 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
             evm_config,
             None,
+            DEFAULT_PROOF_PERMITS,
         )
     }
 

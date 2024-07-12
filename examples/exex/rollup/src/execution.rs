@@ -10,7 +10,6 @@ use reth_primitives::{
     constants,
     eip4844::kzg_to_versioned_hash,
     keccak256,
-    revm::env::fill_tx_env,
     revm_primitives::{CfgEnvWithHandlerCfg, EVMError, ExecutionResult, ResultAndState},
     Address, Block, BlockWithSenders, Bytes, EthereumHardfork, Header, Receipt, TransactionSigned,
     TxType, B256, U256,
@@ -108,13 +107,7 @@ fn configure_evm<'a>(
     );
 
     let mut cfg = CfgEnvWithHandlerCfg::new_with_spec_id(evm.cfg().clone(), evm.spec_id());
-    EthEvmConfig::fill_cfg_and_block_env(
-        &mut cfg,
-        evm.block_mut(),
-        &CHAIN_SPEC,
-        header,
-        U256::ZERO,
-    );
+    config.fill_cfg_and_block_env(&mut cfg, evm.block_mut(), &CHAIN_SPEC, header, U256::ZERO);
     *evm.cfg_mut() = cfg.cfg_env;
 
     evm
@@ -217,7 +210,7 @@ fn execute_transactions(
             }
             // Execute transaction.
             // Fill revm structure.
-            fill_tx_env(evm.tx_mut(), &transaction, sender);
+            EthEvmConfig::default().fill_tx_env(evm.tx_mut(), &transaction, sender);
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(result) => result,

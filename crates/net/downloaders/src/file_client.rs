@@ -5,13 +5,12 @@ use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::RequestError,
-    headers::client::{HeadersClient, HeadersFut, HeadersRequest},
+    headers::client::{HeadersClient, HeadersDirection, HeadersFut, HeadersRequest},
     priority::Priority,
 };
 use reth_network_peers::PeerId;
 use reth_primitives::{
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, HeadersDirection, SealedHeader,
-    B256,
+    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, Header, SealedHeader, B256,
 };
 use std::{collections::HashMap, io, path::Path};
 use thiserror::Error;
@@ -228,15 +227,7 @@ impl FromReader for FileClient {
                 // add to the internal maps
                 headers.insert(block.header.number, block.header.clone());
                 hash_to_number.insert(block_hash, block.header.number);
-                bodies.insert(
-                    block_hash,
-                    BlockBody {
-                        transactions: block.body,
-                        ommers: block.ommers,
-                        withdrawals: block.withdrawals,
-                        requests: block.requests,
-                    },
-                );
+                bodies.insert(block_hash, block.into());
 
                 if log_interval == 0 {
                     trace!(target: "downloaders::file",

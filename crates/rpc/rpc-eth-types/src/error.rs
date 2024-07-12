@@ -54,6 +54,9 @@ pub enum EthApiError {
     /// When an invalid block range is provided
     #[error("invalid block range")]
     InvalidBlockRange,
+    /// Thrown when the target block for proof computation exceeds the maximum configured window.
+    #[error("distance to target block exceeds maximum proof window")]
+    ExceedsMaxProofWindow,
     /// An internal error where prevrandao is not set in the evm's environment
     #[error("prevrandao not in the EVM's environment after merge")]
     PrevrandaoNotSet,
@@ -143,6 +146,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
             EthApiError::InvalidBlockRange |
+            EthApiError::ExceedsMaxProofWindow |
             EthApiError::ConflictingFeeFieldsInRequest |
             EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) |
@@ -356,6 +360,15 @@ pub enum RpcInvalidTransactionError {
     /// Blob transaction is a create transaction
     #[error("blob transaction is a create transaction")]
     BlobTransactionIsCreate,
+    /// EOF crate should have `to` address
+    #[error("EOF crate should have `to` address")]
+    EofCrateShouldHaveToAddress,
+    /// EIP-7702 is not enabled.
+    #[error("EIP-7702 authorization list not supported")]
+    AuthorizationListNotSupported,
+    /// EIP-7702 transaction has invalid fields set.
+    #[error("EIP-7702 authorization list has invalid fields")]
+    AuthorizationListInvalidFields,
     /// Optimism related error
     #[error(transparent)]
     #[cfg(feature = "optimism")]
@@ -450,6 +463,13 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
             InvalidTransaction::TooManyBlobs { max, have } => Self::TooManyBlobs { max, have },
             InvalidTransaction::BlobCreateTransaction => Self::BlobTransactionIsCreate,
+            InvalidTransaction::EofCrateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
+            InvalidTransaction::AuthorizationListNotSupported => {
+                Self::AuthorizationListNotSupported
+            }
+            InvalidTransaction::AuthorizationListInvalidFields => {
+                Self::AuthorizationListInvalidFields
+            }
             #[cfg(feature = "optimism")]
             InvalidTransaction::DepositSystemTxPostRegolith => {
                 Self::Optimism(OptimismInvalidTransactionError::DepositSystemTxPostRegolith)
@@ -458,8 +478,6 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::HaltedDepositPostRegolith => {
                 Self::Optimism(OptimismInvalidTransactionError::HaltedDepositPostRegolith)
             }
-            // TODO(EOF)
-            InvalidTransaction::EofCrateShouldHaveToAddress => todo!("EOF"),
         }
     }
 }
@@ -480,6 +498,7 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
             InvalidTransactionError::Eip2930Disabled |
             InvalidTransactionError::Eip1559Disabled |
             InvalidTransactionError::Eip4844Disabled |
+            InvalidTransactionError::Eip7702Disabled |
             InvalidTransactionError::TxTypeNotSupported => Self::TxTypeNotSupported,
             InvalidTransactionError::GasUintOverflow => Self::GasUintOverflow,
             InvalidTransactionError::GasTooLow => Self::GasTooLow,

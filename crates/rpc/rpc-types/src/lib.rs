@@ -11,7 +11,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #[allow(hidden_glob_reexports)]
 mod eth;
-mod mev;
 mod peer;
 mod rpc;
 
@@ -29,14 +28,17 @@ pub mod trace {
     pub use alloy_rpc_types_trace::*;
 }
 
+// re-export admin
+pub use alloy_rpc_types_admin as admin;
+
 // Anvil specific rpc types coming from alloy.
 pub use alloy_rpc_types_anvil as anvil;
 
+// re-export mev
+pub use alloy_rpc_types_mev as mev;
+
 // re-export beacon
 pub use alloy_rpc_types_beacon as beacon;
-
-// re-export admin
-pub use alloy_rpc_types_admin as admin;
 
 // re-export txpool
 pub use alloy_rpc_types_txpool as txpool;
@@ -51,6 +53,5 @@ pub use eth::{
     transaction::{self, TransactionRequest, TypedTransactionRequest},
 };
 
-pub use mev::*;
 pub use peer::*;
 pub use rpc::*;

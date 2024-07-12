@@ -5,16 +5,14 @@ use crate::{
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
 use reth_basic_payload_builder::*;
-use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardfork};
-use reth_evm::ConfigureEvm;
+use reth_chainspec::{EthereumHardforks, OptimismHardfork};
+use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
     constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
     eip4844::calculate_excess_blob_gas,
-    proofs,
-    revm::env::tx_env_with_recovered,
-    Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH, U256,
+    proofs, Block, Header, IntoRecoveredTransaction, Receipt, TxType, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use reth_provider::StateProviderFactory;
 use reth_revm::database::StateProviderDatabase;
@@ -24,7 +22,6 @@ use revm::{
     primitives::{EVMError, EnvWithHandlerCfg, InvalidTransaction, ResultAndState},
     DatabaseCommit, State,
 };
-use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
@@ -33,16 +30,14 @@ pub struct OptimismPayloadBuilder<EvmConfig> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
     compute_pending_block: bool,
-    /// The rollup's chain spec.
-    chain_spec: Arc<ChainSpec>,
     /// The type responsible for creating the evm.
     evm_config: EvmConfig,
 }
 
 impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     /// `OptimismPayloadBuilder` constructor.
-    pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
-        Self { compute_pending_block: true, chain_spec, evm_config }
+    pub const fn new(evm_config: EvmConfig) -> Self {
+        Self { compute_pending_block: true, evm_config }
     }
 
     /// Sets the rollup's compute pending block configuration option.
@@ -59,12 +54,6 @@ impl<EvmConfig> OptimismPayloadBuilder<EvmConfig> {
     /// Returns the rollup's compute pending block configuration option.
     pub const fn is_compute_pending_block(&self) -> bool {
         self.compute_pending_block
-    }
-
-    /// Sets the rollup's chainspec.
-    pub fn set_chain_spec(mut self, chain_spec: Arc<ChainSpec>) -> Self {
-        self.chain_spec = chain_spec;
-        self
     }
 }
 
@@ -127,11 +116,13 @@ where
         // apply eip-4788 pre block contract call
         pre_block_beacon_root_contract_call(
             &mut db,
+            &self.evm_config,
             &chain_spec,
-            block_number,
             &initialized_cfg,
             &initialized_block_env,
-            &attributes,
+            block_number,
+            attributes.payload_attributes.timestamp,
+            attributes.payload_attributes.parent_beacon_block_root,
         )
         .map_err(|err| {
             warn!(target: "payload_builder",
@@ -139,7 +130,7 @@ where
                 %err,
                 "failed to apply beacon root contract call for empty payload"
             );
-            err
+            PayloadBuilderError::Internal(err.into())
         })?;
 
         let WithdrawalsOutcome { withdrawals_root, withdrawals } = commit_withdrawals(
@@ -288,12 +279,22 @@ where
     // apply eip-4788 pre block contract call
     pre_block_beacon_root_contract_call(
         &mut db,
+        &evm_config,
         &chain_spec,
-        block_number,
         &initialized_cfg,
         &initialized_block_env,
-        &attributes,
-    )?;
+        block_number,
+        attributes.payload_attributes.timestamp,
+        attributes.payload_attributes.parent_beacon_block_root,
+    )
+    .map_err(|err| {
+        warn!(target: "payload_builder",
+            parent_hash=%parent_block.hash(),
+            %err,
+            "failed to apply beacon root contract call for empty payload"
+        );
+        PayloadBuilderError::Internal(err.into())
+    })?;
 
     // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
     // blocks will always have at least a single transaction in them (the L1 info transaction),
@@ -324,7 +325,7 @@ where
         }
 
         // Convert the transaction to a [TransactionSignedEcRecovered]. This is
-        // purely for the purposes of utilizing the [tx_env_with_recovered] function.
+        // purely for the purposes of utilizing the `evm_config.tx_env`` function.
         // Deposit transactions do not have signatures, so if the tx is a deposit, this
         // will just pull in its `from` address.
         let sequencer_tx = sequencer_tx.clone().try_into_ecrecovered().map_err(|_| {
@@ -351,7 +352,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
-            tx_env_with_recovered(&sequencer_tx),
+            evm_config.tx_env(&sequencer_tx),
         );
 
         let mut evm = evm_config.evm_with_env(&mut db, env);
@@ -430,7 +431,7 @@ where
             let env = EnvWithHandlerCfg::new_with_cfg_env(
                 initialized_cfg.clone(),
                 initialized_block_env.clone(),
-                tx_env_with_recovered(&tx),
+                evm_config.tx_env(&tx),
             );
 
             // Configure the environment for the block.

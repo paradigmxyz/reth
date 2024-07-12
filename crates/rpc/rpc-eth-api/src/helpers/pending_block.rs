@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use futures::Future;
 use reth_chainspec::EthereumHardforks;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvm, ConfigureEvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
     constants::{eip4844::MAX_DATA_GAS_PER_BLOCK, BEACON_NONCE, EMPTY_ROOT_HASH},
@@ -25,8 +25,8 @@ use reth_revm::{
     database::StateProviderDatabase, state_change::post_block_withdrawals_balance_increments,
 };
 use reth_rpc_eth_types::{
-    pending_block::{pre_block_beacon_root_contract_call, pre_block_blockhashes_update},
-    EthApiError, EthResult, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin,
+    pending_block::pre_block_blockhashes_update, EthApiError, EthResult, PendingBlock,
+    PendingBlockEnv, PendingBlockEnvOrigin,
 };
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
@@ -235,12 +235,15 @@ pub trait LoadPendingBlock {
             // parent beacon block root
             pre_block_beacon_root_contract_call(
                 &mut db,
+                self.evm_config(),
                 chain_spec.as_ref(),
-                block_number,
                 &cfg,
                 &block_env,
+                block_number,
+                block_env.timestamp.to::<u64>(),
                 origin.header().parent_beacon_block_root,
-            )?;
+            )
+            .map_err(|err| EthApiError::Internal(err.into()))?;
             origin.header().parent_beacon_block_root
         } else {
             None

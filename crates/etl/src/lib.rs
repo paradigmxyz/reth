@@ -164,6 +164,14 @@ where
     }
 }
 
+/// Type alias for the items stored in the heap of [`EtlIter`].
+///
+/// Each item in the heap is a tuple containing:
+/// - A `Reverse` tuple of a key-value pair (`Vec<u8>, Vec<u8>`), used to maintain the heap in
+///   ascending order of keys.
+/// - An index (`usize`) representing the source file from which the key-value pair was read.
+type HeapItem = (Reverse<(Vec<u8>, Vec<u8>)>, usize);
+
 /// `EtlIter` is an iterator for traversing through sorted key-value pairs in a collection of ETL
 /// files. These files are created using the [`Collector`] and contain data where keys are encoded
 /// and values are compressed.
@@ -174,8 +182,7 @@ where
 #[derive(Debug)]
 pub struct EtlIter<'a> {
     /// Heap managing the next items to be iterated.
-    #[allow(clippy::type_complexity)]
-    heap: BinaryHeap<(Reverse<(Vec<u8>, Vec<u8>)>, usize)>,
+    heap: BinaryHeap<HeapItem>,
     /// Reference to the vector of ETL files being iterated over.
     files: &'a mut Vec<EtlFile>,
 }

@@ -1,9 +1,5 @@
 //! Command for debugging block building.
-
-use crate::{
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
-    macros::block_executor,
-};
+use crate::macros::block_executor;
 use alloy_rlp::Decodable;
 use clap::Parser;
 use eyre::Context;
@@ -14,6 +10,7 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_consensus::Consensus;
 use reth_db::DatabaseEnv;
@@ -32,6 +29,7 @@ use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
     ProviderFactory, StageCheckpointReader, StateProviderFactory,
 };
+use reth_prune::PruneModes;
 use reth_revm::{database::StateProviderDatabase, primitives::EnvKzgSettings};
 use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use reth_stages::StageId;
@@ -125,7 +123,11 @@ impl Command {
         // configure blockchain tree
         let tree_externals =
             TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
-        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
+        let tree = BlockchainTree::new(
+            tree_externals,
+            BlockchainTreeConfig::default(),
+            PruneModes::none(),
+        )?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // fetch the best block from the database
@@ -246,7 +248,6 @@ impl Command {
 
         #[cfg(feature = "optimism")]
         let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
-            provider_factory.chain_spec(),
             reth_node_optimism::OptimismEvmConfig::default(),
         )
         .compute_pending_block();
@@ -301,7 +302,6 @@ impl Command {
                     execution_outcome,
                     hashed_post_state,
                     trie_updates,
-                    None,
                 )?;
                 info!(target: "reth::cli", "Successfully appended built block");
             }

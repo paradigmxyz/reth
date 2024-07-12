@@ -31,6 +31,17 @@ impl<'a> reth_provider::StateRootProvider for StateProviderTraitObjWrapper<'a> {
     }
 }
 
+impl<'a> reth_provider::StateProofProvider for StateProviderTraitObjWrapper<'a> {
+    fn proof(
+        &self,
+        state: &revm::db::BundleState,
+        address: revm_primitives::Address,
+        slots: &[B256],
+    ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {
+        self.0.proof(state, address, slots)
+    }
+}
+
 impl<'a> reth_provider::AccountReader for StateProviderTraitObjWrapper<'a> {
     fn basic_account(
         &self,
@@ -93,14 +104,6 @@ impl<'a> StateProvider for StateProviderTraitObjWrapper<'a> {
         self.0.bytecode_by_hash(code_hash)
     }
 
-    fn proof(
-        &self,
-        address: revm_primitives::Address,
-        keys: &[B256],
-    ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {
-        self.0.proof(address, keys)
-    }
-
     fn storage(
         &self,
         account: revm_primitives::Address,
@@ -124,10 +127,6 @@ impl<'a, 'b> Database for StateCacheDbRefMutWrapper<'a, 'b> {
         self.0.basic(address)
     }
 
-    fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
-        self.0.block_hash(number)
-    }
-
     fn code_by_hash(&mut self, code_hash: B256) -> Result<revm_primitives::Bytecode, Self::Error> {
         self.0.code_by_hash(code_hash)
     }
@@ -138,6 +137,10 @@ impl<'a, 'b> Database for StateCacheDbRefMutWrapper<'a, 'b> {
         index: U256,
     ) -> Result<U256, Self::Error> {
         self.0.storage(address, index)
+    }
+
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.0.block_hash(number)
     }
 }
 
@@ -151,10 +154,6 @@ impl<'a, 'b> DatabaseRef for StateCacheDbRefMutWrapper<'a, 'b> {
         self.0.basic_ref(address)
     }
 
-    fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
-        self.0.block_hash_ref(number)
-    }
-
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<revm_primitives::Bytecode, Self::Error> {
         self.0.code_by_hash_ref(code_hash)
     }
@@ -165,5 +164,9 @@ impl<'a, 'b> DatabaseRef for StateCacheDbRefMutWrapper<'a, 'b> {
         index: U256,
     ) -> Result<U256, Self::Error> {
         self.0.storage_ref(address, index)
+    }
+
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
+        self.0.block_hash_ref(number)
     }
 }

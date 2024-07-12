@@ -11,10 +11,7 @@ use crate::{
 };
 use futures::Future;
 use reth_chainspec::ChainSpec;
-use reth_db::{
-    test_utils::{create_test_rw_db_with_path, tempdir_path, TempDatabase},
-    DatabaseEnv,
-};
+use reth_cli_util::get_secret_key;
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -25,12 +22,10 @@ use reth_network::{
 };
 use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
 use reth_node_core::{
-    args::{get_secret_key, DatadirArgs},
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
-    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
+    dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::Head,
-    utils::write_peers_to_file,
 };
 use reth_primitives::revm_primitives::EnvKzgSettings;
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
@@ -39,6 +34,7 @@ use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
 pub use states::*;
 use std::sync::Arc;
+use tracing::{info, trace, warn};
 
 mod states;
 
@@ -175,19 +171,24 @@ impl<DB> NodeBuilder<DB> {
     }
 
     /// Creates an _ephemeral_ preconfigured node for testing purposes.
+    #[cfg(feature = "test-utils")]
     pub fn testing_node(
         mut self,
         task_executor: TaskExecutor,
-    ) -> WithLaunchContext<NodeBuilder<Arc<TempDatabase<DatabaseEnv>>>> {
-        let path = MaybePlatformPath::<DataDirPath>::from(tempdir_path());
-        self.config = self
-            .config
-            .with_datadir_args(DatadirArgs { datadir: path.clone(), ..Default::default() });
+    ) -> WithLaunchContext<NodeBuilder<Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>>
+    {
+        let path = reth_node_core::dirs::MaybePlatformPath::<DataDirPath>::from(
+            reth_db::test_utils::tempdir_path(),
+        );
+        self.config = self.config.with_datadir_args(reth_node_core::args::DatadirArgs {
+            datadir: path.clone(),
+            ..Default::default()
+        });
 
         let data_dir =
             path.unwrap_or_chain_default(self.config.chain.chain, self.config.datadir.clone());
 
-        let db = create_test_rw_db_with_path(data_dir.db());
+        let db = reth_db::test_utils::create_test_rw_db_with_path(data_dir.db());
 
         WithLaunchContext { builder: self.with_database(db), task_executor }
     }
@@ -509,7 +510,18 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             "p2p network task",
             |shutdown| {
                 network.run_until_graceful_shutdown(shutdown, |network| {
-                    write_peers_to_file(&network, known_peers_file)
+                    if let Some(peers_file) = known_peers_file {
+                        let num_known_peers = network.num_known_peers();
+                        trace!(target: "reth::cli", peers_file=?peers_file, num_peers=%num_known_peers, "Saving current peers");
+                        match network.write_peers_to_file(peers_file.as_path()) {
+                            Ok(_) => {
+                                info!(target: "reth::cli", peers_file=?peers_file, "Wrote network peers to file");
+                            }
+                            Err(err) => {
+                                warn!(target: "reth::cli", %err, "Failed to write network peers to file");
+                            }
+                        }
+                    }
                 })
             },
         );

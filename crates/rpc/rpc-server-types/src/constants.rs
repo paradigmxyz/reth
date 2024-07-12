@@ -26,6 +26,9 @@ pub fn default_max_tracing_requests() -> usize {
         .map_or(25, |cpus| max(cpus.get().saturating_sub(RESERVED), RESERVED))
 }
 
+/// The default number of getproof calls we are allowing to run concurrently.
+pub const DEFAULT_PROOF_PERMITS: usize = 25;
+
 /// The default IPC endpoint
 #[cfg(windows)]
 pub const DEFAULT_IPC_ENDPOINT: &str = r"\\.\pipe\reth.ipc";
@@ -41,6 +44,12 @@ pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = r"\\.\pipe\reth_engine_api.ipc
 /// The `engine_api` IPC endpoint
 #[cfg(not(windows))]
 pub const DEFAULT_ENGINE_API_IPC_ENDPOINT: &str = "/tmp/reth_engine_api.ipc";
+
+/// The default eth historical proof window.
+pub const DEFAULT_ETH_PROOF_WINDOW: u64 = 0;
+
+/// Maximum eth historical proof window. Equivalent to roughly one month of data.
+pub const MAX_ETH_PROOF_WINDOW: u64 = 216_000;
 
 /// GPO specific constants
 pub mod gas_oracle {

@@ -1,6 +1,6 @@
 //! Utils for `stages`.
 use reth_config::config::EtlConfig;
-use reth_db::BlockNumberList;
+use reth_db::{BlockNumberList, Database};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::sharded_key::NUM_OF_INDICES_IN_SHARD,
@@ -10,6 +10,7 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_primitives::BlockNumber;
+use reth_provider::DatabaseProviderRW;
 use reth_stages_api::StageError;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
@@ -34,20 +35,20 @@ const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
 ///
 /// As a result, the `Collector` will contain entries such as `(Address1.3, [1,2,3])` and
 /// `(Address1.300, [100,300])`. The entries may be stored across one or more files.
-pub(crate) fn collect_history_indices<TX, CS, H, P>(
-    tx: &TX,
+pub(crate) fn collect_history_indices<DB, CS, H, P>(
+    provider: &DatabaseProviderRW<DB>,
     range: impl RangeBounds<CS::Key>,
     sharded_key_factory: impl Fn(P, BlockNumber) -> H::Key,
     partial_key_factory: impl Fn((CS::Key, CS::Value)) -> (u64, P),
     etl_config: &EtlConfig,
 ) -> Result<Collector<H::Key, H::Value>, StageError>
 where
-    TX: DbTxMut + DbTx,
+    DB: Database,
     CS: Table,
     H: Table<Value = BlockNumberList>,
     P: Copy + Eq + Hash,
 {
-    let mut changeset_cursor = tx.cursor_read::<CS>()?;
+    let mut changeset_cursor = provider.tx_ref().cursor_read::<CS>()?;
 
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
     let mut cache: HashMap<P, Vec<u64>> = HashMap::new();
@@ -64,7 +65,7 @@ where
     };
 
     // observability
-    let total_changesets = tx.entries::<CS>()?;
+    let total_changesets = provider.tx_ref().entries::<CS>()?;
     let interval = (total_changesets / 1000).max(1);
 
     let mut flush_counter = 0;
@@ -101,8 +102,8 @@ where
 /// `Address.StorageKey`). It flushes indices to disk when reaching a shard's max length
 /// (`NUM_OF_INDICES_IN_SHARD`) or when the partial key changes, ensuring the last previous partial
 /// key shard is stored.
-pub(crate) fn load_history_indices<TX, H, P>(
-    tx: &TX,
+pub(crate) fn load_history_indices<DB, H, P>(
+    provider: &DatabaseProviderRW<DB>,
     mut collector: Collector<H::Key, H::Value>,
     append_only: bool,
     sharded_key_factory: impl Clone + Fn(P, u64) -> <H as Table>::Key,
@@ -110,11 +111,11 @@ pub(crate) fn load_history_indices<TX, H, P>(
     get_partial: impl Fn(<H as Table>::Key) -> P,
 ) -> Result<(), StageError>
 where
-    TX: DbTxMut + DbTx,
+    DB: Database,
     H: Table<Value = BlockNumberList>,
     P: Copy + Default + Eq,
 {
-    let mut write_cursor = tx.cursor_write::<H>()?;
+    let mut write_cursor = provider.tx_ref().cursor_write::<H>()?;
     let mut current_partial = P::default();
     let mut current_list = Vec::<u64>::new();
 
