@@ -1,7 +1,7 @@
 # https://github.com/paradigmxyz/reth/issues/7015
 # https://github.com/paradigmxyz/reth/issues/6332
 rpc-compat:
-  - debug_getRawBlock/get-invalid-number (reth)
+  # - debug_getRawBlock/get-invalid-number (reth)
   - debug_getRawHeader/get-invalid-number (reth)
   - debug_getRawReceipts/get-invalid-number (reth)
   - debug_getRawTransaction/get-invalid-hash (reth)
@@ -40,7 +40,7 @@ engine-withdrawals:
 # https://github.com/paradigmxyz/reth/issues/8305
 # https://github.com/paradigmxyz/reth/issues/6217
 engine-api:
-  - Inconsistent Head in ForkchoiceState (Paris) (reth)
+  # - Inconsistent Head in ForkchoiceState (Paris) (reth)
   - Invalid NewPayload, StateRoot, Syncing=True, EmptyTxs=True, DynFeeTxs=False (Paris) (reth)
   - Invalid NewPayload, StateRoot, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Paris) (reth)
   - Invalid NewPayload, PrevRandao, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Paris) (reth)
