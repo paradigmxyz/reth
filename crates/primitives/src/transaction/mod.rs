@@ -1693,7 +1693,7 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     }
 }
 
-/// Generic wrapper with encoded Bytes
+/// Generic wrapper with encoded Bytes, such as transaction data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WithEncoded<T>(Bytes, pub T);
 
@@ -1714,22 +1714,22 @@ impl<T> WithEncoded<T> {
         self.0.clone()
     }
 
-    /// Get the underlying data
-    pub const fn data(&self) -> &T {
+    /// Get the underlying value
+    pub const fn value(&self) -> &T {
         &self.1
     }
 
-    /// Returns ownership of the underlying data.
-    pub fn into_data(self) -> T {
+    /// Returns ownership of the underlying value.
+    pub fn into_value(self) -> T {
         self.1
     }
 
-    /// Transform the data
+    /// Transform the value
     pub fn transform<F: From<T>>(self) -> WithEncoded<F> {
         WithEncoded(self.0, self.1.into())
     }
 
-    /// Split the wrapper into [`Bytes`] and data tuple
+    /// Split the wrapper into [`Bytes`] and value tuple
     pub fn split(self) -> (Bytes, T) {
         (self.0, self.1)
     }
