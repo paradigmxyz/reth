@@ -3,8 +3,6 @@
 use std::time::Duration;
 
 use alloy_sol_types::decode_revert_reason;
-#[cfg(feature = "optimism")]
-use jsonrpsee_types::ErrorObject;
 use reth_errors::RethError;
 use reth_primitives::{revm_primitives::InvalidHeader, Address, Bytes};
 use reth_rpc_server_types::result::{
@@ -371,10 +369,16 @@ pub enum RpcInvalidTransactionError {
     /// EIP-7702 transaction has invalid fields set.
     #[error("EIP-7702 authorization list has invalid fields")]
     AuthorizationListInvalidFields,
-    /// Optimism related error
-    #[error(transparent)]
-    #[cfg(feature = "optimism")]
-    Optimism(#[from] Box<EthApiError>),
+    /// Any other error
+    #[error("{0}")]
+    Other(Box<dyn ToRpcError>),
+}
+
+impl RpcInvalidTransactionError {
+    /// crates a new [`RpcInvalidTransactionError::Other`] variant.
+    pub fn other<E: ToRpcError>(err: E) -> Self {
+        Self::Other(Box::new(err))
+    }
 }
 
 /// Optimism specific invalid transaction errors
@@ -388,20 +392,15 @@ pub enum OptimismInvalidTransactionError {
     #[error("deposit transaction halted after regolith")]
     HaltedDepositPostRegolith,
 }
+
 #[cfg(feature = "optimism")]
 impl ToRpcError for OptimismInvalidTransactionError {
-    fn to_rpc_error(&self) -> ErrorObject<'static> {
+    fn to_rpc_error(&self) -> jsonrpsee_types::error::ErrorObject<'static> {
         match self {
             Self::DepositSystemTxPostRegolith | Self::HaltedDepositPostRegolith => {
-                internal_rpc_err(self.to_string())
+                rpc_err(EthRpcErrorCode::TransactionRejected.code(), self.to_string(), None)
             }
         }
-    }
-}
-#[cfg(feature = "optimism")]
-impl From<OptimismInvalidTransactionError> for EthApiError {
-    fn from(err: OptimismInvalidTransactionError) -> Self {
-        Self::other(err)
     }
 }
 
@@ -450,6 +449,7 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
                     revert.output.as_ref().map(|out| out.as_ref()),
                 )
             }
+            RpcInvalidTransactionError::Other(err) => err.to_rpc_error(),
             err => rpc_err(err.error_code(), err.to_string(), None),
         }
     }
@@ -489,13 +489,13 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
                 Self::AuthorizationListInvalidFields
             }
             #[cfg(feature = "optimism")]
-            InvalidTransaction::DepositSystemTxPostRegolith => Self::Optimism(Box::new(
-                EthApiError::from(OptimismInvalidTransactionError::DepositSystemTxPostRegolith),
-            )),
+            InvalidTransaction::DepositSystemTxPostRegolith => {
+                Self::other(OptimismInvalidTransactionError::DepositSystemTxPostRegolith)
+            }
             #[cfg(feature = "optimism")]
-            InvalidTransaction::HaltedDepositPostRegolith => Self::Optimism(Box::new(
-                EthApiError::from(OptimismInvalidTransactionError::HaltedDepositPostRegolith),
-            )),
+            InvalidTransaction::HaltedDepositPostRegolith => {
+                Self::Other(Box::new(OptimismInvalidTransactionError::HaltedDepositPostRegolith))
+            }
         }
     }
 }
