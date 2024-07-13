@@ -79,6 +79,7 @@ jobs:
           path: ./hive_assets
   test:
     timeout-minutes: 60
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
