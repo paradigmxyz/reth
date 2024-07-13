@@ -79,7 +79,6 @@ jobs:
           path: ./hive_assets
   test:
     timeout-minutes: 60
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -234,6 +233,7 @@ jobs:
           cat hivetests/workspace/logs/reth/client-*.log
   notify-on-error:
     needs: test
+    if: always()
     runs-on:
       group: Reth
     steps:
