@@ -24,8 +24,8 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
             roundtrips.push(quote! {
                 {
                     let mut buf = vec![];
-                    let len = field.clone().to_compact(&mut buf);
-                    let (decoded, _) = super::#type_ident::from_compact(&buf, len);
+                    let len = reth_codecs::Compact::to_compact(field.clone(), &mut buf);
+                    let (decoded, _) = <super::#type_ident as reth_codecs::Compact>::from_compact(&buf, len);
                     assert!(field == decoded);
                 }
             });
