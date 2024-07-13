@@ -134,7 +134,7 @@ impl Command {
         #[cfg(not(feature = "optimism"))]
         let (payload_service, payload_builder): (
             _,
-            PayloadBuilderHandle<reth_node_ethereum::EthEngineTypes>,
+            PayloadBuilderHandle<reth_node_ethereum::EthEngine>,
         ) = PayloadBuilderService::new(payload_generator, blockchain_db.canonical_state_stream());
 
         ctx.task_executor.spawn_critical("payload builder service", payload_service);

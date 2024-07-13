@@ -2,7 +2,7 @@
 
 use crate::utils::launch_auth;
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
-use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_engine_primitives::EthEngine;
 use reth_primitives::{Block, U64};
 use reth_rpc_api::clients::EngineApiClient;
 use reth_rpc_layer::JwtSecret;
@@ -13,7 +13,7 @@ use reth_rpc_types_compat::engine::payload::{
 #[allow(unused_must_use)]
 async fn test_basic_engine_calls<C>(client: &C)
 where
-    C: ClientT + SubscriptionClientT + Sync + EngineApiClient<EthEngineTypes>,
+    C: ClientT + SubscriptionClientT + Sync + EngineApiClient<EthEngine>,
 {
     let block = Block::default().seal_slow();
     EngineApiClient::new_payload_v1(client, block_to_payload_v1(block.clone())).await;
