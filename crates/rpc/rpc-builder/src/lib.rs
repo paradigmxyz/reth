@@ -19,12 +19,13 @@
 //! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
+//! use reth_rpc::{eth::SpawnEthApi, EthApi};
 //! use reth_rpc_builder::{
 //!     RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
 //! };
-//!
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::TransactionPool;
+//!
 //! pub async fn launch<Provider, Pool, Network, Events, EvmConfig>(
 //!     provider: Provider,
 //!     pool: Pool,
@@ -69,7 +70,8 @@
 //! use reth_evm::ConfigureEvm;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
-//! use reth_rpc_api::EngineApiServer;
+//! use reth_rpc::EthApi;
+//! use reth_rpc_api::{eth::helpers::SpawnEthApi, EngineApiServer};
 //! use reth_rpc_builder::{
 //!     auth::AuthServerConfig, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
 //!     TransportRpcModuleConfig,
@@ -458,6 +460,7 @@ where
     /// use reth_evm::ConfigureEvm;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
+    /// use reth_rpc::{eth::SpawnEthApi, EthApi};
     /// use reth_rpc_builder::RpcModuleBuilder;
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
