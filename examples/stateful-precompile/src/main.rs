@@ -21,7 +21,7 @@ use reth::{
 use reth_chainspec::{Chain, ChainSpec};
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
+use reth_node_ethereum::{node::EthereumAddOns, EthEvmConfig, EthExecutorProvider, EthereumNode};
 use reth_primitives::{
     revm_primitives::{SpecId, StatefulPrecompileMut},
     Header, TransactionSigned,
@@ -243,7 +243,9 @@ async fn main() -> eyre::Result<()> {
         // configure the node with regular ethereum types
         .with_types::<EthereumNode>()
         // use default ethereum components but with our executor
-        .with_components(EthereumNode::components().executor(MyExecutorBuilder::default()))
+        .with_components::<_, EthereumAddOns>(
+            EthereumNode::components().executor(MyExecutorBuilder::default()),
+        )
         .launch()
         .await
         .unwrap();

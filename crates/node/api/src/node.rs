@@ -152,7 +152,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
 pub trait NodeAddOns<N: FullNodeComponents>: Send + Sync + Unpin + Clone + 'static {
     /// The core `eth` namespace API type to install on the RPC server (see
     /// `reth_rpc_eth_api::EthApiServer`).
-    type EthApi: Send;
+    type EthApi: Send + Clone;
 }
 
 impl<N: FullNodeComponents> NodeAddOns<N> for () {

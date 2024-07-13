@@ -20,8 +20,7 @@
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc_builder::{
-//!     EthApiBuild, RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder,
-//!     TransportRpcModuleConfig,
+//!     RethRpcModule, RpcModuleBuilder, RpcServerConfig, ServerBuilder, TransportRpcModuleConfig,
 //! };
 //!
 //! use reth_tasks::TokioTaskExecutor;
@@ -54,7 +53,7 @@
 //!         events,
 //!         evm_config,
 //!     )
-//!     .build(transports, EthApiBuild::build);
+//!     .build(transports, Box::new(EthApi::with_spawner));
 //!     let handle = RpcServerConfig::default()
 //!         .with_http(ServerBuilder::default())
 //!         .start(&transport_modules)
@@ -72,7 +71,7 @@
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc_api::EngineApiServer;
 //! use reth_rpc_builder::{
-//!     auth::AuthServerConfig, EthApiBuild, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
+//!     auth::AuthServerConfig, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
 //!     TransportRpcModuleConfig,
 //! };
 //! use reth_rpc_layer::JwtSecret;
@@ -113,7 +112,7 @@
 //!
 //!     // configure the server modules
 //!     let (modules, auth_module, _registry) =
-//!         builder.build_with_auth_server(transports, engine_api, EthApiBuild::build);
+//!         builder.build_with_auth_server(transports, engine_api, Box::new(EthApi::with_spawner));
 //!
 //!     // start the servers
 //!     let auth_config = AuthServerConfig::builder(JwtSecret::random()).build();
@@ -459,7 +458,7 @@ where
     /// use reth_evm::ConfigureEvm;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
-    /// use reth_rpc_builder::{EthApiBuild, RpcModuleBuilder};
+    /// use reth_rpc_builder::RpcModuleBuilder;
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
     ///
@@ -471,7 +470,7 @@ where
     ///         .with_executor(TokioTaskExecutor::default())
     ///         .with_events(TestCanonStateSubscriptions::default())
     ///         .with_evm_config(evm)
-    ///         .into_registry(Default::default(), EthApiBuild::build);
+    ///         .into_registry(Default::default(), Box::new(EthApi::with_spawner));
     ///
     ///     let eth_api = registry.eth_api();
     /// }

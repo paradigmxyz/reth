@@ -17,7 +17,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use std::{convert::Infallible, sync::Arc};
+use std::convert::Infallible;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -28,7 +28,7 @@ use reth::{
     builder::{
         components::{ComponentsBuilder, PayloadServiceBuilder},
         node::NodeTypes,
-        BuilderContext, FullNodeTypes, Node, NodeAddOnBuilders, NodeBuilder, PayloadBuilderConfig,
+        BuilderContext, FullNodeTypes, Node, NodeBuilder, PayloadBuilderConfig,
     },
     primitives::revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
     providers::{CanonStateSubscriptions, StateProviderFactory},

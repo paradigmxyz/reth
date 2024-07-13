@@ -3,7 +3,7 @@
 use reth_db::test_utils::create_test_rw_db;
 use reth_node_api::FullNodeComponents;
 use reth_node_builder::{NodeBuilder, NodeConfig};
-use reth_node_optimism::node::OptimismNode;
+use reth_node_optimism::node::{OptimismAddOns, OptimismNode};
 
 #[test]
 fn test_basic_setup() {
@@ -13,7 +13,7 @@ fn test_basic_setup() {
     let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types::<OptimismNode>()
-        .with_components(OptimismNode::components(Default::default()))
+        .with_components::<_, OptimismAddOns>(OptimismNode::components(Default::default()))
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();
             Ok(())

@@ -32,6 +32,7 @@ pub use call::{Call, EthCall};
 pub use fee::{EthFees, LoadFee};
 pub use pending_block::LoadPendingBlock;
 pub use receipt::LoadReceipt;
+use reth_rpc_eth_types::EthApiBuilderCtx;
 pub use signer::{AddDevSigners, EthSigner};
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
@@ -64,4 +65,12 @@ impl<T> FullEthApi for T where
         + Trace
         + LoadReceipt
 {
+}
+
+/// Spawns core `eth` API in given context.
+pub trait SpawnEthApi<Provider, Pool, EvmConfig, Network, Tasks, Events> {
+    /// Return a new `eth` API instance in given context.
+    fn with_spawner(
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    ) -> Self;
 }
