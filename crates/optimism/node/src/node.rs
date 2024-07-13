@@ -100,7 +100,7 @@ impl NodeTypes for OptimismNode {
     type Engine = OptimismEngineTypes;
 }
 
-/// Add ons w.r.t. optimism.
+/// Add-ons w.r.t. optimism.
 #[derive(Debug, Clone)]
 pub struct OptimismAddOns;
 

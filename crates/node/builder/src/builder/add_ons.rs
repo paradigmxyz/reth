@@ -14,7 +14,7 @@ pub struct AddOns<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     pub hooks: NodeHooks<Node, AddOns>,
     /// The `ExExs` (execution extensions) of the node.
     pub exexs: Vec<(String, Box<dyn BoxedLaunchExEx<Node>>)>,
-    /// Additional RPC add ons.
+    /// Additional RPC add-ons.
     pub rpc: RpcAddOns<Node, AddOns::EthApi>,
 }
 
