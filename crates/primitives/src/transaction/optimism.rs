@@ -7,7 +7,7 @@ use reth_codecs::{main_codec, Compact};
 use std::mem;
 
 /// Deposit transactions, also known as deposits are initiated on L1, and executed on L2.
-#[main_codec]
+#[cfg_attr(any(test, feature = "reth-codec"), main_codec)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxDeposit {
     /// Hash that uniquely identifies the source of the deposit.

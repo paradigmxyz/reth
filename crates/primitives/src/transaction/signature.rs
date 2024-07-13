@@ -2,7 +2,7 @@ use crate::{transaction::util::secp256k1, Address, B256, U256};
 use alloy_primitives::Bytes;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use bytes::Buf;
-use reth_codecs::{derive_arbitrary, Compact};
+use reth_codecs::{derive_arbitrary};
 use serde::{Deserialize, Serialize};
 
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
@@ -40,7 +40,8 @@ impl Signature {
     }
 }
 
-impl Compact for Signature {
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for Signature {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,

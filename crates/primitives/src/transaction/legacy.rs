@@ -7,7 +7,7 @@ use reth_codecs::{main_codec, Compact};
 use alloc::vec::Vec;
 
 /// Legacy transaction.
-#[main_codec]
+#[cfg_attr(any(test, feature = "reth-codec"), main_codec)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxLegacy {
     /// Added as EIP-155: Simple replay attack protection

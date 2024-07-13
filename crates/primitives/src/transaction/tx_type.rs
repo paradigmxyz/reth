@@ -1,8 +1,9 @@
 use crate::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::Buf;
-use reth_codecs::{derive_arbitrary, Compact};
+use reth_codecs::{derive_arbitrary};
 use serde::{Deserialize, Serialize};
+use reth_codecs::Compact;
 
 /// For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
 /// parameter. In the case of a 3, the full transaction type is read from the buffer as a
@@ -134,7 +135,8 @@ impl TryFrom<U64> for TxType {
     }
 }
 
-impl Compact for TxType {
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for TxType {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -218,7 +220,7 @@ impl Decodable for TxType {
 #[cfg(test)]
 mod tests {
     use rand::Rng;
-
+    use reth_codecs::Compact;
     use crate::hex;
 
     use super::*;

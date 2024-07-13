@@ -24,7 +24,7 @@ extern crate alloc;
 mod alloy_compat;
 pub mod basefee;
 mod block;
-#[cfg(feature = "zstd-codec")]
+#[cfg(feature = "reth-codec")]
 mod compression;
 pub mod constants;
 pub mod eip4844;
@@ -40,7 +40,7 @@ pub use block::{
     Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders,
     ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
 };
-#[cfg(feature = "zstd-codec")]
+#[cfg(feature = "reth-codec")]
 pub use compression::*;
 pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, HOLESKY_GENESIS_HASH, KECCAK_EMPTY,
