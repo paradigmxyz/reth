@@ -9,6 +9,7 @@ use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{
     revm_primitives::{BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId},
+    transaction::WithEncoded,
     Address, BlobTransactionSidecar, Header, SealedBlock, TransactionSigned, Withdrawals, B256,
     U256,
 };
@@ -33,8 +34,9 @@ pub struct OptimismPayloadBuilderAttributes {
     pub payload_attributes: EthPayloadBuilderAttributes,
     /// `NoTxPool` option for the generated payload
     pub no_tx_pool: bool,
-    /// Transactions for the generated payload
-    pub transactions: Vec<TransactionSigned>,
+    /// Decoded transactions and the original EIP-2718 encoded bytes as received in the payload
+    /// attributes.
+    pub transactions: Vec<WithEncoded<TransactionSigned>>,
     /// The gas limit for the generated payload
     pub gas_limit: Option<u64>,
 }
@@ -47,16 +49,17 @@ impl PayloadBuilderAttributes for OptimismPayloadBuilderAttributes {
     ///
     /// Derives the unique [`PayloadId`] for the given parent and attributes
     fn try_new(parent: B256, attributes: OptimismPayloadAttributes) -> Result<Self, Self::Error> {
-        let (id, transactions) = {
-            let transactions: Vec<_> = attributes
-                .transactions
-                .as_deref()
-                .unwrap_or(&[])
-                .iter()
-                .map(|tx| TransactionSigned::decode_enveloped(&mut tx.as_ref()))
-                .collect::<Result<_, _>>()?;
-            (payload_id_optimism(&parent, &attributes, &transactions), transactions)
-        };
+        let id = payload_id_optimism(&parent, &attributes);
+
+        let transactions = attributes
+            .transactions
+            .unwrap_or_default()
+            .into_iter()
+            .map(|data| {
+                TransactionSigned::decode_enveloped(&mut data.as_ref())
+                    .map(|tx| WithEncoded::new(data, tx))
+            })
+            .collect::<Result<_, _>>()?;
 
         let payload_attributes = EthPayloadBuilderAttributes {
             id,
@@ -308,7 +311,6 @@ impl From<OptimismBuiltPayload> for OptimismExecutionPayloadEnvelopeV4 {
 pub(crate) fn payload_id_optimism(
     parent: &B256,
     attributes: &OptimismPayloadAttributes,
-    txs: &[TransactionSigned],
 ) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
@@ -327,10 +329,9 @@ pub(crate) fn payload_id_optimism(
     }
 
     let no_tx_pool = attributes.no_tx_pool.unwrap_or_default();
-    if no_tx_pool || !txs.is_empty() {
-        hasher.update([no_tx_pool as u8]);
-        hasher.update(txs.len().to_be_bytes());
-        txs.iter().for_each(|tx| hasher.update(tx.hash()));
+    hasher.update([no_tx_pool as u8]);
+    if let Some(txs) = &attributes.transactions {
+        txs.iter().for_each(|tx| hasher.update(tx));
     }
 
     if let Some(gas_limit) = attributes.gas_limit {
