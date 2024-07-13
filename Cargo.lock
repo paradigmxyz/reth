@@ -5337,6 +5337,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-serde",
+ "arbitrary",
  "serde",
 ]
 
@@ -6693,6 +6694,7 @@ dependencies = [
  "arbitrary",
  "bytes",
  "modular-bitfield",
+ "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
  "proptest-derive 0.5.0",
@@ -8085,6 +8087,7 @@ dependencies = [
  "modular-bitfield",
  "nybbles",
  "once_cell",
+ "op-alloy-consensus",
  "pprof",
  "proptest",
  "proptest-arbitrary-interop",

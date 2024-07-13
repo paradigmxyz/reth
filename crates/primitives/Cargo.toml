@@ -28,6 +28,8 @@ alloy-rpc-types = { workspace = true, optional = true }
 alloy-genesis.workspace = true
 alloy-eips = { workspace = true, features = ["serde"] }
 
+op-alloy-consensus = { workspace = true, optional = true }
+
 # crypto
 secp256k1 = { workspace = true, features = [
     "global-context",
@@ -101,6 +103,7 @@ arbitrary = [
 c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg"]
 zstd-codec = ["dep:zstd"]
 optimism = [
+    "dep:op-alloy-consensus",
     "reth-chainspec/optimism",
     "reth-codecs/optimism",
     "reth-ethereum-forks/optimism",

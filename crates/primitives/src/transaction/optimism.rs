@@ -6,6 +6,8 @@ use bytes::Buf;
 use reth_codecs::{main_codec, Compact};
 use std::mem;
 
+pub use op_alloy_consensus::TxDeposit;
+
 /// Deposit transactions, also known as deposits are initiated on L1, and executed on L2.
 #[main_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
