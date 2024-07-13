@@ -20,7 +20,7 @@
 pub use reth_codecs_derive::*;
 
 use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, U256};
-use bytes::Buf;
+use bytes::{Buf, BufMut};
 
 #[cfg(any(test, feature = "alloy"))]
 mod alloy;
@@ -44,7 +44,7 @@ mod alloy;
 /// size array like `Vec<B256>`.
 pub trait Compact: Sized {
     /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>;
 
@@ -58,7 +58,7 @@ pub trait Compact: Sized {
 
     /// "Optional": If there's no good reason to use it, don't.
     #[inline]
-    fn specialized_to_compact<B>(self, buf: &mut B) -> usize
+    fn specialized_to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -77,7 +77,7 @@ pub type CompactPlaceholder = ();
 
 impl Compact for CompactPlaceholder {
     #[inline]
-    fn to_compact<B>(self, _: &mut B) -> usize
+    fn to_compact<B>(&self, _: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -95,7 +95,7 @@ macro_rules! impl_uint_compact {
         $(
             impl Compact for $name {
                 #[inline]
-                fn to_compact<B>(self, buf: &mut B) -> usize
+                fn to_compact<B>(&self, buf: &mut B) -> usize
                     where B: bytes::BufMut + AsMut<[u8]>
                 {
                     let leading = self.leading_zeros() as usize / 8;
@@ -127,7 +127,7 @@ where
 {
     /// Returns 0 since we won't include it in the `StructFlags`.
     #[inline]
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -167,7 +167,7 @@ where
 
     /// To be used by fixed sized types like `Vec<B256>`.
     #[inline]
-    fn specialized_to_compact<B>(self, buf: &mut B) -> usize
+    fn specialized_to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -200,7 +200,7 @@ where
 {
     /// Returns 0 for `None` and 1 for `Some(_)`.
     #[inline]
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -233,7 +233,7 @@ where
 
     /// To be used by fixed sized types like `Option<B256>`.
     #[inline]
-    fn specialized_to_compact<B>(self, buf: &mut B) -> usize
+    fn specialized_to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -259,7 +259,7 @@ where
 
 impl Compact for U256 {
     #[inline]
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -284,12 +284,12 @@ impl Compact for U256 {
 
 impl Compact for Bytes {
     #[inline]
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
         let len = self.len();
-        buf.put(self.0);
+        buf.put_slice(&self.0);
         len
     }
 
@@ -301,11 +301,11 @@ impl Compact for Bytes {
 
 impl<const N: usize> Compact for [u8; N] {
     #[inline]
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        buf.put_slice(&self);
+        buf.put_slice(&self[..]);
         N
     }
 
@@ -328,7 +328,7 @@ macro_rules! impl_compact_for_wrapped_bytes {
         $(
             impl Compact for $name {
                 #[inline]
-                fn to_compact<B>(self, buf: &mut B) -> usize
+                fn to_compact<B>(&self, buf: &mut B) -> usize
                 where
                     B: bytes::BufMut + AsMut<[u8]>
                 {
@@ -348,7 +348,7 @@ impl_compact_for_wrapped_bytes!(Address, Bloom);
 
 impl<const N: usize> Compact for FixedBytes<N> {
     #[inline]
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -365,7 +365,7 @@ impl<const N: usize> Compact for FixedBytes<N> {
 impl Compact for bool {
     /// `bool` vars go directly to the `StructFlags` and are not written to the buffer.
     #[inline]
-    fn to_compact<B>(self, _: &mut B) -> usize
+    fn to_compact<B>(&self, _: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {

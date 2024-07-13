@@ -20,7 +20,7 @@ struct Withdrawal {
 }
 
 impl Compact for AlloyWithdrawal {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {

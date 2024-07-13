@@ -16,7 +16,7 @@ struct Authorization {
 }
 
 impl Compact for AlloyAuthorization {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -37,11 +37,11 @@ impl Compact for AlloyAuthorization {
 }
 
 impl Compact for SignedAuthorization<alloy_primitives::Signature> {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let (auth, signature) = self.into_parts();
+        let signature = self.signature();
         let (v, r, s) = (signature.v(), signature.r(), signature.s());
         buf.put_u8(v.y_parity_byte());
         buf.put_slice(r.as_le_slice());
@@ -49,7 +49,7 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
 
         // to_compact doesn't write the len to buffer.
         // By placing it as last, we don't need to store it either.
-        1 + 32 + 32 + auth.to_compact(buf)
+        1 + 32 + 32 + self.to_compact(buf)
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {

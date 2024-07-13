@@ -6,7 +6,7 @@ use bytes::BufMut;
 
 /// Implement `Compact` for `LogData` and `Log`.
 impl Compact for LogData {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: BufMut + AsMut<[u8]>,
     {
@@ -28,7 +28,7 @@ impl Compact for LogData {
 }
 
 impl Compact for Log {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: BufMut + AsMut<[u8]>,
     {

@@ -4,7 +4,7 @@ use alloy_primitives::Address;
 
 /// Implement `Compact` for `AccessListItem` and `AccessList`.
 impl Compact for AccessListItem {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -26,7 +26,7 @@ impl Compact for AccessListItem {
 }
 
 impl Compact for AccessList {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
