@@ -68,7 +68,7 @@ impl NodeTypes for EthereumNode {
     type Engine = EthEngineTypes;
 }
 
-/// Add ons w.r.t. l1 ethereum.
+/// Add-ons w.r.t. l1 ethereum.
 #[derive(Debug, Clone)]
 pub struct EthereumAddOns;
 
