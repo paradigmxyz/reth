@@ -2,11 +2,10 @@
 
 use crate::{EnvWithHandlerCfg, Evm};
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{Address, BlockNumber, BlockWithSenders, Receipt, Request, U256};
+use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Request, U256};
 use reth_prune_types::PruneModes;
 use revm::{db::BundleState, DatabaseCommit};
-use revm_primitives::{db::Database, Account, EVMError, EVMResult, Env, ExecutionResult};
-use std::collections::HashMap;
+use revm_primitives::{db::Database, EVMError, EVMResult, Env, ExecutionResult, ResultAndState};
 
 pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_storage_errors::provider::ProviderError;
@@ -42,7 +41,7 @@ pub trait EvmCommit: EvmTransact {
     type EvmError;
 
     /// Commit state changes to the database.
-    fn commit(&mut self, output: HashMap<Address, Account>);
+    fn commit(&mut self, output: ResultAndState);
 
     /// Transact using [`EvmTransact::Env`], commit the state changes and
     /// return them.
@@ -79,8 +78,8 @@ where
     type EvmOutput = ExecutionResult;
     type EvmError = EVMError<DB::Error>;
 
-    fn commit(&mut self, output: HashMap<Address, Account>) {
-        self.context.evm.db.commit(output)
+    fn commit(&mut self, output: ResultAndState) {
+        self.context.evm.db.commit(output.state)
     }
 
     fn transact_and_commit(&mut self) -> Result<Self::EvmOutput, Self::EvmError> {
