@@ -12,20 +12,19 @@ use alloy_primitives::{Address, U64};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::RethResult;
 use reth_evm::ConfigureEvm;
-use reth_network::NetworkHandle;
 use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::eth::DevSigner;
 use reth_rpc_eth_api::{
     helpers::{
         AddDevSigners, Call, EthApiSpec, EthCall, EthFees, EthSigner, EthState, LoadFee, LoadState,
-        SpawnBlocking, SpawnEthApi, Trace, UpdateRawTxForwarder,
+        SpawnBlocking, Trace, UpdateRawTxForwarder,
     },
     RawTransactionForwarder,
 };
-use reth_rpc_eth_types::{EthApiBuilderCtx, EthStateCache};
+use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types::SyncStatus;
-use reth_tasks::{pool::BlockingTaskPool, TaskExecutor, TaskSpawner};
+use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -180,19 +179,12 @@ impl<Eth: UpdateRawTxForwarder> UpdateRawTxForwarder for OpEthApi<Eth> {
 
 impl<N, Eth> BuilderProvider<N> for OpEthApi<Eth>
 where
-    Eth: SpawnEthApi<N::Provider, N::Pool, N::Evm, NetworkHandle, TaskExecutor, N::Provider> + Send,
+    Eth: BuilderProvider<N>,
     N: FullNodeComponents,
 {
-    type Ctx<'a> = &'a EthApiBuilderCtx<
-        N::Provider,
-        N::Pool,
-        N::Evm,
-        NetworkHandle,
-        TaskExecutor,
-        N::Provider,
-    >;
+    type Ctx<'a> = <Eth as BuilderProvider<N>>::Ctx<'a>;
 
     fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
-        Box::new(|ctx| Self { inner: Eth::with_spawner(ctx) })
+        Box::new(|ctx| Self { inner: Eth::builder()(ctx) })
     }
 }

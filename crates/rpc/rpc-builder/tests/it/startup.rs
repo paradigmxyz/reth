@@ -7,7 +7,6 @@ use reth_rpc_builder::{
     error::{RpcError, ServerKind, WsHttpSamePortError},
     RpcServerConfig, TransportRpcModuleConfig,
 };
-use reth_rpc_eth_api::helpers::SpawnEthApi;
 use reth_rpc_server_types::RethRpcModule;
 
 use crate::utils::{

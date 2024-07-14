@@ -19,7 +19,7 @@ use reth::{
         providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
     },
-    rpc::{api::eth::helpers::SpawnEthApi, eth::EthApi},
+    rpc::eth::EthApi,
     utils::open_db_read_only,
 };
 use reth_chainspec::ChainSpecBuilder;

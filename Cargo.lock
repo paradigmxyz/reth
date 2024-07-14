@@ -8012,7 +8012,6 @@ dependencies = [
  "reth-errors",
  "reth-evm",
  "reth-evm-optimism",
- "reth-network",
  "reth-node-api",
  "reth-primitives",
  "reth-provider",

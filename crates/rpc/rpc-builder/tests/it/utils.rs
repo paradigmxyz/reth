@@ -13,7 +13,6 @@ use reth_rpc_builder::{
     RpcModuleBuilder, RpcServerConfig, RpcServerHandle, TransportRpcModuleConfig,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-use reth_rpc_eth_api::helpers::SpawnEthApi;
 use reth_rpc_layer::JwtSecret;
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_rpc_types::engine::{ClientCode, ClientVersionV1};

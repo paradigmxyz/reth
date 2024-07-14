@@ -9,7 +9,7 @@ use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_primitives::{BlockNumberOrTag, U256};
 use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
-    helpers::{transaction::UpdateRawTxForwarder, EthSigner, SpawnBlocking, SpawnEthApi},
+    helpers::{transaction::UpdateRawTxForwarder, EthSigner, SpawnBlocking},
     RawTransactionForwarder,
 };
 use reth_rpc_eth_types::{
@@ -76,21 +76,21 @@ where
     }
 }
 
-impl<Provider, Pool, EvmConfig, Network, Tasks, Events>
-    SpawnEthApi<Provider, Pool, EvmConfig, Network, Tasks, Events>
-    for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, EvmConfig, Network> EthApi<Provider, Pool, Network, EvmConfig>
 where
     Provider: ChainSpecProvider + BlockReaderIdExt + Clone + 'static,
     Pool: Clone,
     EvmConfig: Clone,
     Network: Clone,
-    Tasks: TaskSpawner + Clone + 'static,
-    Events: CanonStateSubscriptions,
 {
     /// Creates a new, shareable instance.
-    fn with_spawner(
+    pub fn with_spawner<Tasks, Events>(
         ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
-    ) -> Self {
+    ) -> Self
+    where
+        Tasks: TaskSpawner + Clone + 'static,
+        Events: CanonStateSubscriptions,
+    {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");
 
