@@ -319,7 +319,7 @@ where
         }
 
         // A sequencer's block should never contain blob transactions.
-        if sequencer_tx.is_eip4844() {
+        if sequencer_tx.value().is_eip4844() {
             return Err(PayloadBuilderError::other(
                 OptimismPayloadBuilderError::BlobTransactionRejected,
             ))
@@ -329,7 +329,7 @@ where
         // purely for the purposes of utilizing the `evm_config.tx_env`` function.
         // Deposit transactions do not have signatures, so if the tx is a deposit, this
         // will just pull in its `from` address.
-        let sequencer_tx = sequencer_tx.clone().try_into_ecrecovered().map_err(|_| {
+        let sequencer_tx = sequencer_tx.value().clone().try_into_ecrecovered().map_err(|_| {
             PayloadBuilderError::other(OptimismPayloadBuilderError::TransactionEcRecoverFailed)
         })?;
 

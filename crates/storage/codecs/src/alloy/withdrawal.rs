@@ -67,14 +67,6 @@ mod tests {
     // expand the flags field and break backwards compatibility
     #[test]
     fn test_ensure_backwards_compatibility() {
-        #[cfg(not(feature = "optimism"))]
-        {
-            assert_eq!(Withdrawal::bitflag_encoded_bytes(), 2);
-        }
-
-        #[cfg(feature = "optimism")]
-        {
-            assert_eq!(Withdrawal::bitflag_encoded_bytes(), 2);
-        }
+        assert_eq!(Withdrawal::bitflag_encoded_bytes(), 2);
     }
 }
