@@ -17,13 +17,11 @@ use reth::{
     },
     tasks::TaskManager,
 };
-use reth_evm::execute::EvmTransact;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
 use reth_primitives::{Chain, ChainSpec, Genesis, Header, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
-use revm_primitives::EnvWithHandlerCfg;
 use std::sync::Arc;
 
 /// Custom EVM configuration
@@ -103,21 +101,7 @@ impl ConfigureEvm for MyEvmConfig {
     }
 }
 
-impl ConfigureEvmGeneric for MyEvmConfig {
-    fn evm_with_env_ext<'a, DB>(
-        &'a self,
-        db: DB,
-        env: EnvWithHandlerCfg,
-    ) -> Box<dyn EvmTransact<DB = DB> + 'a>
-    where
-        DB: Database + 'a,
-    {
-        let mut evm = self.evm(db);
-        evm.modify_spec_id(env.spec_id());
-        evm.context.evm.env = env.env;
-        Box::new(evm)
-    }
-}
+impl ConfigureEvmGeneric for MyEvmConfig {}
 
 /// Builds a regular ethereum block executor that uses the custom EVM.
 #[derive(Debug, Default, Clone, Copy)]

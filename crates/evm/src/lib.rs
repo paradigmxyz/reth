@@ -33,7 +33,13 @@ pub trait ConfigureEvmGeneric: ConfigureEvm + ConfigureEvmEnv {
         env: EnvWithHandlerCfg,
     ) -> Box<dyn EvmTransact<DB = DB> + 'a>
     where
-        DB: Database + 'a;
+        DB: Database + 'a,
+    {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        Box::new(evm)
+    }
 }
 
 /// Trait for configuring the EVM for executing full blocks.

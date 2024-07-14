@@ -8,10 +8,10 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_evm::{execute::EvmTransact, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_tx_env},
-    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, TxEnv},
+    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, ChainSpec, Head, Header, TransactionSigned, U256,
 };
 use reth_revm::{Database, EvmBuilder};
@@ -58,21 +58,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
-impl ConfigureEvmGeneric for EthEvmConfig {
-    fn evm_with_env_ext<'a, DB>(
-        &'a self,
-        db: DB,
-        env: EnvWithHandlerCfg,
-    ) -> Box<dyn EvmTransact<DB = DB> + 'a>
-    where
-        DB: Database + 'a,
-    {
-        let mut evm = self.evm(db);
-        evm.modify_spec_id(env.spec_id());
-        evm.context.evm.env = env.env;
-        Box::new(evm)
-    }
-}
+impl ConfigureEvmGeneric for EthEvmConfig {}
 
 impl ConfigureEvm for EthEvmConfig {
     type DefaultExternalContext<'a> = ();
