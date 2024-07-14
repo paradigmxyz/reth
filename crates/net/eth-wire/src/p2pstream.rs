@@ -613,7 +613,7 @@ where
     /// Returns `Poll::Ready(Ok(()))` when no buffered items remain.
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let mut this = self.project();
-        loop {
+        let res = loop {
             // P2PStream wraps `reth_ecies::stream::ECIESStream` in node. `ECIESStream`
             // internally wraps the network connection in `tokio_util::codec::Framed`.
             //
@@ -622,15 +622,14 @@ where
             // if it had to call flush - no need to explicitly flush the batch again before
             // propagating pending or error.
             ready!(this.inner.as_mut().poll_ready(cx))?;
-            let Some(message) = this.outgoing_messages.pop_front() else {
-                ready!(this.inner.as_mut().poll_flush(cx))?;
-                return Poll::Ready(Ok(()))
-            };
+            let Some(message) = this.outgoing_messages.pop_front() else { break Ok(()) };
             if let Err(err) = this.inner.as_mut().start_send(message) {
-                ready!(this.inner.as_mut().poll_flush(cx))?;
-                return Poll::Ready(Err(err.into()))
+                break Err(err.into())
             }
-        }
+        };
+
+        ready!(this.inner.as_mut().poll_flush(cx))?;
+        Poll::Ready(res)
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
