@@ -200,7 +200,7 @@ pub mod error;
 
 /// Eth utils
 pub mod eth;
-pub use eth::{EthApiBuilder, EthHandlers};
+pub use eth::EthHandlers;
 
 // Rpc server metrics
 mod metrics;

@@ -123,40 +123,6 @@ where
     }
 }
 
-/// Builds core `eth` namespace API to run on the RPC server
-/// ([`EthApiServer`](reth_rpc::eth::EthApiServer)).
-pub trait EthApiBuilder<Provider, Pool, Evm, Network, Tasks, Events>:
-    Send + Sync + Unpin + 'static
-{
-    /// The `eth_` API type that is built.
-    type Output;
-
-    /// Builds core `eth` namespace API.
-    fn build_eth_api(
-        &self,
-        ctx: &EthApiBuilderCtx<Provider, Pool, Evm, Network, Tasks, Events>,
-    ) -> Self::Output;
-}
-
-impl<Provider, Pool, Evm, Network, Tasks, Events, F, EthApi>
-    EthApiBuilder<Provider, Pool, Evm, Network, Tasks, Events> for F
-where
-    F: Fn(&EthApiBuilderCtx<Provider, Pool, Evm, Network, Tasks, Events>) -> EthApi
-        + Send
-        + Sync
-        + Unpin
-        + 'static,
-{
-    type Output = EthApi;
-
-    fn build_eth_api(
-        &self,
-        ctx: &EthApiBuilderCtx<Provider, Pool, Evm, Network, Tasks, Events>,
-    ) -> Self::Output {
-        self(ctx)
-    }
-}
-
 /// Builds the `eth_` namespace API [`EthFilterApiServer`](reth_rpc_eth_api::EthFilterApiServer).
 #[derive(Debug)]
 pub struct EthFilterApiBuilder;
