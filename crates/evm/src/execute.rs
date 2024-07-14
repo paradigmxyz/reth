@@ -5,9 +5,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{Address, BlockNumber, BlockWithSenders, Receipt, Request, U256};
 use reth_prune_types::PruneModes;
 use revm::{db::BundleState, DatabaseCommit};
-use revm_primitives::{
-    db::Database, Account, EVMError, EVMResult, Env, EvmState, ExecutionResult, ResultAndState,
-};
+use revm_primitives::{db::Database, Account, EVMError, EVMResult, Env, ExecutionResult};
 use std::collections::HashMap;
 
 pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
@@ -35,12 +33,6 @@ pub trait EvmTransact {
     fn env_with_handler_cfg(&self) -> EnvWithHandlerCfg;
 }
 
-/// Trait that represents the output of a transaction and provides access to the state.
-pub trait EvmTransactOutput {
-    /// Returns the state produced by the transaction.
-    fn state(&self) -> EvmState;
-}
-
 /// Trait that can transact an [`EvmTransact::Env`] and
 /// commit state changes to the database.
 pub trait EvmCommit: EvmTransact {
@@ -55,12 +47,6 @@ pub trait EvmCommit: EvmTransact {
     /// Transact using [`EvmTransact::Env`], commit the state changes and
     /// return them.
     fn transact_and_commit(&mut self) -> Result<Self::CommitOutput, Self::CommitError>;
-}
-
-impl EvmTransactOutput for ResultAndState {
-    fn state(&self) -> EvmState {
-        self.state.clone()
-    }
 }
 
 impl<'a, C, DB> EvmTransact for Evm<'a, C, DB>
