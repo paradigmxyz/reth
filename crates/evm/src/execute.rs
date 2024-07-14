@@ -6,8 +6,7 @@ use reth_primitives::{Address, BlockNumber, BlockWithSenders, Receipt, Request, 
 use reth_prune_types::PruneModes;
 use revm::{db::BundleState, DatabaseCommit};
 use revm_primitives::{
-    db::Database, Account, BlockEnv, EVMError, EVMResult, Env, EvmState, ExecutionResult,
-    ResultAndState, TxEnv,
+    db::Database, Account, EVMError, EVMResult, Env, EvmState, ExecutionResult, ResultAndState,
 };
 use std::collections::HashMap;
 
@@ -34,21 +33,6 @@ pub trait EvmTransact {
 
     /// Returns the current env with handler cfg.
     fn env_with_handler_cfg(&self) -> EnvWithHandlerCfg;
-
-    /// Returns a reference to the current database.
-    fn db(&self) -> &Self::DB;
-
-    /// Returns a mutable reference to the current database.
-    fn db_mut(&mut self) -> &mut Self::DB;
-
-    /// Returns the reference of transaction.
-    fn tx(&self) -> &TxEnv;
-
-    /// Returns the mutable reference of transaction.
-    fn tx_mut(&mut self) -> &mut TxEnv;
-
-    /// Returns the reference of block.
-    fn block(&self) -> &BlockEnv;
 }
 
 /// Trait that represents the output of a transaction and provides access to the state.
@@ -99,26 +83,6 @@ where
 
     fn env_with_handler_cfg(&self) -> EnvWithHandlerCfg {
         EnvWithHandlerCfg { env: Box::new(self.env().clone()), handler_cfg: self.handler.cfg() }
-    }
-
-    fn db(&self) -> &Self::DB {
-        self.db()
-    }
-
-    fn db_mut(&mut self) -> &mut Self::DB {
-        self.db_mut()
-    }
-
-    fn tx(&self) -> &TxEnv {
-        self.tx()
-    }
-
-    fn tx_mut(&mut self) -> &mut TxEnv {
-        self.tx_mut()
-    }
-
-    fn block(&self) -> &BlockEnv {
-        self.block()
     }
 }
 
