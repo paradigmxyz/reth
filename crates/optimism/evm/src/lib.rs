@@ -9,13 +9,14 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{execute::EvmTransact, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_op_tx_env},
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, ChainSpec, Head, Header, TransactionSigned, U256,
 };
 use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
+use revm_primitives::EnvWithHandlerCfg;
 
 mod execute;
 pub use execute::*;
@@ -80,6 +81,22 @@ impl ConfigureEvm for OptimismEvmConfig {
             .optimism()
             .append_handler_register(inspector_handle_register)
             .build()
+    }
+}
+
+impl ConfigureEvmGeneric for OptimismEvmConfig {
+    fn evm_with_env_ext<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Box<dyn EvmTransact<DB = DB> + 'a>
+    where
+        DB: Database + 'a,
+    {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        Box::new(evm)
     }
 }
 
