@@ -1,9 +1,9 @@
 use crate::{segment::PrunePurpose, PruneSegment, PruneSegmentError};
 use alloy_primitives::BlockNumber;
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{reth_db_codec, Compact};
 
 /// Prune mode.
-#[main_codec]
+#[reth_db_codec]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum PruneMode {
