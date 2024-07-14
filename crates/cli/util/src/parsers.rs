@@ -1,4 +1,5 @@
-use reth_primitives::{BlockHashOrNumber, B256};
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::B256;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
     str::FromStr,
@@ -68,7 +69,6 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
 mod tests {
     use super::*;
     use proptest::prelude::Rng;
-    use secp256k1::rand::thread_rng;
 
     #[test]
     fn parse_socket_addresses() {
@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn parse_socket_address_random() {
-        let port: u16 = thread_rng().gen();
+        let port: u16 = rand::thread_rng().gen();
 
         for value in [format!("localhost:{port}"), format!(":{port}"), port.to_string()] {
             let socket_addr = parse_socket_address(&value)

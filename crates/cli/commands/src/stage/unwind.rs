@@ -1,13 +1,13 @@
 //! Unwinding a certain block range
 
-use crate::macros::block_executor;
+use crate::common::{AccessRights, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db_api::database::Database;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
+use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_node_core::args::NetworkArgs;
 use reth_primitives::{BlockHashOrNumber, BlockNumber, B256};
@@ -119,7 +119,9 @@ impl Command {
         let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let executor = block_executor!(provider_factory.chain_spec());
+
+        // Unwinding does not require a valid executor
+        let executor = NoopBlockExecutorProvider::default();
 
         let builder = if self.offline {
             Pipeline::builder().add_stages(

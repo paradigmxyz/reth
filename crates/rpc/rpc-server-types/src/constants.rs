@@ -26,6 +26,9 @@ pub fn default_max_tracing_requests() -> usize {
         .map_or(25, |cpus| max(cpus.get().saturating_sub(RESERVED), RESERVED))
 }
 
+/// The default number of getproof calls we are allowing to run concurrently.
+pub const DEFAULT_PROOF_PERMITS: usize = 25;
+
 /// The default IPC endpoint
 #[cfg(windows)]
 pub const DEFAULT_IPC_ENDPOINT: &str = r"\\.\pipe\reth.ipc";

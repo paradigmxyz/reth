@@ -7,7 +7,7 @@ use std::{
 /// or the time it can run.
 #[derive(Debug, Clone, Default)]
 pub struct PruneLimiter {
-    /// Maximum entries (rows in the database) to delete from the database per block.
+    /// Maximum entries (rows in the database) to delete from the database per run.
     deleted_entries_limit: Option<PruneDeletedEntriesLimit>,
     /// Maximum duration of one prune run.
     time_limit: Option<PruneTimeLimit>,

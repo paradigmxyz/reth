@@ -35,6 +35,7 @@ thiserror.workspace = true
 itertools.workspace = true
 rayon.workspace = true
 tokio.workspace = true
+rustc-hash.workspace = true
 
 [dev-dependencies]
 # reth

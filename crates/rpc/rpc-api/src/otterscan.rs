@@ -1,11 +1,11 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{Address, BlockId, Bytes, TxHash, B256};
+use reth_primitives::{Address, Bytes, TxHash, B256};
 use reth_rpc_types::{
     trace::otterscan::{
         BlockDetails, ContractCreator, InternalOperation, OtsBlockTransactions, TraceEntry,
         TransactionsWithReceipts,
     },
-    Header, Transaction,
+    Header,
 };
 
 /// Otterscan rpc interface.
@@ -24,7 +24,7 @@ pub trait Otterscan {
 
     /// Check if a certain address contains a deployed code.
     #[method(name = "hasCode")]
-    async fn has_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<bool>;
+    async fn has_code(&self, address: Address, block_number: Option<u64>) -> RpcResult<bool>;
 
     /// Very simple API versioning scheme. Every time we add a new capability, the number is
     /// incremented. This allows for Otterscan to check if the node contains all API it
@@ -43,7 +43,7 @@ pub trait Otterscan {
     /// Extract all variations of calls, contract creation and self-destructs and returns a call
     /// tree.
     #[method(name = "traceTransaction")]
-    async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<TraceEntry>;
+    async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<Option<Vec<TraceEntry>>>;
 
     /// Tailor-made and expanded version of eth_getBlockByNumber for block details page in
     /// Otterscan.
@@ -87,7 +87,7 @@ pub trait Otterscan {
         &self,
         sender: Address,
         nonce: u64,
-    ) -> RpcResult<Option<Transaction>>;
+    ) -> RpcResult<Option<TxHash>>;
 
     /// Gets the transaction hash and the address who created a contract.
     #[method(name = "getContractCreator")]

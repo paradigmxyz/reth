@@ -1,11 +1,26 @@
 //! OP-Reth `eth_` endpoint implementation.
 
+pub mod receipt;
+pub mod transaction;
+
+mod block;
+mod pending_block;
+
+use std::{future::Future, sync::Arc};
+
 use alloy_primitives::{Address, U64};
-use reth_chainspec::ChainInfo;
+use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::RethResult;
-use reth_rpc_eth_api::helpers::EthApiSpec;
+use reth_evm::ConfigureEvm;
+use reth_provider::{BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderFactory};
+use reth_rpc_eth_api::helpers::{
+    Call, EthApiSpec, EthCall, EthFees, EthState, LoadFee, LoadState, SpawnBlocking, Trace,
+};
+use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types::SyncStatus;
-use std::future::Future;
+use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
+use reth_transaction_pool::TransactionPool;
+use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// OP-Reth `Eth` API implementation.
 ///
@@ -52,5 +67,90 @@ impl<Eth: EthApiSpec> EthApiSpec for OpEthApi<Eth> {
 
     fn sync_status(&self) -> RethResult<SyncStatus> {
         self.inner.sync_status()
+    }
+
+    fn chain_spec(&self) -> Arc<ChainSpec> {
+        self.inner.chain_spec()
+    }
+}
+
+impl<Eth: SpawnBlocking> SpawnBlocking for OpEthApi<Eth> {
+    fn io_task_spawner(&self) -> impl TaskSpawner {
+        self.inner.io_task_spawner()
+    }
+
+    fn tracing_task_pool(&self) -> &BlockingTaskPool {
+        self.inner.tracing_task_pool()
+    }
+
+    fn acquire_owned(
+        &self,
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
+        self.inner.acquire_owned()
+    }
+
+    fn acquire_many_owned(
+        &self,
+        n: u32,
+    ) -> impl Future<Output = Result<OwnedSemaphorePermit, AcquireError>> + Send {
+        self.inner.acquire_many_owned(n)
+    }
+}
+
+impl<Eth: LoadFee> LoadFee for OpEthApi<Eth> {
+    fn provider(&self) -> impl reth_provider::BlockIdReader + HeaderProvider + ChainSpecProvider {
+        LoadFee::provider(&self.inner)
+    }
+
+    fn cache(&self) -> &EthStateCache {
+        LoadFee::cache(&self.inner)
+    }
+
+    fn gas_oracle(&self) -> &reth_rpc_eth_types::GasPriceOracle<impl BlockReaderIdExt> {
+        self.inner.gas_oracle()
+    }
+
+    fn fee_history_cache(&self) -> &reth_rpc_eth_types::FeeHistoryCache {
+        self.inner.fee_history_cache()
+    }
+}
+
+impl<Eth: Call> Call for OpEthApi<Eth> {
+    fn call_gas_limit(&self) -> u64 {
+        self.inner.call_gas_limit()
+    }
+
+    fn evm_config(&self) -> &impl ConfigureEvm {
+        self.inner.evm_config()
+    }
+}
+
+impl<Eth: LoadState> LoadState for OpEthApi<Eth> {
+    fn provider(&self) -> impl StateProviderFactory {
+        LoadState::provider(&self.inner)
+    }
+
+    fn cache(&self) -> &EthStateCache {
+        LoadState::cache(&self.inner)
+    }
+
+    fn pool(&self) -> impl TransactionPool {
+        LoadState::pool(&self.inner)
+    }
+}
+
+impl<Eth: EthState> EthState for OpEthApi<Eth> {
+    fn max_proof_window(&self) -> u64 {
+        self.inner.max_proof_window()
+    }
+}
+
+impl<Eth: EthCall> EthCall for OpEthApi<Eth> {}
+
+impl<Eth: EthFees> EthFees for OpEthApi<Eth> {}
+
+impl<Eth: Trace> Trace for OpEthApi<Eth> {
+    fn evm_config(&self) -> &impl ConfigureEvm {
+        self.inner.evm_config()
     }
 }

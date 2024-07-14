@@ -1,4 +1,6 @@
-use crate::{metrics::EngineApiMetrics, EngineApiError, EngineApiResult};
+use crate::{
+    capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
+};
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
@@ -10,16 +12,18 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, PayloadAttributes,
     PayloadBuilderAttributes, PayloadOrAttributes,
 };
-use reth_primitives::{BlockHash, BlockHashOrNumber, BlockNumber, EthereumHardfork, B256, U64};
+use reth_primitives::{
+    Block, BlockHash, BlockHashOrNumber, BlockNumber, EthereumHardfork, B256, U64,
+};
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types::engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
-    ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
-    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
-    CAPABILITIES,
+    ExecutionPayloadBodiesV2, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
+    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    TransitionConfiguration,
 };
 use reth_rpc_types_compat::engine::payload::{
-    convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
+    convert_payload_input_v2_to_payload, convert_to_payload_body_v1, convert_to_payload_body_v2,
 };
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -54,6 +58,8 @@ struct EngineApiInner<Provider, EngineT: EngineTypes> {
     metrics: EngineApiMetrics,
     /// Identification of the execution client used by the consensus client
     client: ClientVersionV1,
+    /// The list of all supported Engine capabilities available over the engine endpoint.
+    capabilities: EngineCapabilities,
 }
 
 impl<Provider, EngineT> EngineApi<Provider, EngineT>
@@ -69,6 +75,7 @@ where
         payload_store: PayloadStore<EngineT>,
         task_spawner: Box<dyn TaskSpawner>,
         client: ClientVersionV1,
+        capabilities: EngineCapabilities,
     ) -> Self {
         let inner = Arc::new(EngineApiInner {
             provider,
@@ -78,6 +85,7 @@ where
             task_spawner,
             metrics: EngineApiMetrics::default(),
             client,
+            capabilities,
         });
         Self { inner }
     }
@@ -359,21 +367,18 @@ where
             })
     }
 
-    /// Returns the execution payload bodies by the range starting at `start`, containing `count`
-    /// blocks.
-    ///
-    /// WARNING: This method is associated with the `BeaconBlocksByRange` message in the consensus
-    /// layer p2p specification, meaning the input should be treated as untrusted or potentially
-    /// adversarial.
-    ///
-    /// Implementers should take care when acting on the input to this method, specifically
-    /// ensuring that the range is limited properly, and that the range boundaries are computed
-    /// correctly and without panics.
-    pub async fn get_payload_bodies_by_range(
+    /// Fetches all the blocks for the provided range starting at `start`, containing `count`
+    /// blocks and returns the mapped payload bodies.
+    async fn get_payload_bodies_by_range_with<F, R>(
         &self,
         start: BlockNumber,
         count: u64,
-    ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
+        f: F,
+    ) -> EngineApiResult<Vec<Option<R>>>
+    where
+        F: Fn(Block) -> R + Send + 'static,
+        R: Send + 'static,
+    {
         let (tx, rx) = oneshot::channel();
         let inner = self.inner.clone();
 
@@ -405,7 +410,7 @@ where
                 let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
                 match block_result {
                     Ok(block) => {
-                        result.push(block.map(convert_to_payload_body_v1));
+                        result.push(block.map(&f));
                     }
                     Err(err) => {
                         tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
@@ -419,11 +424,45 @@ where
         rx.await.map_err(|err| EngineApiError::Internal(Box::new(err)))?
     }
 
+    /// Returns the execution payload bodies by the range starting at `start`, containing `count`
+    /// blocks.
+    ///
+    /// WARNING: This method is associated with the `BeaconBlocksByRange` message in the consensus
+    /// layer p2p specification, meaning the input should be treated as untrusted or potentially
+    /// adversarial.
+    ///
+    /// Implementers should take care when acting on the input to this method, specifically
+    /// ensuring that the range is limited properly, and that the range boundaries are computed
+    /// correctly and without panics.
+    pub async fn get_payload_bodies_by_range_v1(
+        &self,
+        start: BlockNumber,
+        count: u64,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
+        self.get_payload_bodies_by_range_with(start, count, convert_to_payload_body_v1).await
+    }
+
+    /// Returns the execution payload bodies by the range starting at `start`, containing `count`
+    /// blocks.
+    ///
+    /// Same as [`Self::get_payload_bodies_by_range_v1`] but as [`ExecutionPayloadBodiesV2`].
+    pub async fn get_payload_bodies_by_range_v2(
+        &self,
+        start: BlockNumber,
+        count: u64,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
+        self.get_payload_bodies_by_range_with(start, count, convert_to_payload_body_v2).await
+    }
+
     /// Called to retrieve execution payload bodies by hashes.
-    pub fn get_payload_bodies_by_hash(
+    fn get_payload_bodies_by_hash_with<F, R>(
         &self,
         hashes: Vec<BlockHash>,
-    ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
+        f: F,
+    ) -> EngineApiResult<Vec<Option<R>>>
+    where
+        F: Fn(Block) -> R,
+    {
         let len = hashes.len() as u64;
         if len > MAX_PAYLOAD_BODIES_LIMIT {
             return Err(EngineApiError::PayloadRequestTooLarge { len })
@@ -436,10 +475,28 @@ where
                 .provider
                 .block(BlockHashOrNumber::Hash(hash))
                 .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-            result.push(block.map(convert_to_payload_body_v1));
+            result.push(block.map(&f));
         }
 
         Ok(result)
+    }
+
+    /// Called to retrieve execution payload bodies by hashes.
+    pub fn get_payload_bodies_by_hash_v1(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
+        self.get_payload_bodies_by_hash_with(hashes, convert_to_payload_body_v1)
+    }
+
+    /// Called to retrieve execution payload bodies by hashes.
+    ///
+    /// Same as [`Self::get_payload_bodies_by_hash_v1`] but as [`ExecutionPayloadBodiesV2`].
+    pub fn get_payload_bodies_by_hash_v2(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> EngineApiResult<ExecutionPayloadBodiesV2> {
+        self.get_payload_bodies_by_hash_with(hashes, convert_to_payload_body_v2)
     }
 
     /// Called to verify network configuration parameters and ensure that Consensus and Execution
@@ -760,8 +817,19 @@ where
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV1");
         let start = Instant::now();
-        let res = Self::get_payload_bodies_by_hash(self, block_hashes);
+        let res = Self::get_payload_bodies_by_hash_v1(self, block_hashes);
         self.inner.metrics.latency.get_payload_bodies_by_hash_v1.record(start.elapsed());
+        Ok(res?)
+    }
+
+    async fn get_payload_bodies_by_hash_v2(
+        &self,
+        block_hashes: Vec<BlockHash>,
+    ) -> RpcResult<ExecutionPayloadBodiesV2> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByHashV2");
+        let start = Instant::now();
+        let res = Self::get_payload_bodies_by_hash_v2(self, block_hashes);
+        self.inner.metrics.latency.get_payload_bodies_by_hash_v2.record(start.elapsed());
         Ok(res?)
     }
 
@@ -788,8 +856,20 @@ where
     ) -> RpcResult<ExecutionPayloadBodiesV1> {
         trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV1");
         let start_time = Instant::now();
-        let res = Self::get_payload_bodies_by_range(self, start.to(), count.to()).await;
+        let res = Self::get_payload_bodies_by_range_v1(self, start.to(), count.to()).await;
         self.inner.metrics.latency.get_payload_bodies_by_range_v1.record(start_time.elapsed());
+        Ok(res?)
+    }
+
+    async fn get_payload_bodies_by_range_v2(
+        &self,
+        start: U64,
+        count: U64,
+    ) -> RpcResult<ExecutionPayloadBodiesV2> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadBodiesByRangeV2");
+        let start_time = Instant::now();
+        let res = Self::get_payload_bodies_by_range_v2(self, start.to(), count.to()).await;
+        self.inner.metrics.latency.get_payload_bodies_by_range_v2.record(start_time.elapsed());
         Ok(res?)
     }
 
@@ -822,7 +902,7 @@ where
     /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
     async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
-        Ok(CAPABILITIES.iter().cloned().map(str::to_owned).collect())
+        Ok(self.inner.capabilities.list())
     }
 }
 
@@ -875,6 +955,7 @@ mod tests {
             payload_store.into(),
             task_executor,
             client,
+            EngineCapabilities::default(),
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)
@@ -929,7 +1010,7 @@ mod tests {
 
             // test [EngineApiMessage::GetPayloadBodiesByRange]
             for (start, count) in by_range_tests {
-                let res = api.get_payload_bodies_by_range(start, count).await;
+                let res = api.get_payload_bodies_by_range_v1(start, count).await;
                 assert_matches!(res, Err(EngineApiError::InvalidBodiesRange { .. }));
             }
         }
@@ -939,7 +1020,7 @@ mod tests {
             let (_, api) = setup_engine_api();
 
             let request_count = MAX_PAYLOAD_BODIES_LIMIT + 1;
-            let res = api.get_payload_bodies_by_range(0, request_count).await;
+            let res = api.get_payload_bodies_by_range_v1(0, request_count).await;
             assert_matches!(res, Err(EngineApiError::PayloadRequestTooLarge { .. }));
         }
 
@@ -959,7 +1040,7 @@ mod tests {
                 .map(|b| Some(convert_to_payload_body_v1(b.unseal())))
                 .collect::<Vec<_>>();
 
-            let res = api.get_payload_bodies_by_range(start, count).await.unwrap();
+            let res = api.get_payload_bodies_by_range_v1(start, count).await.unwrap();
             assert_eq!(res, expected);
         }
 
@@ -1000,7 +1081,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            let res = api.get_payload_bodies_by_range(start, count).await.unwrap();
+            let res = api.get_payload_bodies_by_range_v1(start, count).await.unwrap();
             assert_eq!(res, expected);
 
             let expected = blocks
@@ -1020,7 +1101,7 @@ mod tests {
                 .collect::<Vec<_>>();
 
             let hashes = blocks.iter().map(|b| b.hash()).collect();
-            let res = api.get_payload_bodies_by_hash(hashes).unwrap();
+            let res = api.get_payload_bodies_by_hash_v1(hashes).unwrap();
             assert_eq!(res, expected);
         }
     }

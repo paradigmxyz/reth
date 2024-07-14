@@ -358,11 +358,7 @@ where
 
         let time = Instant::now();
         // write output
-        state.write_to_storage(
-            provider.tx_ref(),
-            static_file_producer,
-            OriginalValuesKnown::Yes,
-        )?;
+        state.write_to_storage(provider, static_file_producer, OriginalValuesKnown::Yes)?;
         let db_write_duration = time.elapsed();
         debug!(
             target: "sync::stages::execution",
@@ -410,7 +406,7 @@ where
         // Unwind account and storage changesets, as well as receipts.
         //
         // This also updates `PlainStorageState` and `PlainAccountState`.
-        let bundle_state_with_receipts = provider.unwind_or_peek_state::<true>(range.clone())?;
+        let bundle_state_with_receipts = provider.take_state(range.clone())?;
 
         // Prepare the input for post unwind commit hook, where an `ExExNotification` will be sent.
         if self.exex_manager_handle.has_exexs() {
@@ -444,7 +440,7 @@ where
             // files do not support filters.
             //
             // If we hit this case, the receipts have already been unwound by the call to
-            // `unwind_or_peek_state`.
+            // `take_state`.
         }
 
         // Update the checkpoint.

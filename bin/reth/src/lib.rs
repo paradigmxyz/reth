@@ -181,18 +181,6 @@ pub mod rpc {
 #[doc(inline)]
 pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
 
-#[cfg(all(unix, any(target_env = "gnu", target_os = "macos")))]
-pub mod sigsegv_handler;
-
-/// Signal handler to extract a backtrace from stack overflow.
-///
-/// This is a no-op because this platform doesn't support our signal handler's requirements.
-#[cfg(not(all(unix, any(target_env = "gnu", target_os = "macos"))))]
-pub mod sigsegv_handler {
-    /// No-op function.
-    pub fn install() {}
-}
-
 #[cfg(all(feature = "jemalloc", unix))]
 use tikv_jemallocator as _;
 

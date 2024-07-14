@@ -1,5 +1,12 @@
-use crate::{backfill::BackfillAction, engine::DownloadRequest};
-use reth_beacon_consensus::{ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated};
+use crate::{
+    backfill::BackfillAction,
+    chain::FromOrchestrator,
+    engine::{DownloadRequest, EngineApiEvent, FromEngine},
+    persistence::PersistenceHandle,
+};
+use reth_beacon_consensus::{
+    BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated,
+};
 use reth_blockchain_tree::{
     error::InsertBlockErrorKind, BlockAttachment, BlockBuffer, BlockStatus,
 };
@@ -11,10 +18,12 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_primitives::PayloadTypes;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Address, Block, BlockNumber, Receipts, Requests, SealedBlock, SealedBlockWithSenders, B256,
-    U256,
+    Address, Block, BlockNumber, GotExpected, Receipts, Requests, SealedBlock,
+    SealedBlockWithSenders, B256, U256,
 };
-use reth_provider::{BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory};
+use reth_provider::{
+    BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory, StateRootProvider,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
     engine::{
@@ -27,12 +36,16 @@ use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
-    sync::Arc,
+    sync::{mpsc::Receiver, Arc},
 };
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tracing::*;
 
 mod memory_overlay;
 pub use memory_overlay::MemoryOverlayStateProvider;
+
+/// Maximum number of blocks to be kept in memory without triggering persistence.
+const PERSISTENCE_THRESHOLD: u64 = 256;
 
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug)]
@@ -45,6 +58,16 @@ pub struct ExecutedBlock {
 }
 
 impl ExecutedBlock {
+    pub(crate) const fn new(
+        block: Arc<SealedBlock>,
+        senders: Arc<Vec<Address>>,
+        execution_output: Arc<ExecutionOutcome>,
+        hashed_state: Arc<HashedPostState>,
+        trie: Arc<TrieUpdates>,
+    ) -> Self {
+        Self { block, senders, execution_output, hashed_state, trie }
+    }
+
     /// Returns a reference to the executed block.
     pub(crate) fn block(&self) -> &SealedBlock {
         &self.block
@@ -72,7 +95,7 @@ impl ExecutedBlock {
 }
 
 /// Keeps track of the state of the tree.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct TreeState {
     /// All executed blocks by hash.
     blocks_by_hash: HashMap<B256, ExecutedBlock>,
@@ -111,6 +134,11 @@ impl TreeState {
             }
         }
     }
+
+    /// Returns the maximum block number stored.
+    pub(crate) fn max_block_number(&self) -> BlockNumber {
+        *self.blocks_by_number.last_key_value().unwrap_or((&BlockNumber::default(), &vec![])).0
+    }
 }
 
 /// Tracks the state of the engine api internals.
@@ -120,7 +148,7 @@ impl TreeState {
 pub struct EngineApiTreeState {
     /// Tracks the state of the blockchain tree.
     tree_state: TreeState,
-    /// Tracks the received forkchoice state updates received by the CL.
+    /// Tracks the forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// Buffer of detached blocks.
     buffer: BlockBuffer,
@@ -129,11 +157,22 @@ pub struct EngineApiTreeState {
     invalid_headers: InvalidHeaderCache,
 }
 
+impl EngineApiTreeState {
+    fn new(block_buffer_limit: u32, max_invalid_header_cache_length: u32) -> Self {
+        Self {
+            invalid_headers: InvalidHeaderCache::new(max_invalid_header_cache_length),
+            buffer: BlockBuffer::new(block_buffer_limit),
+            tree_state: TreeState::default(),
+            forkchoice_state_tracker: ForkchoiceStateTracker::default(),
+        }
+    }
+}
+
 /// The type responsible for processing engine API requests.
 ///
 /// TODO: design: should the engine handler functions also accept the response channel or return the
 /// result and the caller redirects the response
-pub trait EngineApiTreeHandler: Send + Sync {
+pub trait EngineApiTreeHandler {
     /// The engine type that this handler is for.
     type Engine: EngineTypes;
 
@@ -170,7 +209,7 @@ pub trait EngineApiTreeHandler: Send + Sync {
         &mut self,
         state: ForkchoiceState,
         attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
-    ) -> TreeOutcome<Result<OnForkChoiceUpdated, String>>;
+    ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>>;
 }
 
 /// The outcome of a tree operation.
@@ -220,6 +259,10 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     consensus: Arc<dyn Consensus>,
     payload_validator: ExecutionPayloadValidator,
     state: EngineApiTreeState,
+    incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
+    outgoing: UnboundedSender<EngineApiEvent>,
+    persistence: PersistenceHandle,
+    persistence_state: PersistenceState,
     /// (tmp) The flag indicating whether the pipeline is active.
     is_pipeline_active: bool,
     _marker: PhantomData<T>,
@@ -227,10 +270,172 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
 
 impl<P, E, T> EngineApiTreeHandlerImpl<P, E, T>
 where
-    P: BlockReader + StateProviderFactory,
+    P: BlockReader + StateProviderFactory + Clone + 'static,
     E: BlockExecutorProvider,
-    T: EngineTypes,
+    T: EngineTypes + 'static,
 {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        provider: P,
+        executor_provider: E,
+        consensus: Arc<dyn Consensus>,
+        payload_validator: ExecutionPayloadValidator,
+        incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
+        outgoing: UnboundedSender<EngineApiEvent>,
+        state: EngineApiTreeState,
+        persistence: PersistenceHandle,
+    ) -> Self {
+        Self {
+            provider,
+            executor_provider,
+            consensus,
+            payload_validator,
+            incoming,
+            outgoing,
+            persistence,
+            persistence_state: PersistenceState::default(),
+            is_pipeline_active: false,
+            state,
+            _marker: PhantomData,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_new(
+        provider: P,
+        executor_provider: E,
+        consensus: Arc<dyn Consensus>,
+        payload_validator: ExecutionPayloadValidator,
+        incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
+        state: EngineApiTreeState,
+        persistence: PersistenceHandle,
+    ) -> UnboundedSender<EngineApiEvent> {
+        let (outgoing, rx) = tokio::sync::mpsc::unbounded_channel();
+        let task = Self::new(
+            provider,
+            executor_provider,
+            consensus,
+            payload_validator,
+            incoming,
+            outgoing.clone(),
+            state,
+            persistence,
+        );
+        std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
+        outgoing
+    }
+
+    fn run(mut self) {
+        loop {
+            while let Ok(msg) = self.incoming.recv() {
+                match msg {
+                    FromEngine::Event(event) => match event {
+                        FromOrchestrator::BackfillSyncFinished => {
+                            todo!()
+                        }
+                        FromOrchestrator::BackfillSyncStarted => {
+                            todo!()
+                        }
+                    },
+                    FromEngine::Request(request) => match request {
+                        BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                            let output = self.on_forkchoice_updated(state, payload_attrs);
+                            if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(Into::into))
+                            {
+                                error!("Failed to send event: {err:?}");
+                            }
+                        }
+                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
+                            let output = self.on_new_payload(payload, cancun_fields);
+                            if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(|e| {
+                                reth_beacon_consensus::BeaconOnNewPayloadError::Internal(Box::new(
+                                    e,
+                                ))
+                            })) {
+                                error!("Failed to send event: {err:?}");
+                            }
+                        }
+                        BeaconEngineMessage::TransitionConfigurationExchanged => {
+                            todo!()
+                        }
+                    },
+                    FromEngine::DownloadedBlocks(blocks) => {
+                        if let Some(event) = self.on_downloaded(blocks) {
+                            if let Err(err) = self.outgoing.send(EngineApiEvent::FromTree(event)) {
+                                error!("Failed to send event: {err:?}");
+                            }
+                        }
+                    }
+                }
+            }
+
+            if self.should_persist() && !self.persistence_state.in_progress() {
+                let blocks_to_persist = self.get_blocks_to_persist();
+                let (tx, rx) = oneshot::channel();
+                self.persistence.save_blocks(blocks_to_persist, tx);
+                self.persistence_state.start(rx);
+            }
+
+            if self.persistence_state.in_progress() {
+                let rx = self
+                    .persistence_state
+                    .rx
+                    .as_mut()
+                    .expect("if a persistence task is in progress Receiver must be Some");
+                // Check if persistence has completed
+                if let Ok(last_persisted_block_hash) = rx.try_recv() {
+                    if let Some(block) =
+                        self.state.tree_state.block_by_hash(last_persisted_block_hash)
+                    {
+                        self.persistence_state.finish(last_persisted_block_hash, block.number);
+                        self.remove_persisted_blocks_from_memory();
+                    } else {
+                        error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Returns true if the canonical chain length minus the last persisted
+    /// block is more than the persistence threshold.
+    fn should_persist(&self) -> bool {
+        self.state.tree_state.max_block_number() -
+            self.persistence_state.last_persisted_block_number >
+            PERSISTENCE_THRESHOLD
+    }
+
+    fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
+        let start = self.persistence_state.last_persisted_block_number + 1;
+        let end = start + PERSISTENCE_THRESHOLD;
+
+        self.state
+            .tree_state
+            .blocks_by_number
+            .range(start..end)
+            .flat_map(|(_, blocks)| blocks.iter().cloned())
+            .collect()
+    }
+
+    fn remove_persisted_blocks_from_memory(&mut self) {
+        let keys_to_remove: Vec<BlockNumber> = self
+            .state
+            .tree_state
+            .blocks_by_number
+            .range(..=self.persistence_state.last_persisted_block_number)
+            .map(|(&k, _)| k)
+            .collect();
+
+        for key in keys_to_remove {
+            if let Some(blocks) = self.state.tree_state.blocks_by_number.remove(&key) {
+                // Remove corresponding blocks from blocks_by_hash
+                for block in blocks {
+                    self.state.tree_state.blocks_by_hash.remove(&block.block().hash());
+                }
+            }
+        }
+    }
+
     /// Return block from database or in-memory state by hash.
     fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Block>> {
         // check database first
@@ -355,6 +560,15 @@ where
         Ok(Some(status))
     }
 
+    /// Checks if the given `head` points to an invalid header, which requires a specific response
+    /// to a forkchoice update.
+    fn check_invalid_ancestor(&mut self, head: B256) -> ProviderResult<Option<PayloadStatus>> {
+        // check if the head was previously marked as invalid
+        let Some(header) = self.state.invalid_headers.get(&head) else { return Ok(None) };
+        // populate the latest valid hash field
+        Ok(Some(self.prepare_invalid_response(header.parent_hash)?))
+    }
+
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
     fn validate_block(&self, block: &SealedBlockWithSenders) -> Result<(), ConsensusError> {
@@ -437,10 +651,16 @@ where
             PostExecutionInput::new(&output.receipts, &output.requests),
         )?;
 
+        // TODO: change StateRootProvider API to accept hashed post state
         let hashed_state = HashedPostState::from_bundle_state(&output.state.state);
 
-        // TODO: compute and validate state root
-        let trie_output = TrieUpdates::default();
+        let (state_root, trie_output) = state_provider.state_root_with_updates(&output.state)?;
+        if state_root != block.state_root {
+            return Err(ConsensusError::BodyStateRootDiff(
+                GotExpected { got: state_root, expected: block.state_root }.into(),
+            )
+            .into())
+        }
 
         let executed = ExecutedBlock {
             block: Arc::new(block.block.seal(block_hash)),
@@ -459,13 +679,42 @@ where
         let attachment = BlockAttachment::Canonical; // TODO: remove or revise attachment
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(attachment)))
     }
+
+    /// Pre-validate forkchoice update and check whether it can be processed.
+    ///
+    /// This method returns the update outcome if validation fails or
+    /// the node is syncing and the update cannot be processed at the moment.
+    fn pre_validate_forkchoice_update(
+        &mut self,
+        state: ForkchoiceState,
+    ) -> ProviderResult<Option<OnForkChoiceUpdated>> {
+        if state.head_block_hash.is_zero() {
+            return Ok(Some(OnForkChoiceUpdated::invalid_state()))
+        }
+
+        // check if the new head hash is connected to any ancestor that we previously marked as
+        // invalid
+        let lowest_buffered_ancestor_fcu = self.lowest_buffered_ancestor_or(state.head_block_hash);
+        if let Some(status) = self.check_invalid_ancestor(lowest_buffered_ancestor_fcu)? {
+            return Ok(Some(OnForkChoiceUpdated::with_invalid(status)))
+        }
+
+        if self.is_pipeline_active {
+            // We can only process new forkchoice updates if the pipeline is idle, since it requires
+            // exclusive access to the database
+            trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
+            return Ok(Some(OnForkChoiceUpdated::syncing()))
+        }
+
+        Ok(None)
+    }
 }
 
 impl<P, E, T> EngineApiTreeHandler for EngineApiTreeHandlerImpl<P, E, T>
 where
-    P: BlockReader + StateProviderFactory + Clone,
+    P: BlockReader + StateProviderFactory + Clone + 'static,
     E: BlockExecutorProvider,
-    T: EngineTypes,
+    T: EngineTypes + 'static,
 {
     type Engine = T;
 
@@ -588,7 +837,44 @@ where
         &mut self,
         state: ForkchoiceState,
         attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
-    ) -> TreeOutcome<Result<OnForkChoiceUpdated, String>> {
+    ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
+        if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
+            self.state.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
+            return Ok(TreeOutcome::new(on_updated))
+        }
+
         todo!()
+    }
+}
+
+/// The state of the persistence task.
+#[derive(Default, Debug)]
+struct PersistenceState {
+    /// Hash of the last block persisted.
+    last_persisted_block_hash: B256,
+    /// Receiver end of channel where the result of the persistence task will be
+    /// sent when done. A None value means there's no persistence task in progress.
+    rx: Option<oneshot::Receiver<B256>>,
+    /// The last persisted block number.
+    last_persisted_block_number: u64,
+}
+
+impl PersistenceState {
+    /// Determines if there is a persistence task in progress by checking if the
+    /// receiver is set.
+    const fn in_progress(&self) -> bool {
+        self.rx.is_some()
+    }
+
+    /// Sets state for a started persistence task.
+    fn start(&mut self, rx: oneshot::Receiver<B256>) {
+        self.rx = Some(rx);
+    }
+
+    /// Sets state for a finished persistence task.
+    fn finish(&mut self, last_persisted_block_hash: B256, last_persisted_block_number: u64) {
+        self.rx = None;
+        self.last_persisted_block_number = last_persisted_block_number;
+        self.last_persisted_block_hash = last_persisted_block_hash;
     }
 }

@@ -1,7 +1,11 @@
 //! `reth stage` command
 
+use std::sync::Arc;
+
 use clap::{Parser, Subcommand};
+use reth_chainspec::ChainSpec;
 use reth_cli_runner::CliContext;
+use reth_evm::execute::BlockExecutorProvider;
 
 pub mod drop;
 pub mod dump;
@@ -35,11 +39,15 @@ pub enum Subcommands {
 
 impl Command {
     /// Execute `stage` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute<E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
+    where
+        E: BlockExecutorProvider,
+        F: FnOnce(Arc<ChainSpec>) -> E,
+    {
         match self.command {
-            Subcommands::Run(command) => command.execute(ctx).await,
+            Subcommands::Run(command) => command.execute(ctx, executor).await,
             Subcommands::Drop(command) => command.execute().await,
-            Subcommands::Dump(command) => command.execute().await,
+            Subcommands::Dump(command) => command.execute(executor).await,
             Subcommands::Unwind(command) => command.execute().await,
         }
     }

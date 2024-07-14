@@ -6,10 +6,10 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
-    fs::{self, ReadDir},
-    io,
+    fs::{self, File, ReadDir},
+    io::{self, BufWriter, Write},
     path::{Path, PathBuf},
 };
 
@@ -223,6 +223,12 @@ pub fn remove_dir_all(path: impl AsRef<Path>) -> Result<()> {
     fs::remove_dir_all(path).map_err(|err| FsPathError::remove_dir(err, path))
 }
 
+/// Wrapper for `File::create`.
+pub fn create_file(path: impl AsRef<Path>) -> Result<fs::File> {
+    let path = path.as_ref();
+    File::create(path).map_err(|err| FsPathError::create_file(err, path))
+}
+
 /// Wrapper for `std::fs::remove_file`
 pub fn remove_file(path: impl AsRef<Path>) -> Result<()> {
     let path = path.as_ref();
@@ -252,4 +258,22 @@ pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
 pub fn metadata(path: impl AsRef<Path>) -> Result<fs::Metadata> {
     let path = path.as_ref();
     fs::metadata(path).map_err(|err| FsPathError::metadata(err, path))
+}
+
+/// Reads the JSON file and deserialize it into the provided type.
+pub fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
+    // read the file into a byte array first
+    // https://github.com/serde-rs/json/issues/160
+    let bytes = read(path)?;
+    serde_json::from_slice(&bytes)
+        .map_err(|source| FsPathError::ReadJson { source, path: path.into() })
+}
+
+/// Writes the object as a JSON object.
+pub fn write_json_file<T: Serialize>(path: &Path, obj: &T) -> Result<()> {
+    let file = create_file(path)?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut writer, obj)
+        .map_err(|source| FsPathError::WriteJson { source, path: path.into() })?;
+    writer.flush().map_err(|e| FsPathError::write(e, path))
 }

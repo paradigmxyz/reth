@@ -12,10 +12,13 @@ pub mod common;
 pub mod config_cmd;
 pub mod db;
 pub mod dump_genesis;
+pub mod import;
 pub mod init_cmd;
 pub mod init_state;
+pub mod node;
 pub mod p2p;
 pub mod prune;
 pub mod recover;
+pub mod stage;
 #[cfg(feature = "dev")]
 pub mod test_vectors;

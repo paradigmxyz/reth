@@ -10,14 +10,15 @@ use reth_primitives::{
     PooledTransactionsElement, U256,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_rpc_types::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
+use reth_rpc_types::mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::CacheDB,
     primitives::{ResultAndState, TxEnv},
 };
-use revm_primitives::{EnvKzgSettings, EnvWithHandlerCfg, MAX_BLOB_GAS_PER_BLOCK};
+use revm_primitives::{EnvKzgSettings, EnvWithHandlerCfg, SpecId, MAX_BLOB_GAS_PER_BLOCK};
 
+use reth_provider::{ChainSpecProvider, HeaderProvider};
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
     EthCallBundleApiServer,
@@ -48,7 +49,15 @@ where
     /// state, or it can be used to simulate a past block. The sender is responsible for signing the
     /// transactions and using the correct nonce and ensuring validity
     pub async fn call_bundle(&self, bundle: EthCallBundle) -> EthResult<EthCallBundleResponse> {
-        let EthCallBundle { txs, block_number, state_block_number, timestamp } = bundle;
+        let EthCallBundle {
+            txs,
+            block_number,
+            state_block_number,
+            timestamp,
+            gas_limit,
+            difficulty,
+            base_fee,
+        } = bundle;
         if txs.is_empty() {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
@@ -88,6 +97,7 @@ where
         }
 
         let block_id: reth_rpc_types::BlockId = state_block_number.into();
+        // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
         let (cfg, mut block_env, at) = self.inner.eth_api.evm_env_at(block_id).await?;
 
         // need to adjust the timestamp for the next block
@@ -95,6 +105,31 @@ where
             block_env.timestamp = U256::from(timestamp);
         } else {
             block_env.timestamp += U256::from(12);
+        }
+
+        if let Some(difficulty) = difficulty {
+            block_env.difficulty = U256::from(difficulty);
+        }
+
+        if let Some(gas_limit) = gas_limit {
+            block_env.gas_limit = U256::from(gas_limit);
+        }
+
+        if let Some(base_fee) = base_fee {
+            block_env.basefee = U256::from(base_fee);
+        } else if cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON) {
+            let parent_block = block_env.number.saturating_to::<u64>();
+            // here we need to fetch the _next_ block's basefee based on the parent block <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2130>
+            let parent = LoadPendingBlock::provider(&self.inner.eth_api)
+                .header_by_number(parent_block)?
+                .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+            if let Some(base_fee) = parent.next_block_base_fee(
+                LoadPendingBlock::provider(&self.inner.eth_api)
+                    .chain_spec()
+                    .base_fee_params_at_block(parent_block),
+            ) {
+                block_env.basefee = U256::from(base_fee);
+            }
         }
 
         let state_block_number = block_env.number;
