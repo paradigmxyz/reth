@@ -141,7 +141,7 @@ impl CanonStateNotification {
 }
 
 /// Wrapper around a broadcast receiver that receives fork choice notifications.
-#[derive(Debug)]
+#[derive(Debug, derive_more::Deref, derive_more::DerefMut)]
 pub struct ForkChoiceNotifications(broadcast::Receiver<SealedHeader>);
 
 /// A trait that allows to register to fork choice related events
@@ -168,15 +168,18 @@ impl Stream for ForkChoiceStream {
     type Item = SealedHeader;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        loop {
-            return match ready!(self.as_mut().project().st.poll_next(cx)) {
-                Some(Ok(notification)) => Poll::Ready(Some(notification)),
-                Some(Err(err)) => {
-                    debug!(%err, "finalized header notification stream lagging behind");
-                    continue
-                }
-                None => Poll::Ready(None),
+        return match ready!(self.as_mut().project().st.poll_next(cx)) {
+            Some(Ok(notification)) => Poll::Ready(Some(notification)),
+            Some(Err(err)) => {
+                debug!(target: "provider::fcu",
+                    %err,
+                    "finalized header notification stream lagging behind"
+                );
+
+                cx.waker().wake_by_ref();
+                Poll::Pending
             }
-        }
+            None => Poll::Ready(None),
+        };
     }
 }
