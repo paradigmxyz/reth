@@ -37,16 +37,18 @@ pub trait EvmTransact {
 /// commit state changes to the database.
 pub trait EvmCommit: EvmTransact {
     /// The output produced by the evm.
-    type CommitOutput;
+    type TransactCommitOutput;
     /// The error produced by the evm.
-    type CommitError;
+    type TransactCommitError;
 
     /// Commit state changes to the database.
     fn commit(&mut self, output: HashMap<Address, Account>);
 
     /// Transact using [`EvmTransact::Env`], commit the state changes and
     /// return them.
-    fn transact_and_commit(&mut self) -> Result<Self::CommitOutput, Self::CommitError>;
+    fn transact_and_commit(
+        &mut self,
+    ) -> Result<Self::TransactCommitOutput, Self::TransactCommitError>;
 }
 
 impl<'a, C, DB> EvmTransact for Evm<'a, C, DB>
@@ -76,14 +78,16 @@ impl<'a, C, DB> EvmCommit for Evm<'a, C, DB>
 where
     DB: Database + DatabaseCommit + 'a,
 {
-    type CommitOutput = ExecutionResult;
-    type CommitError = EVMError<DB::Error>;
+    type TransactCommitOutput = ExecutionResult;
+    type TransactCommitError = EVMError<DB::Error>;
 
     fn commit(&mut self, output: HashMap<Address, Account>) {
         self.context.evm.db.commit(output)
     }
 
-    fn transact_and_commit(&mut self) -> Result<Self::CommitOutput, Self::CommitError> {
+    fn transact_and_commit(
+        &mut self,
+    ) -> Result<Self::TransactCommitOutput, Self::TransactCommitError> {
         self.transact_commit()
     }
 }
