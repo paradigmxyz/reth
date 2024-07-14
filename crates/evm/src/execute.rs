@@ -1,10 +1,11 @@
 //! Traits for execution.
 
+use crate::{EnvWithHandlerCfg, Evm};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Request, U256};
 use reth_prune_types::PruneModes;
-use revm::db::BundleState;
-use revm_primitives::db::Database;
+use revm::{db::BundleState, DatabaseCommit};
+use revm_primitives::{db::Database, EVMError, EVMResult, Env, ExecutionResult, ResultAndState};
 
 pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_storage_errors::provider::ProviderError;
@@ -14,33 +15,76 @@ pub use reth_storage_errors::provider::ProviderError;
 ///
 /// The trait cannot commit the state changes to the database directly, see [`EvmCommit`].
 pub trait EvmTransact {
-    /// The environment for the evm.
-    type Env;
-    /// The output produced by the evm.
-    type Output;
-    /// The error produced by the evm.
-    type Error;
+    /// The database used by the evm.
+    type DB: Database;
 
     /// Transacts with the current env to produce an output without
     /// committing to the underlying database.
-    fn transact(&mut self) -> Result<Self::Output, Self::Error>;
+    fn transact(&mut self) -> EVMResult<<<Self as EvmTransact>::DB as Database>::Error>;
 
     /// Returns a mutable reference to the current env.
-    fn env_mut(&mut self) -> &mut Self::Env;
+    fn env_mut(&mut self) -> &mut Env;
 
     /// Returns a reference to the current env.
-    fn env(&self) -> &Self::Env;
+    fn env(&self) -> &Env;
+
+    /// Returns the current env with handler cfg.
+    fn env_with_handler_cfg(&self) -> EnvWithHandlerCfg;
 }
 
 /// Trait that can transact an [`EvmTransact::Env`] and
 /// commit state changes to the database.
 pub trait EvmCommit: EvmTransact {
+    /// The output produced by the evm.
+    type EvmOutput;
+    /// The error produced by the evm.
+    type EvmError;
+
     /// Commit state changes to the database.
-    fn commit(&mut self, output: Self::Output);
+    fn commit(&mut self, output: ResultAndState);
 
     /// Transact using [`EvmTransact::Env`], commit the state changes and
     /// return them.
-    fn transact_and_commit(&mut self) -> Result<Self::Output, Self::Error>;
+    fn transact_and_commit(&mut self) -> Result<Self::EvmOutput, Self::EvmError>;
+}
+
+impl<'a, C, DB> EvmTransact for Evm<'a, C, DB>
+where
+    DB: Database + 'a,
+{
+    type DB = DB;
+
+    fn transact(&mut self) -> EVMResult<<<Self as EvmTransact>::DB as Database>::Error> {
+        self.transact()
+    }
+
+    fn env_mut(&mut self) -> &mut Env {
+        &mut self.context.evm.inner.env
+    }
+
+    fn env(&self) -> &Env {
+        &self.context.evm.inner.env
+    }
+
+    fn env_with_handler_cfg(&self) -> EnvWithHandlerCfg {
+        EnvWithHandlerCfg { env: Box::new(self.env().clone()), handler_cfg: self.handler.cfg() }
+    }
+}
+
+impl<'a, C, DB> EvmCommit for Evm<'a, C, DB>
+where
+    DB: Database + DatabaseCommit + 'a,
+{
+    type EvmOutput = ExecutionResult;
+    type EvmError = EVMError<DB::Error>;
+
+    fn commit(&mut self, output: ResultAndState) {
+        self.context.evm.db.commit(output.state)
+    }
+
+    fn transact_and_commit(&mut self) -> Result<Self::EvmOutput, Self::EvmError> {
+        self.transact_commit()
+    }
 }
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output

@@ -10,7 +10,7 @@ use reth_evm::{
         BatchExecutor, BlockExecutionError, BlockExecutionInput, BlockExecutionOutput,
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
-    ConfigureEvm,
+    ConfigureEvmGeneric,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
@@ -61,7 +61,7 @@ impl<EvmConfig> EthExecutorProvider<EvmConfig> {
 
 impl<EvmConfig> EthExecutorProvider<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
 {
     fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
     where
@@ -77,7 +77,7 @@ where
 
 impl<EvmConfig> BlockExecutorProvider for EthExecutorProvider<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
 {
     type Executor<DB: Database<Error = ProviderError>> = EthBlockExecutor<EvmConfig, DB>;
 
@@ -122,7 +122,7 @@ struct EthEvmExecutor<EvmConfig> {
 
 impl<EvmConfig> EthEvmExecutor<EvmConfig>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
 {
     /// Executes the transactions in the block and returns the receipts of the transactions in the
     /// block, the total gas used and the list of EIP-7685 [requests](Request).
@@ -254,7 +254,7 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
     DB: Database<Error = ProviderError>,
 {
     /// Configures a new evm configuration and block environment for the given block.
@@ -352,7 +352,7 @@ where
 
 impl<EvmConfig, DB> Executor<DB> for EthBlockExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -402,7 +402,7 @@ impl<EvmConfig, DB> EthBatchExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> BatchExecutor<DB> for EthBatchExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
     DB: Database<Error = ProviderError>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;

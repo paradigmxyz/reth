@@ -17,7 +17,7 @@ use reth::{
     },
     tasks::TaskManager,
 };
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
+use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider, EthereumNode};
 use reth_primitives::{Chain, ChainSpec, Genesis, Header, TransactionSigned};
@@ -100,6 +100,8 @@ impl ConfigureEvm for MyEvmConfig {
             .build()
     }
 }
+
+impl ConfigureEvmGeneric for MyEvmConfig {}
 
 /// Builds a regular ethereum block executor that uses the custom EVM.
 #[derive(Debug, Default, Clone, Copy)]

@@ -5,7 +5,7 @@ use crate::{
     payload::{OptimismBuiltPayload, OptimismPayloadBuilderAttributes},
 };
 use reth_basic_payload_builder::*;
-use reth_evm::ConfigureEvm;
+use reth_evm::ConfigureEvmGeneric;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
     constants::{BEACON_NONCE, EMPTY_RECEIPTS, EMPTY_TRANSACTIONS},
@@ -72,7 +72,7 @@ impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBu
 where
     Client: StateProviderFactory,
     Pool: TransactionPool,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
 {
     type Attributes = OptimismPayloadBuilderAttributes;
     type BuiltPayload = OptimismBuiltPayload;
@@ -240,7 +240,7 @@ pub(crate) fn optimism_payload_builder<EvmConfig, Pool, Client>(
     _compute_pending_block: bool,
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {

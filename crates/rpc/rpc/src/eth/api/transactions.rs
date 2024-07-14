@@ -10,7 +10,7 @@ use crate::{
 };
 use alloy_primitives::TxKind as RpcTransactionKind;
 use async_trait::async_trait;
-use reth_evm::ConfigureEvm;
+use reth_evm::ConfigureEvmGeneric;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{
     eip4844::calc_blob_gasprice,
@@ -547,7 +547,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    EvmConfig: ConfigureEvmGeneric + 'static,
 {
     fn transact<DB>(
         &self,
@@ -556,11 +556,11 @@ where
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
     where
         DB: Database,
-        <DB as Database>::Error: Into<EthApiError>,
+        DB::Error: Into<EthApiError>,
     {
-        let mut evm = self.inner.evm_config.evm_with_env(db, env);
+        let mut evm = self.inner.evm_config.evm_with_env_generic(db, env);
         let res = evm.transact()?;
-        let (_, env) = evm.into_db_and_env_with_handler_cfg();
+        let env = evm.env_with_handler_cfg();
         Ok((res, env))
     }
 
@@ -1386,7 +1386,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmGeneric,
 {
     /// Returns the gas price if it is set, otherwise fetches a suggested gas price for legacy
     /// transactions.

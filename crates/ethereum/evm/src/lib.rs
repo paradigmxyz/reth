@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_tx_env},
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
@@ -57,6 +57,8 @@ impl ConfigureEvmEnv for EthEvmConfig {
         cfg_env.handler_cfg.spec_id = spec_id;
     }
 }
+
+impl ConfigureEvmGeneric for EthEvmConfig {}
 
 impl ConfigureEvm for EthEvmConfig {
     type DefaultExternalContext<'a> = ();

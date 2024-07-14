@@ -6,7 +6,7 @@ use crate::{
     OptimismEngineTypes,
 };
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_evm::ConfigureEvm;
+use reth_evm::ConfigureEvmGeneric;
 use reth_evm_optimism::{OpExecutorProvider, OptimismEvmConfig};
 use reth_network::{NetworkHandle, NetworkManager};
 use reth_node_builder::{
@@ -218,7 +218,7 @@ impl<Node, EVM, Pool> PayloadServiceBuilder<Node, Pool> for OptimismPayloadBuild
 where
     Node: FullNodeTypes<Engine = OptimismEngineTypes>,
     Pool: TransactionPool + Unpin + 'static,
-    EVM: ConfigureEvm,
+    EVM: ConfigureEvmGeneric,
 {
     async fn spawn_payload_service(
         self,

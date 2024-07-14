@@ -9,7 +9,7 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric};
 use reth_primitives::{
     revm::{config::revm_spec, env::fill_op_tx_env},
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
@@ -82,6 +82,8 @@ impl ConfigureEvm for OptimismEvmConfig {
             .build()
     }
 }
+
+impl ConfigureEvmGeneric for OptimismEvmConfig {}
 
 #[cfg(test)]
 mod tests {

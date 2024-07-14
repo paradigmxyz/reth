@@ -8,6 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use crate::execute::EvmTransact;
 use reth_primitives::{
     revm::env::fill_block_env, Address, ChainSpec, Header, TransactionSigned, U256,
 };
@@ -22,6 +23,24 @@ pub mod provider;
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
 pub mod test_utils;
+
+/// Trait for configuring the EVM in a generic way
+pub trait ConfigureEvmGeneric: ConfigureEvm + ConfigureEvmEnv {
+    /// Returns a new EVM with the given database configured with the given environment settings.
+    fn evm_with_env_generic<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Box<dyn EvmTransact<DB = DB> + 'a>
+    where
+        DB: Database + 'a,
+    {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        Box::new(evm)
+    }
+}
 
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {

@@ -1,11 +1,11 @@
 //! Traits for configuring a node.
 
-use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
+use crate::{primitives::NodePrimitives, EngineTypes};
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmGeneric};
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
@@ -93,7 +93,7 @@ pub trait FullNodeComponents: FullNodeTypes + 'static {
     type Pool: TransactionPool + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm;
+    type Evm: ConfigureEvmGeneric;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider;

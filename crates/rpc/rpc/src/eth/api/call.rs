@@ -12,7 +12,7 @@ use crate::{
     },
     EthApi,
 };
-use reth_evm::ConfigureEvm;
+use reth_evm::ConfigureEvmGeneric;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{revm::env::tx_env_with_recovered, BlockId, Bytes, TxKind, U256};
 use reth_provider::{
@@ -47,7 +47,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + Send + Sync + 'static,
-    EvmConfig: ConfigureEvm + 'static,
+    EvmConfig: ConfigureEvmGeneric + 'static,
 {
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].
     pub async fn estimate_gas_at(
