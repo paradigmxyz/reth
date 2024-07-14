@@ -3020,15 +3020,22 @@ dependencies = [
 name = "example-exex-stealth-addresses"
 version = "0.0.0"
 dependencies = [
+ "alloy-primitives",
  "alloy-sol-types",
  "chacha20poly1305",
+ "clap",
  "eyre",
  "futures",
  "k256",
  "reth",
+ "reth-chainspec",
+ "reth-cli-commands",
+ "reth-cli-runner",
+ "reth-db",
  "reth-execution-types",
  "reth-exex",
  "reth-node-api",
+ "reth-node-builder",
  "reth-node-ethereum",
  "reth-tracing",
 ]

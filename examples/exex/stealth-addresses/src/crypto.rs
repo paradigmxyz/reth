@@ -43,16 +43,18 @@ pub fn is_ours(view: &SigningKey, eph_pub: &VerifyingKey, expected_view_tag: u8)
     expected_view_tag == shared_bytes[0]
 }
 
-/// Generates the corresponding stealth address private key if the view tag matches.
+/// Generates the corresponding stealth address private key.
+///
+/// It will check the view tag first if passed.
 pub fn stealth_key(
     spend: &SigningKey,
     view: &SigningKey,
     eph_pub: &VerifyingKey,
-    expected_view_tag: u8,
+    expected_view_tag: Option<u8>,
 ) -> Option<SigningKey> {
     let shared_bytes = shared_secret(view, eph_pub);
 
-    if expected_view_tag == shared_bytes[0] {
+    if expected_view_tag.is_none() || (expected_view_tag.is_some_and(|v| v == shared_bytes[0])) {
         let shared = SigningKey::from_slice(shared_bytes.as_slice()).ok()?;
 
         let combined_scalar =
@@ -95,7 +97,7 @@ pub fn try_decrypt_node(view: &SigningKey, eph_pub: &VerifyingKey, data: &[u8]) 
     let key = keccak256(shared_secret(view, eph_pub));
     let cipher = ChaCha20Poly1305::new(key.as_slice().into());
 
-    let decrypted_plaintext = cipher.decrypt(&nonce, &data[NONCE_LEN..]).ok()?;
+    let decrypted_plaintext = cipher.decrypt(nonce, &data[NONCE_LEN..]).ok()?;
     String::from_utf8(decrypted_plaintext).ok()
 }
 
@@ -119,7 +121,7 @@ pub fn try_encrypt_note(
     let key = keccak256(shared_secret(eph, view_pub));
     let cipher = ChaCha20Poly1305::new(key.as_slice().into());
 
-    buf.extend(cipher.encrypt(&nonce, plaintext.as_bytes()).ok()?);
+    buf.extend(cipher.encrypt(nonce, plaintext.as_bytes()).ok()?);
     Some(buf)
 }
 
@@ -133,12 +135,9 @@ mod tests {
         let eph = SigningKey::from_slice(B256::random().as_slice()).unwrap();
         let plaintext = "Stealthy".to_string();
 
-        let cipher_text = try_encrypt_note(&eph, &view.verifying_key(), &plaintext).unwrap();
+        let cipher_text = try_encrypt_note(&eph, view.verifying_key(), &plaintext).unwrap();
 
-        assert_eq!(
-            Some(plaintext),
-            try_decrypt_node(&view, &eph.verifying_key(), &cipher_text)
-        );
+        assert_eq!(Some(plaintext), try_decrypt_node(&view, eph.verifying_key(), &cipher_text));
     }
 
     #[test]
@@ -149,7 +148,7 @@ mod tests {
 
         let (sth_addr, tag) = stealth_address(spend.verifying_key(), view.verifying_key(), &eph);
 
-        let key = stealth_key(&spend, &view, eph.verifying_key(), tag).unwrap();
+        let key = stealth_key(&spend, &view, eph.verifying_key(), Some(tag)).unwrap();
 
         assert_eq!(
             sth_addr,

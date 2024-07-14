@@ -7,12 +7,18 @@ license.workspace = true
 
 [dependencies]
 reth.workspace = true
+reth-chainspec.workspace = true
+reth-cli-commands.workspace = true
+reth-cli-runner.workspace = true
+reth-db.workspace = true
 reth-exex.workspace = true
 reth-node-api.workspace = true
+reth-node-builder.workspace = true
 reth-node-ethereum.workspace = true
 reth-tracing.workspace = true
 reth-execution-types.workspace = true
 
+alloy-primitives.workspace = true
 alloy-sol-types = { workspace = true, features = ["json"] }
 
 k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
@@ -20,3 +26,8 @@ chacha20poly1305 = "0.10.1"
 
 eyre.workspace = true
 futures.workspace = true
+clap.workspace = true
+
+[[bin]]
+name = "stealthy"
+path = "src/main.rs"
