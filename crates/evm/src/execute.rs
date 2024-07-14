@@ -13,6 +13,40 @@ use alloc::vec::Vec;
 pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_storage_errors::provider::ProviderError;
 
+/// Trait that transacts an input (e.g. transaction and height) and produces an output
+/// (e.g. state changes).
+///
+/// The trait cannot commit the state changes to the database directly, see [`EvmCommit`].
+pub trait EvmTransact {
+    /// The environment for the evm.
+    type Env;
+    /// The output produced by the evm.
+    type Output;
+    /// The error produced by the evm.
+    type Error;
+
+    /// Transacts with the current env to produce an output without
+    /// committing to the underlying database.
+    fn transact(&mut self) -> Result<Self::Output, Self::Error>;
+
+    /// Returns a mutable reference to the current env.
+    fn env_mut(&mut self) -> &mut Self::Env;
+
+    /// Returns a reference to the current env.
+    fn env(&self) -> &Self::Env;
+}
+
+/// Trait that can transact an [`EvmTransact::Env`] and
+/// commit state changes to the database.
+pub trait EvmCommit: EvmTransact {
+    /// Commit state changes to the database.
+    fn commit(&mut self, output: Self::Output);
+
+    /// Transact using [`EvmTransact::Env`], commit the state changes and
+    /// return them.
+    fn transact_and_commit(&mut self) -> Result<Self::Output, Self::Error>;
+}
+
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
 ///
