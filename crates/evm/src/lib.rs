@@ -27,7 +27,7 @@ pub mod test_utils;
 /// Trait for configuring the EVM in a generic way
 pub trait ConfigureEvmGeneric: ConfigureEvm + ConfigureEvmEnv {
     /// Returns a new EVM with the given database configured with the given environment settings.
-    fn evm_with_env_ext<'a, DB>(
+    fn evm_with_env_generic<'a, DB>(
         &'a self,
         db: DB,
         env: EnvWithHandlerCfg,

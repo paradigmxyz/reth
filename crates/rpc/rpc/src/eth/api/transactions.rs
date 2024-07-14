@@ -558,7 +558,7 @@ where
         DB: Database,
         DB::Error: Into<EthApiError>,
     {
-        let mut evm = self.inner.evm_config.evm_with_env_ext(db, env);
+        let mut evm = self.inner.evm_config.evm_with_env_generic(db, env);
         let res = evm.transact()?;
         let env = evm.env_with_handler_cfg();
         Ok((res, env))
