@@ -16,6 +16,7 @@ pub struct StealthMeta {
 pub struct Command {
     #[arg(value_parser = parse_stealth_meta_address)]
     recipient: StealthMeta,
+    note: Option<String>,
 }
 
 impl Command {
@@ -33,11 +34,21 @@ impl Command {
         let eph_pub =
             hex::encode_prefixed(ephemeral.verifying_key().to_encoded_point(true).as_bytes());
 
+        info!("🔐 🔐 🔐");
         info!(
             ephemeral_public_key = ?eph_pub,
             ?view_tag,
-            ?stealth_address
+            ?stealth_address,
         );
+
+        if let Some(note) = self.note {
+            let mut payload = vec![view_tag];
+            payload.extend(
+                crypto::try_encrypt_note(&ephemeral, &self.recipient.view_pub, &note).unwrap(),
+            );
+            info!("encrypted note with view tag prefix:\"{}\"", hex::encode_prefixed(payload))
+        }
+        info!("🔐 🔐 🔐");
 
         Ok(())
     }

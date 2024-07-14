@@ -15,7 +15,8 @@ pub struct Command {
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
 pub enum Generator {
-    /// Generate a stealth address from a stealth meta address.
+    /// Generate a stealth address from a stealth meta address alongside an optional encrypted
+    /// note.
     #[command(name = "addr")]
     Address(addr::Command),
     /// Generate a stealth meta address from view and spend private keys.
