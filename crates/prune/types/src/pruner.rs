@@ -55,15 +55,14 @@ pub struct SegmentOutputCheckpoint {
 }
 
 impl SegmentOutputCheckpoint {
+    /// Converts [`PruneCheckpoint`] to [`SegmentOutputCheckpoint`].
+    pub const fn from_prune_checkpoint(checkpoint: PruneCheckpoint) -> Self {
+        Self { block_number: checkpoint.block_number, tx_number: checkpoint.tx_number }
+    }
+
     /// Converts [`SegmentOutputCheckpoint`] to [`PruneCheckpoint`] with the provided [`PruneMode`]
     pub const fn as_prune_checkpoint(&self, prune_mode: PruneMode) -> PruneCheckpoint {
         PruneCheckpoint { block_number: self.block_number, tx_number: self.tx_number, prune_mode }
-    }
-}
-
-impl From<PruneCheckpoint> for SegmentOutputCheckpoint {
-    fn from(checkpoint: PruneCheckpoint) -> Self {
-        Self { block_number: checkpoint.block_number, tx_number: checkpoint.tx_number }
     }
 }
 

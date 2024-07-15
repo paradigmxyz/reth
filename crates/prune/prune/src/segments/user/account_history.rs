@@ -66,7 +66,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         if limiter.is_limit_reached() {
             return Ok(SegmentOutput::not_done(
                 PruneInterruptReason::new(&limiter),
-                input.previous_checkpoint.map(|checkpoint| checkpoint.into()),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
             ))
         }
 
