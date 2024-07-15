@@ -44,7 +44,7 @@ use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
     updates::TrieUpdates,
-    HashedPostState, Nibbles, StateRoot,
+    HashedPostStateSorted, Nibbles, StateRoot,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -3274,7 +3274,7 @@ impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
         &self,
         blocks: Vec<SealedBlockWithSenders>,
         execution_outcome: ExecutionOutcome,
-        hashed_state: HashedPostState,
+        hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
@@ -3302,7 +3302,7 @@ impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
 
         // insert hashes and intermediate merkle nodes
         {
-            HashedStateChanges(hashed_state).write_to_db(self)?;
+            HashedStateChanges(&hashed_state).write_to_db(self)?;
             trie_updates.write_to_database(&self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertHashes);

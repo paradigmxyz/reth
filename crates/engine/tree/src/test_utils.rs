@@ -11,7 +11,7 @@ use reth_prune_types::PruneModes;
 use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
 use reth_stages_api::Pipeline;
 use reth_static_file::StaticFileProducer;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
 use revm::db::BundleState;
 use std::{collections::VecDeque, ops::Range, sync::Arc};
 use tokio::sync::watch;
@@ -103,7 +103,7 @@ pub(crate) fn get_executed_block_with_number(block_number: BlockNumber) -> Execu
             block_number,
             vec![Requests::default()],
         )),
-        Arc::new(HashedPostState::default()),
+        Arc::new(HashedPostStateSorted::default()),
         Arc::new(TrieUpdates::default()),
     )
 }
