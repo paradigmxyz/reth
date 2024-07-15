@@ -6,7 +6,7 @@ use reth_errors::ProviderResult;
 use reth_primitives::{BlockNumber, Receipt, TxNumber};
 use reth_storage_api::ReceiptWriter;
 
-pub(crate) struct DatabaseWriter<'a, W>(pub &'a mut W);
+pub(crate) struct DatabaseWriter<'a, W>(pub(crate) &'a mut W);
 
 impl<'a, W> ReceiptWriter for DatabaseWriter<'a, W>
 where

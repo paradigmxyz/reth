@@ -3,7 +3,7 @@ use reth_errors::ProviderResult;
 use reth_primitives::{BlockNumber, Receipt, StaticFileSegment, TxNumber};
 use reth_storage_api::ReceiptWriter;
 
-pub(crate) struct StaticFileWriter<'a, W>(pub &'a mut W);
+pub(crate) struct StaticFileWriter<'a, W>(pub(crate) &'a mut W);
 
 impl<'a> ReceiptWriter for StaticFileWriter<'a, StaticFileProviderRWRefMut<'_>> {
     fn append_block_receipts(
