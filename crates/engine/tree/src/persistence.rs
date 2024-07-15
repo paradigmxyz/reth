@@ -249,4 +249,21 @@ mod tests {
         let actual_hash = rx.await.unwrap();
         assert_eq!(last_hash, actual_hash);
     }
+
+    #[tokio::test]
+    async fn test_save_blocks_multiple_calls() {
+        let persistence_handle = default_persistence_handle();
+
+        let ranges = [0..1, 1..2, 2..4, 4..5];
+        for range in ranges {
+            let blocks = get_executed_blocks(range).collect::<Vec<_>>();
+            let last_hash = blocks.last().unwrap().block().hash();
+            let (tx, rx) = oneshot::channel();
+
+            persistence_handle.save_blocks(blocks, tx);
+
+            let actual_hash = rx.await.unwrap();
+            assert_eq!(last_hash, actual_hash);
+        }
+    }
 }
