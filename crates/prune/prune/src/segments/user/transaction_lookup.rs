@@ -1,12 +1,14 @@
 use crate::{
-    segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
+    segments::{PruneInput, Segment, SegmentOutput},
     PrunerError,
 };
 use rayon::prelude::*;
 use reth_db::tables;
 use reth_db_api::database::Database;
 use reth_provider::{DatabaseProviderRW, TransactionsProvider};
-use reth_prune_types::{PruneMode, PruneProgress, PrunePurpose, PruneSegment};
+use reth_prune_types::{
+    PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutputCheckpoint,
+};
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -38,12 +40,12 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
         &self,
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
-    ) -> Result<PruneOutput, PrunerError> {
+    ) -> Result<SegmentOutput, PrunerError> {
         let (start, end) = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transaction lookup entries to prune");
-                return Ok(PruneOutput::done())
+                return Ok(SegmentOutput::done())
             }
         }
         .into_inner();
@@ -94,10 +96,10 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
 
         let progress = PruneProgress::new(done, &limiter);
 
-        Ok(PruneOutput {
+        Ok(SegmentOutput {
             progress,
             pruned,
-            checkpoint: Some(PruneOutputCheckpoint {
+            checkpoint: Some(SegmentOutputCheckpoint {
                 block_number: last_pruned_block,
                 tx_number: Some(last_pruned_transaction),
             }),
@@ -107,7 +109,7 @@ impl<DB: Database> Segment<DB> for TransactionLookup {
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, PruneOutput, Segment, TransactionLookup};
+    use crate::segments::{PruneInput, Segment, SegmentOutput, TransactionLookup};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -204,7 +206,7 @@ mod tests {
 
             assert_matches!(
                 result,
-                PruneOutput {progress, pruned, checkpoint: Some(_)}
+                SegmentOutput {progress, pruned, checkpoint: Some(_)}
                     if (progress, pruned) == expected_result
             );
 

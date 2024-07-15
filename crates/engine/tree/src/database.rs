@@ -8,7 +8,7 @@ use reth_provider::{
     bundle_state::HashedStateChanges, BlockWriter, HistoryWriter, OriginalValuesKnown,
     ProviderFactory, StageCheckpointWriter, StateWriter,
 };
-use reth_prune::{PruneProgress, Pruner};
+use reth_prune::{Pruner, PrunerOutput};
 use reth_stages_types::{StageCheckpoint, StageId};
 use std::sync::mpsc::{Receiver, SendError, Sender};
 use tokio::sync::oneshot;
@@ -118,7 +118,7 @@ impl<DB: Database> DatabaseService<DB> {
 
     /// Prunes block data before the given block hash according to the configured prune
     /// configuration.
-    fn prune_before(&mut self, block_num: u64) -> PruneProgress {
+    fn prune_before(&mut self, block_num: u64) -> PrunerOutput {
         // TODO: doing this properly depends on pruner segment changes
         self.pruner.run(block_num).expect("todo: handle errors")
     }
@@ -201,7 +201,7 @@ pub enum DatabaseAction {
 
     /// Prune associated block data before the given block number, according to already-configured
     /// prune modes.
-    PruneBefore((u64, oneshot::Sender<PruneProgress>)),
+    PruneBefore((u64, oneshot::Sender<PrunerOutput>)),
 }
 
 /// A handle to the database service
@@ -246,7 +246,7 @@ impl DatabaseServiceHandle {
 
     /// Tells the database service to remove block data before the given hash, according to the
     /// configured prune config.
-    pub async fn prune_before(&self, block_num: u64) -> PruneProgress {
+    pub async fn prune_before(&self, block_num: u64) -> PrunerOutput {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(DatabaseAction::PruneBefore((block_num, tx)))
