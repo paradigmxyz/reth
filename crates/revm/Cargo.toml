@@ -33,6 +33,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-trie.workspace = true
+reth-ethereum-forks.workspace = true
 
 [features]
 default = ["std", "c-kzg"]

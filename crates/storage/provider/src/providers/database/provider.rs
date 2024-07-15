@@ -15,7 +15,7 @@ use crate::{
 };
 use itertools::{izip, Itertools};
 use reth_chainspec::{ChainInfo, ChainSpec, EthereumHardforks};
-use reth_db::{tables, BlockNumberList};
+use reth_db::{tables, BlockNumberList, PlainAccountState, PlainStorageState};
 use reth_db_api::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, RangeWalker},
@@ -623,70 +623,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         let mut senders =
             self.get::<tables::TransactionSenders>(first_transaction..=last_transaction)?;
 
-        // Recover senders manually if not found in db
-        // NOTE: Transactions are always guaranteed to be in the database whereas
-        // senders might be pruned.
-        if senders.len() != transactions.len() {
-            if senders.len() > transactions.len() {
-                error!(target: "providers::db", senders=%senders.len(), transactions=%transactions.len(),
-                    first_tx=%first_transaction, last_tx=%last_transaction,
-                    "unexpected senders and transactions mismatch");
-            }
-            let missing = transactions.len().saturating_sub(senders.len());
-            senders.reserve(missing);
-            // Find all missing senders, their corresponding tx numbers and indexes to the original
-            // `senders` vector at which the recovered senders will be inserted.
-            let mut missing_senders = Vec::with_capacity(missing);
-            {
-                let mut senders = senders.iter().peekable();
-
-                // `transactions` contain all entries. `senders` contain _some_ of the senders for
-                // these transactions. Both are sorted and indexed by `TxNumber`.
-                //
-                // The general idea is to iterate on both `transactions` and `senders`, and advance
-                // the `senders` iteration only if it matches the current `transactions` entry's
-                // `TxNumber`. Otherwise, add the transaction to the list of missing senders.
-                for (i, (tx_number, transaction)) in transactions.iter().enumerate() {
-                    if let Some((sender_tx_number, _)) = senders.peek() {
-                        if sender_tx_number == tx_number {
-                            // If current sender's `TxNumber` matches current transaction's
-                            // `TxNumber`, advance the senders iterator.
-                            senders.next();
-                        } else {
-                            // If current sender's `TxNumber` doesn't match current transaction's
-                            // `TxNumber`, add it to missing senders.
-                            missing_senders.push((i, tx_number, transaction));
-                        }
-                    } else {
-                        // If there's no more senders left, but we're still iterating over
-                        // transactions, add them to missing senders
-                        missing_senders.push((i, tx_number, transaction));
-                    }
-                }
-            }
-
-            // Recover senders
-            let recovered_senders = TransactionSigned::recover_signers(
-                missing_senders.iter().map(|(_, _, tx)| *tx).collect::<Vec<_>>(),
-                missing_senders.len(),
-            )
-            .ok_or(ProviderError::SenderRecoveryError)?;
-
-            // Insert recovered senders along with tx numbers at the corresponding indexes to the
-            // original `senders` vector
-            for ((i, tx_number, _), sender) in missing_senders.into_iter().zip(recovered_senders) {
-                // Insert will put recovered senders at necessary positions and shift the rest
-                senders.insert(i, (*tx_number, sender));
-            }
-
-            // Debug assertions which are triggered during the test to ensure that all senders are
-            // present and sorted
-            debug_assert_eq!(senders.len(), transactions.len(), "missing one or more senders");
-            debug_assert!(
-                senders.iter().tuple_windows().all(|(a, b)| a.0 < b.0),
-                "senders not sorted"
-            );
-        }
+        recover_block_senders(&mut senders, &transactions, first_transaction, last_transaction)?;
 
         // Merge transaction into blocks
         let mut block_tx = Vec::with_capacity(block_bodies.len());
@@ -855,18 +792,69 @@ impl<TX: DbTx> DatabaseProvider<TX> {
         let storage_changeset = self.get::<tables::StorageChangeSets>(storage_range)?;
         let account_changeset = self.get::<tables::AccountChangeSets>(range)?;
 
-        // iterate previous value and get plain state value to create changeset
-        // Double option around Account represent if Account state is know (first option) and
-        // account is removed (Second Option)
-
-        let mut state: BundleStateInit = HashMap::new();
-
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
         // History state. Accessing history state can be tricky but we are not gaining
         // anything.
         let mut plain_accounts_cursor = self.tx.cursor_read::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_read::<tables::PlainStorageState>()?;
+
+        let (state, reverts) = self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            &mut plain_accounts_cursor,
+            &mut plain_storage_cursor,
+        )?;
+
+        // iterate over block body and create ExecutionResult
+        let mut receipt_iter =
+            self.get::<tables::Receipts>(from_transaction_num..=to_transaction_num)?.into_iter();
+
+        let mut receipts = Vec::new();
+        // loop break if we are at the end of the blocks.
+        for (_, block_body) in block_bodies {
+            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
+            for _ in block_body.tx_num_range() {
+                if let Some((_, receipt)) = receipt_iter.next() {
+                    block_receipts.push(Some(receipt));
+                }
+            }
+            receipts.push(block_receipts);
+        }
+
+        Ok(ExecutionOutcome::new_init(
+            state,
+            reverts,
+            Vec::new(),
+            receipts.into(),
+            start_block_number,
+            Vec::new(),
+        ))
+    }
+
+    /// Populate a [`BundleStateInit`] and [`RevertsInit`] using cursors over the
+    /// [`PlainAccountState`] and [`PlainStorageState`] tables, based on the given storage and
+    /// account changesets.
+    fn populate_bundle_state<A, S>(
+        &self,
+        account_changeset: Vec<(u64, AccountBeforeTx)>,
+        storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
+        plain_accounts_cursor: &mut A,
+        plain_storage_cursor: &mut S,
+    ) -> ProviderResult<(BundleStateInit, RevertsInit)>
+    where
+        A: DbCursorRO<PlainAccountState>,
+        S: DbDupCursorRO<PlainStorageState>,
+    {
+        // iterate previous value and get plain state value to create changeset
+        // Double option around Account represent if Account state is know (first option) and
+        // account is removed (Second Option)
+        let mut state: BundleStateInit = HashMap::new();
+
+        // This is not working for blocks that are not at tip. as plain state is not the last
+        // state of end range. We should rename the functions or add support to access
+        // History state. Accessing history state can be tricky but we are not gaining
+        // anything.
 
         let mut reverts: RevertsInit = HashMap::new();
 
@@ -922,30 +910,7 @@ impl<TX: DbTx> DatabaseProvider<TX> {
                 .push(old_storage);
         }
 
-        // iterate over block body and create ExecutionResult
-        let mut receipt_iter =
-            self.get::<tables::Receipts>(from_transaction_num..=to_transaction_num)?.into_iter();
-
-        let mut receipts = Vec::new();
-        // loop break if we are at the end of the blocks.
-        for (_, block_body) in block_bodies {
-            let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
-            for _ in block_body.tx_num_range() {
-                if let Some((_, receipt)) = receipt_iter.next() {
-                    block_receipts.push(Some(receipt));
-                }
-            }
-            receipts.push(block_receipts);
-        }
-
-        Ok(ExecutionOutcome::new_init(
-            state,
-            reverts,
-            Vec::new(),
-            receipts.into(),
-            start_block_number,
-            Vec::new(),
-        ))
+        Ok((state, reverts))
     }
 }
 
@@ -995,12 +960,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
         let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
 
-        // iterate previous value and get plain state value to create changeset
-        // Double option around Account represent if Account state is know (first option) and
-        // account is removed (Second Option)
-
-        let mut state: BundleStateInit = HashMap::new();
-
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
         // History state. Accessing history state can be tricky but we are not gaining
@@ -1008,59 +967,12 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
-        let mut reverts: RevertsInit = HashMap::new();
-
-        // add account changeset changes
-        for (block_number, account_before) in account_changeset.into_iter().rev() {
-            let AccountBeforeTx { info: old_info, address } = account_before;
-            match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((old_info, new_info, HashMap::new()));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    // overwrite old account state.
-                    entry.get_mut().0 = old_info;
-                }
-            }
-            // insert old info into reverts.
-            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
-        }
-
-        // add storage changeset changes
-        for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
-            let BlockNumberAddress((block_number, address)) = block_and_address;
-            // get account state or insert from plain state.
-            let account_state = match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((present_info, present_info, HashMap::new()))
-                }
-                hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            };
-
-            // match storage.
-            match account_state.2.entry(old_storage.key) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_storage = plain_storage_cursor
-                        .seek_by_key_subkey(address, old_storage.key)?
-                        .filter(|storage| storage.key == old_storage.key)
-                        .unwrap_or_default();
-                    entry.insert((old_storage.value, new_storage.value));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().0 = old_storage.value;
-                }
-            };
-
-            reverts
-                .entry(block_number)
-                .or_default()
-                .entry(address)
-                .or_default()
-                .1
-                .push(old_storage);
-        }
+        let (state, _) = self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            &mut plain_accounts_cursor,
+            &mut plain_storage_cursor,
+        )?;
 
         // iterate over local plain state remove all account and all storages.
         for (address, (old_account, new_account, storage)) in &state {
@@ -1144,12 +1056,6 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
         let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
 
-        // iterate previous value and get plain state value to create changeset
-        // Double option around Account represent if Account state is know (first option) and
-        // account is removed (Second Option)
-
-        let mut state: BundleStateInit = HashMap::new();
-
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
         // History state. Accessing history state can be tricky but we are not gaining
@@ -1157,59 +1063,14 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
 
-        let mut reverts: RevertsInit = HashMap::new();
-
-        // add account changeset changes
-        for (block_number, account_before) in account_changeset.into_iter().rev() {
-            let AccountBeforeTx { info: old_info, address } = account_before;
-            match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((old_info, new_info, HashMap::new()));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    // overwrite old account state.
-                    entry.get_mut().0 = old_info;
-                }
-            }
-            // insert old info into reverts.
-            reverts.entry(block_number).or_default().entry(address).or_default().0 = Some(old_info);
-        }
-
-        // add storage changeset changes
-        for (block_and_address, old_storage) in storage_changeset.into_iter().rev() {
-            let BlockNumberAddress((block_number, address)) = block_and_address;
-            // get account state or insert from plain state.
-            let account_state = match state.entry(address) {
-                hash_map::Entry::Vacant(entry) => {
-                    let present_info = plain_accounts_cursor.seek_exact(address)?.map(|kv| kv.1);
-                    entry.insert((present_info, present_info, HashMap::new()))
-                }
-                hash_map::Entry::Occupied(entry) => entry.into_mut(),
-            };
-
-            // match storage.
-            match account_state.2.entry(old_storage.key) {
-                hash_map::Entry::Vacant(entry) => {
-                    let new_storage = plain_storage_cursor
-                        .seek_by_key_subkey(address, old_storage.key)?
-                        .filter(|storage| storage.key == old_storage.key)
-                        .unwrap_or_default();
-                    entry.insert((old_storage.value, new_storage.value));
-                }
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().0 = old_storage.value;
-                }
-            };
-
-            reverts
-                .entry(block_number)
-                .or_default()
-                .entry(address)
-                .or_default()
-                .1
-                .push(old_storage);
-        }
+        // populate bundle state and reverts from changesets / state cursors, to iterate over,
+        // remove, and return later
+        let (state, reverts) = self.populate_bundle_state(
+            account_changeset,
+            storage_changeset,
+            &mut plain_accounts_cursor,
+            &mut plain_storage_cursor,
+        )?;
 
         // iterate over local plain state remove all account and all storages.
         for (address, (old_account, new_account, storage)) in &state {
@@ -1394,70 +1255,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
         let mut senders =
             self.take::<tables::TransactionSenders>(first_transaction..=last_transaction)?;
 
-        // Recover senders manually if not found in db
-        // NOTE: Transactions are always guaranteed to be in the database whereas
-        // senders might be pruned.
-        if senders.len() != transactions.len() {
-            if senders.len() > transactions.len() {
-                error!(target: "providers::db", senders=%senders.len(), transactions=%transactions.len(),
-                    first_tx=%first_transaction, last_tx=%last_transaction,
-                    "unexpected senders and transactions mismatch");
-            }
-            let missing = transactions.len().saturating_sub(senders.len());
-            senders.reserve(missing);
-            // Find all missing senders, their corresponding tx numbers and indexes to the original
-            // `senders` vector at which the recovered senders will be inserted.
-            let mut missing_senders = Vec::with_capacity(missing);
-            {
-                let mut senders = senders.iter().peekable();
-
-                // `transactions` contain all entries. `senders` contain _some_ of the senders for
-                // these transactions. Both are sorted and indexed by `TxNumber`.
-                //
-                // The general idea is to iterate on both `transactions` and `senders`, and advance
-                // the `senders` iteration only if it matches the current `transactions` entry's
-                // `TxNumber`. Otherwise, add the transaction to the list of missing senders.
-                for (i, (tx_number, transaction)) in transactions.iter().enumerate() {
-                    if let Some((sender_tx_number, _)) = senders.peek() {
-                        if sender_tx_number == tx_number {
-                            // If current sender's `TxNumber` matches current transaction's
-                            // `TxNumber`, advance the senders iterator.
-                            senders.next();
-                        } else {
-                            // If current sender's `TxNumber` doesn't match current transaction's
-                            // `TxNumber`, add it to missing senders.
-                            missing_senders.push((i, tx_number, transaction));
-                        }
-                    } else {
-                        // If there's no more senders left, but we're still iterating over
-                        // transactions, add them to missing senders
-                        missing_senders.push((i, tx_number, transaction));
-                    }
-                }
-            }
-
-            // Recover senders
-            let recovered_senders = TransactionSigned::recover_signers(
-                missing_senders.iter().map(|(_, _, tx)| *tx).collect::<Vec<_>>(),
-                missing_senders.len(),
-            )
-            .ok_or(ProviderError::SenderRecoveryError)?;
-
-            // Insert recovered senders along with tx numbers at the corresponding indexes to the
-            // original `senders` vector
-            for ((i, tx_number, _), sender) in missing_senders.into_iter().zip(recovered_senders) {
-                // Insert will put recovered senders at necessary positions and shift the rest
-                senders.insert(i, (*tx_number, sender));
-            }
-
-            // Debug assertions which are triggered during the test to ensure that all senders are
-            // present and sorted
-            debug_assert_eq!(senders.len(), transactions.len(), "missing one or more senders");
-            debug_assert!(
-                senders.iter().tuple_windows().all(|(a, b)| a.0 < b.0),
-                "senders not sorted"
-            );
-        }
+        recover_block_senders(&mut senders, &transactions, first_transaction, last_transaction)?;
 
         // Remove TransactionHashNumbers
         let mut tx_hash_cursor = self.tx.cursor_write::<tables::TransactionHashNumbers>()?;
@@ -3581,6 +3379,82 @@ impl<TX: DbTxMut> FinalizedBlockWriter for DatabaseProvider<TX> {
             .tx
             .put::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock, block_number)?)
     }
+}
+
+/// Helper method to recover senders for any blocks in the db which do not have senders. This
+/// compares the length of the input senders [`Vec`], with the length of given transactions [`Vec`],
+/// and will add to the input senders vec if there are more transactions.
+///
+/// NOTE: This will modify the input senders list, which is why a mutable reference is required.
+fn recover_block_senders(
+    senders: &mut Vec<(u64, Address)>,
+    transactions: &[(u64, TransactionSigned)],
+    first_transaction: u64,
+    last_transaction: u64,
+) -> ProviderResult<()> {
+    // Recover senders manually if not found in db
+    // NOTE: Transactions are always guaranteed to be in the database whereas
+    // senders might be pruned.
+    if senders.len() != transactions.len() {
+        if senders.len() > transactions.len() {
+            error!(target: "providers::db", senders=%senders.len(), transactions=%transactions.len(),
+                first_tx=%first_transaction, last_tx=%last_transaction,
+                "unexpected senders and transactions mismatch");
+        }
+        let missing = transactions.len().saturating_sub(senders.len());
+        senders.reserve(missing);
+        // Find all missing senders, their corresponding tx numbers and indexes to the original
+        // `senders` vector at which the recovered senders will be inserted.
+        let mut missing_senders = Vec::with_capacity(missing);
+        {
+            let mut senders = senders.iter().peekable();
+
+            // `transactions` contain all entries. `senders` contain _some_ of the senders for
+            // these transactions. Both are sorted and indexed by `TxNumber`.
+            //
+            // The general idea is to iterate on both `transactions` and `senders`, and advance
+            // the `senders` iteration only if it matches the current `transactions` entry's
+            // `TxNumber`. Otherwise, add the transaction to the list of missing senders.
+            for (i, (tx_number, transaction)) in transactions.iter().enumerate() {
+                if let Some((sender_tx_number, _)) = senders.peek() {
+                    if sender_tx_number == tx_number {
+                        // If current sender's `TxNumber` matches current transaction's
+                        // `TxNumber`, advance the senders iterator.
+                        senders.next();
+                    } else {
+                        // If current sender's `TxNumber` doesn't match current transaction's
+                        // `TxNumber`, add it to missing senders.
+                        missing_senders.push((i, tx_number, transaction));
+                    }
+                } else {
+                    // If there's no more senders left, but we're still iterating over
+                    // transactions, add them to missing senders
+                    missing_senders.push((i, tx_number, transaction));
+                }
+            }
+        }
+
+        // Recover senders
+        let recovered_senders = TransactionSigned::recover_signers(
+            missing_senders.iter().map(|(_, _, tx)| *tx).collect::<Vec<_>>(),
+            missing_senders.len(),
+        )
+        .ok_or(ProviderError::SenderRecoveryError)?;
+
+        // Insert recovered senders along with tx numbers at the corresponding indexes to the
+        // original `senders` vector
+        for ((i, tx_number, _), sender) in missing_senders.into_iter().zip(recovered_senders) {
+            // Insert will put recovered senders at necessary positions and shift the rest
+            senders.insert(i, (*tx_number, sender));
+        }
+
+        // Debug assertions which are triggered during the test to ensure that all senders are
+        // present and sorted
+        debug_assert_eq!(senders.len(), transactions.len(), "missing one or more senders");
+        debug_assert!(senders.iter().tuple_windows().all(|(a, b)| a.0 < b.0), "senders not sorted");
+    }
+
+    Ok(())
 }
 
 fn range_size_hint(range: &impl RangeBounds<TxNumber>) -> Option<usize> {

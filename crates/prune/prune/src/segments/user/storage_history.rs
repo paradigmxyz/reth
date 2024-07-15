@@ -1,6 +1,7 @@
 use crate::{
     segments::{
-        history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint, Segment,
+        user::history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint,
+        Segment,
     },
     PrunerError,
 };
@@ -11,7 +12,9 @@ use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress},
 };
 use reth_provider::DatabaseProviderRW;
-use reth_prune_types::{PruneInterruptReason, PruneMode, PruneProgress, PruneSegment};
+use reth_prune_types::{
+    PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
+};
 use rustc_hash::FxHashMap;
 use tracing::{instrument, trace};
 
@@ -39,6 +42,10 @@ impl<DB: Database> Segment<DB> for StorageHistory {
 
     fn mode(&self) -> Option<PruneMode> {
         Some(self.mode)
+    }
+
+    fn purpose(&self) -> PrunePurpose {
+        PrunePurpose::User
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
@@ -132,7 +139,7 @@ impl<DB: Database> Segment<DB> for StorageHistory {
 #[cfg(test)]
 mod tests {
     use crate::segments::{
-        storage_history::STORAGE_HISTORY_TABLES_TO_PRUNE, PruneInput, PruneOutput, Segment,
+        user::storage_history::STORAGE_HISTORY_TABLES_TO_PRUNE, PruneInput, PruneOutput, Segment,
         StorageHistory,
     };
     use alloy_primitives::{BlockNumber, B256};

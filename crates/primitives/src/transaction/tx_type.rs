@@ -4,6 +4,11 @@ use bytes::Buf;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
+/// For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
+/// parameter. In the case of a 3, the full transaction type is read from the buffer as a
+/// single byte.
+const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
+
 /// Identifier for legacy transaction, however [`TxLegacy`](crate::TxLegacy) this is technically not
 /// typed.
 pub const LEGACY_TX_TYPE_ID: u8 = 0;
@@ -139,20 +144,17 @@ impl Compact for TxType {
             Self::Eip2930 => 1,
             Self::Eip1559 => 2,
             Self::Eip4844 => {
-                // Write the full transaction type to the buffer when encoding > 3.
-                // This allows compat decoding the [TyType] from a single byte as
-                // opposed to 2 bits for the backwards-compatible encoding.
                 buf.put_u8(self as u8);
-                3
+                COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
             Self::Eip7702 => {
                 buf.put_u8(self as u8);
-                3
+                COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
             #[cfg(feature = "optimism")]
             Self::Deposit => {
                 buf.put_u8(self as u8);
-                3
+                COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
         }
     }
@@ -166,7 +168,7 @@ impl Compact for TxType {
                 0 => Self::Legacy,
                 1 => Self::Eip2930,
                 2 => Self::Eip1559,
-                3 => {
+                COMPACT_EXTENDED_IDENTIFIER_FLAG => {
                     let extended_identifier = buf.get_u8();
                     match extended_identifier {
                         EIP4844_TX_TYPE_ID => Self::Eip4844,
@@ -252,10 +254,10 @@ mod tests {
             (TxType::Legacy, 0, vec![]),
             (TxType::Eip2930, 1, vec![]),
             (TxType::Eip1559, 2, vec![]),
-            (TxType::Eip4844, 3, vec![EIP4844_TX_TYPE_ID]),
-            (TxType::Eip7702, 3, vec![EIP7702_TX_TYPE_ID]),
+            (TxType::Eip4844, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP4844_TX_TYPE_ID]),
+            (TxType::Eip7702, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP7702_TX_TYPE_ID]),
             #[cfg(feature = "optimism")]
-            (TxType::Deposit, 3, vec![DEPOSIT_TX_TYPE_ID]),
+            (TxType::Deposit, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![DEPOSIT_TX_TYPE_ID]),
         ];
 
         for (tx_type, expected_identifier, expected_buf) in cases {
@@ -275,10 +277,10 @@ mod tests {
             (TxType::Legacy, 0, vec![]),
             (TxType::Eip2930, 1, vec![]),
             (TxType::Eip1559, 2, vec![]),
-            (TxType::Eip4844, 3, vec![EIP4844_TX_TYPE_ID]),
-            (TxType::Eip7702, 3, vec![EIP7702_TX_TYPE_ID]),
+            (TxType::Eip4844, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP4844_TX_TYPE_ID]),
+            (TxType::Eip7702, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![EIP7702_TX_TYPE_ID]),
             #[cfg(feature = "optimism")]
-            (TxType::Deposit, 3, vec![DEPOSIT_TX_TYPE_ID]),
+            (TxType::Deposit, COMPACT_EXTENDED_IDENTIFIER_FLAG, vec![DEPOSIT_TX_TYPE_ID]),
         ];
 
         for (expected_type, identifier, buf) in cases {

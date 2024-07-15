@@ -274,7 +274,7 @@ mod tests {
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, Header};
+    use reth_primitives::Header;
     use std::{future::poll_fn, sync::Arc};
 
     struct TestHarness {
@@ -295,7 +295,7 @@ mod tests {
             let client = TestFullBlockClient::default();
             let header = Header {
                 base_fee_per_gas: Some(7),
-                gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+                gas_limit: chain_spec.max_gas_limit,
                 ..Default::default()
             }
             .seal_slow();

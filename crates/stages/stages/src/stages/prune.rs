@@ -43,7 +43,7 @@ impl<DB: Database> Stage<DB> for PruneStage {
         let mut pruner = PrunerBuilder::default()
             .segments(self.prune_modes.clone())
             .delete_limit(self.commit_threshold)
-            .build();
+            .build(provider.static_file_provider().clone());
 
         let result = pruner.run(provider, input.target())?;
         if result.is_finished() {

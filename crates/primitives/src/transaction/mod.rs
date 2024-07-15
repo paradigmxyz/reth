@@ -2,9 +2,11 @@
 
 #[cfg(any(feature = "arbitrary", feature = "zstd-codec"))]
 use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
-use crate::{keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind, B256, U256};
+use crate::{
+    eip7702::SignedAuthorization, keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind,
+    B256, U256,
+};
 
-use alloy_eips::eip7702::SignedAuthorization;
 use alloy_rlp::{
     Decodable, Encodable, Error as RlpError, Header, EMPTY_LIST_CODE, EMPTY_STRING_CODE,
 };
@@ -1690,6 +1692,60 @@ impl IntoRecoveredTransaction for TransactionSignedEcRecovered {
     #[inline]
     fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
         self.clone()
+    }
+}
+
+/// Generic wrapper with encoded Bytes, such as transaction data.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WithEncoded<T>(Bytes, pub T);
+
+impl<T> From<(Bytes, T)> for WithEncoded<T> {
+    fn from(value: (Bytes, T)) -> Self {
+        Self(value.0, value.1)
+    }
+}
+
+impl<T> WithEncoded<T> {
+    /// Wraps the value with the bytes.
+    pub const fn new(bytes: Bytes, value: T) -> Self {
+        Self(bytes, value)
+    }
+
+    /// Get the encoded bytes
+    pub fn encoded_bytes(&self) -> Bytes {
+        self.0.clone()
+    }
+
+    /// Get the underlying value
+    pub const fn value(&self) -> &T {
+        &self.1
+    }
+
+    /// Returns ownership of the underlying value.
+    pub fn into_value(self) -> T {
+        self.1
+    }
+
+    /// Transform the value
+    pub fn transform<F: From<T>>(self) -> WithEncoded<F> {
+        WithEncoded(self.0, self.1.into())
+    }
+
+    /// Split the wrapper into [`Bytes`] and value tuple
+    pub fn split(self) -> (Bytes, T) {
+        (self.0, self.1)
+    }
+
+    /// Maps the inner value to a new value using the given function.
+    pub fn map<U, F: FnOnce(T) -> U>(self, op: F) -> WithEncoded<U> {
+        WithEncoded(self.0, op(self.1))
+    }
+}
+
+impl<T> WithEncoded<Option<T>> {
+    /// returns `None` if the inner value is `None`, otherwise returns `Some(WithEncoded<T>)`.
+    pub fn transpose(self) -> Option<WithEncoded<T>> {
+        self.1.map(|v| WithEncoded(self.0, v))
     }
 }
 

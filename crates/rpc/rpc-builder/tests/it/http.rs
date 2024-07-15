@@ -304,6 +304,7 @@ where
     OtterscanClient::get_header_by_number(client, block_number).await.unwrap();
 
     OtterscanClient::has_code(client, address, None).await.unwrap();
+    OtterscanClient::has_code(client, address, Some(block_number)).await.unwrap();
 
     OtterscanClient::get_api_level(client).await.unwrap();
 

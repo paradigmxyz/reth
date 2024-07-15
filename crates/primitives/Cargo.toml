@@ -102,7 +102,6 @@ c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg"]
 zstd-codec = ["dep:zstd"]
 optimism = [
     "reth-chainspec/optimism",
-    "reth-codecs/optimism",
     "reth-ethereum-forks/optimism",
     "revm-primitives/optimism",
 ]

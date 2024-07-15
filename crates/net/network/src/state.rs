@@ -20,10 +20,11 @@ use reth_eth_wire::{
 use reth_network_api::PeerKind;
 use reth_network_peers::PeerId;
 use reth_primitives::{ForkId, B256};
-use reth_storage_api::BlockNumReader;
 use std::{
     collections::{HashMap, VecDeque},
+    fmt,
     net::{IpAddr, SocketAddr},
+    ops::Deref,
     sync::{
         atomic::{AtomicU64, AtomicUsize},
         Arc,
@@ -36,6 +37,30 @@ use tracing::{debug, trace};
 /// Cache limit of blocks to keep track of for a single peer.
 const PEER_BLOCK_CACHE_LIMIT: u32 = 512;
 
+/// Wrapper type for the [`BlockNumReader`] trait.
+pub(crate) struct BlockNumReader(Box<dyn reth_storage_api::BlockNumReader>);
+
+impl BlockNumReader {
+    /// Create a new instance with the given reader.
+    pub fn new(reader: impl reth_storage_api::BlockNumReader + 'static) -> Self {
+        Self(Box::new(reader))
+    }
+}
+
+impl fmt::Debug for BlockNumReader {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BlockNumReader").field("inner", &"<dyn BlockNumReader>").finish()
+    }
+}
+
+impl Deref for BlockNumReader {
+    type Target = Box<dyn reth_storage_api::BlockNumReader>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// The [`NetworkState`] keeps track of the state of all peers in the network.
 ///
 /// This includes:
@@ -47,7 +72,7 @@ const PEER_BLOCK_CACHE_LIMIT: u32 = 512;
 ///
 /// This type is also responsible for responding for received request.
 #[derive(Debug)]
-pub struct NetworkState<C> {
+pub struct NetworkState {
     /// All active peers and their state.
     active_peers: HashMap<PeerId, ActivePeer>,
     /// Manages connections to peers.
@@ -58,7 +83,7 @@ pub struct NetworkState<C> {
     ///
     /// This type is used to fetch the block number after we established a session and received the
     /// [Status] block hash.
-    client: C,
+    client: BlockNumReader,
     /// Network discovery.
     discovery: Discovery,
     /// The type that handles requests.
@@ -69,13 +94,10 @@ pub struct NetworkState<C> {
     state_fetcher: StateFetcher,
 }
 
-impl<C> NetworkState<C>
-where
-    C: BlockNumReader,
-{
+impl NetworkState {
     /// Create a new state instance with the given params
     pub(crate) fn new(
-        client: C,
+        client: BlockNumReader,
         discovery: Discovery,
         peers_manager: PeersManager,
         num_active_peers: Arc<AtomicUsize>,
@@ -523,8 +545,12 @@ pub(crate) enum StateAction {
 #[cfg(test)]
 mod tests {
     use crate::{
-        discovery::Discovery, fetch::StateFetcher, message::PeerRequestSender, peers::PeersManager,
-        state::NetworkState, PeerRequest,
+        discovery::Discovery,
+        fetch::StateFetcher,
+        message::PeerRequestSender,
+        peers::PeersManager,
+        state::{BlockNumReader, NetworkState},
+        PeerRequest,
     };
     use reth_eth_wire::{
         capability::{Capabilities, Capability},
@@ -542,14 +568,14 @@ mod tests {
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
     /// Returns a testing instance of the [`NetworkState`].
-    fn state() -> NetworkState<NoopProvider> {
+    fn state() -> NetworkState {
         let peers = PeersManager::default();
         let handle = peers.handle();
         NetworkState {
             active_peers: Default::default(),
             peers_manager: Default::default(),
             queued_messages: Default::default(),
-            client: NoopProvider::default(),
+            client: BlockNumReader(Box::new(NoopProvider::default())),
             discovery: Discovery::noop(),
             state_fetcher: StateFetcher::new(handle, Default::default()),
         }
