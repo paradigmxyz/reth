@@ -322,7 +322,7 @@ impl HashedStorage {
 }
 
 /// Sorted hashed post state optimized for iterating during state trie calculation.
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct HashedPostStateSorted {
     /// Updated state of accounts.
     pub(crate) accounts: HashedAccountsSorted,
@@ -343,7 +343,7 @@ impl HashedPostStateSorted {
 }
 
 /// Sorted account state optimized for iterating during state trie calculation.
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Default, Debug)]
 pub struct HashedAccountsSorted {
     /// Sorted collection of hashed addresses and their account info.
     pub(crate) accounts: Vec<(B256, Account)>,
