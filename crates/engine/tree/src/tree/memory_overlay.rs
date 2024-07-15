@@ -84,14 +84,14 @@ impl<H> StateRootProvider for MemoryOverlayStateProvider<H>
 where
     H: StateRootProvider + Send,
 {
-    // TODO: Currently this does not re-use available in-memory trie nodes.
+    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn hashed_state_root(&self, hashed_state: &HashedPostState) -> ProviderResult<B256> {
         let mut state = self.hashed_post_state.clone();
         state.extend(hashed_state.clone());
         self.historical.hashed_state_root(&state)
     }
 
-    // TODO: Currently this does not re-use available in-memory trie nodes.
+    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn hashed_state_root_with_updates(
         &self,
         hashed_state: &HashedPostState,
@@ -106,7 +106,7 @@ impl<H> StateProofProvider for MemoryOverlayStateProvider<H>
 where
     H: StateProofProvider + Send,
 {
-    // TODO: Currently this does not re-use available in-memory trie nodes.
+    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn hashed_proof(
         &self,
         hashed_state: &HashedPostState,
