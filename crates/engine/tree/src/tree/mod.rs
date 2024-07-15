@@ -855,6 +855,33 @@ where
     }
 }
 
+impl<P, E, T> InMemoryState for EngineApiTreeHandlerImpl<P, E, T>
+where
+    T: EngineTypes,
+{
+    fn in_memory_state_by_hash(&self, hash: B256) -> Option<Arc<State>> {
+        let sealed_block = self.state.tree_state.block_by_hash(hash)?;
+        Some(Arc::new(State::new(sealed_block)))
+    }
+
+    fn in_memory_state_by_number(&self, number: u64) -> Option<Arc<State>> {
+        let sealed_block = self.state.tree_state.block_by_number(number)?;
+        Some(Arc::new(State::new(sealed_block)))
+    }
+
+    fn in_memory_current_head(&self) -> Option<(BlockNumber, B256)> {
+        self.state.tree_state.current_head
+    }
+
+    fn in_memory_pending_state(&self) -> Option<Arc<State>> {
+        self.state.tree_state.pending.clone()
+    }
+
+    fn in_memory_pending_block_hash(&self) -> Option<B256> {
+        self.state.tree_state.pending.as_ref().map(|state| state.block_hash)
+    }
+}
+
 /// The state of the persistence task.
 #[derive(Default, Debug)]
 struct PersistenceState {
@@ -930,33 +957,6 @@ impl State {
     }
 }
 
-impl<P, E, T> InMemoryState for EngineApiTreeHandlerImpl<P, E, T>
-where
-    T: EngineTypes,
-{
-    fn in_memory_state_by_hash(&self, hash: B256) -> Option<Arc<State>> {
-        let sealed_block = self.state.tree_state.block_by_hash(hash)?;
-        Some(Arc::new(State::new(sealed_block)))
-    }
-
-    fn in_memory_state_by_number(&self, number: u64) -> Option<Arc<State>> {
-        let sealed_block = self.state.tree_state.block_by_number(number)?;
-        Some(Arc::new(State::new(sealed_block)))
-    }
-
-    fn in_memory_current_head(&self) -> Option<(BlockNumber, B256)> {
-        self.state.tree_state.current_head
-    }
-
-    fn in_memory_pending_state(&self) -> Option<Arc<State>> {
-        self.state.tree_state.pending.clone()
-    }
-
-    fn in_memory_pending_block_hash(&self) -> Option<B256> {
-        self.state.tree_state.pending.as_ref().map(|state| state.block_hash)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -976,8 +976,8 @@ mod tests {
         sf_action_rx: Receiver<StaticFileAction>,
     }
 
-    fn get_default_tree(number_of_blocks: u64) -> TestHarness {
-        let blocks: Vec<_> = get_executed_blocks(0..number_of_blocks).collect();
+    fn get_default_test_harness(number_of_blocks: u64) -> TestHarness {
+        let blocks = get_executed_blocks(number_of_blocks);
 
         let mut blocks_by_hash = HashMap::new();
         let mut blocks_by_number = BTreeMap::new();
@@ -1041,7 +1041,7 @@ mod tests {
         // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
         // persistence task.
         let TestHarness { tree, to_tree_tx, sf_action_rx, mut blocks } =
-            get_default_tree(PERSISTENCE_THRESHOLD + 1);
+            get_default_test_harness(PERSISTENCE_THRESHOLD + 1);
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| tree.run()).unwrap();
 
         // send a message to the tree to enter the main loop.
@@ -1060,17 +1060,22 @@ mod tests {
 
     #[test]
     fn test_in_memory_state_trait_impl() {
-        let TestHarness { tree, to_tree_tx, sf_action_rx, blocks } = get_default_tree(10);
+        let TestHarness { tree, to_tree_tx, sf_action_rx, blocks } = get_default_test_harness(10);
 
         let head_block = blocks.last().unwrap().block();
+        let first_block = blocks.first().unwrap().block();
 
-        let expected_head_state = State::new(Arc::new(head_block.clone()));
+        for executed_block in blocks {
+            let sealed_block = executed_block.block();
 
-        let actual_head_state_by_hash = tree.in_memory_state_by_hash(head_block.hash()).unwrap();
-        assert_eq!(expected_head_state, *actual_head_state_by_hash);
+            let expected_state = State::new(Arc::new(sealed_block.clone()));
 
-        let actual_head_state_by_number =
-            tree.in_memory_state_by_number(head_block.number).unwrap();
-        assert_eq!(expected_head_state, *actual_head_state_by_number);
+            let actual_state_by_hash = tree.in_memory_state_by_hash(sealed_block.hash()).unwrap();
+            assert_eq!(expected_state, *actual_state_by_hash);
+
+            let actual_state_by_number =
+                tree.in_memory_state_by_number(sealed_block.number).unwrap();
+            assert_eq!(expected_state, *actual_state_by_number);
+        }
     }
 }
