@@ -4,8 +4,7 @@ use reth_primitives::{Account, Address, BlockNumber, Bytecode, StorageKey, Stora
 use reth_provider::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
 };
-use reth_trie::{updates::TrieUpdates, AccountProof};
-use revm::db::BundleState;
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
@@ -79,13 +78,13 @@ impl<H> StateRootProvider for MemoryOverlayStateProvider<H>
 where
     H: StateRootProvider + Send,
 {
-    fn state_root(&self, bundle_state: &BundleState) -> ProviderResult<B256> {
+    fn hashed_state_root(&self, hashed_state: &HashedPostState) -> ProviderResult<B256> {
         todo!()
     }
 
-    fn state_root_with_updates(
+    fn hashed_state_root_with_updates(
         &self,
-        bundle_state: &BundleState,
+        hashed_state: &HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         todo!()
     }
@@ -95,9 +94,9 @@ impl<H> StateProofProvider for MemoryOverlayStateProvider<H>
 where
     H: StateProofProvider + Send,
 {
-    fn proof(
+    fn hashed_proof(
         &self,
-        state: &BundleState,
+        hashed_state: &HashedPostState,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
