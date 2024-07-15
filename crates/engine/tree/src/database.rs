@@ -155,8 +155,7 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 DatabaseAction::RemoveBlocksAbove((new_tip_num, sender)) => {
-                    let output =
-                        self.remove_blocks_above(new_tip_num, sender).expect("todo: handle errors");
+                    self.remove_blocks_above(new_tip_num, sender).expect("todo: handle errors");
                 }
                 DatabaseAction::SaveBlocks((blocks, sender)) => {
                     if blocks.is_empty() {
