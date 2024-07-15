@@ -115,7 +115,7 @@ impl<TX> DatabaseProvider<TX> {
     }
 
     /// Returns reference to prune modes.
-    pub fn prune_modes_ref(&self) -> &PruneModes {
+    pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
     }
 }

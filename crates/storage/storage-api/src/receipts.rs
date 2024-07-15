@@ -69,13 +69,19 @@ pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdReader {
     }
 }
 
+/// Writer trait for writing [Receipt] data.
 pub trait ReceiptWriter {
+    /// Appends receipts for a block.
+    ///
+    /// # Parameters
+    /// - `first_tx_index`: The transaction number of the first receipt in the block.
+    /// - `block_number`: The block number to which the receipts belong.
+    /// - `receipts`: A vector of optional receipts in the block. If `None`, it means they were
+    ///   pruned.
     fn append_block_receipts(
         &mut self,
         first_tx_index: TxNumber,
         block_number: BlockNumber,
         receipts: Vec<Option<Receipt>>,
-    ) -> ProviderResult<()> {
-        todo!()
-    }
+    ) -> ProviderResult<()>;
 }

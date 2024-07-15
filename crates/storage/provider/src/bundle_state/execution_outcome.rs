@@ -2,11 +2,7 @@ use crate::{
     providers::StaticFileProviderRWRefMut, writer::StorageWriter, DatabaseProviderRW, StateChanges,
     StateReverts, StateWriter,
 };
-use reth_db::{tables, Database};
-use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW},
-    transaction::{DbTx, DbTxMut},
-};
+use reth_db::Database;
 pub use reth_execution_types::*;
 use reth_storage_errors::provider::ProviderResult;
 pub use revm::db::states::OriginalValuesKnown;
@@ -26,7 +22,7 @@ impl StateWriter for ExecutionOutcome {
         StateReverts(reverts).write_to_db(provider_rw, self.first_block)?;
 
         StorageWriter::new(Some(provider_rw), static_file_producer)
-            .write_blocks_receipts(self.first_block, self.receipts.into_iter())?;
+            .append_receipts_from_blocks(self.first_block, self.receipts.into_iter())?;
 
         StateChanges(plain_state).write_to_db(provider_rw)?;
 
@@ -38,11 +34,12 @@ impl StateWriter for ExecutionOutcome {
 mod tests {
     use super::*;
     use crate::{test_utils::create_test_provider_factory, AccountReader};
-    use reth_db::test_utils::create_test_rw_db;
+    use reth_db::{tables, test_utils::create_test_rw_db};
     use reth_db_api::{
-        cursor::DbDupCursorRO,
+        cursor::{DbCursorRO, DbDupCursorRO},
         database::Database,
         models::{AccountBeforeTx, BlockNumberAddress},
+        transaction::{DbTx, DbTxMut},
     };
     use reth_primitives::{
         keccak256, Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
