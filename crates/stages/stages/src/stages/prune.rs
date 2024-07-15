@@ -49,7 +49,9 @@ impl<DB: Database> Stage<DB> for PruneStage {
         if result.progress.is_finished() {
             Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
         } else {
-            info!(target: "sync::stages::prune::exec", segments = ?result.segments, "Pruner has more data to prune");
+            if let Some(last_segment) = result.segments.last() {
+                info!(target: "sync::stages::prune::exec", ?last_segment, "Pruner has more data to prune");
+            }
             // We cannot set the checkpoint yet, because prune segments may have different highest
             // pruned block numbers
             Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
