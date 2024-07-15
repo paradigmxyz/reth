@@ -6,7 +6,7 @@ import "./TaikoL1TestBase.sol";
 contract TestSgxVerifier is TaikoL1TestBase {
     function deployTaikoL1() internal override returns (TaikoL1) {
         return
-            TaikoL1(payable(deployProxy({ name: "taiko", impl: address(new TaikoL1()), data: "" })));
+TaikoL1(payable(deployProxy({ name: "taiko", impl: address(new TaikoL1()), data: "" })));
     }
 
     function test_addInstancesByOwner() external {

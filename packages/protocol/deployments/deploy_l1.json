@@ -1,1 +1,5 @@
-{}
+{
+  "address_manager": "0x2946259E0334f33A064106302415aD3391BeD384",
+  "bridge": "0x6D411e0A54382eD43F02410Ce1c7a7c122afA6E1",
+  "signal_service": "0x66a15edcC3b50a663e72F1457FFd49b9AE284dDc"
+}

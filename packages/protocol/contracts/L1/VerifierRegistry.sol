@@ -6,7 +6,6 @@
 
 pragma solidity ^0.8.20;
 
-
 import "../common/AddressResolver.sol";
 import "../common/EssentialContract.sol";
 
@@ -20,8 +19,8 @@ contract VerifierRegistry is EssentialContract {
     }
 
     mapping(address verifier => Verifier) public verifiers;
-    mapping(address verifier => uint id) public verifierId;
-    mapping(uint id => address verifier) public verifierAddress;
+    mapping(address verifier => uint256 id) public verifierId;
+    mapping(uint256 id => address verifier) public verifierAddress;
 
     uint16 public verifierIdGenerator;
 
@@ -31,37 +30,20 @@ contract VerifierRegistry is EssentialContract {
     }
 
     /// Adds a verifier
-    function addVerifier(
-        address verifier,
-        bytes4 tag
-    )
-        external
-        onlyOwner()
-    {
+    function addVerifier(address verifier, bytes4 tag) external onlyOwner {
         // Generate a unique id
         uint16 id = verifierIdGenerator++;
-        verifiers[verifier] = Verifier({
-            id: id,
-            tag: tag,
-            poisoned: false
-        });
+        verifiers[verifier] = Verifier({ id: id, tag: tag, poisoned: false });
         verifierId[verifier] = id;
         verifierAddress[id] = verifier;
     }
 
     /// Makes a verifier unusable
-    function poisonVerifier(address verifier)
-        external
-        onlyFromOwnerOrNamed("verifier_watchdog")
-    {
+    function poisonVerifier(address verifier) external onlyFromOwnerOrNamed("verifier_watchdog") {
         delete verifiers[verifier];
     }
 
-    function isVerifier(address addr)
-        external
-        view
-        returns (bool)
-    {
+    function isVerifier(address addr) external view returns (bool) {
         return verifiers[addr].id != 0 && !verifiers[addr].poisoned;
     }
 }

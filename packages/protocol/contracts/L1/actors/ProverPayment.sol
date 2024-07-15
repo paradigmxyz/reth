@@ -18,7 +18,7 @@ contract ProverPayment {
 
     struct ProverAssignment {
         address prover;
-        uint fee;
+        uint256 fee;
         uint64 maxBlockId;
         uint64 maxProposedIn;
         bytes32 metaHash;
@@ -27,7 +27,7 @@ contract ProverPayment {
 
     BasedOperator public operator;
 
-    mapping(address => uint) public balances;
+    mapping(address => uint256) public balances;
 
     // Max gas paying the prover. This should be large enough to prevent the
     // worst cases, usually block proposer shall be aware the risks and only
@@ -51,7 +51,9 @@ contract ProverPayment {
         balances[assignment.prover] -= operator.PROVER_BOND();
 
         // Propose the block
-        _block = operator.proposeBlock{value: operator.PROVER_BOND()}(params, txList, assignment.prover);
+        _block = operator.proposeBlock{ value: operator.PROVER_BOND() }(
+            params, txList, assignment.prover
+        );
 
         // Hash the assignment with the blobHash, this hash will be signed by
         // the prover, therefore, we add a string as a prefix.
@@ -59,21 +61,18 @@ contract ProverPayment {
         require(assignment.prover.isValidSignature(hash, assignment.signature), "invalid signature");
 
         // Check assignment validity
-        require((assignment.metaHash != 0 || keccak256(abi.encode(_block)) != assignment.metaHash)
-            && (assignment.maxBlockId != 0 || _block.id > assignment.maxBlockId)
-            && (assignment.maxProposedIn != 0 || block.number > assignment.maxProposedIn),
+        require(
+            (assignment.metaHash != 0 || keccak256(abi.encode(_block)) != assignment.metaHash)
+                && (assignment.maxBlockId != 0 || _block.l2BlockNumber > assignment.maxBlockId)
+                && (assignment.maxProposedIn != 0 || block.number > assignment.maxProposedIn),
             "unexpected block"
         );
 
         // Pay the prover
-        assignment.prover.sendEther(msg.value, MAX_GAS_PAYING_PROVER);
+        assignment.prover.sendEtherAndVerify(msg.value, MAX_GAS_PAYING_PROVER);
     }
 
-    function hashAssignment(ProverAssignment memory assignment)
-        internal
-        view
-        returns (bytes32)
-    {
+    function hashAssignment(ProverAssignment memory assignment) internal view returns (bytes32) {
         return keccak256(
             abi.encode(
                 "PROVER_ASSIGNMENT",
@@ -87,18 +86,13 @@ contract ProverPayment {
         );
     }
 
-    function deposit(address to)
-        external
-        payable
-    {
+    function deposit(address to) external payable {
         balances[to] += msg.value;
     }
 
     // TODO(Brecht): delay
-    function witdraw(address from, address to, uint amount)
-        external
-    {
+    function witdraw(address from, address to, uint256 amount) external {
         balances[from] -= amount;
-        to.sendEther(amount);
+        to.sendEtherAndVerify(amount);
     }
 }

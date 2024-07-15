@@ -17,9 +17,11 @@ import "../contracts/tokenvault/ERC20Vault.sol";
 import "../contracts/tokenvault/ERC721Vault.sol";
 import "../contracts/tokenvault/ERC1155Vault.sol";
 
-import "../contracts/L1/TaikoToken.sol";
+import "../contracts/tko/TaikoToken.sol";
+import "../contracts/L1/BasedOperator.sol";
+import "../contracts/L1/VerifierRegistry.sol";
+import "../contracts/L1/verifiers/MockSgxVerifier.sol";
 /*import "../contracts/L1/TaikoL1.sol";
-import "../contracts/L1/verifiers/SgxVerifier.sol";
 import "../contracts/L1/verifiers/GuardianVerifier.sol";
 import "../contracts/L1/verifiers/PseZkVerifier.sol";
 import "../contracts/L1/verifiers/SgxAndZkVerifier.sol";
@@ -28,13 +30,9 @@ import "../contracts/L1/tiers/ITierProvider.sol";
 import "../contracts/L1/tiers/ITierProvider.sol";
 import "../contracts/L1/provers/GuardianProver.sol";*/
 
-import "../contracts/L2/Lib1559Math.sol";
-import "../contracts/L2/TaikoL2EIP1559Configurable.sol";
-import "../contracts/L2/TaikoL2.sol";
-
-import "../contracts/team/TimelockTokenPool.sol";
-import "../contracts/team/airdrop/ERC20Airdrop.sol";
-import "../contracts/team/airdrop/ERC20Airdrop2.sol";
+// import "../contracts/L2/Lib1559Math.sol";
+//import "../contracts/L2/TaikoL2EIP1559Configurable.sol";
+// import "../contracts/L2/TaikoL2.sol";
 
 import "../contracts/test/erc20/FreeMintERC20.sol";
 
@@ -81,5 +79,13 @@ abstract contract TaikoTest is Test, DeployCapability {
 
     function randBytes32() internal returns (bytes32) {
         return keccak256(abi.encodePacked("bytes32", _seed++));
+    }
+
+    function strToBytes32(string memory input) internal pure returns (bytes32 result) {
+        require(bytes(input).length <= 32, "String too long");
+        // Copy the string's bytes directly into the bytes32 variable
+        assembly {
+            result := mload(add(input, 32))
+        }
     }
 }

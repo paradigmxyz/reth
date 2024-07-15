@@ -24,19 +24,20 @@ contract PBSActor {
         bytes calldata params,
         bytes calldata txList,
         bytes memory proverPaymentData,
-        bytes32 parentMetaHash,
-        uint tip
+        bytes32 parentHash,
+        uint256 tip
     )
         external
         payable
     {
         // TODO(Brecht): just pass in opaque data to make it general, though kind of doesn't matter
-        TaikoData.BlockMetadata memory _block = operator.proposeBlock{ value: msg.value - tip }(params, txList, proverPaymentData);
+        TaikoData.BlockMetadata memory _block =
+            operator.proposeBlock{ value: msg.value - tip }(params, txList, proverPaymentData);
 
         // Check if parent block has the right meta hash
-        require(keccak256(abi.encode(_block)) == parentMetaHash, "unexpected parent");
+        require(keccak256(abi.encode(_block)) == parentHash, "unexpected parent");
 
         // Do conditional payment
-        address(block.coinbase).sendEther(tip);
+        address(block.coinbase).sendEtherAndVerify(tip);
     }
 }

@@ -8,337 +8,340 @@ contract MockVerifier {
         return bytes.concat(keccak256("taiko"));
     }
 }
-
+*/
 // TODO (dani): remove some code to sub-contracts, this one shall only contain
 // shared logics and data.
+
 abstract contract TaikoL1TestBase is TaikoTest {
     AddressManager public addressManager;
-    AssignmentHook public assignmentHook;
+    // AssignmentHook public assignmentHook;
+    BasedOperator public basedOperator;
     TaikoToken public tko;
-    SignalService public ss;
+    // SignalService public ss;
     TaikoL1 public L1;
     TaikoData.Config conf;
     uint256 internal logCount;
-    PseZkVerifier public pv;
-    SgxVerifier public sv;
-    SgxAndZkVerifier public sgxZkVerifier;
-    GuardianVerifier public gv;
-    GuardianProver public gp;
-    TaikoA6TierProvider public cp;
-    Bridge public bridge;
+    // PseZkVerifier public pv;
+    /* 3 proof verifiers - to fulfill the requirement in BasedOperator.sol */
+    SgxVerifier public sv1;
+    SgxVerifier public sv2;
+    SgxVerifier public sv3;
+    VerifierRegistry public vr;
+    // SgxAndZkVerifier public sgxZkVerifier;
+    // GuardianVerifier public gv;
+    // GuardianProver public gp;
+    // TaikoA6TierProvider public cp;
+    // Bridge public bridge;
 
     bytes32 public GENESIS_BLOCK_HASH = keccak256("GENESIS_BLOCK_HASH");
 
     address public L2SS = randAddress();
     address public L2 = randAddress();
 
-    function deployTaikoL1() internal virtual returns (TaikoL1 taikoL1);
+    function deployTaikoL1(address addressManager) internal virtual returns (TaikoL1 taikoL1);
 
     function setUp() public virtual {
-        L1 = deployTaikoL1();
-        conf = L1.getConfig();
+        vm.startPrank(Alice);
+        vm.roll(20_232_182); //A real Ethereum block number from Jul-04-2024 09:13:47
+        vm.warp(1_720_077_269);
 
         addressManager = AddressManager(
             deployProxy({
                 name: "address_manager",
                 impl: address(new AddressManager()),
-                data: bytes.concat(AddressManager.init.selector)
+                data: abi.encodeCall(AddressManager.init, (Alice))
             })
         );
 
-        ss = SignalService(
+        L1 = deployTaikoL1(address(addressManager));
+        conf = L1.getConfig();
+
+        console2.log("Address szar:", (address(addressManager)));
+        basedOperator = BasedOperator(
             deployProxy({
-                name: "signal_service",
-                impl: address(new SignalService()),
-                data: bytes.concat(SignalService.init.selector)
+                name: "operator",
+                impl: address(new BasedOperator()),
+                data: abi.encodeCall(BasedOperator.init, (Alice, address(addressManager)))
             })
         );
 
-        pv = PseZkVerifier(
+        vr = VerifierRegistry(
             deployProxy({
-                name: "tier_pse_zkevm",
-                impl: address(new PseZkVerifier()),
-                data: bytes.concat(PseZkVerifier.init.selector, abi.encode(address(addressManager)))
-            })
-        );
-
-        sv = SgxVerifier(
-            deployProxy({
-                name: "tier_sgx",
-                impl: address(new SgxVerifier()),
-                data: bytes.concat(SgxVerifier.init.selector, abi.encode(address(addressManager)))
-            })
-        );
-
-        address[] memory initSgxInstances = new address[](1);
-        initSgxInstances[0] = SGX_X_0;
-        sv.addInstances(initSgxInstances);
-
-        sgxZkVerifier = SgxAndZkVerifier(
-            deployProxy({
-                name: "tier_sgx_and_pse_zkevm",
-                impl: address(new SgxAndZkVerifier()),
-                data: bytes.concat(SgxAndZkVerifier.init.selector, abi.encode(address(addressManager)))
-            })
-        );
-
-        gv = GuardianVerifier(
-            deployProxy({
-                name: "guardian_verifier",
-                impl: address(new GuardianVerifier()),
-                data: bytes.concat(GuardianVerifier.init.selector, abi.encode(address(addressManager)))
-            })
-        );
-
-        gp = GuardianProver(
-            deployProxy({
-                name: "guardian_prover",
-                impl: address(new GuardianProver()),
-                data: bytes.concat(GuardianProver.init.selector, abi.encode(address(addressManager)))
-            })
-        );
-
-        setupGuardianProverMultisig();
-
-        cp = TaikoA6TierProvider(
-            deployProxy({
-                name: "tier_provider",
-                impl: address(new TaikoA6TierProvider()),
-                data: bytes.concat(TaikoA6TierProvider.init.selector)
-            })
-        );
-
-        bridge = Bridge(
-            payable(
-                deployProxy({
-                    name: "bridge",
-                    impl: address(new Bridge()),
-                    data: bytes.concat(Bridge.init.selector, abi.encode(addressManager)),
-                    registerTo: address(addressManager),
-                    owner: address(0)
-                })
-            )
-        );
-
-        assignmentHook = AssignmentHook(
-            deployProxy({
-                name: "assignment_hook",
-                impl: address(new AssignmentHook()),
-                data: bytes.concat(AssignmentHook.init.selector, abi.encode(address(addressManager)))
+                name: "verifier_registry",
+                impl: address(new VerifierRegistry()),
+                data: abi.encodeCall(VerifierRegistry.init, (address(addressManager)))
             })
         );
 
         registerAddress("taiko", address(L1));
-        registerAddress("tier_pse_zkevm", address(pv));
-        registerAddress("tier_sgx", address(sv));
-        registerAddress("tier_guardian", address(gv));
-        registerAddress("tier_sgx_and_pse_zkevm", address(sgxZkVerifier));
-        registerAddress("tier_provider", address(cp));
-        registerAddress("signal_service", address(ss));
-        registerAddress("guardian_prover", address(gp));
-        registerAddress("bridge", address(bridge));
-        registerL2Address("taiko", address(L2));
-        registerL2Address("signal_service", address(L2SS));
-        registerL2Address("taiko_l2", address(L2));
+        registerAddress("operator", address(basedOperator));
+        registerAddress("verifier_registry", address(vr));
 
-        registerAddress(pv.getVerifierName(300), address(new MockVerifier()));
+        //         ss = SignalService(
+        //             deployProxy({
+        //                 name: "signal_service",
+        //                 impl: address(new SignalService()),
+        //                 data: bytes.concat(SignalService.init.selector)
+        //             })
+        //         );
+
+        //         pv = PseZkVerifier(
+        //             deployProxy({
+        //                 name: "tier_pse_zkevm",
+        //                 impl: address(new PseZkVerifier()),
+        //                 data: bytes.concat(PseZkVerifier.init.selector,
+        // abi.encode(address(addressManager)))
+        //             })
+        //         );
+
+        address sgxImpl = address(new SgxVerifier());
+        //Naming is like: 3, 1, 2, is because we need to have incremental order of addresses in
+        // BasedOperator, so figured out this is actually the way
+
+        sv1 = SgxVerifier(
+            deployProxy({
+                name: "sgx2", //Name does not matter now, since we check validity via
+                    // verifierRegistry
+                impl: sgxImpl,
+                data: abi.encodeCall(SgxVerifier.init, (Alice, address(addressManager)))
+            })
+        );
+
+        console2.log(address(sv1));
+
+        sv2 = SgxVerifier(
+            deployProxy({
+                name: "sgx3", //Name does not matter now, since we check validity via
+                    // verifierRegistry
+                impl: sgxImpl,
+                data: abi.encodeCall(SgxVerifier.init, (Alice, address(addressManager)))
+            })
+        );
+
+        sv3 = SgxVerifier(
+            deployProxy({
+                name: "sgx1", //Name does not matter now, since we check validity via
+                    // verifierRegistry
+                impl: sgxImpl,
+                data: abi.encodeCall(SgxVerifier.init, (Alice, address(addressManager)))
+            })
+        );
+
+        console2.log(address(sv2));
+
+        // sv2 = SgxVerifier(
+        //     deployProxy({
+        //         name: "sgx3", //Name does not matter now, since we check validity via
+        //             // verifierRegistry
+        //         impl: sgxImpl,
+        //         data: abi.encodeCall(SgxVerifier.init, (Alice, address(addressManager)))
+        //     })
+        // );
+
+        console2.log(address(sv3));
+
+        // Bootstrap / add first trusted instance -> SGX code needs some change tho - because
+        // changed since taiko-simplified was created first.
+        address[] memory initSgxInstances = new address[](1);
+        initSgxInstances[0] = SGX_X_0;
+
+        sv1.addInstances(initSgxInstances);
+        sv2.addInstances(initSgxInstances);
+        sv3.addInstances(initSgxInstances);
+
+        //         address[] memory initSgxInstances = new address[](1);
+        //         initSgxInstances[0] = SGX_X_0;
+        //         sv.addInstances(initSgxInstances);
+
+        //         sgxZkVerifier = SgxAndZkVerifier(
+        //             deployProxy({
+        //                 name: "tier_sgx_and_pse_zkevm",
+        //                 impl: address(new SgxAndZkVerifier()),
+        // data: bytes.concat(SgxAndZkVerifier.init.selector, abi.encode(address(addressManager)))
+        //             })
+        //         );
+
+        //         gv = GuardianVerifier(
+        //             deployProxy({
+        //                 name: "guardian_verifier",
+        //                 impl: address(new GuardianVerifier()),
+        // data: bytes.concat(GuardianVerifier.init.selector, abi.encode(address(addressManager)))
+        //             })
+        //         );
+
+        //         gp = GuardianProver(
+        //             deployProxy({
+        //                 name: "guardian_prover",
+        //                 impl: address(new GuardianProver()),
+        // data: bytes.concat(GuardianProver.init.selector, abi.encode(address(addressManager)))
+        //             })
+        //         );
+
+        //         setupGuardianProverMultisig();
+
+        //         cp = TaikoA6TierProvider(
+        //             deployProxy({
+        //                 name: "tier_provider",
+        //                 impl: address(new TaikoA6TierProvider()),
+        //                 data: bytes.concat(TaikoA6TierProvider.init.selector)
+        //             })
+        //         );
+
+        //         bridge = Bridge(
+        //             payable(
+        //                 deployProxy({
+        //                     name: "bridge",
+        //                     impl: address(new Bridge()),
+        //                     data: bytes.concat(Bridge.init.selector, abi.encode(addressManager)),
+        //                     registerTo: address(addressManager),
+        //                     owner: address(0)
+        //                 })
+        //             )
+        //         );
+
+        //         assignmentHook = AssignmentHook(
+        //             deployProxy({
+        //                 name: "assignment_hook",
+        //                 impl: address(new AssignmentHook()),
+        // data: bytes.concat(AssignmentHook.init.selector, abi.encode(address(addressManager)))
+        //             })
+        //         );
+
+        //         registerAddress("taiko", address(L1));
+        //         registerAddress("tier_pse_zkevm", address(pv));
+        //         registerAddress("tier_sgx", address(sv));
+        //         registerAddress("tier_guardian", address(gv));
+        //         registerAddress("tier_sgx_and_pse_zkevm", address(sgxZkVerifier));
+        //         registerAddress("tier_provider", address(cp));
+        //         registerAddress("signal_service", address(ss));
+        //         registerAddress("guardian_prover", address(gp));
+        //         registerAddress("bridge", address(bridge));
+        //         registerL2Address("taiko", address(L2));
+        //         registerL2Address("signal_service", address(L2SS));
+        //         registerL2Address("taiko_l2", address(L2));
+
+        //         registerAddress(pv.getVerifierName(300), address(new MockVerifier()));
 
         tko = TaikoToken(
             deployProxy({
                 name: "taiko_token",
                 impl: address(new TaikoToken()),
-                data: bytes.concat(
-                    TaikoToken.init.selector,
-                    abi.encode(
-                        "Taiko Token", //
-                        "TTKOk",
-                        address(this)
-                    )
-                    ),
-                registerTo: address(addressManager),
-                owner: address(0)
+                data: abi.encodeCall(TaikoToken.init, (address(0), address(this))),
+                registerTo: address(addressManager)
             })
         );
 
-        L1.init(address(addressManager), GENESIS_BLOCK_HASH);
+        L1.init(Alice, address(addressManager), GENESIS_BLOCK_HASH);
         printVariables("init  ");
+        vm.stopPrank();
+
+        // Add those 3 to verifier registry
+        vm.startPrank(vr.owner());
+        vr.addVerifier(address(sv1), "sgx1");
+        vr.addVerifier(address(sv2), "sgx2");
+        vr.addVerifier(address(sv3), "sgx3");
+        vm.stopPrank();
     }
 
     function proposeBlock(
         address proposer,
         address prover,
-        uint32 gasLimit,
-        uint24 txListSize
-    )
-        internal
-        returns (
-            TaikoData.BlockMetadata memory meta
-        )
-    {
-        TaikoData.TierFee[] memory tierFees = new TaikoData.TierFee[](5);
-        // Register the tier fees
-        // Based on OPL2ConfigTier we need 3:
-        // - LibTiers.TIER_PSE_ZKEVM;
-        // - LibTiers.TIER_SGX;
-        // - LibTiers.TIER_OPTIMISTIC;
-        // - LibTiers.TIER_GUARDIAN;
-        // - LibTiers.TIER_SGX_AND_PSE_ZKEVM
-        tierFees[0] = TaikoData.TierFee(LibTiers.TIER_OPTIMISTIC, 1 ether);
-        tierFees[1] = TaikoData.TierFee(LibTiers.TIER_SGX, 1 ether);
-        tierFees[2] = TaikoData.TierFee(LibTiers.TIER_PSE_ZKEVM, 2 ether);
-        tierFees[3] = TaikoData.TierFee(LibTiers.TIER_SGX_AND_PSE_ZKEVM, 2 ether);
-        tierFees[4] = TaikoData.TierFee(LibTiers.TIER_GUARDIAN, 0 ether);
-        // For the test not to fail, set the message.value to the highest, the
-        // rest will be returned
-        // anyways
-        uint256 msgValue = 2 ether;
-
-        AssignmentHook.ProverAssignment memory assignment = AssignmentHook.ProverAssignment({
-            feeToken: address(0),
-            tierFees: tierFees,
-            expiry: uint64(block.timestamp + 60 minutes),
-            maxBlockId: 0,
-            maxProposedIn: 0,
-            metaHash: 0,
-            signature: new bytes(0)
-        });
-
-        assignment.signature =
-            _signAssignment(prover, assignment, address(L1), keccak256(new bytes(txListSize)));
-
-        (, TaikoData.SlotB memory b) = L1.getStateVariables();
-
-        uint256 _difficulty;
-        unchecked {
-            _difficulty = block.prevrandao * b.numBlocks;
-        }
-
-        meta.timestamp = uint64(block.timestamp);
-        meta.l1Height = uint64(block.number - 1);
-        meta.l1Hash = blockhash(block.number - 1);
-        meta.difficulty = bytes32(_difficulty);
-        meta.gasLimit = gasLimit;
-
-        TaikoData.HookCall[] memory hookcalls = new TaikoData.HookCall[](1);
-
-        hookcalls[0] = TaikoData.HookCall(address(assignmentHook), abi.encode(assignment));
-
-        vm.prank(proposer, proposer);
-        meta = L1.proposeBlock{ value: msgValue }(
-            abi.encode(TaikoData.BlockParams(prover, 0, 0, 0, 0, false, 0, hookcalls)),
-            new bytes(txListSize)
-        );
-    }
-
-    function proveBlock(
-        address msgSender,
-        address prover,
         TaikoData.BlockMetadata memory meta,
-        bytes32 parentHash,
-        bytes32 blockHash,
-        bytes32 signalRoot,
-        uint16 tier,
         bytes4 revertReason
     )
         internal
+        returns (TaikoData.BlockMetadata memory)
     {
-        TaikoData.Transition memory tran = TaikoData.Transition({
-            parentHash: parentHash,
-            blockHash: blockHash,
-            signalRoot: signalRoot,
-            graffiti: 0x0
-        });
+        // TaikoData.TierFee[] memory tierFees = new TaikoData.TierFee[](5);
+        // // Register the tier fees
+        // // Based on OPL2ConfigTier we need 3:
+        // // - LibTiers.TIER_PSE_ZKEVM;
+        // // - LibTiers.TIER_SGX;
+        // // - LibTiers.TIER_OPTIMISTIC;
+        // // - LibTiers.TIER_GUARDIAN;
+        // // - LibTiers.TIER_SGX_AND_PSE_ZKEVM
+        // tierFees[0] = TaikoData.TierFee(LibTiers.TIER_OPTIMISTIC, 1 ether);
+        // tierFees[1] = TaikoData.TierFee(LibTiers.TIER_SGX, 1 ether);
+        // tierFees[2] = TaikoData.TierFee(LibTiers.TIER_PSE_ZKEVM, 2 ether);
+        // tierFees[3] = TaikoData.TierFee(LibTiers.TIER_SGX_AND_PSE_ZKEVM, 2 ether);
+        // tierFees[4] = TaikoData.TierFee(LibTiers.TIER_GUARDIAN, 0 ether);
+        // // For the test not to fail, set the message.value to the highest, the
+        // // rest will be returned
+        // // anyways
+        // uint256 msgValue = 2 ether;
 
-        bytes32 instance =
-            pv.calcInstance(tran, prover, keccak256(abi.encode(meta)), meta.blobHash, 0);
+        // AssignmentHook.ProverAssignment memory assignment = AssignmentHook.ProverAssignment({
+        //     feeToken: address(0),
+        //     tierFees: tierFees,
+        //     expiry: uint64(block.timestamp + 60 minutes),
+        //     maxBlockId: 0,
+        //     maxProposedIn: 0,
+        //     metaHash: 0,
+        //     signature: new bytes(0)
+        // });
 
-        TaikoData.TierProof memory proof;
-        proof.tier = tier;
-        {
-            PseZkVerifier.ZkEvmProof memory zkProof;
-            zkProof.verifierId = 300;
-            zkProof.zkp = bytes.concat(
-                bytes16(0),
-                bytes16(instance),
-                bytes16(0),
-                bytes16(uint128(uint256(instance))),
-                new bytes(100)
+        // assignment.signature =
+        //     _signAssignment(prover, assignment, address(L1), keccak256(new bytes(txListSize)));
+
+        // (, TaikoData.SlotB memory b) = L1.getStateVariables();
+
+        // uint256 _difficulty;
+        // unchecked {
+        //     _difficulty = block.prevrandao;
+        // }
+
+        // meta.blockHash = blockHash;
+        // meta.parentHash = parentHash;
+
+        // meta.timestamp = uint64(block.timestamp);
+        // meta.l1Height = uint64(block.number - 1);
+        // meta.l1Hash = blockhash(block.number - 1);
+        // meta.difficulty = bytes32(_difficulty);
+        // meta.gasLimit = gasLimit;
+
+        // TaikoData.HookCall[] memory hookcalls = new TaikoData.HookCall[](1);
+
+        // hookcalls[0] = TaikoData.HookCall(address(assignmentHook), abi.encode(assignment));
+
+        bytes memory dummyTxList =
+            hex"0000000000000000000000000000000000000000000000000000000000000001";
+        bytes memory emptyTxList;
+
+        if (revertReason == "") {
+            vm.prank(proposer, proposer);
+            meta = basedOperator.proposeBlock{ value: 1 ether / 10 }(
+                abi.encode(meta), meta.blobUsed == true ? emptyTxList : dummyTxList, prover
             );
-
-            proof.data = abi.encode(zkProof);
-        }
-
-        address newInstance;
-        // Keep changing the pub key associated with an instance to avoid
-        // attacks,
-        // obviously just a mock due to 2 addresses changing all the time.
-        (newInstance,) = sv.instances(0);
-        if (newInstance == SGX_X_0) {
-            newInstance = SGX_X_1;
         } else {
-            newInstance = SGX_X_0;
+            vm.prank(proposer, proposer);
+            vm.expectRevert(revertReason);
+            meta = basedOperator.proposeBlock{ value: 1 ether / 10 }(
+                abi.encode(meta), meta.blobUsed == true ? emptyTxList : dummyTxList, prover
+            );
         }
 
-        if (tier == LibTiers.TIER_SGX) {
-            bytes memory signature =
-                createSgxSignatureProof(tran, newInstance, prover, keccak256(abi.encode(meta)));
-
-            proof.data = bytes.concat(bytes4(0), bytes20(newInstance), signature);
-        }
-
-        if (tier == LibTiers.TIER_SGX_AND_PSE_ZKEVM) {
-            bytes memory signature =
-                createSgxSignatureProof(tran, newInstance, prover, keccak256(abi.encode(meta)));
-
-            bytes memory sgxProof = bytes.concat(bytes4(0), bytes20(newInstance), signature);
-            // Concatenate SGX and ZK (in this order)
-            proof.data = bytes.concat(sgxProof, proof.data);
-        }
-
-        if (tier == LibTiers.TIER_GUARDIAN) {
-            proof.data = "";
-
-            // Grant 2 signatures, 3rd might be a revert
-            vm.prank(David, David);
-            gp.approve(meta, tran, proof);
-            vm.prank(Emma, Emma);
-            gp.approve(meta, tran, proof);
-
-            if (revertReason != "") {
-                vm.prank(Frank, Frank);
-                vm.expectRevert(); // Revert reason is 'wrapped' so will not be
-                    // identical to the expectedRevert
-                gp.approve(meta, tran, proof);
-            } else {
-                vm.prank(Frank, Frank);
-                gp.approve(meta, tran, proof);
-            }
-        } else {
-            if (revertReason != "") {
-                vm.prank(msgSender, msgSender);
-                vm.expectRevert(revertReason);
-                L1.proveBlock(meta.id, abi.encode(meta, tran, proof));
-            } else {
-                vm.prank(msgSender, msgSender);
-                L1.proveBlock(meta.id, abi.encode(meta, tran, proof));
-            }
-        }
+        return meta;
     }
 
-    function verifyBlock(address, uint64 count) internal {
-        L1.verifyBlocks(count);
+    function proveBlock(address prover, bytes memory blockProof) internal {
+        vm.prank(prover, prover);
+        basedOperator.proveBlock(blockProof);
     }
 
-    function setupGuardianProverMultisig() internal {
-        address[] memory initMultiSig = new address[](5);
-        initMultiSig[0] = David;
-        initMultiSig[1] = Emma;
-        initMultiSig[2] = Frank;
-        initMultiSig[3] = Grace;
-        initMultiSig[4] = Henry;
-
-        gp.setGuardians(initMultiSig, 3);
+    function verifyBlock(uint64 count) internal {
+        basedOperator.verifyBlocks(count);
     }
+
+    // function setupGuardianProverMultisig() internal {
+    //     address[] memory initMultiSig = new address[](5);
+    //     initMultiSig[0] = David;
+    //     initMultiSig[1] = Emma;
+    //     initMultiSig[2] = Frank;
+    //     initMultiSig[3] = Grace;
+    //     initMultiSig[4] = Henry;
+
+    //     gp.setGuardians(initMultiSig, 3);
+    // }
 
     function registerAddress(bytes32 nameHash, address addr) internal {
         addressManager.setAddress(uint64(block.chainid), nameHash, addr);
@@ -350,32 +353,32 @@ abstract contract TaikoL1TestBase is TaikoTest {
         console2.log(conf.chainId, string(abi.encodePacked(nameHash)), unicode"→", addr);
     }
 
-    function _signAssignment(
-        address signer,
-        AssignmentHook.ProverAssignment memory assignment,
-        address taikoAddr,
-        bytes32 blobHash
-    )
-        internal
-        view
-        returns (bytes memory signature)
-    {
-        uint256 signerPrivateKey;
+    // function _signAssignment(
+    //     address signer,
+    //     AssignmentHook.ProverAssignment memory assignment,
+    //     address taikoAddr,
+    //     bytes32 blobHash
+    // )
+    //     internal
+    //     view
+    //     returns (bytes memory signature)
+    // {
+    //     uint256 signerPrivateKey;
 
-        // In the test suite these are the 3 which acts as provers
-        if (signer == Alice) {
-            signerPrivateKey = 0x1;
-        } else if (signer == Bob) {
-            signerPrivateKey = 0x2;
-        } else if (signer == Carol) {
-            signerPrivateKey = 0x3;
-        }
+    //     // In the test suite these are the 3 which acts as provers
+    //     if (signer == Alice) {
+    //         signerPrivateKey = 0x1;
+    //     } else if (signer == Bob) {
+    //         signerPrivateKey = 0x2;
+    //     } else if (signer == Carol) {
+    //         signerPrivateKey = 0x3;
+    //     }
 
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(
-            signerPrivateKey, assignmentHook.hashAssignment(assignment, taikoAddr, blobHash)
-        );
-        signature = abi.encodePacked(r, s, v);
-    }
+    //     (uint8 v, bytes32 r, bytes32 s) = vm.sign(
+    //         signerPrivateKey, assignmentHook.hashAssignment(assignment, taikoAddr, blobHash)
+    //     );
+    //     signature = abi.encodePacked(r, s, v);
+    // }
 
     function createSgxSignatureProof(
         TaikoData.Transition memory tran,
@@ -387,7 +390,9 @@ abstract contract TaikoL1TestBase is TaikoTest {
         view
         returns (bytes memory signature)
     {
-        bytes32 digest = sv.getSignedHash(tran, newInstance, prover, metaHash);
+        bytes32 digest = LibPublicInput.hashPublicInputs(
+            tran, address(sv1), newInstance, prover, metaHash, L1.getConfig().chainId
+        );
 
         uint256 signerPrivateKey;
 
@@ -408,40 +413,121 @@ abstract contract TaikoL1TestBase is TaikoTest {
 
         vm.prank(to, to);
         tko.approve(address(L1), amountTko);
-        vm.prank(to, to);
-        tko.approve(address(assignmentHook), amountTko);
+        // vm.prank(to, to);
+        // tko.approve(address(assignmentHook), amountTko);
 
         console2.log("TKO balance:", to, tko.balanceOf(to));
         console2.log("ETH balance:", to, to.balance);
     }
 
     function printVariables(string memory comment) internal {
-        (TaikoData.SlotA memory a, TaikoData.SlotB memory b) = L1.getStateVariables();
-
         string memory str = string.concat(
             Strings.toString(logCount++),
             ":[",
-            Strings.toString(b.lastVerifiedBlockId),
+            Strings.toString(L1.getLastVerifiedBlockId()),
             unicode"→",
-            Strings.toString(b.numBlocks),
-            "]"
-        );
-
-        str = string.concat(
-            str,
-            " nextEthDepositToProcess:",
-            Strings.toString(a.nextEthDepositToProcess),
-            " numEthDeposits:",
-            Strings.toString(a.numEthDeposits),
-            " // ",
+            Strings.toString(L1.getNumOfBlocks()),
+            "] // ",
             comment
         );
         console2.log(str);
     }
 
     function mine(uint256 counts) internal {
-        vm.warp(block.timestamp + 20 * counts);
+        vm.warp(block.timestamp + 12 * counts);
         vm.roll(block.number + counts);
     }
+
+    function createBlockMetaData(
+        address coinbase,
+        uint64 l2BlockNumber,
+        uint32 belowBlockTipHeight, // How many blocks below from current tip (block.id)
+        bool blobUsed
+    )
+        internal
+        returns (TaikoData.BlockMetadata memory meta)
+    {
+        meta.blockHash = randBytes32();
+
+        TaikoData.Block memory parentBlock = L1.getBlock(l2BlockNumber - 1);
+        meta.parentMetaHash = parentBlock.metaHash;
+        meta.parentBlockHash = parentBlock.blockHash;
+        meta.l1Hash = blockhash(block.number - belowBlockTipHeight);
+        meta.difficulty = block.prevrandao;
+        meta.blobHash = randBytes32();
+        meta.coinbase = coinbase;
+        meta.l2BlockNumber = l2BlockNumber;
+        meta.gasLimit = L1.getConfig().blockMaxGasLimit;
+        meta.l1StateBlockNumber = uint32(block.number - belowBlockTipHeight);
+        meta.timestamp = uint64(block.timestamp - (belowBlockTipHeight * 12)); // x blocks behind
+
+        if (blobUsed) {
+            meta.txListByteOffset = 0;
+            meta.txListByteSize = 0;
+            meta.blobUsed = true;
+        } else {
+            meta.txListByteOffset = 0;
+            meta.txListByteSize = 32; // Corresponding dummyTxList is set during proposeBlock()
+            meta.blobUsed = false;
+        }
+    }
+
+    function createProofs(
+        TaikoData.BlockMetadata memory meta,
+        address prover,
+        bool threeMockSGXProofs // Used to indicate to "trick" the BasedProver with 3 different (but
+            // same code) deployments of SGX verifier - later we can fine tune to have 3 correct,
+            // valid proofs.
+    )
+        internal
+        view
+        returns (BasedOperator.ProofBatch memory proofBatch)
+    {
+        // Set metadata
+        proofBatch.blockMetadata = meta;
+
+        // Set transition
+        TaikoData.Transition memory transition;
+        transition.parentBlockHash = L1.getBlock(meta.l2BlockNumber - 1).blockHash;
+        transition.blockHash = meta.blockHash;
+        proofBatch.transition = transition;
+
+        // Set prover
+        proofBatch.prover = prover;
+
+        address newInstance;
+        // Keep changing the pub key associated with an instance to avoid
+        // attacks,
+        // obviously just a mock due to 2 addresses changing all the time.
+        (newInstance,) = sv1.instances(0);
+        if (newInstance == SGX_X_0) {
+            newInstance = SGX_X_1;
+        } else {
+            newInstance = SGX_X_0;
+        }
+
+        BasedOperator.ProofData[] memory proofs = new BasedOperator.ProofData[](3);
+
+        bytes memory signature =
+            createSgxSignatureProof(transition, newInstance, prover, keccak256(abi.encode(meta)));
+
+        // The order is on purpose reversed, becase of the L1_INVALID_OR_DUPLICATE_VERIFIER() check
+        proofs[0].verifier = sv2;
+        proofs[0].proof = bytes.concat(bytes4(0), bytes20(newInstance), signature);
+
+        if (threeMockSGXProofs) {
+            // The order is on purpose reversed, becase of the L1_INVALID_OR_DUPLICATE_VERIFIER()
+            // check
+            proofs[1].verifier = sv1;
+            proofs[1].proof = bytes.concat(bytes4(0), bytes20(newInstance), signature);
+
+            proofs[2].verifier = sv3;
+            proofs[2].proof = bytes.concat(bytes4(0), bytes20(newInstance), signature);
+        } else {
+            //Todo(dani): Implement more proof and verifiers when needed/available but for now, not
+            // to change the code in BasedOperator, maybe best to mock those 3
+        }
+
+        proofBatch.proofs = proofs;
+    }
 }
-*/

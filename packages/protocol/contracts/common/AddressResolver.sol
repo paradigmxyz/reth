@@ -1,111 +1,106 @@
 // SPDX-License-Identifier: MIT
-//  _____     _ _         _         _
-// |_   _|_ _(_) |_____  | |   __ _| |__ ___
-//   | |/ _` | | / / _ \ | |__/ _` | '_ (_-<
-//   |_|\__,_|_|_\_\___/ |____\__,_|_.__/__/
+pragma solidity 0.8.24;
 
-pragma solidity ^0.8.20;
-
-import "@openzeppelin/contracts/utils/Strings.sol";
-import "./AddressManager.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "./IAddressManager.sol";
+import "./IAddressResolver.sol";
 
 /// @title AddressResolver
-/// @notice This contract acts as a bridge for name-to-address resolution.
-/// It delegates the resolution to the AddressManager. By separating the logic,
-/// we can maintain flexibility in address management without affecting the
-/// resolving process.
-///
-/// Note that the address manager should be changed using upgradability, there
-/// is no setAddressManager() function go guarantee atomicness across all
-/// contracts that are resolvers.
-abstract contract AddressResolver {
-    using Strings for uint256;
-
+/// @notice See the documentation in {IAddressResolver}.
+/// @custom:security-contact security@taiko.xyz
+abstract contract AddressResolver is IAddressResolver, Initializable {
+    /// @notice Address of the AddressManager.
     address public addressManager;
     uint256[49] private __gap;
 
     error RESOLVER_DENIED();
     error RESOLVER_INVALID_MANAGER();
     error RESOLVER_UNEXPECTED_CHAINID();
-    error RESOLVER_ZERO_ADDR(uint64 chainId, string name);
+    error RESOLVER_ZERO_ADDR(uint64 chainId, bytes32 name);
 
     /// @dev Modifier that ensures the caller is the resolved address of a given
     /// name.
-    /// @param name The name to check against.
-    modifier onlyFromNamed(bytes32 name) {
-        if (msg.sender != resolve(name, true)) revert RESOLVER_DENIED();
+    /// @param _name The name to check against.
+    modifier onlyFromNamed(bytes32 _name) {
+        if (msg.sender != resolve(_name, true)) revert RESOLVER_DENIED();
         _;
     }
 
-    /// @notice Resolves a name to its address deployed on this chain.
-    /// @param name Name whose address is to be resolved.
-    /// @param allowZeroAddress If set to true, does not throw if the resolved
-    /// address is `address(0)`.
-    /// @return addr Address associated with the given name.
-    function resolve(
-        bytes32 name,
-        bool allowZeroAddress
-    )
-        public
-        view
-        virtual
-        returns (address payable addr)
-    {
-        return _resolve(uint64(block.chainid), name, allowZeroAddress);
+    /// @dev Modifier that ensures the caller is a resolved address to either _name1 or _name2
+    /// name.
+    /// @param _name1 The first name to check against.
+    /// @param _name2 The second name to check against.
+    modifier onlyFromNamedEither(bytes32 _name1, bytes32 _name2) {
+        if (msg.sender != resolve(_name1, true) && msg.sender != resolve(_name2, true)) {
+            revert RESOLVER_DENIED();
+        }
+        _;
     }
 
-    /// @notice Resolves a name to its address deployed on a specified chain.
-    /// @param chainId The chainId of interest.
-    /// @param name Name whose address is to be resolved.
-    /// @param allowZeroAddress If set to true, does not throw if the resolved
-    /// address is `address(0)`.
-    /// @return addr Address associated with the given name on the specified
-    /// chain.
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    /// @inheritdoc IAddressResolver
     function resolve(
-        uint64 chainId,
-        bytes32 name,
-        bool allowZeroAddress
+        bytes32 _name,
+        bool _allowZeroAddress
     )
         public
         view
         virtual
-        returns (address payable addr)
+        returns (address payable)
     {
-        return _resolve(chainId, name, allowZeroAddress);
+        return _resolve(uint64(block.chainid), _name, _allowZeroAddress);
+    }
+
+    /// @inheritdoc IAddressResolver
+    function resolve(
+        uint64 _chainId,
+        bytes32 _name,
+        bool _allowZeroAddress
+    )
+        public
+        view
+        virtual
+        returns (address payable)
+    {
+        return _resolve(_chainId, _name, _allowZeroAddress);
     }
 
     /// @dev Initialization method for setting up AddressManager reference.
     /// @param _addressManager Address of the AddressManager.
-    // solhint-disable-next-line func-name-mixedcase
-    function __AddressResolver_init(address _addressManager) internal virtual {
-        if (block.chainid >= type(uint64).max) {
+    function __AddressResolver_init(address _addressManager) internal virtual onlyInitializing {
+        if (block.chainid > type(uint64).max) {
             revert RESOLVER_UNEXPECTED_CHAINID();
         }
         addressManager = _addressManager;
     }
 
     /// @dev Helper method to resolve name-to-address.
-    /// @param chainId The chainId of interest.
-    /// @param name Name whose address is to be resolved.
-    /// @param allowZeroAddress If set to true, does not throw if the resolved
+    /// @param _chainId The chainId of interest.
+    /// @param _name Name whose address is to be resolved.
+    /// @param _allowZeroAddress If set to true, does not throw if the resolved
     /// address is `address(0)`.
-    /// @return addr Address associated with the given name on the specified
+    /// @return addr_ Address associated with the given name on the specified
     /// chain.
     function _resolve(
-        uint64 chainId,
-        bytes32 name,
-        bool allowZeroAddress
+        uint64 _chainId,
+        bytes32 _name,
+        bool _allowZeroAddress
     )
         private
         view
-        returns (address payable addr)
+        returns (address payable addr_)
     {
-        if (addressManager == address(0)) revert RESOLVER_INVALID_MANAGER();
+        address _addressManager = addressManager;
+        if (_addressManager == address(0)) revert RESOLVER_INVALID_MANAGER();
 
-        addr = payable(IAddressManager(addressManager).getAddress(chainId, name));
+        addr_ = payable(IAddressManager(_addressManager).getAddress(_chainId, _name));
 
-        if (!allowZeroAddress && addr == address(0)) {
-            revert RESOLVER_ZERO_ADDR(chainId, uint256(name).toString());
+        if (!_allowZeroAddress && addr_ == address(0)) {
+            revert RESOLVER_ZERO_ADDR(_chainId, _name);
         }
     }
 }
