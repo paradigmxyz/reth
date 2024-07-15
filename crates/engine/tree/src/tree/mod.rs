@@ -932,9 +932,7 @@ impl State {
 
 impl<P, E, T> InMemoryState for EngineApiTreeHandlerImpl<P, E, T>
 where
-    P: BlockReader + StateProviderFactory + Clone + 'static,
-    E: BlockExecutorProvider,
-    T: EngineTypes + 'static,
+    T: EngineTypes,
 {
     fn in_memory_state_by_hash(&self, hash: B256) -> Option<Arc<State>> {
         let sealed_block = self.state.tree_state.block_by_hash(hash)?;
