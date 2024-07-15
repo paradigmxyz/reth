@@ -5,7 +5,6 @@ use reth_provider::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
 };
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
-use revm::db::BundleState;
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
