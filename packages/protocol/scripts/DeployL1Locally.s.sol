@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/utils/Strings.sol";
 import "../contracts/L1/TaikoL1.sol";
 import "../contracts/L1/BasedOperator.sol";
 import "../contracts/L1/VerifierRegistry.sol";
-import "../contracts/L1/TaikoToken.sol";
+import "../contracts/tko/TaikoToken.sol";
 import "../contracts/L1/provers/GuardianProver.sol";
 // import "../contracts/L1/tiers/DevnetTierProvider.sol";
 // import "../contracts/L1/tiers/TierProviderV2.sol";
@@ -21,7 +21,7 @@ import "../contracts/L1/provers/GuardianProver.sol";
 // import "../contracts/automata-attestation/AutomataDcapV3Attestation.sol";
 // import "../contracts/automata-attestation/utils/SigVerifyLib.sol";
 // import "../contracts/automata-attestation/lib/PEMCertChainLib.sol";
-import "../contracts/L1/verifiers/SgxVerifier.sol";
+//import "../contracts/L1/verifiers/SgxVerifier.sol";
 import "../contracts/L1/verifiers/MockSgxVerifier.sol"; // Avoid proof verification for now!
 // import "../contracts/team/proving/ProverSet.sol";
 // import "../test/common/erc20/FreeMintERC20.sol";
@@ -141,7 +141,7 @@ contract DeployL1OnAnvil is DeployCapability {
             sharedAddressManager = deployProxy({
                 name: "shared_address_manager",
                 impl: address(new AddressManager()),
-                data: abi.encodeCall(AddressManager.init, ())
+                data: abi.encodeCall(AddressManager.init, (owner))
             });
         }
 
@@ -151,9 +151,8 @@ contract DeployL1OnAnvil is DeployCapability {
             taikoToken = deployProxy({
                 name: "taiko_token",
                 impl: address(new TaikoToken()),
-                data: abi.encodeCall(TaikoToken.init, ("TAIKO", "TAIKO", MAINNET_CONTRACT_OWNER)),
-                registerTo: sharedAddressManager,
-                owner: MAINNET_CONTRACT_OWNER
+                data: abi.encodeCall(TaikoToken.init, (MAINNET_CONTRACT_OWNER, MAINNET_CONTRACT_OWNER)),
+                registerTo: sharedAddressManager
             });
         }
 
@@ -243,7 +242,7 @@ contract DeployL1OnAnvil is DeployCapability {
         rollupAddressManager = deployProxy({
             name: "rollup_address_manager",
             impl: address(new AddressManager()),
-            data: abi.encodeCall(AddressManager.init, ())
+            data: abi.encodeCall(AddressManager.init, (owner))
         });
 
         // ---------------------------------------------------------------
@@ -259,53 +258,48 @@ contract DeployL1OnAnvil is DeployCapability {
             data: abi.encodeCall(
                 TaikoL1.init,
                 (
+                    owner,
                     rollupAddressManager,
                     vm.envBytes32("L2_GENESIS_HASH")
                 )
             ),
-            registerTo: rollupAddressManager,
-            owner: MAINNET_CONTRACT_OWNER
+            registerTo: rollupAddressManager
         });
 
         /* Deploy BasedOperator */
         deployProxy({
                 name: "operator",
                 impl: address(new BasedOperator()),
-                data: abi.encodeCall(BasedOperator.init, (address(rollupAddressManager))),
-                registerTo: rollupAddressManager,
-                owner: MAINNET_CONTRACT_OWNER
+                data: abi.encodeCall(BasedOperator.init, (MAINNET_CONTRACT_OWNER, rollupAddressManager)),
+                registerTo: rollupAddressManager
         });
 
         /* Deploy MockSGXVerifier 3 times for now, so that we can call verifyProof without modifications of the protocol code. Later obv. shall be replaced with real verifiers. */
         address verifier1 = deployProxy({
             name: "tier_sgx1",
             impl: address(new MockSgxVerifier()),
-            data: abi.encodeCall(MockSgxVerifier.init, (rollupAddressManager)),
-            registerTo: rollupAddressManager,
-            owner: MAINNET_CONTRACT_OWNER
+            data: abi.encodeCall(MockSgxVerifier.init, (MAINNET_CONTRACT_OWNER, rollupAddressManager)),
+            registerTo: rollupAddressManager
         });
         address verifier2 = deployProxy({
             name: "tier_sgx2",
             impl: address(new MockSgxVerifier()),
-            data: abi.encodeCall(MockSgxVerifier.init, (rollupAddressManager)),
-            registerTo: rollupAddressManager,
-            owner: MAINNET_CONTRACT_OWNER
+            data: abi.encodeCall(MockSgxVerifier.init, (MAINNET_CONTRACT_OWNER, rollupAddressManager)),
+            registerTo: rollupAddressManager
         });
         address verifier3 = deployProxy({
             name: "tier_sgx3",
             impl: address(new MockSgxVerifier()),
-            data: abi.encodeCall(MockSgxVerifier.init, (rollupAddressManager)),
-            registerTo: rollupAddressManager,
-            owner: MAINNET_CONTRACT_OWNER
+            data: abi.encodeCall(MockSgxVerifier.init, (MAINNET_CONTRACT_OWNER, rollupAddressManager)),
+            registerTo: rollupAddressManager
         });
 
         /* Deploy VerifierRegistry */
         address vieriferRegistry = deployProxy({
                 name: "verifier_registry",
                 impl: address(new VerifierRegistry()),
-                data: abi.encodeCall(VerifierRegistry.init, (rollupAddressManager)),
-                registerTo: rollupAddressManager,
-            owner: MAINNET_CONTRACT_OWNER
+                data: abi.encodeCall(VerifierRegistry.init, (MAINNET_CONTRACT_OWNER, rollupAddressManager)),
+                registerTo: rollupAddressManager
             });
 
         // Add those 3 to verifier registry

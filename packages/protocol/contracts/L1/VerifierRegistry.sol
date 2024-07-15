@@ -24,8 +24,8 @@ contract VerifierRegistry is EssentialContract {
 
     uint16 public verifierIdGenerator;
 
-    function init(address _addressManager) external initializer {
-        __Essential_init(_addressManager);
+    function init(address _owner, address _addressManager) external initializer {
+        __Essential_init(_owner, _addressManager);
         verifierIdGenerator = 1;
     }
 

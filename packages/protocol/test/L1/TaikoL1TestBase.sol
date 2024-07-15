@@ -23,9 +23,9 @@ abstract contract TaikoL1TestBase is TaikoTest {
     uint256 internal logCount;
     // PseZkVerifier public pv;
     /* 3 proof verifiers - to fulfill the requirement in BasedOperator.sol */
-    SgxVerifier public sv1;
-    SgxVerifier public sv2;
-    SgxVerifier public sv3;
+    MockSgxVerifier public sv1;
+    MockSgxVerifier public sv2;
+    MockSgxVerifier public sv3;
     VerifierRegistry public vr;
     // SgxAndZkVerifier public sgxZkVerifier;
     // GuardianVerifier public gv;
@@ -69,7 +69,7 @@ abstract contract TaikoL1TestBase is TaikoTest {
             deployProxy({
                 name: "verifier_registry",
                 impl: address(new VerifierRegistry()),
-                data: abi.encodeCall(VerifierRegistry.init, (address(addressManager)))
+                data: abi.encodeCall(VerifierRegistry.init, (Alice, address(addressManager)))
             })
         );
 
@@ -94,36 +94,36 @@ abstract contract TaikoL1TestBase is TaikoTest {
         //             })
         //         );
 
-        address sgxImpl = address(new SgxVerifier());
+        address sgxImpl = address(new MockSgxVerifier());
         //Naming is like: 3, 1, 2, is because we need to have incremental order of addresses in
         // BasedOperator, so figured out this is actually the way
 
-        sv1 = SgxVerifier(
+        sv1 = MockSgxVerifier(
             deployProxy({
                 name: "sgx2", //Name does not matter now, since we check validity via
                     // verifierRegistry
                 impl: sgxImpl,
-                data: abi.encodeCall(SgxVerifier.init, (Alice, address(addressManager)))
+                data: abi.encodeCall(MockSgxVerifier.init, (Alice, address(addressManager)))
             })
         );
 
         console2.log(address(sv1));
 
-        sv2 = SgxVerifier(
+        sv2 = MockSgxVerifier(
             deployProxy({
                 name: "sgx3", //Name does not matter now, since we check validity via
                     // verifierRegistry
                 impl: sgxImpl,
-                data: abi.encodeCall(SgxVerifier.init, (Alice, address(addressManager)))
+                data: abi.encodeCall(MockSgxVerifier.init, (Alice, address(addressManager)))
             })
         );
 
-        sv3 = SgxVerifier(
+        sv3 = MockSgxVerifier(
             deployProxy({
                 name: "sgx1", //Name does not matter now, since we check validity via
                     // verifierRegistry
                 impl: sgxImpl,
-                data: abi.encodeCall(SgxVerifier.init, (Alice, address(addressManager)))
+                data: abi.encodeCall(MockSgxVerifier.init, (Alice, address(addressManager)))
             })
         );
 
