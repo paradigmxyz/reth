@@ -1141,7 +1141,6 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
     /// Configurable RPC middleware
-    #[allow(dead_code)]
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
 }
 
@@ -1337,8 +1336,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Returns the [`RpcServerHandle`] with the handle to the started servers.
     pub async fn start(self, modules: &TransportRpcModules) -> Result<RpcServerHandle, RpcError>
     where
-        RpcMiddleware: for<'a> Layer<RpcService, Service: RpcServiceT<'a>> + Clone + Send + 'static,
-        <RpcMiddleware as Layer<RpcService>>::Service: Send + std::marker::Sync,
+        RpcMiddleware: tower::Layer<RpcService> + Clone + Send + 'static,
+        <RpcMiddleware as Layer<RpcService>>::Service: std::marker::Sync + Send,
+        for<'a> <RpcMiddleware as tower::Layer<RpcService>>::Service: RpcServiceT<'a>,
     {
         let mut http_handle = None;
         let mut ws_handle = None;
@@ -1396,7 +1396,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                             .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                     )
                     .set_rpc_middleware(
-                        RpcServiceBuilder::new().layer(
+                        self.rpc_middleware.clone().layer(
                             modules
                                 .http
                                 .as_ref()
@@ -1444,7 +1444,8 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                 )
                 .set_rpc_middleware(
-                    RpcServiceBuilder::new()
+                    self.rpc_middleware
+                        .clone()
                         .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
                 )
                 .build(ws_socket_addr)
@@ -1468,7 +1469,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                 )
                 .set_rpc_middleware(
-                    RpcServiceBuilder::new().layer(
+                    self.rpc_middleware.clone().layer(
                         modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
                     ),
                 )

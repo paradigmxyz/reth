@@ -61,11 +61,22 @@ impl RpcRequestMetrics {
     }
 }
 
-impl<S> Layer<S> for RpcRequestMetrics {
-    type Service = RpcRequestMetricsService<S>;
+// impl<S> Layer<S> for RpcRequestMetrics {
+//     type Service = RpcRequestMetricsService<S>;
+
+//     fn layer(&self, inner: S) -> Self::Service {
+//         RpcRequestMetricsService::new(inner, self.clone())
+//     }
+// }
+
+impl<S> Layer<S> for RpcRequestMetrics
+where
+    S: std::marker::Send + std::marker::Sync,
+{
+    type Service = S;
 
     fn layer(&self, inner: S) -> Self::Service {
-        RpcRequestMetricsService::new(inner, self.clone())
+        inner
     }
 }
 
@@ -82,11 +93,13 @@ struct RpcServerMetricsInner {
 ///
 /// This is created per connection and captures metrics for each request.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub(crate) struct RpcRequestMetricsService<S> {
     metrics: RpcRequestMetrics,
     inner: S,
 }
 
+#[allow(dead_code)]
 impl<S> RpcRequestMetricsService<S> {
     pub(crate) fn new(service: S, metrics: RpcRequestMetrics) -> Self {
         // this instance is kept alive for the duration of the connection
