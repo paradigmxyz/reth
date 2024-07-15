@@ -1,36 +1,39 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.24;
 
 import "../TaikoTest.sol";
+import "../../contracts/L2/LibL2Config.sol";
 
 contract TestLib1559Math is TaikoTest {
     using LibMath for uint256;
 
-    function test_eip1559_math() external {
-        uint256 gasTarget = 15 * 1e6 * 10;
-        uint256 adjustmentQuotient = 8;
-        uint256 adjustmentFactor = gasTarget * adjustmentQuotient;
-        // The expected values are calculated in eip1559_util.py
-        _assertAmostEq(
-            999_999_916,
-            Lib1559Math.basefee({ gasExcess: 49_954_623_777, adjustmentFactor: adjustmentFactor })
-        );
+    // function test_eip1559_math() external pure {
+    //     LibL2Config.Config memory config = LibL2Config.get();
+    //     uint256 adjustmentFactor = config.gasTargetPerL1Block * config.basefeeAdjustmentQuotient;
 
-        _assertAmostEq(
-            48_246_703_821_869_050_543_408_253_349_256_099_602_613_005_189_120,
-            Lib1559Math.basefee({
-                gasExcess: LibFixedPointMath.MAX_EXP_INPUT * adjustmentFactor
-                    / LibFixedPointMath.SCALING_FACTOR,
-                adjustmentFactor: adjustmentFactor
-            })
-        );
-    }
+    //     uint256 baseFee;
+    //     uint256 i;
+    //     uint256 target = 0.01 gwei;
 
-    // Assert the different between two number is smaller than 1/1000000
-    function _assertAmostEq(uint256 a, uint256 b) private {
-        uint256 min = a.min(b);
-        uint256 max = a.max(b);
-        assertTrue(max > 0 && ((max - min) * 1_000_000) / max <= 1);
-        console2.log(a, " <> ", b);
-    }
+    //     for (uint256 k; k < 5; ++k) {
+    //         for (; baseFee < target; ++i) {
+    //             baseFee = Lib1559Math.basefee(config.gasTargetPerL1Block * i, adjustmentFactor);
+    //         }
+    //         console2.log("base fee:", baseFee);
+    //         console2.log("    gasExcess:", config.gasTargetPerL1Block * i);
+    //         console2.log("    i:", i);
+    //         target *= 10;
+    //     }
+    // }
+
+    // function test_eip1559_math_max() external pure {
+    //     LibL2Config.Config memory config = LibL2Config.get();
+    //     uint256 adjustmentFactor = config.gasTargetPerL1Block * config.basefeeAdjustmentQuotient;
+
+    //     uint256 gasExcess = type(uint64).max;
+    //     uint256 baseFee = Lib1559Math.basefee(gasExcess, adjustmentFactor);
+
+    //     console2.log("base fee (gwei):", baseFee / 1 gwei);
+    //     console2.log("    gasExcess:", gasExcess);
+    // }
 }

@@ -69,7 +69,7 @@ contract ProverPayment {
         );
 
         // Pay the prover
-        assignment.prover.sendEther(msg.value, MAX_GAS_PAYING_PROVER);
+        assignment.prover.sendEtherAndVerify(msg.value, MAX_GAS_PAYING_PROVER);
     }
 
     function hashAssignment(ProverAssignment memory assignment) internal view returns (bytes32) {
@@ -93,6 +93,6 @@ contract ProverPayment {
     // TODO(Brecht): delay
     function witdraw(address from, address to, uint256 amount) external {
         balances[from] -= amount;
-        to.sendEther(amount);
+        to.sendEtherAndVerify(amount);
     }
 }

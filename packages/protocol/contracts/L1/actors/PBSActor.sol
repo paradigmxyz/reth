@@ -38,6 +38,6 @@ contract PBSActor {
         require(keccak256(abi.encode(_block)) == parentHash, "unexpected parent");
 
         // Do conditional payment
-        address(block.coinbase).sendEther(tip);
+        address(block.coinbase).sendEtherAndVerify(tip);
     }
 }

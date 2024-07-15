@@ -55,11 +55,11 @@ contract BasedOperator is EssentialContract, TaikoErrors {
 
     mapping(uint256 => Block) public blocks;
 
-    function init(address _addressManager) external initializer {
+    function init(address _owner, address _addressManager) external initializer {
         if (_addressManager == address(0)) {
             revert L1_INVALID_ADDRESS();
         }
-        __Essential_init(_addressManager);
+        __Essential_init(_owner, _addressManager);
     }
 
     /// @dev Proposes a Taiko L2 block.
@@ -119,8 +119,8 @@ contract BasedOperator is EssentialContract, TaikoErrors {
             require(verifierRegistry.isVerifier(address(verifier)), "invalid verifier");
             // Verify the proof
             verifier.verifyProof(
-                proofBatch.blockMetadata,
                 proofBatch.transition,
+                keccak256(abi.encode(proofBatch.blockMetadata)),
                 proofBatch.prover,
                 proofBatch.proofs[i].proof
             );
@@ -185,9 +185,9 @@ contract BasedOperator is EssentialContract, TaikoErrors {
             uint256 bondToReturn = blk.bond;
             if (prover != blk.assignedProver) {
                 bondToReturn >>= 1;
-                treasury.sendEther(bondToReturn, MAX_GAS_PROVER_PAYMENT);
+                treasury.sendEtherAndVerify(bondToReturn, MAX_GAS_PROVER_PAYMENT);
             }
-            prover.sendEther(bondToReturn, MAX_GAS_PROVER_PAYMENT);
+            prover.sendEtherAndVerify(bondToReturn, MAX_GAS_PROVER_PAYMENT);
         }
     }
 

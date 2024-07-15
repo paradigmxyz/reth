@@ -1,22 +1,21 @@
 // SPDX-License-Identifier: MIT
-//  _____     _ _         _         _
-// |_   _|_ _(_) |_____  | |   __ _| |__ ___
-//   | |/ _` | | / / _ \ | |__/ _` | '_ (_-<
-//   |_|\__,_|_|_\_\___/ |____\__,_|_.__/__/
-
-pragma solidity ^0.8.20;
+pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "../TaikoL1.sol";
 import "../../common/EssentialContract.sol";
-import "../../thirdparty/LibBytesUtils.sol";
-import "../TaikoData.sol";
+import "../../automata-attestation/interfaces/IAttestation.sol";
+import "../../automata-attestation/lib/QuoteV3Auth/V3Struct.sol";
+import "./libs/LibPublicInput.sol";
 import "./IVerifier.sol";
 
 /// @title SgxVerifier
-/// @notice This contract is the implementation of verifying SGX signature
-/// proofs on-chain. Please see references below!
-/// Reference #1: https://ethresear.ch/t/2fa-zk-rollups-using-sgx/14462
-/// Reference #2: https://github.com/gramineproject/gramine/discussions/1579
+/// @notice This contract is the implementation of verifying SGX signature proofs
+/// onchain.
+/// @dev Please see references below:
+/// - Reference #1: https://ethresear.ch/t/2fa-zk-rollups-using-sgx/14462
+/// - Reference #2: https://github.com/gramineproject/gramine/discussions/1579
+/// @custom:security-contact security@taiko.xyz
 contract SgxVerifier is EssentialContract, IVerifier {
     /// @dev Each public-private key pair (Ethereum address) is generated within
     /// the SGX program when it boots up. The off-chain remote attestation
@@ -24,129 +23,186 @@ contract SgxVerifier is EssentialContract, IVerifier {
     /// bootstrapping the network with trustworthy instances.
     struct Instance {
         address addr;
-        uint64 addedAt; // We can calculate if expired
+        uint64 validSince;
     }
 
-    uint256 public constant INSTANCE_EXPIRY = 180 days;
+    /// @notice The expiry time for the SGX instance.
+    uint64 public constant INSTANCE_EXPIRY = 365 days;
 
-    /// @dev For gas savings, we shall assign each SGX instance with an id
-    /// so that when we need to set a new pub key, just write storage once.
-    uint256 public nextInstanceId; // slot 1
+    /// @notice A security feature, a delay until an instance is enabled when using onchain RA
+    /// verification
+    uint64 public constant INSTANCE_VALIDITY_DELAY = 0;
 
-    /// @dev One SGX instance is uniquely identified (on-chain) by it's ECDSA
-    /// public key (or rather ethereum address). Once that address is used (by
-    /// proof verification) it has to be overwritten by a new one (representing
-    /// the same instance). This is due to side-channel protection. Also this
-    /// public key shall expire after some time. (For now it is a long enough 6
-    /// months setting.)
-    mapping(uint256 instanceId => Instance) public instances; // slot 2
+    /// @dev For gas savings, we shall assign each SGX instance with an id that when we need to
+    /// set a new pub key, just write storage once.
+    /// Slot 1.
+    uint256 public nextInstanceId;
 
-    uint256[48] private __gap;
+    /// @dev One SGX instance is uniquely identified (on-chain) by it's ECDSA public key
+    /// (or rather ethereum address). Once that address is used (by proof verification) it has to be
+    /// overwritten by a new one (representing the same instance). This is due to side-channel
+    /// protection. Also this public key shall expire after some time
+    /// (for now it is a long enough 6 months setting).
+    /// Slot 2.
+    mapping(uint256 instanceId => Instance instance) public instances;
 
+    /// @dev One address shall be registered (during attestation) only once, otherwise it could
+    /// bypass this contract's expiry check by always registering with the same attestation and
+    /// getting multiple valid instanceIds. While during proving, it is technically possible to
+    /// register the old addresses, it is less of a problem, because the instanceId would be the
+    /// same for those addresses and if deleted - the attestation cannot be reused anyways.
+    /// Slot 3.
+    mapping(address instanceAddress => bool alreadyAttested) public addressRegistered;
+
+    uint256[47] private __gap;
+
+    /// @notice Emitted when a new SGX instance is added to the registry, or replaced.
+    /// @param id The ID of the SGX instance.
+    /// @param instance The address of the SGX instance.
+    /// @param replaced The address of the SGX instance that was replaced. If it is the first
+    /// instance, this value is zero address.
+    /// @param validSince The time since the instance is valid.
     event InstanceAdded(
-        uint256 indexed id, address indexed instance, address replaced, uint256 timstamp
+        uint256 indexed id, address indexed instance, address indexed replaced, uint256 validSince
     );
 
-    error SGX_INVALID_INSTANCE();
-    error SGX_INVALID_INSTANCES();
-    error SGX_INVALID_PROOF();
+    /// @notice Emitted when an SGX instance is deleted from the registry.
+    /// @param id The ID of the SGX instance.
+    /// @param instance The address of the SGX instance.
+    event InstanceDeleted(uint256 indexed id, address indexed instance);
 
-    /// @notice Initializes the contract with the provided address manager.
-    /// @param _addressManager The address of the address manager contract.
-    function init(address _addressManager) external initializer {
-        __Essential_init(_addressManager);
+    error SGX_ALREADY_ATTESTED();
+    error SGX_INVALID_ATTESTATION();
+    error SGX_INVALID_INSTANCE();
+    error SGX_INVALID_PROOF();
+    error SGX_RA_NOT_SUPPORTED();
+
+    /// @notice Initializes the contract.
+    /// @param _owner The owner of this contract. msg.sender will be used if this value is zero.
+    /// @param _addressManager The address of the {AddressManager} contract.
+    function init(address _owner, address _addressManager) external initializer {
+        __Essential_init(_owner, _addressManager);
     }
 
     /// @notice Adds trusted SGX instances to the registry.
     /// @param _instances The address array of trusted SGX instances.
-    /// @return ids The respective instanceId array per addresses.
+    /// @return The respective instanceId array per addresses.
     function addInstances(address[] calldata _instances)
         external
         onlyOwner
-        returns (uint256[] memory ids)
+        returns (uint256[] memory)
     {
-        if (_instances.length == 0) revert SGX_INVALID_INSTANCES();
-        ids = _addInstances(_instances);
+        return _addInstances(_instances, true);
     }
 
-    /// @notice Adds SGX instances to the registry by another SGX instance.
-    /// @param id The id of the SGX instance who is adding new members.
-    /// @param newInstance The new address of this instance.
-    /// @param extraInstances The address array of SGX instances.
-    /// @param signature The signature proving authenticity.
-    /// @return ids The respective instanceId array per addresses.
-    function addInstances(
-        uint256 id,
-        address newInstance,
-        address[] calldata extraInstances,
-        bytes calldata signature
-    )
+    /// @notice Deletes SGX instances from the registry.
+    /// @param _ids The ids array of SGX instances.
+    function deleteInstances(uint256[] calldata _ids)
         external
-        returns (uint256[] memory ids)
+        onlyFromOwnerOrNamed("sgx_watchdog")
     {
-        bytes32 signedHash = keccak256(abi.encode("ADD_INSTANCES", extraInstances));
-        address oldInstance = ECDSA.recover(signedHash, signature);
-        if (!_isInstanceValid(id, oldInstance)) revert SGX_INVALID_INSTANCE();
+        for (uint256 i; i < _ids.length; ++i) {
+            uint256 idx = _ids[i];
 
-        _replaceInstance(id, oldInstance, newInstance);
+            if (instances[idx].addr == address(0)) revert SGX_INVALID_INSTANCE();
 
-        ids = _addInstances(extraInstances);
+            emit InstanceDeleted(idx, instances[idx].addr);
+
+            delete instances[idx];
+        }
+    }
+
+    /// @notice Adds an SGX instance after the attestation is verified
+    /// @param _attestation The parsed attestation quote.
+    /// @return The respective instanceId
+    function registerInstance(V3Struct.ParsedV3QuoteStruct calldata _attestation)
+        external
+        returns (uint256)
+    {
+        address automataDcapAttestation = resolve("automata_dcap_attestation", true);
+
+        if (automataDcapAttestation == address(0)) {
+            revert SGX_RA_NOT_SUPPORTED();
+        }
+
+        (bool verified,) = IAttestation(automataDcapAttestation).verifyParsedQuote(_attestation);
+
+        if (!verified) revert SGX_INVALID_ATTESTATION();
+
+        address[] memory _address = new address[](1);
+        _address[0] = address(bytes20(_attestation.localEnclaveReport.reportData));
+
+        return _addInstances(_address, false)[0];
     }
 
     /// @inheritdoc IVerifier
     function verifyProof(
-        TaikoData.BlockMetadata calldata _block,
         TaikoData.Transition calldata transition,
+        bytes32 blockMetaHash,
         address prover,
         bytes calldata proof
     )
         external
+        onlyFromNamed("taiko")
     {
         // Size is: 89 bytes
         // 4 bytes + 20 bytes + 65 bytes (signature) = 89
         if (proof.length != 89) revert SGX_INVALID_PROOF();
 
-        uint32 id = uint32(bytes4(LibBytesUtils.slice(proof, 0, 4)));
-        address newInstance = address(bytes20(LibBytesUtils.slice(proof, 4, 20)));
-        bytes memory signature = LibBytesUtils.slice(proof, 24);
+        uint32 id = uint32(bytes4(proof[:4]));
+        address newInstance = address(bytes20(proof[4:24]));
+        bytes memory signature = proof[24:];
+
+        uint64 chainId = TaikoL1(resolve("taiko", false)).getConfig().chainId;
 
         address oldInstance = ECDSA.recover(
-            getSignedHash(transition, newInstance, prover, keccak256(abi.encode(_block))), signature
+            LibPublicInput.hashPublicInputs(
+                transition, address(this), newInstance, prover, blockMetaHash, chainId
+            ),
+            signature
         );
 
         if (!_isInstanceValid(id, oldInstance)) revert SGX_INVALID_INSTANCE();
-        _replaceInstance(id, oldInstance, newInstance);
+
+        if (oldInstance != newInstance) {
+            _replaceInstance(id, oldInstance, newInstance);
+        }
     }
 
-    function getSignedHash(
-        TaikoData.Transition memory tran,
-        address newInstance,
-        address prover,
-        bytes32 metaHash
+    function _addInstances(
+        address[] memory _instances,
+        bool instantValid
     )
-        public
-        pure
-        returns (bytes32 signedHash)
+        private
+        returns (uint256[] memory ids)
     {
-        return keccak256(abi.encode(tran, newInstance, prover, metaHash));
-    }
-
-    function _addInstances(address[] calldata _instances) private returns (uint256[] memory ids) {
         ids = new uint256[](_instances.length);
 
+        uint64 validSince = uint64(block.timestamp);
+
+        if (!instantValid) {
+            validSince += INSTANCE_VALIDITY_DELAY;
+        }
+
         for (uint256 i; i < _instances.length; ++i) {
+            if (addressRegistered[_instances[i]]) revert SGX_ALREADY_ATTESTED();
+
+            addressRegistered[_instances[i]] = true;
+
             if (_instances[i] == address(0)) revert SGX_INVALID_INSTANCE();
 
-            instances[nextInstanceId] = Instance(_instances[i], uint64(block.timestamp));
+            instances[nextInstanceId] = Instance(_instances[i], validSince);
             ids[i] = nextInstanceId;
 
-            emit InstanceAdded(nextInstanceId, _instances[i], address(0), block.timestamp);
+            emit InstanceAdded(nextInstanceId, _instances[i], address(0), validSince);
 
-            nextInstanceId++;
+            ++nextInstanceId;
         }
     }
 
     function _replaceInstance(uint256 id, address oldInstance, address newInstance) private {
+        // Replacing an instance means, it went through a cooldown (if added by on-chain RA) so no
+        // need to have a cooldown
         instances[id] = Instance(newInstance, uint64(block.timestamp));
         emit InstanceAdded(id, newInstance, oldInstance, block.timestamp);
     }
@@ -154,6 +210,7 @@ contract SgxVerifier is EssentialContract, IVerifier {
     function _isInstanceValid(uint256 id, address instance) private view returns (bool) {
         if (instance == address(0)) return false;
         if (instance != instances[id].addr) return false;
-        return instances[id].addedAt + INSTANCE_EXPIRY > block.timestamp;
+        return instances[id].validSince <= block.timestamp
+            && block.timestamp <= instances[id].validSince + INSTANCE_EXPIRY;
     }
 }

@@ -38,28 +38,30 @@ abstract contract TaikoL1TestBase is TaikoTest {
     address public L2SS = randAddress();
     address public L2 = randAddress();
 
-    function deployTaikoL1() internal virtual returns (TaikoL1 taikoL1);
+    function deployTaikoL1(address addressManager) internal virtual returns (TaikoL1 taikoL1);
 
     function setUp() public virtual {
+        vm.startPrank(Alice);
         vm.roll(20_232_182); //A real Ethereum block number from Jul-04-2024 09:13:47
         vm.warp(1_720_077_269);
-
-        L1 = deployTaikoL1();
-        conf = L1.getConfig();
 
         addressManager = AddressManager(
             deployProxy({
                 name: "address_manager",
                 impl: address(new AddressManager()),
-                data: bytes.concat(AddressManager.init.selector)
+                data: abi.encodeCall(AddressManager.init, (Alice))
             })
         );
 
+        L1 = deployTaikoL1(address(addressManager));
+        conf = L1.getConfig();
+
+        console2.log("Address szar:", (address(addressManager)));
         basedOperator = BasedOperator(
             deployProxy({
                 name: "operator",
                 impl: address(new BasedOperator()),
-                data: abi.encodeCall(BasedOperator.init, (address(addressManager)))
+                data: abi.encodeCall(BasedOperator.init, (Alice, address(addressManager)))
             })
         );
 
@@ -95,34 +97,46 @@ abstract contract TaikoL1TestBase is TaikoTest {
         address sgxImpl = address(new SgxVerifier());
         //Naming is like: 3, 1, 2, is because we need to have incremental order of addresses in
         // BasedOperator, so figured out this is actually the way
-        sv3 = SgxVerifier(
-            deployProxy({
-                name: "sgx1", //Name does not matter now, since we check validity via
-                    // verifierRegistry
-                impl: sgxImpl,
-                data: bytes.concat(SgxVerifier.init.selector, abi.encode(address(addressManager)))
-            })
-        );
-        console2.log(address(sv1));
 
         sv1 = SgxVerifier(
             deployProxy({
                 name: "sgx2", //Name does not matter now, since we check validity via
                     // verifierRegistry
                 impl: sgxImpl,
-                data: bytes.concat(SgxVerifier.init.selector, abi.encode(address(addressManager)))
+                data: abi.encodeCall(SgxVerifier.init, (Alice, address(addressManager)))
             })
         );
-        console2.log(address(sv2));
+
+        console2.log(address(sv1));
 
         sv2 = SgxVerifier(
             deployProxy({
                 name: "sgx3", //Name does not matter now, since we check validity via
                     // verifierRegistry
                 impl: sgxImpl,
-                data: bytes.concat(SgxVerifier.init.selector, abi.encode(address(addressManager)))
+                data: abi.encodeCall(SgxVerifier.init, (Alice, address(addressManager)))
             })
         );
+
+        sv3 = SgxVerifier(
+            deployProxy({
+                name: "sgx1", //Name does not matter now, since we check validity via
+                    // verifierRegistry
+                impl: sgxImpl,
+                data: abi.encodeCall(SgxVerifier.init, (Alice, address(addressManager)))
+            })
+        );
+
+        console2.log(address(sv2));
+
+        // sv2 = SgxVerifier(
+        //     deployProxy({
+        //         name: "sgx3", //Name does not matter now, since we check validity via
+        //             // verifierRegistry
+        //         impl: sgxImpl,
+        //         data: abi.encodeCall(SgxVerifier.init, (Alice, address(addressManager)))
+        //     })
+        // );
 
         console2.log(address(sv3));
 
@@ -130,14 +144,10 @@ abstract contract TaikoL1TestBase is TaikoTest {
         // changed since taiko-simplified was created first.
         address[] memory initSgxInstances = new address[](1);
         initSgxInstances[0] = SGX_X_0;
+
         sv1.addInstances(initSgxInstances);
         sv2.addInstances(initSgxInstances);
         sv3.addInstances(initSgxInstances);
-
-        // Add those 3 to verifier registry
-        vr.addVerifier(address(sv1), "sgx1");
-        vr.addVerifier(address(sv2), "sgx2");
-        vr.addVerifier(address(sv3), "sgx3");
 
         //         address[] memory initSgxInstances = new address[](1);
         //         initSgxInstances[0] = SGX_X_0;
@@ -216,21 +226,21 @@ abstract contract TaikoL1TestBase is TaikoTest {
             deployProxy({
                 name: "taiko_token",
                 impl: address(new TaikoToken()),
-                data: bytes.concat(
-                    TaikoToken.init.selector,
-                    abi.encode(
-                        "Taiko Token", //
-                        "TTKOk",
-                        address(this)
-                    )
-                ),
-                registerTo: address(addressManager),
-                owner: address(0)
+                data: abi.encodeCall(TaikoToken.init, (address(0), address(this))),
+                registerTo: address(addressManager)
             })
         );
 
-        L1.init(address(addressManager), GENESIS_BLOCK_HASH);
+        L1.init(Alice, address(addressManager), GENESIS_BLOCK_HASH);
         printVariables("init  ");
+        vm.stopPrank();
+
+        // Add those 3 to verifier registry
+        vm.startPrank(vr.owner());
+        vr.addVerifier(address(sv1), "sgx1");
+        vr.addVerifier(address(sv2), "sgx2");
+        vr.addVerifier(address(sv3), "sgx3");
+        vm.stopPrank();
     }
 
     function proposeBlock(
@@ -380,7 +390,9 @@ abstract contract TaikoL1TestBase is TaikoTest {
         view
         returns (bytes memory signature)
     {
-        bytes32 digest = sv1.getSignedHash(tran, newInstance, prover, metaHash);
+        bytes32 digest = LibPublicInput.hashPublicInputs(
+            tran, address(sv1), newInstance, prover, metaHash, L1.getConfig().chainId
+        );
 
         uint256 signerPrivateKey;
 
@@ -499,11 +511,14 @@ abstract contract TaikoL1TestBase is TaikoTest {
         bytes memory signature =
             createSgxSignatureProof(transition, newInstance, prover, keccak256(abi.encode(meta)));
 
-        proofs[0].verifier = sv1;
+        // The order is on purpose reversed, becase of the L1_INVALID_OR_DUPLICATE_VERIFIER() check
+        proofs[0].verifier = sv2;
         proofs[0].proof = bytes.concat(bytes4(0), bytes20(newInstance), signature);
 
         if (threeMockSGXProofs) {
-            proofs[1].verifier = sv2;
+            // The order is on purpose reversed, becase of the L1_INVALID_OR_DUPLICATE_VERIFIER()
+            // check
+            proofs[1].verifier = sv1;
             proofs[1].proof = bytes.concat(bytes4(0), bytes20(newInstance), signature);
 
             proofs[2].verifier = sv3;
