@@ -31,6 +31,9 @@ pub struct EvmCommand {
     /// end block number
     #[arg(long, alias = "end", short = 'e')]
     end_number: u64,
+    /// step size for loop
+    #[arg(long, alias = "step", short = 's', default_value = "10")]
+    step_size: usize,
 }
 
 impl EvmCommand {
@@ -47,10 +50,10 @@ impl EvmCommand {
 
         // configure blockchain tree
         let tree_externals =
-            TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
+            TreeExternals::new(provider_factory.clone(), consensus, executor);
         let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
-        let blockchain_db = BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone(), blockchain_tree)?;
 
         let provider = provider_factory.provider()?;
 
@@ -65,7 +68,7 @@ impl EvmCommand {
 
 
         // 获取 CPU 核心数，减一作为线程数
-        let cpu_count = self.get_cpu_count();
+        let cpu_count = self.get_cpu_count() * 2;
         let thread_count = cpu_count - 1;
 
         // 计算每个线程处理的区间大小
@@ -76,7 +79,7 @@ impl EvmCommand {
 
         // 创建共享 gas 计数器
         let cumulative_gas = Arc::new(Mutex::new(0));
-        let block_counter = Arc::new(Mutex::new(0));
+        let block_counter = Arc::new(Mutex::new(self.begin_number -1));
         let txs_counter = Arc::new(Mutex::new(0));
 
         // 创建状态输出线程
@@ -88,7 +91,7 @@ impl EvmCommand {
 
             thread::spawn(move || {
                 let mut previous_cumulative_gas:u64 = 0;
-                let mut previous_block_counter:u64 = 0;
+                let mut previous_block_counter:u64 = self.begin_number -1;
                 let mut previous_txs_counter:u64 = 0;
                 loop {
                     thread::sleep(Duration::from_secs(1));
@@ -130,54 +133,75 @@ impl EvmCommand {
                 thread_start + range_per_thread - 1
             };
 
-            let cumulative_gas = Arc::clone(&cumulative_gas);
-            let block_counter = Arc::clone(&block_counter);
-            let txs_counter = Arc::clone(&txs_counter);
+            let cumulative_gas_clone = Arc::clone(&cumulative_gas);
+            let block_counter_clone = Arc::clone(&block_counter);
+            let txs_counter_clone = Arc::clone(&txs_counter);
 
             let provider_factory = provider_factory.clone();
             let blockchain_db = blockchain_db.clone();
 
-
-
-
-            let mut td = blockchain_db.header_td_by_number(thread_start)?
+            let mut td = blockchain_db.header_td_by_number(thread_start -1)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(thread_start.into()))?;
 
+            debug!(
+                target:"exex::evm",
+                td=?td,
+                thread_start=?thread_start,
+                "fetch td"
+            );
+            let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(thread_start -1)?);
+            let executor = block_executor!(provider_factory.chain_spec());
+            let mut executor = executor.batch_executor(db, PruneModes::none());
+
             threads.push(thread::spawn(move || {
+                let thread_id = thread::current().id();
+                for loop_start in (thread_start..=thread_end).step_by(self.step_size) {
+                    let loop_end = std::cmp::min(loop_start + self.step_size as u64 - 1, thread_end);
+                    // let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(loop_start-1)?);
+                    // let executor = block_executor!(provider_factory.chain_spec());
+                    // let mut executor = executor.batch_executor(db, PruneModes::none());
 
-                for loop_start in (thread_start..=thread_end).step_by(1000) {
-                    let loop_end = std::cmp::min(loop_start + 999, thread_end);
-
-                    let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(loop_start-1)?);
-                    let executor = block_executor!(provider_factory.chain_spec()).clone();
-                    let executor = executor.batch_executor(db, PruneModes::none());
                     let blocks = blockchain_db.block_with_senders_range(loop_start..=loop_end).unwrap();
 
-                    debug!(
-                        target:"exex::evm",
-                        loop_start=loop_start,
-                        loop_end=loop_end,
-                        "loop"
-                    );
-                    executor.execute_and_verify_batch(blocks.iter()
+                    let start = Instant::now();
+                    let mut step_cumulative_gas:u64 = 0;
+                    let mut step_txs_counter:usize = 0;
+
+                    executor.execute_and_verify_many(blocks.iter()
                         .map(|block| {
                             let result = (block, td).into();
                             td += block.header.difficulty;
+                            step_cumulative_gas += block.block.gas_used;
+                            step_txs_counter += block.block.body.len();
+                            // info!(target:"exex::evm", block_number=block.block.header.number, txs_count= block.block.body.len(), "Adding transactions count");
                             result
                         })
                         .collect::<Vec<_>>())?;
 
 
-                    // 增加 gas 计数器
-                    let mut cumulative_gas = cumulative_gas.lock().unwrap();
-                    *cumulative_gas += blocks.iter().map(|block| block.block.gas_used).sum::<u64>();
-                    // block
-                    let mut block_counter = block_counter.lock().unwrap();
-                    *block_counter += blocks.len() as u64;
+                    // Ensure the locks are correctly used without deadlock
+                    {
+                        *cumulative_gas_clone.lock().unwrap() +=step_cumulative_gas;
+                    }
+                    {
+                        *block_counter_clone.lock().unwrap()+= blocks.len() as u64;
+                    }
+                    {
+                        *txs_counter_clone.lock().unwrap() += step_txs_counter as u64;
+                    }
 
-                    let mut txs_counter = txs_counter.lock().unwrap();
-                    *txs_counter += blocks.iter().map(|block| block.block.body.len()).sum::<usize>() as u64;
-
+                    debug!(
+                        target:"exex::evm",
+                        loop_start=loop_start,
+                        loop_end=loop_end,
+                        txs=step_txs_counter,
+                        blocks = blocks.len(),
+                        throughput = format_gas_throughput(step_cumulative_gas, start.elapsed()),
+                        time = ?start.elapsed(),
+                        thread_id = ?thread_id,
+                        total_difficulty = ?td,
+                        "loop"
+                    );
                 }
                 Ok(true)
             }));
@@ -185,11 +209,15 @@ impl EvmCommand {
 
         for thread in threads {
             match thread.join() {
-                Ok(_) => {},
+                Ok(res) => {
+                    if let Err(e) = res {
+                        return Err(eyre::eyre!("Thread execution error: {:?}", e));
+                    }
+                },
                 Err(e) => return Err(eyre::eyre!("Thread join error: {:?}", e)),
             };
         }
-
+        thread::sleep(Duration::from_secs(1));
         Ok(())
     }
 
