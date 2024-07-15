@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.24;
 
 import "../TaikoTest.sol";
 
 contract Target1 is EssentialContract {
     uint256 public count;
 
-    function init() external initializer {
-        __Essential_init();
+    function init(address _owner) external initializer {
+        __Essential_init(_owner);
         count = 100;
     }
 
@@ -26,9 +26,9 @@ contract Target2 is Target1 {
     }
 }
 
-contract TestOwnerUUPSUpgradable is TaikoTest {
+contract TestEssentialContract is TaikoTest {
     function test_essential_behind_1967_proxy() external {
-        bytes memory data = bytes.concat(Target1.init.selector);
+        bytes memory data = abi.encodeCall(Target1.init, (address(0)));
         vm.startPrank(Alice);
         ERC1967Proxy proxy = new ERC1967Proxy(address(new Target1()), data);
         Target1 target = Target1(address(proxy));
@@ -49,7 +49,7 @@ contract TestOwnerUUPSUpgradable is TaikoTest {
         target.adjust();
 
         address v2 = address(new Target2());
-        data = bytes.concat(Target2.update.selector);
+        data = abi.encodeCall(Target2.update, ());
 
         vm.prank(Bob);
         vm.expectRevert();

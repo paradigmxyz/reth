@@ -1,134 +1,116 @@
 // SPDX-License-Identifier: MIT
-//  _____     _ _         _         _
-// |_   _|_ _(_) |_____  | |   __ _| |__ ___
-//   | |/ _` | | / / _ \ | |__/ _` | '_ (_-<
-//   |_|\__,_|_|_\_\___/ |____\__,_|_.__/__/
+pragma solidity 0.8.24;
 
-pragma solidity ^0.8.20;
-
-import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol";
-import
-    "@openzeppelin/contracts-upgradeable/token/ERC1155/extensions/IERC1155MetadataURIUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC1155/IERC1155Upgradeable.sol";
 import "../common/EssentialContract.sol";
+import "../common/LibStrings.sol";
+import "./IBridgedERC1155.sol";
 import "./LibBridgedToken.sol";
 
 /// @title BridgedERC1155
 /// @notice Contract for bridging ERC1155 tokens across different chains.
+/// @custom:security-contact security@taiko.xyz
 contract BridgedERC1155 is
     EssentialContract,
-    IERC1155Upgradeable,
-    IERC1155MetadataURIUpgradeable,
+    IBridgedERC1155,
+    IBridgedERC1155Initializable,
     ERC1155Upgradeable
 {
-    address public srcToken; // Address of the source token contract.
-    uint256 public srcChainId; // Source chain ID where the token originates.
-    string private symbol_; // Symbol of the bridged token.
-    string private name_; // Name of the bridged token.
+    /// @notice Address of the source token contract.
+    address public srcToken;
+
+    /// @notice Source chain ID where the token originates.
+    uint256 public srcChainId;
+
+    /// @dev Symbol of the bridged token.
+    string public symbol;
+
+    /// @dev Name of the bridged token.
+    string public name;
 
     uint256[46] private __gap;
 
-    // Event triggered upon token transfer.
-    event Transfer(address indexed from, address indexed to, uint256 tokenId, uint256 amount);
-
-    error BTOKEN_CANNOT_RECEIVE();
     error BTOKEN_INVALID_PARAMS();
 
-    /// @dev Initializer function to be called after deployment.
-    /// @param _addressManager The address of the address manager.
-    /// @param _srcToken Address of the source token.
-    /// @param _srcChainId Source chain ID.
-    /// @param _symbol Symbol of the bridged token.
-    /// @param _name Name of the bridged token.
+    /// @inheritdoc IBridgedERC1155Initializable
     function init(
+        address _owner,
         address _addressManager,
         address _srcToken,
         uint256 _srcChainId,
-        string memory _symbol,
-        string memory _name
+        string calldata _symbol,
+        string calldata _name
     )
         external
         initializer
     {
-        if (_srcToken == address(0) || _srcChainId == 0 || _srcChainId == block.chainid) {
-            revert BTOKEN_INVALID_PARAMS();
-        }
-        __Essential_init(_addressManager);
-        __ERC1155_init("");
+        // Check if provided parameters are valid.
+        // The symbol and the name can be empty for ERC1155 tokens so we use some placeholder data
+        // for them instead.
+        LibBridgedToken.validateInputs(_srcToken, _srcChainId);
+        __Essential_init(_owner, _addressManager);
+
+        // The token URI here is not important as the client will have to read the URI from the
+        // canonical contract to fetch meta data.
+        __ERC1155_init(LibBridgedToken.buildURI(_srcToken, _srcChainId, ""));
+
         srcToken = _srcToken;
         srcChainId = _srcChainId;
-        symbol_ = _symbol;
-        name_ = _name;
+        symbol = _symbol;
+        name = _name;
     }
 
-    /// @dev Mints tokens.
-    /// @param account Address to receive the minted tokens.
-    /// @param tokenId ID of the token to mint.
-    /// @param amount Amount of tokens to mint.
-    function mint(
-        address account,
-        uint256 tokenId,
-        uint256 amount
+    /// @inheritdoc IBridgedERC1155
+    function mintBatch(
+        address _to,
+        uint256[] calldata _tokenIds,
+        uint256[] calldata _amounts
     )
-        public
-        nonReentrant
+        external
         whenNotPaused
-        onlyFromNamed("erc1155_vault")
+        onlyFromNamed(LibStrings.B_ERC1155_VAULT)
+        nonReentrant
     {
-        _mint(account, tokenId, amount, "");
+        _mintBatch(_to, _tokenIds, _amounts, "");
     }
 
-    /// @dev Burns tokens.
-    /// @param account Address from which tokens are burned.
-    /// @param tokenId ID of the token to burn.
-    /// @param amount Amount of tokens to burn.
+    /// @inheritdoc IBridgedERC1155
     function burn(
-        address account,
-        uint256 tokenId,
-        uint256 amount
+        uint256 _id,
+        uint256 _amount
     )
-        public
-        nonReentrant
+        external
         whenNotPaused
-        onlyFromNamed("erc1155_vault")
+        onlyFromNamed(LibStrings.B_ERC1155_VAULT)
+        nonReentrant
     {
-        _burn(account, tokenId, amount);
+        _burn(msg.sender, _id, _amount);
     }
 
-    /// @dev Safely transfers tokens from one address to another.
-    /// @param from Address from which tokens are transferred.
-    /// @param to Address to which tokens are transferred.
-    /// @param tokenId ID of the token to transfer.
-    /// @param amount Amount of tokens to transfer.
-    /// @param data Additional data.
-    function safeTransferFrom(
-        address from,
-        address to,
-        uint256 tokenId,
-        uint256 amount,
-        bytes memory data
+    /// @inheritdoc IBridgedERC1155
+    function canonical() external view returns (address, uint256) {
+        return (srcToken, srcChainId);
+    }
+
+    function supportsInterface(bytes4 _interfaceId) public view override returns (bool) {
+        return _interfaceId == type(IBridgedERC1155).interfaceId
+            || _interfaceId == type(IBridgedERC1155Initializable).interfaceId
+            || super.supportsInterface(_interfaceId);
+    }
+
+    function _beforeTokenTransfer(
+        address _operator,
+        address _from,
+        address _to,
+        uint256[] memory _ids,
+        uint256[] memory _amounts,
+        bytes memory _data
     )
-        public
-        override(ERC1155Upgradeable, IERC1155Upgradeable)
-        nonReentrant
+        internal
+        override
         whenNotPaused
     {
-        if (to == address(this)) {
-            revert BTOKEN_CANNOT_RECEIVE();
-        }
-        return ERC1155Upgradeable.safeTransferFrom(from, to, tokenId, amount, data);
-    }
-
-    /// @notice Gets the name of the bridged token.
-    /// @return The name.
-    function name() public view returns (string memory) {
-        return LibBridgedToken.buildName(name_, srcChainId);
-    }
-
-    /// @notice Gets the symbol of the bridged token.
-    /// @return The symbol.
-    function symbol() public view returns (string memory) {
-        return LibBridgedToken.buildSymbol(symbol_);
+        LibBridgedToken.checkToAddress(_to);
+        super._beforeTokenTransfer(_operator, _from, _to, _ids, _amounts, _data);
     }
 }

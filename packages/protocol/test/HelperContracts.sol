@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.24;
 
 import "../contracts/bridge/Bridge.sol";
 import "../contracts/signal/SignalService.sol";
-import "../contracts/common/ICrossChainSync.sol";
 
 contract BadReceiver {
     receive() external payable {
@@ -19,10 +18,11 @@ contract BadReceiver {
     }
 }
 
-contract GoodReceiver {
+contract GoodReceiver is IMessageInvocable {
     receive() external payable { }
 
-    function forward(address addr) public payable {
+    function onMessageInvocation(bytes calldata data) public payable {
+        address addr = abi.decode(data, (address));
         payable(addr).transfer(address(this).balance / 2);
     }
 }
@@ -37,20 +37,15 @@ contract NonNftContract {
 }
 
 contract SkipProofCheckSignal is SignalService {
-    function skipProofCheck() public pure override returns (bool) {
-        return true;
-    }
-}
-
-contract DummyCrossChainSync is EssentialContract, ICrossChainSync {
-    Snippet private _snippet;
-
-    function setSyncedData(bytes32 blockHash, bytes32 signalRoot) external {
-        _snippet.blockHash = blockHash;
-        _snippet.signalRoot = signalRoot;
-    }
-
-    function getSyncedSnippet(uint64) external view returns (Snippet memory) {
-        return _snippet;
-    }
+    function proveSignalReceived(
+        uint64, /*srcChainId*/
+        address, /*app*/
+        bytes32, /*signal*/
+        bytes calldata /*proof*/
+    )
+        public
+        pure
+        override
+        returns (uint256)
+    { }
 }

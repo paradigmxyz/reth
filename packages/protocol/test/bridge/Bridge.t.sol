@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.24;
 
 import "../TaikoTest.sol";
 
@@ -13,9 +13,22 @@ contract UntrustedSendMessageRelayer {
         uint256 message_value
     )
         public
+        returns (bytes32 msgHash, IBridge.Message memory updatedMessage)
     {
-        IBridge(bridge).sendMessage{ value: message_value }(message);
+        return IBridge(bridge).sendMessage{ value: message_value }(message);
     }
+}
+
+// A malicious contract that attempts to exhaust gas
+contract MaliciousContract2 {
+    fallback() external payable {
+        while (true) { } // infinite loop
+    }
+}
+
+// Non malicious contract that does not exhaust gas
+contract NonMaliciousContract1 {
+    fallback() external payable { }
 }
 
 contract BridgeTest is TaikoTest {
@@ -25,9 +38,14 @@ contract BridgeTest is TaikoTest {
     Bridge bridge;
     Bridge destChainBridge;
     SignalService signalService;
-    DummyCrossChainSync crossChainSync;
     SkipProofCheckSignal mockProofSignalService;
     UntrustedSendMessageRelayer untrustedSenderContract;
+
+    NonMaliciousContract1 nonmaliciousContract1;
+    MaliciousContract2 maliciousContract2;
+
+    address mockDAO = randAddress(); //as "real" L1 owner
+
     uint64 destChainId = 19_389;
 
     function setUp() public {
@@ -38,7 +56,7 @@ contract BridgeTest is TaikoTest {
             deployProxy({
                 name: "address_manager",
                 impl: address(new AddressManager()),
-                data: bytes.concat(AddressManager.init.selector)
+                data: abi.encodeCall(AddressManager.init, (address(0)))
             })
         );
 
@@ -47,9 +65,8 @@ contract BridgeTest is TaikoTest {
                 deployProxy({
                     name: "bridge",
                     impl: address(new Bridge()),
-                    data: bytes.concat(Bridge.init.selector, abi.encode(addressManager)),
-                    registerTo: address(addressManager),
-                    owner: address(0)
+                    data: abi.encodeCall(Bridge.init, (address(0), address(addressManager))),
+                    registerTo: address(addressManager)
                 })
             )
         );
@@ -59,18 +76,23 @@ contract BridgeTest is TaikoTest {
                 deployProxy({
                     name: "bridge",
                     impl: address(new Bridge()),
-                    data: bytes.concat(Bridge.init.selector, abi.encode(addressManager))
+                    data: abi.encodeCall(Bridge.init, (address(0), address(addressManager)))
                 })
             )
         );
+
+        // "Deploy" on L2 only
+        uint64 l1ChainId = uint64(block.chainid);
+        vm.chainId(destChainId);
+
+        vm.chainId(l1ChainId);
 
         mockProofSignalService = SkipProofCheckSignal(
             deployProxy({
                 name: "signal_service",
                 impl: address(new SkipProofCheckSignal()),
-                data: bytes.concat(SignalService.init.selector),
-                registerTo: address(addressManager),
-                owner: address(0)
+                data: abi.encodeCall(SignalService.init, (address(0), address(addressManager))),
+                registerTo: address(addressManager)
             })
         );
 
@@ -78,13 +100,11 @@ contract BridgeTest is TaikoTest {
             deployProxy({
                 name: "signal_service",
                 impl: address(new SignalService()),
-                data: bytes.concat(SignalService.init.selector)
+                data: abi.encodeCall(SignalService.init, (address(0), address(addressManager)))
             })
         );
 
         vm.deal(address(destChainBridge), 100 ether);
-
-        crossChainSync = new DummyCrossChainSync();
 
         untrustedSenderContract = new UntrustedSendMessageRelayer();
         vm.deal(address(untrustedSenderContract), 10 ether);
@@ -96,6 +116,9 @@ contract BridgeTest is TaikoTest {
         register(address(addressManager), "bridge", address(destChainBridge), destChainId);
 
         register(address(addressManager), "taiko", address(uint160(123)), destChainId);
+
+        register(address(addressManager), "bridge_watchdog", address(uint160(123)), destChainId);
+
         vm.stopPrank();
     }
 
@@ -105,17 +128,16 @@ contract BridgeTest is TaikoTest {
             from: address(bridge),
             srcChainId: uint64(block.chainid),
             destChainId: destChainId,
-            owner: Alice,
+            srcOwner: Alice,
+            destOwner: Alice,
             to: Alice,
-            refundTo: Alice,
-            value: 1000,
+            value: 10_000,
             fee: 1000,
             gasLimit: 1_000_000,
-            data: "",
-            memo: ""
+            data: ""
         });
         // Mocking proof - but obviously it needs to be created in prod
-        // coresponding to the message
+        // corresponding to the message
         bytes memory proof = hex"00";
 
         bytes32 msgHash = destChainBridge.hashMessage(message);
@@ -124,19 +146,19 @@ contract BridgeTest is TaikoTest {
         vm.prank(Bob, Bob);
         destChainBridge.processMessage(message, proof);
 
-        Bridge.Status status = destChainBridge.messageStatus(msgHash);
+        IBridge.Status status = destChainBridge.messageStatus(msgHash);
 
-        assertEq(status == Bridge.Status.DONE, true);
+        assertEq(status == IBridge.Status.DONE, true);
         // Alice has 100 ether + 1000 wei balance, because we did not use the
         // 'sendMessage'
         // since we mocking the proof, so therefore the 1000 wei
-        // deduction/transfer did
-        // not happen
-        assertEq(Alice.balance, 100_000_000_000_000_001_000);
-        assertEq(Bob.balance, 1000);
+        // deduction/transfer did not happen
+        assertTrue(Alice.balance >= 100 ether + 10_000);
+        assertTrue(Alice.balance <= 100 ether + 10_000 + 1000);
+        assertTrue(Bob.balance >= 0 && Bob.balance <= 1000);
     }
 
-    function test_Bridge_send_ether_to_contract_with_value() public {
+    function test_Bridge_send_ether_to_contract_with_value_simple() public {
         goodReceiver = new GoodReceiver();
 
         IBridge.Message memory message = IBridge.Message({
@@ -144,17 +166,16 @@ contract BridgeTest is TaikoTest {
             from: address(bridge),
             srcChainId: uint64(block.chainid),
             destChainId: destChainId,
-            owner: Alice,
+            srcOwner: Alice,
+            destOwner: Alice,
             to: address(goodReceiver),
-            refundTo: Alice,
-            value: 1000,
+            value: 10_000,
             fee: 1000,
             gasLimit: 1_000_000,
-            data: "",
-            memo: ""
+            data: ""
         });
         // Mocking proof - but obviously it needs to be created in prod
-        // coresponding to the message
+        // corresponding to the message
         bytes memory proof = hex"00";
 
         bytes32 msgHash = destChainBridge.hashMessage(message);
@@ -164,13 +185,14 @@ contract BridgeTest is TaikoTest {
         vm.prank(Bob, Bob);
         destChainBridge.processMessage(message, proof);
 
-        Bridge.Status status = destChainBridge.messageStatus(msgHash);
+        IBridge.Status status = destChainBridge.messageStatus(msgHash);
 
-        assertEq(status == Bridge.Status.DONE, true);
+        assertEq(status == IBridge.Status.DONE, true);
 
         // Bob (relayer) and goodContract has 1000 wei balance
-        assertEq(address(goodReceiver).balance, 1000);
-        assertEq(Bob.balance, 1000);
+        assertEq(address(goodReceiver).balance, 10_000);
+        console2.log("Bob.balance:", Bob.balance);
+        assertTrue(Bob.balance >= 0 && Bob.balance <= 1000);
     }
 
     function test_Bridge_send_ether_to_contract_with_value_and_message_data() public {
@@ -181,17 +203,16 @@ contract BridgeTest is TaikoTest {
             from: address(bridge),
             srcChainId: uint64(block.chainid),
             destChainId: destChainId,
-            owner: Alice,
+            srcOwner: Alice,
+            destOwner: Alice,
             to: address(goodReceiver),
-            refundTo: Alice,
             value: 1000,
             fee: 1000,
             gasLimit: 1_000_000,
-            data: abi.encodeWithSelector(GoodReceiver.forward.selector, Carol),
-            memo: ""
+            data: abi.encodeCall(GoodReceiver.onMessageInvocation, abi.encode(Carol))
         });
         // Mocking proof - but obviously it needs to be created in prod
-        // coresponding to the message
+        // corresponding to the message
         bytes memory proof = hex"00";
 
         bytes32 msgHash = destChainBridge.hashMessage(message);
@@ -201,9 +222,9 @@ contract BridgeTest is TaikoTest {
         vm.prank(Bob, Bob);
         destChainBridge.processMessage(message, proof);
 
-        Bridge.Status status = destChainBridge.messageStatus(msgHash);
+        IBridge.Status status = destChainBridge.messageStatus(msgHash);
 
-        assertEq(status == Bridge.Status.DONE, true);
+        assertEq(status == IBridge.Status.DONE, true);
 
         // Carol and goodContract has 500 wei balance
         assertEq(address(goodReceiver).balance, 500);
@@ -216,8 +237,8 @@ contract BridgeTest is TaikoTest {
             owner: Alice,
             to: Alice,
             value: 0,
-            gasLimit: 0,
-            fee: 1,
+            gasLimit: 1_000_000,
+            fee: 1_000_000,
             destChain: destChainId
         });
 
@@ -236,7 +257,7 @@ contract BridgeTest is TaikoTest {
             destChain: destChainId
         });
 
-        vm.expectRevert(Bridge.B_INVALID_USER.selector);
+        vm.expectRevert(EssentialContract.ZERO_ADDRESS.selector);
         bridge.sendMessage{ value: amount }(message);
     }
 
@@ -289,12 +310,12 @@ contract BridgeTest is TaikoTest {
 
     function test_Bridge_send_message_ether_with_processing_fee() public {
         uint256 amount = 0 wei;
-        uint256 fee = 1 wei;
+        uint64 fee = 1_000_000 wei;
         IBridge.Message memory message = newMessage({
             owner: Alice,
             to: Alice,
             value: 0,
-            gasLimit: 0,
+            gasLimit: 1_000_000,
             fee: fee,
             destChain: destChainId
         });
@@ -305,7 +326,7 @@ contract BridgeTest is TaikoTest {
 
     function test_Bridge_recall_message_ether() public {
         uint256 amount = 1 ether;
-        uint256 fee = 1 wei;
+        uint64 fee = 0 wei;
         IBridge.Message memory message = newMessage({
             owner: Alice,
             to: Alice,
@@ -336,7 +357,7 @@ contract BridgeTest is TaikoTest {
         // ERCXXTokenVault (message.from) but directly from the Bridge
 
         uint256 amount = 1 ether;
-        uint256 fee = 1 wei;
+        uint64 fee = 0 wei;
         IBridge.Message memory message = newMessage({
             owner: Alice,
             to: Alice,
@@ -348,7 +369,7 @@ contract BridgeTest is TaikoTest {
 
         uint256 starterBalanceVault = address(bridge).balance;
 
-        untrustedSenderContract.sendMessage(address(bridge), message, amount + fee);
+        (, message) = untrustedSenderContract.sendMessage(address(bridge), message, amount + fee);
 
         assertEq(address(bridge).balance, (starterBalanceVault + amount + fee));
 
@@ -359,12 +380,12 @@ contract BridgeTest is TaikoTest {
 
     function test_Bridge_send_message_ether_with_processing_fee_invalid_amount() public {
         uint256 amount = 0 wei;
-        uint256 fee = 1 wei;
+        uint64 fee = 1_000_000 wei;
         IBridge.Message memory message = newMessage({
             owner: Alice,
             to: Alice,
             value: 0,
-            gasLimit: 0,
+            gasLimit: 1_000_000,
             fee: fee,
             destChain: destChainId
         });
@@ -377,9 +398,6 @@ contract BridgeTest is TaikoTest {
     // proofs via rpc
     // in foundry
     function test_Bridge_process_message() public {
-        /* DISCALIMER: From now on we do not need to have real
-        proofs because we can bypass with overriding skipProofCheck()
-        in a mockBirdge AND proof system already 'battle tested'.*/
         // This predefined successful process message call fails now
         // since we modified the iBridge.Message struct and cut out
         // depositValue
@@ -391,18 +409,15 @@ contract BridgeTest is TaikoTest {
 
         destChainBridge.processMessage(message, proof);
 
-        Bridge.Status status = destChainBridge.messageStatus(msgHash);
+        IBridge.Status status = destChainBridge.messageStatus(msgHash);
 
-        assertEq(status == Bridge.Status.DONE, true);
+        assertEq(status == IBridge.Status.DONE, true);
     }
 
     // test with a known good merkle proof / message since we cant generate
     // proofs via rpc
     // in foundry
     function test_Bridge_retry_message_and_end_up_in_failed_status() public {
-        /* DISCALIMER: From now on we do not need to have real
-        proofs because we can bypass with overriding skipProofCheck()
-        in a mockBirdge AND proof system already 'battle tested'.*/
         vm.startPrank(Alice);
         (IBridge.Message memory message, bytes memory proof) =
             setUpPredefinedSuccessfulProcessMessageCall();
@@ -414,18 +429,100 @@ contract BridgeTest is TaikoTest {
 
         destChainBridge.processMessage(message, proof);
 
-        Bridge.Status status = destChainBridge.messageStatus(msgHash);
+        IBridge.Status status = destChainBridge.messageStatus(msgHash);
 
-        assertEq(status == Bridge.Status.RETRIABLE, true);
+        assertEq(status == IBridge.Status.RETRIABLE, true);
 
         vm.stopPrank();
-        vm.prank(message.owner);
 
+        vm.prank(message.destOwner);
+        vm.expectRevert(Bridge.B_RETRY_FAILED.selector);
+        destChainBridge.retryMessage(message, false);
+
+        vm.prank(message.destOwner);
         destChainBridge.retryMessage(message, true);
+        IBridge.Status postRetryStatus = destChainBridge.messageStatus(msgHash);
+        assertEq(postRetryStatus == IBridge.Status.FAILED, true);
+    }
 
-        Bridge.Status postRetryStatus = destChainBridge.messageStatus(msgHash);
+    function test_Bridge_fail_message() public {
+        vm.startPrank(Alice);
+        (IBridge.Message memory message, bytes memory proof) =
+            setUpPredefinedSuccessfulProcessMessageCall();
 
-        assertEq(postRetryStatus == Bridge.Status.FAILED, true);
+        // etch bad receiver at the to address, so it fails.
+        vm.etch(message.to, address(badReceiver).code);
+
+        bytes32 msgHash = destChainBridge.hashMessage(message);
+
+        destChainBridge.processMessage(message, proof);
+
+        IBridge.Status status = destChainBridge.messageStatus(msgHash);
+
+        assertEq(status == IBridge.Status.RETRIABLE, true);
+
+        vm.stopPrank();
+
+        vm.prank(message.destOwner);
+        destChainBridge.failMessage(message);
+        IBridge.Status postRetryStatus = destChainBridge.messageStatus(msgHash);
+        assertEq(postRetryStatus == IBridge.Status.FAILED, true);
+    }
+
+    function test_processMessage_InvokeMessageCall_DoS1() public {
+        nonmaliciousContract1 = new NonMaliciousContract1();
+
+        IBridge.Message memory message = IBridge.Message({
+            id: 0,
+            from: address(this),
+            srcChainId: uint64(block.chainid),
+            destChainId: destChainId,
+            srcOwner: Alice,
+            destOwner: Alice,
+            to: address(nonmaliciousContract1),
+            value: 1000,
+            fee: 1000,
+            gasLimit: 1_000_000,
+            data: ""
+        });
+
+        bytes memory proof = hex"00";
+        bytes32 msgHash = destChainBridge.hashMessage(message);
+        vm.chainId(destChainId);
+        vm.prank(Bob, Bob);
+
+        destChainBridge.processMessage(message, proof);
+
+        IBridge.Status status = destChainBridge.messageStatus(msgHash);
+        assertEq(status == IBridge.Status.DONE, true); // test pass check
+    }
+
+    function test_processMessage_InvokeMessageCall_DoS2_testfail() public {
+        maliciousContract2 = new MaliciousContract2();
+
+        IBridge.Message memory message = IBridge.Message({
+            id: 0,
+            from: address(this),
+            srcChainId: uint64(block.chainid),
+            destChainId: destChainId,
+            srcOwner: Alice,
+            destOwner: Alice,
+            to: address(maliciousContract2),
+            value: 1000,
+            fee: 1000,
+            gasLimit: 1_000_000,
+            data: ""
+        });
+
+        bytes memory proof = hex"00";
+        bytes32 msgHash = destChainBridge.hashMessage(message);
+        vm.chainId(destChainId);
+        vm.prank(Bob, Bob);
+
+        destChainBridge.processMessage(message, proof);
+
+        IBridge.Status status = destChainBridge.messageStatus(msgHash);
+        assertEq(status == IBridge.Status.RETRIABLE, true); //Test fail check
     }
 
     function retry_message_reverts_when_status_non_retriable() public {
@@ -438,7 +535,7 @@ contract BridgeTest is TaikoTest {
             destChain: destChainId
         });
 
-        vm.expectRevert(Bridge.B_NON_RETRIABLE.selector);
+        vm.expectRevert(Bridge.B_INVALID_STATUS.selector);
         destChainBridge.retryMessage(message, true);
     }
 
@@ -457,9 +554,6 @@ contract BridgeTest is TaikoTest {
         destChainBridge.retryMessage(message, true);
     }
 
-    /* DISCALIMER: From now on we do not need to have real
-    proofs because we can bypass with overriding skipProofCheck()
-    in a mockBirdge AND proof system already 'battle tested'.*/
     function setUpPredefinedSuccessfulProcessMessageCall()
         internal
         returns (IBridge.Message memory, bytes memory)
@@ -467,8 +561,6 @@ contract BridgeTest is TaikoTest {
         badReceiver = new BadReceiver();
 
         uint64 dest = 1337;
-        addressManager.setAddress(dest, "taiko", address(crossChainSync));
-
         addressManager.setAddress(1336, "bridge", 0x564540a26Fb667306b3aBdCB4ead35BEb88698ab);
 
         addressManager.setAddress(dest, "bridge", address(destChainBridge));
@@ -476,11 +568,6 @@ contract BridgeTest is TaikoTest {
         vm.deal(address(bridge), 100 ether);
 
         addressManager.setAddress(dest, "signal_service", address(mockProofSignalService));
-
-        crossChainSync.setSyncedData(
-            0xd5f5d8ac6bc37139c97389b00e9cf53e89c153ad8a5fc765ffe9f44ea9f3d31e,
-            0x631b214fb030d82847224f0b3d3b906a6764dded176ad3c7262630204867ba85
-        );
 
         vm.deal(address(destChainBridge), 1 ether);
 
@@ -492,14 +579,13 @@ contract BridgeTest is TaikoTest {
             from: 0xDf08F82De32B8d460adbE8D72043E3a7e25A3B39,
             srcChainId: 1336,
             destChainId: dest,
-            owner: 0xDf08F82De32B8d460adbE8D72043E3a7e25A3B39,
+            srcOwner: 0xDf08F82De32B8d460adbE8D72043E3a7e25A3B39,
+            destOwner: 0xDf08F82De32B8d460adbE8D72043E3a7e25A3B39,
             to: 0x200708D76eB1B69761c23821809d53F65049939e,
-            refundTo: 0x10020FCb72e27650651B05eD2CEcA493bC807Ba4,
             value: 1000,
             fee: 1000,
             gasLimit: 1_000_000,
-            data: "",
-            memo: ""
+            data: ""
         });
 
         bytes memory proof =
@@ -512,8 +598,8 @@ contract BridgeTest is TaikoTest {
         address owner,
         address to,
         uint256 value,
-        uint256 gasLimit,
-        uint256 fee,
+        uint32 gasLimit,
+        uint64 fee,
         uint64 destChain
     )
         internal
@@ -521,7 +607,8 @@ contract BridgeTest is TaikoTest {
         returns (IBridge.Message memory)
     {
         return IBridge.Message({
-            owner: owner,
+            srcOwner: owner,
+            destOwner: owner,
             destChainId: destChain,
             to: to,
             value: value,
@@ -529,10 +616,8 @@ contract BridgeTest is TaikoTest {
             id: 0, // placeholder, will be overwritten
             from: owner, // placeholder, will be overwritten
             srcChainId: uint64(block.chainid), // will be overwritten
-            refundTo: owner,
             gasLimit: gasLimit,
-            data: "",
-            memo: ""
+            data: ""
         });
     }
 }

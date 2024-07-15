@@ -1,130 +1,113 @@
 // SPDX-License-Identifier: MIT
-//  _____     _ _         _         _
-// |_   _|_ _(_) |_____  | |   __ _| |__ ___
-//   | |/ _` | | / / _ \ | |__/ _` | '_ (_-<
-//   |_|\__,_|_|_\_\___/ |____\__,_|_.__/__/
-
-pragma solidity ^0.8.20;
+pragma solidity 0.8.24;
 
 import "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
-import "@openzeppelin/contracts/utils/Strings.sol";
 import "../common/EssentialContract.sol";
+import "../common/LibStrings.sol";
+import "./IBridgedERC721.sol";
 import "./LibBridgedToken.sol";
 
 /// @title BridgedERC721
 /// @notice Contract for bridging ERC721 tokens across different chains.
-contract BridgedERC721 is EssentialContract, ERC721Upgradeable {
-    address public srcToken; // Address of the source token contract.
-    uint256 public srcChainId; // Source chain ID where the token originates.
+/// @custom:security-contact security@taiko.xyz
+contract BridgedERC721 is
+    EssentialContract,
+    IBridgedERC721,
+    IBridgedERC721Initializable,
+    ERC721Upgradeable
+{
+    /// @notice Address of the source token contract.
+    address public srcToken;
+
+    /// @notice Source chain ID where the token originates.
+    uint256 public srcChainId;
 
     uint256[48] private __gap;
 
-    error BTOKEN_CANNOT_RECEIVE();
     error BTOKEN_INVALID_PARAMS();
     error BTOKEN_INVALID_BURN();
 
-    /// @dev Initializer function to be called after deployment.
-    /// @param _addressManager The address of the address manager.
-    /// @param _srcToken Address of the source token.
-    /// @param _srcChainId Source chain ID.
-    /// @param _symbol Symbol of the bridged token.
-    /// @param _name Name of the bridged token.
+    /// @inheritdoc IBridgedERC721Initializable
     function init(
+        address _owner,
         address _addressManager,
         address _srcToken,
         uint256 _srcChainId,
-        string memory _symbol,
-        string memory _name
+        string calldata _symbol,
+        string calldata _name
     )
         external
         initializer
     {
-        if (
-            _srcToken == address(0) || _srcChainId == 0 || _srcChainId == block.chainid
-                || bytes(_symbol).length == 0 || bytes(_name).length == 0
-        ) {
-            revert BTOKEN_INVALID_PARAMS();
-        }
-        __Essential_init(_addressManager);
+        // Check if provided parameters are valid
+        LibBridgedToken.validateInputs(_srcToken, _srcChainId);
+        __Essential_init(_owner, _addressManager);
         __ERC721_init(_name, _symbol);
+
         srcToken = _srcToken;
         srcChainId = _srcChainId;
     }
 
-    /// @dev Mints tokens.
-    /// @param account Address to receive the minted token.
-    /// @param tokenId ID of the token to mint.
+    /// @inheritdoc IBridgedERC721
     function mint(
-        address account,
-        uint256 tokenId
+        address _account,
+        uint256 _tokenId
     )
-        public
-        nonReentrant
+        external
         whenNotPaused
-        onlyFromNamed("erc721_vault")
+        onlyFromNamed(LibStrings.B_ERC721_VAULT)
+        nonReentrant
     {
-        _mint(account, tokenId);
+        _safeMint(_account, _tokenId);
     }
 
-    /// @dev Burns tokens.
-    /// @param account Address from which the token is burned.
-    /// @param tokenId ID of the token to burn.
-    function burn(
-        address account,
-        uint256 tokenId
-    )
-        public
-        nonReentrant
+    /// @inheritdoc IBridgedERC721
+    function burn(uint256 _tokenId)
+        external
         whenNotPaused
-        onlyFromNamed("erc721_vault")
+        onlyFromNamed(LibStrings.B_ERC721_VAULT)
+        nonReentrant
     {
-        // Check if the caller is the owner of the token.
-        if (ownerOf(tokenId) != account) {
+        // Check if the caller is the owner of the token. Somehow this is not done inside the
+        // _burn() function below.
+        if (ownerOf(_tokenId) != msg.sender) {
             revert BTOKEN_INVALID_BURN();
         }
-        _burn(tokenId);
+        _burn(_tokenId);
     }
 
-    /// @dev Safely transfers tokens from one address to another.
-    /// @param from Address from which the token is transferred.
-    /// @param to Address to which the token is transferred.
-    /// @param tokenId ID of the token to transfer.
-    function transferFrom(
-        address from,
-        address to,
-        uint256 tokenId
-    )
-        public
-        override(ERC721Upgradeable)
-        nonReentrant
-        whenNotPaused
-    {
-        if (to == address(this)) {
-            revert BTOKEN_CANNOT_RECEIVE();
-        }
-        return ERC721Upgradeable.transferFrom(from, to, tokenId);
-    }
-
-    /// @notice Gets the name of the token.
-    /// @return The name.
-    function name() public view override(ERC721Upgradeable) returns (string memory) {
-        return LibBridgedToken.buildName(super.name(), srcChainId);
-    }
-
-    /// @notice Gets the symbol of the bridged token.
-    /// @return The symbol.
-    function symbol() public view override(ERC721Upgradeable) returns (string memory) {
-        return LibBridgedToken.buildSymbol(super.symbol());
-    }
-
-    /// @notice Gets the source token and source chain ID being bridged.
-    /// @return Source token address and source chain ID.
-    function source() public view returns (address, uint256) {
+    /// @inheritdoc IBridgedERC721
+    function canonical() external view returns (address, uint256) {
         return (srcToken, srcChainId);
     }
 
-    /// @notice Returns an empty token URI.
-    function tokenURI(uint256) public pure virtual override returns (string memory) {
-        return "";
+    /// @notice Returns the token URI.
+    /// @param _tokenId The token id.
+    /// @return The token URI following EIP-681.
+    function tokenURI(uint256 _tokenId) public view override returns (string memory) {
+        // https://github.com/crytic/slither/wiki/Detector-Documentation#abi-encodePacked-collision
+        // The abi.encodePacked() call below takes multiple dynamic arguments. This is known and
+        // considered acceptable in terms of risk.
+        return LibBridgedToken.buildURI(srcToken, srcChainId, Strings.toString(_tokenId));
+    }
+
+    function supportsInterface(bytes4 _interfaceId) public view override returns (bool) {
+        return _interfaceId == type(IBridgedERC721).interfaceId
+            || _interfaceId == type(IBridgedERC721Initializable).interfaceId
+            || super.supportsInterface(_interfaceId);
+    }
+
+    function _beforeTokenTransfer(
+        address _from,
+        address _to,
+        uint256 _firstTokenId,
+        uint256 _batchSize
+    )
+        internal
+        override
+        whenNotPaused
+    {
+        LibBridgedToken.checkToAddress(_to);
+        super._beforeTokenTransfer(_from, _to, _firstTokenId, _batchSize);
     }
 }
