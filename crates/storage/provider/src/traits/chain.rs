@@ -2,6 +2,7 @@
 
 use crate::{BlockReceipts, Chain};
 use auto_impl::auto_impl;
+use derive_more::{Deref, DerefMut};
 use reth_primitives::{SealedBlockWithSenders, SealedHeader};
 use std::{
     pin::Pin,
@@ -141,7 +142,7 @@ impl CanonStateNotification {
 }
 
 /// Wrapper around a broadcast receiver that receives fork choice notifications.
-#[derive(Debug, derive_more::Deref, derive_more::DerefMut)]
+#[derive(Debug, Deref, DerefMut)]
 pub struct ForkChoiceNotifications(broadcast::Receiver<SealedHeader>);
 
 /// A trait that allows to register to fork choice related events
