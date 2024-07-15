@@ -1,6 +1,8 @@
 use reth_db_api::database::Database;
 use reth_provider::{DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter};
-use reth_prune::{PruneMode, PruneModes, PruneSegment, PrunerBuilder};
+use reth_prune::{
+    PruneMode, PruneModes, PruneSegment, PrunerBuilder, SegmentOutput, SegmentOutputCheckpoint,
+};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
@@ -49,8 +51,33 @@ impl<DB: Database> Stage<DB> for PruneStage {
         if result.progress.is_finished() {
             Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
         } else {
-            if let Some(last_segment) = result.segments.last() {
-                info!(target: "sync::stages::prune::exec", ?last_segment, "Pruner has more data to prune");
+            if let Some((last_segment, last_segment_output)) = result.segments.last() {
+                match last_segment_output {
+                    SegmentOutput {
+                        progress,
+                        pruned,
+                        checkpoint:
+                            checkpoint @ Some(SegmentOutputCheckpoint { block_number: Some(_), .. }),
+                    } => {
+                        info!(
+                            target: "sync::stages::prune::exec",
+                            ?last_segment,
+                            ?progress,
+                            ?pruned,
+                            ?checkpoint,
+                            "Last segment has more data to prune"
+                        )
+                    }
+                    SegmentOutput { progress, pruned, checkpoint: _ } => {
+                        info!(
+                            target: "sync::stages::prune::exec",
+                            ?last_segment,
+                            ?progress,
+                            ?pruned,
+                            "Last segment has more data to prune"
+                        )
+                    }
+                }
             }
             // We cannot set the checkpoint yet, because prune segments may have different highest
             // pruned block numbers
