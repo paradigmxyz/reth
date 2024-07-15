@@ -36,6 +36,8 @@ library TaikoData {
         uint64 timestamp;
         uint24 txListByteOffset;
         uint24 txListByteSize;
+        // todo: Do we need this below ?
+        // bytes32 blobId OR blobHash; ? as per in current taiko-mono's preconfirmation branch ?
         bool blobUsed;
     }
 

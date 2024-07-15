@@ -21,21 +21,16 @@ contract PBSActor {
 
     /// @dev Proposes a Taiko L2 block.
     function proposeBlock(
-        bytes calldata params,
-        bytes calldata txList,
+        bytes[] calldata data,
+        bytes[] calldata txLists,
         bytes memory proverPaymentData,
-        bytes32 parentHash,
         uint256 tip
     )
         external
         payable
     {
         // TODO(Brecht): just pass in opaque data to make it general, though kind of doesn't matter
-        TaikoData.BlockMetadata memory _block =
-            operator.proposeBlock{ value: msg.value - tip }(params, txList, proverPaymentData);
-
-        // Check if parent block has the right meta hash
-        require(keccak256(abi.encode(_block)) == parentHash, "unexpected parent");
+       operator.proposeBlock{ value: msg.value - tip }(data, txLists, proverPaymentData);
 
         // Do conditional payment
         address(block.coinbase).sendEtherAndVerify(tip);

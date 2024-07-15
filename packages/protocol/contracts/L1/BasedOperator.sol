@@ -64,27 +64,41 @@ contract BasedOperator is EssentialContract, TaikoErrors {
 
     /// @dev Proposes a Taiko L2 block.
     function proposeBlock(
-        bytes calldata params,
-        bytes calldata txList,
+        bytes[] calldata data,
+        bytes[] calldata txLists,
         address prover
     )
         external
         payable
         nonReentrant
         whenNotPaused
-        returns (TaikoData.BlockMetadata memory _block)
+        returns (TaikoData.BlockMetadata[] memory _blocks)
     {
-        require(msg.value == PROVER_BOND, "Prover bond not expected");
-
-        _block = TaikoL1(resolve("taiko", false)).proposeBlock(params, txList);
-
-        // Check if we have whitelisted proposers
-        if (!_isProposerPermitted(_block)) {
-            revert L1_INVALID_PROPOSER();
+        if(txLists.length != 0) {
+            require(data.length == txLists.length, "mismatched params length");
         }
 
-        // Store who paid for proving the block
-        blocks[_block.l2BlockNumber] = Block({ assignedProver: prover, bond: uint96(PROVER_BOND) });
+        require(msg.value == PROVER_BOND, "Prover bond not expected");
+
+        _blocks = new TaikoData.BlockMetadata[](data.length);
+        for (uint i = 0; i < data.length; i++) {
+            if(txLists.length != 0) {
+                // If calldata, then pass forward the calldata
+                _blocks[i] =  TaikoL1(resolve("taiko", false)).proposeBlock(data[i], txLists[i]);
+            }
+            else {
+                // Blob otherwise
+                _blocks[i] =  TaikoL1(resolve("taiko", false)).proposeBlock(data[i], "");
+            }
+
+            // Check if we have whitelisted proposers
+            if (!_isProposerPermitted(_blocks[i])) {
+                revert L1_INVALID_PROPOSER();
+            }
+
+            // Store who paid for proving the block
+            blocks[_blocks[i].l2BlockNumber] = Block({ assignedProver: prover, bond: uint96(PROVER_BOND) });
+        }
 
         // Verify some blocks
         _verifyBlocks(MAX_BLOCKS_TO_VERIFY);

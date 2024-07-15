@@ -303,24 +303,34 @@ abstract contract TaikoL1TestBase is TaikoTest {
 
         // hookcalls[0] = TaikoData.HookCall(address(assignmentHook), abi.encode(assignment));
 
-        bytes memory dummyTxList =
+        bytes[] memory dummyTxList = new bytes[](1);
+        dummyTxList[0] =
             hex"0000000000000000000000000000000000000000000000000000000000000001";
-        bytes memory emptyTxList;
+        
+        // If blob is used, empty tx list
+        bytes[] memory emptyTxList;
+
+        // Input metadata sturct can now support multiple block proposals per L1 TXN
+        bytes[] memory metasEncoded = new bytes[](1);
+        metasEncoded[0] = abi.encode(meta);
+
+        TaikoData.BlockMetadata[] memory _returnedBlocks = new TaikoData.BlockMetadata[](1);
 
         if (revertReason == "") {
             vm.prank(proposer, proposer);
-            meta = basedOperator.proposeBlock{ value: 1 ether / 10 }(
-                abi.encode(meta), meta.blobUsed == true ? emptyTxList : dummyTxList, prover
+            _returnedBlocks = basedOperator.proposeBlock{ value: 1 ether / 10 }(
+                metasEncoded, meta.blobUsed == true ? emptyTxList : dummyTxList, prover
             );
         } else {
             vm.prank(proposer, proposer);
             vm.expectRevert(revertReason);
-            meta = basedOperator.proposeBlock{ value: 1 ether / 10 }(
-                abi.encode(meta), meta.blobUsed == true ? emptyTxList : dummyTxList, prover
+            _returnedBlocks = basedOperator.proposeBlock{ value: 1 ether / 10 }(
+                metasEncoded, meta.blobUsed == true ? emptyTxList : dummyTxList, prover
             );
+            return meta;
         }
 
-        return meta;
+        return _returnedBlocks[0];
     }
 
     function proveBlock(address prover, bytes memory blockProof) internal {

@@ -36,13 +36,13 @@ contract ProverPayment {
 
     /// @dev Proposes a Taiko L2 block.
     function proposeBlock(
-        bytes calldata params,
-        bytes calldata txList,
+        bytes[] calldata data,
+        bytes[] calldata txLists,
         bytes calldata proverAssignment
     )
         external
         payable
-        returns (TaikoData.BlockMetadata memory _block)
+        returns (TaikoData.BlockMetadata[] memory _blocks)
     {
         // Decode the assignment data
         ProverAssignment memory assignment = abi.decode(proverAssignment, (ProverAssignment));
@@ -51,19 +51,22 @@ contract ProverPayment {
         balances[assignment.prover] -= operator.PROVER_BOND();
 
         // Propose the block
-        _block = operator.proposeBlock{ value: operator.PROVER_BOND() }(
-            params, txList, assignment.prover
+        _blocks = operator.proposeBlock{ value: operator.PROVER_BOND() }(
+            data, txLists, assignment.prover
         );
+
+        uint64 highestl2BlockNumber = _blocks[_blocks.length-1].l2BlockNumber;
 
         // Hash the assignment with the blobHash, this hash will be signed by
         // the prover, therefore, we add a string as a prefix.
+        // IMPORTANT!! Assignment now multi-block assignment!!
         bytes32 hash = hashAssignment(assignment);
         require(assignment.prover.isValidSignature(hash, assignment.signature), "invalid signature");
 
         // Check assignment validity
         require(
-            (assignment.metaHash != 0 || keccak256(abi.encode(_block)) != assignment.metaHash)
-                && (assignment.maxBlockId != 0 || _block.l2BlockNumber > assignment.maxBlockId)
+            (assignment.metaHash != 0 || keccak256(abi.encode(_blocks)) != assignment.metaHash)
+                && (assignment.maxBlockId != 0 || highestl2BlockNumber > assignment.maxBlockId)
                 && (assignment.maxProposedIn != 0 || block.number > assignment.maxProposedIn),
             "unexpected block"
         );

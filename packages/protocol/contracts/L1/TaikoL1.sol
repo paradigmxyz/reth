@@ -53,7 +53,7 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
     }
 
     /// Proposes a Taiko L2 block.
-    /// @param data Block parameters, currently an encoded BlockParams object.
+    /// @param data Block parameters, currently an encoded BlockMetadata object.
     /// @param txList txList data if calldata is used for DA.
     /// @return _block The metadata of the proposed L2 block.
     function proposeBlock(
@@ -64,8 +64,8 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         payable
         nonReentrant
         whenNotPaused
+        onlyFromNamed("operator")
         returns (
-            //onlyFromNamed("operator")
             TaikoData.BlockMetadata memory _block
         )
     {
@@ -85,7 +85,9 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
         require(_block.blobUsed == (txList.length == 0), "INVALID_BLOB_USED");
         // Verify DA data
         if (_block.blobUsed) {
-            //require(_block.blobHash == blobhash(0), "invalid data blob");
+            // Todo: Is blobHash posisble to be checked and pre-calculated in input metadata off-chain ?
+            // or shall we do something with it to cross check ?
+            // require(_block.blobHash == blobhash(0), "invalid data blob");
             require(
                 uint256(_block.txListByteOffset) + _block.txListByteSize <= MAX_BYTES_PER_BLOB,
                 "invalid blob size"
@@ -104,7 +106,8 @@ contract TaikoL1 is EssentialContract, TaikoEvents, TaikoErrors {
 
         TaikoData.Block storage parentBlock = state.blocks[(state.numBlocks - 1)];
 
-        require(_block.parentMetaHash == parentBlock.metaHash, "invalid parentHash");
+        require(_block.parentMetaHash == parentBlock.metaHash, "invalid parentMetaHash");
+        require(_block.parentBlockHash == parentBlock.blockHash, "invalid parentHash");
 
         // Verify the passed in L1 state block number.
         // We only allow the L1 block to be 4 epochs old.
