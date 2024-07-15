@@ -95,6 +95,9 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
 
     /// Appends receipts block by block.
     ///
+    /// ATTENTION: If called from [`StorageWriter`] without a static file producer, it will always
+    /// write them to database. Otherwise, it will look into the pruning configuration to decide.
+    ///
     /// # Parameters
     /// - `initial_block_number`: The starting block number.
     /// - `blocks`: An iterator over blocks, each block having a vector of optional receipts. If
@@ -109,7 +112,8 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
             self.database_writer().tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
 
         // We write receipts to database in two situations:
-        // * If we are in live sync. In this case, `StorageWriter` is built without a static file writer.
+        // * If we are in live sync. In this case, `StorageWriter` is built without a static file
+        //   writer.
         // * If there is any kind of receipt pruning
         let mut storage_type = if self.static_file_writer.is_none() ||
             self.database_writer().prune_modes_ref().has_receipts_pruning()
