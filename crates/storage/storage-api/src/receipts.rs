@@ -69,7 +69,7 @@ pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdReader {
     }
 }
 
-/// Writer trait for writing [`Receipt``] data.
+/// Writer trait for writing [`Receipt`] data.
 pub trait ReceiptWriter {
     /// Appends receipts for a block.
     ///
