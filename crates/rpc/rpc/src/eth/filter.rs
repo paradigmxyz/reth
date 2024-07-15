@@ -476,8 +476,8 @@ where
 
             for (idx, header) in headers.iter().enumerate() {
                 // only if filter matches
-                if FilteredParams::matches_address(header.logs_bloom, &address_filter)
-                    && FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
+                if FilteredParams::matches_address(header.logs_bloom, &address_filter) &&
+                    FilteredParams::matches_topics(header.logs_bloom, &topics_filter)
                 {
                     // these are consecutive headers, so we can use the parent hash of the next
                     // block to get the current header's hash
@@ -711,9 +711,9 @@ impl From<FilterError> for jsonrpsee::types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             FilterError::EthAPIError(err) => err.into(),
-            err @ FilterError::InvalidBlockRangeParams
-            | err @ FilterError::QueryExceedsMaxBlocks(_)
-            | err @ FilterError::QueryExceedsMaxResults(_) => {
+            err @ FilterError::InvalidBlockRangeParams |
+            err @ FilterError::QueryExceedsMaxBlocks(_) |
+            err @ FilterError::QueryExceedsMaxResults(_) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }

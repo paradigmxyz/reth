@@ -143,8 +143,8 @@ impl StateFetcher {
             }
 
             // replace best peer if this peer has better rtt
-            if maybe_better.1.timeout() < best_peer.1.timeout()
-                && !maybe_better.1.last_response_likely_bad
+            if maybe_better.1.timeout() < best_peer.1.timeout() &&
+                !maybe_better.1.last_response_likely_bad
             {
                 best_peer = maybe_better;
             }

@@ -327,10 +327,10 @@ impl ForkFilter {
                 // we check if this fork is time-based or block number-based by estimating that,
                 // if fork_id.next is bigger than the old timestamp, we are dealing with a
                 // timestamp, otherwise with a block.
-                (fork_id.next > TIMESTAMP_BEFORE_ETHEREUM_MAINNET
-                    && self.head.timestamp >= fork_id.next)
-                    || (fork_id.next <= TIMESTAMP_BEFORE_ETHEREUM_MAINNET
-                        && self.head.number >= fork_id.next)
+                (fork_id.next > TIMESTAMP_BEFORE_ETHEREUM_MAINNET &&
+                    self.head.timestamp >= fork_id.next) ||
+                    (fork_id.next <= TIMESTAMP_BEFORE_ETHEREUM_MAINNET &&
+                        self.head.number >= fork_id.next)
             } else {
                 // Extra safety check to future-proof for when Ethereum has over a billion blocks.
                 let head_block_or_time = match self.cache.epoch_start {

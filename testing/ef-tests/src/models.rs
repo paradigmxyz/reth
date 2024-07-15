@@ -326,17 +326,17 @@ impl From<ForkSpec> for ChainSpec {
                 spec_builder.tangerine_whistle_activated()
             }
             ForkSpec::EIP158 => spec_builder.spurious_dragon_activated(),
-            ForkSpec::Byzantium
-            | ForkSpec::EIP158ToByzantiumAt5
-            | ForkSpec::ConstantinopleFix
-            | ForkSpec::ByzantiumToConstantinopleFixAt5 => spec_builder.byzantium_activated(),
+            ForkSpec::Byzantium |
+            ForkSpec::EIP158ToByzantiumAt5 |
+            ForkSpec::ConstantinopleFix |
+            ForkSpec::ByzantiumToConstantinopleFixAt5 => spec_builder.byzantium_activated(),
             ForkSpec::Istanbul => spec_builder.istanbul_activated(),
             ForkSpec::Berlin => spec_builder.berlin_activated(),
             ForkSpec::London | ForkSpec::BerlinToLondonAt5 => spec_builder.london_activated(),
-            ForkSpec::Merge
-            | ForkSpec::MergeEOF
-            | ForkSpec::MergeMeterInitCode
-            | ForkSpec::MergePush0 => spec_builder.paris_activated(),
+            ForkSpec::Merge |
+            ForkSpec::MergeEOF |
+            ForkSpec::MergeMeterInitCode |
+            ForkSpec::MergePush0 => spec_builder.paris_activated(),
             ForkSpec::Shanghai => spec_builder.shanghai_activated(),
             ForkSpec::Cancun => spec_builder.cancun_activated(),
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {

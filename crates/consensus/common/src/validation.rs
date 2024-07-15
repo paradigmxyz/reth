@@ -23,8 +23,8 @@ pub fn validate_header_standalone(
     }
 
     // Check if base fee is set.
-    if chain_spec.fork(Hardfork::London).active_at_block(header.number)
-        && header.base_fee_per_gas.is_none()
+    if chain_spec.fork(Hardfork::London).active_at_block(header.number) &&
+        header.base_fee_per_gas.is_none()
     {
         return Err(ConsensusError::BaseFeeMissing);
     }
@@ -34,8 +34,8 @@ pub fn validate_header_standalone(
     // EIP-4895: Beacon chain push withdrawals as operations
     if chain_spec.is_shanghai_active_at_timestamp(header.timestamp) && wd_root_missing {
         return Err(ConsensusError::WithdrawalsRootMissing);
-    } else if !chain_spec.is_shanghai_active_at_timestamp(header.timestamp)
-        && header.withdrawals_root.is_some()
+    } else if !chain_spec.is_shanghai_active_at_timestamp(header.timestamp) &&
+        header.withdrawals_root.is_some()
     {
         return Err(ConsensusError::WithdrawalsRootUnexpected);
     }

@@ -136,10 +136,10 @@ impl EngineHooksController {
         // - Active DB write according to passed argument
         // - Missing a finalized block number. We might be on an optimistic sync scenario where we
         // cannot skip the FCU with the finalized hash, otherwise CL might misbehave.
-        if hook.db_access_level().is_read_write()
-            && (self.active_db_write_hook.is_some()
-                || db_write_active
-                || args.finalized_block_number.is_none())
+        if hook.db_access_level().is_read_write() &&
+            (self.active_db_write_hook.is_some() ||
+                db_write_active ||
+                args.finalized_block_number.is_none())
         {
             return Poll::Pending;
         }
@@ -307,9 +307,9 @@ mod tests {
         assert_eq!(
             result.map(|result| {
                 let polled_hook = result.unwrap();
-                polled_hook.name == hook_ro_name
-                    && polled_hook.event.is_started()
-                    && polled_hook.db_access_level.is_read_only()
+                polled_hook.name == hook_ro_name &&
+                    polled_hook.event.is_started() &&
+                    polled_hook.db_access_level.is_read_only()
             }),
             Poll::Ready(true)
         );
@@ -346,9 +346,9 @@ mod tests {
         assert_eq!(
             result.map(|result| {
                 let polled_hook = result.unwrap();
-                polled_hook.name == hook_rw_1_name
-                    && polled_hook.event.is_started()
-                    && polled_hook.db_access_level.is_read_write()
+                polled_hook.name == hook_rw_1_name &&
+                    polled_hook.event.is_started() &&
+                    polled_hook.db_access_level.is_read_write()
             }),
             Poll::Ready(true)
         );
@@ -368,9 +368,9 @@ mod tests {
         assert_eq!(
             result.map(|result| {
                 let polled_hook = result.unwrap();
-                polled_hook.name == hook_ro_name
-                    && polled_hook.event.is_started()
-                    && polled_hook.db_access_level.is_read_only()
+                polled_hook.name == hook_ro_name &&
+                    polled_hook.event.is_started() &&
+                    polled_hook.db_access_level.is_read_only()
             }),
             Poll::Ready(true)
         );

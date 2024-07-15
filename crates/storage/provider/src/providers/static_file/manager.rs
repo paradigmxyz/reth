@@ -442,8 +442,8 @@ impl StaticFileProvider {
                 } else if tx_index.get(&segment).map(|index| index.len()) == Some(1) {
                     // Only happens if we unwind all the txs/receipts from the first static file.
                     // Should only happen in test scenarios.
-                    if jar.user_header().expected_block_start() == 0
-                        && matches!(
+                    if jar.user_header().expected_block_start() == 0 &&
+                        matches!(
                             segment,
                             StaticFileSegment::Receipts | StaticFileSegment::Transactions
                         )
@@ -662,8 +662,8 @@ impl StaticFileProvider {
             // If there is a gap between the entry found in static file and
             // database, then we have most likely lost static file data and need to unwind so we can
             // load it again
-            if !(db_first_entry <= highest_static_file_entry
-                || highest_static_file_entry + 1 == db_first_entry)
+            if !(db_first_entry <= highest_static_file_entry ||
+                highest_static_file_entry + 1 == db_first_entry)
             {
                 info!(
                     target: "reth::providers::static_file",
@@ -1499,9 +1499,9 @@ impl RequestsProvider for StaticFileProvider {
 impl StatsReader for StaticFileProvider {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         match T::NAME {
-            tables::CanonicalHeaders::NAME
-            | tables::Headers::NAME
-            | tables::HeaderTerminalDifficulties::NAME => Ok(self
+            tables::CanonicalHeaders::NAME |
+            tables::Headers::NAME |
+            tables::HeaderTerminalDifficulties::NAME => Ok(self
                 .get_highest_static_file_block(StaticFileSegment::Headers)
                 .map(|block| block + 1)
                 .unwrap_or_default()
