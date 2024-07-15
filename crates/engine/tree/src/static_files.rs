@@ -75,13 +75,12 @@ where
             tx_number += 1;
         }
 
-        // increment block for both segments
-        header_writer.increment_block(StaticFileSegment::Headers, block.number)?;
+        // increment block for transactions
         transactions_writer.increment_block(StaticFileSegment::Transactions, block.number)?;
 
         // finally commit
-        header_writer.commit()?;
         transactions_writer.commit()?;
+        header_writer.commit()?;
 
         // TODO: do we care about the mpsc error here?
         // send a command to the db service to update the checkpoints for headers / bodies
@@ -123,6 +122,10 @@ where
                 receipts_writer.append_receipt(num, receipt.clone())?;
             }
         }
+
+        // finally increment block and commit
+        receipts_writer.increment_block(StaticFileSegment::Receipts, last_block.number)?;
+        receipts_writer.commit()?;
 
         // TODO: do we care about the mpsc error here?
         // send a command to the db service to update the checkpoints for execution etc.
