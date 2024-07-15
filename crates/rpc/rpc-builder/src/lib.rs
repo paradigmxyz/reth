@@ -143,7 +143,10 @@ use error::{ConflictingModules, RpcError, ServerKind};
 use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
-    server::{AlreadyStoppedError, IdProvider, RpcServiceBuilder, ServerHandle},
+    server::{
+        middleware::rpc::{RpcService, RpcServiceT},
+        AlreadyStoppedError, IdProvider, RpcServiceBuilder, ServerHandle,
+    },
     Methods, RpcModule,
 };
 use reth_engine_primitives::EngineTypes;
@@ -169,6 +172,7 @@ use reth_rpc_layer::{AuthLayer, Claims, JwtAuthValidator, JwtSecret};
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
+use tower::Layer;
 use tower_http::cors::CorsLayer;
 
 use crate::{
@@ -1116,8 +1120,8 @@ where
 ///
 /// Once the [`RpcModule`] is built via [`RpcModuleBuilder`] the servers can be started, See also
 /// [`ServerBuilder::build`] and [`Server::start`](jsonrpsee::server::Server::start).
-#[derive(Default, Debug)]
-pub struct RpcServerConfig {
+#[derive(Debug)]
+pub struct RpcServerConfig<RpcMiddleware = Identity> {
     /// Configs for JSON-RPC Http.
     http_server_config: Option<ServerBuilder<Identity, Identity>>,
     /// Allowed CORS Domains for http
@@ -1136,9 +1140,30 @@ pub struct RpcServerConfig {
     ipc_endpoint: Option<String>,
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
+    /// Configurable RPC middleware
+    #[allow(dead_code)]
+    rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
 }
 
 // === impl RpcServerConfig ===
+
+impl Default for RpcServerConfig<Identity> {
+    /// Create a new config instance
+    fn default() -> Self {
+        Self {
+            http_server_config: None,
+            http_cors_domains: None,
+            http_addr: None,
+            ws_server_config: None,
+            ws_cors_domains: None,
+            ws_addr: None,
+            ipc_server_config: None,
+            ipc_endpoint: None,
+            jwt_secret: None,
+            rpc_middleware: RpcServiceBuilder::new(),
+        }
+    }
+}
 
 impl RpcServerConfig {
     /// Creates a new config with only http set
@@ -1166,15 +1191,45 @@ impl RpcServerConfig {
         self
     }
 
+    /// Configures the ws server
+    ///
+    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
+    /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
+    pub fn with_ws(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
+        self.ws_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
+        self
+    }
+
+    /// Configures the ipc server
+    ///
+    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
+    /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
+    pub fn with_ipc(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
+        self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
+        self
+    }
+}
+
+impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
+    /// Configure rpc middleware
+    pub fn set_rpc_middleware<T>(self, rpc_middleware: RpcServiceBuilder<T>) -> RpcServerConfig<T> {
+        RpcServerConfig {
+            http_server_config: self.http_server_config,
+            http_cors_domains: self.http_cors_domains,
+            http_addr: self.http_addr,
+            ws_server_config: self.ws_server_config,
+            ws_cors_domains: self.ws_cors_domains,
+            ws_addr: self.ws_addr,
+            ipc_server_config: self.ipc_server_config,
+            ipc_endpoint: self.ipc_endpoint,
+            jwt_secret: self.jwt_secret,
+            rpc_middleware,
+        }
+    }
+
     /// Configure the cors domains for http _and_ ws
     pub fn with_cors(self, cors_domain: Option<String>) -> Self {
         self.with_http_cors(cors_domain.clone()).with_ws_cors(cors_domain)
-    }
-
-    /// Configure the cors domains for HTTP
-    pub fn with_http_cors(mut self, cors_domain: Option<String>) -> Self {
-        self.http_cors_domains = cors_domain;
-        self
     }
 
     /// Configure the cors domains for WS
@@ -1183,12 +1238,9 @@ impl RpcServerConfig {
         self
     }
 
-    /// Configures the ws server
-    ///
-    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
-    /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
-    pub fn with_ws(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
-        self.ws_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
+    /// Configure the cors domains for HTTP
+    pub fn with_http_cors(mut self, cors_domain: Option<String>) -> Self {
+        self.http_cors_domains = cors_domain;
         self
     }
 
@@ -1207,15 +1259,6 @@ impl RpcServerConfig {
     /// [`reth_rpc_server_types::constants::DEFAULT_WS_RPC_PORT`]
     pub const fn with_ws_address(mut self, addr: SocketAddr) -> Self {
         self.ws_addr = Some(addr);
-        self
-    }
-
-    /// Configures the ipc server
-    ///
-    /// Note: this always configures an [`EthSubscriptionIdProvider`] [`IdProvider`] for
-    /// convenience. To set a custom [`IdProvider`], please use [`Self::with_id_provider`].
-    pub fn with_ipc(mut self, config: IpcServerBuilder<Identity, Identity>) -> Self {
-        self.ipc_server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
 
@@ -1292,7 +1335,11 @@ impl RpcServerConfig {
     /// If both http and ws are on the same port, they are combined into one server.
     ///
     /// Returns the [`RpcServerHandle`] with the handle to the started servers.
-    pub async fn start(self, modules: &TransportRpcModules) -> Result<RpcServerHandle, RpcError> {
+    pub async fn start(self, modules: &TransportRpcModules) -> Result<RpcServerHandle, RpcError>
+    where
+        RpcMiddleware: for<'a> Layer<RpcService, Service: RpcServiceT<'a>> + Clone + Send + 'static,
+        <RpcMiddleware as Layer<RpcService>>::Service: Send + std::marker::Sync,
+    {
         let mut http_handle = None;
         let mut ws_handle = None;
         let mut ipc_handle = None;
