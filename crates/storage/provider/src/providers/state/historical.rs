@@ -16,7 +16,6 @@ use reth_primitives::{
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
-use revm::db::BundleState;
 use std::fmt::Debug;
 
 /// State provider for a given block number which takes a tx reference.
@@ -257,15 +256,18 @@ impl<'b, TX: DbTx> BlockHashReader for HistoricalStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
-    fn state_root(&self, state: &BundleState) -> ProviderResult<B256> {
+    fn hashed_state_root(&self, hashed_state: &HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
-        revert_state.extend(HashedPostState::from_bundle_state(&state.state));
+        revert_state.extend(hashed_state.clone());
         revert_state.state_root(self.tx).map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_with_updates(&self, state: &BundleState) -> ProviderResult<(B256, TrieUpdates)> {
+    fn hashed_state_root_with_updates(
+        &self,
+        hashed_state: &HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
-        revert_state.extend(HashedPostState::from_bundle_state(&state.state));
+        revert_state.extend(hashed_state.clone());
         revert_state
             .state_root_with_updates(self.tx)
             .map_err(|err| ProviderError::Database(err.into()))
@@ -274,14 +276,14 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
 
 impl<'b, TX: DbTx> StateProofProvider for HistoricalStateProviderRef<'b, TX> {
     /// Get account and storage proofs.
-    fn proof(
+    fn hashed_proof(
         &self,
-        state: &BundleState,
+        hashed_state: &HashedPostState,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         let mut revert_state = self.revert_state()?;
-        revert_state.extend(HashedPostState::from_bundle_state(&state.state));
+        revert_state.extend(hashed_state.clone());
         revert_state
             .account_proof(self.tx, address, slots)
             .map_err(|err| ProviderError::Database(err.into()))
