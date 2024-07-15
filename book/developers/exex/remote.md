@@ -82,7 +82,7 @@ This method streams notifications to the client.
 A proper way to represent the notification would be to define all fields in the schema, but it goes beyond the scope
 of this chapter.
 
-For an example of a full schema, see the [Remote ExEx](https://github.com/paradigmxyz/reth-exex-grpc/blob/22b26f7beca1c74577d28be3b3838eb352747be0/proto/exex.proto) example.
+For an example of a full schema, see the [Remote ExEx](https://github.com/paradigmxyz/reth-exex-examples/blob/1f74410740ac996276a84ee72003f4f9cf041491/remote/proto/exex.proto) example.
 
 </div>
 
