@@ -288,7 +288,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TxEip7702 {
                 alloy_eips::eip7702::Authorization {
                     chain_id: auth.chain_id,
                     address: auth.address,
-                    nonce: auth.nonce.into(),
+                    nonce: auth.nonce,
                 }
                 .into_signed(sig),
             );
