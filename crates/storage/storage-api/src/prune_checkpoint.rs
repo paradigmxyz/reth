@@ -9,6 +9,9 @@ pub trait PruneCheckpointReader: Send + Sync {
         &self,
         segment: PruneSegment,
     ) -> ProviderResult<Option<PruneCheckpoint>>;
+
+    /// Fetch all the checkpoints.
+    fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>>;
 }
 
 /// The trait for updating prune checkpoint related data.
