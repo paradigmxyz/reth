@@ -49,7 +49,7 @@ impl<DB: Database> Stage<DB> for PruneStage {
         if result.is_finished() {
             Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
         } else {
-            // We cannot set the checkpoint yet, because prune segments have different highest
+            // We cannot set the checkpoint yet, because prune segments may have different highest
             // pruned block numbers
             Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
         }
