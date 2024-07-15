@@ -108,9 +108,12 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
         let mut bodies_cursor =
             self.database_writer().tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
 
-        // If there is any kind of receipt pruning, then we store the receipts to database instead
-        // of static file.
-        let mut storage_type = if self.database_writer().prune_modes_ref().has_receipts_pruning() {
+        // We write receipts to database in two situations:
+        // * If we are in live sync. In this case, `StorageWriter` is built without a static file writer.
+        // * If there is any kind of receipt pruning
+        let mut storage_type = if self.static_file_writer.is_none() ||
+            self.database_writer().prune_modes_ref().has_receipts_pruning()
+        {
             StorageType::Database(
                 self.database_writer().tx_ref().cursor_write::<tables::Receipts>()?,
             )
