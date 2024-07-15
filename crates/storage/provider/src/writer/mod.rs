@@ -136,7 +136,11 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
                     )?;
                 }
                 StorageType::StaticFile(sf) => {
-                    StaticFileWriter(*sf).append_block_receipts(first_tx_index, block_number, receipts)?;
+                    StaticFileWriter(*sf).append_block_receipts(
+                        first_tx_index,
+                        block_number,
+                        receipts,
+                    )?;
                 }
             };
         }
