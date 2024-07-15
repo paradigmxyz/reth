@@ -109,6 +109,10 @@ where
         let first_block = blocks.first().unwrap().block();
         let last_block = blocks.last().unwrap().block();
 
+        // get highest tx, if it returns none, use zero (this is the first static file write)
+        let highest_tx =
+            provider.get_highest_static_file_tx(StaticFileSegment::Receipts).unwrap_or_default();
+
         let mut receipts_writer =
             provider.get_writer(first_block.number, StaticFileSegment::Receipts)?;
         for (num, receipts) in blocks
