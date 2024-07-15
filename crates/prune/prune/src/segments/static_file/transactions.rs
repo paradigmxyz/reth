@@ -1,11 +1,13 @@
 use crate::{
-    segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
+    segments::{PruneInput, Segment},
     PrunerError,
 };
 use reth_db::tables;
 use reth_db_api::database::Database;
 use reth_provider::{providers::StaticFileProvider, DatabaseProviderRW, TransactionsProvider};
-use reth_prune_types::{PruneMode, PruneProgress, PrunePurpose, PruneSegment};
+use reth_prune_types::{
+    PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
+};
 use reth_static_file_types::StaticFileSegment;
 use tracing::trace;
 
@@ -39,12 +41,12 @@ impl<DB: Database> Segment<DB> for Transactions {
         &self,
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
-    ) -> Result<PruneOutput, PrunerError> {
+    ) -> Result<SegmentOutput, PrunerError> {
         let tx_range = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transactions to prune");
-                return Ok(PruneOutput::done())
+                return Ok(SegmentOutput::done())
             }
         };
 
@@ -68,10 +70,10 @@ impl<DB: Database> Segment<DB> for Transactions {
 
         let progress = PruneProgress::new(done, &limiter);
 
-        Ok(PruneOutput {
+        Ok(SegmentOutput {
             progress,
             pruned,
-            checkpoint: Some(PruneOutputCheckpoint {
+            checkpoint: Some(SegmentOutputCheckpoint {
                 block_number: last_pruned_block,
                 tx_number: Some(last_pruned_transaction),
             }),
@@ -81,7 +83,7 @@ impl<DB: Database> Segment<DB> for Transactions {
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, PruneOutput, Segment};
+    use crate::segments::{PruneInput, Segment};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -91,7 +93,8 @@ mod tests {
     use reth_db::tables;
     use reth_provider::{PruneCheckpointReader, PruneCheckpointWriter, StaticFileProviderFactory};
     use reth_prune_types::{
-        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
+        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
+        PruneSegment, SegmentOutput,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::{generators, generators::random_block_range};
@@ -140,7 +143,7 @@ mod tests {
 
             assert_matches!(
                 result,
-                PruneOutput {progress, pruned, checkpoint: Some(_)}
+                SegmentOutput {progress, pruned, checkpoint: Some(_)}
                     if (progress, pruned) == expected_result
             );
 
