@@ -10,6 +10,7 @@
 - [Run a Node](./run/run-a-node.md)
    - [Mainnet or official testnets](./run/mainnet.md)
    - [OP Stack](./run/optimism.md)
+   - [Run an OP Mainnet Node](./run/sync-op-mainnet.md)
    - [Private testnet](./run/private-testnet.md)
    - [Metrics](./run/observability.md)
    - [Configuring Reth](./run/config.md)
