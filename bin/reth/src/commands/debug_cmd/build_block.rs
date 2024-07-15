@@ -283,8 +283,7 @@ impl Command {
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");
 
                 let hashed_post_state = execution_outcome.hash_state_slow();
-                let (state_root, trie_updates) = execution_outcome
-                    .hash_state_slow()
+                let (state_root, trie_updates) = hashed_post_state
                     .state_root_with_updates(provider_factory.provider()?.tx_ref())?;
 
                 if state_root != block_with_senders.state_root {
@@ -300,7 +299,7 @@ impl Command {
                 provider_rw.append_blocks_with_state(
                     Vec::from([block_with_senders]),
                     execution_outcome,
-                    hashed_post_state,
+                    hashed_post_state.into_sorted(),
                     trie_updates,
                 )?;
                 info!(target: "reth::cli", "Successfully appended built block");
