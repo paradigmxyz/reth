@@ -109,26 +109,32 @@ where
         let first_block = blocks.first().unwrap().block();
         let last_block = blocks.last().unwrap().block();
 
-        // get highest tx, if it returns none, use zero (this is the first static file write)
-        let highest_tx =
-            provider.get_highest_static_file_tx(StaticFileSegment::Receipts).unwrap_or_default();
+        // get highest receipt, if it returns none, use zero (this is the first static file write)
+        let mut current_receipt = provider
+            .get_highest_static_file_tx(StaticFileSegment::Receipts)
+            .map(|num| num + 1)
+            .unwrap_or_default();
+        let mut current_block = first_block.number;
 
         let mut receipts_writer =
             provider.get_writer(first_block.number, StaticFileSegment::Receipts)?;
-        for (num, receipts) in blocks
-            .iter()
-            .map(|block| (block.block().number, block.execution_outcome().receipts.clone()))
-        {
+        for receipts in blocks.iter().map(|block| block.execution_outcome().receipts.clone()) {
             debug_assert!(receipts.len() == 1);
             // TODO: should we also assert that the receipt is not None here, that means the
             // receipt is pruned
-            for receipt in receipts.first().unwrap().iter().flatten() {
-                receipts_writer.append_receipt(num, receipt.clone())?;
+            for maybe_receipt in receipts.first().unwrap() {
+                if let Some(receipt) = maybe_receipt {
+                    receipts_writer.append_receipt(current_receipt, receipt.clone())?;
+                }
+                current_receipt += 1;
             }
+
+            // increment the block
+            receipts_writer.increment_block(StaticFileSegment::Receipts, current_block)?;
+            current_block += 1;
         }
 
         // finally increment block and commit
-        receipts_writer.increment_block(StaticFileSegment::Receipts, last_block.number)?;
         receipts_writer.commit()?;
 
         // TODO: do we care about the mpsc error here?
@@ -166,7 +172,7 @@ where
 
         // TODO: how do we delete s.t. `block_num` is the start? Additionally, do we need to index
         // by tx num for the transactions segment?
-        todo!("implement me")
+        todo!("implement remove_blocks_above")
     }
 }
 
@@ -188,17 +194,14 @@ where
                 )) => {
                     self.log_transactions(block, start_tx_number, td, response_sender)
                         .expect("todo: handle errors");
-                    todo!("implement me")
                 }
                 StaticFileAction::RemoveBlocksAbove((block_num, response_sender)) => {
                     self.remove_blocks_above(block_num, response_sender)
                         .expect("todo: handle errors");
-                    todo!("implement me")
                 }
                 StaticFileAction::WriteExecutionData((blocks, response_sender)) => {
                     self.write_execution_data(blocks, response_sender)
                         .expect("todo: handle errors");
-                    todo!("implement me")
                 }
             }
         }
