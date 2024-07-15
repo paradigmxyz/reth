@@ -1,13 +1,13 @@
 //! Command that imports OP mainnet receipts from Bedrock datadir, exported via
 //! <https://github.com/testinprod-io/op-geth/pull/1>.
 
+use crate::file_codec_ovm_receipt::HackReceiptFileCodec;
 use clap::Parser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::tables;
 use reth_db_api::database::Database;
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
-    file_codec_ovm_receipt::HackReceiptFileCodec,
     receipt_file_client::ReceiptFileClient,
 };
 use reth_execution_types::ExecutionOutcome;
