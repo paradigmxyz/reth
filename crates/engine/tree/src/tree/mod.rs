@@ -32,7 +32,7 @@ use reth_rpc_types::{
     },
     ExecutionPayload,
 };
-use reth_trie::{updates::TrieUpdates, HashedPostState, HashedPostStateSorted};
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
@@ -53,7 +53,7 @@ pub struct ExecutedBlock {
     block: Arc<SealedBlock>,
     senders: Arc<Vec<Address>>,
     execution_output: Arc<ExecutionOutcome>,
-    hashed_state: Arc<HashedPostStateSorted>,
+    hashed_state: Arc<HashedPostState>,
     trie: Arc<TrieUpdates>,
 }
 
@@ -62,7 +62,7 @@ impl ExecutedBlock {
         block: Arc<SealedBlock>,
         senders: Arc<Vec<Address>>,
         execution_output: Arc<ExecutionOutcome>,
-        hashed_state: Arc<HashedPostStateSorted>,
+        hashed_state: Arc<HashedPostState>,
         trie: Arc<TrieUpdates>,
     ) -> Self {
         Self { block, senders, execution_output, hashed_state, trie }
@@ -84,7 +84,7 @@ impl ExecutedBlock {
     }
 
     /// Returns a reference to the hashed state result of the execution outcome
-    pub(crate) fn hashed_state(&self) -> &HashedPostStateSorted {
+    pub(crate) fn hashed_state(&self) -> &HashedPostState {
         &self.hashed_state
     }
 
@@ -666,7 +666,7 @@ where
                 block_number,
                 vec![Requests::from(output.requests)],
             )),
-            hashed_state: Arc::new(hashed_state.into_sorted()),
+            hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
         };
         self.state.tree_state.insert_executed(executed);
