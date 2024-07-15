@@ -332,12 +332,12 @@ pub struct HashedPostStateSorted {
 
 impl HashedPostStateSorted {
     /// Returns reference to hashed accounts.
-    pub fn accounts(&self) -> &HashedAccountsSorted {
+    pub const fn accounts(&self) -> &HashedAccountsSorted {
         &self.accounts
     }
 
     /// Returns reference to hashed account storages.
-    pub fn account_storages(&self) -> &HashMap<B256, HashedStorageSorted> {
+    pub const fn account_storages(&self) -> &HashMap<B256, HashedStorageSorted> {
         &self.storages
     }
 }
@@ -353,7 +353,7 @@ pub struct HashedAccountsSorted {
 
 impl HashedAccountsSorted {
     /// Returns a sorted iterator over updated accounts.
-    pub fn accounts_sorted(self) -> impl Iterator<Item = (B256, Option<Account>)> {
+    pub fn accounts_sorted(&self) -> impl Iterator<Item = (B256, Option<Account>)> {
         self.accounts
             .iter()
             .map(|(address, account)| (*address, Some(*account)))
@@ -375,7 +375,7 @@ pub struct HashedStorageSorted {
 
 impl HashedStorageSorted {
     /// Returns `true` if the account was wiped.
-    pub fn is_wiped(&self) -> bool {
+    pub const fn is_wiped(&self) -> bool {
         self.wiped
     }
 
