@@ -32,7 +32,7 @@ use reth_rpc_types::{
     },
     ExecutionPayload,
 };
-use reth_trie::{updates::TrieUpdates, HashedPostState, HashedPostStateSorted};
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,

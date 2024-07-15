@@ -11,7 +11,7 @@ use reth_prune_types::PruneModes;
 use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
 use reth_stages_api::Pipeline;
 use reth_static_file::StaticFileProducer;
-use reth_trie::{updates::TrieUpdates, HashedPostState, HashedPostStateSorted};
+use reth_trie::{updates::TrieUpdates, HashedPostState};
 use revm::db::BundleState;
 use std::{collections::VecDeque, ops::Range, sync::Arc};
 use tokio::sync::watch;
