@@ -49,15 +49,9 @@ impl<DB: Database> Stage<DB> for PruneStage {
         if result.is_finished() {
             Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
         } else {
-            let checkpoint = provider
-                .get_prune_checkpoint(PruneSegment::SenderRecovery)?
-                .ok_or(StageError::MissingPruneCheckpoint(PruneSegment::SenderRecovery))?;
-            Ok(ExecOutput {
-                // `unwrap_or_default` is safe because we know that genesis block doesn't have any
-                // transactions and senders
-                checkpoint: StageCheckpoint::new(checkpoint.block_number.unwrap_or_default()),
-                done: false,
-            })
+            // We cannot set the checkpoint yet, because prune segments have different highest
+            // pruned block numbers
+            Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
         }
     }
 
@@ -98,7 +92,20 @@ impl<DB: Database> Stage<DB> for PruneSenderRecoveryStage {
         provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        self.0.execute(provider, input)
+        let mut result = self.0.execute(provider, input)?;
+
+        // Adjust the checkpoint to the highest pruned block number of the Sender Recovery segment
+        if !result.done {
+            let checkpoint = provider
+                .get_prune_checkpoint(PruneSegment::SenderRecovery)?
+                .ok_or(StageError::MissingPruneCheckpoint(PruneSegment::SenderRecovery))?;
+
+            // `unwrap_or_default` is safe because we know that genesis block doesn't have any
+            // transactions and senders
+            result.checkpoint = StageCheckpoint::new(checkpoint.block_number.unwrap_or_default());
+        }
+
+        Ok(result)
     }
 
     fn unwind(
