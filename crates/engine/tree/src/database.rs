@@ -85,7 +85,8 @@ impl<DB: Database> DatabaseService<DB> {
             {
                 let trie_updates = block.trie_updates().clone();
                 let hashed_state = block.hashed_state();
-                HashedStateChanges(hashed_state).write_to_db(&provider_rw)?;
+                HashedStateChanges(&hashed_state.clone().into_sorted())
+                    .write_to_db(&provider_rw)?;
                 trie_updates.write_to_database(provider_rw.tx_ref())?;
             }
 
