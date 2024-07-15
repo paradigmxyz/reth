@@ -2,9 +2,12 @@ use alloy_primitives::{BlockNumber, TxNumber};
 
 use crate::{PruneCheckpoint, PruneLimiter, PruneMode, PruneSegment};
 
+/// Pruner run output.
 #[derive(Debug)]
 pub struct PrunerOutput {
+    /// Pruning progress.
     pub progress: PruneProgress,
+    /// Pruning output for each segment.
     pub segments: Vec<(PruneSegment, SegmentOutput)>,
 }
 
@@ -14,9 +17,10 @@ impl From<PruneProgress> for PrunerOutput {
     }
 }
 
-/// Segment pruning output, see [`Segment::prune`].
+/// Segment pruning output.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct SegmentOutput {
+    /// Segment pruning progress.
     pub progress: PruneProgress,
     /// Number of entries pruned, i.e. deleted from the database.
     pub pruned: usize,
@@ -41,6 +45,7 @@ impl SegmentOutput {
     }
 }
 
+/// Segment pruning checkpoint.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct SegmentOutputCheckpoint {
     /// Highest pruned block number. If it's [None], the pruning for block `0` is not finished yet.
