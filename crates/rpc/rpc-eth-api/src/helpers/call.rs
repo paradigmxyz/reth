@@ -823,7 +823,6 @@ pub trait Call: LoadState + SpawnBlocking {
 
         let gas_limit = gas.unwrap_or_else(|| block_env.gas_limit.min(U256::from(u64::MAX)).to());
 
-        #[allow(clippy::needless_update)]
         let env = TxEnv {
             gas_limit: gas_limit
                 .try_into()
@@ -841,7 +840,6 @@ pub trait Call: LoadState + SpawnBlocking {
             blob_hashes: blob_versioned_hashes.unwrap_or_default(),
             max_fee_per_blob_gas,
             // EIP-7702 fields
-            authorization_list: None,
             // authorization_list: TODO
             ..Default::default()
         };
