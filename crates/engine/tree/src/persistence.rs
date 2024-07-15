@@ -30,9 +30,7 @@ pub enum PersistenceAction {
     SaveBlocks((Vec<ExecutedBlock>, oneshot::Sender<B256>)),
 
     /// Removes block data above the given block number from the database.
-    ///
-    /// Returns the block hash for the lowest block removed from the database.
-    RemoveBlocksAbove((u64, oneshot::Sender<B256>)),
+    RemoveBlocksAbove((u64, oneshot::Sender<()>)),
 
     /// Prune associated block data before the given block number, according to already-configured
     /// prune modes.
@@ -163,7 +161,7 @@ impl PersistenceHandle {
 
     /// Tells the persistence service to remove blocks above a certain block number. The removed
     /// blocks are returned by the service.
-    pub async fn remove_blocks_above(&self, block_num: u64) -> B256 {
+    pub async fn remove_blocks_above(&self, block_num: u64) {
         let (tx, rx) = oneshot::channel();
         self.send_action(PersistenceAction::RemoveBlocksAbove((block_num, tx)))
             .expect("should be able to send");
