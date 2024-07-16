@@ -1,4 +1,4 @@
-use reth_evm::ConfigureEvmGeneric;
+use reth_evm::ConfigureEvmCommit;
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory};
 use reth_rpc::{EthFilter, EthPubSub};
 use reth_rpc_eth_types::{
@@ -75,7 +75,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi>
 where
     Provider: StateProviderFactory + BlockReader + EvmEnvProvider + Clone + Unpin + 'static,
     Pool: Send + Sync + Clone + 'static,
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
     Network: Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,

@@ -19,7 +19,7 @@ use reth::{
     tasks::TaskManager,
 };
 use reth_chainspec::{Chain, ChainSpec};
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric, FullNodeTypes};
+use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmTransact, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{node::EthereumAddOns, EthEvmConfig, EthExecutorProvider, EthereumNode};
 use reth_primitives::{
@@ -196,14 +196,32 @@ impl ConfigureEvm for MyEvmConfig {
     }
 }
 
-impl ConfigureEvmGeneric for MyEvmConfig {
-    type EvmType<'a, DB: Database + 'a> = reth_revm::Evm<'a, (), DB>;
+impl ConfigureEvmCommit for MyEvmConfig {
+    type EvmCommitType<'a, DB: Database + DatabaseCommit + 'a> = reth_revm::Evm<'a, (), DB>;
 
-    fn evm_with_env_generic<'a, DB>(
+    fn evm_with_env_commit<'a, DB>(
         &'a self,
         db: DB,
         env: EnvWithHandlerCfg,
-    ) -> Self::EvmType<'a, DB>
+    ) -> Self::EvmCommitType<'a, DB>
+    where
+        DB: Database + DatabaseCommit + 'a,
+    {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
+    }
+}
+
+impl ConfigureEvmTransact for MyEvmConfig {
+    type EvmTransactType<'a, DB: Database + 'a> = reth_revm::Evm<'a, (), DB>;
+
+    fn evm_with_env_transact<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Self::EvmTransactType<'a, DB>
     where
         DB: Database + 'a,
     {

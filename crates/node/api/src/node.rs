@@ -6,7 +6,7 @@ use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
-use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmGeneric};
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmCommit};
 use reth_network::NetworkHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
@@ -121,7 +121,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Pool: TransactionPool + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvmGeneric;
+    type Evm: ConfigureEvmCommit;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider;

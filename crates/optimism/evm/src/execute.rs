@@ -8,7 +8,7 @@ use reth_evm::{
         BlockExecutorProvider, BlockValidationError, Executor, ProviderError,
     },
     system_calls::apply_beacon_root_contract_call,
-    ConfigureEvmGeneric,
+    ConfigureEvmCommit,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::validate_block_post_execution;
@@ -50,7 +50,7 @@ impl<EvmConfig> OpExecutorProvider<EvmConfig> {
 
 impl<EvmConfig> OpExecutorProvider<EvmConfig>
 where
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
 {
     fn op_executor<DB>(&self, db: DB) -> OpBlockExecutor<EvmConfig, DB>
     where
@@ -66,7 +66,7 @@ where
 
 impl<EvmConfig> BlockExecutorProvider for OpExecutorProvider<EvmConfig>
 where
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
 {
     type Executor<DB: Database<Error: Into<ProviderError> + std::fmt::Display>> =
         OpBlockExecutor<EvmConfig, DB>;
@@ -104,7 +104,7 @@ struct OpEvmExecutor<EvmConfig> {
 
 impl<EvmConfig> OpEvmExecutor<EvmConfig>
 where
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
 {
     /// Executes the transactions in the block and returns the receipts.
     ///
@@ -263,7 +263,7 @@ impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> OpBlockExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
     DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
     /// Configures a new evm configuration and block environment for the given block.
@@ -337,7 +337,7 @@ where
 
 impl<EvmConfig, DB> Executor<DB> for OpBlockExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
     DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
@@ -394,7 +394,7 @@ impl<EvmConfig, DB> OpBatchExecutor<EvmConfig, DB> {
 
 impl<EvmConfig, DB> BatchExecutor<DB> for OpBatchExecutor<EvmConfig, DB>
 where
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
     DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;

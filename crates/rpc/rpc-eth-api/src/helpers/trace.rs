@@ -1,7 +1,7 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
 use futures::Future;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric};
+use reth_evm::{ConfigureEvm, ConfigureEvmCommit, ConfigureEvmEnv};
 use reth_primitives::B256;
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
@@ -20,7 +20,7 @@ pub trait Trace: LoadState {
     /// Returns a handle for reading evm config.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn evm_config(&self) -> &impl ConfigureEvmGeneric;
+    fn evm_config(&self) -> &impl ConfigureEvmCommit;
 
     /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
     /// changes.

@@ -6,7 +6,7 @@ use crate::{
 };
 use reth_basic_payload_builder::*;
 use reth_chainspec::{EthereumHardforks, OptimismHardfork};
-use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvmGeneric};
+use reth_evm::{system_calls::pre_block_beacon_root_contract_call, ConfigureEvmCommit};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::error::PayloadBuilderError;
 use reth_primitives::{
@@ -62,7 +62,7 @@ impl<Pool, Client, EvmConfig> PayloadBuilder<Pool, Client> for OptimismPayloadBu
 where
     Client: StateProviderFactory,
     Pool: TransactionPool,
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
 {
     type Attributes = OptimismPayloadBuilderAttributes;
     type BuiltPayload = OptimismBuiltPayload;
@@ -233,7 +233,7 @@ pub(crate) fn optimism_payload_builder<EvmConfig, Pool, Client>(
     _compute_pending_block: bool,
 ) -> Result<BuildOutcome<OptimismBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {

@@ -1,7 +1,7 @@
 //! Loads and formats OP transaction RPC response.
 
 use jsonrpsee_types::error::ErrorObject;
-use reth_evm::ConfigureEvmGeneric;
+use reth_evm::ConfigureEvmCommit;
 use reth_evm_optimism::RethL1BlockInfo;
 use reth_primitives::{
     BlockNumber, Receipt, TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, B256,
@@ -149,7 +149,7 @@ where
     Self: SpawnBlocking,
     Provider: BlockReaderIdExt + EvmEnvProvider + ChainSpecProvider + StateProviderFactory,
     Pool: TransactionPool,
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
 {
     #[inline]
     fn provider(
@@ -169,7 +169,7 @@ where
     }
 
     #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvmGeneric {
+    fn evm_config(&self) -> &impl ConfigureEvmCommit {
         self.inner.evm_config()
     }
 

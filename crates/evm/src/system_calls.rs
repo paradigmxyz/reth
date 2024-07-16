@@ -1,6 +1,6 @@
 //! System contract call functions.
 
-use crate::ConfigureEvmGeneric;
+use crate::ConfigureEvmCommit;
 use alloy_eips::{
     eip4788::BEACON_ROOTS_ADDRESS,
     eip7002::{WithdrawalRequest, WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS},
@@ -36,7 +36,7 @@ pub fn pre_block_beacon_root_contract_call<EvmConfig, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: std::fmt::Display,
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
 {
     // apply pre-block EIP-4788 contract call
     let mut evm_pre_block = Evm::builder()
@@ -78,7 +78,7 @@ pub fn apply_beacon_root_contract_call<EvmConfig, EXT, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
 {
     if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
         return Ok(())
@@ -149,7 +149,7 @@ pub fn post_block_withdrawal_requests_contract_call<EvmConfig, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: std::fmt::Display,
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
 {
     // apply post-block EIP-7002 contract call
     let mut evm_post_block = Evm::builder()
@@ -177,7 +177,7 @@ pub fn apply_withdrawal_requests_contract_call<EvmConfig, EXT, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
 {
     // get previous env
     let previous_env = Box::new(evm.context.env().clone());
@@ -282,7 +282,7 @@ pub fn post_block_consolidation_requests_contract_call<EvmConfig, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: std::fmt::Display,
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
 {
     // apply post-block EIP-7251 contract call
     let mut evm_post_block = Evm::builder()
@@ -310,7 +310,7 @@ pub fn apply_consolidation_requests_contract_call<EvmConfig, EXT, DB>(
 where
     DB: Database + DatabaseCommit,
     DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
 {
     // get previous env
     let previous_env = Box::new(evm.context.env().clone());

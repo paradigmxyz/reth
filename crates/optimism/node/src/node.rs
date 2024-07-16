@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_evm::ConfigureEvmGeneric;
+use reth_evm::ConfigureEvmCommit;
 use reth_evm_optimism::{OpExecutorProvider, OptimismEvmConfig};
 use reth_network::{NetworkHandle, NetworkManager};
 use reth_node_api::{FullNodeComponents, NodeAddOns};
@@ -234,7 +234,7 @@ impl<Node, EVM, Pool> PayloadServiceBuilder<Node, Pool> for OptimismPayloadBuild
 where
     Node: FullNodeTypes<Engine = OptimismEngineTypes>,
     Pool: TransactionPool + Unpin + 'static,
-    EVM: ConfigureEvmGeneric,
+    EVM: ConfigureEvmCommit,
 {
     async fn spawn_payload_service(
         self,

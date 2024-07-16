@@ -2,7 +2,9 @@
 //! methods.
 
 use futures::Future;
-use reth_evm::{execute::EvmTransact, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric};
+use reth_evm::{
+    execute::EvmTransact, ConfigureEvm, ConfigureEvmCommit, ConfigureEvmEnv, ConfigureEvmTransact,
+};
 use reth_primitives::{
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
@@ -274,7 +276,7 @@ pub trait Call: LoadState + SpawnBlocking {
     /// Returns a handle for reading evm config.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn evm_config(&self) -> &impl ConfigureEvmGeneric;
+    fn evm_config(&self) -> &impl ConfigureEvmCommit;
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`].
     fn with_state_at_block<F, T>(&self, at: BlockId, f: F) -> EthResult<T>
@@ -296,7 +298,7 @@ pub trait Call: LoadState + SpawnBlocking {
         DB: Database,
         DB::Error: Into<EthApiError>,
     {
-        let mut evm = self.evm_config().evm_with_env_generic(db, env);
+        let mut evm = self.evm_config().evm_with_env_transact(db, env);
         let res = evm.transact()?;
         let env = evm.env_with_handler_cfg();
         Ok((res, env))

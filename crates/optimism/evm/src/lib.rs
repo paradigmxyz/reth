@@ -10,13 +10,15 @@
 #![cfg(feature = "optimism")]
 
 use reth_chainspec::ChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric};
+use reth_evm::{ConfigureEvm, ConfigureEvmCommit, ConfigureEvmEnv, ConfigureEvmTransact};
 use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, TxEnv},
     transaction::FillTxEnv,
     Address, Head, Header, TransactionSigned, U256,
 };
-use reth_revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
+use reth_revm::{
+    inspector_handle_register, Database, DatabaseCommit, Evm, EvmBuilder, GetInspector,
+};
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
@@ -131,14 +133,32 @@ impl ConfigureEvm for OptimismEvmConfig {
     }
 }
 
-impl ConfigureEvmGeneric for OptimismEvmConfig {
-    type EvmType<'a, DB: Database + 'a> = reth_revm::Evm<'a, (), DB>;
+impl ConfigureEvmCommit for OptimismEvmConfig {
+    type EvmCommitType<'a, DB: Database + DatabaseCommit + 'a> = reth_revm::Evm<'a, (), DB>;
 
-    fn evm_with_env_generic<'a, DB>(
+    fn evm_with_env_commit<'a, DB>(
         &'a self,
         db: DB,
         env: EnvWithHandlerCfg,
-    ) -> Self::EvmType<'a, DB>
+    ) -> Self::EvmCommitType<'a, DB>
+    where
+        DB: Database + DatabaseCommit + 'a,
+    {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
+    }
+}
+
+impl ConfigureEvmTransact for OptimismEvmConfig {
+    type EvmTransactType<'a, DB: Database + 'a> = reth_revm::Evm<'a, (), DB>;
+
+    fn evm_with_env_transact<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Self::EvmTransactType<'a, DB>
     where
         DB: Database + 'a,
     {

@@ -1,9 +1,8 @@
 //! Contains RPC handler implementations specific to endpoints that call/execute within evm.
 
-use reth_evm::ConfigureEvmGeneric;
-use reth_rpc_eth_api::helpers::{Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking};
-
 use crate::EthApi;
+use reth_evm::ConfigureEvmCommit;
+use reth_rpc_eth_api::helpers::{Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking};
 
 impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig> where
     Self: Call + LoadPendingBlock
@@ -13,7 +12,7 @@ impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Netw
 impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadState + SpawnBlocking,
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
@@ -21,7 +20,7 @@ where
     }
 
     #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvmGeneric {
+    fn evm_config(&self) -> &impl ConfigureEvmCommit {
         self.inner.evm_config()
     }
 }

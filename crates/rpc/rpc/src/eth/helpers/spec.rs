@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::{RethError, RethResult};
-use reth_evm::ConfigureEvmGeneric;
+use reth_evm::ConfigureEvmCommit;
 use reth_network_api::NetworkInfo;
 use reth_primitives::{Address, U256, U64};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory};
@@ -18,7 +18,7 @@ where
     Provider:
         BlockReaderIdExt + ChainSpecProvider + StateProviderFactory + EvmEnvProvider + 'static,
     Network: NetworkInfo + 'static,
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
 {
     /// Returns the current ethereum protocol version.
     ///

@@ -10,7 +10,7 @@ mod pending_block;
 use alloy_primitives::{Address, U64};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::RethResult;
-use reth_evm::ConfigureEvmGeneric;
+use reth_evm::ConfigureEvmCommit;
 use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::eth::DevSigner;
@@ -146,7 +146,7 @@ impl<Eth: EthCall> EthCall for OpEthApi<Eth> {}
 impl<Eth: EthFees> EthFees for OpEthApi<Eth> {}
 
 impl<Eth: Trace> Trace for OpEthApi<Eth> {
-    fn evm_config(&self) -> &impl ConfigureEvmGeneric {
+    fn evm_config(&self) -> &impl ConfigureEvmCommit {
         self.inner.evm_config()
     }
 }

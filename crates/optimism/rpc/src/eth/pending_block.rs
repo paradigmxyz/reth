@@ -1,7 +1,7 @@
 //! Loads OP pending block for a RPC response.
 
 use crate::OpEthApi;
-use reth_evm::ConfigureEvmGeneric;
+use reth_evm::ConfigureEvmCommit;
 use reth_primitives::{
     revm_primitives::{BlockEnv, ExecutionResult},
     BlockNumber, Receipt, TransactionSignedEcRecovered, B256,
@@ -35,7 +35,7 @@ where
     }
 
     #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvmGeneric {
+    fn evm_config(&self) -> &impl ConfigureEvmCommit {
         self.inner.evm_config()
     }
 

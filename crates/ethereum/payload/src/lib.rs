@@ -19,7 +19,7 @@ use reth_evm::{
     system_calls::{
         post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
     },
-    ConfigureEvmGeneric,
+    ConfigureEvmCommit,
 };
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
@@ -68,7 +68,7 @@ impl Default for EthereumPayloadBuilder {
 // Default implementation of [PayloadBuilder] for unit type
 impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
 where
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -259,7 +259,7 @@ pub fn default_ethereum_payload_builder<EvmConfig, Pool, Client>(
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where
-    EvmConfig: ConfigureEvmGeneric,
+    EvmConfig: ConfigureEvmCommit,
     Client: StateProviderFactory,
     Pool: TransactionPool,
 {
@@ -368,7 +368,7 @@ where
         );
 
         // Configure the environment for the block.
-        let mut evm = evm_config.evm_with_env_generic(&mut db, env);
+        let mut evm = evm_config.evm_with_env_transact(&mut db, env);
 
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,

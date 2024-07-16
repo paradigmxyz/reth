@@ -5,7 +5,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Request, U256};
 use reth_prune_types::PruneModes;
 use revm::{db::BundleState, DatabaseCommit};
-use revm_primitives::{db::Database, EVMError, EVMResult, Env, ExecutionResult, ResultAndState};
+use revm_primitives::{db::Database, EVMError, EVMResult, Env, EvmState, ExecutionResult, TxEnv};
 use std::fmt::Display;
 
 #[cfg(not(feature = "std"))]
@@ -34,6 +34,9 @@ pub trait EvmTransact {
 
     /// Returns the current env with handler cfg.
     fn env_with_handler_cfg(&self) -> EnvWithHandlerCfg;
+
+    /// Returns the mutable reference of transaction.
+    fn tx_mut(&mut self) -> &mut TxEnv;
 }
 
 /// Trait that commits state changes to the database.
@@ -44,7 +47,7 @@ pub trait EvmCommit: EvmTransact {
     type EvmError;
 
     /// Commit state changes to the database.
-    fn commit(&mut self, output: ResultAndState);
+    fn commit(&mut self, output: EvmState);
 
     /// Transact, commit the state changes and return them.
     fn transact_and_commit(&mut self) -> Result<Self::EvmOutput, Self::EvmError>;
@@ -71,6 +74,10 @@ where
     fn env_with_handler_cfg(&self) -> EnvWithHandlerCfg {
         EnvWithHandlerCfg { env: Box::new(self.env().clone()), handler_cfg: self.handler.cfg() }
     }
+
+    fn tx_mut(&mut self) -> &mut TxEnv {
+        self.tx_mut()
+    }
 }
 
 impl<'a, C, DB> EvmCommit for Evm<'a, C, DB>
@@ -80,8 +87,8 @@ where
     type EvmOutput = ExecutionResult;
     type EvmError = EVMError<DB::Error>;
 
-    fn commit(&mut self, output: ResultAndState) {
-        self.context.evm.db.commit(output.state)
+    fn commit(&mut self, output: EvmState) {
+        self.context.evm.db.commit(output)
     }
 
     fn transact_and_commit(&mut self) -> Result<Self::EvmOutput, Self::EvmError> {

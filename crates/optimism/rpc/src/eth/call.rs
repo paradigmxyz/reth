@@ -1,4 +1,4 @@
-use reth_evm::ConfigureEvmGeneric;
+use reth_evm::ConfigureEvmCommit;
 use reth_primitives::{
     revm_primitives::{BlockEnv, OptimismFields, TxEnv},
     Bytes,
@@ -14,7 +14,7 @@ impl<Eth: Call> Call for OpEthApi<Eth> {
         self.inner.call_gas_limit()
     }
 
-    fn evm_config(&self) -> &impl ConfigureEvmGeneric {
+    fn evm_config(&self) -> &impl ConfigureEvmCommit {
         self.inner.evm_config()
     }
 
