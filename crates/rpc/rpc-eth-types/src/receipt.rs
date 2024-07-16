@@ -58,9 +58,11 @@ impl ReceiptBuilder {
             num_logs += prev_receipt.logs.len();
         }
 
-        let mut logs = Vec::with_capacity(receipt.logs.len());
-        for (tx_log_idx, log) in receipt.logs.iter().enumerate() {
-            let rpclog = Log {
+        let logs: Vec<Log> = receipt
+            .logs
+            .iter()
+            .enumerate()
+            .map(|(tx_log_idx, log)| Log {
                 inner: log.clone(),
                 block_hash: Some(meta.block_hash),
                 block_number: Some(meta.block_number),
@@ -69,9 +71,8 @@ impl ReceiptBuilder {
                 transaction_index: Some(meta.index),
                 log_index: Some((num_logs + tx_log_idx) as u64),
                 removed: false,
-            };
-            logs.push(rpclog);
-        }
+            })
+            .collect();
 
         let rpc_receipt = reth_rpc_types::Receipt {
             status: receipt.success.into(),
@@ -118,9 +119,6 @@ impl ReceiptBuilder {
     /// Builds a receipt response from the base response body, and any set additional fields.
     pub fn build(self) -> AnyTransactionReceipt {
         let Self { base, other } = self;
-        let mut res = WithOtherFields::new(base);
-        res.other = other;
-
-        res
+        WithOtherFields { inner: base, other }
     }
 }
