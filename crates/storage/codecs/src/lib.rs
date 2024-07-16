@@ -555,7 +555,7 @@ mod tests {
         });
     }
 
-    #[main_codec]
+    #[reth_codec]
     #[derive(Debug, PartialEq, Clone)]
     struct TestStruct {
         f_u64: u64,
@@ -607,7 +607,7 @@ mod tests {
         );
     }
 
-    #[main_codec]
+    #[reth_codec]
     #[derive(Debug, PartialEq, Clone, Default)]
     enum TestEnum {
         #[default]
