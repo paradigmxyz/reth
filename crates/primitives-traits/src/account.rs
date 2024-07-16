@@ -4,12 +4,12 @@ use alloy_primitives::{keccak256, Bytes, B256, U256};
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use derive_more::Deref;
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{reth_codec, Compact};
 use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, JumpTable};
 use serde::{Deserialize, Serialize};
 
 /// An Ethereum account.
-#[main_codec]
+#[reth_codec]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Account {
     /// Account nonce.

@@ -8,15 +8,15 @@ use core::{cmp::Ordering, ops::Deref};
 use derive_more::{Deref, DerefMut, From, IntoIterator};
 #[cfg(feature = "zstd-codec")]
 use reth_codecs::CompactZstd;
-use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, reth_codec, Compact};
 use serde::{Deserialize, Serialize};
 
 #[cfg(not(feature = "std"))]
 use alloc::{vec, vec::Vec};
 
 /// Receipt containing result of transaction execution.
-#[cfg_attr(feature = "zstd-codec", main_codec(no_arbitrary, zstd))]
-#[cfg_attr(not(feature = "zstd-codec"), main_codec(no_arbitrary))]
+#[cfg_attr(feature = "zstd-codec", reth_codec(no_arbitrary, zstd))]
+#[cfg_attr(not(feature = "zstd-codec"), reth_codec(no_arbitrary))]
 #[add_arbitrary_tests]
 #[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 #[rlp(trailing)]
@@ -142,7 +142,7 @@ impl From<Receipt> for ReceiptWithBloom {
 }
 
 /// [`Receipt`] with calculated bloom filter.
-#[main_codec]
+#[reth_codec]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ReceiptWithBloom {
     /// Bloom filter build from logs.
