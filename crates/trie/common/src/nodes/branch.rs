@@ -7,6 +7,9 @@ use bytes::Buf;
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
+/// [`StoredBranchNode`] with a `static` lifetime.
+pub type StoredBranchNodeStatic = StoredBranchNode<'static>;
+
 /// Wrapper around `BranchNodeCompact` that implements `Compact`.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredBranchNode<'a>(pub Cow<'a, BranchNodeCompact>);

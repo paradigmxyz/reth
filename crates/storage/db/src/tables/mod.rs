@@ -35,7 +35,9 @@ use reth_primitives::{
 use reth_primitives_traits::IntegerList;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
-use reth_trie_common::{StorageTrieEntry, StoredBranchNode, StoredNibbles, StoredNibblesSubKey};
+use reth_trie_common::{
+    nodes::StoredBranchNodeStatic, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -267,8 +269,6 @@ macro_rules! tables {
         }
     };
 }
-
-type StoredBranchNodeStatic = StoredBranchNode<'static>;
 
 tables! {
     /// Stores the header hashes belonging to the canonical chain.
