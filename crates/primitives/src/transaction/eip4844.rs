@@ -5,7 +5,10 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::mem;
-use reth_codecs::{reth_codec, Compact, CompactPlaceholder};
+use reth_codecs::Compact;
+
+/// To be used with `Option<CompactPlaceholder>` to place or replace one bit on the bitflag struct.
+pub(crate) type CompactPlaceholder = ();
 
 #[cfg(feature = "c-kzg")]
 use crate::kzg::KzgSettings;
@@ -16,7 +19,7 @@ use alloc::vec::Vec;
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
 ///
 /// A transaction with blob hashes and max blob fee
-#[reth_codec]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxEip4844 {
     /// Added as EIP-155: Simple replay attack protection

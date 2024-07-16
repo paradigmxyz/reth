@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 rust-version = "1.79"
 license = "MIT OR Apache-2.0"
@@ -152,6 +152,7 @@ rust.unreachable_pub = "warn"
 rust.unused_must_use = "deny"
 rust.rust_2018_idioms = { level = "deny", priority = -1 }
 rustdoc.all = "warn"
+# rust.unnameable-types = "warn"
 
 [workspace.lints.clippy]
 # These are some of clippy's nursery (i.e., experimental) lints that we like.

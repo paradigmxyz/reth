@@ -2,9 +2,10 @@
 
 use std::io;
 
+use reth_rpc::EthApi;
 use reth_rpc_builder::{
     error::{RpcError, ServerKind, WsHttpSamePortError},
-    EthApiBuild, RpcServerConfig, TransportRpcModuleConfig,
+    RpcServerConfig, TransportRpcModuleConfig,
 };
 use reth_rpc_server_types::RethRpcModule;
 
@@ -26,8 +27,10 @@ async fn test_http_addr_in_use() {
     let handle = launch_http(vec![RethRpcModule::Admin]).await;
     let addr = handle.http_local_addr().unwrap();
     let builder = test_rpc_builder();
-    let server = builder
-        .build(TransportRpcModuleConfig::set_http(vec![RethRpcModule::Admin]), EthApiBuild::build);
+    let server = builder.build(
+        TransportRpcModuleConfig::set_http(vec![RethRpcModule::Admin]),
+        Box::new(EthApi::with_spawner),
+    );
     let result =
         RpcServerConfig::http(Default::default()).with_http_address(addr).start(&server).await;
     let err = result.unwrap_err();
@@ -39,8 +42,10 @@ async fn test_ws_addr_in_use() {
     let handle = launch_ws(vec![RethRpcModule::Admin]).await;
     let addr = handle.ws_local_addr().unwrap();
     let builder = test_rpc_builder();
-    let server = builder
-        .build(TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Admin]), EthApiBuild::build);
+    let server = builder.build(
+        TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Admin]),
+        Box::new(EthApi::with_spawner),
+    );
     let result = RpcServerConfig::ws(Default::default()).with_ws_address(addr).start(&server).await;
     let err = result.unwrap_err();
     assert!(is_addr_in_use_kind(&err, ServerKind::WS(addr)), "{err}");
@@ -60,7 +65,7 @@ async fn test_launch_same_port_different_modules() {
     let server = builder.build(
         TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Admin])
             .with_http(vec![RethRpcModule::Eth]),
-        EthApiBuild::build,
+        Box::new(EthApi::with_spawner),
     );
     let addr = test_address();
     let res = RpcServerConfig::ws(Default::default())
@@ -82,7 +87,7 @@ async fn test_launch_same_port_same_cors() {
     let server = builder.build(
         TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Eth])
             .with_http(vec![RethRpcModule::Eth]),
-        EthApiBuild::build,
+        Box::new(EthApi::with_spawner),
     );
     let addr = test_address();
     let res = RpcServerConfig::ws(Default::default())
@@ -102,7 +107,7 @@ async fn test_launch_same_port_different_cors() {
     let server = builder.build(
         TransportRpcModuleConfig::set_ws(vec![RethRpcModule::Eth])
             .with_http(vec![RethRpcModule::Eth]),
-        EthApiBuild::build,
+        Box::new(EthApi::with_spawner),
     );
     let addr = test_address();
     let res = RpcServerConfig::ws(Default::default())

@@ -22,7 +22,7 @@ use reth_chainspec::{Chain, ChainSpec, Head};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
+use reth_node_ethereum::{node::EthereumAddOns, EthExecutorProvider, EthereumNode};
 use reth_primitives::{
     revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
     Address, Header, TransactionSigned, U256,
@@ -180,6 +180,7 @@ async fn main() -> eyre::Result<()> {
         .with_types::<EthereumNode>()
         // use default ethereum components but with our executor
         .with_components(EthereumNode::components().executor(MyExecutorBuilder::default()))
+        .with_add_ons::<EthereumAddOns>()
         .launch()
         .await
         .unwrap();

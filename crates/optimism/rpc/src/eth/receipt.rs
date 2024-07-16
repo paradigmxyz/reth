@@ -38,7 +38,7 @@ where
     }
 }
 
-/// Applies OP specific fields to a receipt.
+/// Applies OP specific fields to a receipt builder.
 pub fn op_receipt_fields(
     resp_builder: ReceiptBuilder,
     tx: &TransactionSigned,

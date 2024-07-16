@@ -1,15 +1,17 @@
-use crate::{
-    auth::AuthServerConfig, error::RpcError, EthConfig, IpcServerBuilder, RpcModuleConfig,
-    RpcServerConfig, TransportRpcModuleConfig,
-};
+use std::{net::SocketAddr, path::PathBuf};
+
 use jsonrpsee::server::ServerBuilder;
 use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_path};
-use reth_rpc_eth_types::{EthStateCacheConfig, GasPriceOracleConfig};
+use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
 use reth_rpc_server_types::RpcModuleSelection;
-use std::{net::SocketAddr, path::PathBuf};
 use tower::layer::util::Identity;
 use tracing::debug;
+
+use crate::{
+    auth::AuthServerConfig, error::RpcError, IpcServerBuilder, RpcModuleConfig, RpcServerConfig,
+    TransportRpcModuleConfig,
+};
 
 /// A trait that provides a configured RPC server.
 ///

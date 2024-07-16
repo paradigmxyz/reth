@@ -4,15 +4,20 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::mem;
-use reth_codecs::{reth_codec, Compact};
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
+#[cfg(any(test, feature = "reth-codec"))]
+use reth_codecs::Compact;
+
 /// [EIP-7702 Set Code Transaction](https://eips.ethereum.org/EIPS/eip-7702)
 ///
 /// Set EOA account code for one transaction
-#[reth_codec(no_arbitrary, add_arbitrary_tests)]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::reth_codec(no_arbitrary, add_arbitrary_tests)
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TxEip7702 {
     /// Added as EIP-155: Simple replay attack protection

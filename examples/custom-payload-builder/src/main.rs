@@ -20,7 +20,7 @@ use reth::{
     transaction_pool::TransactionPool,
 };
 use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
-use reth_node_ethereum::{EthEngineTypes, EthereumNode};
+use reth_node_ethereum::{node::EthereumAddOns, EthEngineTypes, EthereumNode};
 use reth_payload_builder::PayloadBuilderService;
 
 pub mod generator;
@@ -78,6 +78,7 @@ fn main() {
                 .with_components(
                     EthereumNode::components().payload(CustomPayloadBuilder::default()),
                 )
+                .with_add_ons::<EthereumAddOns>()
                 .launch()
                 .await?;
 

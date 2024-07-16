@@ -17,9 +17,13 @@ pub use node::*;
 
 /// Support for configuring the components of a node.
 pub mod components;
+pub use components::{NodeComponents, NodeComponentsBuilder};
 
 mod builder;
-pub use builder::*;
+pub use builder::{
+    add_ons::{AddOns, RpcAddOns},
+    *,
+};
 
 mod launch;
 pub use launch::*;
