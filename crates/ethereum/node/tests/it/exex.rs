@@ -32,7 +32,8 @@ fn basic_exex() {
     let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types::<EthereumNode>()
-        .with_components::<_, EthereumAddOns>(EthereumNode::components())
+        .with_components(EthereumNode::components())
+        .with_add_ons::<EthereumAddOns>()
         .install_exex("dummy", move |ctx| future::ok(DummyExEx { _ctx: ctx }))
         .check_launch();
 }

@@ -32,6 +32,7 @@ tracing.workspace = true
 rayon.workspace = true
 derive_more.workspace = true
 auto_impl.workspace = true
+itertools.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }

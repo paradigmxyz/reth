@@ -2,7 +2,7 @@
 
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{AsRef, Deref, DerefMut, From, IntoIterator};
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{reth_codec, Compact};
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 pub use alloy_eips::eip4895::Withdrawal;
 
 /// Represents a collection of Withdrawals.
-#[main_codec]
+#[reth_codec]
 #[derive(
     Debug,
     Clone,
@@ -92,7 +92,7 @@ mod tests {
 
     /// This type is kept for compatibility tests after the codec support was added to alloy-eips
     /// Withdrawal type natively
-    #[main_codec]
+    #[reth_codec]
     #[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, RlpDecodable)]
     struct RethWithdrawal {
         /// Monotonically increasing identifier issued by consensus layer.

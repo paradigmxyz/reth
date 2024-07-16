@@ -1,6 +1,8 @@
 use reth_db_api::database::Database;
-use reth_provider::DatabaseProviderRW;
-use reth_prune::{PruneMode, PruneModes, PrunerBuilder};
+use reth_provider::{DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter};
+use reth_prune::{
+    PruneMode, PruneModes, PruneSegment, PrunerBuilder, SegmentOutput, SegmentOutputCheckpoint,
+};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
@@ -46,19 +48,55 @@ impl<DB: Database> Stage<DB> for PruneStage {
             .build(provider.static_file_provider().clone());
 
         let result = pruner.run(provider, input.target())?;
-        if result.is_finished() {
+        if result.progress.is_finished() {
             Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
         } else {
+            if let Some((last_segment, last_segment_output)) = result.segments.last() {
+                match last_segment_output {
+                    SegmentOutput {
+                        progress,
+                        pruned,
+                        checkpoint:
+                            checkpoint @ Some(SegmentOutputCheckpoint { block_number: Some(_), .. }),
+                    } => {
+                        info!(
+                            target: "sync::stages::prune::exec",
+                            ?last_segment,
+                            ?progress,
+                            ?pruned,
+                            ?checkpoint,
+                            "Last segment has more data to prune"
+                        )
+                    }
+                    SegmentOutput { progress, pruned, checkpoint: _ } => {
+                        info!(
+                            target: "sync::stages::prune::exec",
+                            ?last_segment,
+                            ?progress,
+                            ?pruned,
+                            "Last segment has more data to prune"
+                        )
+                    }
+                }
+            }
+            // We cannot set the checkpoint yet, because prune segments may have different highest
+            // pruned block numbers
             Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
         }
     }
 
     fn unwind(
         &mut self,
-        _provider: &DatabaseProviderRW<DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        info!(target: "sync::stages::prune::unwind", "Stage is always skipped");
+        // We cannot recover the data that was pruned in `execute`, so we just update the
+        // checkpoints.
+        let prune_checkpoints = provider.get_prune_checkpoints()?;
+        for (segment, mut checkpoint) in prune_checkpoints {
+            checkpoint.block_number = Some(input.unwind_to);
+            provider.save_prune_checkpoint(segment, checkpoint)?;
+        }
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
@@ -90,7 +128,20 @@ impl<DB: Database> Stage<DB> for PruneSenderRecoveryStage {
         provider: &DatabaseProviderRW<DB>,
         input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        self.0.execute(provider, input)
+        let mut result = self.0.execute(provider, input)?;
+
+        // Adjust the checkpoint to the highest pruned block number of the Sender Recovery segment
+        if !result.done {
+            let checkpoint = provider
+                .get_prune_checkpoint(PruneSegment::SenderRecovery)?
+                .ok_or(StageError::MissingPruneCheckpoint(PruneSegment::SenderRecovery))?;
+
+            // `unwrap_or_default` is safe because we know that genesis block doesn't have any
+            // transactions and senders
+            result.checkpoint = StageCheckpoint::new(checkpoint.block_number.unwrap_or_default());
+        }
+
+        Ok(result)
     }
 
     fn unwind(
@@ -174,11 +225,19 @@ mod tests {
                     return Ok(())
                 }
 
+                let provider = self.db.factory.provider()?;
+
                 assert!(output.done);
-                assert_eq!(output.checkpoint.block_number, input.target());
+                assert_eq!(
+                    output.checkpoint.block_number,
+                    provider
+                        .get_prune_checkpoint(PruneSegment::SenderRecovery)?
+                        .expect("prune checkpoint must exist")
+                        .block_number
+                        .unwrap_or_default()
+                );
 
                 // Verify that the senders are pruned
-                let provider = self.db.factory.provider()?;
                 let tx_range =
                     provider.transaction_range_by_block_range(start_block..=end_block)?;
                 let senders = self.db.factory.provider()?.senders_by_tx_range(tx_range)?;

@@ -209,6 +209,7 @@ where
         let static_file_producer = if self.prune_modes.receipts.is_none() &&
             self.prune_modes.receipts_log_filter.is_empty()
         {
+            debug!(target: "sync::stages::execution", start = start_block, "Preparing static file producer");
             let mut producer = prepare_static_file_producer(provider, start_block)?;
             // Since there might be a database <-> static file inconsistency (read
             // `prepare_static_file_producer` for context), we commit the change straight away.
@@ -545,6 +546,8 @@ fn calculate_gas_used_from_headers(
     provider: &StaticFileProvider,
     range: RangeInclusive<BlockNumber>,
 ) -> Result<u64, ProviderError> {
+    debug!(target: "sync::stages::execution", ?range, "Calculating gas used from headers");
+
     let mut gas_total = 0;
 
     let start = Instant::now();
@@ -559,7 +562,7 @@ fn calculate_gas_used_from_headers(
     }
 
     let duration = start.elapsed();
-    trace!(target: "sync::stages::execution", ?range, ?duration, "Time elapsed in calculate_gas_used_from_headers");
+    debug!(target: "sync::stages::execution", ?range, ?duration, "Finished calculating gas used from headers");
 
     Ok(gas_total)
 }

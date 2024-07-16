@@ -582,6 +582,10 @@ impl<DB: Database> PruneCheckpointReader for ProviderFactory<DB> {
     ) -> ProviderResult<Option<PruneCheckpoint>> {
         self.provider()?.get_prune_checkpoint(segment)
     }
+
+    fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        self.provider()?.get_prune_checkpoints()
+    }
 }
 
 impl<DB> Clone for ProviderFactory<DB> {

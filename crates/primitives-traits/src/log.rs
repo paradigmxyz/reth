@@ -19,11 +19,11 @@ mod tests {
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::proptest;
     use proptest_arbitrary_interop::arb;
-    use reth_codecs::{main_codec, Compact};
+    use reth_codecs::{reth_codec, Compact};
 
     /// This type is kept for compatibility tests after the codec support was added to
     /// alloy-primitives Log type natively
-    #[main_codec(rlp)]
+    #[reth_codec(rlp)]
     #[derive(Clone, Debug, PartialEq, Eq, RlpDecodable, RlpEncodable, Default)]
     struct Log {
         /// Contract that emitted this log.

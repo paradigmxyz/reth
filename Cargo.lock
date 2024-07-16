@@ -570,7 +570,6 @@ version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "867a5469d61480fea08c7333ffeca52d5b621f5ca2e44f271b117ec1fc9a0525"
 dependencies = [
- "alloy-json-abi",
  "alloy-sol-macro-input",
  "const-hex",
  "heck 0.5.0",
@@ -589,13 +588,11 @@ version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e482dc33a32b6fadbc0f599adea520bd3aaa585c141a80b404d0a3e3fa72528"
 dependencies = [
- "alloy-json-abi",
  "const-hex",
  "dunce",
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "serde_json",
  "syn 2.0.71",
  "syn-solidity",
 ]
@@ -616,7 +613,6 @@ version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a91ca40fa20793ae9c3841b83e74569d1cc9af29a2f5237314fd3452d51e38c7"
 dependencies = [
- "alloy-json-abi",
  "alloy-primitives",
  "alloy-sol-macro",
  "const-hex",
@@ -2443,7 +2439,7 @@ dependencies = [
  "enr",
  "fnv",
  "futures",
- "hashlink 0.8.4",
+ "hashlink",
  "hex",
  "hkdf",
  "lazy_static",
@@ -2872,115 +2868,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "example-exex-discv5"
-version = "0.0.0"
-dependencies = [
- "clap",
- "discv5",
- "enr",
- "eyre",
- "futures",
- "futures-util",
- "reth",
- "reth-chainspec",
- "reth-discv5",
- "reth-exex",
- "reth-exex-test-utils",
- "reth-network-peers",
- "reth-node-api",
- "reth-node-ethereum",
- "reth-testing-utils",
- "reth-tracing",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tracing",
-]
-
-[[package]]
-name = "example-exex-in-memory-state"
-version = "0.0.0"
-dependencies = [
- "eyre",
- "reth",
- "reth-execution-types",
- "reth-exex",
- "reth-exex-test-utils",
- "reth-node-api",
- "reth-node-ethereum",
- "reth-testing-utils",
- "reth-tracing",
- "tokio",
-]
-
-[[package]]
-name = "example-exex-minimal"
-version = "0.0.0"
-dependencies = [
- "eyre",
- "futures",
- "reth",
- "reth-execution-types",
- "reth-exex",
- "reth-exex-test-utils",
- "reth-node-api",
- "reth-node-ethereum",
- "reth-tracing",
- "tokio",
-]
-
-[[package]]
-name = "example-exex-op-bridge"
-version = "0.0.0"
-dependencies = [
- "alloy-sol-types",
- "eyre",
- "futures",
- "rand 0.8.5",
- "reth",
- "reth-execution-types",
- "reth-exex",
- "reth-exex-test-utils",
- "reth-node-api",
- "reth-node-ethereum",
- "reth-primitives",
- "reth-testing-utils",
- "reth-tracing",
- "rusqlite",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "example-exex-rollup"
-version = "0.0.0"
-dependencies = [
- "alloy-consensus",
- "alloy-genesis",
- "alloy-rlp",
- "alloy-sol-types",
- "eyre",
- "foundry-blob-explorers",
- "once_cell",
- "reth",
- "reth-chainspec",
- "reth-execution-errors",
- "reth-execution-types",
- "reth-exex",
- "reth-node-api",
- "reth-node-ethereum",
- "reth-primitives",
- "reth-provider",
- "reth-revm",
- "reth-testing-utils",
- "reth-tracing",
- "rusqlite",
- "secp256k1",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "example-manual-p2p"
 version = "0.0.0"
 dependencies = [
@@ -3111,18 +2998,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fallible-iterator"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
-
-[[package]]
-name = "fallible-streaming-iterator"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
-
-[[package]]
 name = "fast-float"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3228,22 +3103,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13624c2627564efccf4934284bdd98cbaa14e79b0b5a141218e507b3a823456"
 dependencies = [
  "percent-encoding",
-]
-
-[[package]]
-name = "foundry-blob-explorers"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "195bb5b228e1215c50d828f3e7d48a809a0af2bc0120462710ea5e7fcba3cbe2"
-dependencies = [
- "alloy-chains",
- "alloy-eips",
- "alloy-primitives",
- "alloy-rpc-types-eth",
- "alloy-serde",
- "chrono",
- "reqwest",
- "serde",
 ]
 
 [[package]]
@@ -3556,15 +3415,6 @@ name = "hashlink"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8094feaf31ff591f651a2664fb9cfd92bba7a60ce3197265e9482ebe753c8f7"
-dependencies = [
- "hashbrown 0.14.5",
-]
-
-[[package]]
-name = "hashlink"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ba4ff7128dee98c7dc9794b6a411377e1404dba1c97deb8d1a55297bd25d8af"
 dependencies = [
  "hashbrown 0.14.5",
 ]
@@ -4754,17 +4604,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3db8d6ba2cec9eacc40e6e8ccc98931840301f1006e95647ceb2dd5c3aa06f7c"
 dependencies = [
  "libsecp256k1-core",
-]
-
-[[package]]
-name = "libsqlite3-sys"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c10584274047cb335c23d3e61bcef8e323adae7c5c8c760540f73610177fc3f"
-dependencies = [
- "cc",
- "pkg-config",
- "vcpkg",
 ]
 
 [[package]]
@@ -7931,6 +7770,7 @@ version = "1.0.1"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
+ "alloy-rlp",
  "clap",
  "eyre",
  "futures-util",
@@ -7959,6 +7799,7 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -8154,6 +7995,7 @@ dependencies = [
  "assert_matches",
  "auto_impl",
  "dashmap",
+ "derive_more",
  "itertools 0.13.0",
  "metrics",
  "parking_lot 0.12.3",
@@ -8808,6 +8650,7 @@ dependencies = [
  "auto_impl",
  "criterion",
  "derive_more",
+ "itertools 0.13.0",
  "metrics",
  "once_cell",
  "proptest",
@@ -9096,20 +8939,6 @@ name = "ruint-macro"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48fd7bd8a6377e15ad9d42a8ec25371b94ddc67abe7c8b9127bec79bebaaae18"
-
-[[package]]
-name = "rusqlite"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b838eba278d213a8beaf485bd313fd580ca4505a00d5871caeb1457c55322cae"
-dependencies = [
- "bitflags 2.6.0",
- "fallible-iterator",
- "fallible-streaming-iterator",
- "hashlink 0.9.1",
- "libsqlite3-sys",
- "smallvec",
-]
 
 [[package]]
 name = "rustc-demangle"
@@ -10818,12 +10647,6 @@ name = "valuable"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
-
-[[package]]
-name = "vcpkg"
-version = "0.2.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vergen"

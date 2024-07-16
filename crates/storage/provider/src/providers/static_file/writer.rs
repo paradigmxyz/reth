@@ -468,7 +468,7 @@ impl StaticFileProviderRW {
     pub fn append_header(
         &mut self,
         header: Header,
-        terminal_difficulty: U256,
+        total_difficulty: U256,
         hash: BlockHash,
     ) -> ProviderResult<BlockNumber> {
         let start = Instant::now();
@@ -479,7 +479,7 @@ impl StaticFileProviderRW {
         let block_number = self.increment_block(StaticFileSegment::Headers, header.number)?;
 
         self.append_column(header)?;
-        self.append_column(CompactU256::from(terminal_difficulty))?;
+        self.append_column(CompactU256::from(total_difficulty))?;
         self.append_column(hash)?;
 
         if let Some(metrics) = &self.metrics {
