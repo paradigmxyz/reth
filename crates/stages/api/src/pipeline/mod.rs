@@ -420,6 +420,8 @@ where
                 };
             }
 
+            let provider_rw = self.provider_factory.provider_rw()?;
+
             self.event_sender.notify(PipelineEvent::Run {
                 pipeline_stages_progress: PipelineStagesProgress {
                     current: stage_index + 1,
@@ -430,7 +432,6 @@ where
                 target,
             });
 
-            let provider_rw = self.provider_factory.provider_rw()?;
             match stage.execute(&provider_rw, exec_input) {
                 Ok(out @ ExecOutput { checkpoint, done }) => {
                     made_progress |=

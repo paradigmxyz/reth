@@ -121,10 +121,10 @@ impl<C> NetworkConfig<C> {
 
 impl<C> NetworkConfig<C>
 where
-    C: BlockNumReader,
+    C: BlockNumReader + 'static,
 {
     /// Convenience method for calling [`NetworkManager::new`].
-    pub async fn manager(self) -> Result<NetworkManager<C>, NetworkError> {
+    pub async fn manager(self) -> Result<NetworkManager, NetworkError> {
         NetworkManager::new(self).await
     }
 }
@@ -136,8 +136,10 @@ where
     /// Starts the networking stack given a [`NetworkConfig`] and returns a handle to the network.
     pub async fn start_network(self) -> Result<NetworkHandle, NetworkError> {
         let client = self.client.clone();
-        let (handle, network, _txpool, eth) =
-            NetworkManager::builder(self).await?.request_handler(client).split_with_handle();
+        let (handle, network, _txpool, eth) = NetworkManager::builder::<C>(self)
+            .await?
+            .request_handler::<C>(client)
+            .split_with_handle();
 
         tokio::task::spawn(network);
         // TODO: tokio::task::spawn(txpool);

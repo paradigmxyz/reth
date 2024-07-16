@@ -11,9 +11,9 @@ use crate::{
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{
-    constants::{eip4844::MAX_BLOBS_PER_BLOCK, ETHEREUM_BLOCK_GAS_LIMIT},
-    GotExpected, InvalidTransactionError, SealedBlock, EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID,
-    EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, LEGACY_TX_TYPE_ID,
+    constants::eip4844::MAX_BLOBS_PER_BLOCK, GotExpected, InvalidTransactionError, SealedBlock,
+    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+    LEGACY_TX_TYPE_ID,
 };
 use reth_provider::{AccountReader, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -479,8 +479,8 @@ impl EthTransactionValidatorBuilder {
     ///  - EIP-4844
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self {
+            block_gas_limit: chain_spec.max_gas_limit,
             chain_spec,
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             minimum_priority_fee: None,
             additional_tasks: 1,
             kzg_settings: EnvKzgSettings::Default,

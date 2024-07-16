@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use alloy_genesis::ChainConfig;
-use alloy_primitives::B256;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
@@ -116,7 +115,7 @@ where
         };
 
         let node_info = NodeInfo {
-            id: B256::from_slice(&enode.id.as_slice()[..32]),
+            id: enode.id.to_string(),
             name: status.client_version,
             enode: enode.to_string(),
             enr: self.network.local_enr().to_string(),

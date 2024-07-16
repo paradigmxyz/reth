@@ -16,11 +16,11 @@ use alloy_primitives::{keccak256, Address, BlockNumber, Bloom, Bytes, B256, B64,
 use alloy_rlp::{length_of_length, Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
-use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
+use reth_codecs::{add_arbitrary_tests, reth_codec, Compact};
 use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
 
 /// Block header
-#[main_codec(no_arbitrary)]
+#[reth_codec(no_arbitrary)]
 #[add_arbitrary_tests(rlp, 25)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Header {

@@ -231,3 +231,14 @@ jobs:
         if: ${{ failure() }}
         run: |
           cat hivetests/workspace/logs/reth/client-*.log
+  notify-on-error:
+    needs: test
+    if: failure()
+    runs-on:
+      group: Reth
+    steps:
+      - name: Discord Webhook Action
+        uses: tsickert/discord-webhook@v6.0.0
+        with:
+          webhook-url: ${{ secrets.RETH_ALERTS_WEBHOOK }}
+          content: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"

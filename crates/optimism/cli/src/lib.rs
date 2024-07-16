@@ -10,6 +10,27 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+/// Optimism chain specification parser.
+pub mod chainspec;
+/// Optimism CLI commands.
+pub mod commands;
+/// Module with a codec for reading and encoding receipts in files.
+///
+/// Enables decoding and encoding `HackReceipt` type. See <https://github.com/testinprod-io/op-geth/pull/1>.
+///
+/// Currently configured to use codec [`HackReceipt`](file_codec_ovm_receipt::HackReceipt) based on
+/// export of below Bedrock data using <https://github.com/testinprod-io/op-geth/pull/1>. Codec can
+/// be replaced with regular encoding of receipts for export.
+///
+/// NOTE: receipts can be exported using regular op-geth encoding for `Receipt` type, to fit
+/// reth's needs for importing. However, this would require patching the diff in <https://github.com/testinprod-io/op-geth/pull/1> to export the `Receipt` and not `HackReceipt` type (originally
+/// made for op-erigon's import needs).
+pub mod file_codec_ovm_receipt;
+
+pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
+
+use std::{ffi::OsString, fmt, sync::Arc};
+
 use chainspec::OpChainSpecParser;
 use clap::{command, value_parser, Parser};
 use commands::Commands;
@@ -20,13 +41,6 @@ use reth_node_core::{
     args::{utils::chain_help, LogArgs},
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use std::{ffi::OsString, fmt, sync::Arc};
-
-/// Optimism chain specification parser.
-pub mod chainspec;
-/// Optimism CLI commands.
-pub mod commands;
-pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
 
 /// The main reth cli interface.
 ///

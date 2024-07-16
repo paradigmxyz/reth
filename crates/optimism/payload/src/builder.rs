@@ -111,7 +111,8 @@ where
 
         let base_fee = initialized_block_env.basefee.to::<u64>();
         let block_number = initialized_block_env.number.to::<u64>();
-        let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
+        let block_gas_limit: u64 =
+            initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
 
         // apply eip-4788 pre block contract call
         pre_block_beacon_root_contract_call(
@@ -255,9 +256,9 @@ where
     debug!(target: "payload_builder", id=%attributes.payload_attributes.payload_id(), parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
 
     let mut cumulative_gas_used = 0;
-    let block_gas_limit: u64 = attributes
-        .gas_limit
-        .unwrap_or_else(|| initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX));
+    let block_gas_limit: u64 = attributes.gas_limit.unwrap_or_else(|| {
+        initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit)
+    });
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
     let mut executed_txs = Vec::with_capacity(attributes.transactions.len());
@@ -318,7 +319,7 @@ where
         }
 
         // A sequencer's block should never contain blob transactions.
-        if sequencer_tx.is_eip4844() {
+        if sequencer_tx.value().is_eip4844() {
             return Err(PayloadBuilderError::other(
                 OptimismPayloadBuilderError::BlobTransactionRejected,
             ))
@@ -328,7 +329,7 @@ where
         // purely for the purposes of utilizing the `evm_config.tx_env`` function.
         // Deposit transactions do not have signatures, so if the tx is a deposit, this
         // will just pull in its `from` address.
-        let sequencer_tx = sequencer_tx.clone().try_into_ecrecovered().map_err(|_| {
+        let sequencer_tx = sequencer_tx.value().clone().try_into_ecrecovered().map_err(|_| {
             PayloadBuilderError::other(OptimismPayloadBuilderError::TransactionEcRecoverFailed)
         })?;
 

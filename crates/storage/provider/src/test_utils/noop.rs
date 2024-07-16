@@ -16,11 +16,8 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof};
-use revm::{
-    db::BundleState,
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-};
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
+use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use tokio::sync::broadcast;
 
 use crate::{
@@ -315,22 +312,22 @@ impl ChangeSetReader for NoopProvider {
 }
 
 impl StateRootProvider for NoopProvider {
-    fn state_root(&self, _state: &BundleState) -> ProviderResult<B256> {
+    fn hashed_state_root(&self, _state: &HashedPostState) -> ProviderResult<B256> {
         Ok(B256::default())
     }
 
-    fn state_root_with_updates(
+    fn hashed_state_root_with_updates(
         &self,
-        _bundle_state: &BundleState,
+        _state: &HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
     }
 }
 
 impl StateProofProvider for NoopProvider {
-    fn proof(
+    fn hashed_proof(
         &self,
-        _state: &BundleState,
+        _hashed_state: &HashedPostState,
         address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {
@@ -476,6 +473,10 @@ impl PruneCheckpointReader for NoopProvider {
         _segment: PruneSegment,
     ) -> ProviderResult<Option<PruneCheckpoint>> {
         Ok(None)
+    }
+
+    fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        Ok(Vec::new())
     }
 }
 

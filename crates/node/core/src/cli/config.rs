@@ -49,7 +49,7 @@ pub trait RethNetworkConfig {
     // TODO add more network config methods here
 }
 
-impl<C> RethNetworkConfig for reth_network::NetworkManager<C> {
+impl RethNetworkConfig for reth_network::NetworkManager {
     fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         Self::add_rlpx_sub_protocol(self, protocol);
     }

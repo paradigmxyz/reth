@@ -49,4 +49,3 @@ alloy = [
     "dep:alloy-genesis",
     "dep:modular-bitfield",
 ]
-optimism = ["reth-codecs-derive/optimism"]

@@ -1,14 +1,23 @@
 use super::access_list::AccessList;
-use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
-use alloy_eips::eip7702::SignedAuthorization;
+use crate::{
+    eip7702::SignedAuthorization, keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256,
+};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
-use reth_codecs::{main_codec, Compact};
-use std::mem;
+use core::mem;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
+#[cfg(any(test, feature = "reth-codec"))]
+use reth_codecs::Compact;
 
 /// [EIP-7702 Set Code Transaction](https://eips.ethereum.org/EIPS/eip-7702)
 ///
 /// Set EOA account code for one transaction
-#[main_codec(no_arbitrary, add_arbitrary_tests)]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::reth_codec(no_arbitrary, add_arbitrary_tests)
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TxEip7702 {
     /// Added as EIP-155: Simple replay attack protection
@@ -60,7 +69,7 @@ pub struct TxEip7702 {
     /// Authorizations are used to temporarily set the code of its signer to
     /// the code referenced by `address`. These also include a `chain_id` (which
     /// can be set to zero and not evaluated) as well as an optional `nonce`.
-    pub authorization_list: Vec<SignedAuthorization<alloy_primitives::Signature>>,
+    pub authorization_list: Vec<SignedAuthorization>,
     /// Input has two uses depending if the transaction `to` field is [`TxKind::Create`] or
     /// [`TxKind::Call`].
     ///
@@ -101,7 +110,7 @@ impl TxEip7702 {
         self.to.size() + // to
         mem::size_of::<U256>() + // value
         self.access_list.size() + // access_list
-        mem::size_of::<SignedAuthorization<alloy_primitives::Signature>>()
+        mem::size_of::<SignedAuthorization>()
              * self.authorization_list.capacity() + // authorization_list
         self.input.len() // input
     }
@@ -306,7 +315,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TxEip7702 {
 }
 
 // TODO(onbjerg): This is temporary until we upstream `Hash` for EIP-7702 types in alloy
-impl std::hash::Hash for TxEip7702 {
+impl core::hash::Hash for TxEip7702 {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.chain_id.hash(state);
         self.nonce.hash(state);

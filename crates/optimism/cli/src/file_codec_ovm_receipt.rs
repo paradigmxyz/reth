@@ -7,7 +7,7 @@ use reth_primitives::{
 };
 use tokio_util::codec::Decoder;
 
-use crate::{file_client::FileClientError, receipt_file_client::ReceiptWithBlockNumber};
+use reth_downloaders::{file_client::FileClientError, receipt_file_client::ReceiptWithBlockNumber};
 
 /// Codec for reading raw receipts from a file.
 ///
