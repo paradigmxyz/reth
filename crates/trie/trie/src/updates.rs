@@ -84,64 +84,6 @@ impl TrieUpdates {
             .collect();
         TrieUpdatesSorted { removed_nodes: self.removed_nodes, account_nodes, storage_tries }
     }
-
-    /// Flush updates all aggregated updates to the database.
-    ///
-    /// # Returns
-    ///
-    /// The number of storage trie entries updated in the database.
-    pub fn write_to_database<TX>(self, tx: &TX) -> Result<usize, reth_db::DatabaseError>
-    where
-        TX: DbTx + DbTxMut,
-    {
-        if self.is_empty() {
-            return Ok(0)
-        }
-
-        // Track the number of inserted entries.
-        let mut num_entries = 0;
-
-        // Merge updated and removed nodes. Updated nodes must take precedence.
-        let mut account_updates = self
-            .removed_nodes
-            .into_iter()
-            .filter_map(|n| (!self.account_nodes.contains_key(&n)).then_some((n, None)))
-            .collect::<Vec<_>>();
-        account_updates
-            .extend(self.account_nodes.into_iter().map(|(nibbles, node)| (nibbles, Some(node))));
-        // Sort trie node updates.
-        account_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-
-        let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
-        for (key, updated_node) in account_updates {
-            let nibbles = StoredNibbles(key);
-            match updated_node {
-                Some(node) => {
-                    if !nibbles.0.is_empty() {
-                        num_entries += 1;
-                        account_trie_cursor.upsert(nibbles, node)?;
-                    }
-                }
-                None => {
-                    num_entries += 1;
-                    if account_trie_cursor.seek_exact(nibbles)?.is_some() {
-                        account_trie_cursor.delete_current()?;
-                    }
-                }
-            }
-        }
-
-        let mut storage_tries = Vec::from_iter(self.storage_tries);
-        storage_tries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let mut storage_trie_cursor = tx.cursor_dup_write::<tables::StoragesTrie>()?;
-        for (hashed_address, storage_trie_updates) in storage_tries {
-            let updated_storage_entries =
-                storage_trie_updates.write_with_cursor(&mut storage_trie_cursor, hashed_address)?;
-            num_entries += updated_storage_entries;
-        }
-
-        Ok(num_entries)
-    }
 }
 
 /// Trie updates for storage trie of a single account.

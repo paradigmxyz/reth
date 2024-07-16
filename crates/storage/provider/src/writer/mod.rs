@@ -1,5 +1,5 @@
 use std::borrow::Borrow;
-
+use std::collections::HashMap;
 use crate::{providers::StaticFileProviderRWRefMut, DatabaseProviderRW};
 use itertools::Itertools;
 use reth_db::{
@@ -14,7 +14,7 @@ use reth_primitives::{
 };
 use reth_storage_api::ReceiptWriter;
 use reth_storage_errors::writer::StorageWriterError;
-use reth_trie::HashedPostStateSorted;
+use reth_trie::{updates::{StorageTrieUpdates, TrieUpdates}, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey, HashedPostStateSorted};
 use static_file::StaticFileWriter;
 
 mod database;
@@ -309,6 +309,97 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
         }
 
         Ok(())
+    }
+
+    /// Writes trie updates. Returns
+    pub fn write_trie_updates(&self, trie_updates: &TrieUpdates) -> ProviderResult<usize> {
+        if trie_updates.is_empty() {
+            return Ok(0)
+        }
+
+        // Track the number of inserted entries.
+        let mut num_entries = 0;
+
+        // Merge updated and removed nodes. Updated nodes must take precedence.
+        let mut account_updates = trie_updates
+            .removed_nodes_ref()
+            .into_iter()
+            .filter_map(|n| (!trie_updates.account_nodes_ref().contains_key(n)).then_some((n, None)))
+            .collect::<Vec<_>>();
+        account_updates
+            .extend(trie_updates.account_nodes_ref().into_iter().map(|(nibbles, node)| (nibbles, Some(node))));
+        // Sort trie node updates.
+        account_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        let tx = self.database_writer().tx_ref();
+        let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
+        for (key, updated_node) in account_updates {
+            let nibbles = StoredNibbles(key.clone());
+            match updated_node {
+                Some(node) => {
+                    if !nibbles.0.is_empty() {
+                        num_entries += 1;
+                        account_trie_cursor.upsert(nibbles, node.clone())?;
+                    }
+                }
+                None => {
+                    num_entries += 1;
+                    if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                        account_trie_cursor.delete_current()?;
+                    }
+                }
+            }
+        }
+
+        num_entries += self.write_storage_trie_updates(trie_updates.storage_tries_ref())?;
+
+        Ok(num_entries)
+    }
+
+    /// Writes storage trie updates from the given storage trie map.
+    pub fn write_storage_trie_updates(&self, storage_tries: &HashMap<B256, StorageTrieUpdates>) -> ProviderResult<usize> {
+        let mut num_entries = 0;
+        let mut storage_tries = Vec::from_iter(storage_tries);
+        storage_tries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let mut cursor = self.database_writer().tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
+        for (hashed_address, storage_trie_updates) in storage_tries {
+
+            // The storage trie for this account has to be deleted.
+            if storage_trie_updates.is_deleted() && cursor.seek_exact(*hashed_address)?.is_some() {
+                cursor.delete_current_duplicates()?;
+            }
+
+            // Merge updated and removed nodes. Updated nodes must take precedence.
+            let mut storage_updates = storage_trie_updates
+                .removed_nodes_ref()
+                .into_iter()
+                .filter_map(|n| (!storage_trie_updates.storage_nodes_ref().contains_key(n)).then_some((n, None)))
+                .collect::<Vec<_>>();
+            storage_updates
+                .extend(storage_trie_updates.storage_nodes_ref().into_iter().map(|(nibbles, node)| (nibbles, Some(node))));
+            // Sort trie node updates.
+            storage_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+            for (nibbles, maybe_updated) in storage_updates.into_iter().filter(|(n, _)| !n.is_empty()) {
+                num_entries += 1;
+                let nibbles = StoredNibblesSubKey(*nibbles);
+                // Delete the old entry if it exists.
+                if cursor
+                    .seek_by_key_subkey(*hashed_address, nibbles.clone())?
+                    .filter(|e| e.nibbles == nibbles)
+                    .is_some()
+                {
+                    cursor.delete_current()?;
+                }
+
+                // There is an updated version of this node, insert new entry.
+                if let Some(node) = maybe_updated {
+                    cursor.upsert(*hashed_address, StorageTrieEntry { nibbles, node: *node })?;
+                }
+            }
+        }
+
+        Ok(num_entries)
     }
 }
 
