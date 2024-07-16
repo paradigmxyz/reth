@@ -344,13 +344,32 @@ where
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
-    /// Executes the block and commits the state changes.
-    ///
-    /// Returns the receipts of the transactions in the block.
-    ///
-    /// Returns an error if the block could not be executed or failed verification.
-    ///
-    /// State changes are committed to the database.
+    fn execute_state_changes_pre(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
+        let BlockExecutionInput { block, total_difficulty } = input;
+
+        let env = self.evm_env_for_block(&block.header, total_difficulty);
+        let mut evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
+
+        // apply pre execution changes
+        apply_beacon_root_contract_call(
+            &self.executor.evm_config,
+            &self.executor.chain_spec,
+            block.timestamp,
+            block.number,
+            block.parent_beacon_block_root,
+            &mut evm,
+        )?;
+
+        // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
+        // blocks will always have at least a single transaction in them (the L1 info transaction),
+        // so we can safely assume that this will always be triggered upon the transition and that
+        // the above check for empty blocks will never be hit on OP chains.
+        ensure_create2_deployer(self.executor.chain_spec.clone(), block.timestamp, evm.db_mut())
+            .map_err(|_| OptimismBlockExecutionError::ForceCreate2DeployerFail)?;
+
+        Ok(())
+    }
+
     fn execute(&mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
         let (receipts, gas_used) = self.execute_without_verification(block, total_difficulty)?;
@@ -364,6 +383,23 @@ where
             requests: vec![],
             gas_used,
         })
+    }
+
+    fn execute_state_changes_post(
+        &mut self,
+        input: Self::Input<'_>,
+        output: Self::Output,
+    ) -> Result<Self::Output, Self::Error> {
+        let BlockExecutionInput { block, total_difficulty } = input;
+
+        let balance_increments =
+            post_block_balance_increments(self.chain_spec(), block, total_difficulty);
+        // increment balances
+        self.state
+            .increment_balances(balance_increments)
+            .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
+
+        Ok(output)
     }
 }
 
