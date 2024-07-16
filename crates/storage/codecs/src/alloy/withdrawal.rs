@@ -49,10 +49,11 @@ impl Compact for AlloyWithdrawal {
 mod tests {
     use super::*;
     use proptest::proptest;
+    use proptest_arbitrary_interop::arb;
 
     proptest! {
         #[test]
-        fn roundtrip(withdrawal: AlloyWithdrawal) {
+        fn roundtrip(withdrawal in arb::<AlloyWithdrawal>()) {
             let mut compacted_withdrawal = Vec::<u8>::new();
             let len = withdrawal.to_compact(&mut compacted_withdrawal);
             let (decoded, _) = AlloyWithdrawal::from_compact(&compacted_withdrawal, len);

@@ -105,6 +105,7 @@ impl ReceiptBuilder {
             // EIP-4844 fields
             blob_gas_price,
             blob_gas_used: blob_gas_used.map(u128::from),
+            authorization_list: transaction.authorization_list().map(|l| l.to_vec()),
         };
 
         Ok(Self { base, other: Default::default() })

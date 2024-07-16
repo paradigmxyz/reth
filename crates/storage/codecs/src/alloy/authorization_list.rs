@@ -36,7 +36,7 @@ impl Compact for AlloyAuthorization {
     }
 }
 
-impl Compact for SignedAuthorization<alloy_primitives::Signature> {
+impl Compact for SignedAuthorization {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
