@@ -7,16 +7,15 @@ use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
 use derive_more::{Deref, DerefMut, From, IntoIterator};
 #[cfg(feature = "reth-codec")]
-use reth_codecs::CompactZstd;
-use reth_codecs::{add_arbitrary_tests, reth_codec, Compact};
+use reth_codecs::{Compact, CompactZstd};
 use serde::{Deserialize, Serialize};
 
 #[cfg(not(feature = "std"))]
 use alloc::{vec, vec::Vec};
 
 /// Receipt containing result of transaction execution.
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codec(no_arbitrary, zstd))]
-#[add_arbitrary_tests]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec(no_arbitrary, zstd))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
 #[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 #[rlp(trailing)]
 pub struct Receipt {
@@ -141,7 +140,7 @@ impl From<Receipt> for ReceiptWithBloom {
 }
 
 /// [`Receipt`] with calculated bloom filter.
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codec)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ReceiptWithBloom {
     /// Bloom filter build from logs.
