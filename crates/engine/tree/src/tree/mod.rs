@@ -924,8 +924,8 @@ trait InMemoryState {
     fn in_memory_current_head(&self) -> Option<(BlockNumber, B256)>;
     /// Returns the pending block hash.
     fn in_memory_pending_block_hash(&self) -> Option<B256>;
-    /// Returns the pending state corresponding to the current head plus one, if
-    /// we have the payload.
+    /// Returns the pending state corresponding to the current head plus one,
+    /// from the payload received in newPayload that does not have a FCU yet.
     fn in_memory_pending_state(&self) -> Option<Arc<State>>;
 }
 
