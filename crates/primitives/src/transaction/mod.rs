@@ -1,7 +1,5 @@
 //! Transaction types.
 
-#[cfg(any(feature = "arbitrary", feature = "reth-codec"))]
-use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
 use crate::{
     eip7702::SignedAuthorization, keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind,
     B256, U256,
@@ -15,9 +13,7 @@ use core::mem;
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary};
 use serde::{Deserialize, Serialize};
-use reth_codecs::Compact;
 
 pub use access_list::{AccessList, AccessListItem};
 pub use eip1559::TxEip1559;
@@ -69,6 +65,9 @@ pub use optimism::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 
+#[cfg(test)]
+use reth_codecs::Compact;
+
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
@@ -87,7 +86,7 @@ pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[derive_arbitrary(compact)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Transaction {
     /// Legacy transaction (type `0x0`).
@@ -813,7 +812,7 @@ impl Encodable for Transaction {
 /// Signed transaction without its Hash. Used type for inserting into the DB.
 ///
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
-#[derive_arbitrary(compact)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSignedNoHash {
     /// The transaction signature values
@@ -927,7 +926,7 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
         let zstd_bit = self.transaction.input().len() >= 32;
 
         let tx_bits = if zstd_bit {
-            TRANSACTION_COMPRESSOR.with(|compressor| {
+            crate::compression::TRANSACTION_COMPRESSOR.with(|compressor| {
                 let mut compressor = compressor.borrow_mut();
                 let mut tmp = Vec::with_capacity(256);
                 let tx_bits = self.transaction.to_compact(&mut tmp);
@@ -955,7 +954,7 @@ impl reth_codecs::Compact for TransactionSignedNoHash {
 
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
-            TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+            crate::compression::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
                 let mut decompressor = decompressor.borrow_mut();
 
                 // TODO: enforce that zstd is only present at a "top" level type
@@ -988,7 +987,7 @@ impl From<TransactionSigned> for TransactionSignedNoHash {
 }
 
 /// Signed transaction.
-#[add_arbitrary_tests(rlp)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSigned {
     /// Transaction hash

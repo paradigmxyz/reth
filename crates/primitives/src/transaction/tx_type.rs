@@ -1,8 +1,9 @@
 use crate::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::Buf;
-use reth_codecs::{derive_arbitrary};
 use serde::{Deserialize, Serialize};
+
+#[cfg(test)]
 use reth_codecs::Compact;
 
 /// For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
@@ -37,7 +38,7 @@ pub const DEPOSIT_TX_TYPE_ID: u8 = 126;
 /// database format.
 ///
 /// Other required changes when adding a new type can be seen on [PR#3953](https://github.com/paradigmxyz/reth/pull/3953/files).
-#[derive_arbitrary(compact)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize, Hash,
 )]
