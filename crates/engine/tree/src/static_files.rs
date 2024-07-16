@@ -160,7 +160,7 @@ where
     fn remove_blocks_above(
         &self,
         block_num: u64,
-        sender: oneshot::Sender<B256>,
+        sender: oneshot::Sender<()>,
     ) -> ProviderResult<()> {
         let provider = self.provider.static_file_provider();
 
@@ -229,9 +229,7 @@ pub enum StaticFileAction {
     ///
     /// This is meant to be called by the db service, as this should only be done after related
     /// data is removed from the database, and checkpoints are updated.
-    ///
-    /// Returns the hash of the lowest removed block.
-    RemoveBlocksAbove((u64, oneshot::Sender<B256>)),
+    RemoveBlocksAbove((u64, oneshot::Sender<()>)),
 }
 
 /// A handle to the static file service
