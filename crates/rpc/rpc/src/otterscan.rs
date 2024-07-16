@@ -1,7 +1,7 @@
 use alloy_primitives::Bytes;
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256};
+use reth_primitives::{Address, BlockNumberOrTag, TxHash, B256, U256};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::helpers::TraceExt;
 use reth_rpc_eth_types::EthApiError;
@@ -14,7 +14,7 @@ use reth_rpc_types::{
         },
         parity::{Action, CreateAction, CreateOutput, TraceOutput},
     },
-    BlockTransactions, Header,
+    AnyTransactionReceipt, BlockTransactions, Header, RichBlock,
 };
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
@@ -35,6 +35,24 @@ impl<Eth> OtterscanApi<Eth> {
     /// Creates a new instance of `Otterscan`.
     pub const fn new(eth: Eth) -> Self {
         Self { eth }
+    }
+
+    /// Constructs a `BlockDetails` from a block and its receipts.
+    fn block_details(
+        &self,
+        block: Option<RichBlock>,
+        receipts: Option<Vec<AnyTransactionReceipt>>,
+    ) -> RpcResult<BlockDetails> {
+        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let receipts = receipts.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+
+        // blob fee is burnt, so we don't need to calculate it
+        let total_fees = receipts
+            .iter()
+            .map(|receipt| receipt.gas_used.saturating_mul(receipt.effective_gas_price))
+            .sum::<u128>();
+
+        Ok(BlockDetails::new(block, Default::default(), U256::from(total_fees)))
     }
 }
 
@@ -133,15 +151,19 @@ where
     }
 
     /// Handler for `ots_getBlockDetails`
-    async fn get_block_details(&self, block_number: u64) -> RpcResult<Option<BlockDetails>> {
-        let block = self.eth.block_by_number(BlockNumberOrTag::Number(block_number), true).await?;
-        Ok(block.map(Into::into))
+    async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails> {
+        let block = self.eth.block_by_number(block_number.into(), true);
+        let receipts = self.eth.block_receipts(block_number.into());
+        let (block, receipts) = futures::try_join!(block, receipts)?;
+        self.block_details(block, receipts)
     }
 
     /// Handler for `getBlockDetailsByHash`
-    async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<Option<BlockDetails>> {
-        let block = self.eth.block_by_hash(block_hash, true).await?;
-        Ok(block.map(Into::into))
+    async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails> {
+        let block = self.eth.block_by_hash(block_hash, true);
+        let receipts = self.eth.block_receipts(block_hash.into());
+        let (block, receipts) = futures::try_join!(block, receipts)?;
+        self.block_details(block, receipts)
     }
 
     /// Handler for `getBlockTransactions`
@@ -156,7 +178,7 @@ where
         let receipts = self.eth.block_receipts(block_number.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
-        let mut block = block.ok_or_else(|| internal_rpc_err("block not found"))?;
+        let mut block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
         let mut receipts = receipts.ok_or_else(|| internal_rpc_err("receipts not found"))?;
 
         // check if the number of transactions matches the number of receipts
