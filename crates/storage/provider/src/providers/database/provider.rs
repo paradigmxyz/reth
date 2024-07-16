@@ -113,6 +113,11 @@ impl<TX> DatabaseProvider<TX> {
     pub const fn static_file_provider(&self) -> &StaticFileProvider {
         &self.static_file_provider
     }
+
+    /// Returns reference to prune modes.
+    pub const fn prune_modes_ref(&self) -> &PruneModes {
+        &self.prune_modes
+    }
 }
 
 impl<TX: DbTxMut> DatabaseProvider<TX> {
