@@ -6,11 +6,12 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{Receipt, Receipts, Request, Requests};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
+#[cfg(feature = "std")]
 use std::collections::HashSet;
 use tracing::debug;
 
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
+use alloc::{vec::Vec, collections::BTreeSet};
 
 /// Takes care of:
 ///  - recording receipts during execution of multiple blocks.
@@ -37,7 +38,10 @@ pub struct BlockBatchRecord {
     ///
     /// Empty implies that there is going to be addresses to include in the filter in a future
     /// block. None means there isn't any kind of configuration.
+    #[cfg(feature = "std")]
     pruning_address_filter: Option<(u64, HashSet<Address>)>,
+    #[cfg(not(feature = "std"))]
+    pruning_address_filter: Option<(u64, BTreeSet<Address>)>,
     /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
     first_block: Option<BlockNumber>,
@@ -153,8 +157,12 @@ impl BlockBatchRecord {
         let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
 
         if !contract_log_pruner.is_empty() {
+            #[cfg(feature = "std")]
             let (prev_block, filter) =
-                self.pruning_address_filter.get_or_insert_with(|| (0, HashSet::new()));
+            self.pruning_address_filter.get_or_insert_with(|| (0, HashSet::new()));
+            #[cfg(not(feature = "std"))]
+            let (prev_block, filter) =
+                self.pruning_address_filter.get_or_insert_with(|| (0, BTreeSet::new()));
             for (_, addresses) in contract_log_pruner.range(*prev_block..=block_number) {
                 filter.extend(addresses.iter().copied());
             }
