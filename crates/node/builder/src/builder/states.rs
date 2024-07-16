@@ -247,8 +247,6 @@ where
     }
 }
 
-// TODO impl install hook functions.
-
 impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
 where
     T: FullNodeTypes,
