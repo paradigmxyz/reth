@@ -179,6 +179,27 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
         DB: Database<Error: Into<ProviderError> + Display>;
 }
 
+/// Executor hooks to extend the behaviour of [`Executor`].
+///
+/// The hooks are inserted in [`Executor::execute`] lifecycle and called in the following order:
+/// 1. [`ExecutorHooks::pre_state_changes`]
+/// 1. Executor does pre-block state changes, such as system contract calls.
+/// 1. [`ExecutorHooks::pre_transactions`]
+/// 1. Executor executes transactions
+/// 1. [`ExecutorHooks::post_transactins`]
+/// 1. Executor does post-block state changes, such as system contract calls.
+/// 1. [`ExecutorHooks::post_state_changes`]
+pub trait ExecutorHooks {
+    /// Called before any pre-block state changes are applied, such as system contract calls.
+    fn pre_state_changes(&self);
+    /// Called before any transactions are executed.
+    fn pre_transactions(&self);
+    /// Called after all transactions are executed.
+    fn post_transactins(&self);
+    /// Called after all post-block state changes are applied, such as system contract calls.
+    fn post_state_changes(&self);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
