@@ -262,9 +262,7 @@ impl Transaction {
     /// Returns the [`SignedAuthorization`] list of the transaction.
     ///
     /// Returns `None` if this transaction is not EIP-7702.
-    pub fn authorization_list(
-        &self,
-    ) -> Option<&[SignedAuthorization<alloy_primitives::Signature>]> {
+    pub fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
         match self {
             Self::Eip7702(tx) => Some(&tx.authorization_list),
             _ => None,
