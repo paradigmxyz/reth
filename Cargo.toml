@@ -373,15 +373,15 @@ reth-trie-common = { path = "crates/trie/common" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "11.0.0", features = [
+revm = { version = "12.0.0", features = [
     "std",
     "secp256k1",
     "blst",
 ], default-features = false }
-revm-primitives = { version = "6.0.0", features = [
+revm-primitives = { version = "7.0.0", features = [
     "std",
 ], default-features = false }
-revm-inspectors = "0.4"
+revm-inspectors = "0.5"
 
 # eth
 alloy-chains = "0.1.18"
@@ -536,7 +536,3 @@ serial_test = "3"
 similar-asserts = "1.5.0"
 test-fuzz = "5"
 iai-callgrind = "0.11"
-
-[patch.crates-io]
-revm = { path = "../revm/crates/revm" }
-revm-primitives = { path = "../revm/crates/primitives" }
