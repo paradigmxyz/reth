@@ -825,6 +825,7 @@ pub trait Call: LoadState + SpawnBlocking {
 
         let gas_limit = gas.unwrap_or_else(|| block_env.gas_limit.min(U256::from(u64::MAX)).to());
 
+        #[allow(clippy::needless_update)]
         let env = TxEnv {
             gas_limit: gas_limit
                 .try_into()
