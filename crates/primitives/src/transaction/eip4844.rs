@@ -5,8 +5,10 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::mem;
-#[cfg(any(test, feature = "reth-codec"))]
 use reth_codecs::Compact;
+
+/// To be used with `Option<CompactPlaceholder>` to place or replace one bit on the bitflag struct.
+pub(crate) type CompactPlaceholder = ();
 
 #[cfg(feature = "c-kzg")]
 use crate::kzg::KzgSettings;
@@ -58,7 +60,7 @@ pub struct TxEip4844 {
     /// TODO(debt): this should be removed if we break the DB.
     /// Makes sure that the Compact bitflag struct has one bit after the above field:
     /// <https://github.com/paradigmxyz/reth/pull/8291#issuecomment-2117545016>
-    pub placeholder: Option<()>,
+    pub placeholder: Option<CompactPlaceholder>,
 
     /// The 160-bit address of the message call’s recipient.
     pub to: Address,
