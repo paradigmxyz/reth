@@ -4,8 +4,7 @@ use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256};
 use reth_provider::{
-    BlockReader, ProviderFactory, StaticFileProviderFactory, StaticFileWriter,
-    TransactionsProviderExt,
+    ProviderFactory, StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt,
 };
 use std::sync::{
     mpsc::{Receiver, SendError, Sender},
