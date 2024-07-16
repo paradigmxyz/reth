@@ -9,6 +9,8 @@ use serde::{
 };
 
 #[cfg(not(feature = "std"))]
+extern crate alloc;
+#[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
 /// Uses Roaring Bitmaps to hold a list of integers. It provides really good compression with the

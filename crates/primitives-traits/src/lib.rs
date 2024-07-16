@@ -12,6 +12,10 @@
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
 
+#[cfg(not(feature = "std"))]
+#[macro_use]
+extern crate alloc;
+
 /// Common constants.
 pub mod constants;
 pub use constants::gas_units::{format_gas, format_gas_throughput};

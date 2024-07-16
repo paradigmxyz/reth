@@ -4,6 +4,8 @@ use core::{
 };
 
 #[cfg(not(feature = "std"))]
+extern crate alloc;
+#[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 
 /// A pair of values, one of which is expected and one of which is actual.

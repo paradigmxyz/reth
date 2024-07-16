@@ -5,6 +5,8 @@ use derive_more::{AsRef, Deref, DerefMut, From, IntoIterator};
 use reth_codecs::{main_codec, Compact};
 
 #[cfg(not(feature = "std"))]
+extern crate alloc;
+#[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
 /// Re-export from `alloy_eips`.

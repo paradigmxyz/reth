@@ -8,6 +8,8 @@ use reth_codecs::{main_codec, Compact};
 use revm_primitives::Bytes;
 
 #[cfg(not(feature = "std"))]
+extern crate alloc;
+#[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
 /// A list of EIP-7685 requests.
