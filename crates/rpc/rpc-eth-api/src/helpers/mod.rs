@@ -40,7 +40,7 @@ pub use transaction::{EthTransactions, LoadTransaction, UpdateRawTxForwarder};
 
 /// Extension trait that bundles traits necessary for tracing transactions and managing state.
 ///
-/// This trait combines multiple [`Load`] and [`Eth`] traits to provide a comprehensive interface
+/// This trait combines multiple Load and Eth traits to provide a comprehensive interface
 /// for tracing transactions, loading blocks, and executing calls. It simplifies the development
 /// process by providing a single entry point for various functionalities related to transaction
 /// tracing and execution.
