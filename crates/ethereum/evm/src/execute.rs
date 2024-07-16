@@ -25,8 +25,9 @@ use reth_prune_types::PruneModes;
 use reth_revm::{
     batch::{BlockBatchRecord, BlockExecutorStats},
     db::states::bundle_state::BundleRetention,
+    inspectors::NoOpInspector,
     state_change::{apply_blockhashes_update, post_block_balance_increments},
-    Evm, State,
+    Evm, Inspector, State,
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
@@ -65,7 +66,7 @@ impl<EvmConfig> EthExecutorProvider<EvmConfig>
 where
     EvmConfig: ConfigureEvm,
 {
-    fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB>
+    fn eth_executor<DB>(&self, db: DB) -> EthBlockExecutor<EvmConfig, DB, NoOpInspector>
     where
         DB: Database<Error: Into<ProviderError>>,
     {
@@ -82,7 +83,7 @@ where
     EvmConfig: ConfigureEvm,
 {
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
-        EthBlockExecutor<EvmConfig, DB>;
+        EthBlockExecutor<EvmConfig, DB, NoOpInspector>;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
         EthBatchExecutor<EvmConfig, DB>;
@@ -245,17 +246,23 @@ where
 /// - Create a new instance of the executor.
 /// - Execute the block.
 #[derive(Debug)]
-pub struct EthBlockExecutor<EvmConfig, DB> {
+pub struct EthBlockExecutor<EvmConfig, DB, INSP> {
     /// Chain specific evm config that's used to execute a block.
     executor: EthEvmExecutor<EvmConfig>,
     /// The state to use for execution
     state: State<DB>,
+    inspector: Option<INSP>,
 }
 
-impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
+impl<EvmConfig, DB, INSP> EthBlockExecutor<EvmConfig, DB, INSP> {
     /// Creates a new Ethereum block executor.
     pub const fn new(chain_spec: Arc<ChainSpec>, evm_config: EvmConfig, state: State<DB>) -> Self {
-        Self { executor: EthEvmExecutor { chain_spec, evm_config }, state }
+        Self { executor: EthEvmExecutor { chain_spec, evm_config }, state, inspector: None }
+    }
+
+    /// Sets the inspector for the block executor.
+    pub fn with_inspector(self, inspector: INSP) -> Self {
+        Self { inspector: Some(inspector), ..self }
     }
 
     #[inline]
@@ -270,10 +277,11 @@ impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB> {
     }
 }
 
-impl<EvmConfig, DB> EthBlockExecutor<EvmConfig, DB>
+impl<'a, EvmConfig, DB, INSP> EthBlockExecutor<EvmConfig, DB, INSP>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: Database<Error: Into<ProviderError> + Display> + 'a,
+    INSP: Inspector<&'a mut State<DB>>,
 {
     /// Configures a new evm configuration and block environment for the given block.
     ///
@@ -311,8 +319,17 @@ where
         // 2. configure the evm and execute
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let output = {
-            let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
-            self.executor.execute_state_transitions(block, evm)
+            if let Some(inspector) = self.inspector.as_mut() {
+                let evm = self.executor.evm_config.evm_with_env_and_inspector(
+                    &mut self.state,
+                    env,
+                    inspector,
+                );
+                self.executor.execute_state_transitions(block, evm)
+            } else {
+                let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
+                self.executor.execute_state_transitions(block, evm)
+            }
         }?;
 
         // 3. apply post execution changes
@@ -360,12 +377,13 @@ where
     }
 }
 
-impl<EvmConfig, DB> Executor<DB> for EthBlockExecutor<EvmConfig, DB>
+impl<'a, EvmConfig, DB, INSP> Executor<DB> for EthBlockExecutor<EvmConfig, DB, INSP>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
+    DB: Database<Error: Into<ProviderError> + Display> + 'a,
+    INSP: Inspector<&'a mut State<DB>>,
 {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Input<'b> = BlockExecutionInput<'b, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
@@ -394,7 +412,7 @@ pub struct EthBatchExecutor<EvmConfig, DB> {
     /// The executor used to execute single blocks
     ///
     /// All state changes are committed to the [State].
-    executor: EthBlockExecutor<EvmConfig, DB>,
+    executor: EthBlockExecutor<EvmConfig, DB, NoOpInspector>,
     /// Keeps track of the batch and records receipts based on the configured prune mode
     batch_record: BlockBatchRecord,
     stats: BlockExecutorStats,
