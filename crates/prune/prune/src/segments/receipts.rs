@@ -5,28 +5,27 @@
 //! - [`crate::segments::static_file::Receipts`] is responsible for pruning receipts on an archive
 //!   node after static file producer has finished
 
-use crate::{
-    segments::{PruneInput, PruneOutput, PruneOutputCheckpoint},
-    PrunerError,
-};
+use crate::{segments::PruneInput, PrunerError};
 use reth_db::tables;
 use reth_db_api::database::Database;
 use reth_provider::{
     errors::provider::ProviderResult, DatabaseProviderRW, PruneCheckpointWriter,
     TransactionsProvider,
 };
-use reth_prune_types::{PruneCheckpoint, PruneProgress, PruneSegment};
+use reth_prune_types::{
+    PruneCheckpoint, PruneProgress, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
+};
 use tracing::trace;
 
 pub(crate) fn prune<DB: Database>(
     provider: &DatabaseProviderRW<DB>,
     input: PruneInput,
-) -> Result<PruneOutput, PrunerError> {
+) -> Result<SegmentOutput, PrunerError> {
     let tx_range = match input.get_next_tx_num_range(provider)? {
         Some(range) => range,
         None => {
             trace!(target: "pruner", "No receipts to prune");
-            return Ok(PruneOutput::done())
+            return Ok(SegmentOutput::done())
         }
     };
     let tx_range_end = *tx_range.end();
@@ -51,10 +50,10 @@ pub(crate) fn prune<DB: Database>(
 
     let progress = PruneProgress::new(done, &limiter);
 
-    Ok(PruneOutput {
+    Ok(SegmentOutput {
         progress,
         pruned,
-        checkpoint: Some(PruneOutputCheckpoint {
+        checkpoint: Some(SegmentOutputCheckpoint {
             block_number: last_pruned_block,
             tx_number: Some(last_pruned_transaction),
         }),
@@ -76,7 +75,7 @@ pub(crate) fn save_checkpoint<DB: Database>(
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, PruneOutput};
+    use crate::segments::{PruneInput, SegmentOutput};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -162,7 +161,7 @@ mod tests {
 
             assert_matches!(
                 result,
-                PruneOutput {progress, pruned, checkpoint: Some(_)}
+                SegmentOutput {progress, pruned, checkpoint: Some(_)}
                     if (progress, pruned) == expected_result
             );
 

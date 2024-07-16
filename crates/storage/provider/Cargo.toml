@@ -48,6 +48,7 @@ metrics.workspace = true
 
 # misc
 auto_impl.workspace = true
+derive_more.workspace = true
 itertools.workspace = true
 pin-project.workspace = true
 parking_lot.workspace = true

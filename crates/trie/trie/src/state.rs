@@ -5,6 +5,7 @@ use crate::{
     updates::TrieUpdates,
     Nibbles, StateRoot,
 };
+use itertools::Itertools;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_db::{tables, DatabaseError};
 use reth_db_api::{
@@ -321,7 +322,7 @@ impl HashedStorage {
 }
 
 /// Sorted hashed post state optimized for iterating during state trie calculation.
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct HashedPostStateSorted {
     /// Updated state of accounts.
     pub(crate) accounts: HashedAccountsSorted,
@@ -329,13 +330,36 @@ pub struct HashedPostStateSorted {
     pub(crate) storages: HashMap<B256, HashedStorageSorted>,
 }
 
+impl HashedPostStateSorted {
+    /// Returns reference to hashed accounts.
+    pub const fn accounts(&self) -> &HashedAccountsSorted {
+        &self.accounts
+    }
+
+    /// Returns reference to hashed account storages.
+    pub const fn account_storages(&self) -> &HashMap<B256, HashedStorageSorted> {
+        &self.storages
+    }
+}
+
 /// Sorted account state optimized for iterating during state trie calculation.
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Default, Debug)]
 pub struct HashedAccountsSorted {
     /// Sorted collection of hashed addresses and their account info.
     pub(crate) accounts: Vec<(B256, Account)>,
     /// Set of destroyed account keys.
     pub(crate) destroyed_accounts: HashSet<B256>,
+}
+
+impl HashedAccountsSorted {
+    /// Returns a sorted iterator over updated accounts.
+    pub fn accounts_sorted(&self) -> impl Iterator<Item = (B256, Option<Account>)> {
+        self.accounts
+            .iter()
+            .map(|(address, account)| (*address, Some(*account)))
+            .chain(self.destroyed_accounts.iter().map(|address| (*address, None)))
+            .sorted_by_key(|entry| *entry.0)
+    }
 }
 
 /// Sorted hashed storage optimized for iterating during state trie calculation.
@@ -345,8 +369,24 @@ pub struct HashedStorageSorted {
     pub(crate) non_zero_valued_slots: Vec<(B256, U256)>,
     /// Slots that have been zero valued.
     pub(crate) zero_valued_slots: HashSet<B256>,
-    /// Flag indicating hether the storage was wiped or not.
+    /// Flag indicating whether the storage was wiped or not.
     pub(crate) wiped: bool,
+}
+
+impl HashedStorageSorted {
+    /// Returns `true` if the account was wiped.
+    pub const fn is_wiped(&self) -> bool {
+        self.wiped
+    }
+
+    /// Returns a sorted iterator over updated storage slots.
+    pub fn storage_slots_sorted(&self) -> impl Iterator<Item = (B256, U256)> {
+        self.non_zero_valued_slots
+            .iter()
+            .map(|(hashed_slot, value)| (*hashed_slot, *value))
+            .chain(self.zero_valued_slots.iter().map(|hashed_slot| (*hashed_slot, U256::ZERO)))
+            .sorted_by_key(|entry| *entry.0)
+    }
 }
 
 #[cfg(test)]

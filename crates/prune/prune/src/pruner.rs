@@ -8,14 +8,14 @@ use alloy_primitives::BlockNumber;
 use reth_db_api::database::Database;
 use reth_exex_types::FinishedExExHeight;
 use reth_provider::{DatabaseProviderRW, ProviderFactory, PruneCheckpointReader};
-use reth_prune_types::{PruneLimiter, PruneProgress, PruneSegment};
+use reth_prune_types::{PruneLimiter, PruneProgress, PruneSegment, PrunerOutput};
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use tracing::debug;
 
 /// Result of [`Pruner::run`] execution.
-pub type PrunerResult = Result<PruneProgress, PrunerError>;
+pub type PrunerResult = Result<PrunerOutput, PrunerError>;
 
 /// The pruner type itself with the result of [`Pruner::run`]
 pub type PrunerWithResult<S, DB> = (Pruner<S, DB>, PrunerResult);
@@ -107,13 +107,13 @@ impl<DB: Database, S> Pruner<DB, S> {
         let Some(tip_block_number) =
             self.adjust_tip_block_number_to_finished_exex_height(tip_block_number)
         else {
-            return Ok(PruneProgress::Finished)
+            return Ok(PruneProgress::Finished.into())
         };
         if tip_block_number == 0 {
             self.previous_tip_block_number = Some(tip_block_number);
 
             debug!(target: "pruner", %tip_block_number, "Nothing to prune yet");
-            return Ok(PruneProgress::Finished)
+            return Ok(PruneProgress::Finished.into())
         }
 
         self.event_sender.notify(PrunerEvent::Started { tip_block_number });
@@ -126,7 +126,7 @@ impl<DB: Database, S> Pruner<DB, S> {
             limiter = limiter.set_time_limit(timeout);
         };
 
-        let (stats, deleted_entries, progress) =
+        let (stats, deleted_entries, output) =
             self.prune_segments(provider, tip_block_number, &mut limiter)?;
 
         self.previous_tip_block_number = Some(tip_block_number);
@@ -134,7 +134,7 @@ impl<DB: Database, S> Pruner<DB, S> {
         let elapsed = start.elapsed();
         self.metrics.duration_seconds.record(elapsed);
 
-        let message = match progress {
+        let message = match output.progress {
             PruneProgress::HasMoreData(_) => "Pruner interrupted and has more data to prune",
             PruneProgress::Finished => "Pruner finished",
         };
@@ -145,14 +145,14 @@ impl<DB: Database, S> Pruner<DB, S> {
             ?elapsed,
             ?deleted_entries,
             ?limiter,
-            ?progress,
+            ?output,
             ?stats,
             "{message}",
         );
 
         self.event_sender.notify(PrunerEvent::Finished { tip_block_number, elapsed, stats });
 
-        Ok(progress)
+        Ok(output)
     }
 
     /// Prunes the segments that the [Pruner] was initialized with, and the segments that needs to
@@ -165,10 +165,13 @@ impl<DB: Database, S> Pruner<DB, S> {
         provider: &DatabaseProviderRW<DB>,
         tip_block_number: BlockNumber,
         limiter: &mut PruneLimiter,
-    ) -> Result<(PrunerStats, usize, PruneProgress), PrunerError> {
+    ) -> Result<(PrunerStats, usize, PrunerOutput), PrunerError> {
         let mut stats = PrunerStats::new();
         let mut pruned = 0;
-        let mut progress = PruneProgress::Finished;
+        let mut output = PrunerOutput {
+            progress: PruneProgress::Finished,
+            segments: Vec::with_capacity(self.segments.len()),
+        };
 
         for segment in &self.segments {
             if limiter.is_limit_reached() {
@@ -194,11 +197,11 @@ impl<DB: Database, S> Pruner<DB, S> {
 
                 let segment_start = Instant::now();
                 let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
-                let output = segment.prune(
+                let segment_output = segment.prune(
                     provider,
                     PruneInput { previous_checkpoint, to_block, limiter: limiter.clone() },
                 )?;
-                if let Some(checkpoint) = output.checkpoint {
+                if let Some(checkpoint) = segment_output.checkpoint {
                     segment
                         .save_checkpoint(provider, checkpoint.as_prune_checkpoint(prune_mode))?;
                 }
@@ -207,7 +210,7 @@ impl<DB: Database, S> Pruner<DB, S> {
                     .duration_seconds
                     .record(segment_start.elapsed());
                 if let Some(highest_pruned_block) =
-                    output.checkpoint.and_then(|checkpoint| checkpoint.block_number)
+                    segment_output.checkpoint.and_then(|checkpoint| checkpoint.block_number)
                 {
                     self.metrics
                         .get_prune_segment_metrics(segment.segment())
@@ -215,7 +218,8 @@ impl<DB: Database, S> Pruner<DB, S> {
                         .set(highest_pruned_block as f64);
                 }
 
-                progress = output.progress;
+                output.progress = segment_output.progress;
+                output.segments.push((segment.segment(), segment_output));
 
                 debug!(
                     target: "pruner",
@@ -223,21 +227,21 @@ impl<DB: Database, S> Pruner<DB, S> {
                     purpose = ?segment.purpose(),
                     %to_block,
                     ?prune_mode,
-                    %output.pruned,
+                    %segment_output.pruned,
                     "Segment pruning finished"
                 );
 
-                if output.pruned > 0 {
-                    limiter.increment_deleted_entries_count_by(output.pruned);
-                    pruned += output.pruned;
-                    stats.push((segment.segment(), output.pruned, output.progress));
+                if segment_output.pruned > 0 {
+                    limiter.increment_deleted_entries_count_by(segment_output.pruned);
+                    pruned += segment_output.pruned;
+                    stats.push((segment.segment(), segment_output.pruned, segment_output.progress));
                 }
             } else {
                 debug!(target: "pruner", segment = ?segment.segment(), purpose = ?segment.purpose(), "Nothing to prune for the segment");
             }
         }
 
-        Ok((stats, pruned, progress))
+        Ok((stats, pruned, output))
     }
 
     /// Returns `true` if the pruning is needed at the provided tip block number.

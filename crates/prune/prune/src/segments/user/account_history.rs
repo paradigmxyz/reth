@@ -1,8 +1,5 @@
 use crate::{
-    segments::{
-        user::history::prune_history_indices, PruneInput, PruneOutput, PruneOutputCheckpoint,
-        Segment,
-    },
+    segments::{user::history::prune_history_indices, PruneInput, Segment},
     PrunerError,
 };
 use itertools::Itertools;
@@ -10,7 +7,8 @@ use reth_db::tables;
 use reth_db_api::{database::Database, models::ShardedKey};
 use reth_provider::DatabaseProviderRW;
 use reth_prune_types::{
-    PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
+    PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
+    SegmentOutputCheckpoint,
 };
 use rustc_hash::FxHashMap;
 use tracing::{instrument, trace};
@@ -50,12 +48,12 @@ impl<DB: Database> Segment<DB> for AccountHistory {
         &self,
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
-    ) -> Result<PruneOutput, PrunerError> {
+    ) -> Result<SegmentOutput, PrunerError> {
         let range = match input.get_next_block_range() {
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No account history to prune");
-                return Ok(PruneOutput::done())
+                return Ok(SegmentOutput::done())
             }
         };
         let range_end = *range.end();
@@ -66,9 +64,9 @@ impl<DB: Database> Segment<DB> for AccountHistory {
             input.limiter
         };
         if limiter.is_limit_reached() {
-            return Ok(PruneOutput::not_done(
+            return Ok(SegmentOutput::not_done(
                 PruneInterruptReason::new(&limiter),
-                input.previous_checkpoint.map(|checkpoint| checkpoint.into()),
+                input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
             ))
         }
 
@@ -117,10 +115,10 @@ impl<DB: Database> Segment<DB> for AccountHistory {
 
         let progress = PruneProgress::new(done, &limiter);
 
-        Ok(PruneOutput {
+        Ok(SegmentOutput {
             progress,
             pruned: pruned_changesets + outcomes.deleted,
-            checkpoint: Some(PruneOutputCheckpoint {
+            checkpoint: Some(SegmentOutputCheckpoint {
                 block_number: Some(last_changeset_pruned_block),
                 tx_number: None,
             }),
@@ -132,7 +130,7 @@ impl<DB: Database> Segment<DB> for AccountHistory {
 mod tests {
     use crate::segments::{
         user::account_history::ACCOUNT_HISTORY_TABLES_TO_PRUNE, AccountHistory, PruneInput,
-        PruneOutput, Segment,
+        Segment, SegmentOutput,
     };
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
@@ -208,7 +206,7 @@ mod tests {
 
                 assert_matches!(
                     result,
-                    PruneOutput {progress, pruned, checkpoint: Some(_)}
+                    SegmentOutput {progress, pruned, checkpoint: Some(_)}
                         if (progress, pruned) == expected_result
                 );
 
