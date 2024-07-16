@@ -6,6 +6,7 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::ChainSpec;
 use reth_network_api::{NetworkInfo, PeerKind, Peers};
 use reth_network_peers::{id2pk, AnyNode, NodeRecord};
+use reth_primitives::EthereumHardfork;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_server_types::ToRpcResult;
 use reth_rpc_types::admin::{
@@ -105,17 +106,56 @@ where
     async fn node_info(&self) -> RpcResult<NodeInfo> {
         let enode = self.network.local_node_record();
         let status = self.network.network_status().await.to_rpc_result()?;
-        let config = ChainConfig {
+        let mut config = ChainConfig {
             chain_id: self.chain_spec.chain.id(),
             terminal_total_difficulty_passed: self
                 .chain_spec
                 .get_final_paris_total_difficulty()
                 .is_some(),
+            terminal_total_difficulty: self
+                .chain_spec
+                .hardforks
+                .fork(EthereumHardfork::Paris)
+                .ttd(),
             ..self.chain_spec.genesis().config.clone()
         };
 
-        let node_info = NodeInfo {
-            id: enode.id.to_string(),
+        // helper macro to set the block or time for a hardfork if known
+        macro_rules! set_block_or_time {
+            ($config:expr, [$( $field:ident => $fork:ident,)*]) => {
+                $(
+                    // don't overwrite if already set
+                    if $config.$field.is_none() {
+                        $config.$field = self.chain_spec.hardforks.fork_block(EthereumHardfork::$fork);
+                    }
+                )*
+            };
+        }
+
+        set_block_or_time!(config, [
+            homestead_block => Homestead,
+            dao_fork_block => Dao,
+            eip150_block => Tangerine,
+            eip155_block => SpuriousDragon,
+            eip158_block => SpuriousDragon,
+            byzantium_block => Byzantium,
+            constantinople_block => Constantinople,
+            petersburg_block => Petersburg,
+            istanbul_block => Istanbul,
+            muir_glacier_block => MuirGlacier,
+            berlin_block => Berlin,
+            london_block => London,
+            arrow_glacier_block => ArrowGlacier,
+            gray_glacier_block => GrayGlacier,
+            shanghai_time => Shanghai,
+            cancun_time => Cancun,
+            prague_time => Prague,
+        ]);
+
+        Ok(NodeInfo {
+            id: id2pk(enode.id)
+                .map(|pk| pk.to_string())
+                .unwrap_or_else(|_| alloy_primitives::hex::encode(enode.id.as_slice())),
             name: status.client_version,
             enode: enode.to_string(),
             enr: self.network.local_enr().to_string(),
@@ -132,9 +172,7 @@ where
                 }),
                 snap: None,
             },
-        };
-
-        Ok(node_info)
+        })
     }
 
     /// Handler for `admin_peerEvents`
