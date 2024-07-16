@@ -75,9 +75,10 @@ fn main() {
                 .with_types::<EthereumNode>()
                 // Configure the components of the node
                 // use default ethereum components but use our custom payload builder
-                .with_components::<_, EthereumAddOns>(
+                .with_components(
                     EthereumNode::components().payload(CustomPayloadBuilder::default()),
                 )
+                .with_add_ons::<EthereumAddOns>()
                 .launch()
                 .await?;
 

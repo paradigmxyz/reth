@@ -179,9 +179,8 @@ async fn main() -> eyre::Result<()> {
         // configure the node with regular ethereum types
         .with_types::<EthereumNode>()
         // use default ethereum components but with our executor
-        .with_components::<_, EthereumAddOns>(
-            EthereumNode::components().executor(MyExecutorBuilder::default()),
-        )
+        .with_components(EthereumNode::components().executor(MyExecutorBuilder::default()))
+        .with_add_ons::<EthereumAddOns>()
         .launch()
         .await
         .unwrap();
