@@ -3327,6 +3327,14 @@ impl<TX: DbTx> PruneCheckpointReader for DatabaseProvider<TX> {
     ) -> ProviderResult<Option<PruneCheckpoint>> {
         Ok(self.tx.get::<tables::PruneCheckpoints>(segment)?)
     }
+
+    fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        Ok(self
+            .tx
+            .cursor_read::<tables::PruneCheckpoints>()?
+            .walk(None)?
+            .collect::<Result<_, _>>()?)
+    }
 }
 
 impl<TX: DbTxMut> PruneCheckpointWriter for DatabaseProvider<TX> {
