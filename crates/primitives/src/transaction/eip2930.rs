@@ -2,6 +2,8 @@ use super::access_list::AccessList;
 use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::mem;
+
+#[cfg(any(test, feature = "reth-codec"))]
 use reth_codecs::Compact;
 
 #[cfg(not(feature = "std"))]

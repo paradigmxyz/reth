@@ -1,7 +1,6 @@
 use crate::{transaction::util::secp256k1, Address, B256, U256};
 use alloy_primitives::Bytes;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
-use bytes::Buf;
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -54,6 +53,7 @@ impl reth_codecs::Compact for Signature {
     }
 
     fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
         assert!(buf.len() >= 64);
         let r = U256::from_le_slice(&buf[0..32]);
         let s = U256::from_le_slice(&buf[32..64]);
