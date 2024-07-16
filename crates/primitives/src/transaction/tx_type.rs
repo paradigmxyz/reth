@@ -33,7 +33,7 @@ pub const DEPOSIT_TX_TYPE_ID: u8 = 126;
 
 /// Transaction Type
 ///
-/// Currently being used as 2-bit type when encoding it to [`Compact`] on
+/// Currently being used as 2-bit type when encoding it to `reth_codecs::Compact` on
 /// [`crate::TransactionSignedNoHash`]. Adding more transaction types will break the codec and
 /// database format.
 ///
