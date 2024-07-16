@@ -36,8 +36,7 @@ pub trait EvmTransact {
     fn env_with_handler_cfg(&self) -> EnvWithHandlerCfg;
 }
 
-/// Trait that can transact an [`EvmTransact::Env`] and
-/// commit state changes to the database.
+/// Trait that commits state changes to the database.
 pub trait EvmCommit: EvmTransact {
     /// The output produced by the evm.
     type EvmOutput;
@@ -47,8 +46,7 @@ pub trait EvmCommit: EvmTransact {
     /// Commit state changes to the database.
     fn commit(&mut self, output: ResultAndState);
 
-    /// Transact using [`EvmTransact::Env`], commit the state changes and
-    /// return them.
+    /// Transact, commit the state changes and return them.
     fn transact_and_commit(&mut self) -> Result<Self::EvmOutput, Self::EvmError>;
 }
 
