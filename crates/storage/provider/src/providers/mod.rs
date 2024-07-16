@@ -75,7 +75,7 @@ pub struct BlockchainProvider<DB> {
     /// Tracks the chain info wrt forkchoice updates
     chain_info: ChainInfoTracker,
     // TODO: In-memory state for recent blocks and pending state.
-    //in_memory_state: Arc<RwLock<dyn InMemoryState>>,
+    //in_memory_state: Arc<dyn InMemoryState>,
 }
 
 impl<DB> Clone for BlockchainProvider<DB> {
@@ -97,7 +97,7 @@ impl<DB> BlockchainProvider<DB> {
         database: ProviderFactory<DB>,
         tree: Arc<dyn TreeViewer>,
         // TODO: add in_memory_state
-        // in_memory_state: Arc<RwLock<dyn InMemoryState>>,
+        // in_memory_state: Arc<dyn InMemoryState>,
         latest: SealedHeader,
     ) -> Self {
         Self {
