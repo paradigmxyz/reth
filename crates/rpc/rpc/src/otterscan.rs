@@ -42,7 +42,7 @@ impl<Eth> OtterscanApi<Eth> {
         &self,
         block: Option<RichBlock>,
         receipts: Option<Vec<AnyTransactionReceipt>>,
-    ) -> RpcResult<Option<BlockDetails>> {
+    ) -> RpcResult<BlockDetails> {
         let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
         let receipts = receipts.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
@@ -52,7 +52,7 @@ impl<Eth> OtterscanApi<Eth> {
             .map(|receipt| receipt.gas_used.saturating_mul(receipt.effective_gas_price))
             .sum::<u128>();
 
-        Ok(Some(BlockDetails::new(block, Default::default(), U256::from(total_fees))))
+        Ok(BlockDetails::new(block, Default::default(), U256::from(total_fees)))
     }
 }
 
@@ -151,7 +151,7 @@ where
     }
 
     /// Handler for `ots_getBlockDetails`
-    async fn get_block_details(&self, block_number: u64) -> RpcResult<Option<BlockDetails>> {
+    async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails> {
         let block = self.eth.block_by_number(block_number.into(), true);
         let receipts = self.eth.block_receipts(block_number.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
@@ -159,7 +159,7 @@ where
     }
 
     /// Handler for `getBlockDetailsByHash`
-    async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<Option<BlockDetails>> {
+    async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails> {
         let block = self.eth.block_by_hash(block_hash, true);
         let receipts = self.eth.block_receipts(block_hash.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
