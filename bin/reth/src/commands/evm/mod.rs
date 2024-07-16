@@ -32,9 +32,15 @@ pub struct EvmCommand {
     #[arg(long, alias = "end", short = 'e')]
     end_number: u64,
     /// step size for loop
-    #[arg(long, alias = "step", short = 's', default_value = "10")]
+    #[arg(long, alias = "step", short = 's', default_value = "100")]
     step_size: usize,
 }
+
+struct Task {
+    start: u64,
+    end: u64,
+}
+
 
 impl EvmCommand {
     /// Execute the `evm` command
@@ -67,17 +73,26 @@ impl EvmCommand {
         }
 
 
+        // 创建任务池
+        let mut tasks = Vec::new();
+        let mut current_start = self.begin_number;
+        while current_start <= self.end_number {
+            let current_end = std::cmp::min(current_start + self.step_size as u64 - 1, self.end_number);
+            tasks.push(Task {
+                start: current_start,
+                end: current_end,
+            });
+            current_start = current_end + 1;
+        }
+
+
         // 获取 CPU 核心数，减一作为线程数
-        let cpu_count = self.get_cpu_count() * 2;
-        let thread_count = cpu_count - 1;
-
-        // 计算每个线程处理的区间大小
-        let range_per_thread = (self.end_number - self.begin_number + 1) / thread_count as u64;
-
+        let thread_count = self.get_cpu_count() * 2 - 1;
         let mut threads: Vec<JoinHandle<Result<bool>>> = Vec::with_capacity(thread_count);
 
 
         // 创建共享 gas 计数器
+        let task_queue = Arc::new(Mutex::new(tasks));
         let cumulative_gas = Arc::new(Mutex::new(0));
         let block_counter = Arc::new(Mutex::new(self.begin_number -1));
         let txs_counter = Arc::new(Mutex::new(0));
@@ -125,43 +140,42 @@ impl EvmCommand {
             });
         }
 
-        for i in 0..thread_count as u64 {
-            let thread_start = self.begin_number + i * range_per_thread;
-            let thread_end = if i == thread_count as u64 - 1 {
-                self.end_number
-            } else {
-                thread_start + range_per_thread - 1
-            };
+        for _ in 0..thread_count {
 
-            let cumulative_gas_clone = Arc::clone(&cumulative_gas);
-            let block_counter_clone = Arc::clone(&block_counter);
-            let txs_counter_clone = Arc::clone(&txs_counter);
+            let task_queue = Arc::clone(&task_queue);
+            let cumulative_gas = Arc::clone(&cumulative_gas);
+            let block_counter = Arc::clone(&block_counter);
+            let txs_counter = Arc::clone(&txs_counter);
 
             let provider_factory = provider_factory.clone();
             let blockchain_db = blockchain_db.clone();
 
-            let mut td = blockchain_db.header_td_by_number(thread_start -1)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(thread_start.into()))?;
-
-            debug!(
-                target:"exex::evm",
-                td=?td,
-                thread_start=?thread_start,
-                "fetch td"
-            );
-            // let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(thread_start -1)?);
-            // let executor = block_executor!(provider_factory.chain_spec());
-            // let mut executor = executor.batch_executor(db, PruneModes::none());
-
             threads.push(thread::spawn(move || {
                 let thread_id = thread::current().id();
-                for loop_start in (thread_start..=thread_end).step_by(self.step_size) {
-                    let loop_end = std::cmp::min(loop_start + self.step_size as u64 - 1, thread_end);
-                    let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(loop_start-1)?);
+                loop  {
+                    let task = {
+                        let mut queue = task_queue.lock().unwrap();
+                        if queue.is_empty() {
+                            break;
+                        }
+                        queue.remove(0)
+                    };
+
+                    let mut td = blockchain_db.header_td_by_number(task.start - 1)?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(task.start.into()))?;
+
+                    debug!(
+                        target: "exex::evm",
+                        td = ?td,
+                        thread_start = ?task.start,
+                        "fetch td"
+                    );
+
+
+                    let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(task.start-1)?);
                     let executor = block_executor!(provider_factory.chain_spec());
                     let mut executor = executor.batch_executor(db);
-
-                    let blocks = blockchain_db.block_with_senders_range(loop_start..=loop_end).unwrap();
+                    let blocks = blockchain_db.block_with_senders_range(task.start..=task.end).unwrap();
 
                     let start = Instant::now();
                     let mut step_cumulative_gas:u64 = 0;
@@ -181,19 +195,19 @@ impl EvmCommand {
 
                     // Ensure the locks are correctly used without deadlock
                     {
-                        *cumulative_gas_clone.lock().unwrap() +=step_cumulative_gas;
+                        *cumulative_gas.lock().unwrap() +=step_cumulative_gas;
                     }
                     {
-                        *block_counter_clone.lock().unwrap()+= blocks.len() as u64;
+                        *block_counter.lock().unwrap()+= blocks.len() as u64;
                     }
                     {
-                        *txs_counter_clone.lock().unwrap() += step_txs_counter as u64;
+                        *txs_counter.lock().unwrap() += step_txs_counter as u64;
                     }
 
                     debug!(
                         target:"exex::evm",
-                        loop_start=loop_start,
-                        loop_end=loop_end,
+                        task_start = task.start,
+                        task_end = task.end,
                         txs=step_txs_counter,
                         blocks = blocks.len(),
                         throughput = format_gas_throughput(step_cumulative_gas, start.elapsed()),
