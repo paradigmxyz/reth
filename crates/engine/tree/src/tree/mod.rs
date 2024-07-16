@@ -936,7 +936,7 @@ pub struct State {
     block_number: BlockNumber,
     /// State root after applying the block.
     state_root: B256,
-    /// Transactions root after applying the the block.
+    /// Transactions root of the block.
     transactions_root: B256,
     /// Receipts root after applying the the block.
     receipts_root: B256,
