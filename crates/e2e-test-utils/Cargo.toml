@@ -22,6 +22,7 @@ reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-tokio-util.workspace = true
 reth-stages-types.workspace = true
 reth-network-peers.workspace = true
+reth-node-ethereum.workspace = true
 
 jsonrpsee.workspace = true
 

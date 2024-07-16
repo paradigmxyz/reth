@@ -5,6 +5,7 @@ use reth_errors::{BlockExecutionError, DatabaseError, RethError};
 use reth_network_p2p::error::DownloadError;
 use reth_primitives_traits::SealedHeader;
 use reth_provider::ProviderError;
+use reth_prune::{PruneSegment, PruneSegmentError, PrunerError};
 use reth_static_file_types::StaticFileSegment;
 use thiserror::Error;
 use tokio::sync::broadcast::error::SendError;
@@ -70,7 +71,10 @@ pub enum StageError {
     Database(#[from] DatabaseError),
     /// Invalid pruning configuration
     #[error(transparent)]
-    PruningConfiguration(#[from] reth_prune::PruneSegmentError),
+    PruningConfiguration(#[from] PruneSegmentError),
+    /// Pruner error
+    #[error(transparent)]
+    Pruner(#[from] PrunerError),
     /// Invalid checkpoint passed to the stage
     #[error("invalid stage checkpoint: {0}")]
     StageCheckpoint(u64),
@@ -118,6 +122,9 @@ pub enum StageError {
         /// Expected static file block number.
         static_file: BlockNumber,
     },
+    /// The prune checkpoint for the given segment is missing.
+    #[error("missing prune checkpoint for {0}")]
+    MissingPruneCheckpoint(PruneSegment),
     /// Internal error
     #[error(transparent)]
     Internal(#[from] RethError),

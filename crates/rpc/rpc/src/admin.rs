@@ -120,8 +120,9 @@ where
             ..self.chain_spec.genesis().config.clone()
         };
 
+        // helper macro to set the block or time for a hardfork if known
         macro_rules! set_block_or_time {
-            ($config:expr, [$( $field:ident => $fork:ident ),* $(,)*]) => {
+            ($config:expr, [$( $field:ident => $fork:ident,)*]) => {
                 $(
                     // don't overwrite if already set
                     if $config.$field.is_none() {

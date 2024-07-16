@@ -1,16 +1,19 @@
+use std::sync::Arc;
+
 use node::NodeTestContext;
 use reth::{
     args::{DiscoveryArgs, NetworkArgs, RpcServerArgs},
     builder::{NodeBuilder, NodeConfig, NodeHandle},
+    rpc::api::eth::{helpers::AddDevSigners, FullEthApiServer},
     tasks::TaskManager,
 };
 use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_node_builder::{
-    components::NodeComponentsBuilder, FullNodeTypesAdapter, Node, NodeAdapter, RethFullAdapter,
+    components::NodeComponentsBuilder, rpc::EthApiBuilderProvider, FullNodeTypesAdapter, Node,
+    NodeAdapter, NodeAddOns, RethFullAdapter,
 };
 use reth_provider::providers::BlockchainProvider;
-use std::sync::Arc;
 use tracing::{span, Level};
 use wallet::Wallet;
 
@@ -42,9 +45,11 @@ pub async fn setup<N>(
     num_nodes: usize,
     chain_spec: Arc<ChainSpec>,
     is_dev: bool,
-) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
+) -> eyre::Result<(Vec<NodeHelperType<N, N::AddOns>>, TaskManager, Wallet)>
 where
     N: Default + Node<TmpNodeAdapter<N>>,
+    <N::AddOns as NodeAddOns<Adapter<N>>>::EthApi:
+        FullEthApiServer + AddDevSigners + EthApiBuilderProvider<Adapter<N>>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -55,7 +60,7 @@ where
     };
 
     // Create nodes and peer them
-    let mut nodes: Vec<NodeTestContext<_>> = Vec::with_capacity(num_nodes);
+    let mut nodes: Vec<NodeTestContext<_, _>> = Vec::with_capacity(num_nodes);
 
     for idx in 0..num_nodes {
         let node_config = NodeConfig::test()
@@ -106,4 +111,4 @@ type Adapter<N> = NodeAdapter<
 >;
 
 /// Type alias for a type of NodeHelper
-pub type NodeHelperType<N> = NodeTestContext<Adapter<N>>;
+pub type NodeHelperType<N, AO> = NodeTestContext<Adapter<N>, AO>;

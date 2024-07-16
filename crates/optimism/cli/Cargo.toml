@@ -38,6 +38,7 @@ reth-cli.workspace = true
 # eth
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 
 # misc
@@ -53,6 +54,7 @@ tokio = { workspace = true, features = [
     "time",
     "rt-multi-thread",
 ] }
+tokio-util = { workspace = true, features = ["codec"] }
 tracing.workspace = true
 eyre.workspace = true
 

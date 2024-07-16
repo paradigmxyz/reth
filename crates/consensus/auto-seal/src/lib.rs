@@ -22,9 +22,9 @@ use reth_engine_primitives::EngineTypes;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{
-    constants::ETHEREUM_BLOCK_GAS_LIMIT, eip4844::calculate_excess_blob_gas, proofs, Block,
-    BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Bloom, Header,
-    Requests, SealedBlock, SealedHeader, TransactionSigned, Withdrawals, B256, U256,
+    eip4844::calculate_excess_blob_gas, proofs, Block, BlockBody, BlockHash, BlockHashOrNumber,
+    BlockNumber, BlockWithSenders, Bloom, Header, Requests, SealedBlock, SealedHeader,
+    TransactionSigned, Withdrawals, B256, U256,
 };
 use reth_provider::{BlockReaderIdExt, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
@@ -293,7 +293,7 @@ impl StorageInner {
             logs_bloom: Default::default(),
             difficulty: U256::from(2),
             number: self.best_block + 1,
-            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            gas_limit: chain_spec.max_gas_limit,
             gas_used: 0,
             timestamp,
             mix_hash: Default::default(),

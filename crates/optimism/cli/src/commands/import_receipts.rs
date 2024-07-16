@@ -1,13 +1,14 @@
 //! Command that imports OP mainnet receipts from Bedrock datadir, exported via
 //! <https://github.com/testinprod-io/op-geth/pull/1>.
 
+use std::path::{Path, PathBuf};
+
 use clap::Parser;
 use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_db::tables;
-use reth_db_api::{database::Database, transaction::DbTx};
+use reth_db_api::database::Database;
 use reth_downloaders::{
     file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
-    file_codec_ovm_receipt::HackReceiptFileCodec,
     receipt_file_client::ReceiptFileClient,
 };
 use reth_execution_types::ExecutionOutcome;
@@ -20,8 +21,9 @@ use reth_provider::{
 };
 use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
-use std::path::{Path, PathBuf};
 use tracing::{debug, error, info, trace};
+
+use crate::file_codec_ovm_receipt::HackReceiptFileCodec;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
@@ -109,8 +111,6 @@ where
         );
     }
 
-    // prepare the tx for `write_to_storage`
-    let tx = provider.into_tx();
     let mut total_decoded_receipts = 0;
     let mut total_filtered_out_dup_txns = 0;
 
@@ -149,14 +149,14 @@ where
             static_file_provider.get_writer(first_block, StaticFileSegment::Receipts)?;
 
         // finally, write the receipts
-        execution_outcome.write_to_storage::<DB::TXMut>(
-            &tx,
+        execution_outcome.write_to_storage(
+            &provider,
             Some(static_file_producer),
             OriginalValuesKnown::Yes,
         )?;
     }
 
-    tx.commit()?;
+    provider.commit()?;
     // as static files works in file ranges, internally it will be committing when creating the
     // next file range already, so we only need to call explicitly at the end.
     static_file_provider.commit()?;

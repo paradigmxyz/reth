@@ -36,8 +36,8 @@
 use crate::{
     stages::{
         AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage,
-        StorageHashingStage, TransactionLookupStage,
+        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, PruneSenderRecoveryStage,
+        PruneStage, SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -49,7 +49,7 @@ use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::
 use reth_primitives::B256;
 use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::PruneModes;
-use std::sync::Arc;
+use std::{ops::Not, sync::Arc};
 use tokio::sync::watch;
 
 /// A set containing all stages to run a fully syncing instance of reth.
@@ -65,6 +65,7 @@ use tokio::sync::watch;
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
 /// - [`ExecutionStage`]
+/// - [`PruneSenderRecoveryStage`] (execute)
 /// - [`MerkleStage`] (unwind)
 /// - [`AccountHashingStage`]
 /// - [`StorageHashingStage`]
@@ -72,6 +73,7 @@ use tokio::sync::watch;
 /// - [`TransactionLookupStage`]
 /// - [`IndexStorageHistoryStage`]
 /// - [`IndexAccountHistoryStage`]
+/// - [`PruneStage`] (execute)
 /// - [`FinishStage`]
 #[derive(Debug)]
 pub struct DefaultStages<Provider, H, B, EF> {
@@ -122,7 +124,7 @@ where
     E: BlockExecutorProvider,
 {
     /// Appends the default offline stages and default finish stage to the given builder.
-    pub fn add_offline_stages<DB: Database>(
+    pub fn add_offline_stages<DB: Database + 'static>(
         default_offline: StageSetBuilder<DB>,
         executor_factory: E,
         stages_config: StageConfig,
@@ -247,13 +249,15 @@ where
 /// A combination of (in order)
 ///
 /// - [`ExecutionStages`]
+/// - [`PruneSenderRecoveryStage`]
 /// - [`HashingStages`]
 /// - [`HistoryIndexingStages`]
+/// - [`PruneStage`]
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct OfflineStages<EF> {
     /// Executor factory needs for execution stage
-    pub executor_factory: EF,
+    executor_factory: EF,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
     /// Prune configuration for every segment that can be pruned
@@ -274,7 +278,7 @@ impl<EF> OfflineStages<EF> {
 impl<E, DB> StageSet<DB> for OfflineStages<E>
 where
     E: BlockExecutorProvider,
-    DB: Database,
+    DB: Database + 'static,
 {
     fn builder(self) -> StageSetBuilder<DB> {
         ExecutionStages::new(
@@ -283,11 +287,21 @@ where
             self.prune_modes.clone(),
         )
         .builder()
+        // If sender recovery prune mode is set, add the prune sender recovery stage.
+        .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
+            PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
+        }))
         .add_set(HashingStages { stages_config: self.stages_config.clone() })
         .add_set(HistoryIndexingStages {
             stages_config: self.stages_config.clone(),
-            prune_modes: self.prune_modes,
+            prune_modes: self.prune_modes.clone(),
         })
+        // If any prune modes are set, add the prune stage.
+        .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
+            // Prune stage should be added after all hashing stages, because otherwise it will
+            // delete
+            PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
+        }))
     }
 }
 

@@ -13,7 +13,6 @@ use reth_eth_wire::{
     EthVersion, Status,
 };
 use reth_network_peers::PeerId;
-use reth_storage_api::BlockNumReader;
 use std::{
     io,
     net::SocketAddr,
@@ -50,23 +49,23 @@ use tracing::trace;
 /// `include_mmd!("docs/mermaid/swarm.mmd`")
 #[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
-pub(crate) struct Swarm<C> {
+pub(crate) struct Swarm {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
     /// All sessions.
     sessions: SessionManager,
     /// Tracks the entire state of the network and handles events received from the sessions.
-    state: NetworkState<C>,
+    state: NetworkState,
 }
 
 // === impl Swarm ===
 
-impl<C> Swarm<C> {
+impl Swarm {
     /// Configures a new swarm instance.
     pub(crate) const fn new(
         incoming: ConnectionListener,
         sessions: SessionManager,
-        state: NetworkState<C>,
+        state: NetworkState,
     ) -> Self {
         Self { incoming, sessions, state }
     }
@@ -77,12 +76,12 @@ impl<C> Swarm<C> {
     }
 
     /// Access to the state.
-    pub(crate) const fn state(&self) -> &NetworkState<C> {
+    pub(crate) const fn state(&self) -> &NetworkState {
         &self.state
     }
 
     /// Mutable access to the state.
-    pub(crate) fn state_mut(&mut self) -> &mut NetworkState<C> {
+    pub(crate) fn state_mut(&mut self) -> &mut NetworkState {
         &mut self.state
     }
 
@@ -102,10 +101,7 @@ impl<C> Swarm<C> {
     }
 }
 
-impl<C> Swarm<C>
-where
-    C: BlockNumReader,
-{
+impl Swarm {
     /// Triggers a new outgoing connection to the given node
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
         self.sessions.dial_outbound(remote_addr, remote_id)
@@ -285,10 +281,7 @@ where
     }
 }
 
-impl<C> Stream for Swarm<C>
-where
-    C: BlockNumReader + Unpin,
-{
+impl Stream for Swarm {
     type Item = SwarmEvent;
 
     /// This advances all components.

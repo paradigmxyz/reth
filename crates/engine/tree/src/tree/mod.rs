@@ -2,6 +2,7 @@ use crate::{
     backfill::BackfillAction,
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
+    persistence::PersistenceHandle,
 };
 use reth_beacon_consensus::{
     BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated,
@@ -37,14 +38,17 @@ use std::{
     marker::PhantomData,
     sync::{mpsc::Receiver, Arc},
 };
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tracing::*;
 
 mod memory_overlay;
 pub use memory_overlay::MemoryOverlayStateProvider;
 
+/// Maximum number of blocks to be kept only in memory without triggering persistence.
+const PERSISTENCE_THRESHOLD: u64 = 256;
+
 /// Represents an executed block stored in-memory.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutedBlock {
     block: Arc<SealedBlock>,
     senders: Arc<Vec<Address>>,
@@ -54,6 +58,16 @@ pub struct ExecutedBlock {
 }
 
 impl ExecutedBlock {
+    pub(crate) const fn new(
+        block: Arc<SealedBlock>,
+        senders: Arc<Vec<Address>>,
+        execution_output: Arc<ExecutionOutcome>,
+        hashed_state: Arc<HashedPostState>,
+        trie: Arc<TrieUpdates>,
+    ) -> Self {
+        Self { block, senders, execution_output, hashed_state, trie }
+    }
+
     /// Returns a reference to the executed block.
     pub(crate) fn block(&self) -> &SealedBlock {
         &self.block
@@ -87,11 +101,22 @@ pub struct TreeState {
     blocks_by_hash: HashMap<B256, ExecutedBlock>,
     /// Executed blocks grouped by their respective block number.
     blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock>>,
+    /// Pending state not yet applied
+    pending: Option<Arc<State>>,
+    /// Block number and hash of the current head.
+    current_head: Option<(BlockNumber, B256)>,
 }
 
 impl TreeState {
     fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlock>> {
         self.blocks_by_hash.get(&hash).map(|b| b.block.clone())
+    }
+
+    fn block_by_number(&self, number: BlockNumber) -> Option<Arc<SealedBlock>> {
+        self.blocks_by_number
+            .get(&number)
+            .and_then(|blocks| blocks.last())
+            .map(|executed_block| executed_block.block.clone())
     }
 
     /// Insert executed block into the state.
@@ -120,6 +145,35 @@ impl TreeState {
             }
         }
     }
+
+    /// Returns the maximum block number stored.
+    pub(crate) fn max_block_number(&self) -> BlockNumber {
+        *self.blocks_by_number.last_key_value().unwrap_or((&BlockNumber::default(), &vec![])).0
+    }
+}
+
+impl InMemoryState for TreeState {
+    fn in_memory_state_by_hash(&self, hash: B256) -> Option<Arc<State>> {
+        let sealed_block = self.block_by_hash(hash)?;
+        Some(Arc::new(State::new(sealed_block)))
+    }
+
+    fn in_memory_state_by_number(&self, number: u64) -> Option<Arc<State>> {
+        let sealed_block = self.block_by_number(number)?;
+        Some(Arc::new(State::new(sealed_block)))
+    }
+
+    fn in_memory_current_head(&self) -> Option<(BlockNumber, B256)> {
+        self.current_head
+    }
+
+    fn in_memory_pending_state(&self) -> Option<Arc<State>> {
+        self.pending.clone()
+    }
+
+    fn in_memory_pending_block_hash(&self) -> Option<B256> {
+        self.pending.as_ref().map(|state| state.block_hash)
+    }
 }
 
 /// Tracks the state of the engine api internals.
@@ -129,7 +183,7 @@ impl TreeState {
 pub struct EngineApiTreeState {
     /// Tracks the state of the blockchain tree.
     tree_state: TreeState,
-    /// Tracks the received forkchoice state updates received by the CL.
+    /// Tracks the forkchoice state updates received by the CL.
     forkchoice_state_tracker: ForkchoiceStateTracker,
     /// Buffer of detached blocks.
     buffer: BlockBuffer,
@@ -242,6 +296,8 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     state: EngineApiTreeState,
     incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
     outgoing: UnboundedSender<EngineApiEvent>,
+    persistence: PersistenceHandle,
+    persistence_state: PersistenceState,
     /// (tmp) The flag indicating whether the pipeline is active.
     is_pipeline_active: bool,
     _marker: PhantomData<T>,
@@ -262,6 +318,7 @@ where
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         outgoing: UnboundedSender<EngineApiEvent>,
         state: EngineApiTreeState,
+        persistence: PersistenceHandle,
     ) -> Self {
         Self {
             provider,
@@ -270,6 +327,8 @@ where
             payload_validator,
             incoming,
             outgoing,
+            persistence,
+            persistence_state: PersistenceState::default(),
             is_pipeline_active: false,
             state,
             _marker: PhantomData,
@@ -284,6 +343,7 @@ where
         payload_validator: ExecutionPayloadValidator,
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         state: EngineApiTreeState,
+        persistence: PersistenceHandle,
     ) -> UnboundedSender<EngineApiEvent> {
         let (outgoing, rx) = tokio::sync::mpsc::unbounded_channel();
         let task = Self::new(
@@ -294,52 +354,114 @@ where
             incoming,
             outgoing.clone(),
             state,
+            persistence,
         );
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
         outgoing
     }
 
     fn run(mut self) {
-        loop {
-            while let Ok(msg) = self.incoming.recv() {
-                match msg {
-                    FromEngine::Event(event) => match event {
-                        FromOrchestrator::BackfillSyncFinished => {
-                            todo!()
-                        }
-                        FromOrchestrator::BackfillSyncStarted => {
-                            todo!()
-                        }
-                    },
-                    FromEngine::Request(request) => match request {
-                        BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
-                            let output = self.on_forkchoice_updated(state, payload_attrs);
-                            if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(Into::into))
-                            {
-                                error!("Failed to send event: {err:?}");
-                            }
-                        }
-                        BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
-                            let output = self.on_new_payload(payload, cancun_fields);
-                            if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(|e| {
-                                reth_beacon_consensus::BeaconOnNewPayloadError::Internal(Box::new(
-                                    e,
-                                ))
-                            })) {
-                                error!("Failed to send event: {err:?}");
-                            }
-                        }
-                        BeaconEngineMessage::TransitionConfigurationExchanged => {
-                            todo!()
-                        }
-                    },
-                    FromEngine::DownloadedBlocks(blocks) => {
-                        if let Some(event) = self.on_downloaded(blocks) {
-                            if let Err(err) = self.outgoing.send(EngineApiEvent::FromTree(event)) {
-                                error!("Failed to send event: {err:?}");
-                            }
+        while let Ok(msg) = self.incoming.recv() {
+            match msg {
+                FromEngine::Event(event) => match event {
+                    FromOrchestrator::BackfillSyncFinished => {
+                        todo!()
+                    }
+                    FromOrchestrator::BackfillSyncStarted => {
+                        todo!()
+                    }
+                },
+                FromEngine::Request(request) => match request {
+                    BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                        let output = self.on_forkchoice_updated(state, payload_attrs);
+                        if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(Into::into)) {
+                            error!("Failed to send event: {err:?}");
                         }
                     }
+                    BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
+                        let output = self.on_new_payload(payload, cancun_fields);
+                        if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(|e| {
+                            reth_beacon_consensus::BeaconOnNewPayloadError::Internal(Box::new(e))
+                        })) {
+                            error!("Failed to send event: {err:?}");
+                        }
+                    }
+                    BeaconEngineMessage::TransitionConfigurationExchanged => {
+                        todo!()
+                    }
+                },
+                FromEngine::DownloadedBlocks(blocks) => {
+                    if let Some(event) = self.on_downloaded(blocks) {
+                        if let Err(err) = self.outgoing.send(EngineApiEvent::FromTree(event)) {
+                            error!("Failed to send event: {err:?}");
+                        }
+                    }
+                }
+            }
+
+            if self.should_persist() && !self.persistence_state.in_progress() {
+                let blocks_to_persist = self.get_blocks_to_persist();
+                let (tx, rx) = oneshot::channel();
+                self.persistence.save_blocks(blocks_to_persist, tx);
+                self.persistence_state.start(rx);
+            }
+
+            if self.persistence_state.in_progress() {
+                let rx = self
+                    .persistence_state
+                    .rx
+                    .as_mut()
+                    .expect("if a persistence task is in progress Receiver must be Some");
+                // Check if persistence has completed
+                if let Ok(last_persisted_block_hash) = rx.try_recv() {
+                    if let Some(block) =
+                        self.state.tree_state.block_by_hash(last_persisted_block_hash)
+                    {
+                        self.persistence_state.finish(last_persisted_block_hash, block.number);
+                        self.remove_persisted_blocks_from_memory();
+                    } else {
+                        error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Returns true if the canonical chain length minus the last persisted
+    /// block is greater than or equal to the persistence threshold.
+    fn should_persist(&self) -> bool {
+        self.state.tree_state.max_block_number() -
+            self.persistence_state.last_persisted_block_number >=
+            PERSISTENCE_THRESHOLD
+    }
+
+    fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
+        let start = self.persistence_state.last_persisted_block_number;
+        let end = start + PERSISTENCE_THRESHOLD;
+
+        // NOTE: this is an exclusive range, to try to include exactly PERSISTENCE_THRESHOLD blocks
+        self.state
+            .tree_state
+            .blocks_by_number
+            .range(start..end)
+            .flat_map(|(_, blocks)| blocks.iter().cloned())
+            .collect()
+    }
+
+    fn remove_persisted_blocks_from_memory(&mut self) {
+        let keys_to_remove: Vec<BlockNumber> = self
+            .state
+            .tree_state
+            .blocks_by_number
+            .range(..=self.persistence_state.last_persisted_block_number)
+            .map(|(&k, _)| k)
+            .collect();
+
+        for key in keys_to_remove {
+            if let Some(blocks) = self.state.tree_state.blocks_by_number.remove(&key) {
+                // Remove corresponding blocks from blocks_by_hash
+                for block in blocks {
+                    self.state.tree_state.blocks_by_hash.remove(&block.block().hash());
                 }
             }
         }
@@ -628,7 +750,8 @@ where
     type Engine = T;
 
     fn on_downloaded(&mut self, _blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
-        todo!()
+        debug!("not implemented");
+        None
     }
 
     fn on_new_payload(
@@ -753,5 +876,204 @@ where
         }
 
         todo!()
+    }
+}
+
+/// The state of the persistence task.
+#[derive(Default, Debug)]
+struct PersistenceState {
+    /// Hash of the last block persisted.
+    last_persisted_block_hash: B256,
+    /// Receiver end of channel where the result of the persistence task will be
+    /// sent when done. A None value means there's no persistence task in progress.
+    rx: Option<oneshot::Receiver<B256>>,
+    /// The last persisted block number.
+    last_persisted_block_number: u64,
+}
+
+impl PersistenceState {
+    /// Determines if there is a persistence task in progress by checking if the
+    /// receiver is set.
+    const fn in_progress(&self) -> bool {
+        self.rx.is_some()
+    }
+
+    /// Sets state for a started persistence task.
+    fn start(&mut self, rx: oneshot::Receiver<B256>) {
+        self.rx = Some(rx);
+    }
+
+    /// Sets state for a finished persistence task.
+    fn finish(&mut self, last_persisted_block_hash: B256, last_persisted_block_number: u64) {
+        self.rx = None;
+        self.last_persisted_block_number = last_persisted_block_number;
+        self.last_persisted_block_hash = last_persisted_block_hash;
+    }
+}
+
+/// Represents the tree state kept in memory.
+trait InMemoryState: Send + Sync {
+    /// Returns the state for a given block hash.
+    fn in_memory_state_by_hash(&self, hash: B256) -> Option<Arc<State>>;
+    /// Returns the state for a given block number.
+    fn in_memory_state_by_number(&self, number: u64) -> Option<Arc<State>>;
+    /// Returns the current chain head.
+    fn in_memory_current_head(&self) -> Option<(BlockNumber, B256)>;
+    /// Returns the pending block hash.
+    fn in_memory_pending_block_hash(&self) -> Option<B256>;
+    /// Returns the pending state corresponding to the current head plus one,
+    /// from the payload received in newPayload that does not have a FCU yet.
+    fn in_memory_pending_state(&self) -> Option<Arc<State>>;
+}
+
+/// State composed of a block hash, and the receipts, state and transactions root
+/// after executing it.
+#[derive(Debug, PartialEq, Eq)]
+pub struct State {
+    /// Block hash defining the state.
+    block_hash: B256,
+    /// Block number defining the state.
+    block_number: BlockNumber,
+    /// State root after applying the block.
+    state_root: B256,
+    /// Transactions root of the block.
+    transactions_root: B256,
+    /// Receipts root after applying the block.
+    receipts_root: B256,
+}
+
+impl State {
+    fn new(sealed_block: Arc<SealedBlock>) -> Self {
+        Self {
+            block_hash: sealed_block.hash(),
+            block_number: sealed_block.number,
+            state_root: sealed_block.state_root,
+            transactions_root: sealed_block.transactions_root,
+            receipts_root: sealed_block.receipts_root,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{static_files::StaticFileAction, test_utils::get_executed_blocks};
+    use reth_beacon_consensus::EthBeaconConsensus;
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_evm::test_utils::MockExecutorProvider;
+    use reth_provider::test_utils::MockEthProvider;
+    use std::sync::mpsc::{channel, Sender};
+    use tokio::sync::mpsc::unbounded_channel;
+
+    struct TestHarness {
+        tree: EngineApiTreeHandlerImpl<MockEthProvider, MockExecutorProvider, EthEngineTypes>,
+        to_tree_tx: Sender<FromEngine<BeaconEngineMessage<EthEngineTypes>>>,
+        blocks: Vec<ExecutedBlock>,
+        sf_action_rx: Receiver<StaticFileAction>,
+    }
+
+    fn get_default_test_harness(number_of_blocks: u64) -> TestHarness {
+        let blocks: Vec<_> = get_executed_blocks(0..number_of_blocks).collect();
+
+        let mut blocks_by_hash = HashMap::new();
+        let mut blocks_by_number = BTreeMap::new();
+        for block in &blocks {
+            blocks_by_hash.insert(block.block().hash(), block.clone());
+            blocks_by_number
+                .entry(block.block().number)
+                .or_insert_with(Vec::new)
+                .push(block.clone());
+        }
+        let tree_state = TreeState { blocks_by_hash, blocks_by_number, ..Default::default() };
+
+        let (action_tx, action_rx) = channel();
+        let (sf_action_tx, sf_action_rx) = channel();
+        let persistence_handle = PersistenceHandle::new(action_tx, sf_action_tx);
+
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(MAINNET.genesis.clone())
+                .paris_activated()
+                .build(),
+        );
+        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
+
+        let provider = MockEthProvider::default();
+        let executor_factory = MockExecutorProvider::default();
+        executor_factory.extend(vec![ExecutionOutcome::default()]);
+
+        let payload_validator = ExecutionPayloadValidator::new(chain_spec);
+
+        let (to_tree_tx, to_tree_rx) = channel();
+        let (from_tree_tx, from_tree_rx) = unbounded_channel();
+
+        let engine_api_tree_state = EngineApiTreeState {
+            invalid_headers: InvalidHeaderCache::new(10),
+            buffer: BlockBuffer::new(10),
+            tree_state,
+            forkchoice_state_tracker: ForkchoiceStateTracker::default(),
+        };
+
+        TestHarness {
+            tree: EngineApiTreeHandlerImpl::new(
+                provider,
+                executor_factory,
+                consensus,
+                payload_validator,
+                to_tree_rx,
+                from_tree_tx,
+                engine_api_tree_state,
+                persistence_handle,
+            ),
+            to_tree_tx,
+            blocks,
+            sf_action_rx,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_tree_persist_blocks() {
+        // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
+        // persistence task.
+        let TestHarness { tree, to_tree_tx, sf_action_rx, mut blocks } =
+            get_default_test_harness(PERSISTENCE_THRESHOLD + 1);
+        std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| tree.run()).unwrap();
+
+        // send a message to the tree to enter the main loop.
+        to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
+
+        let received_action = sf_action_rx.recv().expect("Failed to receive saved blocks");
+        if let StaticFileAction::WriteExecutionData((saved_blocks, _)) = received_action {
+            // only PERSISTENCE_THRESHOLD will be persisted
+            blocks.pop();
+            assert_eq!(saved_blocks.len() as u64, PERSISTENCE_THRESHOLD);
+            assert_eq!(saved_blocks, blocks);
+        } else {
+            panic!("unexpected action received {received_action:?}");
+        }
+    }
+
+    #[test]
+    fn test_in_memory_state_trait_impl() {
+        let TestHarness { tree, to_tree_tx, sf_action_rx, blocks } = get_default_test_harness(10);
+
+        let head_block = blocks.last().unwrap().block();
+        let first_block = blocks.first().unwrap().block();
+
+        for executed_block in blocks {
+            let sealed_block = executed_block.block();
+
+            let expected_state = State::new(Arc::new(sealed_block.clone()));
+
+            let actual_state_by_hash =
+                tree.state.tree_state.in_memory_state_by_hash(sealed_block.hash()).unwrap();
+            assert_eq!(expected_state, *actual_state_by_hash);
+
+            let actual_state_by_number =
+                tree.state.tree_state.in_memory_state_by_number(sealed_block.number).unwrap();
+            assert_eq!(expected_state, *actual_state_by_number);
+        }
     }
 }

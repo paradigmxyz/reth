@@ -3,8 +3,9 @@
 use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256};
-use reth_provider::{ProviderFactory, StaticFileProviderFactory, StaticFileWriter};
-use reth_prune::PruneModes;
+use reth_provider::{
+    ProviderFactory, StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt,
+};
 use std::sync::{
     mpsc::{Receiver, SendError, Sender},
     Arc,
@@ -12,7 +13,7 @@ use std::sync::{
 use tokio::sync::oneshot;
 
 use crate::{
-    persistence::{PersistenceAction, PersistenceHandle},
+    database::{DatabaseAction, DatabaseServiceHandle},
     tree::ExecutedBlock,
 };
 
@@ -28,28 +29,22 @@ pub struct StaticFileService<DB> {
     /// The db / static file provider to use
     provider: ProviderFactory<DB>,
     /// Handle for the database service
-    database_handle: PersistenceHandle,
+    database_handle: DatabaseServiceHandle,
     /// Incoming requests to write static files
     incoming: Receiver<StaticFileAction>,
-    /// The pruning configuration
-    pruning: PruneModes,
 }
 
 impl<DB> StaticFileService<DB>
 where
     DB: Database + 'static,
 {
-    /// Create a new static file service, spawning it, and returning a [`StaticFileServiceHandle`].
-    fn spawn_new(provider: ProviderFactory<DB>) -> StaticFileServiceHandle {
-        todo!("implement initialization first");
-        // let (tx, rx) = std::sync::mpsc::channel();
-        // let service = Self::new(provider, rx);
-        // std::thread::Builder::new()
-        //     .name("StaticFile Service".to_string())
-        //     .spawn(|| service.run())
-        //     .unwrap();
-
-        // StaticFileServiceHandle::new(tx)
+    /// Create a new static file service.
+    pub const fn new(
+        provider: ProviderFactory<DB>,
+        incoming: Receiver<StaticFileAction>,
+        database_handle: DatabaseServiceHandle,
+    ) -> Self {
+        Self { provider, database_handle, incoming }
     }
 
     // TODO: some things about this are a bit weird, and just to make the underlying static file
@@ -82,19 +77,18 @@ where
             tx_number += 1;
         }
 
-        // increment block for both segments
-        header_writer.increment_block(StaticFileSegment::Headers, block.number)?;
+        // increment block for transactions
         transactions_writer.increment_block(StaticFileSegment::Transactions, block.number)?;
 
         // finally commit
-        header_writer.commit()?;
         transactions_writer.commit()?;
+        header_writer.commit()?;
 
         // TODO: do we care about the mpsc error here?
         // send a command to the db service to update the checkpoints for headers / bodies
         let _ = self
             .database_handle
-            .send_action(PersistenceAction::UpdateTransactionMeta((block.number, sender)));
+            .send_action(DatabaseAction::UpdateTransactionMeta((block.number, sender)));
 
         Ok(())
     }
@@ -117,23 +111,37 @@ where
         let first_block = blocks.first().unwrap().block();
         let last_block = blocks.last().unwrap().block();
 
+        // get highest receipt, if it returns none, use zero (this is the first static file write)
+        let mut current_receipt = provider
+            .get_highest_static_file_tx(StaticFileSegment::Receipts)
+            .map(|num| num + 1)
+            .unwrap_or_default();
+        let mut current_block = first_block.number;
+
         let mut receipts_writer =
             provider.get_writer(first_block.number, StaticFileSegment::Receipts)?;
-        for (num, receipts) in blocks
-            .iter()
-            .map(|block| (block.block().number, block.execution_outcome().receipts.clone()))
-        {
+        for receipts in blocks.iter().map(|block| block.execution_outcome().receipts.clone()) {
             debug_assert!(receipts.len() == 1);
             // TODO: should we also assert that the receipt is not None here, that means the
             // receipt is pruned
-            for receipt in receipts.first().unwrap().iter().flatten() {
-                receipts_writer.append_receipt(num, receipt.clone())?;
+            for maybe_receipt in receipts.first().unwrap() {
+                if let Some(receipt) = maybe_receipt {
+                    receipts_writer.append_receipt(current_receipt, receipt.clone())?;
+                }
+                current_receipt += 1;
             }
+
+            // increment the block
+            receipts_writer.increment_block(StaticFileSegment::Receipts, current_block)?;
+            current_block += 1;
         }
+
+        // finally increment block and commit
+        receipts_writer.commit()?;
 
         // TODO: do we care about the mpsc error here?
         // send a command to the db service to update the checkpoints for execution etc.
-        let _ = self.database_handle.send_action(PersistenceAction::SaveBlocks((blocks, sender)));
+        let _ = self.database_handle.send_action(DatabaseAction::SaveBlocks((blocks, sender)));
 
         Ok(())
     }
@@ -154,19 +162,42 @@ where
     fn remove_blocks_above(
         &self,
         block_num: u64,
-        sender: oneshot::Sender<B256>,
+        sender: oneshot::Sender<()>,
     ) -> ProviderResult<()> {
-        let provider = self.provider.static_file_provider();
+        let sf_provider = self.provider.static_file_provider();
+        let db_provider_rw = self.provider.provider_rw()?;
+
+        // get highest static file block for the total block range
+        let highest_static_file_block = sf_provider
+            .get_highest_static_file_block(StaticFileSegment::Headers)
+            .expect("todo: error handling, headers should exist");
+
+        // Get the total txs for the block range, so we have the correct number of columns for
+        // receipts and transactions
+        let tx_range = db_provider_rw
+            .transaction_range_by_block_range(block_num..=highest_static_file_block)?;
+        let total_txs = tx_range.end().saturating_sub(*tx_range.start());
 
         // get the writers
-        let mut _header_writer = provider.get_writer(block_num, StaticFileSegment::Headers)?;
-        let mut _transactions_writer =
-            provider.get_writer(block_num, StaticFileSegment::Transactions)?;
-        let mut _receipts_writer = provider.get_writer(block_num, StaticFileSegment::Receipts)?;
+        let mut header_writer = sf_provider.get_writer(block_num, StaticFileSegment::Headers)?;
+        let mut transactions_writer =
+            sf_provider.get_writer(block_num, StaticFileSegment::Transactions)?;
+        let mut receipts_writer = sf_provider.get_writer(block_num, StaticFileSegment::Receipts)?;
 
-        // TODO: how do we delete s.t. `block_num` is the start? Additionally, do we need to index
-        // by tx num for the transactions segment?
-        todo!("implement me")
+        // finally actually truncate, these internally commit
+        receipts_writer.truncate(StaticFileSegment::Receipts, total_txs, Some(block_num))?;
+        transactions_writer.truncate(
+            StaticFileSegment::Transactions,
+            total_txs,
+            Some(block_num),
+        )?;
+        header_writer.truncate(
+            StaticFileSegment::Headers,
+            highest_static_file_block.saturating_sub(block_num),
+            None,
+        )?;
+
+        Ok(())
     }
 }
 
@@ -176,7 +207,7 @@ where
 {
     /// This is the main loop, that will listen to static file actions, and write DB data to static
     /// files.
-    fn run(self) {
+    pub fn run(self) {
         // If the receiver errors then senders have disconnected, so the loop should then end.
         while let Ok(action) = self.incoming.recv() {
             match action {
@@ -188,17 +219,14 @@ where
                 )) => {
                     self.log_transactions(block, start_tx_number, td, response_sender)
                         .expect("todo: handle errors");
-                    todo!("implement me")
                 }
                 StaticFileAction::RemoveBlocksAbove((block_num, response_sender)) => {
                     self.remove_blocks_above(block_num, response_sender)
                         .expect("todo: handle errors");
-                    todo!("implement me")
                 }
                 StaticFileAction::WriteExecutionData((blocks, response_sender)) => {
                     self.write_execution_data(blocks, response_sender)
                         .expect("todo: handle errors");
-                    todo!("implement me")
                 }
             }
         }
@@ -226,9 +254,7 @@ pub enum StaticFileAction {
     ///
     /// This is meant to be called by the db service, as this should only be done after related
     /// data is removed from the database, and checkpoints are updated.
-    ///
-    /// Returns the hash of the lowest removed block.
-    RemoveBlocksAbove((u64, oneshot::Sender<B256>)),
+    RemoveBlocksAbove((u64, oneshot::Sender<()>)),
 }
 
 /// A handle to the static file service

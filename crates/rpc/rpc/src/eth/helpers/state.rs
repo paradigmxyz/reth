@@ -1,6 +1,6 @@
 //! Contains RPC handler implementations specific to state.
 
-use reth_provider::StateProviderFactory;
+use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
 use reth_rpc_eth_api::helpers::{EthState, LoadState, SpawnBlocking};
@@ -19,11 +19,11 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: StateProviderFactory,
+    Provider: StateProviderFactory + ChainSpecProvider,
     Pool: TransactionPool,
 {
     #[inline]
-    fn provider(&self) -> impl StateProviderFactory {
+    fn provider(&self) -> impl StateProviderFactory + ChainSpecProvider {
         self.inner.provider()
     }
 

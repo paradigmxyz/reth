@@ -4,7 +4,7 @@ use crate::{
     table::{Compress, Decode, Decompress, Encode},
     DatabaseError,
 };
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{reth_codec, Compact};
 use reth_primitives::{Address, B256, *};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
@@ -263,7 +263,7 @@ macro_rules! add_wrapper_struct {
     ($(($name:tt, $wrapper:tt)),+) => {
         $(
             /// Wrapper struct so it can use StructFlags from Compact, when used as pure table values.
-            #[main_codec]
+            #[reth_codec]
             #[derive(Debug, Clone, PartialEq, Eq, Default)]
             pub struct $wrapper(pub $name);
 
