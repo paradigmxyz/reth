@@ -10,7 +10,7 @@ use reth::{
         blobstore::InMemoryBlobStore, EthTransactionPool, TransactionValidationTaskExecutor,
     },
 };
-use reth_node_ethereum::EthereumNode;
+use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::PoolConfig;
 
@@ -23,6 +23,7 @@ fn main() {
                 // Configure the components of the node
                 // use default ethereum components but use our custom pool
                 .with_components(EthereumNode::components().pool(CustomPoolBuilder::default()))
+                .with_add_ons::<EthereumAddOns>()
                 .launch()
                 .await?;
 

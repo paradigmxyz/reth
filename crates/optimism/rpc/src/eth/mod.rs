@@ -12,9 +12,15 @@ use alloy_primitives::{Address, U64};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::RethResult;
 use reth_evm::ConfigureEvm;
+use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderFactory};
-use reth_rpc_eth_api::helpers::{
-    Call, EthApiSpec, EthCall, EthFees, EthState, LoadFee, LoadState, SpawnBlocking, Trace,
+use reth_rpc::eth::DevSigner;
+use reth_rpc_eth_api::{
+    helpers::{
+        AddDevSigners, Call, EthApiSpec, EthCall, EthFees, EthSigner, EthState, LoadFee, LoadState,
+        SpawnBlocking, Trace, UpdateRawTxForwarder,
+    },
+    RawTransactionForwarder,
 };
 use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types::SyncStatus;
@@ -152,5 +158,33 @@ impl<Eth: EthFees> EthFees for OpEthApi<Eth> {}
 impl<Eth: Trace> Trace for OpEthApi<Eth> {
     fn evm_config(&self) -> &impl ConfigureEvm {
         self.inner.evm_config()
+    }
+}
+
+impl<Eth: AddDevSigners> AddDevSigners for OpEthApi<Eth> {
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
+        self.inner.signers()
+    }
+
+    fn with_dev_accounts(&self) {
+        *self.signers().write() = DevSigner::random_signers(20)
+    }
+}
+
+impl<Eth: UpdateRawTxForwarder> UpdateRawTxForwarder for OpEthApi<Eth> {
+    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
+        self.inner.set_eth_raw_transaction_forwarder(forwarder);
+    }
+}
+
+impl<N, Eth> BuilderProvider<N> for OpEthApi<Eth>
+where
+    Eth: BuilderProvider<N>,
+    N: FullNodeComponents,
+{
+    type Ctx<'a> = <Eth as BuilderProvider<N>>::Ctx<'a>;
+
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
+        Box::new(|ctx| Self { inner: Eth::builder()(ctx) })
     }
 }
