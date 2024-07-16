@@ -48,9 +48,8 @@ pub fn op_receipt_fields(
     let mut op_fields = OptimismTransactionReceiptFields::default();
 
     if tx.is_deposit() {
-        op_fields.deposit_nonce = receipt.deposit_nonce.map(reth_primitives::U64::from);
-        op_fields.deposit_receipt_version =
-            receipt.deposit_receipt_version.map(reth_primitives::U64::from);
+        op_fields.deposit_nonce = receipt.deposit_nonce;
+        op_fields.deposit_receipt_version = receipt.deposit_receipt_version;
     } else if let Some(l1_block_info) = optimism_tx_meta.l1_block_info {
         op_fields.l1_fee = optimism_tx_meta.l1_fee;
         op_fields.l1_gas_used = optimism_tx_meta.l1_data_gas.map(|dg| {

@@ -69,7 +69,7 @@ pub struct TxEip7702 {
     /// Authorizations are used to temporarily set the code of its signer to
     /// the code referenced by `address`. These also include a `chain_id` (which
     /// can be set to zero and not evaluated) as well as an optional `nonce`.
-    pub authorization_list: Vec<SignedAuthorization<alloy_primitives::Signature>>,
+    pub authorization_list: Vec<SignedAuthorization>,
     /// Input has two uses depending if the transaction `to` field is [`TxKind::Create`] or
     /// [`TxKind::Call`].
     ///
@@ -110,7 +110,7 @@ impl TxEip7702 {
         self.to.size() + // to
         mem::size_of::<U256>() + // value
         self.access_list.size() + // access_list
-        mem::size_of::<SignedAuthorization<alloy_primitives::Signature>>()
+        mem::size_of::<SignedAuthorization>()
              * self.authorization_list.capacity() + // authorization_list
         self.input.len() // input
     }
