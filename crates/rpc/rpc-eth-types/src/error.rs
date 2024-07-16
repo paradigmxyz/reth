@@ -17,7 +17,6 @@ use reth_transaction_pool::error::{
 };
 use revm::primitives::{EVMError, ExecutionResult, HaltReason, OutOfGasError};
 use revm_inspectors::tracing::{js::JsInspectorError, MuxError};
-use revm_primitives::OptimismInvalidTransaction;
 
 /// Result alias
 pub type EthResult<T> = Result<T, EthApiError>;
@@ -491,12 +490,14 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             }
             #[cfg(feature = "optimism")]
             InvalidTransaction::OptimismError(err) => match err {
-                OptimismInvalidTransaction::DepositSystemTxPostRegolith => {
+                revm_primitives::OptimismInvalidTransaction::DepositSystemTxPostRegolith => {
                     Self::other(OptimismInvalidTransactionError::DepositSystemTxPostRegolith)
                 }
-                OptimismInvalidTransaction::HaltedDepositPostRegolith => Self::Other(Box::new(
-                    OptimismInvalidTransactionError::HaltedDepositPostRegolith,
-                )),
+                revm_primitives::OptimismInvalidTransaction::HaltedDepositPostRegolith => {
+                    Self::Other(Box::new(
+                        OptimismInvalidTransactionError::HaltedDepositPostRegolith,
+                    ))
+                }
             },
         }
     }
