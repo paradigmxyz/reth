@@ -9,9 +9,9 @@ pub mod pubsub;
 /// Implementation of `eth` namespace API.
 pub use bundle::EthBundle;
 pub use core::EthApi;
-pub use filter::{EthFilter, EthFilterConfig};
+pub use filter::EthFilter;
 pub use pubsub::EthPubSub;
 
 pub use helpers::signer::DevSigner;
 
-pub use reth_rpc_eth_api::RawTransactionForwarder;
+pub use reth_rpc_eth_api::{EthApiServer, RawTransactionForwarder};
