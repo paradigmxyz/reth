@@ -974,7 +974,7 @@ mod tests {
     }
 
     fn get_default_test_harness(number_of_blocks: u64) -> TestHarness {
-        let blocks = get_executed_blocks(number_of_blocks);
+        let blocks: Vec<_> = get_executed_blocks(0..number_of_blocks).collect();
 
         let mut blocks_by_hash = HashMap::new();
         let mut blocks_by_number = BTreeMap::new();
