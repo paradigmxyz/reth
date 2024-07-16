@@ -28,6 +28,7 @@ use reth_primitives::{
     Address, Header, TransactionSigned, U256,
 };
 use reth_tracing::{RethTracer, Tracer};
+use revm_primitives::EnvWithHandlerCfg;
 use std::sync::Arc;
 
 /// Custom EVM configuration
@@ -132,7 +133,23 @@ impl ConfigureEvm for MyEvmConfig {
     }
 }
 
-impl ConfigureEvmGeneric for MyEvmConfig {}
+impl ConfigureEvmGeneric for MyEvmConfig {
+    type EvmType<'a, DB: Database + 'a> = reth_revm::Evm<'a, (), DB>;
+
+    fn evm_with_env_generic<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Self::EvmType<'a, DB>
+    where
+        DB: Database + 'a,
+    {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
+    }
+}
 
 /// Builds a regular ethereum block executor that uses the custom EVM.
 #[derive(Debug, Default, Clone, Copy)]

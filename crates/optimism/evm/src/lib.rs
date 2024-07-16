@@ -12,7 +12,7 @@
 use reth_chainspec::ChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric};
 use reth_primitives::{
-    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
+    revm_primitives::{AnalysisKind, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, TxEnv},
     transaction::FillTxEnv,
     Address, Head, Header, TransactionSigned, U256,
 };
@@ -131,7 +131,23 @@ impl ConfigureEvm for OptimismEvmConfig {
     }
 }
 
-impl ConfigureEvmGeneric for OptimismEvmConfig {}
+impl ConfigureEvmGeneric for OptimismEvmConfig {
+    type EvmType<'a, DB: Database + 'a> = reth_revm::Evm<'a, (), DB>;
+
+    fn evm_with_env_generic<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Self::EvmType<'a, DB>
+    where
+        DB: Database + 'a,
+    {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -34,20 +34,17 @@ pub mod test_utils;
 
 /// Trait for configuring the EVM in a generic way
 pub trait ConfigureEvmGeneric: ConfigureEvm + ConfigureEvmEnv {
+    /// Associated type for the EVM type that should be configured for the EVM.
+    type EvmType<'a, DB: Database + 'a>: EvmTransact<DB = DB>;
+
     /// Returns a new EVM with the given database configured with the given environment settings.
     fn evm_with_env_generic<'a, DB>(
         &'a self,
         db: DB,
         env: EnvWithHandlerCfg,
-    ) -> Box<dyn EvmTransact<DB = DB> + 'a>
+    ) -> Self::EvmType<'a, DB>
     where
-        DB: Database + 'a,
-    {
-        let mut evm = self.evm(db);
-        evm.modify_spec_id(env.spec_id());
-        evm.context.evm.env = env.env;
-        Box::new(evm)
-    }
+        DB: Database + 'a;
 }
 
 /// Trait for configuring the EVM for executing full blocks.

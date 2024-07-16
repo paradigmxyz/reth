@@ -2,7 +2,7 @@
 //! methods.
 
 use futures::Future;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric};
+use reth_evm::{execute::EvmTransact, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric};
 use reth_primitives::{
     revm_primitives::{
         BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, HaltReason,
@@ -294,11 +294,11 @@ pub trait Call: LoadState + SpawnBlocking {
     ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
     where
         DB: Database,
-        <DB as Database>::Error: Into<EthApiError>,
+        DB::Error: Into<EthApiError>,
     {
-        let mut evm = self.evm_config().evm_with_env(db, env);
+        let mut evm = self.evm_config().evm_with_env_generic(db, env);
         let res = evm.transact()?;
-        let (_, env) = evm.into_db_and_env_with_handler_cfg();
+        let env = evm.env_with_handler_cfg();
         Ok((res, env))
     }
 

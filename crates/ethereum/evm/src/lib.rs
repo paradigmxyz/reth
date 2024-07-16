@@ -16,7 +16,9 @@ use reth_chainspec::{ChainSpec, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmGeneric};
 use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned, U256};
 use reth_revm::{Database, EvmBuilder};
-use revm_primitives::{AnalysisKind, Bytes, CfgEnvWithHandlerCfg, Env, TxEnv, TxKind};
+use revm_primitives::{
+    AnalysisKind, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, TxEnv, TxKind,
+};
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};
@@ -104,7 +106,23 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
-impl ConfigureEvmGeneric for EthEvmConfig {}
+impl ConfigureEvmGeneric for EthEvmConfig {
+    type EvmType<'a, DB: Database + 'a> = reth_revm::Evm<'a, (), DB>;
+
+    fn evm_with_env_generic<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Self::EvmType<'a, DB>
+    where
+        DB: Database + 'a,
+    {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
+    }
+}
 
 impl ConfigureEvm for EthEvmConfig {
     type DefaultExternalContext<'a> = ();

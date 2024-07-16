@@ -2792,7 +2792,9 @@ dependencies = [
  "reth-node-core",
  "reth-node-ethereum",
  "reth-primitives",
+ "reth-revm",
  "reth-tracing",
+ "revm-primitives",
  "tokio",
 ]
 
@@ -2972,7 +2974,9 @@ dependencies = [
  "reth-node-core",
  "reth-node-ethereum",
  "reth-primitives",
+ "reth-revm",
  "reth-tracing",
+ "revm-primitives",
  "schnellru",
  "tokio",
 ]
