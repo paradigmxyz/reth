@@ -18,7 +18,7 @@ use reth_provider::{BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StatePr
 use reth_rpc::eth::DevSigner;
 use reth_rpc_eth_api::{
     helpers::{
-        AddDevSigners, EthApiSpec, EthCall, EthFees, EthSigner, EthState, LoadFee, LoadState,
+        AddDevSigners, Call, EthApiSpec, EthCall, EthFees, EthSigner, EthState, LoadFee, LoadState,
         SpawnBlocking, Trace, UpdateRawTxForwarder,
     },
     RawTransactionForwarder,

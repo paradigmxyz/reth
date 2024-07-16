@@ -13,7 +13,8 @@ fn test_basic_setup() {
     let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types::<EthereumNode>()
-        .with_components::<_, EthereumAddOns>(EthereumNode::components())
+        .with_components(EthereumNode::components())
+        .with_add_ons::<EthereumAddOns>()
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();
             println!("{msg}");

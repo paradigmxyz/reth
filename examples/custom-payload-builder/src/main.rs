@@ -78,6 +78,7 @@ fn main() {
                 .with_components::<_, EthereumAddOns>(
                     EthereumNode::components().payload(CustomPayloadBuilder::default()),
                 )
+                .with_add_ons::<EthereumAddOns>()
                 .launch()
                 .await?;
 

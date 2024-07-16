@@ -1,12 +1,12 @@
 use crate::{
-    segments::{PruneInput, PruneOutput, Segment},
+    segments::{PruneInput, Segment},
     PrunerError,
 };
 use reth_db_api::database::Database;
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileProvider, DatabaseProviderRW,
 };
-use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
+use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 use reth_static_file_types::StaticFileSegment;
 
 #[derive(Debug)]
@@ -39,7 +39,7 @@ impl<DB: Database> Segment<DB> for Receipts {
         &self,
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
-    ) -> Result<PruneOutput, PrunerError> {
+    ) -> Result<SegmentOutput, PrunerError> {
         crate::segments::receipts::prune(provider, input)
     }
 

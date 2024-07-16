@@ -13,7 +13,8 @@ fn test_basic_setup() {
     let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types::<OptimismNode>()
-        .with_components::<_, OptimismAddOns>(OptimismNode::components(Default::default()))
+        .with_components(OptimismNode::components(Default::default()))
+        .with_add_ons::<OptimismAddOns>()
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();
             Ok(())
