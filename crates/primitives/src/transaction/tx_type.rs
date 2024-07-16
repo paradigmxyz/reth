@@ -316,8 +316,7 @@ mod tests {
         assert_eq!(tx_type, TxType::Eip7702);
 
         // Test random byte not in range
-        let buf = [rand::thread_rng().gen_range(4..=u8::MAX)];
-        println!("{buf:?}");
+        let buf = [rand::thread_rng().gen_range(5..=u8::MAX)];
         assert!(TxType::decode(&mut &buf[..]).is_err());
 
         // Test for Deposit transaction
