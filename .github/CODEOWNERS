@@ -13,17 +13,17 @@ crates/errors/              @mattsse
 crates/ethereum/            @mattsse @Rjected
 crates/ethereum-forks/      @mattsse @Rjected
 crates/etl/                 @joshieDo @shekhirin
-crates/evm/                 @rakita @mattsse @Rjected @DaniPopes
+crates/evm/                 @rakita @mattsse @Rjected
 crates/exex/                @onbjerg @shekhirin
-crates/fs-util/             @onbjerg @DaniPopes @emhane
+crates/fs-util/             @onbjerg @emhane
 crates/metrics/             @onbjerg
 crates/net/                 @emhane @mattsse @Rjected
 crates/net/downloaders/     @onbjerg @rkrasiuk @emhane
 crates/node/                @mattsse @Rjected @onbjerg
 crates/optimism/            @mattsse @Rjected @fgimenez
 crates/payload/             @mattsse @Rjected
-crates/primitives/          @DaniPopes @Rjected
-crates/primitives-traits/   @DaniPopes @Rjected @joshieDo
+crates/primitives/          @Rjected
+crates/primitives-traits/   @Rjected @joshieDo
 crates/prune/               @shekhirin @joshieDo
 crates/revm/                @mattsse @rakita
 crates/rpc/                 @mattsse @Rjected @emhane
