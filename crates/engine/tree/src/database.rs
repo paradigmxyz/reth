@@ -1,12 +1,15 @@
 #![allow(dead_code)]
 
-use crate::{static_files::StaticFileServiceHandle, tree::ExecutedBlock};
+use crate::{
+    static_files::{StaticFileAction, StaticFileServiceHandle},
+    tree::ExecutedBlock,
+};
 use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::B256;
 use reth_provider::{
-    bundle_state::HashedStateChanges, BlockWriter, HistoryWriter, OriginalValuesKnown,
-    ProviderFactory, StageCheckpointWriter, StateWriter,
+    bundle_state::HashedStateChanges, BlockExecutionWriter, BlockNumReader, BlockWriter,
+    HistoryWriter, OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateWriter,
 };
 use reth_prune::{Pruner, PrunerOutput};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -106,14 +109,21 @@ impl<DB: Database> DatabaseService<DB> {
     /// This is exclusive, i.e., it only removes blocks above `block_number`, and does not remove
     /// `block_number`.
     ///
-    /// Returns the block hash for the lowest block removed from the database, which should be
-    /// the hash for `block_number + 1`.
-    ///
     /// This will then send a command to the static file service, to remove the actual block data.
-    fn remove_blocks_above(&self, block_number: u64) -> ProviderResult<B256> {
-        todo!("depends on PR")
-        // let mut provider_rw = self.provider.provider_rw()?;
-        // provider_rw.get_or_take_block_and_execution_range(range);
+    fn remove_blocks_above(
+        &self,
+        block_number: u64,
+        sender: oneshot::Sender<()>,
+    ) -> ProviderResult<()> {
+        let provider_rw = self.provider.provider_rw()?;
+        let highest_block = self.provider.last_block_number()?;
+        provider_rw.remove_block_and_execution_range(block_number..=highest_block)?;
+
+        // send a command to the static file service to also remove blocks
+        let _ = self
+            .static_file_handle
+            .send_action(StaticFileAction::RemoveBlocksAbove((block_number, sender)));
+        Ok(())
     }
 
     /// Prunes block data before the given block hash according to the configured prune
@@ -145,11 +155,7 @@ where
         while let Ok(action) = self.incoming.recv() {
             match action {
                 DatabaseAction::RemoveBlocksAbove((new_tip_num, sender)) => {
-                    let output =
-                        self.remove_blocks_above(new_tip_num).expect("todo: handle errors");
-
-                    // we ignore the error because the caller may or may not care about the result
-                    let _ = sender.send(output);
+                    self.remove_blocks_above(new_tip_num, sender).expect("todo: handle errors");
                 }
                 DatabaseAction::SaveBlocks((blocks, sender)) => {
                     if blocks.is_empty() {
@@ -195,9 +201,7 @@ pub enum DatabaseAction {
     /// Removes block data above the given block number from the database.
     ///
     /// This will then send a command to the static file service, to remove the actual block data.
-    ///
-    /// Returns the block hash for the lowest block removed from the database.
-    RemoveBlocksAbove((u64, oneshot::Sender<B256>)),
+    RemoveBlocksAbove((u64, oneshot::Sender<()>)),
 
     /// Prune associated block data before the given block number, according to already-configured
     /// prune modes.
@@ -234,9 +238,8 @@ impl DatabaseServiceHandle {
         rx.await.expect("todo: err handling")
     }
 
-    /// Tells the database service to remove blocks above a certain block number. The removed
-    /// blocks are returned by the service.
-    pub async fn remove_blocks_above(&self, block_num: u64) -> B256 {
+    /// Tells the database service to remove blocks above a certain block number.
+    pub async fn remove_blocks_above(&self, block_num: u64) {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(DatabaseAction::RemoveBlocksAbove((block_num, tx)))
