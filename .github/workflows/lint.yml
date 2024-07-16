@@ -58,7 +58,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Run no_std checks
-        run: .github/scripts/check_no_std.sh
+        run: .github/assets/check_no_std.sh
 
   crate-checks:
     runs-on: ubuntu-latest
@@ -160,6 +160,15 @@ jobs:
         with:
           cmd: jq empty etc/grafana/dashboards/overview.json
 
+  no-test-deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Ensure no arbitrary or proptest dependency on default build
+        run: cargo tree --package reth -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
+  
   lint-success:
     name: lint success
     runs-on: ubuntu-latest
@@ -173,6 +182,7 @@ jobs:
       - book
       - codespell
       - grafana
+      - no-test-deps
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed

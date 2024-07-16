@@ -1,7 +1,7 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
-    prefix_set::PrefixSetMut,
+    prefix_set::TriePrefixSetsMut,
     trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
     walker::TrieWalker,
     HashBuilder, Nibbles,
@@ -12,6 +12,7 @@ use reth_db_api::transaction::DbTx;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives::{constants::EMPTY_ROOT_HASH, keccak256, Address, B256};
 use reth_trie_common::{proof::ProofRetainer, AccountProof, StorageProof, TrieAccount};
+
 /// A struct for generating merkle proofs.
 ///
 /// Proof generator adds the target address and slots to the prefix set, enables the proof retainer
@@ -23,12 +24,32 @@ pub struct Proof<'a, TX, H> {
     tx: &'a TX,
     /// The factory for hashed cursors.
     hashed_cursor_factory: H,
+    /// A set of prefix sets that have changes.
+    prefix_sets: TriePrefixSetsMut,
+}
+
+impl<'a, TX, H> Proof<'a, TX, H> {
+    /// Creates a new proof generator.
+    pub fn new(tx: &'a TX, hashed_cursor_factory: H) -> Self {
+        Self { tx, hashed_cursor_factory, prefix_sets: TriePrefixSetsMut::default() }
+    }
+
+    /// Set the hashed cursor factory.
+    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> Proof<'a, TX, HF> {
+        Proof { tx: self.tx, hashed_cursor_factory, prefix_sets: self.prefix_sets }
+    }
+
+    /// Set the prefix sets. They have to be mutable in order to allow extension with proof target.
+    pub fn with_prefix_sets_mut(mut self, prefix_sets: TriePrefixSetsMut) -> Self {
+        self.prefix_sets = prefix_sets;
+        self
+    }
 }
 
 impl<'a, TX> Proof<'a, TX, &'a TX> {
-    /// Create a new [Proof] instance.
-    pub const fn new(tx: &'a TX) -> Self {
-        Self { tx, hashed_cursor_factory: tx }
+    /// Create a new [Proof] instance from database transaction.
+    pub fn from_tx(tx: &'a TX) -> Self {
+        Self::new(tx, tx)
     }
 }
 
@@ -52,7 +73,7 @@ where
             DatabaseAccountTrieCursor::new(self.tx.cursor_read::<tables::AccountsTrie>()?);
 
         // Create the walker.
-        let mut prefix_set = PrefixSetMut::default();
+        let mut prefix_set = self.prefix_sets.account_prefix_set.clone();
         prefix_set.insert(target_nibbles.clone());
         let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
 
@@ -117,12 +138,14 @@ where
         }
 
         let target_nibbles = proofs.iter().map(|p| p.nibbles.clone()).collect::<Vec<_>>();
-        let prefix_set = PrefixSetMut::from(target_nibbles.clone()).freeze();
+        let mut prefix_set =
+            self.prefix_sets.storage_prefix_sets.get(&hashed_address).cloned().unwrap_or_default();
+        prefix_set.extend(target_nibbles.clone());
         let trie_cursor = DatabaseStorageTrieCursor::new(
             self.tx.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
         );
-        let walker = TrieWalker::new(trie_cursor, prefix_set);
+        let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
 
         let retainer = ProofRetainer::from_iter(target_nibbles);
         let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
@@ -226,7 +249,7 @@ mod tests {
         let (root, updates) = StateRoot::from_tx(provider.tx_ref())
             .root_with_updates()
             .map_err(Into::<reth_db::DatabaseError>::into)?;
-        updates.flush(provider.tx_mut())?;
+        updates.write_to_database(provider.tx_mut())?;
 
         provider.commit()?;
 
@@ -281,7 +304,8 @@ mod tests {
         let provider = factory.provider().unwrap();
         for (target, expected_proof) in data {
             let target = Address::from_str(target).unwrap();
-            let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[]).unwrap();
+            let account_proof =
+                Proof::from_tx(provider.tx_ref()).account_proof(target, &[]).unwrap();
             similar_asserts::assert_eq!(
                 account_proof.proof,
                 expected_proof,
@@ -301,7 +325,8 @@ mod tests {
         let slots = Vec::from([B256::with_last_byte(1), B256::with_last_byte(3)]);
 
         let provider = factory.provider().unwrap();
-        let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &slots).unwrap();
+        let account_proof =
+            Proof::from_tx(provider.tx_ref()).account_proof(target, &slots).unwrap();
         assert_eq!(account_proof.storage_root, EMPTY_ROOT_HASH, "expected empty storage root");
 
         assert_eq!(slots.len(), account_proof.storage_proofs.len());
@@ -333,7 +358,7 @@ mod tests {
         ]);
 
         let provider = factory.provider().unwrap();
-        let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[]).unwrap();
+        let account_proof = Proof::from_tx(provider.tx_ref()).account_proof(target, &[]).unwrap();
         similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
         assert_eq!(account_proof.verify(root), Ok(()));
     }
@@ -356,7 +381,7 @@ mod tests {
         ]);
 
         let provider = factory.provider().unwrap();
-        let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &[]).unwrap();
+        let account_proof = Proof::from_tx(provider.tx_ref()).account_proof(target, &[]).unwrap();
         similar_asserts::assert_eq!(account_proof.proof, expected_account_proof);
         assert_eq!(account_proof.verify(root), Ok(()));
     }
@@ -442,7 +467,8 @@ mod tests {
         };
 
         let provider = factory.provider().unwrap();
-        let account_proof = Proof::new(provider.tx_ref()).account_proof(target, &slots).unwrap();
+        let account_proof =
+            Proof::from_tx(provider.tx_ref()).account_proof(target, &slots).unwrap();
         similar_asserts::assert_eq!(account_proof, expected);
         assert_eq!(account_proof.verify(root), Ok(()));
     }

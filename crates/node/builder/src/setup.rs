@@ -24,7 +24,7 @@ use tokio::sync::watch;
 
 /// Constructs a [Pipeline] that's wired to the network
 #[allow(clippy::too_many_arguments)]
-pub async fn build_networked_pipeline<DB, Client, Executor>(
+pub fn build_networked_pipeline<DB, Client, Executor>(
     config: &StageConfig,
     client: Client,
     consensus: Arc<dyn Consensus>,
@@ -63,15 +63,14 @@ where
         static_file_producer,
         executor,
         exex_manager_handle,
-    )
-    .await?;
+    )?;
 
     Ok(pipeline)
 }
 
 /// Builds the [Pipeline] with the given [`ProviderFactory`] and downloaders.
 #[allow(clippy::too_many_arguments)]
-pub async fn build_pipeline<DB, H, B, Executor>(
+pub fn build_pipeline<DB, H, B, Executor>(
     provider_factory: ProviderFactory<DB>,
     stage_config: &StageConfig,
     header_downloader: H,

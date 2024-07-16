@@ -65,6 +65,23 @@ impl Withdrawals {
     }
 }
 
+impl<'a> IntoIterator for &'a Withdrawals {
+    type Item = &'a Withdrawal;
+    type IntoIter = core::slice::Iter<'a, Withdrawal>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut Withdrawals {
+    type Item = &'a mut Withdrawal;
+    type IntoIter = core::slice::IterMut<'a, Withdrawal>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

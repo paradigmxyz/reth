@@ -155,10 +155,23 @@ impl NodeConfig {
             .with_unused_ports()
     }
 
-    /// Sets --dev mode for the node
+    /// Sets --dev mode for the node.
+    ///
+    /// In addition to setting the `--dev` flag, this also:
+    ///   - disables discovery in [`NetworkArgs`].
     pub const fn dev(mut self) -> Self {
         self.dev.dev = true;
+        self.network.discovery.disable_discovery = true;
         self
+    }
+
+    /// Sets --dev mode for the node [`NodeConfig::dev`], if `dev` is true.
+    pub const fn set_dev(self, dev: bool) -> Self {
+        if dev {
+            self.dev()
+        } else {
+            self
+        }
     }
 
     /// Set the data directory args for the node

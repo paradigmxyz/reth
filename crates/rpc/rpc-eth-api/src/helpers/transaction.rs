@@ -1,7 +1,7 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
-use std::{fmt, sync::Arc};
+use std::{fmt, ops::Deref, sync::Arc};
 
 use alloy_dyn_abi::TypedData;
 use futures::Future;
@@ -19,7 +19,7 @@ use reth_rpc_types::{
         EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
         LegacyTransactionRequest,
     },
-    AnyTransactionReceipt, Index, Transaction, TransactionRequest, TypedTransactionRequest,
+    AnyTransactionReceipt, Transaction, TransactionRequest, TypedTransactionRequest,
 };
 use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
 use reth_transaction_pool::{TransactionOrigin, TransactionPool};
@@ -184,7 +184,7 @@ pub trait EthTransactions: LoadTransaction {
     fn transaction_by_block_and_tx_index(
         &self,
         block_id: BlockId,
-        index: Index,
+        index: usize,
     ) -> impl Future<Output = EthResult<Option<Transaction>>> + Send
     where
         Self: LoadBlock,
@@ -194,13 +194,13 @@ pub trait EthTransactions: LoadTransaction {
                 let block_hash = block.hash();
                 let block_number = block.number;
                 let base_fee_per_gas = block.base_fee_per_gas;
-                if let Some(tx) = block.into_transactions_ecrecovered().nth(index.into()) {
+                if let Some(tx) = block.into_transactions_ecrecovered().nth(index) {
                     return Ok(Some(from_recovered_with_block_context(
                         tx,
                         block_hash,
                         block_number,
                         base_fee_per_gas,
-                        index.into(),
+                        index,
                     )))
                 }
             }
@@ -215,14 +215,14 @@ pub trait EthTransactions: LoadTransaction {
     fn raw_transaction_by_block_and_tx_index(
         &self,
         block_id: BlockId,
-        index: Index,
+        index: usize,
     ) -> impl Future<Output = EthResult<Option<Bytes>>> + Send
     where
         Self: LoadBlock,
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
-                if let Some(tx) = block.transactions().nth(index.into()) {
+                if let Some(tx) = block.transactions().nth(index) {
                     return Ok(Some(tx.envelope_encoded()))
                 }
             }
@@ -271,6 +271,10 @@ pub trait EthTransactions: LoadTransaction {
                 Some(from) => from,
                 None => return Err(SignError::NoAccount.into()),
             };
+
+            if self.find_signer(&from).is_err() {
+                return Err(SignError::NoAccount.into());
+            }
 
             // set nonce if not already set before
             if request.nonce.is_none() {
@@ -647,4 +651,22 @@ pub trait LoadTransaction: SpawnBlocking {
 pub trait RawTransactionForwarder: fmt::Debug + Send + Sync + 'static {
     /// Forwards raw transaction bytes for `eth_sendRawTransaction`
     async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()>;
+}
+
+/// Configure server's forwarder for `eth_sendRawTransaction`, at runtime.
+pub trait UpdateRawTxForwarder {
+    /// Sets a forwarder for `eth_sendRawTransaction`
+    ///
+    /// Note: this might be removed in the future in favor of a more generic approach.
+    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>);
+}
+
+impl<T, K> UpdateRawTxForwarder for T
+where
+    T: Deref<Target = Arc<K>>,
+    K: UpdateRawTxForwarder,
+{
+    fn set_eth_raw_transaction_forwarder(&self, forwarder: Arc<dyn RawTransactionForwarder>) {
+        self.deref().deref().set_eth_raw_transaction_forwarder(forwarder);
+    }
 }

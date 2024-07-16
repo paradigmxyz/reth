@@ -14,7 +14,6 @@ use reth_rpc_api::TraceApiServer;
 use reth_rpc_eth_api::helpers::{Call, TraceExt};
 use reth_rpc_eth_types::{
     error::{EthApiError, EthResult},
-    revm_utils::prepare_call_env,
     utils::recover_raw_transaction,
 };
 use reth_rpc_types::{
@@ -158,7 +157,7 @@ where
                 let mut calls = calls.into_iter().peekable();
 
                 while let Some((call, trace_types)) = calls.next() {
-                    let env = prepare_call_env(
+                    let env = this.eth_api().prepare_call_env(
                         cfg.clone(),
                         block_env.clone(),
                         call,

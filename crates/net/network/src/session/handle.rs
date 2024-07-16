@@ -11,8 +11,8 @@ use reth_eth_wire::{
     errors::EthStreamError,
     DisconnectReason, EthVersion, Status,
 };
-use reth_network_api::PeerInfo;
-use reth_network_peers::PeerId;
+use reth_network_api::{PeerInfo, PeerKind};
+use reth_network_peers::{NodeRecord, PeerId};
 use std::{io, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::{
     mpsc::{self, error::SendError},
@@ -136,10 +136,12 @@ impl ActiveSessionHandle {
     }
 
     /// Extracts the [`PeerInfo`] from the session handle.
-    pub(crate) fn peer_info(&self) -> PeerInfo {
+    pub(crate) fn peer_info(&self, record: &NodeRecord, kind: PeerKind) -> PeerInfo {
         PeerInfo {
             remote_id: self.remote_id,
             direction: self.direction,
+            enode: record.to_string(),
+            enr: None,
             remote_addr: self.remote_addr,
             local_addr: self.local_addr,
             capabilities: self.capabilities.clone(),
@@ -147,6 +149,7 @@ impl ActiveSessionHandle {
             eth_version: self.version,
             status: self.status.clone(),
             session_established: self.established,
+            kind,
         }
     }
 }

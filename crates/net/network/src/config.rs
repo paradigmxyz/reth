@@ -14,7 +14,7 @@ use reth_eth_wire::{HelloMessage, HelloMessageWithProtocols, Status};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_primitives::{ForkFilter, Head};
-use reth_provider::{BlockReader, HeaderProvider};
+use reth_storage_api::{BlockNumReader, BlockReader, HeaderProvider};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
@@ -88,6 +88,11 @@ impl NetworkConfig<()> {
     pub fn builder(secret_key: SecretKey) -> NetworkConfigBuilder {
         NetworkConfigBuilder::new(secret_key)
     }
+
+    /// Convenience method for creating the corresponding builder type with a random secret key.
+    pub fn builder_with_rng_secret_key() -> NetworkConfigBuilder {
+        NetworkConfigBuilder::with_rng_secret_key()
+    }
 }
 
 impl<C> NetworkConfig<C> {
@@ -116,13 +121,25 @@ impl<C> NetworkConfig<C> {
 
 impl<C> NetworkConfig<C>
 where
+    C: BlockNumReader + 'static,
+{
+    /// Convenience method for calling [`NetworkManager::new`].
+    pub async fn manager(self) -> Result<NetworkManager, NetworkError> {
+        NetworkManager::new(self).await
+    }
+}
+
+impl<C> NetworkConfig<C>
+where
     C: BlockReader + HeaderProvider + Clone + Unpin + 'static,
 {
     /// Starts the networking stack given a [`NetworkConfig`] and returns a handle to the network.
     pub async fn start_network(self) -> Result<NetworkHandle, NetworkError> {
         let client = self.client.clone();
-        let (handle, network, _txpool, eth) =
-            NetworkManager::builder(self).await?.request_handler(client).split_with_handle();
+        let (handle, network, _txpool, eth) = NetworkManager::builder::<C>(self)
+            .await?
+            .request_handler::<C>(client)
+            .split_with_handle();
 
         tokio::task::spawn(network);
         // TODO: tokio::task::spawn(txpool);
@@ -176,6 +193,12 @@ pub struct NetworkConfigBuilder {
 
 #[allow(missing_docs)]
 impl NetworkConfigBuilder {
+    /// Create a new builder instance with a random secret key.
+    pub fn with_rng_secret_key() -> Self {
+        Self::new(rng_secret_key())
+    }
+
+    /// Create a new builder instance with the given secret key.
     pub fn new(secret_key: SecretKey) -> Self {
         Self {
             secret_key,
@@ -210,6 +233,11 @@ impl NetworkConfigBuilder {
     /// Returns the configured [`PeerId`]
     pub fn get_peer_id(&self) -> PeerId {
         pk2id(&self.secret_key.public_key(SECP256K1))
+    }
+
+    /// Returns the configured [`SecretKey`], from which the node's identity is derived.
+    pub const fn secret_key(&self) -> &SecretKey {
+        &self.secret_key
     }
 
     /// Sets the chain spec.
@@ -427,11 +455,10 @@ impl NetworkConfigBuilder {
 
     /// Convenience function for creating a [`NetworkConfig`] with a noop provider that does
     /// nothing.
-    #[cfg(any(test, feature = "test-utils"))]
     pub fn build_with_noop_provider(
         self,
-    ) -> NetworkConfig<reth_provider::test_utils::NoopProvider> {
-        self.build(reth_provider::test_utils::NoopProvider::default())
+    ) -> NetworkConfig<reth_storage_api::noop::NoopBlockReader> {
+        self.build(Default::default())
     }
 
     /// Consumes the type and creates the actual [`NetworkConfig`]

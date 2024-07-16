@@ -1,9 +1,11 @@
 use crate::{
     hashed_cursor::HashedPostStateCursorFactory,
-    prefix_set::{PrefixSetMut, TriePrefixSets},
+    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    proof::Proof,
     updates::TrieUpdates,
     Nibbles, StateRoot,
 };
+use itertools::Itertools;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_db::{tables, DatabaseError};
 use reth_db_api::{
@@ -13,6 +15,7 @@ use reth_db_api::{
 };
 use reth_execution_errors::StateRootError;
 use reth_primitives::{keccak256, Account, Address, BlockNumber, B256, U256};
+use reth_trie_common::AccountProof;
 use revm::db::BundleAccount;
 use std::{
     collections::{hash_map, HashMap, HashSet},
@@ -170,10 +173,10 @@ impl HashedPostState {
         HashedPostStateSorted { accounts, storages }
     }
 
-    /// Construct [`TriePrefixSets`] from hashed post state.
+    /// Construct [`TriePrefixSetsMut`] from hashed post state.
     /// The prefix sets contain the hashed account and storage keys that have been changed in the
     /// post state.
-    pub fn construct_prefix_sets(&self) -> TriePrefixSets {
+    pub fn construct_prefix_sets(&self) -> TriePrefixSetsMut {
         // Populate account prefix set.
         let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
         let mut destroyed_accounts = HashSet::default();
@@ -194,14 +197,10 @@ impl HashedPostState {
             for hashed_slot in hashed_storage.storage.keys() {
                 prefix_set.insert(Nibbles::unpack(hashed_slot));
             }
-            storage_prefix_sets.insert(*hashed_address, prefix_set.freeze());
+            storage_prefix_sets.insert(*hashed_address, prefix_set);
         }
 
-        TriePrefixSets {
-            account_prefix_set: account_prefix_set.freeze(),
-            storage_prefix_sets,
-            destroyed_accounts,
-        }
+        TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
     }
 
     /// Calculate the state root for this [`HashedPostState`].
@@ -236,7 +235,7 @@ impl HashedPostState {
     /// The state root for this [`HashedPostState`].
     pub fn state_root<TX: DbTx>(&self, tx: &TX) -> Result<B256, StateRootError> {
         let sorted = self.clone().into_sorted();
-        let prefix_sets = self.construct_prefix_sets();
+        let prefix_sets = self.construct_prefix_sets().freeze();
         StateRoot::from_tx(tx)
             .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
             .with_prefix_sets(prefix_sets)
@@ -250,11 +249,26 @@ impl HashedPostState {
         tx: &TX,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let sorted = self.clone().into_sorted();
-        let prefix_sets = self.construct_prefix_sets();
+        let prefix_sets = self.construct_prefix_sets().freeze();
         StateRoot::from_tx(tx)
             .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
             .with_prefix_sets(prefix_sets)
             .root_with_updates()
+    }
+
+    /// Generates the state proof for target account and slots on top of this [`HashedPostState`].
+    pub fn account_proof<TX: DbTx>(
+        &self,
+        tx: &TX,
+        address: Address,
+        slots: &[B256],
+    ) -> Result<AccountProof, StateRootError> {
+        let sorted = self.clone().into_sorted();
+        let prefix_sets = self.construct_prefix_sets();
+        Proof::from_tx(tx)
+            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
+            .with_prefix_sets_mut(prefix_sets)
+            .account_proof(address, slots)
     }
 }
 
@@ -308,7 +322,7 @@ impl HashedStorage {
 }
 
 /// Sorted hashed post state optimized for iterating during state trie calculation.
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct HashedPostStateSorted {
     /// Updated state of accounts.
     pub(crate) accounts: HashedAccountsSorted,
@@ -316,13 +330,36 @@ pub struct HashedPostStateSorted {
     pub(crate) storages: HashMap<B256, HashedStorageSorted>,
 }
 
+impl HashedPostStateSorted {
+    /// Returns reference to hashed accounts.
+    pub const fn accounts(&self) -> &HashedAccountsSorted {
+        &self.accounts
+    }
+
+    /// Returns reference to hashed account storages.
+    pub const fn account_storages(&self) -> &HashMap<B256, HashedStorageSorted> {
+        &self.storages
+    }
+}
+
 /// Sorted account state optimized for iterating during state trie calculation.
-#[derive(Clone, Eq, PartialEq, Debug)]
+#[derive(Clone, Eq, PartialEq, Default, Debug)]
 pub struct HashedAccountsSorted {
     /// Sorted collection of hashed addresses and their account info.
     pub(crate) accounts: Vec<(B256, Account)>,
     /// Set of destroyed account keys.
     pub(crate) destroyed_accounts: HashSet<B256>,
+}
+
+impl HashedAccountsSorted {
+    /// Returns a sorted iterator over updated accounts.
+    pub fn accounts_sorted(&self) -> impl Iterator<Item = (B256, Option<Account>)> {
+        self.accounts
+            .iter()
+            .map(|(address, account)| (*address, Some(*account)))
+            .chain(self.destroyed_accounts.iter().map(|address| (*address, None)))
+            .sorted_by_key(|entry| *entry.0)
+    }
 }
 
 /// Sorted hashed storage optimized for iterating during state trie calculation.
@@ -332,8 +369,24 @@ pub struct HashedStorageSorted {
     pub(crate) non_zero_valued_slots: Vec<(B256, U256)>,
     /// Slots that have been zero valued.
     pub(crate) zero_valued_slots: HashSet<B256>,
-    /// Flag indicating hether the storage was wiped or not.
+    /// Flag indicating whether the storage was wiped or not.
     pub(crate) wiped: bool,
+}
+
+impl HashedStorageSorted {
+    /// Returns `true` if the account was wiped.
+    pub const fn is_wiped(&self) -> bool {
+        self.wiped
+    }
+
+    /// Returns a sorted iterator over updated storage slots.
+    pub fn storage_slots_sorted(&self) -> impl Iterator<Item = (B256, U256)> {
+        self.non_zero_valued_slots
+            .iter()
+            .map(|(hashed_slot, value)| (*hashed_slot, *value))
+            .chain(self.zero_valued_slots.iter().map(|hashed_slot| (*hashed_slot, U256::ZERO)))
+            .sorted_by_key(|entry| *entry.0)
+    }
 }
 
 #[cfg(test)]

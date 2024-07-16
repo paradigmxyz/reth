@@ -53,7 +53,7 @@ pub use error::{
 };
 
 mod invalid_headers;
-use invalid_headers::InvalidHeaderCache;
+pub use invalid_headers::InvalidHeaderCache;
 
 mod event;
 pub use event::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
@@ -62,13 +62,12 @@ mod handle;
 pub use handle::BeaconConsensusEngineHandle;
 
 mod forkchoice;
-pub use forkchoice::ForkchoiceStatus;
-use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker};
+pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
 
 mod metrics;
 use metrics::EngineMetrics;
 
-pub(crate) mod sync;
+pub mod sync;
 use sync::{EngineSyncController, EngineSyncEvent};
 
 /// Hooks for running during the main loop of
@@ -88,6 +87,18 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 /// This is the default threshold, the distance to the head that the tree will be used for sync.
 /// If the distance exceeds this threshold, the pipeline will be used for sync.
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
+
+/// Represents a pending forkchoice update.
+///
+/// This type encapsulates the necessary components for a pending forkchoice update
+/// in the context of a beacon consensus engine.
+///
+/// It consists of:
+/// - The current fork choice state.
+/// - Optional payload attributes specific to the engine type.
+/// - Sender for the result of an oneshot channel, conveying the outcome of the fork choice update.
+type PendingForkchoiceUpdate<PayloadAttributes> =
+    (ForkchoiceState, Option<PayloadAttributes>, oneshot::Sender<RethResult<OnForkChoiceUpdated>>);
 
 /// The beacon consensus engine is the driver that switches between historical and live sync.
 ///
@@ -190,12 +201,7 @@ where
     /// It is recorded if we cannot process the forkchoice update because
     /// a hook with database read-write access is active.
     /// This is a temporary solution to always process missed FCUs.
-    #[allow(clippy::type_complexity)]
-    pending_forkchoice_update: Option<(
-        ForkchoiceState,
-        Option<EngineT::PayloadAttributes>,
-        oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
-    )>,
+    pending_forkchoice_update: Option<PendingForkchoiceUpdate<EngineT::PayloadAttributes>>,
     /// Tracks the header of invalid payloads that were rejected by the engine because they're
     /// invalid.
     invalid_headers: InvalidHeaderCache,
@@ -2160,7 +2166,6 @@ mod tests {
                 provider
                     .insert_block(
                         b.clone().try_seal_with_senders().expect("invalid tx signature in block"),
-                        None,
                     )
                     .map(drop)
             })

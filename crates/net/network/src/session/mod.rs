@@ -170,6 +170,11 @@ impl SessionManager {
         self.secret_key
     }
 
+    /// Returns a borrowed reference to the active sessions.
+    pub const fn active_sessions(&self) -> &HashMap<PeerId, ActiveSessionHandle> {
+        &self.active_sessions
+    }
+
     /// Returns the session hello message.
     pub fn hello_message(&self) -> HelloMessageWithProtocols {
         self.hello_message.clone()
@@ -586,35 +591,6 @@ impl SessionManager {
                 }
             }
         }
-    }
-
-    /// Returns [`PeerInfo`] for all connected peers
-    pub(crate) fn get_peer_info(&self) -> Vec<PeerInfo> {
-        self.active_sessions.values().map(ActiveSessionHandle::peer_info).collect()
-    }
-
-    /// Returns [`PeerInfo`] for a given peer.
-    ///
-    /// Returns `None` if there's no active session to the peer.
-    pub(crate) fn get_peer_info_by_id(&self, peer_id: PeerId) -> Option<PeerInfo> {
-        self.active_sessions.get(&peer_id).map(ActiveSessionHandle::peer_info)
-    }
-    /// Returns [`PeerInfo`] for a given peer.
-    ///
-    /// Returns `None` if there's no active session to the peer.
-    pub(crate) fn get_peer_infos_by_ids(
-        &self,
-        peer_ids: impl IntoIterator<Item = PeerId>,
-    ) -> Vec<PeerInfo> {
-        let mut infos = Vec::new();
-        for peer_id in peer_ids {
-            if let Some(info) =
-                self.active_sessions.get(&peer_id).map(ActiveSessionHandle::peer_info)
-            {
-                infos.push(info);
-            }
-        }
-        infos
     }
 }
 

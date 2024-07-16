@@ -3,19 +3,19 @@
 use clap::Parser;
 use eyre::Result;
 use tracing::{info, debug};
-use crate::commands::common::{AccessRights, Environment, EnvironmentArgs};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use reth_blockchain_tree::{BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals};
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_consensus::Consensus;
 use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
+use reth_primitives::constants::gas_units::format_gas_throughput;
 use reth_provider::{BlockReader, ChainSpecProvider, HeaderProvider};
 use reth_provider::providers::BlockchainProvider;
-use reth_prune_types::PruneModes;
+use reth_prune::PruneModes;
 use reth_revm::database::StateProviderDatabase;
-use reth_stages::format_gas_throughput;
 use crate::beacon_consensus::EthBeaconConsensus;
 use crate::macros::block_executor;
 use crate::providers::{BlockNumReader, ProviderError, StateProviderFactory};
@@ -51,7 +51,7 @@ impl EvmCommand {
         // configure blockchain tree
         let tree_externals =
             TreeExternals::new(provider_factory.clone(), consensus, executor);
-        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
+        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), PruneModes::none())?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
         let blockchain_db = BlockchainProvider::new(provider_factory.clone(), blockchain_tree)?;
 
@@ -159,7 +159,7 @@ impl EvmCommand {
                     let loop_end = std::cmp::min(loop_start + self.step_size as u64 - 1, thread_end);
                     let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(loop_start-1)?);
                     let executor = block_executor!(provider_factory.chain_spec());
-                    let mut executor = executor.batch_executor(db, PruneModes::none());
+                    let mut executor = executor.batch_executor(db);
 
                     let blocks = blockchain_db.block_with_senders_range(loop_start..=loop_end).unwrap();
 

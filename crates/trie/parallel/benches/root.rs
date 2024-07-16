@@ -27,10 +27,10 @@ pub fn calculate_state_root(c: &mut Criterion) {
         let provider_factory = create_test_provider_factory();
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
-            HashedStateChanges(db_state).write_to_db(provider_rw.tx_ref()).unwrap();
+            HashedStateChanges(&db_state.into_sorted()).write_to_db(&provider_rw).unwrap();
             let (_, updates) =
                 StateRoot::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
-            updates.flush(provider_rw.tx_ref()).unwrap();
+            updates.write_to_database(provider_rw.tx_ref()).unwrap();
             provider_rw.commit().unwrap();
         }
 
@@ -41,7 +41,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
             b.to_async(&runtime).iter_with_setup(
                 || {
                     let sorted_state = updated_state.clone().into_sorted();
-                    let prefix_sets = updated_state.construct_prefix_sets();
+                    let prefix_sets = updated_state.construct_prefix_sets().freeze();
                     let provider = provider_factory.provider().unwrap();
                     (provider, sorted_state, prefix_sets)
                 },

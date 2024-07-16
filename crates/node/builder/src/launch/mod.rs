@@ -25,7 +25,7 @@ use reth_node_core::{
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
-use reth_rpc_engine_api::EngineApi;
+use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
@@ -104,7 +104,7 @@ where
         let ctx = ctx
             .with_configured_globals()
             // load the toml config
-            .with_loaded_toml_config(config).await?
+            .with_loaded_toml_config(config)?
             // add resolved peers
             .with_resolved_peers().await?
             // attach the database
@@ -127,7 +127,7 @@ where
             .with_metrics()
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
-            .with_blockchain_db::<T>().await?
+            .with_blockchain_db::<T>()?
             .with_components(components_builder, on_component_initialized).await?;
 
         // spawn exexs
@@ -201,8 +201,7 @@ where
                 static_file_producer,
                 ctx.components().block_executor().clone(),
                 pipeline_exex_handle,
-            )
-            .await?;
+            )?;
 
             let pipeline_events = pipeline.events();
             task.set_pipeline_events(pipeline_events);
@@ -223,8 +222,7 @@ where
                 static_file_producer,
                 ctx.components().block_executor().clone(),
                 pipeline_exex_handle,
-            )
-            .await?;
+            )?;
 
             (pipeline, Either::Right(network_client.clone()))
         };
@@ -233,14 +231,12 @@ where
 
         let initial_target = ctx.node_config().debug.tip;
 
-        let mut pruner_builder =
-            ctx.pruner_builder().max_reorg_depth(ctx.tree_config().max_reorg_depth() as usize);
+        let mut pruner_builder = ctx.pruner_builder();
         if let Some(exex_manager_handle) = &exex_manager_handle {
             pruner_builder =
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
         }
-
-        let pruner = pruner_builder.build(ctx.provider_factory().clone());
+        let pruner = pruner_builder.build_with_provider_factory(ctx.provider_factory().clone());
 
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
@@ -281,7 +277,7 @@ where
         ctx.task_executor().spawn_critical(
             "events task",
             node::handle_events(
-                Some(ctx.components().network().clone()),
+                Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
                 database.clone(),
@@ -301,6 +297,7 @@ where
             ctx.components().payload_builder().clone().into(),
             Box::new(ctx.task_executor().clone()),
             client,
+            EngineCapabilities::default(),
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -308,7 +305,7 @@ where
         let jwt_secret = ctx.auth_jwt_secret()?;
 
         // Start RPC servers
-        let (rpc_server_handles, mut rpc_registry) = crate::rpc::launch_rpc_servers(
+        let (rpc_server_handles, rpc_registry) = crate::rpc::launch_rpc_servers(
             ctx.node_adapter().clone(),
             engine_api,
             ctx.node_config(),

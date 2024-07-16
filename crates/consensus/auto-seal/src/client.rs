@@ -4,11 +4,11 @@ use crate::Storage;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
-    headers::client::{HeadersClient, HeadersFut, HeadersRequest},
+    headers::client::{HeadersClient, HeadersDirection, HeadersFut, HeadersRequest},
     priority::Priority,
 };
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection, B256};
+use reth_primitives::{BlockBody, BlockHashOrNumber, Header, B256};
 use std::fmt::Debug;
 use tracing::{trace, warn};
 

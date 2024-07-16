@@ -212,15 +212,17 @@ impl PeersManager {
         })
     }
 
-    /// Returns the [`NodeRecord`] for the given peer id
-    #[allow(dead_code)]
-    fn peer_by_id(&self, peer_id: PeerId) -> Option<NodeRecord> {
+    /// Returns the `NodeRecord` and `PeerKind` for the given peer id
+    pub(crate) fn peer_by_id(&self, peer_id: PeerId) -> Option<(NodeRecord, PeerKind)> {
         self.peers.get(&peer_id).map(|v| {
-            NodeRecord::new_with_ports(
-                v.addr.tcp.ip(),
-                v.addr.tcp.port(),
-                v.addr.udp.map(|addr| addr.port()),
-                peer_id,
+            (
+                NodeRecord::new_with_ports(
+                    v.addr.tcp.ip(),
+                    v.addr.tcp.port(),
+                    v.addr.udp.map(|addr| addr.port()),
+                    peer_id,
+                ),
+                v.kind,
             )
         })
     }
@@ -373,8 +375,9 @@ impl PeersManager {
     fn ban_peer(&mut self, peer_id: PeerId) {
         let mut ban_duration = self.ban_duration;
         if let Some(peer) = self.peers.get(&peer_id) {
-            if peer.is_trusted() {
-                // For misbehaving trusted peers, we provide a bit more leeway when penalizing them.
+            if peer.is_trusted() || peer.is_static() {
+                // For misbehaving trusted or static peers, we provide a bit more leeway when
+                // penalizing them.
                 ban_duration = self.backoff_durations.medium;
             }
         }
@@ -444,8 +447,8 @@ impl PeersManager {
                 peer.reset_reputation()
             } else {
                 let mut reputation_change = self.reputation_weights.change(rep).as_i32();
-                if peer.is_trusted() {
-                    // exempt trusted peers from reputation slashing for
+                if peer.is_trusted() || peer.is_static() {
+                    // exempt trusted and static peers from reputation slashing for
                     if matches!(
                         rep,
                         ReputationChangeKind::Dropped |
@@ -779,8 +782,8 @@ impl PeersManager {
 
     /// Returns the idle peer with the highest reputation.
     ///
-    /// Peers that are `trusted`, see [`PeerKind`], are prioritized as long as they're not currently
-    /// marked as banned or backed off.
+    /// Peers that are `trusted` or `static`, see [`PeerKind`], are prioritized as long as they're
+    /// not currently marked as banned or backed off.
     ///
     /// If `trusted_nodes_only` is enabled, see [`PeersConfig`], then this will only consider
     /// `trusted` peers.
@@ -797,13 +800,13 @@ impl PeersManager {
         // keep track of the best peer, if there's one
         let mut best_peer = unconnected.next()?;
 
-        if best_peer.1.is_trusted() {
+        if best_peer.1.is_trusted() || best_peer.1.is_static() {
             return Some((*best_peer.0, best_peer.1))
         }
 
         for maybe_better in unconnected {
-            // if the peer is trusted, return it immediately
-            if maybe_better.1.is_trusted() {
+            // if the peer is trusted or static, return it immediately
+            if maybe_better.1.is_trusted() || maybe_better.1.is_static() {
                 return Some((*maybe_better.0, maybe_better.1))
             }
 
@@ -1150,6 +1153,12 @@ impl Peer {
     const fn is_trusted(&self) -> bool {
         matches!(self.kind, PeerKind::Trusted)
     }
+
+    /// Returns whether this peer is static
+    #[inline]
+    const fn is_static(&self) -> bool {
+        matches!(self.kind, PeerKind::Static)
+    }
 }
 
 /// Outcomes when a reputation change is applied to a peer
@@ -1378,7 +1387,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        let record = peers.peer_by_id(peer).unwrap();
+        let (record, _) = peers.peer_by_id(peer).unwrap();
         assert_eq!(record.tcp_addr(), socket_addr);
         assert_eq!(record.udp_addr(), socket_addr);
     }
@@ -1405,7 +1414,7 @@ mod tests {
             _ => unreachable!(),
         }
 
-        let record = peers.peer_by_id(peer).unwrap();
+        let (record, _) = peers.peer_by_id(peer).unwrap();
         assert_eq!(record.tcp_addr(), tcp_addr);
         assert_eq!(record.udp_addr(), udp_addr);
     }

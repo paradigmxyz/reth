@@ -26,6 +26,7 @@ use reth_provider::{
 use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
+use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, StateRoot};
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::Arc,
@@ -65,8 +66,6 @@ pub struct BlockchainTree<DB, E> {
     externals: TreeExternals<DB, E>,
     /// Tree configuration
     config: BlockchainTreeConfig,
-    /// Prune modes.
-    prune_modes: Option<PruneModes>,
     /// Broadcast channel for canon state changes notifications.
     canon_state_notification_sender: CanonStateNotificationSender,
     /// Metrics for sync stages.
@@ -115,15 +114,18 @@ where
     ///   storage space efficiently. It's important to validate this configuration to ensure it does
     ///   not lead to unintended data loss.
     pub fn new(
-        externals: TreeExternals<DB, E>,
+        mut externals: TreeExternals<DB, E>,
         config: BlockchainTreeConfig,
-        prune_modes: Option<PruneModes>,
+        prune_modes: PruneModes,
     ) -> ProviderResult<Self> {
         let max_reorg_depth = config.max_reorg_depth() as usize;
         // The size of the broadcast is twice the maximum reorg depth, because at maximum reorg
         // depth at least N blocks must be sent at once.
         let (canon_state_notification_sender, _receiver) =
             tokio::sync::broadcast::channel(max_reorg_depth * 2);
+
+        // Set the prune modes argument, on the provider
+        externals.provider_factory = externals.provider_factory.with_prune_modes(prune_modes);
 
         let last_canonical_hashes =
             externals.fetch_latest_canonical_hashes(config.num_of_canonical_hashes() as usize)?;
@@ -138,7 +140,6 @@ where
                 config.max_unconnected_blocks(),
             ),
             config,
-            prune_modes,
             canon_state_notification_sender,
             sync_metrics_tx: None,
             metrics: Default::default(),
@@ -1214,6 +1215,8 @@ where
     ) -> Result<(), CanonicalError> {
         let (blocks, state, chain_trie_updates) = chain.into_inner();
         let hashed_state = state.hash_state_slow();
+        let prefix_sets = hashed_state.construct_prefix_sets().freeze();
+        let hashed_state_sorted = hashed_state.into_sorted();
 
         // Compute state root or retrieve cached trie updates before opening write transaction.
         let block_hash_numbers =
@@ -1233,8 +1236,13 @@ where
                     // State root calculation can take a while, and we're sure no write transaction
                     // will be open in parallel. See https://github.com/paradigmxyz/reth/issues/6168.
                     .disable_long_read_transaction_safety();
-                let (state_root, trie_updates) = hashed_state
-                    .state_root_with_updates(provider.tx_ref())
+                let (state_root, trie_updates) = StateRoot::from_tx(provider.tx_ref())
+                    .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
+                        provider.tx_ref(),
+                        &hashed_state_sorted,
+                    ))
+                    .with_prefix_sets(prefix_sets)
+                    .root_with_updates()
                     .map_err(Into::<BlockValidationError>::into)?;
                 let tip = blocks.tip();
                 if state_root != tip.state_root {
@@ -1256,9 +1264,8 @@ where
             .append_blocks_with_state(
                 blocks.into_blocks().collect(),
                 state,
-                hashed_state,
+                hashed_state_sorted,
                 trie_updates,
-                self.prune_modes.as_ref(),
             )
             .map_err(|e| CanonicalError::CanonicalCommit(e.to_string()))?;
 
@@ -1381,7 +1388,7 @@ mod tests {
     #[cfg(feature = "optimism")]
     use reth_primitives::proofs::calculate_receipt_root_optimism;
     use reth_primitives::{
-        constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH, ETHEREUM_BLOCK_GAS_LIMIT},
+        constants::{EIP1559_INITIAL_BASE_FEE, EMPTY_ROOT_HASH},
         keccak256,
         proofs::calculate_transaction_root,
         revm_primitives::AccountInfo,
@@ -1424,7 +1431,6 @@ mod tests {
         provider
             .insert_historical_block(
                 genesis.try_seal_with_senders().expect("invalid tx signature in genesis"),
-                None,
             )
             .unwrap();
 
@@ -1545,7 +1551,6 @@ mod tests {
                     SealedBlock::new(chain_spec.sealed_genesis_header(), Default::default())
                         .try_seal_with_senders()
                         .unwrap(),
-                    None,
                 )
                 .unwrap();
             let account = Account { balance: initial_signer_balance, ..Default::default() };
@@ -1602,7 +1607,7 @@ mod tests {
                         number,
                         parent_hash: parent.unwrap_or_default(),
                         gas_used: body.len() as u64 * 21_000,
-                        gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+                        gas_limit: chain_spec.max_gas_limit,
                         mix_hash: B256::random(),
                         base_fee_per_gas: Some(EIP1559_INITIAL_BASE_FEE),
                         transactions_root,
@@ -1647,7 +1652,7 @@ mod tests {
         let mut tree = BlockchainTree::new(
             TreeExternals::new(provider_factory, consensus, executor_provider),
             BlockchainTreeConfig::default(),
-            None,
+            PruneModes::default(),
         )
         .expect("failed to create tree");
 
@@ -1727,7 +1732,8 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, config, PruneModes::default())
+            .expect("failed to create tree");
         // genesis block 10 is already canonical
         tree.make_canonical(B256::ZERO).unwrap();
 
@@ -1803,7 +1809,8 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, config, PruneModes::default())
+            .expect("failed to create tree");
         // genesis block 10 is already canonical
         tree.make_canonical(B256::ZERO).unwrap();
 
@@ -1867,7 +1874,7 @@ mod tests {
         );
 
         let provider = tree.externals.provider_factory.provider().unwrap();
-        let prefix_sets = exec5.hash_state_slow().construct_prefix_sets();
+        let prefix_sets = exec5.hash_state_slow().construct_prefix_sets().freeze();
         let state_root =
             StateRoot::from_tx(provider.tx_ref()).with_prefix_sets(prefix_sets).root().unwrap();
         assert_eq!(state_root, block5.state_root);
@@ -1888,7 +1895,8 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, config, PruneModes::default())
+            .expect("failed to create tree");
         // genesis block 10 is already canonical
         tree.make_canonical(B256::ZERO).unwrap();
 
@@ -1986,7 +1994,8 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, config, PruneModes::default())
+            .expect("failed to create tree");
 
         let mut canon_notif = tree.subscribe_canon_state();
         // genesis block 10 is already canonical
@@ -2379,7 +2388,8 @@ mod tests {
 
         // make tree
         let config = BlockchainTreeConfig::new(1, 2, 3, 2);
-        let mut tree = BlockchainTree::new(externals, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(externals, config, PruneModes::default())
+            .expect("failed to create tree");
 
         assert_eq!(
             tree.insert_block(block1.clone(), BlockValidationKind::Exhaustive).unwrap(),
@@ -2399,8 +2409,8 @@ mod tests {
         tree.make_canonical(block2.hash()).unwrap();
 
         // restart
-        let mut tree =
-            BlockchainTree::new(cloned_externals_1, config, None).expect("failed to create tree");
+        let mut tree = BlockchainTree::new(cloned_externals_1, config, PruneModes::default())
+            .expect("failed to create tree");
         assert_eq!(tree.block_indices().last_finalized_block(), 0);
 
         let mut block1a = block1;
@@ -2416,8 +2426,8 @@ mod tests {
         tree.finalize_block(block1a.number).unwrap();
 
         // restart
-        let tree =
-            BlockchainTree::new(cloned_externals_2, config, None).expect("failed to create tree");
+        let tree = BlockchainTree::new(cloned_externals_2, config, PruneModes::default())
+            .expect("failed to create tree");
 
         assert_eq!(tree.block_indices().last_finalized_block(), block1a.number);
     }

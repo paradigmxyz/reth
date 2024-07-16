@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use reth_chainspec::{Chain, ChainSpec, EthereumHardfork, EthereumHardforks};
+use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
@@ -198,12 +198,7 @@ impl Consensus for EthBeaconConsensus {
                 })
             }
 
-            // Goerli and early OP exception:
-            //  * If the network is goerli pre-merge, ignore the extradata check, since we do not
-            //  support clique. Same goes for OP blocks below Bedrock.
-            if self.chain_spec.chain != Chain::goerli() && !self.chain_spec.is_optimism() {
-                validate_header_extradata(header)?;
-            }
+            validate_header_extradata(header)?;
         }
 
         Ok(())

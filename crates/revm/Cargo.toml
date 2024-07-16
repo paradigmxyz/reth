@@ -27,13 +27,13 @@ revm.workspace = true
 
 # alloy
 alloy-eips.workspace = true
-alloy-rlp.workspace = true
 
 # common
 tracing.workspace = true
 
 [dev-dependencies]
 reth-trie.workspace = true
+reth-ethereum-forks.workspace = true
 
 [features]
 default = ["std", "c-kzg"]
