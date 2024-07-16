@@ -8,9 +8,14 @@ use reth_errors::RethResult;
 use reth_primitives::{Address, U64};
 use reth_rpc_types::SyncStatus;
 
-/// `Eth` API trait.
+/// Core Ethereum API specification.
 ///
-/// Defines core functionality of the `eth` API implementation.
+/// This trait defines the fundamental methods required for implementing
+/// the Ethereum JSON-RPC API. It provides access to essential blockchain
+/// information and node status.
+///
+/// Implementations of this trait form the basis for servicing Ethereum
+/// API requests in a node or client application.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait EthApiSpec: Send + Sync {
     /// Returns the current ethereum protocol version.

@@ -12,8 +12,14 @@ use tracing::debug;
 
 use super::LoadBlock;
 
-/// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
-/// `eth_` namespace.
+/// Fee-related functionalities for the [`EthApiServer`](crate::EthApiServer) trait
+/// within the `eth_` namespace. This trait provides a comprehensive set of methods
+/// to interact with Ethereum's gas pricing mechanisms and fee history, enabling
+/// efficient handling of transactions and fee estimation.
+///
+/// The `EthFees` trait encompasses essential operations such as retrieving suggested
+/// gas prices, calculating base fees for various transaction types, and accessing
+/// historical fee data.
 pub trait EthFees: LoadFee {
     /// Returns a suggestion for a gas price for legacy transactions.
     ///
@@ -222,9 +228,12 @@ pub trait EthFees: LoadFee {
     }
 }
 
-/// Loads fee from database.
+/// Trait for loading and managing fee-related data in Ethereum RPC implementations.
 ///
-/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` fees RPC methods.
+/// This trait provides methods for accessing and calculating various types of
+/// transaction fees, including legacy gas prices, EIP-1559 fees, and EIP-4844 blob fees.
+///
+/// It is designed to be used across multiple `eth_` RPC methods, not just fee-specific ones.
 pub trait LoadFee: LoadBlock {
     // Returns a handle for reading data from disk.
     ///

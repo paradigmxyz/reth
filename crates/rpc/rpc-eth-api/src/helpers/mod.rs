@@ -38,7 +38,12 @@ pub use state::{EthState, LoadState};
 pub use trace::Trace;
 pub use transaction::{EthTransactions, LoadTransaction, UpdateRawTxForwarder};
 
-/// Extension trait that bundles traits needed for tracing transactions.
+/// Extension trait that bundles traits necessary for tracing transactions and managing state.
+///
+/// This trait combines multiple [`Load`] and [`Eth`] traits to provide a comprehensive interface
+/// for tracing transactions, loading blocks, and executing calls. It simplifies the development
+/// process by providing a single entry point for various functionalities related to transaction
+/// tracing and execution.
 pub trait TraceExt:
     LoadTransaction + LoadBlock + LoadPendingBlock + SpawnBlocking + Trace + Call
 {
@@ -46,9 +51,15 @@ pub trait TraceExt:
 
 impl<T> TraceExt for T where T: LoadTransaction + LoadBlock + LoadPendingBlock + Trace + Call {}
 
-/// Helper trait to unify all `eth` rpc server building block traits, for simplicity.
+/// Helper trait that unifies all `eth` RPC server building block traits for ease of use.
 ///
-/// This trait is automatically implemented for any type that implements all the `Eth` traits.
+/// This trait serves as a comprehensive interface by aggregating all necessary `Eth` traits
+/// required for building an Ethereum RPC server. It is automatically implemented for any type
+/// that adheres to the required traits, ensuring consistency and simplifying implementation
+/// for developers.
+///
+/// Implementers of this trait gain access to functionalities covering transactions, blocks,
+/// state management, and more, forming a complete Ethereum API server interface.
 pub trait FullEthApi:
     EthApiSpec + EthTransactions + EthBlocks + EthState + EthCall + EthFees + Trace + LoadReceipt
 {

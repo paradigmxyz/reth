@@ -6,7 +6,10 @@ use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit};
 
-/// Executes code on a blocking thread.
+/// Trait for executing code on blocking threads.
+///
+/// This trait provides methods to spawn both I/O-bound and CPU-bound tasks,
+/// as well as utilities for managing concurrency with semaphores.
 pub trait SpawnBlocking: Clone + Send + Sync + 'static {
     /// Returns a handle for spawning IO heavy blocking tasks.
     ///

@@ -19,12 +19,88 @@ use crate::helpers::{
     EthTransactions, FullEthApi,
 };
 
-/// Helper trait, unifies functionality that must be supported to implement all RPC methods for
-/// server.
+/// Helper trait that unifies the core functionality required to implement all Ethereum RPC methods.
+///
+/// This trait combines several key components:
+/// - `EthApiServer`: Provides the base Ethereum API server functionality.
+/// - `FullEthApi`: Extends the base API with additional methods for a full Ethereum node.
+/// - `UpdateRawTxForwarder`: Allows updating the raw transaction forwarding mechanism.
+/// - `Clone`: Enables the creation of copies of the implementing type.
+///
+/// By implementing this trait, a type gains all the necessary capabilities to serve
+/// as a comprehensive Ethereum RPC server. This design allows for modular composition
+/// of Ethereum node functionality and easier extensibility for custom implementations.
+///
+/// ## Usage
+///
+/// Implement this trait on types that need to provide full Ethereum RPC server capabilities.
+/// This is particularly useful for creating custom Ethereum node implementations or
+/// for extending existing implementations with additional functionality.
 pub trait FullEthApiServer: EthApiServer + FullEthApi + UpdateRawTxForwarder + Clone {}
 
 impl<T> FullEthApiServer for T where T: EthApiServer + FullEthApi + UpdateRawTxForwarder + Clone {}
 
+/// Ethereum JSON-RPC API implementation.
+///
+/// This trait defines the core functionality for handling Ethereum JSON-RPC requests.
+/// It is designed to be flexible and extensible, allowing for customization of specific
+/// behaviors while maintaining a consistent interface.
+///
+/// ## Default Implementation
+///
+/// The default implementation of `EthApiServer` provides standard Ethereum (L1) behavior
+/// for the `eth_` namespace RPC methods. This serves as the base implementation for most
+/// Ethereum-compatible networks.
+///
+/// ## Customization
+///
+/// To customize the behavior of specific RPC methods or to implement network-specific
+/// features (such as for L2 solutions or sidechains), you can selectively override
+/// the helper traits that compose the `EthApiServer` functionality. This approach
+/// allows for targeted modifications without necessitating a complete reimplementation
+/// of the entire `EthApiServer` trait.
+///
+/// ## Helper Traits
+///
+/// The `EthApiServer` functionality is composed of several helper traits, including:
+///
+/// - `EthApiSpec`: Defines basic Ethereum network information and status.
+/// - `SpawnBlocking`: Handles task spawning and concurrency.
+/// - `LoadFee`: Manages fee-related data loading and caching.
+/// - `Call`: Handles EVM call operations.
+/// - `LoadState`: Manages state loading and caching.
+/// - `EthState`: Provides Ethereum state-related functionality.
+/// - `EthCall`: Implements Ethereum call-related methods.
+/// - `EthFees`: Handles fee estimation and history.
+/// - `Trace`: Provides tracing functionality for transactions.
+/// - `AddDevSigners`: Manages development signers for testing.
+/// - `UpdateRawTxForwarder`: Allows updating of raw transaction forwarding behavior.
+///
+/// ## Example: Customizing `EthApi` (Optimism rollup)
+///
+/// The `OpEthApi` struct demonstrates how to customize the `EthApiServer` for
+/// Optimistism Rollup network:
+///
+/// ```rust
+/// pub struct OpEthApi<Eth> {
+///     inner: Eth,
+/// }
+///
+/// impl<Eth: EthApiSpec> EthApiSpec for OpEthApi<Eth> {
+///     // Custom implementations for Optimistic Rollup specific behavior
+/// }
+///
+/// // Implement other helper traits as needed...
+/// ```
+///
+/// By wrapping the base `Eth` implementation and selectively overriding specific
+/// helper traits, `OpEthApi` can modify only the necessary behaviors while
+/// inheriting the rest from the default implementation.
+///
+/// This approach allows for efficient customization of the Ethereum RPC behavior
+/// for different network types or specific use cases, without the need to
+/// reimplement the entire API surface.
+///
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]

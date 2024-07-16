@@ -19,7 +19,13 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
 
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 
-/// Helper methods for `eth_` methods relating to state (accounts).
+/// A trait that defines methods for interacting with the Ethereum state.
+///
+/// This trait facilitates the `eth_` JSON-RPC methods related to account management and state
+/// queries.
+///
+/// It provides functionality to access account balances, transaction counts, code, storage values,
+/// and generate Merkle proofs for accounts.
 pub trait EthState: LoadState + SpawnBlocking {
     /// Returns the maximum number of blocks into the past for generating state proofs.
     fn max_proof_window(&self) -> u64;
@@ -121,9 +127,12 @@ pub trait EthState: LoadState + SpawnBlocking {
     }
 }
 
-/// Loads state from database.
+/// Trait for loading and accessing Ethereum state data.
 ///
-/// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` state RPC methods.
+/// This trait provides methods for retrieving state information from various sources,
+/// including the database, memory cache, and transaction pool.
+///
+/// It's used by several `eth_` RPC methods, not exclusively by `eth_` state RPC methods.
 pub trait LoadState {
     /// Returns a handle for reading state from database.
     ///

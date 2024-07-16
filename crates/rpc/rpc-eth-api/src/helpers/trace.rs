@@ -15,7 +15,19 @@ use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndSta
 
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 
-/// Executes CPU heavy tasks.
+/// Trait for tracing the execution of Ethereum transactions and blocks.
+///
+/// The [`Trace`] trait defines the essential functionalities for inspecting the execution
+/// of transactions within the Ethereum Virtual Machine (EVM).
+///
+/// It enables developers to analyze the behavior of transactions, including state changes and
+/// execution results, during different phases of block processing. This trait is particularly
+/// useful for debugging and monitoring Ethereum smart contracts by allowing the inspection of the
+/// EVM's execution environment and transaction state at various points.
+///
+/// The trait is built on top of the [`LoadState`] trait, which provides access to the
+/// underlying state of the Ethereum blockchain, ensuring that the tracing functions
+/// can operate on the most up-to-date state information.
 pub trait Trace: LoadState {
     /// Returns a handle for reading evm config.
     ///

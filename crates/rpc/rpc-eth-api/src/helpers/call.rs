@@ -35,8 +35,11 @@ use tracing::trace;
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 
-/// Execution related functions for the [`EthApiServer`](crate::EthApiServer) trait in
-/// the `eth_` namespace.
+/// A trait that provides execution-related functions for the [`EthApiServer`](crate::EthApiServer)
+/// in the `eth_` namespace.
+///
+/// This trait enables the execution of various Ethereum transactions and calls,
+/// supporting functionalities like estimating gas, executing calls, and creating access lists.
 pub trait EthCall: Call + LoadPendingBlock {
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].
     fn estimate_gas_at(
@@ -266,7 +269,10 @@ pub trait EthCall: Call + LoadPendingBlock {
     }
 }
 
-/// Executes code on state.
+/// Trait for executing code on the Ethereum state.
+///
+/// This trait provides methods for executing transactions, estimating gas,
+/// and performing other state-related operations.
 pub trait Call: LoadState + SpawnBlocking {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     ///
