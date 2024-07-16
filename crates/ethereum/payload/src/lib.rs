@@ -15,6 +15,7 @@ use reth_basic_payload_builder::{
 };
 use reth_errors::RethError;
 use reth_evm::{
+    execute::EvmTransact,
     system_calls::{
         post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
     },
@@ -367,7 +368,7 @@ where
         );
 
         // Configure the environment for the block.
-        let mut evm = evm_config.evm_with_env(&mut db, env);
+        let mut evm = evm_config.evm_with_env_generic(&mut db, env);
 
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
