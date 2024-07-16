@@ -314,13 +314,12 @@ where
     T: NodeTypes,
 {
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB, AO>(
+    pub fn with_components<CB>(
         self,
         components_builder: CB,
     ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, ()>>
     where
         CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
-        AO: NodeAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
     {
         WithLaunchContext {
             builder: self.builder.with_components(components_builder),
@@ -334,8 +333,6 @@ where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: NodeTypes,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
-    AO: NodeAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
-    AO::EthApi: FullEthApiServer + AddDevSigners,
 {
     /// Advances the state of the node builder to the next state where all customizable
     /// [`NodeAddOns`] types are configured.
