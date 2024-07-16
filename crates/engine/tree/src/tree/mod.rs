@@ -152,6 +152,30 @@ impl TreeState {
     }
 }
 
+impl InMemoryState for TreeState {
+    fn in_memory_state_by_hash(&self, hash: B256) -> Option<Arc<State>> {
+        let sealed_block = self.block_by_hash(hash)?;
+        Some(Arc::new(State::new(sealed_block)))
+    }
+
+    fn in_memory_state_by_number(&self, number: u64) -> Option<Arc<State>> {
+        let sealed_block = self.block_by_number(number)?;
+        Some(Arc::new(State::new(sealed_block)))
+    }
+
+    fn in_memory_current_head(&self) -> Option<(BlockNumber, B256)> {
+        self.current_head
+    }
+
+    fn in_memory_pending_state(&self) -> Option<Arc<State>> {
+        self.pending.clone()
+    }
+
+    fn in_memory_pending_block_hash(&self) -> Option<B256> {
+        self.pending.as_ref().map(|state| state.block_hash)
+    }
+}
+
 /// Tracks the state of the engine api internals.
 ///
 /// This type is shareable.
@@ -855,33 +879,6 @@ where
     }
 }
 
-impl<P, E, T> InMemoryState for EngineApiTreeHandlerImpl<P, E, T>
-where
-    T: EngineTypes,
-{
-    fn in_memory_state_by_hash(&self, hash: B256) -> Option<Arc<State>> {
-        let sealed_block = self.state.tree_state.block_by_hash(hash)?;
-        Some(Arc::new(State::new(sealed_block)))
-    }
-
-    fn in_memory_state_by_number(&self, number: u64) -> Option<Arc<State>> {
-        let sealed_block = self.state.tree_state.block_by_number(number)?;
-        Some(Arc::new(State::new(sealed_block)))
-    }
-
-    fn in_memory_current_head(&self) -> Option<(BlockNumber, B256)> {
-        self.state.tree_state.current_head
-    }
-
-    fn in_memory_pending_state(&self) -> Option<Arc<State>> {
-        self.state.tree_state.pending.clone()
-    }
-
-    fn in_memory_pending_block_hash(&self) -> Option<B256> {
-        self.state.tree_state.pending.as_ref().map(|state| state.block_hash)
-    }
-}
-
 /// The state of the persistence task.
 #[derive(Default, Debug)]
 struct PersistenceState {
@@ -915,7 +912,7 @@ impl PersistenceState {
 }
 
 /// Represents the tree state kept in memory.
-trait InMemoryState {
+trait InMemoryState: Send + Sync {
     /// Returns the state for a given block hash.
     fn in_memory_state_by_hash(&self, hash: B256) -> Option<Arc<State>>;
     /// Returns the state for a given block number.
@@ -1070,11 +1067,12 @@ mod tests {
 
             let expected_state = State::new(Arc::new(sealed_block.clone()));
 
-            let actual_state_by_hash = tree.in_memory_state_by_hash(sealed_block.hash()).unwrap();
+            let actual_state_by_hash =
+                tree.state.tree_state.in_memory_state_by_hash(sealed_block.hash()).unwrap();
             assert_eq!(expected_state, *actual_state_by_hash);
 
             let actual_state_by_number =
-                tree.in_memory_state_by_number(sealed_block.number).unwrap();
+                tree.state.tree_state.in_memory_state_by_number(sealed_block.number).unwrap();
             assert_eq!(expected_state, *actual_state_by_number);
         }
     }
