@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
 use crate::{
-    segments::{PruneInput, PruneOutput, PruneOutputCheckpoint, Segment},
+    segments::{PruneInput, Segment},
     PrunerError,
 };
 use alloy_primitives::BlockNumber;
@@ -13,7 +13,10 @@ use reth_db::{
     transaction::DbTxMut,
 };
 use reth_provider::{providers::StaticFileProvider, DatabaseProviderRW};
-use reth_prune_types::{PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment};
+use reth_prune_types::{
+    PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
+    SegmentOutputCheckpoint,
+};
 use reth_static_file_types::StaticFileSegment;
 use tracing::trace;
 
@@ -50,12 +53,12 @@ impl<DB: Database> Segment<DB> for Headers {
         &self,
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
-    ) -> Result<PruneOutput, PrunerError> {
+    ) -> Result<SegmentOutput, PrunerError> {
         let (block_range_start, block_range_end) = match input.get_next_block_range() {
             Some(range) => (*range.start(), *range.end()),
             None => {
                 trace!(target: "pruner", "No headers to prune");
-                return Ok(PruneOutput::done())
+                return Ok(SegmentOutput::done())
             }
         };
 
@@ -93,10 +96,10 @@ impl<DB: Database> Segment<DB> for Headers {
         let done = last_pruned_block.map_or(false, |block| block == block_range_end);
         let progress = PruneProgress::new(done, &limiter);
 
-        Ok(PruneOutput {
+        Ok(SegmentOutput {
             progress,
             pruned,
-            checkpoint: Some(PruneOutputCheckpoint {
+            checkpoint: Some(SegmentOutputCheckpoint {
                 block_number: last_pruned_block,
                 tx_number: None,
             }),
@@ -193,8 +196,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::segments::{
-        static_file::headers::HEADER_TABLES_TO_PRUNE, PruneInput, PruneOutput,
-        PruneOutputCheckpoint, Segment,
+        static_file::headers::HEADER_TABLES_TO_PRUNE, PruneInput, Segment, SegmentOutput,
     };
     use alloy_primitives::{BlockNumber, B256, U256};
     use assert_matches::assert_matches;
@@ -202,7 +204,8 @@ mod tests {
     use reth_db_api::transaction::DbTx;
     use reth_provider::{PruneCheckpointReader, PruneCheckpointWriter, StaticFileProviderFactory};
     use reth_prune_types::{
-        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
+        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
+        PruneSegment, SegmentOutputCheckpoint,
     };
     use reth_stages::test_utils::TestStageDB;
     use reth_testing_utils::{generators, generators::random_header_range};
@@ -258,12 +261,12 @@ mod tests {
                 expected_prune_progress=?expected_result.0,
                 expected_pruned=?expected_result.1,
                 result=?result,
-                "PruneOutput"
+                "SegmentOutput"
             );
 
             assert_matches!(
                 result,
-                PruneOutput {progress, pruned, checkpoint: Some(_)}
+                SegmentOutput {progress, pruned, checkpoint: Some(_)}
                     if (progress, pruned) == expected_result
             );
             provider
@@ -327,9 +330,9 @@ mod tests {
         let result = segment.prune(&provider, input).unwrap();
         assert_eq!(
             result,
-            PruneOutput::not_done(
+            SegmentOutput::not_done(
                 PruneInterruptReason::DeletedEntriesLimitReached,
-                Some(PruneOutputCheckpoint::default())
+                Some(SegmentOutputCheckpoint::default())
             )
         );
     }

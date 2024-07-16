@@ -8,7 +8,7 @@ use crate::{
 use reth_db::Database;
 use reth_primitives::{SealedBlock, B256, U256};
 use reth_provider::ProviderFactory;
-use reth_prune::{PruneProgress, Pruner};
+use reth_prune::{Pruner, PrunerOutput};
 use std::sync::{
     mpsc::{SendError, Sender},
     Arc,
@@ -36,7 +36,7 @@ pub enum PersistenceAction {
 
     /// Prune associated block data before the given block number, according to already-configured
     /// prune modes.
-    PruneBefore((u64, oneshot::Sender<PruneProgress>)),
+    PruneBefore((u64, oneshot::Sender<PrunerOutput>)),
 }
 
 /// An error type for when there is a [`SendError`] while sending an action to one of the services.
@@ -172,7 +172,7 @@ impl PersistenceHandle {
 
     /// Tells the persistence service to remove block data before the given hash, according to the
     /// configured prune config.
-    pub async fn prune_before(&self, block_num: u64) -> PruneProgress {
+    pub async fn prune_before(&self, block_num: u64) -> PrunerOutput {
         let (tx, rx) = oneshot::channel();
         self.send_action(PersistenceAction::PruneBefore((block_num, tx)))
             .expect("should be able to send");

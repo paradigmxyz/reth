@@ -4,7 +4,7 @@ use crate::{
 use reth_primitives::{Account, Address, BlockNumber, Bytecode, B256};
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof};
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 use revm::db::BundleState;
 
 /// A state provider that resolves to data from either a wrapped [`crate::ExecutionOutcome`]
@@ -71,6 +71,13 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         self.state_provider.state_root(&state)
     }
 
+    fn hashed_state_root(&self, hashed_state: &reth_trie::HashedPostState) -> ProviderResult<B256> {
+        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
+        state.extend(hashed_state.clone());
+        self.state_provider.hashed_state_root(&state)
+    }
+
     fn state_root_with_updates(
         &self,
         bundle_state: &BundleState,
@@ -79,20 +86,31 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         state.extend(bundle_state.clone());
         self.state_provider.state_root_with_updates(&state)
     }
+
+    fn hashed_state_root_with_updates(
+        &self,
+        hashed_state: &HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
+        state.extend(hashed_state.clone());
+        self.state_provider.hashed_state_root_with_updates(&state)
+    }
 }
 
 impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
     for BundleStateProvider<SP, EDP>
 {
-    fn proof(
+    fn hashed_proof(
         &self,
-        bundle_state: &BundleState,
+        hashed_state: &HashedPostState,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        let mut state = self.block_execution_data_provider.execution_outcome().state().clone();
-        state.extend(bundle_state.clone());
-        self.state_provider.proof(&state, address, slots)
+        let bundle_state = self.block_execution_data_provider.execution_outcome().state();
+        let mut state = HashedPostState::from_bundle_state(&bundle_state.state);
+        state.extend(hashed_state.clone());
+        self.state_provider.hashed_proof(&state, address, slots)
     }
 }
 
