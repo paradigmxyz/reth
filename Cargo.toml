@@ -500,10 +500,10 @@ tower-http = "0.5"
 discv5 = "0.6.0"
 
 # rpc
-jsonrpsee = "0.23"
-jsonrpsee-core = "0.23"
-jsonrpsee-types = "0.23"
-jsonrpsee-http-client = "0.23"
+jsonrpsee = "0.24"
+jsonrpsee-core = "0.24"
+jsonrpsee-types = "0.24"
+jsonrpsee-http-client = "0.24"
 
 # http
 http = "1.0"
