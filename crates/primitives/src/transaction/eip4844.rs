@@ -5,7 +5,10 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::mem;
-use reth_codecs::{Compact, CompactPlaceholder};
+use reth_codecs::Compact;
+
+/// To be used with `Option<CompactPlaceholder>` to place or replace one bit on the bitflag struct.
+pub(crate) type CompactPlaceholder = ();
 
 #[cfg(feature = "c-kzg")]
 use crate::kzg::KzgSettings;
