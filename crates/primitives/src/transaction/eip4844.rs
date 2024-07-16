@@ -5,8 +5,7 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::mem;
-use reth_codecs::{CompactPlaceholder};
-use reth_codecs::Compact;
+use reth_codecs::{Compact, CompactPlaceholder};
 
 #[cfg(feature = "c-kzg")]
 use crate::kzg::KzgSettings;

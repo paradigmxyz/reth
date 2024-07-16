@@ -1698,8 +1698,7 @@ mod tests {
     use crate::{
         hex, sign_message,
         transaction::{
-            signature::Signature, TxEip1559,
-            TxKind, TxLegacy, PARALLEL_SENDER_RECOVERY_THRESHOLD,
+            signature::Signature, TxEip1559, TxKind, TxLegacy, PARALLEL_SENDER_RECOVERY_THRESHOLD,
         },
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
         TransactionSignedNoHash, B256, U256,

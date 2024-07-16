@@ -220,9 +220,9 @@ impl Decodable for TxType {
 
 #[cfg(test)]
 mod tests {
+    use crate::hex;
     use rand::Rng;
     use reth_codecs::Compact;
-    use crate::hex;
 
     use super::*;
 
