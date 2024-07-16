@@ -8,7 +8,7 @@ use reth_codecs::Compact;
 use alloc::vec::Vec;
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::main_codec)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxEip1559 {
     /// Added as EIP-155: Simple replay attack protection

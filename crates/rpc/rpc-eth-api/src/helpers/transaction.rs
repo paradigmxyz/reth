@@ -272,6 +272,10 @@ pub trait EthTransactions: LoadTransaction {
                 None => return Err(SignError::NoAccount.into()),
             };
 
+            if self.find_signer(&from).is_err() {
+                return Err(SignError::NoAccount.into());
+            }
+
             // set nonce if not already set before
             if request.nonce.is_none() {
                 let nonce = self.transaction_count(from, Some(BlockId::pending())).await?;

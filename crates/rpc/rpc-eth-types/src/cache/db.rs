@@ -16,29 +16,29 @@ pub type StateCacheDb<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjW
 pub struct StateProviderTraitObjWrapper<'a>(pub &'a dyn StateProvider);
 
 impl<'a> reth_provider::StateRootProvider for StateProviderTraitObjWrapper<'a> {
-    fn state_root(
+    fn hashed_state_root(
         &self,
-        bundle_state: &revm::db::BundleState,
+        hashed_state: &reth_trie::HashedPostState,
     ) -> reth_errors::ProviderResult<B256> {
-        self.0.state_root(bundle_state)
+        self.0.hashed_state_root(hashed_state)
     }
 
-    fn state_root_with_updates(
+    fn hashed_state_root_with_updates(
         &self,
-        bundle_state: &revm::db::BundleState,
+        hashed_state: &reth_trie::HashedPostState,
     ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
-        self.0.state_root_with_updates(bundle_state)
+        self.0.hashed_state_root_with_updates(hashed_state)
     }
 }
 
 impl<'a> reth_provider::StateProofProvider for StateProviderTraitObjWrapper<'a> {
-    fn proof(
+    fn hashed_proof(
         &self,
-        state: &revm::db::BundleState,
+        hashed_state: &reth_trie::HashedPostState,
         address: revm_primitives::Address,
         slots: &[B256],
     ) -> reth_errors::ProviderResult<reth_trie::AccountProof> {
-        self.0.proof(state, address, slots)
+        self.0.hashed_proof(hashed_state, address, slots)
     }
 }
 

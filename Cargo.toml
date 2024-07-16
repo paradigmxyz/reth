@@ -127,7 +127,6 @@ members = [
     "examples/custom-node-components/",
     "examples/custom-payload-builder/",
     "examples/db-access",
-    "examples/exex/*",
     "examples/manual-p2p/",
     "examples/network-txpool/",
     "examples/network/",
@@ -137,8 +136,6 @@ members = [
     "examples/rpc-db/",
     "examples/txpool-tracing/",
     "examples/custom-rlpx-subprotocol",
-    "examples/exex/minimal/",
-    "examples/exex/op-bridge/",
     "testing/ef-tests/",
     "testing/testing-utils",
 ]

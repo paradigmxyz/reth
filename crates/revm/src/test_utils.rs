@@ -5,8 +5,7 @@ use reth_storage_api::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof};
-use revm::db::BundleState;
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 use std::collections::HashMap;
 
 /// Mock state for testing
@@ -66,22 +65,22 @@ impl BlockHashReader for StateProviderTest {
 }
 
 impl StateRootProvider for StateProviderTest {
-    fn state_root(&self, _bundle_state: &BundleState) -> ProviderResult<B256> {
+    fn hashed_state_root(&self, _hashed_state: &HashedPostState) -> ProviderResult<B256> {
         unimplemented!("state root computation is not supported")
     }
 
-    fn state_root_with_updates(
+    fn hashed_state_root_with_updates(
         &self,
-        _bundle_state: &BundleState,
+        _hashed_state: &HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }
 }
 
 impl StateProofProvider for StateProviderTest {
-    fn proof(
+    fn hashed_proof(
         &self,
-        _state: &BundleState,
+        _hashed_state: &HashedPostState,
         _address: Address,
         _slots: &[B256],
     ) -> ProviderResult<AccountProof> {

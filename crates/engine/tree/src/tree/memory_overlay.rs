@@ -4,8 +4,7 @@ use reth_primitives::{Account, Address, BlockNumber, Bytecode, StorageKey, Stora
 use reth_provider::{
     AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
 };
-use reth_trie::{updates::TrieUpdates, AccountProof};
-use revm::db::BundleState;
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
@@ -13,14 +12,20 @@ use revm::db::BundleState;
 pub struct MemoryOverlayStateProvider<H> {
     /// The collection of executed parent blocks.
     in_memory: Vec<ExecutedBlock>,
+    /// The collection of hashed state from in-memory blocks.
+    hashed_post_state: HashedPostState,
     /// Historical state provider for state lookups that are not found in in-memory blocks.
     historical: H,
 }
 
 impl<H> MemoryOverlayStateProvider<H> {
     /// Create new memory overlay state provider.
-    pub const fn new(in_memory: Vec<ExecutedBlock>, historical: H) -> Self {
-        Self { in_memory, historical }
+    pub fn new(in_memory: Vec<ExecutedBlock>, historical: H) -> Self {
+        let mut hashed_post_state = HashedPostState::default();
+        for block in &in_memory {
+            hashed_post_state.extend(block.hashed_state.as_ref().clone());
+        }
+        Self { in_memory, hashed_post_state, historical }
     }
 }
 
@@ -79,15 +84,21 @@ impl<H> StateRootProvider for MemoryOverlayStateProvider<H>
 where
     H: StateRootProvider + Send,
 {
-    fn state_root(&self, bundle_state: &BundleState) -> ProviderResult<B256> {
-        todo!()
+    // TODO: Currently this does not reuse available in-memory trie nodes.
+    fn hashed_state_root(&self, hashed_state: &HashedPostState) -> ProviderResult<B256> {
+        let mut state = self.hashed_post_state.clone();
+        state.extend(hashed_state.clone());
+        self.historical.hashed_state_root(&state)
     }
 
-    fn state_root_with_updates(
+    // TODO: Currently this does not reuse available in-memory trie nodes.
+    fn hashed_state_root_with_updates(
         &self,
-        bundle_state: &BundleState,
+        hashed_state: &HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        todo!()
+        let mut state = self.hashed_post_state.clone();
+        state.extend(hashed_state.clone());
+        self.historical.hashed_state_root_with_updates(&state)
     }
 }
 
@@ -95,13 +106,16 @@ impl<H> StateProofProvider for MemoryOverlayStateProvider<H>
 where
     H: StateProofProvider + Send,
 {
-    fn proof(
+    // TODO: Currently this does not reuse available in-memory trie nodes.
+    fn hashed_proof(
         &self,
-        state: &BundleState,
+        hashed_state: &HashedPostState,
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        todo!()
+        let mut state = self.hashed_post_state.clone();
+        state.extend(hashed_state.clone());
+        self.historical.hashed_proof(&state, address, slots)
     }
 }
 

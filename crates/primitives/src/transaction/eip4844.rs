@@ -17,7 +17,7 @@ use alloc::vec::Vec;
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
 ///
 /// A transaction with blob hashes and max blob fee
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::main_codec)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxEip4844 {
     /// Added as EIP-155: Simple replay attack protection

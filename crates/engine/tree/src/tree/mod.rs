@@ -44,7 +44,7 @@ use tracing::*;
 mod memory_overlay;
 pub use memory_overlay::MemoryOverlayStateProvider;
 
-/// Maximum number of blocks to be kept in memory without triggering persistence.
+/// Maximum number of blocks to be kept only in memory without triggering persistence.
 const PERSISTENCE_THRESHOLD: u64 = 256;
 
 /// Represents an executed block stored in-memory.
@@ -393,17 +393,18 @@ where
     }
 
     /// Returns true if the canonical chain length minus the last persisted
-    /// block is more than the persistence threshold.
+    /// block is greater than or equal to the persistence threshold.
     fn should_persist(&self) -> bool {
         self.state.tree_state.max_block_number() -
-            self.persistence_state.last_persisted_block_number >
+            self.persistence_state.last_persisted_block_number >=
             PERSISTENCE_THRESHOLD
     }
 
     fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
-        let start = self.persistence_state.last_persisted_block_number + 1;
+        let start = self.persistence_state.last_persisted_block_number;
         let end = start + PERSISTENCE_THRESHOLD;
 
+        // NOTE: this is an exclusive range, to try to include exactly PERSISTENCE_THRESHOLD blocks
         self.state
             .tree_state
             .blocks_by_number
@@ -939,7 +940,7 @@ mod tests {
     async fn test_tree_persist_blocks() {
         // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
         // persistence task.
-        let mut blocks = get_executed_blocks(PERSISTENCE_THRESHOLD + 1);
+        let mut blocks = get_executed_blocks(0..PERSISTENCE_THRESHOLD + 1).collect::<Vec<_>>();
 
         let mut blocks_by_hash = HashMap::new();
         let mut blocks_by_number = BTreeMap::new();
@@ -966,8 +967,8 @@ mod tests {
         if let StaticFileAction::WriteExecutionData((saved_blocks, _)) = received_action {
             // only PERSISTENCE_THRESHOLD will be persisted
             blocks.pop();
-            assert_eq!(saved_blocks, blocks);
             assert_eq!(saved_blocks.len() as u64, PERSISTENCE_THRESHOLD);
+            assert_eq!(saved_blocks, blocks);
         } else {
             panic!("unexpected action received {received_action:?}");
         }

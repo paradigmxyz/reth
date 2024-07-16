@@ -8,7 +8,7 @@ use crate::{
 use reth_db::Database;
 use reth_primitives::{SealedBlock, B256, U256};
 use reth_provider::ProviderFactory;
-use reth_prune::{PruneProgress, Pruner};
+use reth_prune::{Pruner, PrunerOutput};
 use std::sync::{
     mpsc::{SendError, Sender},
     Arc,
@@ -30,13 +30,11 @@ pub enum PersistenceAction {
     SaveBlocks((Vec<ExecutedBlock>, oneshot::Sender<B256>)),
 
     /// Removes block data above the given block number from the database.
-    ///
-    /// Returns the block hash for the lowest block removed from the database.
-    RemoveBlocksAbove((u64, oneshot::Sender<B256>)),
+    RemoveBlocksAbove((u64, oneshot::Sender<()>)),
 
     /// Prune associated block data before the given block number, according to already-configured
     /// prune modes.
-    PruneBefore((u64, oneshot::Sender<PruneProgress>)),
+    PruneBefore((u64, oneshot::Sender<PrunerOutput>)),
 }
 
 /// An error type for when there is a [`SendError`] while sending an action to one of the services.
@@ -163,7 +161,7 @@ impl PersistenceHandle {
 
     /// Tells the persistence service to remove blocks above a certain block number. The removed
     /// blocks are returned by the service.
-    pub async fn remove_blocks_above(&self, block_num: u64) -> B256 {
+    pub async fn remove_blocks_above(&self, block_num: u64) {
         let (tx, rx) = oneshot::channel();
         self.send_action(PersistenceAction::RemoveBlocksAbove((block_num, tx)))
             .expect("should be able to send");
@@ -172,7 +170,7 @@ impl PersistenceHandle {
 
     /// Tells the persistence service to remove block data before the given hash, according to the
     /// configured prune config.
-    pub async fn prune_before(&self, block_num: u64) -> PruneProgress {
+    pub async fn prune_before(&self, block_num: u64) -> PrunerOutput {
         let (tx, rx) = oneshot::channel();
         self.send_action(PersistenceAction::PruneBefore((block_num, tx)))
             .expect("should be able to send");
@@ -183,7 +181,7 @@ impl PersistenceHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::get_executed_block_with_number;
+    use crate::test_utils::{get_executed_block_with_number, get_executed_blocks};
     use reth_exex_types::FinishedExExHeight;
     use reth_primitives::B256;
     use reth_provider::{test_utils::create_test_provider_factory, ProviderFactory};
@@ -223,7 +221,7 @@ mod tests {
     #[tokio::test]
     async fn test_save_blocks_single_block() {
         let persistence_handle = default_persistence_handle();
-        let block_number = 5;
+        let block_number = 0;
         let executed = get_executed_block_with_number(block_number);
         let block_hash = executed.block().hash();
 
@@ -234,5 +232,36 @@ mod tests {
 
         let actual_hash = rx.await.unwrap();
         assert_eq!(block_hash, actual_hash);
+    }
+
+    #[tokio::test]
+    async fn test_save_blocks_multiple_blocks() {
+        let persistence_handle = default_persistence_handle();
+
+        let blocks = get_executed_blocks(0..5).collect::<Vec<_>>();
+        let last_hash = blocks.last().unwrap().block().hash();
+        let (tx, rx) = oneshot::channel();
+
+        persistence_handle.save_blocks(blocks, tx);
+
+        let actual_hash = rx.await.unwrap();
+        assert_eq!(last_hash, actual_hash);
+    }
+
+    #[tokio::test]
+    async fn test_save_blocks_multiple_calls() {
+        let persistence_handle = default_persistence_handle();
+
+        let ranges = [0..1, 1..2, 2..4, 4..5];
+        for range in ranges {
+            let blocks = get_executed_blocks(range).collect::<Vec<_>>();
+            let last_hash = blocks.last().unwrap().block().hash();
+            let (tx, rx) = oneshot::channel();
+
+            persistence_handle.save_blocks(blocks, tx);
+
+            let actual_hash = rx.await.unwrap();
+            assert_eq!(last_hash, actual_hash);
+        }
     }
 }
