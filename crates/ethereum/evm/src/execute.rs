@@ -394,7 +394,10 @@ where
         Ok(())
     }
 
-    fn execute(&mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute_transactions(
+        &mut self,
+        input: Self::Input<'_>,
+    ) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
         let EthExecuteOutput { receipts, requests, gas_used } =
             self.execute_without_verification(block, total_difficulty)?;
@@ -622,7 +625,7 @@ mod tests {
         // attempt to execute a block without parent beacon block root, expect err
         let err = provider
             .executor(StateProviderDatabase::new(&db))
-            .execute(
+            .execute_transactions(
                 (
                     &BlockWithSenders {
                         block: Block {
@@ -1367,7 +1370,7 @@ mod tests {
         let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         let BlockExecutionOutput { receipts, requests, .. } = executor
-            .execute(
+            .execute_transactions(
                 (
                     &Block {
                         header,
@@ -1455,7 +1458,7 @@ mod tests {
         let mut executor = executor_provider(chain_spec).executor(StateProviderDatabase::new(&db));
 
         // Execute the block and capture the result
-        let exec_result = executor.execute(
+        let exec_result = executor.execute_transactions(
             (
                 &Block {
                     header,

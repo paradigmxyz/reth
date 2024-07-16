@@ -133,17 +133,18 @@ impl Command {
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
-        let BlockExecutionOutput { state, receipts, requests, .. } = executor.execute(
-            (
-                &block
-                    .clone()
-                    .unseal()
-                    .with_recovered_senders()
-                    .ok_or(BlockValidationError::SenderRecoveryError)?,
-                merkle_block_td + block.difficulty,
-            )
-                .into(),
-        )?;
+        let BlockExecutionOutput { state, receipts, requests, .. } = executor
+            .execute_transactions(
+                (
+                    &block
+                        .clone()
+                        .unseal()
+                        .with_recovered_senders()
+                        .ok_or(BlockValidationError::SenderRecoveryError)?,
+                    merkle_block_td + block.difficulty,
+                )
+                    .into(),
+            )?;
         let execution_outcome =
             ExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
 

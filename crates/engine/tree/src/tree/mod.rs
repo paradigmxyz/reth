@@ -677,7 +677,7 @@ where
         let block_number = block.number;
         let block_hash = block.hash();
         let block = block.unseal();
-        let output = executor.execute((&block, U256::MAX).into()).unwrap();
+        let output = executor.execute_transactions((&block, U256::MAX).into()).unwrap();
         self.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&output.receipts, &output.requests),

@@ -256,7 +256,8 @@ where
 
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body.len(), "Executing block");
 
-        let block_execution_output = executor.execute((&block_with_senders, td).into())?;
+        let block_execution_output =
+            executor.execute_transactions((&block_with_senders, td).into())?;
 
         Ok((block_with_senders, block_execution_output))
     }
@@ -334,7 +335,7 @@ mod tests {
                 provider.tx_ref(),
                 provider.static_file_provider().clone(),
             )))
-            .execute(BlockExecutionInput { block, total_difficulty: U256::ZERO })?;
+            .execute_transactions(BlockExecutionInput { block, total_difficulty: U256::ZERO })?;
         block_execution_output.state.reverts.sort();
 
         // Convert the block execution output to an execution outcome for committing to the database

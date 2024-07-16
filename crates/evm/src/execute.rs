@@ -42,7 +42,8 @@ pub trait Executor<DB> {
     ///
     /// # Returns
     /// The output of the block execution.
-    fn execute(&mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
+    fn execute_transactions(&mut self, input: Self::Input<'_>)
+        -> Result<Self::Output, Self::Error>;
 
     /// Executes the state changes after the block has been executed.
     ///
@@ -239,7 +240,10 @@ mod tests {
         type Output = BlockExecutionOutput<Receipt>;
         type Error = BlockExecutionError;
 
-        fn execute(&mut self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+        fn execute_transactions(
+            &mut self,
+            _input: Self::Input<'_>,
+        ) -> Result<Self::Output, Self::Error> {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
     }
@@ -283,6 +287,6 @@ mod tests {
             requests: None,
         };
         let block = BlockWithSenders::new(block, Default::default()).unwrap();
-        let _ = executor.execute(BlockExecutionInput::new(&block, U256::ZERO));
+        let _ = executor.execute_transactions(BlockExecutionInput::new(&block, U256::ZERO));
     }
 }

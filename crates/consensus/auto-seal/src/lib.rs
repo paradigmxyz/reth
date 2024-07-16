@@ -387,7 +387,7 @@ impl StorageInner {
             requests: block_execution_requests,
             gas_used,
             ..
-        } = executor.executor(&mut db).execute((&block, U256::ZERO).into())?;
+        } = executor.executor(&mut db).execute_transactions((&block, U256::ZERO).into())?;
         let execution_outcome = ExecutionOutcome::new(
             state,
             receipts.into(),

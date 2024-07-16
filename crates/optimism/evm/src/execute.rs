@@ -370,7 +370,10 @@ where
         Ok(())
     }
 
-    fn execute(&mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute_transactions(
+        &mut self,
+        input: Self::Input<'_>,
+    ) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
         let (receipts, gas_used) = self.execute_without_verification(block, total_difficulty)?;
 

@@ -209,7 +209,7 @@ impl AppendableChain {
         let block_hash = block.hash();
         let block = block.unseal();
 
-        let state = executor.execute((&block, U256::MAX).into())?;
+        let state = executor.execute_transactions((&block, U256::MAX).into())?;
         let BlockExecutionOutput { state, receipts, requests, .. } = state;
         externals
             .consensus
