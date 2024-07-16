@@ -152,29 +152,28 @@ where
             prague_time => Prague,
         ]);
 
-        if let Ok(pk) = id2pk(enode.id) {
-            Ok(NodeInfo {
-                id: pk.to_string(),
-                name: status.client_version,
-                enode: enode.to_string(),
-                enr: self.network.local_enr().to_string(),
-                ip: enode.address,
-                ports: Ports { discovery: enode.udp_port, listener: enode.tcp_port },
-                listen_addr: enode.tcp_addr(),
-                protocols: ProtocolInfo {
-                    eth: Some(EthProtocolInfo {
-                        network: status.eth_protocol_info.network,
-                        difficulty: status.eth_protocol_info.difficulty,
-                        genesis: status.eth_protocol_info.genesis,
-                        config,
-                        head: status.eth_protocol_info.head,
-                    }),
-                    snap: None,
-                },
-            })
-        } else {
-            Err(internal_rpc_err("Failed to convert local node id to public key"))
-        }
+        let Ok(pk) = id2pk(enode.id) else {
+            return Err(internal_rpc_err("Failed to convert local node id to public key"))
+        };
+        Ok(NodeInfo {
+            id: pk.to_string(),
+            name: status.client_version,
+            enode: enode.to_string(),
+            enr: self.network.local_enr().to_string(),
+            ip: enode.address,
+            ports: Ports { discovery: enode.udp_port, listener: enode.tcp_port },
+            listen_addr: enode.tcp_addr(),
+            protocols: ProtocolInfo {
+                eth: Some(EthProtocolInfo {
+                    network: status.eth_protocol_info.network,
+                    difficulty: status.eth_protocol_info.difficulty,
+                    genesis: status.eth_protocol_info.genesis,
+                    config,
+                    head: status.eth_protocol_info.head,
+                }),
+                snap: None,
+            },
+        })
     }
 
     /// Handler for `admin_peerEvents`
