@@ -38,13 +38,13 @@ impl<Eth> OtterscanApi<Eth> {
     }
 
     /// Constructs a `BlockDetails` from a block and its receipts.
-    fn into_block_details(
+    fn block_details(
         &self,
         block: Option<RichBlock>,
         receipts: Option<Vec<AnyTransactionReceipt>>,
     ) -> RpcResult<Option<BlockDetails>> {
-        let block = block.ok_or_else(|| internal_rpc_err("block not found"))?;
-        let receipts = receipts.ok_or_else(|| internal_rpc_err("receipts not found"))?;
+        let block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
+        let receipts = receipts.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
         // blob fee is burnt, so we don't need to calculate it
         let total_fees = receipts
@@ -155,15 +155,15 @@ where
         let block = self.eth.block_by_number(block_number.into(), true);
         let receipts = self.eth.block_receipts(block_number.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
-        self.into_block_details(block, receipts)
+        self.block_details(block, receipts)
     }
 
     /// Handler for `getBlockDetailsByHash`
     async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<Option<BlockDetails>> {
-        let block = self.eth.block_by_hash(block_hash.into(), true);
+        let block = self.eth.block_by_hash(block_hash, true);
         let receipts = self.eth.block_receipts(block_hash.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
-        self.into_block_details(block, receipts)
+        self.block_details(block, receipts)
     }
 
     /// Handler for `getBlockTransactions`
@@ -178,7 +178,7 @@ where
         let receipts = self.eth.block_receipts(block_number.into());
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
-        let mut block = block.ok_or_else(|| internal_rpc_err("block not found"))?;
+        let mut block = block.ok_or_else(|| EthApiError::UnknownBlockNumber)?;
         let mut receipts = receipts.ok_or_else(|| internal_rpc_err("receipts not found"))?;
 
         // check if the number of transactions matches the number of receipts
