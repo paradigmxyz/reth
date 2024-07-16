@@ -45,7 +45,7 @@ impl<DB> Executor<DB> for NoopBlockExecutorProvider {
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
-    fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute(&mut self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }
 }

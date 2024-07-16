@@ -50,7 +50,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
-    fn execute(self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute(&mut self, _: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let ExecutionOutcome { bundle, receipts, requests, first_block: _ } =
             self.exec_results.lock().pop().unwrap();
         Ok(BlockExecutionOutput {

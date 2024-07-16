@@ -205,7 +205,7 @@ impl AppendableChain {
         let provider = BundleStateProvider::new(state_provider, bundle_state_data_provider);
 
         let db = StateProviderDatabase::new(&provider);
-        let executor = externals.executor_factory.executor(db);
+        let mut executor = externals.executor_factory.executor(db);
         let block_hash = block.hash();
         let block = block.unseal();
 

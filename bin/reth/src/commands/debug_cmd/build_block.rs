@@ -269,7 +269,7 @@ impl Command {
                     SealedBlockWithSenders::new(block.clone(), senders).unwrap();
 
                 let db = StateProviderDatabase::new(blockchain_db.latest()?);
-                let executor = block_executor!(provider_factory.chain_spec()).executor(db);
+                let mut executor = block_executor!(provider_factory.chain_spec()).executor(db);
 
                 let BlockExecutionOutput { state, receipts, requests, .. } =
                     executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;

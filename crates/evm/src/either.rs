@@ -67,7 +67,7 @@ where
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
-    fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute(&mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         match self {
             Self::Left(a) => a.execute(input),
             Self::Right(b) => b.execute(input),

@@ -369,12 +369,32 @@ where
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
-    /// Executes the block and commits the changes to the internal state.
-    ///
-    /// Returns the receipts of the transactions in the block.
-    ///
-    /// Returns an error if the block could not be executed or failed verification.
-    fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+    fn execute_state_changes_pre(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
+        let BlockExecutionInput { block, total_difficulty } = input;
+
+        let env = self.evm_env_for_block(&block.header, total_difficulty);
+        let mut evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
+
+        apply_beacon_root_contract_call(
+            &self.executor.evm_config,
+            &self.executor.chain_spec,
+            block.timestamp,
+            block.number,
+            block.parent_beacon_block_root,
+            &mut evm,
+        )?;
+        apply_blockhashes_update(
+            evm.db_mut(),
+            &self.executor.chain_spec,
+            block.timestamp,
+            block.number,
+            block.parent_hash,
+        )?;
+
+        Ok(())
+    }
+
+    fn execute(&mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         let BlockExecutionInput { block, total_difficulty } = input;
         let EthExecuteOutput { receipts, requests, gas_used } =
             self.execute_without_verification(block, total_difficulty)?;
@@ -383,6 +403,61 @@ where
         self.state.merge_transitions(BundleRetention::Reverts);
 
         Ok(BlockExecutionOutput { state: self.state.take_bundle(), receipts, requests, gas_used })
+    }
+
+    fn execute_state_changes_post(
+        &mut self,
+        input: Self::Input<'_>,
+        mut output: Self::Output,
+    ) -> Result<Self::Output, Self::Error> {
+        let BlockExecutionInput { block, total_difficulty } = input;
+
+        let mut balance_increments =
+            post_block_balance_increments(self.chain_spec(), block, total_difficulty);
+
+        // Irregular state change at Ethereum DAO hardfork
+        if self.chain_spec().fork(EthereumHardfork::Dao).transitions_at_block(block.number) {
+            // drain balances from hardcoded addresses.
+            let drained_balance: u128 = self
+                .state
+                .drain_balances(DAO_HARDKFORK_ACCOUNTS)
+                .map_err(|_| BlockValidationError::IncrementBalanceFailed)?
+                .into_iter()
+                .sum();
+
+            // return balance to DAO beneficiary.
+            *balance_increments.entry(DAO_HARDFORK_BENEFICIARY).or_default() += drained_balance;
+        }
+
+        // Increment balances
+        self.state
+            .increment_balances(balance_increments)
+            .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
+
+        // Populate requests
+        if self.chain_spec().is_prague_active_at_timestamp(block.timestamp) {
+            let env = self.evm_env_for_block(&block.header, total_difficulty);
+            let mut evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
+
+            // Collect all EIP-6110 deposits
+            let deposit_requests = crate::eip6110::parse_deposits_from_receipts(
+                &self.executor.chain_spec,
+                &output.receipts,
+            )?;
+
+            // Collect all EIP-7685 requests
+            let withdrawal_requests =
+                apply_withdrawal_requests_contract_call(&self.executor.evm_config, &mut evm)?;
+
+            // Collect all EIP-7251 requests
+            let consolidation_requests =
+                apply_consolidation_requests_contract_call(&self.executor.evm_config, &mut evm)?;
+
+            output.requests =
+                [deposit_requests, withdrawal_requests, consolidation_requests].concat()
+        }
+
+        Ok(output)
     }
 }
 
@@ -1289,7 +1364,7 @@ mod tests {
 
         let provider = executor_provider(chain_spec);
 
-        let executor = provider.executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.executor(StateProviderDatabase::new(&db));
 
         let BlockExecutionOutput { receipts, requests, .. } = executor
             .execute(
@@ -1377,7 +1452,7 @@ mod tests {
         );
 
         // Create an executor from the state provider
-        let executor = executor_provider(chain_spec).executor(StateProviderDatabase::new(&db));
+        let mut executor = executor_provider(chain_spec).executor(StateProviderDatabase::new(&db));
 
         // Execute the block and capture the result
         let exec_result = executor.execute(

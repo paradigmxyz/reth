@@ -25,7 +25,16 @@ pub trait Executor<DB> {
     /// The error type returned by the executor.
     type Error;
 
-    /// Consumes the type and executes the block.
+    /// Executes the state changes before the block is executed.
+    ///
+    /// Such state changes may include:
+    /// - Start of block system contract calls and updates (such as EIP-4788 system contract call or
+    ///   EIP-2935 system contract storage update)
+    fn execute_state_changes_pre(&mut self, _input: Self::Input<'_>) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    /// Executes the block.
     ///
     /// # Note
     /// Execution happens without any validation of the output. To validate the output, use the
@@ -33,7 +42,22 @@ pub trait Executor<DB> {
     ///
     /// # Returns
     /// The output of the block execution.
-    fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
+    fn execute(&mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error>;
+
+    /// Executes the state changes after the block has been executed.
+    ///
+    /// Such state changes may include:
+    /// - Post-block balance increments
+    /// - Irregular state transitions (such as Ethereum DAO hardfork)
+    /// - End of block system contract calls
+    /// - Population of EIP-7685 requests
+    fn execute_state_changes_post(
+        &mut self,
+        _input: Self::Input<'_>,
+        output: Self::Output,
+    ) -> Result<Self::Output, Self::Error> {
+        Ok(output)
+    }
 }
 
 /// A general purpose executor that can execute multiple inputs in sequence, validate the outputs,
@@ -215,7 +239,7 @@ mod tests {
         type Output = BlockExecutionOutput<Receipt>;
         type Error = BlockExecutionError;
 
-        fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+        fn execute(&mut self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
     }
@@ -250,7 +274,7 @@ mod tests {
     fn test_provider() {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-        let executor = provider.executor(db);
+        let mut executor = provider.executor(db);
         let block = Block {
             header: Default::default(),
             body: vec![],

@@ -129,7 +129,7 @@ impl Command {
             provider_factory.static_file_provider(),
         ));
 
-        let executor = block_executor!(provider_factory.chain_spec()).executor(db);
+        let mut executor = block_executor!(provider_factory.chain_spec()).executor(db);
 
         let merkle_block_td =
             provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
