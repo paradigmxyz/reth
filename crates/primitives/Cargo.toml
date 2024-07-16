@@ -46,7 +46,7 @@ rayon.workspace = true
 serde.workspace = true
 tempfile = { workspace = true, optional = true }
 thiserror-no-std = { workspace = true, default-features = false }
-zstd = { version = "0.13", features = ["experimental"], optional = true }
+zstd = { workspace = true, features = ["experimental"], optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
