@@ -73,7 +73,7 @@ fn fill(
     let chain_id = signed_tx.chain_id();
     let blob_versioned_hashes = signed_tx.blob_versioned_hashes();
     let access_list = signed_tx.access_list().cloned();
-    let _authorization_list = signed_tx.authorization_list();
+    let authorization_list = signed_tx.authorization_list().map(|l| l.to_vec());
 
     let signature =
         from_primitive_signature(*signed_tx.signature(), signed_tx.tx_type(), signed_tx.chain_id());
@@ -101,6 +101,7 @@ fn fill(
         // EIP-4844 fields
         max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas(),
         blob_versioned_hashes,
+        authorization_list,
         // Optimism fields
         #[cfg(feature = "optimism")]
         other: reth_rpc_types::optimism::OptimismTransactionFields {
