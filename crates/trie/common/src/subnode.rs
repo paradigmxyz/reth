@@ -1,6 +1,7 @@
 use super::{BranchNodeCompact, StoredBranchNode};
 use bytes::Buf;
 use reth_codecs::Compact;
+use std::borrow::Cow;
 
 /// Walker sub node for storing intermediate state root calculation state in the database.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -14,7 +15,7 @@ pub struct StoredSubNode {
 }
 
 impl Compact for StoredSubNode {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -33,10 +34,10 @@ impl Compact for StoredSubNode {
             len += 1;
         }
 
-        if let Some(node) = self.node {
+        if let Some(node) = &self.node {
             buf.put_u8(1);
             len += 1;
-            len += StoredBranchNode(node).to_compact(buf);
+            len += StoredBranchNode(Cow::Borrowed(node)).to_compact(buf);
         } else {
             len += 1;
             buf.put_u8(0);
@@ -57,7 +58,7 @@ impl Compact for StoredSubNode {
         let node = if node_exists {
             let (node, rest) = StoredBranchNode::from_compact(buf, 0);
             buf = rest;
-            Some(node.0)
+            Some(node.0.into_owned())
         } else {
             None
         };
@@ -87,7 +88,7 @@ mod tests {
         };
 
         let mut encoded = vec![];
-        subnode.clone().to_compact(&mut encoded);
+        subnode.to_compact(&mut encoded);
         let (decoded, _) = StoredSubNode::from_compact(&encoded[..], 0);
 
         assert_eq!(subnode, decoded);

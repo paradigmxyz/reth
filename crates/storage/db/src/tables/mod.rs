@@ -268,6 +268,8 @@ macro_rules! tables {
     };
 }
 
+type StoredBranchNodeStatic = StoredBranchNode<'static>;
+
 tables! {
     /// Stores the header hashes belonging to the canonical chain.
     table CanonicalHeaders<Key = BlockNumber, Value = HeaderHash>;
@@ -381,7 +383,7 @@ tables! {
     table HashedStorages<Key = B256, Value = StorageEntry, SubKey = B256>;
 
     /// Stores the current state's Merkle Patricia Tree.
-    table AccountsTrie<Key = StoredNibbles, Value = StoredBranchNode>;
+    table AccountsTrie<Key = StoredNibbles, Value = StoredBranchNodeStatic>;
 
     /// From HashedAddress => NibblesSubKey => Intermediate value
     table StoragesTrie<Key = B256, Value = StorageTrieEntry, SubKey = StoredNibblesSubKey>;

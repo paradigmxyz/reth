@@ -8,7 +8,10 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::B256;
-use std::collections::{HashMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+};
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -119,7 +122,7 @@ impl TrieUpdates {
                 Some(node) => {
                     if !nibbles.0.is_empty() {
                         num_entries += 1;
-                        account_trie_cursor.upsert(nibbles, StoredBranchNode(node))?;
+                        account_trie_cursor.upsert(nibbles, StoredBranchNode(Cow::Owned(node)))?;
                     }
                 }
                 None => {

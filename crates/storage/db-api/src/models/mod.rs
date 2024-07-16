@@ -178,18 +178,18 @@ impl Decode for ClientVersion {
 
 /// Implements compression for Compact type.
 macro_rules! impl_compression_for_compact {
-    ($($name:tt),+) => {
+    ($($name:ident $(<$lt:lifetime>)?),+) => {
         $(
-            impl Compress for $name {
+            impl$(<$lt>)? Compress for $name$(<$lt>)? {
                 type Compressed = Vec<u8>;
 
                 fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
-                    let _ = Compact::to_compact(self, buf);
+                    let _ = Compact::to_compact(&self, buf);
                 }
             }
 
-            impl Decompress for $name {
-                fn decompress<B: AsRef<[u8]>>(value: B) -> Result<$name, $crate::DatabaseError> {
+            impl$(<$lt>)? Decompress for $name$(<$lt>)? {
+                fn decompress<B: AsRef<[u8]>>(value: B) -> Result<$name$(<$lt>)?, $crate::DatabaseError> {
                     let value = value.as_ref();
                     let (obj, _) = Compact::from_compact(&value, value.len());
                     Ok(obj)
@@ -207,7 +207,7 @@ impl_compression_for_compact!(
     Receipt,
     TxType,
     StorageEntry,
-    StoredBranchNode,
+    StoredBranchNode<'a>,
     StoredNibbles,
     StoredNibblesSubKey,
     StorageTrieEntry,
@@ -234,7 +234,7 @@ macro_rules! impl_compression_fixed_compact {
                 type Compressed = Vec<u8>;
 
                 fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
-                    let _  = Compact::to_compact(self, buf);
+                    let _  = Compact::to_compact(&self, buf);
                 }
 
                 fn uncompressable_ref(&self) -> Option<&[u8]> {

@@ -55,7 +55,7 @@ mod tests {
         #[test]
         fn test_roundtrip_compact_access_list_item(access_list_item: AccessListItem) {
             let mut compacted_access_list_item = Vec::<u8>::new();
-            let len = access_list_item.clone().to_compact(&mut compacted_access_list_item);
+            let len = access_list_item.to_compact(&mut compacted_access_list_item);
 
             let (decoded_access_list_item, _) = AccessListItem::from_compact(&compacted_access_list_item, len);
             assert_eq!(access_list_item, decoded_access_list_item);
@@ -66,7 +66,7 @@ mod tests {
         #[test]
         fn test_roundtrip_compact_access_list(access_list: AccessList) {
             let mut compacted_access_list = Vec::<u8>::new();
-            let len = access_list.clone().to_compact(&mut compacted_access_list);
+            let len = access_list.to_compact(&mut compacted_access_list);
 
             let (decoded_access_list, _) = AccessList::from_compact(&compacted_access_list, len);
             assert_eq!(access_list, decoded_access_list);

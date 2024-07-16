@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::StoredTrieMask;
 use alloy_primitives::B256;
 use alloy_trie::BranchNodeCompact;
@@ -7,27 +9,25 @@ use serde::{Deserialize, Serialize};
 
 /// Wrapper around `BranchNodeCompact` that implements `Compact`.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoredBranchNode(pub BranchNodeCompact);
+pub struct StoredBranchNode<'a>(pub Cow<'a, BranchNodeCompact>);
 
-impl Compact for StoredBranchNode {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+impl<'a> Compact for StoredBranchNode<'a> {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let BranchNodeCompact { state_mask, tree_mask, hash_mask, root_hash, hashes } = self.0;
-
         let mut buf_size = 0;
 
-        buf_size += StoredTrieMask(state_mask).to_compact(buf);
-        buf_size += StoredTrieMask(tree_mask).to_compact(buf);
-        buf_size += StoredTrieMask(hash_mask).to_compact(buf);
+        buf_size += StoredTrieMask(self.0.state_mask).to_compact(buf);
+        buf_size += StoredTrieMask(self.0.tree_mask).to_compact(buf);
+        buf_size += StoredTrieMask(self.0.hash_mask).to_compact(buf);
 
-        if let Some(root_hash) = root_hash {
+        if let Some(root_hash) = self.0.root_hash {
             buf_size += B256::len_bytes();
             buf.put_slice(root_hash.as_slice());
         }
 
-        for hash in &hashes {
+        for hash in &self.0.hashes {
             buf_size += B256::len_bytes();
             buf.put_slice(hash.as_slice());
         }
@@ -64,7 +64,12 @@ impl Compact for StoredBranchNode {
             buf.advance(hash_len);
         }
 
-        (Self(BranchNodeCompact::new(state_mask, tree_mask, hash_mask, hashes, root_hash)), buf)
+        (
+            Self(Cow::Owned(BranchNodeCompact::new(
+                state_mask, tree_mask, hash_mask, hashes, root_hash,
+            ))),
+            buf,
+        )
     }
 }
 
@@ -87,7 +92,7 @@ mod tests {
         );
 
         let mut out = Vec::new();
-        let compact_len = StoredBranchNode(n.clone()).to_compact(&mut out);
-        assert_eq!(StoredBranchNode::from_compact(&out, compact_len).0 .0, n);
+        let compact_len = StoredBranchNode(Cow::Borrowed(&n)).to_compact(&mut out);
+        assert_eq!(StoredBranchNode::from_compact(&out, compact_len).0 .0.into_owned(), n);
     }
 }

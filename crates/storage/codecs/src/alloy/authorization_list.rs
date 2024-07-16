@@ -1,3 +1,5 @@
+use core::ops::Deref;
+
 use crate::Compact;
 use alloy_eips::eip7702::{Authorization as AlloyAuthorization, SignedAuthorization};
 use alloy_primitives::{Address, ChainId, U256};
@@ -49,7 +51,7 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
 
         // to_compact doesn't write the len to buffer.
         // By placing it as last, we don't need to store it either.
-        1 + 32 + 32 + self.to_compact(buf)
+        1 + 32 + 32 + self.deref().to_compact(buf)
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
@@ -88,7 +90,7 @@ mod tests {
             .unwrap(),
         );
         let mut compacted_authorization = Vec::<u8>::new();
-        let len = authorization.clone().to_compact(&mut compacted_authorization);
+        let len = authorization.to_compact(&mut compacted_authorization);
         let (decoded_authorization, _) =
             SignedAuthorization::from_compact(&compacted_authorization, len);
         assert_eq!(authorization, decoded_authorization);

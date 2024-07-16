@@ -72,6 +72,19 @@ pub trait Compact: Sized {
     }
 }
 
+impl<T: Compact> Compact for &T {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: BufMut + AsMut<[u8]>,
+    {
+        (*self).to_compact(buf)
+    }
+
+    fn from_compact(_: &[u8], _: usize) -> (Self, &[u8]) {
+        unimplemented!()
+    }
+}
+
 /// To be used with `Option<CompactPlaceholder>` to place or replace one bit on the bitflag struct.
 pub type CompactPlaceholder = ();
 
@@ -369,7 +382,7 @@ impl Compact for bool {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        self as usize
+        *self as usize
     }
 
     /// `bool` expects the real value to come in `len`, and does not advance the cursor.
@@ -420,7 +433,7 @@ mod tests {
         let arr = [1, 2, 3, 4, 5];
         let list = Bytes::copy_from_slice(&arr);
         let mut buf = vec![];
-        assert_eq!(list.clone().to_compact(&mut buf), list.len());
+        assert_eq!(list.to_compact(&mut buf), list.len());
 
         // Add some noise data.
         buf.push(1);
@@ -500,7 +513,7 @@ mod tests {
         let mut buf = vec![];
 
         // Vec doesn't return a total length
-        assert_eq!(list.clone().to_compact(&mut buf), 0);
+        assert_eq!(list.to_compact(&mut buf), 0);
 
         // Add some noise data in the end that should be returned by `from_compact`.
         buf.extend([1u8, 2]);
@@ -621,15 +634,15 @@ mod tests {
     #[test_fuzz::test_fuzz]
     fn compact_test_enum_all_variants(var0: TestEnum, var1: TestEnum, var2: TestEnum) {
         let mut buf = vec![];
-        var0.clone().to_compact(&mut buf);
+        var0.to_compact(&mut buf);
         assert_eq!(TestEnum::from_compact(&buf, buf.len()).0, var0);
 
         let mut buf = vec![];
-        var1.clone().to_compact(&mut buf);
+        var1.to_compact(&mut buf);
         assert_eq!(TestEnum::from_compact(&buf, buf.len()).0, var1);
 
         let mut buf = vec![];
-        var2.clone().to_compact(&mut buf);
+        var2.to_compact(&mut buf);
         assert_eq!(TestEnum::from_compact(&buf, buf.len()).0, var2);
     }
 

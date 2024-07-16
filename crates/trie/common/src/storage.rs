@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use super::{BranchNodeCompact, StoredBranchNode, StoredNibblesSubKey};
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
@@ -15,19 +17,19 @@ pub struct StorageTrieEntry {
 // and compress second part of the value. If we have compression
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
 impl Compact for StorageTrieEntry {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
         let nibbles_len = self.nibbles.to_compact(buf);
-        let node_len = StoredBranchNode(self.node).to_compact(buf);
+        let node_len = StoredBranchNode(Cow::Borrowed(&self.node)).to_compact(buf);
         nibbles_len + node_len
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let (nibbles, buf) = StoredNibblesSubKey::from_compact(buf, 33);
         let (node, buf) = StoredBranchNode::from_compact(buf, len - 33);
-        let this = Self { nibbles, node: node.0 };
+        let this = Self { nibbles, node: node.0.into_owned() };
         (this, buf)
     }
 }

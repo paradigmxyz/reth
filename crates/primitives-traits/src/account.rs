@@ -67,7 +67,7 @@ impl Bytecode {
 }
 
 impl Compact for Bytecode {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -209,7 +209,7 @@ mod tests {
             2,
             JumpTable::from_slice(&[0]),
         )));
-        let len = bytecode.clone().to_compact(&mut buf);
+        let len = bytecode.to_compact(&mut buf);
         assert_eq!(len, 16);
 
         let (decoded, remainder) = Bytecode::from_compact(&buf, len);

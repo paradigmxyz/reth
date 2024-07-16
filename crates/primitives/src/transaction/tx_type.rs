@@ -135,7 +135,7 @@ impl TryFrom<U64> for TxType {
 }
 
 impl Compact for TxType {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -144,16 +144,16 @@ impl Compact for TxType {
             Self::Eip2930 => 1,
             Self::Eip1559 => 2,
             Self::Eip4844 => {
-                buf.put_u8(self as u8);
+                buf.put_u8(*self as u8);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
             Self::Eip7702 => {
-                buf.put_u8(self as u8);
+                buf.put_u8(*self as u8);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
             #[cfg(feature = "optimism")]
             Self::Deposit => {
-                buf.put_u8(self as u8);
+                buf.put_u8(*self as u8);
                 COMPACT_EXTENDED_IDENTIFIER_FLAG
             }
         }

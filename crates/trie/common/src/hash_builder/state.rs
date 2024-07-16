@@ -5,6 +5,7 @@ use bytes::Buf;
 use nybbles::Nibbles;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 /// The hash builder state for storing in the database.
 /// Check the `reth-trie` crate for more info on hash builder.
@@ -61,7 +62,7 @@ impl From<HashBuilder> for HashBuilderState {
 }
 
 impl Compact for HashBuilderState {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -77,7 +78,7 @@ impl Compact for HashBuilderState {
             len += 2 + item.len();
         }
 
-        len += StoredHashBuilderValue(self.value).to_compact(buf);
+        len += StoredHashBuilderValue(Cow::Borrowed(&self.value)).to_compact(buf);
 
         buf.put_u16(self.groups.len() as u16);
         len += 2;
@@ -140,7 +141,18 @@ impl Compact for HashBuilderState {
         }
 
         let stored_in_database = buf.get_u8() != 0;
-        (Self { key, stack, value, groups, tree_masks, hash_masks, stored_in_database }, buf)
+        (
+            Self {
+                key,
+                stack,
+                value: value.into_owned(),
+                groups,
+                tree_masks,
+                hash_masks,
+                stored_in_database,
+            },
+            buf,
+        )
     }
 }
 
@@ -164,7 +176,7 @@ mod tests {
         #[test]
         fn hash_builder_state_roundtrip(state in arb::<HashBuilderState>()) {
             let mut buf = vec![];
-            let len = state.clone().to_compact(&mut buf);
+            let len = state.to_compact(&mut buf);
             let (decoded, _) = HashBuilderState::from_compact(&buf, len);
             assert_eq!(state, decoded);
         }

@@ -42,25 +42,35 @@ pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
     let with_zstd = args.clone().into_iter().any(|tk| tk.to_string() == "zstd");
+    let without_serde = args.clone().into_iter().any(|tk| tk.to_string() == "no_serde");
+    let without_arbitrary = args.clone().into_iter().any(|tk| tk.to_string() == "no_arbitrary");
 
+    let serde = if !without_serde {
+        quote! {
+            #[derive(serde::Serialize, serde::Deserialize)]
+        }
+    } else {
+        quote! {}
+    };
+    
     let compact = if with_zstd {
         quote! {
-            #[derive(CompactZstd, serde::Serialize, serde::Deserialize)]
+            #serde
+            #[derive(CompactZstd)]
             #ast
         }
         .into()
     } else {
         quote! {
-            #[derive(Compact, serde::Serialize, serde::Deserialize)]
+            #serde
+            #[derive(Compact)]
             #ast
         }
         .into()
     };
 
-    if let Some(first_arg) = args.clone().into_iter().next() {
-        if first_arg.to_string() == "no_arbitrary" {
-            return compact
-        }
+    if without_arbitrary {
+        return compact
     }
 
     let mut args = args.into_iter().collect::<Vec<_>>();

@@ -11,9 +11,11 @@ impl Compact for LogData {
         B: BufMut + AsMut<[u8]>,
     {
         let mut buffer = Vec::new();
-        let (topics, data) = self.split();
+
+        let topics = self.topics().iter().collect::<Vec<_>>();
         topics.specialized_to_compact(&mut buffer);
-        data.to_compact(&mut buffer);
+
+        self.data.to_compact(&mut buffer);
         buf.put(&buffer[..]);
         buffer.len()
     }
@@ -60,7 +62,7 @@ mod tests {
         #[test]
         fn roundtrip(log: Log) {
             let mut buf = Vec::<u8>::new();
-            let len = log.clone().to_compact(&mut buf);
+            let len = log.to_compact(&mut buf);
             let (decoded, _) = Log::from_compact(&buf, len);
             assert_eq!(log, decoded);
         }

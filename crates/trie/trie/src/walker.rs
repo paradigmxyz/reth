@@ -247,6 +247,7 @@ mod tests {
     use reth_db::tables;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_provider::test_utils::create_test_provider_factory;
+    use std::borrow::Cow;
 
     #[test]
     fn walk_nodes_with_common_prefix() {
@@ -276,7 +277,9 @@ mod tests {
 
         let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
         for (k, v) in &inputs {
-            account_cursor.upsert(k.clone().into(), StoredBranchNode(v.clone())).unwrap();
+            account_cursor
+                .upsert(k.clone().into(), StoredBranchNode(Cow::Owned(v.clone())))
+                .unwrap();
         }
         let account_trie = DatabaseAccountTrieCursor::new(account_cursor);
         test_cursor(account_trie, &expected);

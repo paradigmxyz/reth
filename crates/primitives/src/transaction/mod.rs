@@ -682,7 +682,7 @@ impl From<TxEip7702> for Transaction {
 impl Compact for Transaction {
     // Serializes the TxType to the buffer if necessary, returning 2 bits of the type as an
     // identifier instead of the length.
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -911,7 +911,7 @@ impl TransactionSignedNoHash {
 
 #[cfg(feature = "zstd-codec")]
 impl Compact for TransactionSignedNoHash {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -975,7 +975,7 @@ impl Compact for TransactionSignedNoHash {
 
 #[cfg(not(feature = "zstd-codec"))]
 impl Compact for TransactionSignedNoHash {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -2142,7 +2142,7 @@ mod tests {
     fn test_transaction_signed_to_from_compact(tx_signed_no_hash: TransactionSignedNoHash) {
         // zstd aware `to_compact`
         let mut buff: Vec<u8> = Vec::new();
-        let written_bytes = tx_signed_no_hash.clone().to_compact(&mut buff);
+        let written_bytes = tx_signed_no_hash.to_compact(&mut buff);
         let (decoded, _) = TransactionSignedNoHash::from_compact(&buff, written_bytes);
         assert_eq!(tx_signed_no_hash, decoded);
 

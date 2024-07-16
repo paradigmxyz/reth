@@ -658,7 +658,7 @@ mod tests {
         };
 
         let mut data = vec![];
-        receipt.clone().to_compact(&mut data);
+        receipt.to_compact(&mut data);
         let (decoded, _) = Receipt::from_compact(&data[..], data.len());
         assert_eq!(decoded, receipt);
     }

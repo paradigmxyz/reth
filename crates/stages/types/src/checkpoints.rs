@@ -32,7 +32,7 @@ impl MerkleCheckpoint {
 }
 
 impl Compact for MerkleCheckpoint {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -46,7 +46,7 @@ impl Compact for MerkleCheckpoint {
 
         buf.put_u16(self.walker_stack.len() as u16);
         len += 2;
-        for item in self.walker_stack {
+        for item in &self.walker_stack {
             len += item.to_compact(buf);
         }
 
@@ -392,7 +392,7 @@ mod tests {
         };
 
         let mut buf = Vec::new();
-        let encoded = checkpoint.clone().to_compact(&mut buf);
+        let encoded = checkpoint.to_compact(&mut buf);
         let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
         assert_eq!(decoded, checkpoint);
     }
