@@ -741,7 +741,7 @@ mod tests {
                             let transaction = random_signed_tx(&mut rng);
                             static_file_producer
                                 .append_transaction(tx_num, transaction.into())
-                                .map(|_| ())
+                                .map(drop)
                         })?;
 
                         if body.tx_count != 0 {

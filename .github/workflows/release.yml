@@ -132,7 +132,7 @@ jobs:
         # https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/.github/workflows/build.yml
         run: |
           body=$(cat <<- "ENDBODY"
-          ![image](https://github.com/paradigmxyz/reth/assets/17802178/d02595cf-7130-418f-81a3-ec91f614abf5)
+          ![image](https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-prod.png)
 
           ## Testing Checklist (DELETE ME)
 
@@ -175,7 +175,7 @@ jobs:
 
           [See pre-built binaries documentation.](https://paradigmxyz.github.io/reth/installation/binaries.html)
 
-          The binaries are signed with the PGP key: `A3AE 097C 8909 3A12 4049  DF1F 5391 A3C4 1005 30B4`
+          The binaries are signed with the PGP key: `50FB 7CC5 5B2E 8AFA 59FE 03B7 AA5E D56A 7FBF 253E`
 
           | System | Architecture | Binary | PGP Signature |
           |:---:|:---:|:---:|:---|

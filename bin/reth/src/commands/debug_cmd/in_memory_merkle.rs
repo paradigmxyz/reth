@@ -1,31 +1,33 @@
 //! Command for debugging in-memory merkle trie calculation.
 
 use crate::{
-    args::{get_secret_key, NetworkArgs},
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
+    args::NetworkArgs,
     macros::block_executor,
     utils::{get_single_body, get_single_header},
 };
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
+use reth_cli_util::get_secret_key;
 use reth_config::Config;
 use reth_db::DatabaseEnv;
 use reth_errors::BlockValidationError;
 use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_execution_types::ExecutionOutcome;
 use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    AccountExtReader, ChainSpecProvider, ExecutionOutcome, HashingWriter, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
-    StateWriter, StaticFileProviderFactory, StorageReader,
+    AccountExtReader, ChainSpecProvider, HashingWriter, HeaderProvider, LatestStateProviderRef,
+    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateWriter,
+    StaticFileProviderFactory, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
-use reth_trie::{updates::TrieKey, StateRoot};
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use reth_trie::StateRoot;
+use std::{path::PathBuf, sync::Arc};
 use tracing::*;
 
 /// `reth debug in-memory-merkle` command
@@ -63,11 +65,6 @@ impl Command {
             .network
             .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::new(self.network.addr, self.network.port))
-            .discovery_addr(SocketAddr::new(
-                self.network.discovery.addr,
-                self.network.discovery.port,
-            ))
             .build(provider_factory)
             .start_network()
             .await?;
@@ -167,9 +164,8 @@ impl Command {
                 .clone()
                 .try_seal_with_senders()
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
-            None,
         )?;
-        execution_outcome.write_to_storage(provider_rw.tx_ref(), None, OriginalValuesKnown::No)?;
+        execution_outcome.write_to_storage(&provider_rw, None, OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;
@@ -192,15 +188,16 @@ impl Command {
         // Compare updates
         let mut in_mem_mismatched = Vec::new();
         let mut incremental_mismatched = Vec::new();
-        let mut in_mem_updates_iter = in_memory_updates.into_iter().peekable();
-        let mut incremental_updates_iter = incremental_trie_updates.into_iter().peekable();
+        let mut in_mem_updates_iter = in_memory_updates.account_nodes_ref().iter().peekable();
+        let mut incremental_updates_iter =
+            incremental_trie_updates.account_nodes_ref().iter().peekable();
 
         while in_mem_updates_iter.peek().is_some() || incremental_updates_iter.peek().is_some() {
             match (in_mem_updates_iter.next(), incremental_updates_iter.next()) {
                 (Some(in_mem), Some(incr)) => {
                     similar_asserts::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
                     if in_mem.1 != incr.1 &&
-                        matches!(in_mem.0, TrieKey::AccountNode(ref nibbles) if nibbles.0.len() > self.skip_node_depth.unwrap_or_default())
+                        in_mem.0.len() > self.skip_node_depth.unwrap_or_default()
                     {
                         in_mem_mismatched.push(in_mem);
                         incremental_mismatched.push(incr);

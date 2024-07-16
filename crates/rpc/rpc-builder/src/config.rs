@@ -1,15 +1,17 @@
-use crate::{
-    auth::AuthServerConfig, error::RpcError, EthConfig, IpcServerBuilder, RpcModuleConfig,
-    RpcServerConfig, TransportRpcModuleConfig,
-};
+use std::{net::SocketAddr, path::PathBuf};
+
 use jsonrpsee::server::ServerBuilder;
 use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_path};
-use reth_rpc::eth::{cache::EthStateCacheConfig, gas_oracle::GasPriceOracleConfig};
+use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
 use reth_rpc_server_types::RpcModuleSelection;
-use std::{net::SocketAddr, path::PathBuf};
 use tower::layer::util::Identity;
 use tracing::debug;
+
+use crate::{
+    auth::AuthServerConfig, error::RpcError, IpcServerBuilder, RpcModuleConfig, RpcServerConfig,
+    TransportRpcModuleConfig,
+};
 
 /// A trait that provides a configured RPC server.
 ///
@@ -91,9 +93,11 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_tracing_requests(self.rpc_max_tracing_requests)
             .max_blocks_per_filter(self.rpc_max_blocks_per_filter.unwrap_or_max())
             .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
+            .eth_proof_window(self.rpc_eth_proof_window)
             .rpc_gas_cap(self.rpc_gas_cap)
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
+            .proof_permits(self.rpc_proof_permits)
     }
 
     fn state_cache_config(&self) -> EthStateCacheConfig {
@@ -216,7 +220,7 @@ impl RethRpcServerConfig for RpcServerArgs {
 mod tests {
     use clap::{Args, Parser};
     use reth_node_core::args::RpcServerArgs;
-    use reth_rpc::eth::RPC_DEFAULT_GAS_CAP;
+    use reth_rpc_eth_types::RPC_DEFAULT_GAS_CAP;
     use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
     use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 

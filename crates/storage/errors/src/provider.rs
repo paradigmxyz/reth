@@ -96,9 +96,6 @@ pub enum ProviderError {
     /// Thrown when we were unable to find a state for a block hash.
     #[error("no state found for block {0}")]
     StateForHashNotFound(B256),
-    /// Unable to compute state root on top of historical block.
-    #[error("unable to compute state root on top of historical block")]
-    StateRootNotAvailableForHistoricalBlock,
     /// Unable to find the block number for a given transaction index.
     #[error("unable to find the block number for a given transaction index")]
     BlockNumberForTransactionIndexNotFound,
@@ -142,6 +139,9 @@ pub enum ProviderError {
     /// Storage lock error.
     #[error(transparent)]
     StorageLockError(#[from] crate::lockfile::StorageLockError),
+    /// Storage writer error.
+    #[error(transparent)]
+    StorageWriterError(#[from] crate::writer::StorageWriterError),
 }
 
 impl From<reth_fs_util::FsPathError> for ProviderError {

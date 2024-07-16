@@ -4,28 +4,34 @@ use crate::{
     B256, U256,
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
-use reth_codecs::{main_codec, Compact, CompactPlaceholder};
-use std::mem;
+use core::mem;
+use reth_codecs::{Compact, CompactPlaceholder};
 
 #[cfg(feature = "c-kzg")]
 use crate::kzg::KzgSettings;
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 /// [EIP-4844 Blob Transaction](https://eips.ethereum.org/EIPS/eip-4844#blob-transaction)
 ///
 /// A transaction with blob hashes and max blob fee
-#[main_codec]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxEip4844 {
-    /// Added as EIP-pub 155: Simple replay attack protection
+    /// Added as EIP-155: Simple replay attack protection
     pub chain_id: ChainId,
+
     /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
     pub nonce: u64,
+
     /// A scalar value equal to the maximum
     /// amount of gas that should be used in executing
     /// this transaction. This is paid up-front, before any
     /// computation is done and may not be increased
     /// later; formally Tg.
     pub gas_limit: u64,
+
     /// A scalar value equal to the maximum
     /// amount of gas that should be used in executing
     /// this transaction. This is paid up-front, before any
@@ -38,6 +44,7 @@ pub struct TxEip4844 {
     ///
     /// This is also known as `GasFeeCap`
     pub max_fee_per_gas: u128,
+
     /// Max Priority fee that transaction is paying
     ///
     /// As ethereum circulation is around 120mil eth as of 2022 that is around
@@ -46,17 +53,21 @@ pub struct TxEip4844 {
     ///
     /// This is also known as `GasTipCap`
     pub max_priority_fee_per_gas: u128,
+
     /// TODO(debt): this should be removed if we break the DB.
     /// Makes sure that the Compact bitflag struct has one bit after the above field:
     /// <https://github.com/paradigmxyz/reth/pull/8291#issuecomment-2117545016>
     pub placeholder: Option<CompactPlaceholder>,
+
     /// The 160-bit address of the message call’s recipient.
     pub to: Address,
+
     /// A scalar value equal to the number of Wei to
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
     /// to the newly created account; formally Tv.
     pub value: U256,
+
     /// The accessList specifies a list of addresses and storage keys;
     /// these addresses and storage keys are added into the `accessed_addresses`
     /// and `accessed_storage_keys` global sets (introduced in EIP-2929).
@@ -72,11 +83,13 @@ pub struct TxEip4844 {
     /// aka BlobFeeCap or blobGasFeeCap
     pub max_fee_per_blob_gas: u128,
 
-    /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
-    /// Some). pub init: An unlimited size byte array specifying the
-    /// EVM-code for the account initialisation procedure CREATE,
-    /// data: An unlimited size byte array specifying the
-    /// input data of the message call, formally Td.
+    /// Unlike other transaction types, where the `input` field has two uses depending on whether
+    /// or not the `to` field is [`Create`](crate::TxKind::Create) or
+    /// [`Call`](crate::TxKind::Call), EIP-4844 transactions cannot be
+    /// [`Create`](crate::TxKind::Create) transactions.
+    ///
+    /// This means the `input` field has a single use, as data: An unlimited size byte array
+    /// specifying the input data of the message call, formally Td.
     pub input: Bytes,
 }
 
@@ -145,20 +158,28 @@ impl TxEip4844 {
     /// - `max_fee_per_blob_gas`
     /// - `blob_versioned_hashes`
     pub fn decode_inner(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(Self {
+        let mut tx = Self {
             chain_id: Decodable::decode(buf)?,
             nonce: Decodable::decode(buf)?,
             max_priority_fee_per_gas: Decodable::decode(buf)?,
             max_fee_per_gas: Decodable::decode(buf)?,
             gas_limit: Decodable::decode(buf)?,
-            placeholder: Some(()),
+            placeholder: None,
             to: Decodable::decode(buf)?,
             value: Decodable::decode(buf)?,
             input: Decodable::decode(buf)?,
             access_list: Decodable::decode(buf)?,
             max_fee_per_blob_gas: Decodable::decode(buf)?,
             blob_versioned_hashes: Decodable::decode(buf)?,
-        })
+        };
+
+        // HACK: our arbitrary implementation sets the placeholder this way for backwards
+        // compatibility, and should be removed once `placeholder` can be removed
+        if tx.to != Address::default() {
+            tx.placeholder = Some(())
+        }
+
+        Ok(tx)
     }
 
     /// Outputs the length of the transaction's fields, without a RLP header.

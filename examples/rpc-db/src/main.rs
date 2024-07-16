@@ -12,14 +12,17 @@
 //! cast rpc myrpcExt_customMethod
 //! ```
 
+use std::{path::Path, sync::Arc};
+
 use reth::{
-    primitives::ChainSpecBuilder,
     providers::{
         providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
     },
-    utils::db::open_db_read_only,
+    rpc::eth::EthApi,
+    utils::open_db_read_only,
 };
+use reth_chainspec::ChainSpecBuilder;
 use reth_db::mdbx::DatabaseArguments;
 use reth_db_api::models::ClientVersion;
 
@@ -29,12 +32,9 @@ use reth::rpc::builder::{
 };
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
-use reth::{
-    blockchain_tree::noop::NoopBlockchainTree, providers::test_utils::TestCanonStateSubscriptions,
-    tasks::TokioTaskExecutor,
-};
+use reth::{blockchain_tree::noop::NoopBlockchainTree, tasks::TokioTaskExecutor};
 use reth_node_ethereum::EthEvmConfig;
-use std::{path::Path, sync::Arc};
+use reth_provider::test_utils::TestCanonStateSubscriptions;
 
 // Custom rpc extension
 pub mod myrpc_ext;
@@ -71,7 +71,7 @@ async fn main() -> eyre::Result<()> {
 
     // Pick which namespaces to expose.
     let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);
-    let mut server = rpc_builder.build(config);
+    let mut server = rpc_builder.build(config, Box::new(EthApi::with_spawner));
 
     // Add a custom rpc namespace
     let custom_rpc = MyRpcExt { provider };
@@ -80,7 +80,7 @@ async fn main() -> eyre::Result<()> {
     // Start the server & keep it alive
     let server_args =
         RpcServerConfig::http(Default::default()).with_http_address("0.0.0.0:8545".parse()?);
-    let _handle = server_args.start(server).await?;
+    let _handle = server_args.start(&server).await?;
     futures::future::pending::<()>().await;
 
     Ok(())

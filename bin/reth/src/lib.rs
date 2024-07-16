@@ -32,7 +32,15 @@
 pub mod cli;
 pub mod commands;
 mod macros;
-pub mod utils;
+
+/// Re-exported utils.
+pub mod utils {
+    pub use reth_db::open_db_read_only;
+
+    /// Re-exported from `reth_node_core`, also to prevent a breaking change. See the comment
+    /// on the `reth_node_core::args` re-export for more details.
+    pub use reth_node_core::utils::*;
+}
 
 /// Re-exported payload related types
 pub mod payload {
@@ -140,6 +148,15 @@ pub mod rpc {
         pub use reth_rpc_types::*;
     }
 
+    /// Re-exported from `reth_rpc_server_types`.
+    pub mod server_types {
+        pub use reth_rpc_server_types::*;
+        /// Re-exported from `reth_rpc_eth_types`.
+        pub mod eth {
+            pub use reth_rpc_eth_types::*;
+        }
+    }
+
     /// Re-exported from `reth_rpc_api`.
     pub mod api {
         pub use reth_rpc_api::*;
@@ -151,10 +168,10 @@ pub mod rpc {
 
     /// Re-exported from `reth_rpc::rpc`.
     pub mod result {
-        pub use reth_rpc::result::*;
+        pub use reth_rpc_server_types::result::*;
     }
 
-    /// Re-exported from `reth_rpc::eth`.
+    /// Re-exported from `reth_rpc_types_compat`.
     pub mod compat {
         pub use reth_rpc_types_compat::*;
     }
@@ -163,18 +180,6 @@ pub mod rpc {
 // re-export for convenience
 #[doc(inline)]
 pub use reth_cli_runner::{tokio_runtime, CliContext, CliRunner};
-
-#[cfg(all(unix, any(target_env = "gnu", target_os = "macos")))]
-pub mod sigsegv_handler;
-
-/// Signal handler to extract a backtrace from stack overflow.
-///
-/// This is a no-op because this platform doesn't support our signal handler's requirements.
-#[cfg(not(all(unix, any(target_env = "gnu", target_os = "macos"))))]
-pub mod sigsegv_handler {
-    /// No-op function.
-    pub fn install() {}
-}
 
 #[cfg(all(feature = "jemalloc", unix))]
 use tikv_jemallocator as _;

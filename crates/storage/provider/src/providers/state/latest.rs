@@ -10,9 +10,9 @@ use reth_db_api::{
 use reth_primitives::{
     Account, Address, BlockNumber, Bytecode, StaticFileSegment, StorageKey, StorageValue, B256,
 };
+use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::{proof::Proof, updates::TrieUpdates, AccountProof, HashedPostState};
-use revm::db::BundleState;
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 
 /// State provider over latest state that takes tx reference.
 #[derive(Debug)]
@@ -74,19 +74,30 @@ impl<'b, TX: DbTx> BlockHashReader for LatestStateProviderRef<'b, TX> {
 }
 
 impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
-    fn state_root(&self, bundle_state: &BundleState) -> ProviderResult<B256> {
-        HashedPostState::from_bundle_state(&bundle_state.state)
-            .state_root(self.tx)
-            .map_err(|err| ProviderError::Database(err.into()))
+    fn hashed_state_root(&self, hashed_state: &HashedPostState) -> ProviderResult<B256> {
+        hashed_state.state_root(self.tx).map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_with_updates(
+    fn hashed_state_root_with_updates(
         &self,
-        bundle_state: &BundleState,
+        hashed_state: &HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        HashedPostState::from_bundle_state(&bundle_state.state)
+        hashed_state
             .state_root_with_updates(self.tx)
             .map_err(|err| ProviderError::Database(err.into()))
+    }
+}
+
+impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {
+    fn hashed_proof(
+        &self,
+        hashed_state: &HashedPostState,
+        address: Address,
+        slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        Ok(hashed_state
+            .account_proof(self.tx, address, slots)
+            .map_err(Into::<reth_db::DatabaseError>::into)?)
     }
 }
 
@@ -109,12 +120,6 @@ impl<'b, TX: DbTx> StateProvider for LatestStateProviderRef<'b, TX> {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         self.tx.get::<tables::Bytecodes>(code_hash).map_err(Into::into)
-    }
-
-    fn proof(&self, address: Address, slots: &[B256]) -> ProviderResult<AccountProof> {
-        Ok(Proof::new(self.tx)
-            .account_proof(address, slots)
-            .map_err(Into::<reth_db::DatabaseError>::into)?)
     }
 }
 

@@ -1,30 +1,34 @@
-use crate::{
-    traits::{BlockSource, ReceiptProvider},
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PruneCheckpointReader,
-    ReceiptProviderIdExt, RequestsProvider, StageCheckpointReader, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
-    WithdrawalsProvider,
+use std::{
+    ops::{RangeBounds, RangeInclusive},
+    sync::Arc,
 };
+
+use reth_chainspec::{ChainInfo, ChainSpec, MAINNET};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
     Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, BlockWithSenders,
-    Bytecode, ChainInfo, ChainSpec, Header, Receipt, SealedBlock, SealedBlockWithSenders,
-    SealedHeader, StorageKey, StorageValue, TransactionMeta, TransactionSigned,
-    TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256, MAINNET, U256,
+    Bytecode, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageKey,
+    StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
+    Withdrawal, Withdrawals, B256, U256,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof};
-use revm::{
-    db::BundleState,
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-};
-use std::{
-    ops::{RangeBounds, RangeInclusive},
-    sync::Arc,
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
+use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
+use tokio::sync::broadcast;
+
+use crate::{
+    providers::StaticFileProvider,
+    traits::{BlockSource, ReceiptProvider},
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
+    EvmEnvProvider, HeaderProvider, PruneCheckpointReader, ReceiptProviderIdExt, RequestsProvider,
+    StageCheckpointReader, StateProvider, StateProviderBox, StateProviderFactory,
+    StateRootProvider, StaticFileProviderFactory, TransactionVariant, TransactionsProvider,
+    WithdrawalsProvider,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -109,6 +113,14 @@ impl BlockReader for NoopProvider {
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<reth_primitives::BlockWithSenders>> {
+        Ok(None)
+    }
+
+    fn sealed_block_with_senders(
+        &self,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
         Ok(None)
     }
 
@@ -300,15 +312,26 @@ impl ChangeSetReader for NoopProvider {
 }
 
 impl StateRootProvider for NoopProvider {
-    fn state_root(&self, _state: &BundleState) -> ProviderResult<B256> {
+    fn hashed_state_root(&self, _state: &HashedPostState) -> ProviderResult<B256> {
         Ok(B256::default())
     }
 
-    fn state_root_with_updates(
+    fn hashed_state_root_with_updates(
         &self,
-        _bundle_state: &BundleState,
+        _state: &HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
+    }
+}
+
+impl StateProofProvider for NoopProvider {
+    fn hashed_proof(
+        &self,
+        _hashed_state: &HashedPostState,
+        address: Address,
+        _slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        Ok(AccountProof::new(address))
     }
 }
 
@@ -323,10 +346,6 @@ impl StateProvider for NoopProvider {
 
     fn bytecode_by_hash(&self, _code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         Ok(None)
-    }
-
-    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        Ok(AccountProof::new(address))
     }
 }
 
@@ -354,22 +373,6 @@ impl EvmEnvProvider for NoopProvider {
     where
         EvmConfig: ConfigureEvmEnv,
     {
-        Ok(())
-    }
-
-    fn fill_block_env_at(
-        &self,
-        _block_env: &mut BlockEnv,
-        _at: BlockHashOrNumber,
-    ) -> ProviderResult<()> {
-        Ok(())
-    }
-
-    fn fill_block_env_with_header(
-        &self,
-        _block_env: &mut BlockEnv,
-        _header: &Header,
-    ) -> ProviderResult<()> {
         Ok(())
     }
 
@@ -470,5 +473,21 @@ impl PruneCheckpointReader for NoopProvider {
         _segment: PruneSegment,
     ) -> ProviderResult<Option<PruneCheckpoint>> {
         Ok(None)
+    }
+
+    fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        Ok(Vec::new())
+    }
+}
+
+impl StaticFileProviderFactory for NoopProvider {
+    fn static_file_provider(&self) -> StaticFileProvider {
+        StaticFileProvider::default()
+    }
+}
+
+impl CanonStateSubscriptions for NoopProvider {
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
+        broadcast::channel(1).1
     }
 }

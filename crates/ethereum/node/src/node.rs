@@ -1,27 +1,34 @@
 //! Ethereum Node types config.
 
-use crate::{EthEngineTypes, EthEvmConfig};
+use std::sync::Arc;
+
 use reth_auto_seal_consensus::AutoSealConsensus;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_ethereum_engine_primitives::{
+    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
+};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network::NetworkHandle;
+use reth_node_api::{FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
         PayloadServiceBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes},
-    BuilderContext, Node, PayloadBuilderConfig,
+    BuilderContext, Node, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
+use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
     TransactionValidationTaskExecutor,
 };
-use std::sync::Arc;
+
+use crate::{EthEngineTypes, EthEvmConfig};
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -39,7 +46,12 @@ impl EthereumNode {
         EthereumConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<Engine = EthEngineTypes>,
+        Node: FullNodeTypes,
+        <Node as NodeTypes>::Engine: PayloadTypes<
+            BuiltPayload = EthBuiltPayload,
+            PayloadAttributes = EthPayloadAttributes,
+            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+        >,
     {
         ComponentsBuilder::default()
             .node_types::<Node>()
@@ -56,6 +68,14 @@ impl NodeTypes for EthereumNode {
     type Engine = EthEngineTypes;
 }
 
+/// Add-ons w.r.t. l1 ethereum.
+#[derive(Debug, Clone)]
+pub struct EthereumAddOns;
+
+impl<N: FullNodeComponents> NodeAddOns<N> for EthereumAddOns {
+    type EthApi = EthApi<N::Provider, N::Pool, NetworkHandle, N::Evm>;
+}
+
 impl<N> Node<N> for EthereumNode
 where
     N: FullNodeTypes<Engine = EthEngineTypes>,
@@ -69,7 +89,9 @@ where
         EthereumConsensusBuilder,
     >;
 
-    fn components_builder(self) -> Self::ComponentsBuilder {
+    type AddOns = EthereumAddOns;
+
+    fn components_builder(&self) -> Self::ComponentsBuilder {
         Self::components()
     }
 }
@@ -178,8 +200,13 @@ pub struct EthereumPayloadBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder
 where
-    Node: FullNodeTypes<Engine = EthEngineTypes>,
     Pool: TransactionPool + Unpin + 'static,
+    Node: FullNodeTypes,
+    <Node as NodeTypes>::Engine: PayloadTypes<
+        BuiltPayload = EthBuiltPayload,
+        PayloadAttributes = EthPayloadAttributes,
+        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+    >,
 {
     async fn spawn_payload_service(
         self,

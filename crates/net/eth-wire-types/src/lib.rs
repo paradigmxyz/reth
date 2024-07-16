@@ -6,9 +6,6 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
-#![allow(unknown_lints, non_local_definitions)]
-#![allow(clippy::needless_lifetimes)] // side effect of optimism fields
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod status;
@@ -19,6 +16,9 @@ pub use version::EthVersion;
 
 pub mod message;
 pub use message::{EthMessage, EthMessageID, ProtocolMessage};
+
+pub mod header;
+pub use header::*;
 
 pub mod blocks;
 pub use blocks::*;

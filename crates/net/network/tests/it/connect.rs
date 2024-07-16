@@ -4,8 +4,8 @@ use alloy_node_bindings::Geth;
 use alloy_provider::{ext::AdminApi, ProviderBuilder};
 use futures::StreamExt;
 use reth_discv4::Discv4Config;
-use reth_eth_wire::DisconnectReason;
-use reth_net_common::ban_list::BanList;
+use reth_eth_wire::{DisconnectReason, HeadersDirection};
+use reth_net_banlist::BanList;
 use reth_network::{
     test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
     NetworkConfigBuilder, NetworkEvent, NetworkEvents, NetworkManager, PeersConfig,
@@ -15,7 +15,7 @@ use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     sync::{NetworkSyncUpdater, SyncState},
 };
-use reth_primitives::{mainnet_nodes, HeadersDirection, NodeRecord};
+use reth_network_peers::{mainnet_nodes, NodeRecord};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
@@ -674,7 +674,7 @@ async fn test_rejected_by_already_connect() {
 async fn new_random_peer(
     max_in_bound: usize,
     trusted_nodes: HashSet<NodeRecord>,
-) -> NetworkManager<NoopProvider> {
+) -> NetworkManager {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let peers_config =
         PeersConfig::default().with_max_inbound(max_in_bound).with_trusted_nodes(trusted_nodes);
@@ -683,7 +683,7 @@ async fn new_random_peer(
         .listener_port(0)
         .disable_discovery()
         .peer_config(peers_config)
-        .build(NoopProvider::default());
+        .build_with_noop_provider();
 
     NetworkManager::new(config).await.unwrap()
 }

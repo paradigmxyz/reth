@@ -6,19 +6,21 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-// TODO: remove when https://github.com/proptest-rs/proptest/pull/427 is merged
-#![allow(unknown_lints, non_local_definitions)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod checkpoint;
 mod limiter;
 mod mode;
+mod pruner;
 mod segment;
 mod target;
 
 pub use checkpoint::PruneCheckpoint;
 pub use limiter::PruneLimiter;
 pub use mode::PruneMode;
+pub use pruner::{
+    PruneInterruptReason, PruneProgress, PrunerOutput, SegmentOutput, SegmentOutputCheckpoint,
+};
 pub use segment::{PrunePurpose, PruneSegment, PruneSegmentError};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -99,68 +101,5 @@ impl ReceiptsLogPruneConfig {
         }
 
         Ok(lowest.map(|lowest| lowest.max(pruned_block)))
-    }
-}
-
-/// Progress of pruning.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum PruneProgress {
-    /// There is more data to prune.
-    HasMoreData(PruneInterruptReason),
-    /// Pruning has been finished.
-    Finished,
-}
-
-/// Reason for interrupting a prune run.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum PruneInterruptReason {
-    /// Prune run timed out.
-    Timeout,
-    /// Limit on the number of deleted entries (rows in the database) per prune run was reached.
-    DeletedEntriesLimitReached,
-    /// Unknown reason for stopping prune run.
-    Unknown,
-}
-
-impl PruneInterruptReason {
-    /// Creates new [`PruneInterruptReason`] based on the [`PruneLimiter`].
-    pub fn new(limiter: &PruneLimiter) -> Self {
-        if limiter.is_time_limit_reached() {
-            Self::Timeout
-        } else if limiter.is_deleted_entries_limit_reached() {
-            Self::DeletedEntriesLimitReached
-        } else {
-            Self::Unknown
-        }
-    }
-
-    /// Returns `true` if the reason is timeout.
-    pub const fn is_timeout(&self) -> bool {
-        matches!(self, Self::Timeout)
-    }
-
-    /// Returns `true` if the reason is reaching the limit on deleted entries.
-    pub const fn is_entries_limit_reached(&self) -> bool {
-        matches!(self, Self::DeletedEntriesLimitReached)
-    }
-}
-
-impl PruneProgress {
-    /// Creates new [`PruneProgress`].
-    ///
-    /// If `done == true`, returns [`PruneProgress::Finished`], otherwise
-    /// [`PruneProgress::HasMoreData`] is returned with [`PruneInterruptReason`] according to the
-    /// passed limiter.
-    pub fn new(done: bool, limiter: &PruneLimiter) -> Self {
-        if done {
-            Self::Finished
-        } else {
-            Self::HasMoreData(PruneInterruptReason::new(limiter))
-        }
-    }
-
-    /// Returns `true` if prune run is finished.
-    pub const fn is_finished(&self) -> bool {
-        matches!(self, Self::Finished)
     }
 }

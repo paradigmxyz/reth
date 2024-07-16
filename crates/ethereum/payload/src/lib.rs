@@ -10,13 +10,18 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use reth_basic_payload_builder::{
-    commit_withdrawals, is_better_payload, post_block_withdrawal_requests_contract_call,
-    pre_block_beacon_root_contract_call, BuildArguments, BuildOutcome, PayloadBuilder,
+    commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig, WithdrawalsOutcome,
 };
 use reth_errors::RethError;
-use reth_evm::ConfigureEvmGeneric;
+use reth_evm::{
+    system_calls::{
+        post_block_withdrawal_requests_contract_call, pre_block_beacon_root_contract_call,
+    },
+    ConfigureEvmGeneric,
+};
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
+use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{
     error::PayloadBuilderError, EthBuiltPayload, EthPayloadBuilderAttributes,
 };
@@ -26,10 +31,10 @@ use reth_primitives::{
     },
     eip4844::calculate_excess_blob_gas,
     proofs::{self, calculate_requests_root},
-    revm::env::tx_env_with_recovered,
-    Block, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH, U256,
+    Block, EthereumHardforks, Header, IntoRecoveredTransaction, Receipt, EMPTY_OMMER_ROOT_HASH,
+    U256,
 };
-use reth_provider::{ExecutionOutcome, StateProviderFactory};
+use reth_provider::StateProviderFactory;
 use reth_revm::{database::StateProviderDatabase, state_change::apply_blockhashes_update};
 use reth_transaction_pool::{BestTransactionsAttributes, TransactionPool};
 use revm::{
@@ -108,16 +113,19 @@ where
 
         let base_fee = initialized_block_env.basefee.to::<u64>();
         let block_number = initialized_block_env.number.to::<u64>();
-        let block_gas_limit = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
+        let block_gas_limit =
+            initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
 
         // apply eip-4788 pre block contract call
         pre_block_beacon_root_contract_call(
             &mut db,
+            &self.evm_config,
             &chain_spec,
-            block_number,
             &initialized_cfg,
             &initialized_block_env,
-            &attributes,
+            block_number,
+            attributes.timestamp,
+            attributes.parent_beacon_block_root,
         )
         .map_err(|err| {
             warn!(target: "payload_builder",
@@ -125,7 +133,7 @@ where
                 %err,
                 "failed to apply beacon root contract call for empty payload"
             );
-            err
+            PayloadBuilderError::Internal(err.into())
         })?;
 
         // apply eip-2935 blockhashes update
@@ -188,22 +196,25 @@ where
         }
 
         // Calculate the requests and the requests root.
-        let (requests, requests_root) =
-            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-                // We do not calculate the EIP-6110 deposit requests because there are no
-                // transactions in an empty payload.
-                let withdrawal_requests = post_block_withdrawal_requests_contract_call(
-                    &mut db,
-                    &initialized_cfg,
-                    &initialized_block_env,
-                )?;
+        let (requests, requests_root) = if chain_spec
+            .is_prague_active_at_timestamp(attributes.timestamp)
+        {
+            // We do not calculate the EIP-6110 deposit requests because there are no
+            // transactions in an empty payload.
+            let withdrawal_requests = post_block_withdrawal_requests_contract_call::<EvmConfig, _>(
+                &self.evm_config,
+                &mut db,
+                &initialized_cfg,
+                &initialized_block_env,
+            )
+            .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-                let requests = withdrawal_requests;
-                let requests_root = calculate_requests_root(&requests);
-                (Some(requests.into()), Some(requests_root))
-            } else {
-                (None, None)
-            };
+            let requests = withdrawal_requests;
+            let requests_root = calculate_requests_root(&requests);
+            (Some(requests.into()), Some(requests_root))
+        } else {
+            (None, None)
+        };
 
         let header = Header {
             parent_hash: parent_block.hash(),
@@ -270,7 +281,8 @@ where
     debug!(target: "payload_builder", id=%attributes.id, parent_hash = ?parent_block.hash(), parent_number = parent_block.number, "building new payload");
     let mut cumulative_gas_used = 0;
     let mut sum_blob_gas_used = 0;
-    let block_gas_limit: u64 = initialized_block_env.gas_limit.try_into().unwrap_or(u64::MAX);
+    let block_gas_limit: u64 =
+        initialized_block_env.gas_limit.try_into().unwrap_or(chain_spec.max_gas_limit);
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
     let mut executed_txs = Vec::new();
@@ -287,12 +299,22 @@ where
     // apply eip-4788 pre block contract call
     pre_block_beacon_root_contract_call(
         &mut db,
+        &evm_config,
         &chain_spec,
-        block_number,
         &initialized_cfg,
         &initialized_block_env,
-        &attributes,
-    )?;
+        block_number,
+        attributes.timestamp,
+        attributes.parent_beacon_block_root,
+    )
+    .map_err(|err| {
+        warn!(target: "payload_builder",
+            parent_hash=%parent_block.hash(),
+            %err,
+            "failed to apply beacon root contract call for empty payload"
+        );
+        PayloadBuilderError::Internal(err.into())
+    })?;
 
     // apply eip-2935 blockhashes update
     apply_blockhashes_update(
@@ -341,7 +363,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             initialized_cfg.clone(),
             initialized_block_env.clone(),
-            tx_env_with_recovered(&tx),
+            evm_config.tx_env(&tx),
         );
 
         // Configure the environment for the block.
@@ -425,10 +447,12 @@ where
         let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter().flatten())
             .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
         let withdrawal_requests = post_block_withdrawal_requests_contract_call(
+            &evm_config,
             &mut db,
             &initialized_cfg,
             &initialized_block_env,
-        )?;
+        )
+        .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
         let requests = [deposit_requests, withdrawal_requests].concat();
         let requests_root = calculate_requests_root(&requests);

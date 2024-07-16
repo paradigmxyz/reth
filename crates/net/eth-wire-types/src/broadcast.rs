@@ -19,14 +19,13 @@ use std::{
 
 #[cfg(feature = "arbitrary")]
 use proptest::{collection::vec, prelude::*};
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+#[cfg(feature = "arbitrary")]
+use proptest_arbitrary_interop::arb;
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NewBlockHashes(
     /// New block hashes and the block number for each blockhash.
     /// Clients should request blocks using a [`GetBlockBodies`](crate::GetBlockBodies) message.
@@ -50,7 +49,7 @@ impl NewBlockHashes {
 /// A block hash _and_ a block number.
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlockHashNumber {
     /// The block hash
     pub hash: B256,
@@ -73,7 +72,7 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
 /// A new block with the current total difficulty, which includes the difficulty of the returned
 /// block.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive_arbitrary(rlp, 25)]
 pub struct NewBlock {
     /// A new block.
@@ -86,7 +85,7 @@ pub struct NewBlock {
 /// in a block.
 #[derive_arbitrary(rlp, 10)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Transactions(
     /// New transactions for the peer to include in its mempool.
     pub Vec<TransactionSigned>,
@@ -291,7 +290,7 @@ impl From<NewPooledTransactionHashes68> for NewPooledTransactionHashes {
 /// but have not been included in a block.
 #[derive_arbitrary(rlp)]
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NewPooledTransactionHashes66(
     /// Transaction hashes for new transactions that have appeared on the network.
     /// Clients should request the transactions with the given hashes using a
@@ -308,7 +307,7 @@ impl From<Vec<B256>> for NewPooledTransactionHashes66 {
 /// Same as [`NewPooledTransactionHashes66`] but extends that that beside the transaction hashes,
 /// the node sends the transaction types and their sizes (as defined in EIP-2718) as well.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NewPooledTransactionHashes68 {
     /// Transaction types for new transactions that have appeared on the network.
     ///
@@ -351,7 +350,7 @@ impl Arbitrary for NewPooledTransactionHashes68 {
             .prop_flat_map(|len| {
                 // Use the generated length to create vectors of TxType, usize, and B256
                 let types_vec =
-                    vec(any::<reth_primitives::TxType>().prop_map(|ty| ty as u8), len..=len);
+                    vec(arb::<reth_primitives::TxType>().prop_map(|ty| ty as u8), len..=len);
 
                 // Map the usize values to the range 0..131072(0x20000)
                 let sizes_vec = vec(proptest::num::usize::ANY.prop_map(|x| x % 131072), len..=len);

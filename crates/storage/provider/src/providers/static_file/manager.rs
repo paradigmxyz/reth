@@ -9,6 +9,7 @@ use crate::{
 };
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use parking_lot::RwLock;
+use reth_chainspec::ChainInfo;
 use reth_db::{
     lockfile::StorageLock,
     static_file::{iter_static_files, HeaderMask, ReceiptMask, StaticFileCursor, TransactionMask},
@@ -24,8 +25,8 @@ use reth_nippy_jar::NippyJar;
 use reth_primitives::{
     keccak256,
     static_file::{find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive},
-    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, ChainInfo, Header,
-    Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
+    Address, Block, BlockHash, BlockHashOrNumber, BlockNumber, BlockWithSenders, Header, Receipt,
+    SealedBlock, SealedBlockWithSenders, SealedHeader, StaticFileSegment, TransactionMeta,
     TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber, Withdrawal, Withdrawals, B256,
     U256,
 };
@@ -645,8 +646,13 @@ impl StaticFileProvider {
     /// * its highest block should match the stage checkpoint block number if it's equal or higher
     ///   than the corresponding database table last entry.
     ///   * If the checkpoint block is higher, then request a pipeline unwind to the static file
-    ///     block.
-    ///   * If the checkpoint block is lower, then heal by removing rows from the static file.
+    ///     block. This is expressed by returning [`Some`] with the requested pipeline unwind
+    ///     target.
+    ///   * If the checkpoint block is lower, then heal by removing rows from the static file. In
+    ///     this case, the rows will be removed and [`None`] will be returned.
+    ///
+    /// * If the database tables overlap with static files and have contiguous keys, or the
+    ///   checkpoint block matches the highest static files block, then [`None`] will be returned.
     fn ensure_invariants<TX: DbTx, T: Table<Key = u64>>(
         &self,
         provider: &DatabaseProvider<TX>,
@@ -735,11 +741,15 @@ impl StaticFileProvider {
     }
 
     /// Gets the highest static file block if it exists for a static file segment.
+    ///
+    /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_highest_static_file_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
         self.static_files_max_block.read().get(&segment).copied()
     }
 
     /// Gets the highest static file transaction.
+    ///
+    /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_highest_static_file_tx(&self, segment: StaticFileSegment) -> Option<TxNumber> {
         self.static_files_tx_index
             .read()
@@ -1452,6 +1462,15 @@ impl BlockReader for StaticFileProvider {
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<BlockWithSenders>> {
+        // Required data not present in static_files
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn sealed_block_with_senders(
+        &self,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }

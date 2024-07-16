@@ -1,6 +1,7 @@
+use reth_chainspec::ChainSpec;
 use reth_primitives::{
     revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Address, ChainSpec, Header, SealedBlock, Withdrawals, B256, U256,
+    Address, Header, SealedBlock, Withdrawals, B256, U256,
 };
 use reth_rpc_types::{
     engine::{OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId},
@@ -146,7 +147,7 @@ impl PayloadAttributes for OptimismPayloadAttributes {
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(chain_spec, version, self.into())?;
 
-        if self.gas_limit.is_none() && chain_spec.is_optimism() {
+        if self.gas_limit.is_none() {
             return Err(EngineObjectValidationError::InvalidParams(
                 "MissingGasLimitInPayloadAttributes".to_string().into(),
             ))

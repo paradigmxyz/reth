@@ -19,7 +19,9 @@ reth-node-core.workspace = true
 reth-provider.workspace = true
 reth-rpc.workspace = true
 reth-rpc-api.workspace = true
+reth-rpc-eth-api.workspace = true
 reth-rpc-layer.workspace = true
+reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
@@ -43,8 +45,10 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+reth-chainspec.workspace = true
 reth-beacon-consensus.workspace = true
 reth-network-api.workspace = true
+reth-network-peers.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
@@ -57,6 +61,7 @@ reth-rpc-types-compat.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-tokio-util.workspace = true
+reth-node-api.workspace = true
 
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true

@@ -1,15 +1,11 @@
 //! Command for debugging merkle trie calculation.
-
-use crate::{
-    args::{get_secret_key, NetworkArgs},
-    commands::common::{AccessRights, Environment, EnvironmentArgs},
-    macros::block_executor,
-    utils::get_single_header,
-};
+use crate::{args::NetworkArgs, macros::block_executor, utils::get_single_header};
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
+use reth_cli_util::get_secret_key;
 use reth_config::Config;
 use reth_consensus::Consensus;
 use reth_db::{tables, DatabaseEnv};
@@ -23,14 +19,13 @@ use reth_provider::{
     BlockNumReader, BlockWriter, ChainSpecProvider, HeaderProvider, LatestStateProviderRef,
     OriginalValuesKnown, ProviderError, ProviderFactory, StateWriter,
 };
-use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
     stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
     ExecInput, Stage, StageCheckpoint,
 };
 use reth_tasks::TaskExecutor;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use tracing::*;
 
 /// `reth debug merkle` command
@@ -69,11 +64,6 @@ impl Command {
             .network
             .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
             .with_task_executor(Box::new(task_executor))
-            .listener_addr(SocketAddr::new(self.network.addr, self.network.port))
-            .discovery_addr(SocketAddr::new(
-                self.network.discovery.addr,
-                self.network.discovery.port,
-            ))
             .build(provider_factory)
             .start_network()
             .await?;
@@ -150,24 +140,21 @@ impl Command {
                 .map_err(|block| eyre::eyre!("Error sealing block with senders: {block:?}"))?;
             trace!(target: "reth::cli", block_number, "Executing block");
 
-            provider_rw.insert_block(sealed_block.clone(), None)?;
+            provider_rw.insert_block(sealed_block.clone())?;
 
             td += sealed_block.difficulty;
-            let mut executor = executor_provider.batch_executor(
-                StateProviderDatabase::new(LatestStateProviderRef::new(
+            let mut executor = executor_provider.batch_executor(StateProviderDatabase::new(
+                LatestStateProviderRef::new(
                     provider_rw.tx_ref(),
                     provider_rw.static_file_provider().clone(),
-                )),
-                PruneModes::none(),
-            );
+                ),
+            ));
             executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
-            executor.finalize().write_to_storage(
-                provider_rw.tx_ref(),
-                None,
-                OriginalValuesKnown::Yes,
-            )?;
+            executor.finalize().write_to_storage(&provider_rw, None, OriginalValuesKnown::Yes)?;
 
-            let checkpoint = Some(StageCheckpoint::new(block_number - 1));
+            let checkpoint = Some(StageCheckpoint::new(
+                block_number.checked_sub(1).ok_or(eyre::eyre!("GenesisBlockHasNoParent"))?,
+            ));
 
             let mut account_hashing_done = false;
             while !account_hashing_done {

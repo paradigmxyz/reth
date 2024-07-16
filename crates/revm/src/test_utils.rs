@@ -1,10 +1,11 @@
 use reth_primitives::{
     keccak256, Account, Address, BlockNumber, Bytecode, Bytes, StorageKey, B256, U256,
 };
-use reth_storage_api::{AccountReader, BlockHashReader, StateProvider, StateRootProvider};
+use reth_storage_api::{
+    AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof};
-use revm::db::BundleState;
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 use std::collections::HashMap;
 
 /// Mock state for testing
@@ -64,15 +65,26 @@ impl BlockHashReader for StateProviderTest {
 }
 
 impl StateRootProvider for StateProviderTest {
-    fn state_root(&self, _bundle_state: &BundleState) -> ProviderResult<B256> {
+    fn hashed_state_root(&self, _hashed_state: &HashedPostState) -> ProviderResult<B256> {
         unimplemented!("state root computation is not supported")
     }
 
-    fn state_root_with_updates(
+    fn hashed_state_root_with_updates(
         &self,
-        _bundle_state: &BundleState,
+        _hashed_state: &HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
+    }
+}
+
+impl StateProofProvider for StateProviderTest {
+    fn hashed_proof(
+        &self,
+        _hashed_state: &HashedPostState,
+        _address: Address,
+        _slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        unimplemented!("proof generation is not supported")
     }
 }
 
@@ -87,9 +99,5 @@ impl StateProvider for StateProviderTest {
 
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         Ok(self.contracts.get(&code_hash).cloned())
-    }
-
-    fn proof(&self, _address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        unimplemented!("proof generation is not supported")
     }
 }

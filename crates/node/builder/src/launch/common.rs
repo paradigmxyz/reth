@@ -1,31 +1,49 @@
 //! Helper types that can be used by launchers.
 
+use crate::{
+    components::{NodeComponents, NodeComponentsBuilder},
+    hooks::OnComponentInitializedHook,
+    BuilderContext, NodeAdapter,
+};
 use backon::{ConstantBuilder, Retryable};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
 use reth_auto_seal_consensus::MiningMode;
 use reth_beacon_consensus::EthBeaconConsensus;
+use reth_blockchain_tree::{
+    noop::NoopBlockchainTree, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
+    TreeExternals,
+};
+use reth_chainspec::{Chain, ChainSpec};
 use reth_config::{config::EtlConfig, PruneConfig};
+use reth_consensus::Consensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitDatabaseError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_network_p2p::headers::client::HeadersClient;
+use reth_node_api::FullNodeTypes;
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
 };
-use reth_primitives::{BlockNumber, Chain, ChainSpec, Head, B256};
-use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
+use reth_primitives::{BlockNumber, Head, B256};
+use reth_provider::{
+    providers::{BlockchainProvider, StaticFileProvider},
+    CanonStateNotificationSender, ProviderFactory, StaticFileProviderFactory,
+};
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
-use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
+use reth_stages::{sets::DefaultStages, MetricEvent, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
-use std::{sync::Arc, thread::available_parallelism};
-use tokio::sync::{mpsc::Receiver, oneshot, watch};
+use std::{marker::PhantomData, sync::Arc, thread::available_parallelism};
+use tokio::sync::{
+    mpsc::{unbounded_channel, Receiver, UnboundedSender},
+    oneshot, watch,
+};
 
 /// Reusable setup for launching a node.
 ///
@@ -53,11 +71,11 @@ impl LaunchContext {
     /// `config`.
     ///
     /// Attaches both the `NodeConfig` and the loaded `reth.toml` config to the launch context.
-    pub async fn with_loaded_toml_config(
+    pub fn with_loaded_toml_config(
         self,
         config: NodeConfig,
     ) -> eyre::Result<LaunchContextWith<WithConfigs>> {
-        let toml_config = self.load_toml_config(&config).await?;
+        let toml_config = self.load_toml_config(&config)?;
         Ok(self.with(WithConfigs { config, toml_config }))
     }
 
@@ -65,7 +83,7 @@ impl LaunchContext {
     /// `config`.
     ///
     /// This is async because the trusted peers may have to be resolved.
-    pub async fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
+    pub fn load_toml_config(&self, config: &NodeConfig) -> eyre::Result<reth_config::Config> {
         let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
 
         let mut toml_config = confy::load_path::<reth_config::Config>(&config_path)
@@ -89,7 +107,7 @@ impl LaunchContext {
     ) -> eyre::Result<()> {
         if reth_config.prune.is_none() {
             if let Some(prune_config) = config.prune_config() {
-                reth_config.update_prune_confing(prune_config);
+                reth_config.update_prune_config(prune_config);
                 info!(target: "reth::cli", "Saving prune config to toml file");
                 reth_config.save(config_path.as_ref())?;
             }
@@ -191,15 +209,16 @@ impl LaunchContextWith<WithConfigs> {
             info!(target: "reth::cli", "Adding trusted nodes");
 
             // resolve trusted peers if they use a domain instead of dns
-            for peer in &self.attachment.config.network.trusted_peers {
+            let resolved = futures::future::try_join_all(
+            self.attachment.config.network.trusted_peers.iter().map(|peer| async move {
                 let backoff = ConstantBuilder::default()
                     .with_max_times(self.attachment.config.network.dns_retries);
-                let resolved = (move || { peer.resolve() })
-                .retry(&backoff)
-                .notify(|err, _| warn!(target: "reth::cli", "Error resolving peer domain: {err}. Retrying..."))
-                .await?;
-                self.attachment.toml_config.peers.trusted_nodes.insert(resolved);
-            }
+                (move || { peer.resolve() })
+                    .retry(&backoff)
+                    .notify(|err, _| warn!(target: "reth::cli", "Error resolving peer domain: {err}. Retrying..."))
+                    .await
+            })).await?;
+            self.attachment.toml_config.peers.trusted_nodes.extend(resolved);
         }
         Ok(self)
     }
@@ -233,7 +252,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     /// - Making sure the ETL dir is set to the datadir
     /// - RPC settings are adjusted to the correct port
     pub fn with_adjusted_configs(self) -> Self {
-        self.ensure_etl_datadir().with_adjusted_rpc_instance_ports()
+        self.ensure_etl_datadir().with_adjusted_instance_ports()
     }
 
     /// Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
@@ -247,7 +266,7 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
     }
 
     /// Change rpc port numbers based on the instance number.
-    pub fn with_adjusted_rpc_instance_ports(mut self) -> Self {
+    pub fn with_adjusted_instance_ports(mut self) -> Self {
         self.node_config_mut().adjust_instance_ports();
         self
     }
@@ -302,15 +321,15 @@ impl<R> LaunchContextWith<Attached<WithConfigs, R>> {
         self.toml_config().prune.clone().or_else(|| self.node_config().prune_config())
     }
 
-    /// Returns the configured [`PruneModes`]
-    pub fn prune_modes(&self) -> Option<PruneModes> {
-        self.prune_config().map(|config| config.segments)
+    /// Returns the configured [`PruneModes`], returning the default if no config was available.
+    pub fn prune_modes(&self) -> PruneModes {
+        self.prune_config().map(|config| config.segments).unwrap_or_default()
     }
 
     /// Returns an initialized [`PrunerBuilder`] based on the configured [`PruneConfig`]
     pub fn pruner_builder(&self) -> PrunerBuilder {
         PrunerBuilder::new(self.prune_config().unwrap_or_default())
-            .prune_delete_limit(self.chain_spec().prune_delete_limit)
+            .delete_limit(self.chain_spec().prune_delete_limit)
             .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
     }
 
@@ -346,6 +365,7 @@ where
             self.chain_spec(),
             StaticFileProvider::read_write(self.data_dir().static_files())?,
         )
+        .with_prune_modes(self.prune_modes())
         .with_static_files_metrics();
 
         let has_receipt_pruning =
@@ -377,14 +397,11 @@ where
                     NoopBodiesDownloader::default(),
                     NoopBlockExecutorProvider::default(),
                     self.toml_config().stages.clone(),
-                    self.prune_modes().unwrap_or_default(),
+                    self.prune_modes(),
                 ))
                 .build(
                     factory.clone(),
-                    StaticFileProducer::new(
-                        factory.clone(),
-                        self.prune_modes().unwrap_or_default(),
-                    ),
+                    StaticFileProducer::new(factory.clone(), self.prune_modes()),
                 );
 
             // Unwinds to block
@@ -437,34 +454,6 @@ where
         self.right().static_file_provider()
     }
 
-    /// Creates a new [`StaticFileProducer`] with the attached database.
-    pub fn static_file_producer(&self) -> StaticFileProducer<DB> {
-        StaticFileProducer::new(
-            self.provider_factory().clone(),
-            self.prune_modes().unwrap_or_default(),
-        )
-    }
-
-    /// Convenience function to [`Self::init_genesis`]
-    pub fn with_genesis(self) -> Result<Self, InitDatabaseError> {
-        init_genesis(self.provider_factory().clone())?;
-        Ok(self)
-    }
-
-    /// Write the genesis block and state if it has not already been written
-    pub fn init_genesis(&self) -> Result<B256, InitDatabaseError> {
-        init_genesis(self.provider_factory().clone())
-    }
-
-    /// Returns the max block that the node should run to, looking it up from the network if
-    /// necessary
-    pub async fn max_block<C>(&self, client: C) -> eyre::Result<Option<BlockNumber>>
-    where
-        C: HeadersClient,
-    {
-        self.node_config().max_block(client, self.provider_factory().clone()).await
-    }
-
     /// Convenience function to [`Self::start_prometheus_endpoint`]
     pub async fn with_prometheus(self) -> eyre::Result<Self> {
         self.start_prometheus_endpoint().await?;
@@ -484,6 +473,106 @@ where
             .await
     }
 
+    /// Convenience function to [`Self::init_genesis`]
+    pub fn with_genesis(self) -> Result<Self, InitDatabaseError> {
+        init_genesis(self.provider_factory().clone())?;
+        Ok(self)
+    }
+
+    /// Write the genesis block and state if it has not already been written
+    pub fn init_genesis(&self) -> Result<B256, InitDatabaseError> {
+        init_genesis(self.provider_factory().clone())
+    }
+
+    /// Creates a new `WithMeteredProvider` container and attaches it to the
+    /// launch context.
+    pub fn with_metrics(self) -> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<DB>>> {
+        let (metrics_sender, metrics_receiver) = unbounded_channel();
+
+        let with_metrics =
+            WithMeteredProvider { provider_factory: self.right().clone(), metrics_sender };
+
+        debug!(target: "reth::cli", "Spawning stages metrics listener task");
+        let sync_metrics_listener = reth_stages::MetricsListener::new(metrics_receiver);
+        self.task_executor().spawn_critical("stages metrics listener task", sync_metrics_listener);
+
+        LaunchContextWith {
+            inner: self.inner,
+            attachment: self.attachment.map_right(|_| with_metrics),
+        }
+    }
+}
+
+impl<DB> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<DB>>>
+where
+    DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
+{
+    /// Returns the configured `ProviderFactory`.
+    const fn provider_factory(&self) -> &ProviderFactory<DB> {
+        &self.right().provider_factory
+    }
+
+    /// Returns the metrics sender.
+    fn sync_metrics_tx(&self) -> UnboundedSender<MetricEvent> {
+        self.right().metrics_sender.clone()
+    }
+
+    /// Creates a `BlockchainProvider` and attaches it to the launch context.
+    pub fn with_blockchain_db<T>(
+        self,
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>>
+    where
+        T: FullNodeTypes<Provider = BlockchainProvider<<T as FullNodeTypes>::DB>>,
+    {
+        let tree_config = BlockchainTreeConfig::default();
+
+        // NOTE: This is a temporary workaround to provide the canon state notification sender to the components builder because there's a cyclic dependency between the blockchain provider and the tree component. This will be removed once the Blockchain provider no longer depends on an instance of the tree: <https://github.com/paradigmxyz/reth/issues/7154>
+        let (canon_state_notification_sender, _receiver) =
+            tokio::sync::broadcast::channel(tree_config.max_reorg_depth() as usize * 2);
+
+        let blockchain_db = BlockchainProvider::new(
+            self.provider_factory().clone(),
+            Arc::new(NoopBlockchainTree::with_canon_state_notifications(
+                canon_state_notification_sender.clone(),
+            )),
+        )?;
+
+        let metered_providers = WithMeteredProviders {
+            db_provider_container: WithMeteredProvider {
+                provider_factory: self.provider_factory().clone(),
+                metrics_sender: self.sync_metrics_tx(),
+            },
+            blockchain_db,
+            tree_config,
+            canon_state_notification_sender,
+            // we store here a reference to T.
+            phantom_data: PhantomData,
+        };
+
+        let ctx = LaunchContextWith {
+            inner: self.inner,
+            attachment: self.attachment.map_right(|_| metered_providers),
+        };
+
+        Ok(ctx)
+    }
+}
+
+impl<DB, T> LaunchContextWith<Attached<WithConfigs, WithMeteredProviders<DB, T>>>
+where
+    DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
+    T: FullNodeTypes<Provider = BlockchainProvider<DB>>,
+{
+    /// Returns access to the underlying database.
+    pub fn database(&self) -> &DB {
+        self.provider_factory().db_ref()
+    }
+
+    /// Returns the configured `ProviderFactory`.
+    pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
+        &self.right().db_provider_container.provider_factory
+    }
+
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
@@ -491,6 +580,166 @@ where
         self.node_config()
             .lookup_head(self.provider_factory().clone())
             .wrap_err("the head block is missing")
+    }
+
+    /// Returns the metrics sender.
+    pub fn sync_metrics_tx(&self) -> UnboundedSender<MetricEvent> {
+        self.right().db_provider_container.metrics_sender.clone()
+    }
+
+    /// Returns a reference to the `BlockchainProvider`.
+    pub const fn blockchain_db(&self) -> &BlockchainProvider<DB> {
+        &self.right().blockchain_db
+    }
+
+    /// Returns a reference to the `BlockchainTreeConfig`.
+    pub const fn tree_config(&self) -> &BlockchainTreeConfig {
+        &self.right().tree_config
+    }
+
+    /// Returns the `CanonStateNotificationSender`.
+    pub fn canon_state_notification_sender(&self) -> CanonStateNotificationSender {
+        self.right().canon_state_notification_sender.clone()
+    }
+
+    /// Creates a `NodeAdapter` and attaches it to the launch context.
+    pub async fn with_components<CB>(
+        self,
+        components_builder: CB,
+        on_component_initialized: Box<
+            dyn OnComponentInitializedHook<NodeAdapter<T, CB::Components>>,
+        >,
+    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs, WithComponents<DB, T, CB>>>>
+    where
+        CB: NodeComponentsBuilder<T>,
+    {
+        // fetch the head block from the database
+        let head = self.lookup_head()?;
+
+        let builder_ctx = BuilderContext::new(
+            head,
+            self.blockchain_db().clone(),
+            self.task_executor().clone(),
+            self.configs().clone(),
+        );
+
+        debug!(target: "reth::cli", "creating components");
+        let components = components_builder.build_components(&builder_ctx).await?;
+
+        let consensus: Arc<dyn Consensus> = Arc::new(components.consensus().clone());
+
+        let tree_externals = TreeExternals::new(
+            self.provider_factory().clone(),
+            consensus.clone(),
+            components.block_executor().clone(),
+        );
+        let tree = BlockchainTree::new(tree_externals, *self.tree_config(), self.prune_modes())?
+            .with_sync_metrics_tx(self.sync_metrics_tx())
+            // Note: This is required because we need to ensure that both the components and the
+            // tree are using the same channel for canon state notifications. This will be removed
+            // once the Blockchain provider no longer depends on an instance of the tree
+            .with_canon_state_notification_sender(self.canon_state_notification_sender());
+
+        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
+
+        // Replace the tree component with the actual tree
+        let blockchain_db = self.blockchain_db().clone().with_tree(blockchain_tree);
+
+        debug!(target: "reth::cli", "configured blockchain tree");
+
+        let node_adapter = NodeAdapter {
+            components,
+            task_executor: self.task_executor().clone(),
+            provider: blockchain_db.clone(),
+        };
+
+        debug!(target: "reth::cli", "calling on_component_initialized hook");
+        on_component_initialized.on_event(node_adapter.clone())?;
+
+        let components_container = WithComponents {
+            db_provider_container: WithMeteredProvider {
+                provider_factory: self.provider_factory().clone(),
+                metrics_sender: self.sync_metrics_tx(),
+            },
+            blockchain_db,
+            tree_config: self.right().tree_config,
+            node_adapter,
+            head,
+            consensus,
+        };
+
+        let ctx = LaunchContextWith {
+            inner: self.inner,
+            attachment: self.attachment.map_right(|_| components_container),
+        };
+
+        Ok(ctx)
+    }
+}
+
+impl<DB, T, CB> LaunchContextWith<Attached<WithConfigs, WithComponents<DB, T, CB>>>
+where
+    DB: Database + DatabaseMetrics + Send + Sync + Clone + 'static,
+    T: FullNodeTypes<Provider = BlockchainProvider<DB>>,
+    CB: NodeComponentsBuilder<T>,
+{
+    /// Returns the configured `ProviderFactory`.
+    pub const fn provider_factory(&self) -> &ProviderFactory<DB> {
+        &self.right().db_provider_container.provider_factory
+    }
+
+    /// Returns the max block that the node should run to, looking it up from the network if
+    /// necessary
+    pub async fn max_block<C>(&self, client: C) -> eyre::Result<Option<BlockNumber>>
+    where
+        C: HeadersClient,
+    {
+        self.node_config().max_block(client, self.provider_factory().clone()).await
+    }
+
+    /// Returns the static file provider to interact with the static files.
+    pub fn static_file_provider(&self) -> StaticFileProvider {
+        self.provider_factory().static_file_provider()
+    }
+
+    /// Creates a new [`StaticFileProducer`] with the attached database.
+    pub fn static_file_producer(&self) -> StaticFileProducer<DB> {
+        StaticFileProducer::new(self.provider_factory().clone(), self.prune_modes())
+    }
+
+    /// Returns the current head block.
+    pub const fn head(&self) -> Head {
+        self.right().head
+    }
+
+    /// Returns the configured `NodeAdapter`.
+    pub const fn node_adapter(&self) -> &NodeAdapter<T, CB::Components> {
+        &self.right().node_adapter
+    }
+
+    /// Returns a reference to the `BlockchainProvider`.
+    pub const fn blockchain_db(&self) -> &BlockchainProvider<DB> {
+        &self.right().blockchain_db
+    }
+
+    /// Returns the configured `Consensus`.
+    pub fn consensus(&self) -> Arc<dyn Consensus> {
+        self.right().consensus.clone()
+    }
+
+    /// Returns the metrics sender.
+    pub fn sync_metrics_tx(&self) -> UnboundedSender<MetricEvent> {
+        self.right().db_provider_container.metrics_sender.clone()
+    }
+
+    /// Returns a reference to the `BlockchainTreeConfig`.
+    pub const fn tree_config(&self) -> &BlockchainTreeConfig {
+        &self.right().tree_config
+    }
+
+    /// Returns the node adapter components.
+    pub const fn components(&self) -> &CB::Components {
+        &self.node_adapter().components
     }
 }
 
@@ -552,6 +801,42 @@ pub struct WithConfigs {
     pub config: NodeConfig,
     /// The loaded reth.toml config.
     pub toml_config: reth_config::Config,
+}
+
+/// Helper container type to bundle the [`ProviderFactory`] and the metrics
+/// sender.
+#[derive(Debug, Clone)]
+pub struct WithMeteredProvider<DB> {
+    provider_factory: ProviderFactory<DB>,
+    metrics_sender: UnboundedSender<MetricEvent>,
+}
+
+/// Helper container to bundle the [`ProviderFactory`], [`BlockchainProvider`]
+/// and a metrics sender.
+#[allow(missing_debug_implementations)]
+pub struct WithMeteredProviders<DB, T> {
+    db_provider_container: WithMeteredProvider<DB>,
+    blockchain_db: BlockchainProvider<DB>,
+    canon_state_notification_sender: CanonStateNotificationSender,
+    tree_config: BlockchainTreeConfig,
+    // this field is used to store a reference to the FullNodeTypes so that we
+    // can build the components in `with_components` method.
+    phantom_data: PhantomData<T>,
+}
+
+/// Helper container to bundle the metered providers container and [`NodeAdapter`].
+#[allow(missing_debug_implementations)]
+pub struct WithComponents<DB, T, CB>
+where
+    T: FullNodeTypes<Provider = BlockchainProvider<DB>>,
+    CB: NodeComponentsBuilder<T>,
+{
+    db_provider_container: WithMeteredProvider<DB>,
+    tree_config: BlockchainTreeConfig,
+    blockchain_db: BlockchainProvider<DB>,
+    node_adapter: NodeAdapter<T, CB::Components>,
+    head: Head,
+    consensus: Arc<dyn Consensus>,
 }
 
 #[cfg(test)]

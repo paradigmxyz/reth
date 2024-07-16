@@ -1,12 +1,14 @@
 //! Collection of methods for block validation.
 
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives::{
     constants::{
         eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
         MAXIMUM_EXTRA_DATA_SIZE,
     },
-    ChainSpec, GotExpected, Hardfork, Header, SealedBlock, SealedHeader,
+    eip4844::calculate_excess_blob_gas,
+    EthereumHardfork, GotExpected, Header, SealedBlock, SealedHeader,
 };
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
@@ -27,7 +29,7 @@ pub fn validate_header_base_fee(
     header: &SealedHeader,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
-    if chain_spec.fork(Hardfork::London).active_at_block(header.number) &&
+    if chain_spec.is_fork_active_at_block(EthereumHardfork::London, header.number) &&
         header.base_fee_per_gas.is_none()
     {
         return Err(ConsensusError::BaseFeeMissing)
@@ -150,8 +152,9 @@ pub fn validate_4844_header_standalone(header: &SealedHeader) -> Result<(), Cons
 /// This must be 32 bytes or fewer; formally Hx.
 #[inline]
 pub fn validate_header_extradata(header: &Header) -> Result<(), ConsensusError> {
-    if header.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-        Err(ConsensusError::ExtraDataExceedsMax { len: header.extra_data.len() })
+    let extradata_len = header.extra_data.len();
+    if extradata_len > MAXIMUM_EXTRA_DATA_SIZE {
+        Err(ConsensusError::ExtraDataExceedsMax { len: extradata_len })
     } else {
         Ok(())
     }
@@ -190,11 +193,11 @@ pub fn validate_against_parent_eip1559_base_fee(
     parent: &SealedHeader,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
-    if chain_spec.fork(Hardfork::London).active_at_block(header.number) {
+    if chain_spec.fork(EthereumHardfork::London).active_at_block(header.number) {
         let base_fee = header.base_fee_per_gas.ok_or(ConsensusError::BaseFeeMissing)?;
 
         let expected_base_fee =
-            if chain_spec.fork(Hardfork::London).transitions_at_block(header.number) {
+            if chain_spec.fork(EthereumHardfork::London).transitions_at_block(header.number) {
                 reth_primitives::constants::EIP1559_INITIAL_BASE_FEE
             } else {
                 // This BaseFeeMissing will not happen as previous blocks are checked to have
@@ -229,15 +232,51 @@ pub fn validate_against_parent_timestamp(
     Ok(())
 }
 
+/// Validates that the EIP-4844 header fields are correct with respect to the parent block. This
+/// ensures that the `blob_gas_used` and `excess_blob_gas` fields exist in the child header, and
+/// that the `excess_blob_gas` field matches the expected `excess_blob_gas` calculated from the
+/// parent header fields.
+pub fn validate_against_parent_4844(
+    header: &SealedHeader,
+    parent: &SealedHeader,
+) -> Result<(), ConsensusError> {
+    // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
+    //
+    // > For the first post-fork block, both parent.blob_gas_used and parent.excess_blob_gas
+    // > are evaluated as 0.
+    //
+    // This means in the first post-fork block, calculate_excess_blob_gas will return 0.
+    let parent_blob_gas_used = parent.blob_gas_used.unwrap_or(0);
+    let parent_excess_blob_gas = parent.excess_blob_gas.unwrap_or(0);
+
+    if header.blob_gas_used.is_none() {
+        return Err(ConsensusError::BlobGasUsedMissing)
+    }
+    let excess_blob_gas = header.excess_blob_gas.ok_or(ConsensusError::ExcessBlobGasMissing)?;
+
+    let expected_excess_blob_gas =
+        calculate_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
+    if expected_excess_blob_gas != excess_blob_gas {
+        return Err(ConsensusError::ExcessBlobGasDiff {
+            diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
+            parent_excess_blob_gas,
+            parent_blob_gas_used,
+        })
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use mockall::mock;
     use rand::Rng;
+    use reth_chainspec::ChainSpecBuilder;
     use reth_primitives::{
         hex_literal::hex, proofs, Account, Address, BlockBody, BlockHash, BlockHashOrNumber,
-        BlockNumber, Bytes, ChainSpecBuilder, Signature, Transaction, TransactionSigned, TxEip4844,
-        Withdrawal, Withdrawals, U256,
+        BlockNumber, Bytes, Signature, Transaction, TransactionSigned, TxEip4844, Withdrawal,
+        Withdrawals, U256,
     };
     use reth_storage_api::{
         errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,

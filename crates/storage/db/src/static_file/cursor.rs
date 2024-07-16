@@ -10,6 +10,9 @@ use std::sync::Arc;
 #[derive(Debug, Deref, DerefMut)]
 pub struct StaticFileCursor<'a>(NippyJarCursor<'a, SegmentHeader>);
 
+/// Type alias for column results with optional values.
+type ColumnResult<T> = ProviderResult<Option<T>>;
+
 impl<'a> StaticFileCursor<'a> {
     /// Returns a new [`StaticFileCursor`].
     pub fn new(jar: &'a NippyJar<SegmentHeader>, reader: Arc<DataReader>) -> ProviderResult<Self> {
@@ -56,7 +59,7 @@ impl<'a> StaticFileCursor<'a> {
     pub fn get_one<M: ColumnSelectorOne>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
-    ) -> ProviderResult<Option<M::FIRST>> {
+    ) -> ColumnResult<M::FIRST> {
         let row = self.get(key_or_num, M::MASK)?;
 
         match row {
@@ -69,7 +72,7 @@ impl<'a> StaticFileCursor<'a> {
     pub fn get_two<M: ColumnSelectorTwo>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
-    ) -> ProviderResult<Option<(M::FIRST, M::SECOND)>> {
+    ) -> ColumnResult<(M::FIRST, M::SECOND)> {
         let row = self.get(key_or_num, M::MASK)?;
 
         match row {
@@ -79,11 +82,10 @@ impl<'a> StaticFileCursor<'a> {
     }
 
     /// Gets three column values from a row.
-    #[allow(clippy::type_complexity)]
     pub fn get_three<M: ColumnSelectorThree>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
-    ) -> ProviderResult<Option<(M::FIRST, M::SECOND, M::THIRD)>> {
+    ) -> ColumnResult<(M::FIRST, M::SECOND, M::THIRD)> {
         let row = self.get(key_or_num, M::MASK)?;
 
         match row {

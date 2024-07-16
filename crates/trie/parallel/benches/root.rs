@@ -1,6 +1,7 @@
 #![allow(missing_docs, unreachable_pub)]
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
+use proptest_arbitrary_interop::arb;
 use rayon::ThreadPoolBuilder;
 use reth_primitives::{Account, B256, U256};
 use reth_provider::{
@@ -26,10 +27,10 @@ pub fn calculate_state_root(c: &mut Criterion) {
         let provider_factory = create_test_provider_factory();
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
-            HashedStateChanges(db_state).write_to_db(provider_rw.tx_ref()).unwrap();
+            HashedStateChanges(&db_state.into_sorted()).write_to_db(&provider_rw).unwrap();
             let (_, updates) =
                 StateRoot::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
-            updates.flush(provider_rw.tx_ref()).unwrap();
+            updates.write_to_database(provider_rw.tx_ref()).unwrap();
             provider_rw.commit().unwrap();
         }
 
@@ -40,7 +41,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
             b.to_async(&runtime).iter_with_setup(
                 || {
                     let sorted_state = updated_state.clone().into_sorted();
-                    let prefix_sets = updated_state.construct_prefix_sets();
+                    let prefix_sets = updated_state.construct_prefix_sets().freeze();
                     let provider = provider_factory.provider().unwrap();
                     (provider, sorted_state, prefix_sets)
                 },
@@ -82,7 +83,7 @@ fn generate_test_data(size: usize) -> (HashedPostState, HashedPostState) {
     let db_state = hash_map(
         any::<B256>(),
         (
-            any::<Account>().prop_filter("non empty account", |a| !a.is_empty()),
+            arb::<Account>().prop_filter("non empty account", |a| !a.is_empty()),
             hash_map(
                 any::<B256>(),
                 any::<U256>().prop_filter("non zero value", |v| !v.is_zero()),

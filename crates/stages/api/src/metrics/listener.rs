@@ -1,5 +1,6 @@
 use crate::{metrics::SyncMetrics, StageCheckpoint, StageId};
-use reth_primitives::{constants::MGAS_TO_GAS, BlockNumber};
+use alloy_primitives::BlockNumber;
+use reth_primitives_traits::constants::MEGAGAS;
 use std::{
     future::Future,
     pin::Pin,
@@ -82,7 +83,7 @@ impl MetricsListener {
                 }
             }
             MetricEvent::ExecutionStageGas { gas } => {
-                self.sync_metrics.execution_stage.mgas_processed_total.increment(gas / MGAS_TO_GAS)
+                self.sync_metrics.execution_stage.mgas_processed_total.increment(gas / MEGAGAS)
             }
         }
     }

@@ -2,19 +2,16 @@
 
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
-use crate::{
-    common::WithConfigs,
-    components::NodeComponentsBuilder,
-    node::FullNode,
-    rpc::{RethRpcServerHandles, RpcContext},
-    DefaultNodeLauncher, Node, NodeHandle,
-};
-use discv5::ListenConfig;
+pub mod add_ons;
+mod states;
+
+pub use states::*;
+
+use std::sync::Arc;
+
 use futures::Future;
-use reth_db::{
-    test_utils::{create_test_rw_db_with_path, tempdir_path, TempDatabase},
-    DatabaseEnv,
-};
+use reth_chainspec::ChainSpec;
+use reth_cli_util::get_secret_key;
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -23,27 +20,28 @@ use reth_exex::ExExContext;
 use reth_network::{
     NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
-use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeTypes};
+use reth_node_api::{FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes};
 use reth_node_core::{
-    args::{get_secret_key, DatadirArgs},
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
-    dirs::{ChainPath, DataDirPath, MaybePlatformPath},
+    dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
-    primitives::{kzg::KzgSettings, Head},
-    utils::write_peers_to_file,
+    primitives::Head,
+    rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
 };
-use reth_primitives::{constants::eip4844::MAINNET_KZG_TRUSTED_SETUP, ChainSpec};
+use reth_primitives::revm_primitives::EnvKzgSettings;
 use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
-pub use states::*;
-use std::{
-    net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6},
-    sync::Arc,
-};
+use tracing::{info, trace, warn};
 
-mod states;
+use crate::{
+    common::WithConfigs,
+    components::NodeComponentsBuilder,
+    node::FullNode,
+    rpc::{EthApiBuilderProvider, RethRpcServerHandles, RpcContext},
+    DefaultNodeLauncher, Node, NodeHandle,
+};
 
 /// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.
@@ -65,7 +63,7 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// components of the node that are downstream of those types, these include:
 ///
 ///  - The EVM and Executor configuration: [`ExecutorBuilder`](crate::components::ExecutorBuilder)
-///  - The transaction pool: [`PoolBuilder`]
+///  - The transaction pool: [`PoolBuilder`](crate::components::PoolBuilder)
 ///  - The network: [`NetworkBuilder`](crate::components::NetworkBuilder)
 ///  - The payload builder: [`PayloadBuilder`](crate::components::PayloadServiceBuilder)
 ///
@@ -97,11 +95,11 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 ///
 /// Once all the components are configured, the builder can be used to set hooks that are run at
 /// specific points in the node's lifecycle. This way custom services can be spawned before the node
-/// is launched [`NodeBuilder::on_component_initialized`], or once the rpc server(s) are launched
-/// [`NodeBuilder::on_rpc_started`]. The [`NodeBuilder::extend_rpc_modules`] can be used to inject
-/// custom rpc modules into the rpc server before it is launched. See also [`RpcContext`]
-/// All hooks accept a closure that is then invoked at the appropriate time in the node's launch
-/// process.
+/// is launched [`NodeBuilderWithComponents::on_component_initialized`], or once the rpc server(s)
+/// are launched [`NodeBuilderWithComponents::on_rpc_started`]. The
+/// [`NodeBuilderWithComponents::extend_rpc_modules`] can be used to inject custom rpc modules into
+/// the rpc server before it is launched. See also [`RpcContext`] All hooks accept a closure that is
+/// then invoked at the appropriate time in the node's launch process.
 ///
 /// ## Flow
 ///
@@ -109,12 +107,12 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// input: [`NodeBuilder::new`]
 ///
 /// From there the builder is configured with the node's types, components, and hooks, then launched
-/// with the [`NodeBuilder::launch`] method. On launch all the builtin internals, such as the
+/// with the [`WithLaunchContext::launch`] method. On launch all the builtin internals, such as the
 /// `Database` and its providers [`BlockchainProvider`] are initialized before the configured
 /// [`NodeComponentsBuilder`] is invoked with the [`BuilderContext`] to create the transaction pool,
 /// network, and payload builder components. When the RPC is configured, the corresponding hooks are
 /// invoked to allow for custom rpc modules to be injected into the rpc server:
-/// [`NodeBuilder::extend_rpc_modules`]
+/// [`NodeBuilderWithComponents::extend_rpc_modules`]
 ///
 /// Finally all components are created and all services are launched and a [`NodeHandle`] is
 /// returned that can be used to interact with the node: [`FullNode`]
@@ -130,12 +128,13 @@ pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<Types, DB, Blockchain
 /// provider trait implementations are currently created by the builder itself during the launch
 /// process, hence the database type is not part of the [`NodeTypes`] trait and the node's
 /// components, that depend on the database, are configured separately. In order to have a nice
-/// trait that encapsulates the entire node the [`FullNodeComponents`] trait was introduced. This
+/// trait that encapsulates the entire node the
+/// [`FullNodeComponents`](reth_node_api::FullNodeComponents) trait was introduced. This
 /// trait has convenient associated types for all the components of the node. After
-/// [`NodeBuilder::launch`] the [`NodeHandle`] contains an instance of [`FullNode`] that implements
-/// the [`FullNodeComponents`] trait and has access to all the components of the node. Internally
-/// the node builder uses several generic adapter types that are then map to traits with associated
-/// types for ease of use.
+/// [`WithLaunchContext::launch`] the [`NodeHandle`] contains an instance of [`FullNode`] that
+/// implements the [`FullNodeComponents`](reth_node_api::FullNodeComponents) trait and has access to
+/// all the components of the node. Internally the node builder uses several generic adapter types
+/// that are then map to traits with associated types for ease of use.
 ///
 /// ### Limitations
 ///
@@ -177,19 +176,24 @@ impl<DB> NodeBuilder<DB> {
     }
 
     /// Creates an _ephemeral_ preconfigured node for testing purposes.
+    #[cfg(feature = "test-utils")]
     pub fn testing_node(
         mut self,
         task_executor: TaskExecutor,
-    ) -> WithLaunchContext<NodeBuilder<Arc<TempDatabase<DatabaseEnv>>>> {
-        let path = MaybePlatformPath::<DataDirPath>::from(tempdir_path());
-        self.config = self
-            .config
-            .with_datadir_args(DatadirArgs { datadir: path.clone(), ..Default::default() });
+    ) -> WithLaunchContext<NodeBuilder<Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>>>
+    {
+        let path = reth_node_core::dirs::MaybePlatformPath::<DataDirPath>::from(
+            reth_db::test_utils::tempdir_path(),
+        );
+        self.config = self.config.with_datadir_args(reth_node_core::args::DatadirArgs {
+            datadir: path.clone(),
+            ..Default::default()
+        });
 
         let data_dir =
             path.unwrap_or_chain_default(self.config.chain.chain, self.config.datadir.clone());
 
-        let db = create_test_rw_db_with_path(data_dir.db());
+        let db = reth_db::test_utils::create_test_rw_db_with_path(data_dir.db());
 
         WithLaunchContext { builder: self.with_database(db), task_executor }
     }
@@ -213,11 +217,11 @@ where
     pub fn node<N>(
         self,
         node: N,
-    ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>
+    ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types().with_components(node.components_builder())
+        self.with_types().with_components(node.components_builder()).with_add_ons::<N::AddOns>()
     }
 }
 
@@ -260,11 +264,13 @@ where
     pub fn node<N>(
         self,
         node: N,
-    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder>>
+    ) -> WithLaunchContext<
+        NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+    >
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types().with_components(node.components_builder())
+        self.with_types().with_components(node.components_builder()).with_add_ons::<N::AddOns>()
     }
 
     /// Launches a preconfigured [Node]
@@ -281,10 +287,22 @@ where
                 RethFullAdapter<DB, N>,
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
+            N::AddOns,
         >,
     >
     where
         N: Node<RethFullAdapter<DB, N>>,
+        <N::AddOns as NodeAddOns<
+            NodeAdapter<
+                RethFullAdapter<DB, N>,
+                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
+            >,
+        >>::EthApi: EthApiBuilderProvider<
+            NodeAdapter<
+                RethFullAdapter<DB, N>,
+                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
+            >,
+        > + FullEthApiServer + AddDevSigners,
     {
         self.node(node).launch().await
     }
@@ -299,7 +317,7 @@ where
     pub fn with_components<CB>(
         self,
         components_builder: CB,
-    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
+    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, ()>>
     where
         CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     {
@@ -310,11 +328,35 @@ where
     }
 }
 
-impl<T, DB, CB> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB>>
+impl<T, DB, CB> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, ()>>
 where
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: NodeTypes,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
+{
+    /// Advances the state of the node builder to the next state where all customizable
+    /// [`NodeAddOns`] types are configured.
+    pub fn with_add_ons<AO>(
+        self,
+    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
+    where
+        CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
+        AO: NodeAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
+    {
+        WithLaunchContext {
+            builder: self.builder.with_add_ons::<AO>(),
+            task_executor: self.task_executor,
+        }
+    }
+}
+
+impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
+where
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    T: NodeTypes,
+    CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
+    AO: NodeAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
+    AO::EthApi: FullEthApiServer + AddDevSigners,
 {
     /// Sets the hook that is run once the node's components are initialized.
     pub fn on_component_initialized<F>(self, hook: F) -> Self
@@ -333,7 +375,7 @@ where
     pub fn on_node_started<F>(self, hook: F) -> Self
     where
         F: FnOnce(
-                FullNode<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
+                FullNode<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>, AO>,
             ) -> eyre::Result<()>
             + Send
             + 'static,
@@ -345,7 +387,7 @@ where
     pub fn on_rpc_started<F>(self, hook: F) -> Self
     where
         F: FnOnce(
-                RpcContext<'_, NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
+                RpcContext<'_, NodeAdapter<RethFullAdapter<DB, T>, CB::Components>, AO::EthApi>,
                 RethRpcServerHandles,
             ) -> eyre::Result<()>
             + Send
@@ -358,7 +400,7 @@ where
     pub fn extend_rpc_modules<F>(self, hook: F) -> Self
     where
         F: FnOnce(
-                RpcContext<'_, NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
+                RpcContext<'_, NodeAdapter<RethFullAdapter<DB, T>, CB::Components>, AO::EthApi>,
             ) -> eyre::Result<()>
             + Send
             + 'static,
@@ -385,21 +427,32 @@ where
         }
     }
 
-    /// Launches the node and returns a handle to it.
-    pub async fn launch(
-        self,
-    ) -> eyre::Result<NodeHandle<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>> {
-        let Self { builder, task_executor } = self;
-
-        let launcher = DefaultNodeLauncher::new(task_executor, builder.config.datadir());
-        builder.launch_with(launcher).await
-    }
-
     /// Check that the builder can be launched
     ///
     /// This is useful when writing tests to ensure that the builder is configured correctly.
     pub const fn check_launch(self) -> Self {
         self
+    }
+}
+
+impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
+where
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    T: NodeTypes,
+    CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
+    AO: NodeAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
+    AO::EthApi: EthApiBuilderProvider<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>
+        + FullEthApiServer
+        + AddDevSigners,
+{
+    /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
+    pub async fn launch(
+        self,
+    ) -> eyre::Result<NodeHandle<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>, AO>> {
+        let Self { builder, task_executor } = self;
+
+        let launcher = DefaultNodeLauncher::new(task_executor, builder.config.datadir());
+        builder.launch_with(launcher).await
     }
 }
 
@@ -468,9 +521,9 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         self.config().txpool.pool_config()
     }
 
-    /// Loads `MAINNET_KZG_TRUSTED_SETUP`.
-    pub fn kzg_settings(&self) -> eyre::Result<Arc<KzgSettings>> {
-        Ok(Arc::clone(&MAINNET_KZG_TRUSTED_SETUP))
+    /// Loads `EnvKzgSettings::Default`.
+    pub const fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
+        Ok(EnvKzgSettings::Default)
     }
 
     /// Returns the config for payload building.
@@ -479,7 +532,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Creates the [`NetworkBuilder`] for the node.
-    pub async fn network_builder(&self) -> eyre::Result<NetworkBuilder<Node::Provider, (), ()>> {
+    pub async fn network_builder(&self) -> eyre::Result<NetworkBuilder<(), ()>> {
         let network_config = self.network_config()?;
         let builder = NetworkManager::builder(network_config).await?;
         Ok(builder)
@@ -489,11 +542,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
-    pub fn start_network<Pool>(
-        &self,
-        builder: NetworkBuilder<Node::Provider, (), ()>,
-        pool: Pool,
-    ) -> NetworkHandle
+    pub fn start_network<Pool>(&self, builder: NetworkBuilder<(), ()>, pool: Pool) -> NetworkHandle
     where
         Pool: TransactionPool + Unpin + 'static,
     {
@@ -511,7 +560,18 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             "p2p network task",
             |shutdown| {
                 network.run_until_graceful_shutdown(shutdown, |network| {
-                    write_peers_to_file(&network, known_peers_file)
+                    if let Some(peers_file) = known_peers_file {
+                        let num_known_peers = network.num_known_peers();
+                        trace!(target: "reth::cli", peers_file=?peers_file, num_peers=%num_known_peers, "Saving current peers");
+                        match network.write_peers_to_file(peers_file.as_path()) {
+                            Ok(_) => {
+                                info!(target: "reth::cli", peers_file=?peers_file, "Wrote network peers to file");
+                            }
+                            Err(err) => {
+                                warn!(target: "reth::cli", %err, "Failed to write network peers to file");
+                            }
+                        }
+                    }
                 })
             },
         );
@@ -529,12 +589,19 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     pub fn network_config_builder(&self) -> eyre::Result<NetworkConfigBuilder> {
         let secret_key = self.network_secret(&self.config().datadir())?;
         let default_peers_path = self.config().datadir().known_peers();
-        Ok(self.config().network.network_config(
-            self.reth_config(),
-            self.config().chain.clone(),
-            secret_key,
-            default_peers_path,
-        ))
+        let builder = self
+            .config()
+            .network
+            .network_config(
+                self.reth_config(),
+                self.config().chain.clone(),
+                secret_key,
+                default_peers_path,
+            )
+            .with_task_executor(Box::new(self.executor.clone()))
+            .set_head(self.head);
+
+        Ok(builder)
     }
 
     /// Get the network secret from the given data dir
@@ -550,49 +617,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         &self,
         network_builder: NetworkConfigBuilder,
     ) -> NetworkConfig<Node::Provider> {
-        network_builder
-            .with_task_executor(Box::new(self.executor.clone()))
-            .set_head(self.head)
-            .listener_addr(SocketAddr::new(
-                self.config().network.addr,
-                // set discovery port based on instance number
-                self.config().network.port + self.config().instance - 1,
-            ))
-            .discovery_addr(SocketAddr::new(
-                self.config().network.discovery.addr,
-                // set discovery port based on instance number
-                self.config().network.discovery.port + self.config().instance - 1,
-            ))
-            .map_discv5_config_builder(|builder| {
-                // Use rlpx address if none given
-                let discv5_addr_ipv4 = self.config().network.discovery.discv5_addr.or(
-                    match self.config().network.addr {
-                        IpAddr::V4(ip) => Some(ip),
-                        IpAddr::V6(_) => None,
-                    },
-                );
-                let discv5_addr_ipv6 = self.config().network.discovery.discv5_addr_ipv6.or(
-                    match self.config().network.addr {
-                        IpAddr::V4(_) => None,
-                        IpAddr::V6(ip) => Some(ip),
-                    },
-                );
-
-                let discv5_port_ipv4 =
-                    self.config().network.discovery.discv5_port + self.config().instance - 1;
-                let discv5_port_ipv6 =
-                    self.config().network.discovery.discv5_port_ipv6 + self.config().instance - 1;
-
-                builder.discv5_config(
-                    discv5::ConfigBuilder::new(ListenConfig::from_two_sockets(
-                        discv5_addr_ipv4.map(|addr| SocketAddrV4::new(addr, discv5_port_ipv4)),
-                        discv5_addr_ipv6
-                            .map(|addr| SocketAddrV6::new(addr, discv5_port_ipv6, 0, 0)),
-                    ))
-                    .build(),
-                )
-            })
-            .build(self.provider.clone())
+        network_builder.build(self.provider.clone())
     }
 }
 

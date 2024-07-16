@@ -6,6 +6,10 @@ use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Request, U256};
 use reth_prune_types::PruneModes;
 use revm::{db::BundleState, DatabaseCommit};
 use revm_primitives::{db::Database, EVMError, EVMResult, Env, ExecutionResult, ResultAndState};
+use std::fmt::Display;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_storage_errors::provider::ProviderError;
@@ -159,6 +163,11 @@ pub trait BatchExecutor<DB> {
     /// This can be used to optimize state pruning during execution.
     fn set_tip(&mut self, tip: BlockNumber);
 
+    /// Set the prune modes.
+    ///
+    /// They are used to determine which parts of the state should be kept during execution.
+    fn set_prune_modes(&mut self, prune_modes: PruneModes);
+
     /// The size hint of the batch's tracked state size.
     ///
     /// This is used to optimize DB commits depending on the size of the state.
@@ -170,7 +179,7 @@ pub trait BatchExecutor<DB> {
 /// Contains the state changes, transaction receipts, and total gas used in the block.
 ///
 /// TODO(mattsse): combine with `ExecutionOutcome`
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BlockExecutionOutput<T> {
     /// The changed state of the block after execution.
     pub state: BundleState,
@@ -217,7 +226,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     ///
     /// It is not expected to validate the state trie root, this must be done by the caller using
     /// the returned state.
-    type Executor<DB: Database<Error = ProviderError>>: for<'a> Executor<
+    type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
         Output = BlockExecutionOutput<Receipt>,
@@ -225,7 +234,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     >;
 
     /// An executor that can execute a batch of blocks given a database.
-    type BatchExecutor<DB: Database<Error = ProviderError>>: for<'a> BatchExecutor<
+    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
         DB,
         Input<'a> = BlockExecutionInput<'a, BlockWithSenders>,
         Output = ExecutionOutcome,
@@ -237,18 +246,15 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// This is used to execute a single block and get the changed state.
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error = ProviderError>;
+        DB: Database<Error: Into<ProviderError> + Display>;
 
     /// Creates a new batch executor with the given database and pruning modes.
     ///
     /// Batch executor is used to execute multiple blocks in sequence and keep track of the state
     /// during historical sync which involves executing multiple blocks in sequence.
-    ///
-    /// The pruning modes are used to determine which parts of the state should be kept during
-    /// execution.
-    fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
+    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error = ProviderError>;
+        DB: Database<Error: Into<ProviderError> + Display>;
 }
 
 #[cfg(test)]
@@ -262,19 +268,19 @@ mod tests {
     struct TestExecutorProvider;
 
     impl BlockExecutorProvider for TestExecutorProvider {
-        type Executor<DB: Database<Error = ProviderError>> = TestExecutor<DB>;
-        type BatchExecutor<DB: Database<Error = ProviderError>> = TestExecutor<DB>;
+        type Executor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
+        type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
 
         fn executor<DB>(&self, _db: DB) -> Self::Executor<DB>
         where
-            DB: Database<Error = ProviderError>,
+            DB: Database<Error: Into<ProviderError> + Display>,
         {
             TestExecutor(PhantomData)
         }
 
-        fn batch_executor<DB>(&self, _db: DB, _prune_modes: PruneModes) -> Self::BatchExecutor<DB>
+        fn batch_executor<DB>(&self, _db: DB) -> Self::BatchExecutor<DB>
         where
-            DB: Database<Error = ProviderError>,
+            DB: Database<Error: Into<ProviderError> + Display>,
         {
             TestExecutor(PhantomData)
         }
@@ -306,6 +312,10 @@ mod tests {
         }
 
         fn set_tip(&mut self, _tip: BlockNumber) {
+            todo!()
+        }
+
+        fn set_prune_modes(&mut self, _prune_modes: PruneModes) {
             todo!()
         }
 

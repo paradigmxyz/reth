@@ -1,6 +1,7 @@
 //! Traits for configuring a node.
 
-use crate::{primitives::NodePrimitives, EngineTypes};
+use std::marker::PhantomData;
+
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
@@ -11,7 +12,8 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::TransactionPool;
-use std::marker::PhantomData;
+
+use crate::{primitives::NodePrimitives, EngineTypes};
 
 /// The type that configures the essential types of an ethereum like node.
 ///
@@ -24,6 +26,32 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     type Primitives: NodePrimitives;
     /// The node's engine types, defining the interaction with the consensus engine.
     type Engine: EngineTypes;
+}
+
+/// A [`NodeTypes`] type builder
+#[derive(Default, Debug)]
+pub struct AnyNodeTypes<P = (), E = ()>(PhantomData<P>, PhantomData<E>);
+
+impl<P, E> AnyNodeTypes<P, E> {
+    /// Sets the `Primitives` associated type.
+    pub const fn primitives<T>(self) -> AnyNodeTypes<T, E> {
+        AnyNodeTypes::<T, E>(PhantomData::<T>, PhantomData::<E>)
+    }
+
+    /// Sets the `Engine` associated type.
+    pub const fn engine<T>(self) -> AnyNodeTypes<P, T> {
+        AnyNodeTypes::<P, T>(PhantomData::<P>, PhantomData::<T>)
+    }
+}
+
+impl<P, E> NodeTypes for AnyNodeTypes<P, E>
+where
+    P: NodePrimitives + Send + Sync + Unpin + 'static,
+    E: EngineTypes + Send + Sync + Unpin + 'static,
+{
+    type Primitives = P;
+
+    type Engine = E;
 }
 
 /// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful components to the
@@ -88,7 +116,7 @@ where
 }
 
 /// Encapsulates all types and components of the node.
-pub trait FullNodeComponents: FullNodeTypes + 'static {
+pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// The transaction pool of the node.
     type Pool: TransactionPool + Unpin;
 
@@ -119,3 +147,34 @@ pub trait FullNodeComponents: FullNodeTypes + 'static {
     /// Returns the task executor.
     fn task_executor(&self) -> &TaskExecutor;
 }
+
+/// Customizable node add-on types.
+pub trait NodeAddOns<N: FullNodeComponents>: Send + Sync + Unpin + Clone + 'static {
+    /// The core `eth` namespace API type to install on the RPC server (see
+    /// `reth_rpc_eth_api::EthApiServer`).
+    type EthApi: Send + Clone;
+}
+
+impl<N: FullNodeComponents> NodeAddOns<N> for () {
+    type EthApi = ();
+}
+
+/// Returns the builder for type.
+pub trait BuilderProvider<N: FullNodeComponents>: Send {
+    /// Context required to build type.
+    type Ctx<'a>;
+
+    /// Returns builder for type.
+    #[allow(clippy::type_complexity)]
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send>;
+}
+
+impl<N: FullNodeComponents> BuilderProvider<N> for () {
+    type Ctx<'a> = ();
+
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
+        Box::new(noop_builder)
+    }
+}
+
+const fn noop_builder(_: ()) {}

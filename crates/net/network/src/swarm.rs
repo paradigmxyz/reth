@@ -13,7 +13,6 @@ use reth_eth_wire::{
     EthVersion, Status,
 };
 use reth_network_peers::PeerId;
-use reth_provider::{BlockNumReader, BlockReader};
 use std::{
     io,
     net::SocketAddr,
@@ -50,23 +49,23 @@ use tracing::trace;
 /// `include_mmd!("docs/mermaid/swarm.mmd`")
 #[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
-pub(crate) struct Swarm<C> {
+pub(crate) struct Swarm {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
     /// All sessions.
     sessions: SessionManager,
     /// Tracks the entire state of the network and handles events received from the sessions.
-    state: NetworkState<C>,
+    state: NetworkState,
 }
 
 // === impl Swarm ===
 
-impl<C> Swarm<C> {
+impl Swarm {
     /// Configures a new swarm instance.
     pub(crate) const fn new(
         incoming: ConnectionListener,
         sessions: SessionManager,
-        state: NetworkState<C>,
+        state: NetworkState,
     ) -> Self {
         Self { incoming, sessions, state }
     }
@@ -77,12 +76,12 @@ impl<C> Swarm<C> {
     }
 
     /// Access to the state.
-    pub(crate) const fn state(&self) -> &NetworkState<C> {
+    pub(crate) const fn state(&self) -> &NetworkState {
         &self.state
     }
 
     /// Mutable access to the state.
-    pub(crate) fn state_mut(&mut self) -> &mut NetworkState<C> {
+    pub(crate) fn state_mut(&mut self) -> &mut NetworkState {
         &mut self.state
     }
 
@@ -102,10 +101,7 @@ impl<C> Swarm<C> {
     }
 }
 
-impl<C> Swarm<C>
-where
-    C: BlockNumReader,
-{
+impl Swarm {
     /// Triggers a new outgoing connection to the given node
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
         self.sessions.dial_outbound(remote_addr, remote_id)
@@ -247,14 +243,14 @@ where
             }
             StateAction::PeerAdded(peer_id) => return Some(SwarmEvent::PeerAdded(peer_id)),
             StateAction::PeerRemoved(peer_id) => return Some(SwarmEvent::PeerRemoved(peer_id)),
-            StateAction::DiscoveredNode { peer_id, socket_addr, fork_id } => {
+            StateAction::DiscoveredNode { peer_id, addr, fork_id } => {
                 // Don't try to connect to peer if node is shutting down
                 if self.is_shutting_down() {
                     return None
                 }
                 // Insert peer only if no fork id or a valid fork id
                 if fork_id.map_or_else(|| true, |f| self.sessions.is_valid_fork_id(f)) {
-                    self.state_mut().peers_mut().add_peer(peer_id, socket_addr, fork_id);
+                    self.state_mut().peers_mut().add_peer(peer_id, addr, fork_id);
                 }
             }
             StateAction::DiscoveredEnrForkId { peer_id, fork_id } => {
@@ -285,10 +281,7 @@ where
     }
 }
 
-impl<C> Stream for Swarm<C>
-where
-    C: BlockReader + Unpin,
-{
+impl Stream for Swarm {
     type Item = SwarmEvent;
 
     /// This advances all components.

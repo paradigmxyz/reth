@@ -1,12 +1,11 @@
 # Reth Book
-_Documentation for Reth users and developers._ 
+_Documentation for Reth users and developers._
 
 [![Telegram Chat][tg-badge]][tg-url]
 
-Reth (short for Rust Ethereum, [pronunciation](https://twitter.com/kelvinfichter/status/1597653609411268608)) is an **Ethereum full node implementation that is focused on being user-friendly, highly modular, as well as being fast and efficient.** 
+Reth (short for Rust Ethereum, [pronunciation](https://twitter.com/kelvinfichter/status/1597653609411268608)) is an **Ethereum full node implementation that is focused on being user-friendly, highly modular, as well as being fast and efficient.**
 
-Reth is production ready, and suitable for usage in mission-critical environments such as staking or high-uptime servi
-ces. We also actively recommend professional node operators to switch to Reth in production for performance and cost reasons in use cases where high performance with great margins is required such as RPC, MEV, Indexing, Simulations, and P2P activities.
+Reth is production ready, and suitable for usage in mission-critical environments such as staking or high-uptime services. We also actively recommend professional node operators to switch to Reth in production for performance and cost reasons in use cases where high performance with great margins is required such as RPC, MEV, Indexing, Simulations, and P2P activities.
 
 <img src="https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-prod.png" style="border-radius: 20px">
 
@@ -56,12 +55,12 @@ We want to solve for node operators that care about fast historical queries, but
 
 We also want to support teams and individuals who want both sync from genesis and via "fast sync".
 
-We envision that Reth will be configurable enough  for the tradeoffs that each team faces.
+We envision that Reth will be configurable enough for the tradeoffs that each team faces.
 
 ## Who is this for?
 
 Reth is a new Ethereum full node that allows users to sync and interact with the entire blockchain, including its historical state if in archive mode.
-- Full node: It can be used as a full node, which stores and processes the entire blockchain, validates blocks and transactions, and participates in the consensus process. 
+- Full node: It can be used as a full node, which stores and processes the entire blockchain, validates blocks and transactions, and participates in the consensus process.
 - Archive node: It can also be used as an archive node, which stores the entire history of the blockchain and is useful for applications that need access to historical data.
 
 As a data engineer/analyst, or as a data indexer, you'll want to use Archive mode. For all other use cases where historical access is not needed, you can use Full mode.
@@ -76,7 +75,10 @@ Reth implements the specification of Ethereum as defined in the [ethereum/execut
 1. We operate multiple nodes at the tip of Ethereum mainnet and various testnets.
 1. We extensively unit test, fuzz test and document all our code, while also restricting PRs with aggressive lint rules.
 
-We intend to also audit / fuzz the EVM & parts of the codebase. Please reach out if you're interested in collaborating on securing this codebase.
+We have completed an audit of the [Reth v1.0.0-rc.2](https://github.com/paradigmxyz/reth/releases/tag/v1.0.0-rc.2) with [Sigma Prime](https://sigmaprime.io/), the developers of [Lighthouse](https://github.com/sigp/lighthouse), the Rust Consensus Layer implementation. Find it [here](https://github.com/paradigmxyz/reth/blob/main/audit/sigma_prime_audit_v2.pdf).
+
+[Revm](https://github.com/bluealloy/revm) (the EVM used in Reth) underwent an audit with [Guido Vranken](https://twitter.com/guidovranken) (#1 [Ethereum Bug Bounty](https://ethereum.org/en/bug-bounty)). We will publish the results soon.
+
 
 ## Sections
 

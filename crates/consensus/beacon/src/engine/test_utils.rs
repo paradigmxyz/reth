@@ -6,6 +6,7 @@ use crate::{
 use reth_blockchain_tree::{
     config::BlockchainTreeConfig, externals::TreeExternals, BlockchainTree, ShareableBlockchainTree,
 };
+use reth_chainspec::ChainSpec;
 use reth_config::config::StageConfig;
 use reth_consensus::{test_utils::TestConsensus, Consensus};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
@@ -22,10 +23,10 @@ use reth_network_p2p::{
     test_utils::NoopFullBlockClient,
 };
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_primitives::{BlockNumber, ChainSpec, B256};
+use reth_primitives::{BlockNumber, B256};
 use reth_provider::{
     providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
-    ExecutionOutcome,
+    ExecutionOutcome, ProviderFactory,
 };
 use reth_prune::Pruner;
 use reth_prune_types::PruneModes;
@@ -390,20 +391,23 @@ where
 
         // Setup blockchain tree
         let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
-        let config = BlockchainTreeConfig::new(1, 2, 3, 2);
         let tree = Arc::new(ShareableBlockchainTree::new(
-            BlockchainTree::new(externals, config, None).expect("failed to create tree"),
+            BlockchainTree::new(
+                externals,
+                BlockchainTreeConfig::new(1, 2, 3, 2),
+                PruneModes::default(),
+            )
+            .expect("failed to create tree"),
         ));
         let latest = self.base_config.chain_spec.genesis_header().seal_slow();
         let blockchain_provider =
             BlockchainProvider::with_latest(provider_factory.clone(), tree, latest);
 
-        let pruner = Pruner::new(
+        let pruner = Pruner::<_, ProviderFactory<_>>::new(
             provider_factory.clone(),
             vec![],
             5,
             self.base_config.chain_spec.prune_delete_limit,
-            config.max_reorg_depth() as usize,
             None,
             watch::channel(FinishedExExHeight::NoExExs).1,
         );

@@ -1,33 +1,32 @@
-use crate::{Chain, ExecutionOutcome};
 use reth_db_api::models::StoredBlockBodyIndices;
+use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{BlockNumber, SealedBlockWithSenders};
-use reth_prune_types::PruneModes;
 use reth_storage_api::BlockReader;
 use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
 use std::ops::RangeInclusive;
 
 /// BlockExecution Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
-pub trait BlockExecutionWriter: BlockWriter + BlockReader + Send + Sync {
-    /// Get range of blocks and its execution result
-    fn get_block_and_execution_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Chain> {
-        self.get_or_take_block_and_execution_range::<false>(range)
-    }
-
+pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
     /// Take range of blocks and its execution result
     fn take_block_and_execution_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Chain> {
-        self.get_or_take_block_and_execution_range::<true>(range)
-    }
+    ) -> ProviderResult<Chain>;
 
-    /// Return range of blocks and its execution result
-    fn get_or_take_block_and_execution_range<const TAKE: bool>(
+    /// Remove range of blocks and its execution result
+    fn remove_block_and_execution_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<()>;
+}
+
+/// BlockExecution Writer
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait BlockExecutionReader: BlockReader + Send + Sync {
+    /// Get range of blocks and its execution result
+    fn get_block_and_execution_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Chain>;
@@ -41,11 +40,8 @@ pub trait BlockWriter: Send + Sync {
     ///
     /// Return [StoredBlockBodyIndices] that contains indices of the first and last transactions and
     /// transition in the block.
-    fn insert_block(
-        &self,
-        block: SealedBlockWithSenders,
-        prune_modes: Option<&PruneModes>,
-    ) -> ProviderResult<StoredBlockBodyIndices>;
+    fn insert_block(&self, block: SealedBlockWithSenders)
+        -> ProviderResult<StoredBlockBodyIndices>;
 
     /// Appends a batch of sealed blocks to the blockchain, including sender information, and
     /// updates the post-state.
@@ -57,7 +53,6 @@ pub trait BlockWriter: Send + Sync {
     ///
     /// - `blocks`: Vector of `SealedBlockWithSenders` instances to append.
     /// - `state`: Post-state information to update after appending.
-    /// - `prune_modes`: Optional pruning configuration.
     ///
     /// # Returns
     ///
@@ -66,8 +61,7 @@ pub trait BlockWriter: Send + Sync {
         &self,
         blocks: Vec<SealedBlockWithSenders>,
         execution_outcome: ExecutionOutcome,
-        hashed_state: HashedPostState,
+        hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,
-        prune_modes: Option<&PruneModes>,
     ) -> ProviderResult<()>;
 }

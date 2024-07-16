@@ -33,12 +33,12 @@ pub fn derive_zstd(input: TokenStream) -> TokenStream {
 /// If you prefer to manually implement the arbitrary traits, you can still use the [`add_arbitrary_tests()`] function to add arbitrary fuzz tests.
 ///
 /// Example usage:
-/// * `#[main_codec(rlp)]`: will implement `derive_arbitrary(rlp)` or `derive_arbitrary(compact, rlp)`, if `compact` is the `main_codec`.
-/// * `#[main_codec(no_arbitrary)]`: will skip `derive_arbitrary` (both trait implementations and tests)
+/// * `#[reth_codec(rlp)]`: will implement `derive_arbitrary(rlp)` or `derive_arbitrary(compact, rlp)`, if `compact` is the `reth_codec`.
+/// * `#[reth_codec(no_arbitrary)]`: will skip `derive_arbitrary` (both trait implementations and tests)
 #[proc_macro_attribute]
 #[rustfmt::skip]
 #[allow(unreachable_code)]
-pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn reth_codec(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
     let with_zstd = args.clone().into_iter().any(|tk| tk.to_string() == "zstd");
@@ -69,7 +69,7 @@ pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
     derive_arbitrary(TokenStream::from_iter(args), compact)
 }
 
-/// Adds `Arbitrary` and `proptest::Arbitrary` imports into scope and derives the struct/enum.
+/// Adds `Arbitrary` imports into scope and derives the struct/enum.
 ///
 /// If `compact` or `rlp` is passed to `derive_arbitrary`, there will be proptest roundtrip tests
 /// generated. An integer value passed will limit the number of proptest cases generated (default:
@@ -89,17 +89,13 @@ pub fn derive_arbitrary(args: TokenStream, input: TokenStream) -> TokenStream {
     let tests = arbitrary::maybe_generate_tests(args, &ast);
 
     // Avoid duplicate names
-    let prop_import = format_ident!("{}PropTestArbitrary", ast.ident);
     let arb_import = format_ident!("{}Arbitrary", ast.ident);
 
     quote! {
         #[cfg(any(test, feature = "arbitrary"))]
-        use proptest_derive::Arbitrary as #prop_import;
-
-        #[cfg(any(test, feature = "arbitrary"))]
         use arbitrary::Arbitrary as #arb_import;
 
-        #[cfg_attr(any(test, feature = "arbitrary"), derive(#prop_import, #arb_import))]
+        #[cfg_attr(any(test, feature = "arbitrary"), derive(#arb_import))]
         #ast
 
         #tests

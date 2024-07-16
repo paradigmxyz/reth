@@ -1,9 +1,7 @@
 //! `eth_` `PubSub` RPC handler implementation
 
-use crate::{
-    eth::logs_utils,
-    result::{internal_rpc_err, invalid_params_rpc_err},
-};
+use std::sync::Arc;
+
 use futures::StreamExt;
 use jsonrpsee::{
     server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
@@ -11,7 +9,9 @@ use jsonrpsee::{
 use reth_network_api::NetworkInfo;
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider};
-use reth_rpc_api::EthPubSubApiServer;
+use reth_rpc_eth_api::pubsub::EthPubSubApiServer;
+use reth_rpc_eth_types::logs_utils;
+use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_rpc_types::{
     pubsub::{
         Params, PubSubSyncStatus, SubscriptionKind, SubscriptionResult as EthSubscriptionResult,
@@ -22,7 +22,6 @@ use reth_rpc_types::{
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
-use std::sync::Arc;
 use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
     Stream,
@@ -163,7 +162,7 @@ where
                 BroadcastStream::new(pubsub.chain_events.subscribe_to_canonical_state());
             // get current sync status
             let mut initial_sync_status = pubsub.network.is_syncing();
-            let current_sub_res = pubsub.sync_status(initial_sync_status).await;
+            let current_sub_res = pubsub.sync_status(initial_sync_status);
 
             // send the current status immediately
             let msg = SubscriptionMessage::from_json(&current_sub_res)
@@ -180,7 +179,7 @@ where
                     initial_sync_status = current_syncing;
 
                     // send a new message now that the status changed
-                    let sync_status = pubsub.sync_status(current_syncing).await;
+                    let sync_status = pubsub.sync_status(current_syncing);
                     let msg = SubscriptionMessage::from_json(&sync_status)
                         .map_err(SubscriptionSerializeError::new)?;
                     if accepted_sink.send(msg).await.is_err() {
@@ -197,10 +196,10 @@ where
 /// Helper to convert a serde error into an [`ErrorObject`]
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to serialize subscription item: {0}")]
-pub(crate) struct SubscriptionSerializeError(#[from] serde_json::Error);
+pub struct SubscriptionSerializeError(#[from] serde_json::Error);
 
 impl SubscriptionSerializeError {
-    pub(crate) const fn new(err: serde_json::Error) -> Self {
+    const fn new(err: serde_json::Error) -> Self {
         Self(err)
     }
 }
@@ -271,7 +270,7 @@ where
     Provider: BlockReader + 'static,
 {
     /// Returns the current sync status for the `syncing` subscription
-    async fn sync_status(&self, is_syncing: bool) -> EthSubscriptionResult {
+    fn sync_status(&self, is_syncing: bool) -> EthSubscriptionResult {
         if is_syncing {
             let current_block =
                 self.provider.chain_info().map(|info| info.best_number).unwrap_or_default();

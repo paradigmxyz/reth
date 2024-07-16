@@ -45,24 +45,42 @@ impl TrustedPeer {
         Self { host, tcp_port: port, udp_port: port, id }
     }
 
+    const fn to_node_record(&self, ip: IpAddr) -> NodeRecord {
+        NodeRecord { address: ip, id: self.id, tcp_port: self.tcp_port, udp_port: self.udp_port }
+    }
+
+    /// Tries to resolve directly to a [`NodeRecord`] if the host is an IP address.
+    fn try_node_record(&self) -> Result<NodeRecord, &str> {
+        match &self.host {
+            Host::Ipv4(ip) => Ok(self.to_node_record((*ip).into())),
+            Host::Ipv6(ip) => Ok(self.to_node_record((*ip).into())),
+            Host::Domain(domain) => Err(domain),
+        }
+    }
+
     /// Resolves the host in a [`TrustedPeer`] to an IP address, returning a [`NodeRecord`].
+    ///
+    /// This use [`ToSocketAddr`](std::net::ToSocketAddrs) to resolve the host to an IP address.
+    pub fn resolve_blocking(&self) -> Result<NodeRecord, Error> {
+        let domain = match self.try_node_record() {
+            Ok(record) => return Ok(record),
+            Err(domain) => domain,
+        };
+        // Resolve the domain to an IP address
+        let mut ips = std::net::ToSocketAddrs::to_socket_addrs(&(domain, 0))?;
+        let ip = ips
+            .next()
+            .ok_or_else(|| Error::new(std::io::ErrorKind::AddrNotAvailable, "No IP found"))?;
+
+        Ok(self.to_node_record(ip.ip()))
+    }
+
+    /// Resolves the host in a [`TrustedPeer`] to an IP address, returning a [`NodeRecord`].
+    #[cfg(any(test, feature = "net"))]
     pub async fn resolve(&self) -> Result<NodeRecord, Error> {
-        let domain = match self.host.to_owned() {
-            Host::Ipv4(ip) => {
-                let id = self.id;
-                let tcp_port = self.tcp_port;
-                let udp_port = self.udp_port;
-
-                return Ok(NodeRecord { address: ip.into(), id, tcp_port, udp_port })
-            }
-            Host::Ipv6(ip) => {
-                let id = self.id;
-                let tcp_port = self.tcp_port;
-                let udp_port = self.udp_port;
-
-                return Ok(NodeRecord { address: ip.into(), id, tcp_port, udp_port })
-            }
-            Host::Domain(domain) => domain,
+        let domain = match self.try_node_record() {
+            Ok(record) => return Ok(record),
+            Err(domain) => domain,
         };
 
         // Resolve the domain to an IP address
@@ -70,12 +88,8 @@ impl TrustedPeer {
         let ip = ips
             .next()
             .ok_or_else(|| Error::new(std::io::ErrorKind::AddrNotAvailable, "No IP found"))?;
-        Ok(NodeRecord {
-            address: ip.ip(),
-            id: self.id,
-            tcp_port: self.tcp_port,
-            udp_port: self.udp_port,
-        })
+
+        Ok(self.to_node_record(ip.ip()))
     }
 }
 
@@ -285,15 +299,16 @@ mod tests {
                 TrustedPeer::new(url::Host::Domain(domain.to_owned()), 30300, PeerId::random());
 
             // Resolve domain and validate
-            let rec = rec.resolve().await.unwrap();
-            match rec.address {
-                std::net::IpAddr::V4(addr) => {
+            let ensure = |rec: NodeRecord| match rec.address {
+                IpAddr::V4(addr) => {
                     assert_eq!(addr, std::net::Ipv4Addr::new(127, 0, 0, 1))
                 }
-                std::net::IpAddr::V6(addr) => {
-                    assert_eq!(addr, std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))
+                IpAddr::V6(addr) => {
+                    assert_eq!(addr, Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))
                 }
-            }
+            };
+            ensure(rec.resolve().await.unwrap());
+            ensure(rec.resolve_blocking().unwrap());
         }
     }
 }

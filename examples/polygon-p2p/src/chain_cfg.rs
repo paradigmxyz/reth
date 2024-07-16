@@ -1,8 +1,10 @@
-use reth_primitives::{
-    b256, BaseFeeParams, Chain, ChainSpec, ForkCondition, Hardfork, Head, NodeRecord, B256,
+use reth_chainspec::{
+    BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition,
 };
+use reth_discv4::NodeRecord;
+use reth_primitives::{b256, Head, B256};
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
 
 const SHANGAI_BLOCK: u64 = 50523000;
 
@@ -15,16 +17,17 @@ pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
         genesis: serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis"),
         genesis_hash: Some(GENESIS),
         paris_block_and_final_difficulty: None,
-        hardforks: BTreeMap::from([
-            (Hardfork::Petersburg, ForkCondition::Block(0)),
-            (Hardfork::Istanbul, ForkCondition::Block(3395000)),
-            (Hardfork::MuirGlacier, ForkCondition::Block(3395000)),
-            (Hardfork::Berlin, ForkCondition::Block(14750000)),
-            (Hardfork::London, ForkCondition::Block(23850000)),
-            (Hardfork::Shanghai, ForkCondition::Block(SHANGAI_BLOCK)),
+        hardforks: ChainHardforks::new(vec![
+            (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(3395000)),
+            (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(3395000)),
+            (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(14750000)),
+            (EthereumHardfork::London.boxed(), ForkCondition::Block(23850000)),
+            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Block(SHANGAI_BLOCK)),
         ]),
         deposit_contract: None,
-        base_fee_params: reth_primitives::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+        base_fee_params: reth_chainspec::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+        max_gas_limit: 30_000_000,
         prune_delete_limit: 0,
     }
     .into()

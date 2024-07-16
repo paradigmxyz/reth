@@ -7,13 +7,13 @@ use crate::{
 use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
-    BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts, NodeData,
-    Receipts,
+    BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders, GetNodeData, GetReceipts,
+    HeadersDirection, NodeData, Receipts,
 };
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
-use reth_primitives::{BlockBody, BlockHashOrNumber, Header, HeadersDirection};
-use reth_provider::{BlockReader, HeaderProvider, ReceiptProvider};
+use reth_primitives::{BlockBody, BlockHashOrNumber, Header};
+use reth_storage_api::{BlockReader, HeaderProvider, ReceiptProvider};
 use std::{
     future::Future,
     pin::Pin,
@@ -66,8 +66,12 @@ pub struct EthRequestHandler<C> {
 impl<C> EthRequestHandler<C> {
     /// Create a new instance
     pub fn new(client: C, peers: PeersHandle, incoming: Receiver<IncomingEthRequest>) -> Self {
-        let metrics = Default::default();
-        Self { client, peers, incoming_requests: ReceiverStream::new(incoming), metrics }
+        Self {
+            client,
+            peers,
+            incoming_requests: ReceiverStream::new(incoming),
+            metrics: Default::default(),
+        }
     }
 }
 
@@ -124,11 +128,7 @@ where
                 total_bytes += header.length();
                 headers.push(header);
 
-                if headers.len() >= MAX_HEADERS_SERVE {
-                    break
-                }
-
-                if total_bytes > SOFT_RESPONSE_LIMIT {
+                if headers.len() >= MAX_HEADERS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }
             } else {
@@ -163,21 +163,12 @@ where
 
         for hash in request.0 {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
-                let body = BlockBody {
-                    transactions: block.body,
-                    ommers: block.ommers,
-                    withdrawals: block.withdrawals,
-                    requests: block.requests,
-                };
+                let body: BlockBody = block.into();
 
                 total_bytes += body.length();
                 bodies.push(body);
 
-                if bodies.len() >= MAX_BODIES_SERVE {
-                    break
-                }
-
-                if total_bytes > SOFT_RESPONSE_LIMIT {
+                if bodies.len() >= MAX_BODIES_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }
             } else {
@@ -212,11 +203,7 @@ where
                 total_bytes += receipt.length();
                 receipts.push(receipt);
 
-                if receipts.len() >= MAX_RECEIPTS_SERVE {
-                    break
-                }
-
-                if total_bytes > SOFT_RESPONSE_LIMIT {
+                if receipts.len() >= MAX_RECEIPTS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
                     break
                 }
             } else {

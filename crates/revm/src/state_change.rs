@@ -1,73 +1,60 @@
-use alloy_eips::{
-    eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
-    eip7002::WithdrawalRequest,
-};
-use alloy_rlp::Buf;
+use alloy_eips::eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE};
+use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus_common::calc;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::{
-    revm::env::{
-        fill_tx_env_with_beacon_root_contract_call,
-        fill_tx_env_with_withdrawal_requests_contract_call,
-    },
-    Address, ChainSpec, Header, Request, Withdrawal, B256, U256,
-};
+use reth_primitives::{Address, Block, Withdrawal, Withdrawals, B256, U256};
 use reth_storage_errors::provider::ProviderError;
 use revm::{
-    interpreter::Host,
-    primitives::{
-        Account, AccountInfo, Bytecode, EvmStorageSlot, ExecutionResult, FixedBytes, ResultAndState,
-    },
-    Database, DatabaseCommit, Evm,
+    primitives::{Account, AccountInfo, Bytecode, EvmStorageSlot, BLOCKHASH_SERVE_WINDOW},
+    Database, DatabaseCommit,
 };
+
+// reuse revm's hashbrown implementation for no-std
+#[cfg(not(feature = "std"))]
+use crate::precompile::HashMap;
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, format, string::ToString, vec::Vec};
+
+#[cfg(feature = "std")]
 use std::collections::HashMap;
 
 /// Collect all balance changes at the end of the block.
 ///
 /// Balance changes might include the block reward, uncle rewards, withdrawals, or irregular
 /// state changes (DAO fork).
-#[allow(clippy::too_many_arguments)]
 #[inline]
 pub fn post_block_balance_increments(
     chain_spec: &ChainSpec,
-    block_number: u64,
-    block_difficulty: U256,
-    beneficiary: Address,
-    block_timestamp: u64,
+    block: &Block,
     total_difficulty: U256,
-    ommers: &[Header],
-    withdrawals: Option<&[Withdrawal]>,
 ) -> HashMap<Address, u128> {
     let mut balance_increments = HashMap::new();
 
     // Add block rewards if they are enabled.
     if let Some(base_block_reward) =
-        calc::base_block_reward(chain_spec, block_number, block_difficulty, total_difficulty)
+        calc::base_block_reward(chain_spec, block.number, block.difficulty, total_difficulty)
     {
         // Ommer rewards
-        for ommer in ommers {
+        for ommer in &block.ommers {
             *balance_increments.entry(ommer.beneficiary).or_default() +=
-                calc::ommer_reward(base_block_reward, block_number, ommer.number);
+                calc::ommer_reward(base_block_reward, block.number, ommer.number);
         }
 
         // Full block reward
-        *balance_increments.entry(beneficiary).or_default() +=
-            calc::block_reward(base_block_reward, ommers.len());
+        *balance_increments.entry(block.beneficiary).or_default() +=
+            calc::block_reward(base_block_reward, block.ommers.len());
     }
 
     // process withdrawals
     insert_post_block_withdrawals_balance_increments(
         chain_spec,
-        block_timestamp,
-        withdrawals,
+        block.timestamp,
+        block.withdrawals.as_ref().map(Withdrawals::as_ref),
         &mut balance_increments,
     );
 
     balance_increments
 }
-
-/// todo: temporary move over of constants from revm until we've migrated to the latest version
-pub const HISTORY_SERVE_WINDOW: u64 = 8192;
 
 /// Applies the pre-block state change outlined in [EIP-2935] to store historical blockhashes in a
 /// system contract.
@@ -79,7 +66,7 @@ pub const HISTORY_SERVE_WINDOW: u64 = 8192;
 ///
 /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
 #[inline]
-pub fn apply_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCommit>(
+pub fn apply_blockhashes_update<DB: Database<Error: Into<ProviderError>> + DatabaseCommit>(
     db: &mut DB,
     chain_spec: &ChainSpec,
     block_timestamp: u64,
@@ -87,7 +74,7 @@ pub fn apply_blockhashes_update<DB: Database<Error = ProviderError> + DatabaseCo
     parent_block_hash: B256,
 ) -> Result<(), BlockExecutionError>
 where
-    DB::Error: std::fmt::Display,
+    DB::Error: core::fmt::Display,
 {
     // If Prague is not activated or this is the genesis block, no hashes are added.
     if !chain_spec.is_prague_active_at_timestamp(block_timestamp) || block_number == 0 {
@@ -101,7 +88,7 @@ where
     // nonce of 1, so it does not get deleted.
     let mut account: Account = db
         .basic(HISTORY_STORAGE_ADDRESS)
-        .map_err(BlockValidationError::BlockHashAccountLoadingFailed)?
+        .map_err(|err| BlockValidationError::BlockHashAccountLoadingFailed(err.into()))?
         .unwrap_or_else(|| AccountInfo {
             nonce: 1,
             code: Some(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
@@ -125,83 +112,17 @@ where
 ///
 /// This calculates the correct storage slot in the `BLOCKHASH` history storage address, fetches the
 /// blockhash and creates a [`EvmStorageSlot`] with appropriate previous and new values.
-fn eip2935_block_hash_slot<DB: Database<Error = ProviderError>>(
+fn eip2935_block_hash_slot<DB: Database<Error: Into<ProviderError>>>(
     db: &mut DB,
     block_number: u64,
     block_hash: B256,
 ) -> Result<(U256, EvmStorageSlot), BlockValidationError> {
-    let slot = U256::from(block_number % HISTORY_SERVE_WINDOW);
+    let slot = U256::from(block_number % BLOCKHASH_SERVE_WINDOW as u64);
     let current_hash = db
         .storage(HISTORY_STORAGE_ADDRESS, slot)
-        .map_err(BlockValidationError::BlockHashAccountLoadingFailed)?;
+        .map_err(|err| BlockValidationError::BlockHashAccountLoadingFailed(err.into()))?;
 
     Ok((slot, EvmStorageSlot::new_changed(current_hash, block_hash.into())))
-}
-
-/// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
-/// [`ChainSpec`], EVM.
-///
-/// If Cancun is not activated or the block is the genesis block, then this is a no-op, and no
-/// state changes are made.
-///
-/// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
-#[inline]
-pub fn apply_beacon_root_contract_call<EXT, DB: Database + DatabaseCommit>(
-    chain_spec: &ChainSpec,
-    block_timestamp: u64,
-    block_number: u64,
-    parent_beacon_block_root: Option<B256>,
-    evm: &mut Evm<'_, EXT, DB>,
-) -> Result<(), BlockExecutionError>
-where
-    DB::Error: std::fmt::Display,
-{
-    if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
-        return Ok(())
-    }
-
-    let parent_beacon_block_root =
-        parent_beacon_block_root.ok_or(BlockValidationError::MissingParentBeaconBlockRoot)?;
-
-    // if the block number is zero (genesis block) then the parent beacon block root must
-    // be 0x0 and no system transaction may occur as per EIP-4788
-    if block_number == 0 {
-        if parent_beacon_block_root != B256::ZERO {
-            return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
-                parent_beacon_block_root,
-            }
-            .into())
-        }
-        return Ok(())
-    }
-
-    // get previous env
-    let previous_env = Box::new(evm.context.env().clone());
-
-    // modify env for pre block call
-    fill_tx_env_with_beacon_root_contract_call(&mut evm.context.evm.env, parent_beacon_block_root);
-
-    let mut state = match evm.transact() {
-        Ok(res) => res.state,
-        Err(e) => {
-            evm.context.evm.env = previous_env;
-            return Err(BlockValidationError::BeaconRootContractCall {
-                parent_beacon_block_root: Box::new(parent_beacon_block_root),
-                message: e.to_string(),
-            }
-            .into())
-        }
-    };
-
-    state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
-    state.remove(&evm.block().coinbase);
-
-    evm.context.evm.db.commit(state);
-
-    // re-set the previous env
-    evm.context.evm.env = previous_env;
-
-    Ok(())
 }
 
 /// Returns a map of addresses to their balance increments if the Shanghai hardfork is active at the
@@ -248,88 +169,229 @@ pub fn insert_post_block_withdrawals_balance_increments(
     }
 }
 
-/// Applies the post-block call to the EIP-7002 withdrawal requests contract.
-///
-/// If Prague is not active at the given timestamp, then this is a no-op, and an empty vector is
-/// returned. Otherwise, the withdrawal requests are returned.
-#[inline]
-pub fn apply_withdrawal_requests_contract_call<EXT, DB: Database + DatabaseCommit>(
-    evm: &mut Evm<'_, EXT, DB>,
-) -> Result<Vec<Request>, BlockExecutionError>
-where
-    DB::Error: std::fmt::Display,
-{
-    // get previous env
-    let previous_env = Box::new(evm.context.env().clone());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
+    use reth_primitives::constants::GWEI_TO_WEI;
 
-    // modify env for pre block call
-    fill_tx_env_with_withdrawal_requests_contract_call(&mut evm.context.evm.env);
+    /// Tests that the function correctly inserts balance increments when the Shanghai hardfork is
+    /// active and there are withdrawals.
+    #[test]
+    fn test_insert_post_block_withdrawals_balance_increments_shanghai_active_with_withdrawals() {
+        // Arrange
+        // Create a ChainSpec with the Shanghai hardfork active at timestamp 100
+        let chain_spec = ChainSpec {
+            hardforks: ChainHardforks::new(vec![(
+                Box::new(EthereumHardfork::Shanghai),
+                ForkCondition::Timestamp(100),
+            )]),
+            ..Default::default()
+        };
 
-    let ResultAndState { result, mut state } = match evm.transact() {
-        Ok(res) => res,
-        Err(e) => {
-            evm.context.evm.env = previous_env;
-            return Err(BlockValidationError::WithdrawalRequestsContractCall {
-                message: format!("execution failed: {e}"),
-            }
-            .into())
-        }
-    };
+        // Define the block timestamp and withdrawals
+        let block_timestamp = 1000;
+        let withdrawals = vec![
+            Withdrawal {
+                address: Address::from([1; 20]),
+                amount: 1000,
+                index: 45,
+                validator_index: 12,
+            },
+            Withdrawal {
+                address: Address::from([2; 20]),
+                amount: 500,
+                index: 412,
+                validator_index: 123,
+            },
+        ];
 
-    // cleanup the state
-    state.remove(&alloy_eips::eip7002::SYSTEM_ADDRESS);
-    state.remove(&evm.block().coinbase);
-    evm.context.evm.db.commit(state);
+        // Create an empty HashMap to hold the balance increments
+        let mut balance_increments = HashMap::new();
 
-    // re-set the previous env
-    evm.context.evm.env = previous_env;
+        // Act
+        // Call the function with the prepared inputs
+        insert_post_block_withdrawals_balance_increments(
+            &chain_spec,
+            block_timestamp,
+            Some(&withdrawals),
+            &mut balance_increments,
+        );
 
-    let mut data = match result {
-        ExecutionResult::Success { output, .. } => Ok(output.into_data()),
-        ExecutionResult::Revert { output, .. } => {
-            Err(BlockValidationError::WithdrawalRequestsContractCall {
-                message: format!("execution reverted: {output}"),
-            })
-        }
-        ExecutionResult::Halt { reason, .. } => {
-            Err(BlockValidationError::WithdrawalRequestsContractCall {
-                message: format!("execution halted: {reason:?}"),
-            })
-        }
-    }?;
-
-    // Withdrawals are encoded as a series of withdrawal requests, each with the following
-    // format:
-    //
-    // +------+--------+--------+
-    // | addr | pubkey | amount |
-    // +------+--------+--------+
-    //    20      48        8
-
-    const WITHDRAWAL_REQUEST_SIZE: usize = 20 + 48 + 8;
-    let mut withdrawal_requests = Vec::with_capacity(data.len() / WITHDRAWAL_REQUEST_SIZE);
-    while data.has_remaining() {
-        if data.remaining() < WITHDRAWAL_REQUEST_SIZE {
-            return Err(BlockValidationError::WithdrawalRequestsContractCall {
-                message: "invalid withdrawal request length".to_string(),
-            }
-            .into())
-        }
-
-        let mut source_address = Address::ZERO;
-        data.copy_to_slice(source_address.as_mut_slice());
-
-        let mut validator_public_key = FixedBytes::<48>::ZERO;
-        data.copy_to_slice(validator_public_key.as_mut_slice());
-
-        let amount = data.get_u64();
-
-        withdrawal_requests.push(Request::WithdrawalRequest(WithdrawalRequest {
-            source_address,
-            validator_public_key,
-            amount,
-        }));
+        // Assert
+        // Verify that the balance increments map has the correct number of entries
+        assert_eq!(balance_increments.len(), 2);
+        // Verify that the balance increments map contains the correct values for each address
+        assert_eq!(
+            *balance_increments.get(&Address::from([1; 20])).unwrap(),
+            (1000 * GWEI_TO_WEI).into()
+        );
+        assert_eq!(
+            *balance_increments.get(&Address::from([2; 20])).unwrap(),
+            (500 * GWEI_TO_WEI).into()
+        );
     }
 
-    Ok(withdrawal_requests)
+    /// Tests that the function correctly handles the case when Shanghai is active but there are no
+    /// withdrawals.
+    #[test]
+    fn test_insert_post_block_withdrawals_balance_increments_shanghai_active_no_withdrawals() {
+        // Arrange
+        // Create a ChainSpec with the Shanghai hardfork active
+        let chain_spec = ChainSpec {
+            hardforks: ChainHardforks::new(vec![(
+                Box::new(EthereumHardfork::Shanghai),
+                ForkCondition::Timestamp(100),
+            )]),
+            ..Default::default()
+        };
+
+        // Define the block timestamp and an empty list of withdrawals
+        let block_timestamp = 1000;
+        let withdrawals = Vec::<Withdrawal>::new();
+
+        // Create an empty HashMap to hold the balance increments
+        let mut balance_increments = HashMap::new();
+
+        // Act
+        // Call the function with the prepared inputs
+        insert_post_block_withdrawals_balance_increments(
+            &chain_spec,
+            block_timestamp,
+            Some(&withdrawals),
+            &mut balance_increments,
+        );
+
+        // Assert
+        // Verify that the balance increments map is empty
+        assert!(balance_increments.is_empty());
+    }
+
+    /// Tests that the function correctly handles the case when Shanghai is not active even if there
+    /// are withdrawals.
+    #[test]
+    fn test_insert_post_block_withdrawals_balance_increments_shanghai_not_active_with_withdrawals()
+    {
+        // Arrange
+        // Create a ChainSpec without the Shanghai hardfork active
+        let chain_spec = ChainSpec::default(); // Mock chain spec with Shanghai not active
+
+        // Define the block timestamp and withdrawals
+        let block_timestamp = 1000;
+        let withdrawals = vec![
+            Withdrawal {
+                address: Address::from([1; 20]),
+                amount: 1000,
+                index: 45,
+                validator_index: 12,
+            },
+            Withdrawal {
+                address: Address::from([2; 20]),
+                amount: 500,
+                index: 412,
+                validator_index: 123,
+            },
+        ];
+
+        // Create an empty HashMap to hold the balance increments
+        let mut balance_increments = HashMap::new();
+
+        // Act
+        // Call the function with the prepared inputs
+        insert_post_block_withdrawals_balance_increments(
+            &chain_spec,
+            block_timestamp,
+            Some(&withdrawals),
+            &mut balance_increments,
+        );
+
+        // Assert
+        // Verify that the balance increments map is empty
+        assert!(balance_increments.is_empty());
+    }
+
+    /// Tests that the function correctly handles the case when Shanghai is active but all
+    /// withdrawals have zero amounts.
+    #[test]
+    fn test_insert_post_block_withdrawals_balance_increments_shanghai_active_with_zero_withdrawals()
+    {
+        // Arrange
+        // Create a ChainSpec with the Shanghai hardfork active
+        let chain_spec = ChainSpec {
+            hardforks: ChainHardforks::new(vec![(
+                Box::new(EthereumHardfork::Shanghai),
+                ForkCondition::Timestamp(100),
+            )]),
+            ..Default::default()
+        };
+
+        // Define the block timestamp and withdrawals with zero amounts
+        let block_timestamp = 1000;
+        let withdrawals = vec![
+            Withdrawal {
+                address: Address::from([1; 20]),
+                amount: 0, // Zero withdrawal amount
+                index: 45,
+                validator_index: 12,
+            },
+            Withdrawal {
+                address: Address::from([2; 20]),
+                amount: 0, // Zero withdrawal amount
+                index: 412,
+                validator_index: 123,
+            },
+        ];
+
+        // Create an empty HashMap to hold the balance increments
+        let mut balance_increments = HashMap::new();
+
+        // Act
+        // Call the function with the prepared inputs
+        insert_post_block_withdrawals_balance_increments(
+            &chain_spec,
+            block_timestamp,
+            Some(&withdrawals),
+            &mut balance_increments,
+        );
+
+        // Assert
+        // Verify that the balance increments map is empty
+        assert!(balance_increments.is_empty());
+    }
+
+    /// Tests that the function correctly handles the case when Shanghai is active but there are no
+    /// withdrawals provided.
+    #[test]
+    fn test_insert_post_block_withdrawals_balance_increments_shanghai_active_with_empty_withdrawals(
+    ) {
+        // Arrange
+        // Create a ChainSpec with the Shanghai hardfork active
+        let chain_spec = ChainSpec {
+            hardforks: ChainHardforks::new(vec![(
+                Box::new(EthereumHardfork::Shanghai),
+                ForkCondition::Timestamp(100),
+            )]),
+            ..Default::default()
+        };
+
+        // Define the block timestamp and no withdrawals
+        let block_timestamp = 1000;
+        let withdrawals = None; // No withdrawals provided
+
+        // Create an empty HashMap to hold the balance increments
+        let mut balance_increments = HashMap::new();
+
+        // Act
+        // Call the function with the prepared inputs
+        insert_post_block_withdrawals_balance_increments(
+            &chain_spec,
+            block_timestamp,
+            withdrawals,
+            &mut balance_increments,
+        );
+
+        // Assert
+        // Verify that the balance increments map is empty
+        assert!(balance_increments.is_empty());
+    }
 }

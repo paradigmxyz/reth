@@ -31,12 +31,14 @@ alloy-eips = { workspace = true, default-features = false, features = [
     "serde",
 ] }
 alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
+alloy-consensus = { workspace = true, features = ["arbitrary"] }
 test-fuzz.workspace = true
 serde_json.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-derive.workspace = true
+proptest-arbitrary-interop.workspace = true
 
 [features]
 default = ["std", "alloy"]
@@ -47,4 +49,3 @@ alloy = [
     "dep:alloy-genesis",
     "dep:modular-bitfield",
 ]
-optimism = ["reth-codecs-derive/optimism"]

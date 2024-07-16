@@ -2,7 +2,8 @@
 
 use crate::{BlockReceipts, Chain};
 use auto_impl::auto_impl;
-use reth_primitives::SealedBlockWithSenders;
+use derive_more::{Deref, DerefMut};
+use reth_primitives::{SealedBlockWithSenders, SealedHeader};
 use std::{
     pin::Pin,
     sync::Arc,
@@ -34,7 +35,7 @@ pub trait CanonStateSubscriptions: Send + Sync {
     }
 }
 
-/// A Stream of [CanonStateNotification].
+/// A Stream of [`CanonStateNotification`].
 #[derive(Debug)]
 #[pin_project::pin_project]
 pub struct CanonStateNotificationStream {
@@ -137,5 +138,46 @@ impl CanonStateNotification {
             self.committed().receipts_with_attachment().into_iter().map(|receipt| (receipt, false)),
         );
         receipts
+    }
+}
+
+/// Wrapper around a broadcast receiver that receives fork choice notifications.
+#[derive(Debug, Deref, DerefMut)]
+pub struct ForkChoiceNotifications(broadcast::Receiver<SealedHeader>);
+
+/// A trait that allows to register to fork choice related events
+/// and get notified when a new fork choice is available.
+pub trait ForkChoiceSubscriptions: Send + Sync {
+    /// Get notified when a new head of the chain is selected.
+    fn subscribe_to_fork_choice(&self) -> ForkChoiceNotifications;
+
+    /// Convenience method to get a stream of the new head of the chain.
+    fn fork_choice_stream(&self) -> ForkChoiceStream {
+        ForkChoiceStream { st: BroadcastStream::new(self.subscribe_to_fork_choice().0) }
+    }
+}
+
+/// A stream of the fork choices in the form of [`SealedHeader`].
+#[derive(Debug)]
+#[pin_project::pin_project]
+pub struct ForkChoiceStream {
+    #[pin]
+    st: BroadcastStream<SealedHeader>,
+}
+
+impl Stream for ForkChoiceStream {
+    type Item = SealedHeader;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            return match ready!(self.as_mut().project().st.poll_next(cx)) {
+                Some(Ok(notification)) => Poll::Ready(Some(notification)),
+                Some(Err(err)) => {
+                    debug!(%err, "finalized header notification stream lagging behind");
+                    continue
+                }
+                None => Poll::Ready(None),
+            };
+        }
     }
 }

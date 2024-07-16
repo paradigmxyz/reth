@@ -49,18 +49,16 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
         // find the next transaction that satisfies the base fee
         loop {
             let best = self.best.next()?;
-            if best.transaction.max_fee_per_gas() < self.base_fee as u128 {
-                // tx violates base fee, mark it as invalid and continue
-                crate::traits::BestTransactions::mark_invalid(self, &best);
+            // If both the base fee and blob fee (if applicable for EIP-4844) are satisfied, return
+            // the transaction
+            if best.transaction.max_fee_per_gas() >= self.base_fee as u128 &&
+                best.transaction
+                    .max_fee_per_blob_gas()
+                    .map_or(true, |fee| fee >= self.base_fee_per_blob_gas as u128)
+            {
+                return Some(best);
             } else {
-                // tx is EIP4844 and violates blob fee, mark it as invalid and continue
-                if best.transaction.max_fee_per_blob_gas().is_some_and(|max_fee_per_blob_gas| {
-                    max_fee_per_blob_gas < self.base_fee_per_blob_gas as u128
-                }) {
-                    crate::traits::BestTransactions::mark_invalid(self, &best);
-                    continue
-                };
-                return Some(best)
+                crate::traits::BestTransactions::mark_invalid(self, &best);
             }
         }
     }
@@ -270,7 +268,9 @@ mod tests {
     use crate::{
         pool::pending::PendingPool,
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
+        Priority,
     };
+    use reth_primitives::U256;
 
     #[test]
     fn test_best_iter() {
@@ -320,5 +320,280 @@ mod tests {
 
         // iterator is empty
         assert!(best.next().is_none());
+    }
+
+    #[test]
+    fn test_best_with_fees_iter_base_fee_satisfied() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let num_tx = 5;
+        let base_fee: u64 = 10;
+        let base_fee_per_blob_gas: u64 = 15;
+
+        // Insert transactions with a max_fee_per_gas greater than or equal to the base fee
+        // Without blob fee
+        for nonce in 0..num_tx {
+            let tx = MockTransaction::eip1559()
+                .rng_hash()
+                .with_nonce(nonce)
+                .with_max_fee(base_fee as u128 + 5);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+
+        for nonce in 0..num_tx {
+            let tx = best.next().expect("Transaction should be returned");
+            assert_eq!(tx.nonce(), nonce);
+            assert!(tx.transaction.max_fee_per_gas() >= base_fee as u128);
+        }
+    }
+
+    #[test]
+    fn test_best_with_fees_iter_base_fee_violated() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let num_tx = 5;
+        let base_fee: u64 = 20;
+        let base_fee_per_blob_gas: u64 = 15;
+
+        // Insert transactions with a max_fee_per_gas less than the base fee
+        for nonce in 0..num_tx {
+            let tx = MockTransaction::eip1559()
+                .rng_hash()
+                .with_nonce(nonce)
+                .with_max_fee(base_fee as u128 - 5);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+
+        // No transaction should be returned since all violate the base fee
+        assert!(best.next().is_none());
+    }
+
+    #[test]
+    fn test_best_with_fees_iter_blob_fee_satisfied() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let num_tx = 5;
+        let base_fee: u64 = 10;
+        let base_fee_per_blob_gas: u64 = 20;
+
+        // Insert transactions with a max_fee_per_blob_gas greater than or equal to the base fee per
+        // blob gas
+        for nonce in 0..num_tx {
+            let tx = MockTransaction::eip4844()
+                .rng_hash()
+                .with_nonce(nonce)
+                .with_max_fee(base_fee as u128 + 5)
+                .with_blob_fee(base_fee_per_blob_gas as u128 + 5);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+
+        // All transactions should be returned in order since they satisfy both base fee and blob
+        // fee
+        for nonce in 0..num_tx {
+            let tx = best.next().expect("Transaction should be returned");
+            assert_eq!(tx.nonce(), nonce);
+            assert!(tx.transaction.max_fee_per_gas() >= base_fee as u128);
+            assert!(
+                tx.transaction.max_fee_per_blob_gas().unwrap() >= base_fee_per_blob_gas as u128
+            );
+        }
+
+        // No more transactions should be returned
+        assert!(best.next().is_none());
+    }
+
+    #[test]
+    fn test_best_with_fees_iter_blob_fee_violated() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let num_tx = 5;
+        let base_fee: u64 = 10;
+        let base_fee_per_blob_gas: u64 = 20;
+
+        // Insert transactions with a max_fee_per_blob_gas less than the base fee per blob gas
+        for nonce in 0..num_tx {
+            let tx = MockTransaction::eip4844()
+                .rng_hash()
+                .with_nonce(nonce)
+                .with_max_fee(base_fee as u128 + 5)
+                .with_blob_fee(base_fee_per_blob_gas as u128 - 5);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+
+        // No transaction should be returned since all violate the blob fee
+        assert!(best.next().is_none());
+    }
+
+    #[test]
+    fn test_best_with_fees_iter_mixed_fees() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        let base_fee: u64 = 10;
+        let base_fee_per_blob_gas: u64 = 20;
+
+        // Insert transactions with varying max_fee_per_gas and max_fee_per_blob_gas
+        let tx1 =
+            MockTransaction::eip1559().rng_hash().with_nonce(0).with_max_fee(base_fee as u128 + 5);
+        let tx2 = MockTransaction::eip4844()
+            .rng_hash()
+            .with_nonce(1)
+            .with_max_fee(base_fee as u128 + 5)
+            .with_blob_fee(base_fee_per_blob_gas as u128 + 5);
+        let tx3 = MockTransaction::eip4844()
+            .rng_hash()
+            .with_nonce(2)
+            .with_max_fee(base_fee as u128 + 5)
+            .with_blob_fee(base_fee_per_blob_gas as u128 - 5);
+        let tx4 =
+            MockTransaction::eip1559().rng_hash().with_nonce(3).with_max_fee(base_fee as u128 - 5);
+
+        pool.add_transaction(Arc::new(f.validated(tx1.clone())), 0);
+        pool.add_transaction(Arc::new(f.validated(tx2.clone())), 0);
+        pool.add_transaction(Arc::new(f.validated(tx3)), 0);
+        pool.add_transaction(Arc::new(f.validated(tx4)), 0);
+
+        let mut best = pool.best_with_basefee_and_blobfee(base_fee, base_fee_per_blob_gas);
+
+        let expected_order = vec![tx1, tx2];
+        for expected_tx in expected_order {
+            let tx = best.next().expect("Transaction should be returned");
+            assert_eq!(tx.transaction, expected_tx);
+        }
+
+        // No more transactions should be returned
+        assert!(best.next().is_none());
+    }
+
+    #[test]
+    fn test_best_add_transaction_with_next_nonce() {
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add 5 transactions with increasing nonces to the pool
+        let num_tx = 5;
+        let tx = MockTransaction::eip1559();
+        for nonce in 0..num_tx {
+            let tx = tx.clone().rng_hash().with_nonce(nonce);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        // Create a BestTransactions iterator from the pool
+        let mut best = pool.best();
+
+        // Use a broadcast channel for transaction updates
+        let (tx_sender, tx_receiver) =
+            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
+        best.new_transaction_receiver = Some(tx_receiver);
+
+        // Create a new transaction with nonce 5 and validate it
+        let new_tx = MockTransaction::eip1559().rng_hash().with_nonce(5);
+        let valid_new_tx = f.validated(new_tx);
+
+        // Send the new transaction through the broadcast channel
+        let pending_tx = PendingTransaction {
+            submission_id: 10,
+            transaction: Arc::new(valid_new_tx.clone()),
+            priority: Priority::Value(U256::from(1000)),
+        };
+        tx_sender.send(pending_tx.clone()).unwrap();
+
+        // Add new transactions to the iterator
+        best.add_new_transactions();
+
+        // Verify that the new transaction has been added to the 'all' map
+        assert_eq!(best.all.len(), 6);
+        assert!(best.all.contains_key(valid_new_tx.id()));
+
+        // Verify that the new transaction has been added to the 'independent' set
+        assert_eq!(best.independent.len(), 2);
+        assert!(best.independent.contains(&pending_tx));
+    }
+
+    #[test]
+    fn test_best_add_transaction_with_ancestor() {
+        // Initialize a new PendingPool with default MockOrdering and MockTransactionFactory
+        let mut pool = PendingPool::new(MockOrdering::default());
+        let mut f = MockTransactionFactory::default();
+
+        // Add 5 transactions with increasing nonces to the pool
+        let num_tx = 5;
+        let tx = MockTransaction::eip1559();
+        for nonce in 0..num_tx {
+            let tx = tx.clone().rng_hash().with_nonce(nonce);
+            let valid_tx = f.validated(tx);
+            pool.add_transaction(Arc::new(valid_tx), 0);
+        }
+
+        // Create a BestTransactions iterator from the pool
+        let mut best = pool.best();
+
+        // Use a broadcast channel for transaction updates
+        let (tx_sender, tx_receiver) =
+            tokio::sync::broadcast::channel::<PendingTransaction<MockOrdering>>(1000);
+        best.new_transaction_receiver = Some(tx_receiver);
+
+        // Create a new transaction with nonce 5 and validate it
+        let base_tx1 = MockTransaction::eip1559().rng_hash().with_nonce(5);
+        let valid_new_tx1 = f.validated(base_tx1.clone());
+
+        // Send the new transaction through the broadcast channel
+        let pending_tx1 = PendingTransaction {
+            submission_id: 10,
+            transaction: Arc::new(valid_new_tx1.clone()),
+            priority: Priority::Value(U256::from(1000)),
+        };
+        tx_sender.send(pending_tx1.clone()).unwrap();
+
+        // Add new transactions to the iterator
+        best.add_new_transactions();
+
+        // Verify that the new transaction has been added to the 'all' map
+        assert_eq!(best.all.len(), 6);
+        assert!(best.all.contains_key(valid_new_tx1.id()));
+
+        // Verify that the new transaction has been added to the 'independent' set
+        assert_eq!(best.independent.len(), 2);
+        assert!(best.independent.contains(&pending_tx1));
+
+        // Attempt to add a new transaction with a different nonce (not a duplicate)
+        let base_tx2 = base_tx1.with_nonce(6);
+        let valid_new_tx2 = f.validated(base_tx2);
+
+        // Send the new transaction through the broadcast channel
+        let pending_tx2 = PendingTransaction {
+            submission_id: 11, // Different submission ID
+            transaction: Arc::new(valid_new_tx2.clone()),
+            priority: Priority::Value(U256::from(1000)),
+        };
+        tx_sender.send(pending_tx2.clone()).unwrap();
+
+        // Add new transactions to the iterator
+        best.add_new_transactions();
+
+        // Verify that the new transaction has been added to 'all'
+        assert_eq!(best.all.len(), 7);
+        assert!(best.all.contains_key(valid_new_tx2.id()));
+
+        // Verify that the new transaction has not been added to the 'independent' set
+        assert_eq!(best.independent.len(), 2);
+        assert!(!best.independent.contains(&pending_tx2));
     }
 }

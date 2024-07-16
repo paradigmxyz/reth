@@ -14,8 +14,8 @@ workspace = true
 [dependencies]
 # reth
 reth-ethereum-forks.workspace = true
-reth-net-common.workspace = true
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
+reth-tokio-util = { workspace = true, features = ["time"] }
 
 # ethereum
 alloy-primitives.workspace = true
@@ -40,7 +40,7 @@ serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-primitives.workspace = true
+reth-chainspec.workspace = true
 alloy-rlp.workspace = true
 alloy-chains.workspace = true
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
@@ -48,5 +48,4 @@ reth-tracing.workspace = true
 rand.workspace = true
 
 [features]
-default = ["serde"]
 serde = ["dep:serde", "dep:serde_with"]

@@ -9,7 +9,7 @@ use crate::{
         BlockRequest, NewBlockMessage, PeerRequest, PeerRequestSender, PeerResponse,
         PeerResponseResult,
     },
-    peers::{PeerAction, PeersManager},
+    peers::{PeerAction, PeerAddr, PeersManager},
     FetchClient,
 };
 use rand::seq::SliceRandom;
@@ -20,10 +20,11 @@ use reth_eth_wire::{
 use reth_network_api::PeerKind;
 use reth_network_peers::PeerId;
 use reth_primitives::{ForkId, B256};
-use reth_provider::BlockNumReader;
 use std::{
     collections::{HashMap, VecDeque},
+    fmt,
     net::{IpAddr, SocketAddr},
+    ops::Deref,
     sync::{
         atomic::{AtomicU64, AtomicUsize},
         Arc,
@@ -36,6 +37,30 @@ use tracing::{debug, trace};
 /// Cache limit of blocks to keep track of for a single peer.
 const PEER_BLOCK_CACHE_LIMIT: u32 = 512;
 
+/// Wrapper type for the [`BlockNumReader`] trait.
+pub(crate) struct BlockNumReader(Box<dyn reth_storage_api::BlockNumReader>);
+
+impl BlockNumReader {
+    /// Create a new instance with the given reader.
+    pub fn new(reader: impl reth_storage_api::BlockNumReader + 'static) -> Self {
+        Self(Box::new(reader))
+    }
+}
+
+impl fmt::Debug for BlockNumReader {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BlockNumReader").field("inner", &"<dyn BlockNumReader>").finish()
+    }
+}
+
+impl Deref for BlockNumReader {
+    type Target = Box<dyn reth_storage_api::BlockNumReader>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 /// The [`NetworkState`] keeps track of the state of all peers in the network.
 ///
 /// This includes:
@@ -47,7 +72,7 @@ const PEER_BLOCK_CACHE_LIMIT: u32 = 512;
 ///
 /// This type is also responsible for responding for received request.
 #[derive(Debug)]
-pub struct NetworkState<C> {
+pub struct NetworkState {
     /// All active peers and their state.
     active_peers: HashMap<PeerId, ActivePeer>,
     /// Manages connections to peers.
@@ -58,7 +83,7 @@ pub struct NetworkState<C> {
     ///
     /// This type is used to fetch the block number after we established a session and received the
     /// [Status] block hash.
-    client: C,
+    client: BlockNumReader,
     /// Network discovery.
     discovery: Discovery,
     /// The type that handles requests.
@@ -69,13 +94,10 @@ pub struct NetworkState<C> {
     state_fetcher: StateFetcher,
 }
 
-impl<C> NetworkState<C>
-where
-    C: BlockNumReader,
-{
+impl NetworkState {
     /// Create a new state instance with the given params
     pub(crate) fn new(
-        client: C,
+        client: BlockNumReader,
         discovery: Discovery,
         peers_manager: PeersManager,
         num_active_peers: Arc<AtomicUsize>,
@@ -274,13 +296,14 @@ where
     }
 
     /// Adds a peer and its address with the given kind to the peerset.
-    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: SocketAddr) {
+    pub(crate) fn add_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind, addr: PeerAddr) {
         self.peers_manager.add_peer_kind(peer_id, kind, addr, None)
     }
 
-    pub(crate) fn remove_peer(&mut self, peer_id: PeerId, kind: PeerKind) {
+    /// Removes a peer and its address with the given kind from the peerset.
+    pub(crate) fn remove_peer_kind(&mut self, peer_id: PeerId, kind: PeerKind) {
         match kind {
-            PeerKind::Basic => self.peers_manager.remove_peer(peer_id),
+            PeerKind::Basic | PeerKind::Static => self.peers_manager.remove_peer(peer_id),
             PeerKind::Trusted => self.peers_manager.remove_peer_from_trusted_set(peer_id),
         }
     }
@@ -288,14 +311,10 @@ where
     /// Event hook for events received from the discovery service.
     fn on_discovery_event(&mut self, event: DiscoveryEvent) {
         match event {
-            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued {
-                peer_id,
-                socket_addr,
-                fork_id,
-            }) => {
+            DiscoveryEvent::NewNode(DiscoveredEvent::EventQueued { peer_id, addr, fork_id }) => {
                 self.queued_messages.push_back(StateAction::DiscoveredNode {
                     peer_id,
-                    socket_addr,
+                    addr,
                     fork_id,
                 });
             }
@@ -516,7 +535,7 @@ pub(crate) enum StateAction {
         fork_id: ForkId,
     },
     /// A new node was found through the discovery, possibly with a `ForkId`
-    DiscoveredNode { peer_id: PeerId, socket_addr: SocketAddr, fork_id: Option<ForkId> },
+    DiscoveredNode { peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId> },
     /// A peer was added
     PeerAdded(PeerId),
     /// A peer was dropped
@@ -526,8 +545,12 @@ pub(crate) enum StateAction {
 #[cfg(test)]
 mod tests {
     use crate::{
-        discovery::Discovery, fetch::StateFetcher, message::PeerRequestSender, peers::PeersManager,
-        state::NetworkState, PeerRequest,
+        discovery::Discovery,
+        fetch::StateFetcher,
+        message::PeerRequestSender,
+        peers::PeersManager,
+        state::{BlockNumReader, NetworkState},
+        PeerRequest,
     };
     use reth_eth_wire::{
         capability::{Capabilities, Capability},
@@ -545,14 +568,14 @@ mod tests {
     use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
     /// Returns a testing instance of the [`NetworkState`].
-    fn state() -> NetworkState<NoopProvider> {
+    fn state() -> NetworkState {
         let peers = PeersManager::default();
         let handle = peers.handle();
         NetworkState {
             active_peers: Default::default(),
             peers_manager: Default::default(),
             queued_messages: Default::default(),
-            client: NoopProvider::default(),
+            client: BlockNumReader(Box::new(NoopProvider::default())),
             discovery: Discovery::noop(),
             state_fetcher: StateFetcher::new(handle, Default::default()),
         }

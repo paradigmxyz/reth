@@ -9,14 +9,16 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+use reth_chainspec::{ChainSpec, EthereumHardforks, OptimismHardforks};
 use reth_consensus::{Consensus, ConsensusError, PostExecutionInput};
 use reth_consensus_common::validation::{
-    validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
-    validate_against_parent_timestamp, validate_block_pre_execution, validate_header_base_fee,
-    validate_header_extradata, validate_header_gas,
+    validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
+    validate_against_parent_hash_number, validate_against_parent_timestamp,
+    validate_block_pre_execution, validate_header_base_fee, validate_header_extradata,
+    validate_header_gas,
 };
 use reth_primitives::{
-    BlockWithSenders, ChainSpec, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
+    BlockWithSenders, Header, SealedBlock, SealedHeader, EMPTY_OMMER_ROOT_HASH, U256,
 };
 use std::{sync::Arc, time::SystemTime};
 
@@ -62,6 +64,11 @@ impl Consensus for OptimismBeaconConsensus {
         }
 
         validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
+
+        // ensure that the blob gas fields for this block
+        if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
+            validate_against_parent_4844(header, parent)?;
+        }
 
         Ok(())
     }

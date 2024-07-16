@@ -139,7 +139,11 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         let offset = transitions.len() as u64;
 
         db.insert_changesets(transitions, None).unwrap();
-        db.commit(|tx| Ok(updates.flush(tx)?)).unwrap();
+        db.commit(|tx| {
+            updates.write_to_database(tx)?;
+            Ok(())
+        })
+        .unwrap();
 
         let (transitions, final_state) = random_changeset_range(
             &mut rng,

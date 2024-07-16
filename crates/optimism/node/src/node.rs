@@ -1,14 +1,12 @@
 //! Optimism Node types config.
 
-use crate::{
-    args::RollupArgs,
-    txpool::{OpTransactionPool, OpTransactionValidator},
-    OptimismEngineTypes,
-};
+use std::sync::Arc;
+
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_evm::ConfigureEvmGeneric;
 use reth_evm_optimism::{OpExecutorProvider, OptimismEvmConfig};
 use reth_network::{NetworkHandle, NetworkManager};
+use reth_node_api::{FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
@@ -18,12 +16,20 @@ use reth_node_builder::{
     BuilderContext, Node, PayloadBuilderConfig,
 };
 use reth_optimism_consensus::OptimismBeaconConsensus;
+use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
+use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
     TransactionValidationTaskExecutor,
+};
+
+use crate::{
+    args::RollupArgs,
+    txpool::{OpTransactionPool, OpTransactionValidator},
+    OptimismEngineTypes,
 };
 
 /// Type configuration for a regular Optimism node.
@@ -81,15 +87,25 @@ where
         OptimismConsensusBuilder,
     >;
 
-    fn components_builder(self) -> Self::ComponentsBuilder {
+    type AddOns = OptimismAddOns;
+
+    fn components_builder(&self) -> Self::ComponentsBuilder {
         let Self { args } = self;
-        Self::components(args)
+        Self::components(args.clone())
     }
 }
 
 impl NodeTypes for OptimismNode {
     type Primitives = ();
     type Engine = OptimismEngineTypes;
+}
+
+/// Add-ons w.r.t. optimism.
+#[derive(Debug, Clone)]
+pub struct OptimismAddOns;
+
+impl<N: FullNodeComponents> NodeAddOns<N> for OptimismAddOns {
+    type EthApi = OpEthApi<EthApi<N::Provider, N::Pool, NetworkHandle, N::Evm>>;
 }
 
 /// A regular optimism evm and executor builder.
@@ -225,11 +241,9 @@ where
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
-        let payload_builder = reth_optimism_payload_builder::OptimismPayloadBuilder::new(
-            ctx.chain_spec(),
-            self.evm_config,
-        )
-        .set_compute_pending_block(self.compute_pending_block);
+        let payload_builder =
+            reth_optimism_payload_builder::OptimismPayloadBuilder::new(self.evm_config)
+                .set_compute_pending_block(self.compute_pending_block);
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
@@ -282,12 +296,14 @@ where
             // purposefully disable discv4
             .disable_discv4_discovery()
             // apply discovery settings
-            .apply(|builder| {
+            .apply(|mut builder| {
                 let rlpx_socket = (args.addr, args.port).into();
-                let mut builder = args.discovery.apply_to_builder(builder, rlpx_socket);
 
                 if !args.discovery.disable_discovery {
-                    builder = builder.discovery_v5(reth_discv5::Config::builder(rlpx_socket));
+                    builder = builder.discovery_v5(args.discovery.discovery_v5_builder(
+                        rlpx_socket,
+                        ctx.chain_spec().bootnodes().unwrap_or_default(),
+                    ));
                 }
 
                 builder
@@ -317,9 +333,13 @@ impl<Node> ConsensusBuilder<Node> for OptimismConsensusBuilder
 where
     Node: FullNodeTypes,
 {
-    type Consensus = OptimismBeaconConsensus;
+    type Consensus = Arc<dyn reth_consensus::Consensus>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(OptimismBeaconConsensus::new(ctx.chain_spec()))
+        if ctx.is_dev() {
+            Ok(Arc::new(reth_auto_seal_consensus::AutoSealConsensus::new(ctx.chain_spec())))
+        } else {
+            Ok(Arc::new(OptimismBeaconConsensus::new(ctx.chain_spec())))
+        }
     }
 }

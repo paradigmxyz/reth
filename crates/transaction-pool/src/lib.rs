@@ -79,7 +79,7 @@
 //! Listen for new transactions and print them:
 //!
 //! ```
-//! use reth_primitives::MAINNET;
+//! use reth_chainspec::MAINNET;
 //! use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
@@ -107,7 +107,7 @@
 //!
 //! ```
 //! use futures_util::Stream;
-//! use reth_primitives::MAINNET;
+//! use reth_chainspec::MAINNET;
 //! use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory};
 //! use reth_tasks::TokioTaskExecutor;
 //! use reth_tasks::TaskSpawner;
@@ -148,7 +148,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![warn(clippy::missing_const_for_fn)]
 
 use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
@@ -285,7 +284,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use reth_primitives::MAINNET;
+    /// use reth_chainspec::MAINNET;
     /// use reth_provider::{BlockReaderIdExt, StateProviderFactory};
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::{

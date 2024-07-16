@@ -62,6 +62,16 @@ impl PruneModes {
             receipts_log_filter: Default::default(),
         }
     }
+
+    /// Returns whether there is any kind of receipt pruning configuration.
+    pub fn has_receipts_pruning(&self) -> bool {
+        self.receipts.is_some() || !self.receipts_log_filter.is_empty()
+    }
+
+    /// Returns true if all prune modes are set to [`None`].
+    pub fn is_empty(&self) -> bool {
+        self == &Self::none()
+    }
 }
 
 /// Deserializes [`Option<PruneMode>`] and validates that the value is not less than the const

@@ -1,11 +1,12 @@
 [package]
-name = "manual-p2p"
+name = "example-manual-p2p"
 version = "0.0.0"
 publish = false
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
+reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-network.workspace = true
 reth-discv4.workspace = true

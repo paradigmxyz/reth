@@ -1,5 +1,7 @@
 //! Helper type that represents one of two possible executor types
 
+use std::fmt::Display;
+
 use crate::execute::{
     BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
@@ -18,13 +20,15 @@ where
     A: BlockExecutorProvider,
     B: BlockExecutorProvider,
 {
-    type Executor<DB: Database<Error = ProviderError>> = Either<A::Executor<DB>, B::Executor<DB>>;
-    type BatchExecutor<DB: Database<Error = ProviderError>> =
+    type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
+        Either<A::Executor<DB>, B::Executor<DB>>;
+
+    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
         Either<A::BatchExecutor<DB>, B::BatchExecutor<DB>>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + Display>,
     {
         match self {
             Self::Left(a) => Either::Left(a.executor(db)),
@@ -32,13 +36,13 @@ where
         }
     }
 
-    fn batch_executor<DB>(&self, db: DB, prune_modes: PruneModes) -> Self::BatchExecutor<DB>
+    fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error: Into<ProviderError> + Display>,
     {
         match self {
-            Self::Left(a) => Either::Left(a.batch_executor(db, prune_modes)),
-            Self::Right(b) => Either::Right(b.batch_executor(db, prune_modes)),
+            Self::Left(a) => Either::Left(a.batch_executor(db)),
+            Self::Right(b) => Either::Right(b.batch_executor(db)),
         }
     }
 }
@@ -57,7 +61,7 @@ where
         Output = BlockExecutionOutput<Receipt>,
         Error = BlockExecutionError,
     >,
-    DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
@@ -85,7 +89,7 @@ where
         Output = ExecutionOutcome,
         Error = BlockExecutionError,
     >,
-    DB: Database<Error = ProviderError>,
+    DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = ExecutionOutcome;
@@ -109,6 +113,13 @@ where
         match self {
             Self::Left(a) => a.set_tip(tip),
             Self::Right(b) => b.set_tip(tip),
+        }
+    }
+
+    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
+        match self {
+            Self::Left(a) => a.set_prune_modes(prune_modes),
+            Self::Right(b) => b.set_prune_modes(prune_modes),
         }
     }
 

@@ -2,13 +2,11 @@ mod ctrl;
 mod event;
 pub use crate::pipeline::ctrl::ControlFlow;
 use crate::{PipelineTarget, StageCheckpoint, StageId};
+use alloy_primitives::{BlockNumber, B256};
 pub use event::*;
 use futures_util::Future;
 use reth_db_api::database::Database;
-use reth_primitives::{
-    constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH, static_file::HighestStaticFiles, BlockNumber,
-    B256,
-};
+use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
     providers::StaticFileWriter, FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory,
     StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
@@ -237,46 +235,29 @@ where
 
     /// Run [static file producer](StaticFileProducer) and [pruner](reth_prune::Pruner) to **move**
     /// all data from the database to static files for corresponding
-    /// [segments](reth_primitives::static_file::StaticFileSegment), according to their [stage
+    /// [segments](reth_static_file_types::StaticFileSegment), according to their [stage
     /// checkpoints](StageCheckpoint):
-    /// - [`StaticFileSegment::Headers`](reth_primitives::static_file::StaticFileSegment::Headers)
-    ///   -> [`StageId::Headers`]
-    /// - [`StaticFileSegment::Receipts`](reth_primitives::static_file::StaticFileSegment::Receipts)
-    ///   -> [`StageId::Execution`]
-    /// - [`StaticFileSegment::Transactions`](reth_primitives::static_file::StaticFileSegment::Transactions)
+    /// - [`StaticFileSegment::Headers`](reth_static_file_types::StaticFileSegment::Headers) ->
+    ///   [`StageId::Headers`]
+    /// - [`StaticFileSegment::Receipts`](reth_static_file_types::StaticFileSegment::Receipts) ->
+    ///   [`StageId::Execution`]
+    /// - [`StaticFileSegment::Transactions`](reth_static_file_types::StaticFileSegment::Transactions)
     ///   -> [`StageId::Bodies`]
     ///
     /// CAUTION: This method locks the static file producer Mutex, hence can block the thread if the
     /// lock is occupied.
     pub fn move_to_static_files(&self) -> RethResult<()> {
-        let static_file_producer = self.static_file_producer.lock();
-
         // Copies data from database to static files
-        let lowest_static_file_height = {
-            let provider = self.provider_factory.provider()?;
-            let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
-                .into_iter()
-                .map(|stage| {
-                    provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            let targets = static_file_producer.get_static_file_targets(HighestStaticFiles {
-                headers: stages_checkpoints[0],
-                receipts: stages_checkpoints[1],
-                transactions: stages_checkpoints[2],
-            })?;
-            static_file_producer.run(targets)?;
-            stages_checkpoints.into_iter().min().expect("exists")
-        };
+        let lowest_static_file_height =
+            self.static_file_producer.lock().copy_to_static_files()?.min();
 
         // Deletes data which has been copied to static files.
         if let Some(prune_tip) = lowest_static_file_height {
             // Run the pruner so we don't potentially end up with higher height in the database vs
             // static files during a pipeline unwind
             let mut pruner = PrunerBuilder::new(Default::default())
-                .prune_delete_limit(usize::MAX)
-                .build(self.provider_factory.clone());
+                .delete_limit(usize::MAX)
+                .build_with_provider_factory(self.provider_factory.clone());
 
             pruner.run(prune_tip)?;
         }
@@ -439,6 +420,8 @@ where
                 };
             }
 
+            let provider_rw = self.provider_factory.provider_rw()?;
+
             self.event_sender.notify(PipelineEvent::Run {
                 pipeline_stages_progress: PipelineStagesProgress {
                     current: stage_index + 1,
@@ -449,7 +432,6 @@ where
                 target,
             });
 
-            let provider_rw = self.provider_factory.provider_rw()?;
             match stage.execute(&provider_rw, exec_input) {
                 Ok(out @ ExecOutput { checkpoint, done }) => {
                     made_progress |=

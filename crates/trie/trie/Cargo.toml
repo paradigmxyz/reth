@@ -32,6 +32,7 @@ tracing.workspace = true
 rayon.workspace = true
 derive_more.workspace = true
 auto_impl.workspace = true
+itertools.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
@@ -40,8 +41,12 @@ metrics = { workspace = true, optional = true }
 # `test-utils` feature
 triehash = { version = "0.8", optional = true }
 
+# `serde` feature
+serde = { workspace = true, optional = true }
+
 [dev-dependencies]
 # reth
+reth-chainspec.workspace = true
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -53,6 +58,7 @@ triehash = "0.8"
 
 # misc
 proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
 tokio = { workspace = true, default-features = false, features = [
     "sync",
     "rt",
@@ -66,6 +72,7 @@ criterion.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
+serde = ["dep:serde"]
 test-utils = ["triehash", "reth-trie-common/test-utils"]
 
 [[bench]]

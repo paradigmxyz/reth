@@ -1,0 +1,120 @@
+# https://github.com/paradigmxyz/reth/issues/7015
+# https://github.com/paradigmxyz/reth/issues/6332
+rpc-compat:
+  - debug_getRawBlock/get-invalid-number (reth)
+  - debug_getRawHeader/get-invalid-number (reth)
+  - debug_getRawReceipts/get-invalid-number (reth)
+  - debug_getRawTransaction/get-invalid-hash (reth)
+
+  - eth_call/call-callenv (reth)
+  - eth_createAccessList/create-al-contract-eip1559 (reth)
+  - eth_createAccessList/create-al-contract (reth)
+  - eth_feeHistory/fee-history (reth)
+  - eth_getStorageAt/get-storage-invalid-key-too-large (reth)
+  - eth_getStorageAt/get-storage-invalid-key (reth)
+  - eth_getTransactionReceipt/get-access-list (reth)
+  - eth_getTransactionReceipt/get-blob-tx (reth)
+  - eth_getTransactionReceipt/get-dynamic-fee (reth)
+
+# https://github.com/paradigmxyz/reth/issues/8732
+engine-withdrawals:
+  - Withdrawals Fork On Genesis (Paris) (reth)
+  - Withdrawals Fork on Block 1 (Paris) (reth)
+  - Withdrawals Fork on Block 2 (Paris) (reth)
+  - Withdrawals Fork on Block 3 (Paris) (reth)
+  - Withdraw to a single account (Paris) (reth)
+  - Withdraw to two accounts (Paris) (reth)
+  - Withdraw many accounts (Paris) (reth)
+  - Withdraw zero amount (Paris) (reth)
+  - Empty Withdrawals (Paris) (reth)
+  - Corrupted Block Hash Payload (INVALID) (Paris) (reth)
+  - Withdrawals Fork on Block 1 - 8 Block Re-Org NewPayload (Paris) (reth)
+  - Withdrawals Fork on Block 1 - 8 Block Re-Org, Sync (Paris) (reth)
+  - Withdrawals Fork on Block 8 - 10 Block Re-Org NewPayload (Paris) (reth)
+  - Withdrawals Fork on Block 8 - 10 Block Re-Org Sync (Paris) (reth)
+  - Withdrawals Fork on Canonical Block 8 / Side Block 7 - 10 Block Re-Org (Paris) (reth)
+  - Withdrawals Fork on Canonical Block 8 / Side Block 7 - 10 Block Re-Org Sync (Paris) (reth)
+  - Withdrawals Fork on Canonical Block 8 / Side Block 9 - 10 Block Re-Org (Paris) (reth)
+  - Withdrawals Fork on Canonical Block 8 / Side Block 9 - 10 Block Re-Org Sync (Paris) (reth)
+
+# https://github.com/paradigmxyz/reth/issues/8305
+# https://github.com/paradigmxyz/reth/issues/6217
+engine-api:
+  - Inconsistent Head in ForkchoiceState (Paris) (reth)
+  - Invalid NewPayload, StateRoot, Syncing=True, EmptyTxs=True, DynFeeTxs=False (Paris) (reth)
+  - Invalid NewPayload, StateRoot, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Paris) (reth)
+  - Invalid NewPayload, PrevRandao, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=True, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=True, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, GasLimit, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Timestamp, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Paris) (reth)
+
+  # Hive issue
+  # https://github.com/ethereum/hive/issues/1135
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Nonce, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Nonce, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Gas, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Gas, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction GasPrice, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction GasPrice, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Value, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Value, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, ReceiptsRoot, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, ReceiptsRoot, EmptyTxs=False, CanonicalReOrg=True, Invalid P8 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, GasLimit, EmptyTxs=False, CanonicalReOrg=True, Invalid P8 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, GasUsed, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, GasUsed, EmptyTxs=False, CanonicalReOrg=True, Invalid P8 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Timestamp, EmptyTxs=False, CanonicalReOrg=True, Invalid P8 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Incomplete Transactions, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Paris) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Incomplete Transactions, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Paris) (reth)
+
+# https://github.com/paradigmxyz/reth/issues/8305
+# https://github.com/paradigmxyz/reth/issues/6217
+# https://github.com/paradigmxyz/reth/issues/8306
+# https://github.com/paradigmxyz/reth/issues/7144
+engine-cancun:
+  - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
+  - Inconsistent Head in ForkchoiceState (Cancun) (reth)
+  - Invalid NewPayload, StateRoot, Syncing=True, EmptyTxs=True, DynFeeTxs=False (Cancun) (reth)
+  - Invalid NewPayload, StateRoot, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+  - Invalid NewPayload, PrevRandao, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=True, CanonicalReOrg=False, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=True, CanonicalReOrg=True, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, StateRoot, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, GasLimit, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Timestamp, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Cancun) (reth)
+  - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
+  - Invalid NewPayload, ParentBeaconBlockRoot, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+  - Invalid NewPayload, BlobGasUsed, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+  - Invalid NewPayload, Blob Count on BlobGasUsed, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+  - Invalid NewPayload, ExcessBlobGas, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+
+  # Hive issue
+  # https://github.com/ethereum/hive/issues/1135
+  - Invalid Missing Ancestor Syncing ReOrg, ReceiptsRoot, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, ReceiptsRoot, EmptyTxs=False, CanonicalReOrg=True, Invalid P8 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, GasLimit, EmptyTxs=False, CanonicalReOrg=True, Invalid P8 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, GasUsed, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, GasUsed, EmptyTxs=False, CanonicalReOrg=True, Invalid P8 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Timestamp, EmptyTxs=False, CanonicalReOrg=True, Invalid P8 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Incomplete Transactions, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Incomplete Transactions, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Signature, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Nonce, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Nonce, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Gas, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Gas, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction GasPrice, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction GasPrice, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Value, EmptyTxs=False, CanonicalReOrg=False, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Transaction Value, EmptyTxs=False, CanonicalReOrg=True, Invalid P9 (Cancun) (reth)
+
+# https://github.com/paradigmxyz/reth/issues/8579
+sync:
+  - sync reth -> reth

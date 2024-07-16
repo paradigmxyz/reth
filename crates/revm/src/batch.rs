@@ -1,12 +1,16 @@
 //! Helper for handling execution of multiple blocks.
 
 use crate::{precompile::Address, primitives::alloy_primitives::BlockNumber};
+use core::time::Duration;
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{Receipt, Receipts, Request, Requests};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
-use std::time::Duration;
+use std::collections::HashSet;
 use tracing::debug;
+
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Takes care of:
 ///  - recording receipts during execution of multiple blocks.
@@ -30,9 +34,10 @@ pub struct BlockBatchRecord {
     /// guaranteed to be the same as the number of transactions.
     requests: Vec<Requests>,
     /// Memoized address pruning filter.
+    ///
     /// Empty implies that there is going to be addresses to include in the filter in a future
     /// block. None means there isn't any kind of configuration.
-    pruning_address_filter: Option<(u64, Vec<Address>)>,
+    pruning_address_filter: Option<(u64, HashSet<Address>)>,
     /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
     first_block: Option<BlockNumber>,
@@ -78,7 +83,7 @@ impl BlockBatchRecord {
 
     /// Returns all recorded receipts.
     pub fn take_receipts(&mut self) -> Receipts {
-        std::mem::take(&mut self.receipts)
+        core::mem::take(&mut self.receipts)
     }
 
     /// Returns the recorded requests.
@@ -88,7 +93,7 @@ impl BlockBatchRecord {
 
     /// Returns all recorded requests.
     pub fn take_requests(&mut self) -> Vec<Requests> {
-        std::mem::take(&mut self.requests)
+        core::mem::take(&mut self.requests)
     }
 
     /// Returns the [`BundleRetention`] for the given block based on the configured prune modes.
@@ -124,10 +129,7 @@ impl BlockBatchRecord {
         &mut self,
         receipts: &mut Vec<Option<Receipt>>,
     ) -> Result<(), PruneSegmentError> {
-        let (first_block, tip) = match self.first_block.zip(self.tip) {
-            Some((block, tip)) => (block, tip),
-            _ => return Ok(()),
-        };
+        let (Some(first_block), Some(tip)) = (self.first_block, self.tip) else { return Ok(()) };
 
         let block_number = first_block + self.receipts.len() as u64;
 
@@ -151,18 +153,18 @@ impl BlockBatchRecord {
         let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
 
         if !contract_log_pruner.is_empty() {
-            let (prev_block, filter) = self.pruning_address_filter.get_or_insert((0, Vec::new()));
+            let (prev_block, filter) =
+                self.pruning_address_filter.get_or_insert_with(|| (0, HashSet::new()));
             for (_, addresses) in contract_log_pruner.range(*prev_block..=block_number) {
                 filter.extend(addresses.iter().copied());
             }
         }
 
-        for receipt in receipts.iter_mut() {
-            let inner_receipt = receipt.as_ref().expect("receipts have not been pruned");
-
-            // If there is an address_filter, and it does not contain any of the
-            // contract addresses, then remove this receipts
-            if let Some((_, filter)) = &self.pruning_address_filter {
+        if let Some((_, filter)) = &self.pruning_address_filter {
+            for receipt in receipts.iter_mut() {
+                // If there is an address_filter, it does not contain any of the
+                // contract addresses, then remove this receipt.
+                let inner_receipt = receipt.as_ref().expect("receipts have not been pruned");
                 if !inner_receipt.logs.iter().any(|log| filter.contains(&log.address)) {
                     receipt.take();
                 }
@@ -206,5 +208,191 @@ impl BlockExecutorStats {
             receipt_root = ?self.receipt_root_duration,
             "Execution time"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_primitives::{Address, Log, Receipt};
+    use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn test_save_receipts_empty() {
+        let mut recorder = BlockBatchRecord::default();
+        // Create an empty vector of receipts
+        let receipts = vec![];
+
+        // Verify that saving receipts completes without error
+        assert!(recorder.save_receipts(receipts).is_ok());
+        // Verify that the saved receipts are equal to a nested empty vector
+        assert_eq!(*recorder.receipts(), vec![vec![]].into());
+    }
+
+    #[test]
+    fn test_save_receipts_non_empty_no_pruning() {
+        let mut recorder = BlockBatchRecord::default();
+        let receipts = vec![Receipt::default()];
+
+        // Verify that saving receipts completes without error
+        assert!(recorder.save_receipts(receipts).is_ok());
+        // Verify that there is one block of receipts
+        assert_eq!(recorder.receipts().len(), 1);
+        // Verify that the first block contains one receipt
+        assert_eq!(recorder.receipts()[0].len(), 1);
+        // Verify that the saved receipt is the default receipt
+        assert_eq!(recorder.receipts()[0][0], Some(Receipt::default()));
+    }
+
+    #[test]
+    fn test_save_receipts_with_pruning_no_prunable_receipts() {
+        let mut recorder = BlockBatchRecord::default();
+
+        // Set the first block number
+        recorder.set_first_block(1);
+        // Set the tip (highest known block)
+        recorder.set_tip(130);
+
+        // Create a vector of receipts with a default receipt
+        let receipts = vec![Receipt::default()];
+
+        // Verify that saving receipts completes without error
+        assert!(recorder.save_receipts(receipts).is_ok());
+        // Verify that there is one block of receipts
+        assert_eq!(recorder.receipts().len(), 1);
+        // Verify that the first block contains one receipt
+        assert_eq!(recorder.receipts()[0].len(), 1);
+        // Verify that the saved receipt is the default receipt
+        assert_eq!(recorder.receipts()[0][0], Some(Receipt::default()));
+    }
+
+    #[test]
+    fn test_save_receipts_with_pruning_no_tip() {
+        // Create a PruneModes with receipts set to PruneMode::Full
+        let prune_modes = PruneModes { receipts: Some(PruneMode::Full), ..Default::default() };
+
+        let mut recorder = BlockBatchRecord::new(prune_modes);
+
+        // Set the first block number
+        recorder.set_first_block(1);
+        // Create a vector of receipts with a default receipt
+        let receipts = vec![Receipt::default()];
+
+        // Verify that saving receipts completes without error
+        assert!(recorder.save_receipts(receipts).is_ok());
+        // Verify that there is one block of receipts
+        assert_eq!(recorder.receipts().len(), 1);
+        // Verify that the first block contains one receipt
+        assert_eq!(recorder.receipts()[0].len(), 1);
+        // Verify that the saved receipt is the default receipt
+        assert_eq!(recorder.receipts()[0][0], Some(Receipt::default()));
+    }
+
+    #[test]
+    fn test_save_receipts_with_pruning_no_block_number() {
+        // Create a PruneModes with receipts set to PruneMode::Full
+        let prune_modes = PruneModes { receipts: Some(PruneMode::Full), ..Default::default() };
+
+        // Create a BlockBatchRecord with the prune_modes
+        let mut recorder = BlockBatchRecord::new(prune_modes);
+
+        // Set the tip (highest known block)
+        recorder.set_tip(130);
+
+        // Create a vector of receipts with a default receipt
+        let receipts = vec![Receipt::default()];
+
+        // Verify that saving receipts completes without error
+        assert!(recorder.save_receipts(receipts).is_ok());
+        // Verify that there is one block of receipts
+        assert_eq!(recorder.receipts().len(), 1);
+        // Verify that the first block contains one receipt
+        assert_eq!(recorder.receipts()[0].len(), 1);
+        // Verify that the saved receipt is the default receipt
+        assert_eq!(recorder.receipts()[0][0], Some(Receipt::default()));
+    }
+
+    // Test saving receipts with pruning configuration and receipts should be pruned
+    #[test]
+    fn test_save_receipts_with_pruning_should_prune() {
+        // Create a PruneModes with receipts set to PruneMode::Full
+        let prune_modes = PruneModes { receipts: Some(PruneMode::Full), ..Default::default() };
+
+        // Create a BlockBatchRecord with the prune_modes
+        let mut recorder = BlockBatchRecord::new(prune_modes);
+
+        // Set the first block number
+        recorder.set_first_block(1);
+        // Set the tip (highest known block)
+        recorder.set_tip(130);
+
+        // Create a vector of receipts with a default receipt
+        let receipts = vec![Receipt::default()];
+
+        // Verify that saving receipts completes without error
+        assert!(recorder.save_receipts(receipts).is_ok());
+        // Verify that there is one block of receipts
+        assert_eq!(recorder.receipts().len(), 1);
+        // Verify that the receipts are pruned (empty)
+        assert!(recorder.receipts()[0].is_empty());
+    }
+
+    // Test saving receipts with address filter pruning
+    #[test]
+    fn test_save_receipts_with_address_filter_pruning() {
+        // Create a PruneModes with receipts_log_filter configuration
+        let prune_modes = PruneModes {
+            receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([
+                (Address::with_last_byte(1), PruneMode::Before(1300001)),
+                (Address::with_last_byte(2), PruneMode::Before(1300002)),
+                (Address::with_last_byte(3), PruneMode::Distance(1300003)),
+            ])),
+            ..Default::default()
+        };
+
+        // Create a BlockBatchRecord with the prune_modes
+        let mut recorder = BlockBatchRecord::new(prune_modes);
+
+        // Set the first block number
+        recorder.set_first_block(1);
+        // Set the tip (highest known block)
+        recorder.set_tip(1300000);
+
+        // With a receipt that should be pruned (address 4 not in the log filter)
+        let mut receipt = Receipt::default();
+        receipt.logs.push(Log { address: Address::with_last_byte(4), ..Default::default() });
+        let receipts = vec![receipt.clone()];
+        assert!(recorder.save_receipts(receipts).is_ok());
+        // Verify that the receipts are pruned (empty)
+        assert_eq!(recorder.receipts().len(), 1);
+        assert_eq!(recorder.receipts()[0], vec![None]);
+
+        // With a receipt that should not be pruned (address 1 in the log filter)
+        let mut receipt1 = Receipt::default();
+        receipt1.logs.push(Log { address: Address::with_last_byte(1), ..Default::default() });
+        let receipts = vec![receipt1.clone()];
+        assert!(recorder.save_receipts(receipts).is_ok());
+        // Verify that the second block of receipts contains the receipt
+        assert_eq!(recorder.receipts().len(), 2);
+        assert_eq!(recorder.receipts()[1][0], Some(receipt1));
+
+        // With a receipt that should not be pruned (address 2 in the log filter)
+        let mut receipt2 = Receipt::default();
+        receipt2.logs.push(Log { address: Address::with_last_byte(2), ..Default::default() });
+        let receipts = vec![receipt2.clone()];
+        assert!(recorder.save_receipts(receipts).is_ok());
+        // Verify that the third block of receipts contains the receipt
+        assert_eq!(recorder.receipts().len(), 3);
+        assert_eq!(recorder.receipts()[2][0], Some(receipt2));
+
+        // With a receipt that should not be pruned (address 3 in the log filter)
+        let mut receipt3 = Receipt::default();
+        receipt3.logs.push(Log { address: Address::with_last_byte(3), ..Default::default() });
+        let receipts = vec![receipt3.clone()];
+        assert!(recorder.save_receipts(receipts).is_ok());
+        // Verify that the fourth block of receipts contains the receipt
+        assert_eq!(recorder.receipts().len(), 4);
+        assert_eq!(recorder.receipts()[3][0], Some(receipt3));
     }
 }

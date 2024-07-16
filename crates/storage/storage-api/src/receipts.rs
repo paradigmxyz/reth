@@ -1,5 +1,7 @@
 use crate::BlockIdReader;
-use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumberOrTag, Receipt, TxHash, TxNumber};
+use reth_primitives::{
+    BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, Receipt, TxHash, TxNumber,
+};
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeBounds;
 
@@ -38,6 +40,7 @@ pub trait ReceiptProvider: Send + Sync {
 /// so this trait can only be implemented for types that implement `BlockIdReader`. The
 /// `BlockIdReader` methods should be used to resolve `BlockId`s to block numbers or hashes, and
 /// retrieving the receipts should be done using the type's `ReceiptProvider` methods.
+#[auto_impl::auto_impl(&, Arc)]
 pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdReader {
     /// Get receipt by block id
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
@@ -64,4 +67,21 @@ pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdReader {
     ) -> ProviderResult<Option<Vec<Receipt>>> {
         self.receipts_by_block_id(number_or_tag.into())
     }
+}
+
+/// Writer trait for writing [`Receipt`] data.
+pub trait ReceiptWriter {
+    /// Appends receipts for a block.
+    ///
+    /// # Parameters
+    /// - `first_tx_index`: The transaction number of the first receipt in the block.
+    /// - `block_number`: The block number to which the receipts belong.
+    /// - `receipts`: A vector of optional receipts in the block. If `None`, it means they were
+    ///   pruned.
+    fn append_block_receipts(
+        &mut self,
+        first_tx_index: TxNumber,
+        block_number: BlockNumber,
+        receipts: Vec<Option<Receipt>>,
+    ) -> ProviderResult<()>;
 }

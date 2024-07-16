@@ -1,11 +1,12 @@
+use crate::DatabaseProviderRW;
 use rayon::slice::ParallelSliceMut;
-use reth_db::tables;
+use reth_db::{tables, Database};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, BlockNumberAddress},
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
 };
-use reth_primitives::{revm::compat::into_reth_acc, BlockNumber, StorageEntry, B256, U256};
+use reth_primitives::{BlockNumber, StorageEntry, B256, U256};
 use reth_storage_errors::db::DatabaseError;
 use revm::db::states::{PlainStateReverts, PlainStorageRevert, RevertToSlot};
 use std::iter::Peekable;
@@ -24,15 +25,20 @@ impl StateReverts {
     /// Write reverts to database.
     ///
     /// `Note::` Reverts will delete all wiped storage from plain state.
-    pub fn write_to_db<TX: DbTxMut + DbTx>(
+    pub fn write_to_db<DB>(
         self,
-        tx: &TX,
+        provider: &DatabaseProviderRW<DB>,
         first_block: BlockNumber,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<(), DatabaseError>
+    where
+        DB: Database,
+    {
         // Write storage changes
         tracing::trace!(target: "provider::reverts", "Writing storage changes");
-        let mut storages_cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
-        let mut storage_changeset_cursor = tx.cursor_dup_write::<tables::StorageChangeSets>()?;
+        let mut storages_cursor =
+            provider.tx_ref().cursor_dup_write::<tables::PlainStorageState>()?;
+        let mut storage_changeset_cursor =
+            provider.tx_ref().cursor_dup_write::<tables::StorageChangeSets>()?;
         for (block_index, mut storage_changes) in self.0.storage.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
 
@@ -72,7 +78,8 @@ impl StateReverts {
 
         // Write account changes
         tracing::trace!(target: "provider::reverts", "Writing account changes");
-        let mut account_changeset_cursor = tx.cursor_dup_write::<tables::AccountChangeSets>()?;
+        let mut account_changeset_cursor =
+            provider.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?;
 
         for (block_index, mut account_block_reverts) in self.0.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
@@ -82,7 +89,7 @@ impl StateReverts {
             for (address, info) in account_block_reverts {
                 account_changeset_cursor.append_dup(
                     block_number,
-                    AccountBeforeTx { address, info: info.map(into_reth_acc) },
+                    AccountBeforeTx { address, info: info.map(Into::into) },
                 )?;
             }
         }

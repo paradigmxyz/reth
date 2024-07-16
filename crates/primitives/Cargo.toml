@@ -14,17 +14,14 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives-traits.workspace = true
-reth-codecs.workspace = true
 reth-ethereum-forks.workspace = true
-reth-network-peers.workspace = true
 reth-static-file-types.workspace = true
 reth-trie-common.workspace = true
-revm.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
+reth-chainspec = { workspace = true, optional = true }
+reth-codecs = { workspace = true, optional = true }
 
 # ethereum
-alloy-chains = { workspace = true, features = ["serde", "rlp"] }
-alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-rpc-types = { workspace = true, optional = true }
@@ -42,26 +39,26 @@ c-kzg = { workspace = true, features = ["serde"], optional = true }
 
 # misc
 bytes.workspace = true
-byteorder = "1"
 derive_more.workspace = true
 modular-bitfield.workspace = true
 once_cell.workspace = true
 rayon.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 tempfile = { workspace = true, optional = true }
-thiserror.workspace = true
+thiserror-no-std = { workspace = true, default-features = false }
 zstd = { version = "0.13", features = ["experimental"], optional = true }
-roaring = "0.10.2"
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
-proptest-derive = { workspace = true, optional = true }
+# proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 # eth
+reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 revm-primitives = { workspace = true, features = ["arbitrary"] }
+reth-chainspec.workspace = true
+reth-codecs.workspace = true
 nybbles = { workspace = true, features = ["arbitrary"] }
 alloy-trie = { workspace = true, features = ["arbitrary"] }
 alloy-eips = { workspace = true, features = ["arbitrary"] }
@@ -69,6 +66,7 @@ alloy-eips = { workspace = true, features = ["arbitrary"] }
 assert_matches.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
 proptest-derive.workspace = true
 rand.workspace = true
 serde_json.workspace = true
@@ -87,40 +85,29 @@ pprof = { workspace = true, features = [
 secp256k1.workspace = true
 
 [features]
-default = ["c-kzg", "zstd-codec", "alloy-compat"]
+default = ["c-kzg", "alloy-compat", "std", "reth-codec"]
+reth-codec = ["dep:reth-codecs", "dep:zstd"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
     "reth-primitives-traits/arbitrary",
     "revm-primitives/arbitrary",
+    "reth-chainspec?/arbitrary",
     "reth-ethereum-forks/arbitrary",
     "nybbles/arbitrary",
     "alloy-trie/arbitrary",
-    "alloy-chains/arbitrary",
-    "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
-    "dep:proptest-derive",
-    "zstd-codec",
+    "reth-codec",
 ]
-c-kzg = [
-    "dep:c-kzg",
-    "revm/c-kzg",
-    "revm-primitives/c-kzg",
-    "dep:tempfile",
-    "alloy-eips/kzg",
-]
-zstd-codec = ["dep:zstd"]
-clap = ["reth-static-file-types/clap"]
+c-kzg = ["dep:c-kzg", "revm-primitives/c-kzg", "dep:tempfile", "alloy-eips/kzg"]
 optimism = [
-    "reth-codecs/optimism",
+    "reth-chainspec/optimism",
     "reth-ethereum-forks/optimism",
-    "revm/optimism",
+    "revm-primitives/optimism",
 ]
-alloy-compat = [
-    "reth-primitives-traits/alloy-compat",
-    "alloy-rpc-types",
-]
+alloy-compat = ["reth-primitives-traits/alloy-compat", "dep:alloy-rpc-types"]
+std = ["thiserror-no-std/std"]
 test-utils = ["reth-primitives-traits/test-utils"]
 
 [[bench]]
@@ -132,6 +119,3 @@ name = "validate_blob_tx"
 required-features = ["arbitrary", "c-kzg"]
 harness = false
 
-[[bench]]
-name = "integer_list"
-harness = false
