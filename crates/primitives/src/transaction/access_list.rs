@@ -11,11 +11,11 @@ mod tests {
     use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
     use proptest::proptest;
     use proptest_arbitrary_interop::arb;
-    use reth_codecs::{main_codec, Compact};
+    use reth_codecs::{reth_codec, Compact};
 
     /// This type is kept for compatibility tests after the codec support was added to alloy-eips
     /// AccessList type natively
-    #[main_codec(rlp)]
+    #[reth_codec(rlp)]
     #[derive(
         Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodableWrapper, RlpEncodableWrapper,
     )]
@@ -28,7 +28,7 @@ mod tests {
     }
 
     // This
-    #[main_codec(rlp)]
+    #[reth_codec(rlp)]
     #[derive(Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodable, RlpEncodable)]
     #[serde(rename_all = "camelCase")]
     struct RethAccessListItem {

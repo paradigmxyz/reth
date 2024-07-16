@@ -1,4 +1,4 @@
-#[cfg(feature = "zstd-codec")]
+#[cfg(feature = "reth-codec")]
 use crate::compression::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
 use crate::{logs_bloom, Bloom, Bytes, TxType, B256};
 use alloy_primitives::Log;
@@ -6,18 +6,16 @@ use alloy_rlp::{length_of_length, Decodable, Encodable, RlpDecodable, RlpEncodab
 use bytes::{Buf, BufMut};
 use core::{cmp::Ordering, ops::Deref};
 use derive_more::{Deref, DerefMut, From, IntoIterator};
-#[cfg(feature = "zstd-codec")]
-use reth_codecs::CompactZstd;
-use reth_codecs::{add_arbitrary_tests, main_codec, Compact};
+#[cfg(feature = "reth-codec")]
+use reth_codecs::{Compact, CompactZstd};
 use serde::{Deserialize, Serialize};
 
 #[cfg(not(feature = "std"))]
 use alloc::{vec, vec::Vec};
 
 /// Receipt containing result of transaction execution.
-#[cfg_attr(feature = "zstd-codec", main_codec(no_arbitrary, zstd))]
-#[cfg_attr(not(feature = "zstd-codec"), main_codec(no_arbitrary))]
-#[add_arbitrary_tests]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec(no_arbitrary, zstd))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
 #[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 #[rlp(trailing)]
 pub struct Receipt {
@@ -142,7 +140,7 @@ impl From<Receipt> for ReceiptWithBloom {
 }
 
 /// [`Receipt`] with calculated bloom filter.
-#[main_codec]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ReceiptWithBloom {
     /// Bloom filter build from logs.

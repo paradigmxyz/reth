@@ -27,7 +27,7 @@ impl From<(B256, U256)> for StorageEntry {
     }
 }
 
-// NOTE: Removing main_codec and manually encode subkey
+// NOTE: Removing reth_codec and manually encode subkey
 // and compress second part of the value. If we have compression
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
 impl Compact for StorageEntry {

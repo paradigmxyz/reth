@@ -1,7 +1,4 @@
-use crate::{
-    engine_api::EngineApiTestContext, network::NetworkTestContext, payload::PayloadTestContext,
-    rpc::RpcTestContext, traits::PayloadEnvelopeExt,
-};
+use std::{marker::PhantomData, pin::Pin};
 
 use alloy_rpc_types::BlockNumberOrTag;
 use eyre::Ok;
@@ -11,32 +8,41 @@ use reth::{
     builder::FullNode,
     payload::PayloadTypes,
     providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
-    rpc::types::engine::PayloadStatusEnum,
+    rpc::{
+        api::eth::helpers::{EthApiSpec, EthTransactions, TraceExt},
+        types::engine::PayloadStatusEnum,
+    },
 };
-use reth_node_builder::NodeTypes;
+use reth_node_builder::{NodeAddOns, NodeTypes};
 use reth_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use reth_stages_types::StageId;
-use std::{marker::PhantomData, pin::Pin};
 use tokio_stream::StreamExt;
 
+use crate::{
+    engine_api::EngineApiTestContext, network::NetworkTestContext, payload::PayloadTestContext,
+    rpc::RpcTestContext, traits::PayloadEnvelopeExt,
+};
+
 /// An helper struct to handle node actions
-pub struct NodeTestContext<Node>
+pub struct NodeTestContext<Node, AddOns>
 where
     Node: FullNodeComponents,
+    AddOns: NodeAddOns<Node>,
 {
-    pub inner: FullNode<Node>,
+    pub inner: FullNode<Node, AddOns>,
     pub payload: PayloadTestContext<Node::Engine>,
     pub network: NetworkTestContext,
     pub engine_api: EngineApiTestContext<Node::Engine>,
-    pub rpc: RpcTestContext<Node>,
+    pub rpc: RpcTestContext<Node, AddOns::EthApi>,
 }
 
-impl<Node> NodeTestContext<Node>
+impl<Node, AddOns> NodeTestContext<Node, AddOns>
 where
     Node: FullNodeComponents,
+    AddOns: NodeAddOns<Node>,
 {
     /// Creates a new test node
-    pub async fn new(node: FullNode<Node>) -> eyre::Result<Self> {
+    pub async fn new(node: FullNode<Node, AddOns>) -> eyre::Result<Self> {
         let builder = node.payload_builder.clone();
 
         Ok(Self {
@@ -53,7 +59,7 @@ where
     }
 
     /// Establish a connection to the node
-    pub async fn connect(&mut self, node: &mut NodeTestContext<Node>) {
+    pub async fn connect(&mut self, node: &mut NodeTestContext<Node, AddOns>) {
         self.network.add_peer(node.network.record()).await;
         node.network.next_session_established().await;
         self.network.next_session_established().await;
@@ -77,6 +83,7 @@ where
     where
         <Node::Engine as EngineTypes>::ExecutionPayloadV3:
             From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
+        AddOns::EthApi: EthApiSpec + EthTransactions + TraceExt,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {

@@ -19,7 +19,7 @@
   - [Scale Encoding](https://github.com/paritytech/parity-scale-codec)
   - [Postcard Encoding](https://github.com/jamesmunns/postcard)
   - Passthrough (called `no_codec` in the codebase)
-- We made implementation of these traits easy via a derive macro called [`main_codec`](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/codecs/derive/src/lib.rs#L15) that delegates to one of Compact (default), Scale, Postcard or Passthrough encoding. This is [derived on every struct we need](https://github.com/search?q=repo%3Aparadigmxyz%2Freth%20%22%23%5Bmain_codec%5D%22&type=code), and lets us experiment with different encoding formats without having to modify the entire codebase each time.
+- We made implementation of these traits easy via a derive macro called [`reth_codec`](https://github.com/paradigmxyz/reth/blob/0d9b9a392d4196793736522f3fc2ac804991b45d/crates/codecs/derive/src/lib.rs#L15) that delegates to one of Compact (default), Scale, Postcard or Passthrough encoding. This is [derived on every struct we need](https://github.com/search?q=repo%3Aparadigmxyz%2Freth%20%22%23%5Breth_codec%5D%22&type=code), and lets us experiment with different encoding formats without having to modify the entire codebase each time.
 
 ### Table layout
 

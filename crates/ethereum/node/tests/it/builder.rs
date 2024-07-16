@@ -1,9 +1,8 @@
 //! Node builder setup tests.
 
 use reth_db::test_utils::create_test_rw_db;
-use reth_node_api::FullNodeComponents;
-use reth_node_builder::{NodeBuilder, NodeConfig};
-use reth_node_ethereum::node::EthereumNode;
+use reth_node_builder::{FullNodeComponents, NodeBuilder, NodeConfig};
+use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
 
 #[test]
 fn test_basic_setup() {
@@ -15,6 +14,7 @@ fn test_basic_setup() {
         .with_database(db)
         .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
+        .with_add_ons::<EthereumAddOns>()
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();
             println!("{msg}");
