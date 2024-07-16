@@ -14,12 +14,15 @@ use reth::{
         handler::register::EvmHandler,
         inspector_handle_register,
         precompile::{Precompile, PrecompileSpecId},
-        ContextPrecompile, ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
+        ContextPrecompile, ContextPrecompiles, Database, DatabaseCommit, Evm, EvmBuilder,
+        GetInspector,
     },
     tasks::TaskManager,
 };
 use reth_chainspec::{Chain, ChainSpec};
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, ConfigureEvmTransact, FullNodeTypes};
+use reth_node_api::{
+    ConfigureEvm, ConfigureEvmCommit, ConfigureEvmEnv, ConfigureEvmTransact, FullNodeTypes,
+};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{node::EthereumAddOns, EthEvmConfig, EthExecutorProvider, EthereumNode};
 use reth_primitives::{

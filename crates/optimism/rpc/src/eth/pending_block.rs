@@ -1,6 +1,7 @@
 //! Loads OP pending block for a RPC response.
 
-use reth_evm::ConfigureEvm;
+use crate::OpEthApi;
+use reth_evm::ConfigureEvmCommit;
 use reth_primitives::{revm_primitives::BlockEnv, BlockNumber, B256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome, StateProviderFactory,
