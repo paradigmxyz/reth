@@ -34,7 +34,7 @@ pub trait Executor<DB> {
         Ok(())
     }
 
-    /// Executes the block.
+    /// Executes the transactions in the block.
     ///
     /// # Note
     /// Execution happens without any validation of the output. To validate the output, use the
@@ -166,8 +166,8 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     ///
     /// # Verification
     ///
-    /// The on [`Executor::execute`] the executor is expected to validate the execution output of
-    /// the input, this includes:
+    /// On [`Executor::execute_transactions`] the executor is expected to validate the execution
+    /// output of the input, this includes:
     /// - Cumulative gas used must match the input's gas used.
     /// - Receipts must match the input's receipts root.
     ///
