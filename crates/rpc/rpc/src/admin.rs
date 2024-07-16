@@ -8,7 +8,7 @@ use reth_network_api::{NetworkInfo, PeerKind, Peers};
 use reth_network_peers::{id2pk, AnyNode, NodeRecord};
 use reth_primitives::EthereumHardfork;
 use reth_rpc_api::AdminApiServer;
-use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
+use reth_rpc_server_types::ToRpcResult;
 use reth_rpc_types::admin::{
     EthInfo, EthPeerInfo, EthProtocolInfo, NodeInfo, PeerInfo, PeerNetworkInfo, PeerProtocolInfo,
     Ports, ProtocolInfo,
@@ -152,11 +152,10 @@ where
             prague_time => Prague,
         ]);
 
-        let Ok(pk) = id2pk(enode.id) else {
-            return Err(internal_rpc_err("Failed to convert local node id to public key"))
-        };
         Ok(NodeInfo {
-            id: pk.to_string(),
+            id: id2pk(enode.id)
+                .map(|pk| pk.to_string())
+                .unwrap_or_else(|_| alloy_primitives::hex::encode(enode.id.as_slice())),
             name: status.client_version,
             enode: enode.to_string(),
             enr: self.network.local_enr().to_string(),
