@@ -2,13 +2,13 @@ use super::access_list::AccessList;
 use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::mem;
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::Compact;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
-#[main_codec]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TxEip1559 {
     /// Added as EIP-155: Simple replay attack protection

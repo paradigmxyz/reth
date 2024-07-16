@@ -40,13 +40,9 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     }
 
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB, AO>(
-        self,
-        components_builder: CB,
-    ) -> NodeBuilderWithComponents<T, CB, AO>
+    pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB, ()>
     where
         CB: NodeComponentsBuilder<T>,
-        AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     {
         let Self { config, adapter } = self;
 
@@ -56,7 +52,7 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
             components_builder,
             add_ons: AddOns {
                 hooks: NodeHooks::default(),
-                rpc: RpcAddOns { _eth_api: PhantomData, hooks: RpcHooks::default() },
+                rpc: RpcAddOns { _eth_api: PhantomData::<()>, hooks: RpcHooks::default() },
                 exexs: Vec::new(),
             },
         }
@@ -165,6 +161,32 @@ pub struct NodeBuilderWithComponents<
     pub(crate) add_ons: AddOns<NodeAdapter<T, CB::Components>, AO>,
 }
 
+impl<T, CB> NodeBuilderWithComponents<T, CB, ()>
+where
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+{
+    /// Advances the state of the node builder to the next state where all customizable
+    /// [`NodeAddOns`] types are configured.
+    pub fn with_add_ons<AO>(self) -> NodeBuilderWithComponents<T, CB, AO>
+    where
+        AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
+    {
+        let Self { config, adapter, components_builder, .. } = self;
+
+        NodeBuilderWithComponents {
+            config,
+            adapter,
+            components_builder,
+            add_ons: AddOns {
+                hooks: NodeHooks::default(),
+                rpc: RpcAddOns { _eth_api: PhantomData::<AO::EthApi>, hooks: RpcHooks::default() },
+                exexs: Vec::new(),
+            },
+        }
+    }
+}
+
 impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
 where
     T: FullNodeTypes,
@@ -246,8 +268,6 @@ where
         self
     }
 }
-
-// TODO impl install hook functions.
 
 impl<T, CB, AO> NodeBuilderWithComponents<T, CB, AO>
 where

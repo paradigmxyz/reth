@@ -1,7 +1,5 @@
 //! Transaction types.
 
-#[cfg(any(feature = "arbitrary", feature = "zstd-codec"))]
-use crate::compression::{TRANSACTION_COMPRESSOR, TRANSACTION_DECOMPRESSOR};
 use crate::{
     eip7702::SignedAuthorization, keccak256, Address, BlockHashOrNumber, Bytes, TxHash, TxKind,
     B256, U256,
@@ -15,7 +13,6 @@ use core::mem;
 use derive_more::{AsRef, Deref};
 use once_cell::sync::Lazy;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_codecs::{add_arbitrary_tests, derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
 
 pub use access_list::{AccessList, AccessListItem};
@@ -68,6 +65,9 @@ pub use optimism::TxDeposit;
 #[cfg(feature = "optimism")]
 pub use tx_type::DEPOSIT_TX_TYPE_ID;
 
+#[cfg(test)]
+use reth_codecs::Compact;
+
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
@@ -86,7 +86,7 @@ pub(crate) static PARALLEL_SENDER_RECOVERY_THRESHOLD: Lazy<usize> =
 /// A raw transaction.
 ///
 /// Transaction types were introduced in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[derive_arbitrary(compact)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Transaction {
     /// Legacy transaction (type `0x0`).
@@ -679,7 +679,8 @@ impl From<TxEip7702> for Transaction {
     }
 }
 
-impl Compact for Transaction {
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for Transaction {
     // Serializes the TxType to the buffer if necessary, returning 2 bits of the type as an
     // identifier instead of the length.
     fn to_compact<B>(self, buf: &mut B) -> usize
@@ -811,7 +812,7 @@ impl Encodable for Transaction {
 /// Signed transaction without its Hash. Used type for inserting into the DB.
 ///
 /// This can by converted to [`TransactionSigned`] by calling [`TransactionSignedNoHash::hash`].
-#[derive_arbitrary(compact)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSignedNoHash {
     /// The transaction signature values
@@ -909,8 +910,8 @@ impl TransactionSignedNoHash {
     }
 }
 
-#[cfg(feature = "zstd-codec")]
-impl Compact for TransactionSignedNoHash {
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for TransactionSignedNoHash {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -925,7 +926,7 @@ impl Compact for TransactionSignedNoHash {
         let zstd_bit = self.transaction.input().len() >= 32;
 
         let tx_bits = if zstd_bit {
-            TRANSACTION_COMPRESSOR.with(|compressor| {
+            crate::compression::TRANSACTION_COMPRESSOR.with(|compressor| {
                 let mut compressor = compressor.borrow_mut();
                 let mut tmp = Vec::with_capacity(256);
                 let tx_bits = self.transaction.to_compact(&mut tmp);
@@ -953,7 +954,7 @@ impl Compact for TransactionSignedNoHash {
 
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
-            TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+            crate::compression::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
                 let mut decompressor = decompressor.borrow_mut();
 
                 // TODO: enforce that zstd is only present at a "top" level type
@@ -973,63 +974,6 @@ impl Compact for TransactionSignedNoHash {
     }
 }
 
-#[cfg(not(feature = "zstd-codec"))]
-impl Compact for TransactionSignedNoHash {
-    fn to_compact<B>(self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        to_compact_ztd_unaware(self, buf)
-    }
-
-    fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
-        from_compact_zstd_unaware(buf, _len)
-    }
-}
-
-// Allowing dead code, as this function is extracted from behind feature, so it can be tested
-#[allow(dead_code)]
-fn to_compact_ztd_unaware<B>(transaction: TransactionSignedNoHash, buf: &mut B) -> usize
-where
-    B: bytes::BufMut + AsMut<[u8]>,
-{
-    let start = buf.as_mut().len();
-
-    // Placeholder for bitflags.
-    // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
-    buf.put_u8(0);
-
-    let sig_bit = transaction.signature.to_compact(buf) as u8;
-    let zstd_bit = false;
-    let tx_bits = transaction.transaction.to_compact(buf) as u8;
-
-    // Replace bitflags with the actual values
-    buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
-
-    buf.as_mut().len() - start
-}
-
-// Allowing dead code, as this function is extracted from behind feature, so it can be tested
-#[allow(dead_code)]
-fn from_compact_zstd_unaware(mut buf: &[u8], _len: usize) -> (TransactionSignedNoHash, &[u8]) {
-    // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
-    let bitflags = buf.get_u8() as usize;
-
-    let sig_bit = bitflags & 1;
-    let (signature, buf) = Signature::from_compact(buf, sig_bit);
-
-    let zstd_bit = bitflags >> 3;
-    assert_eq!(
-        zstd_bit, 0,
-        "zstd-codec feature is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag"
-    );
-
-    let transaction_type = bitflags >> 1;
-    let (transaction, buf) = Transaction::from_compact(buf, transaction_type);
-
-    (TransactionSignedNoHash { signature, transaction }, buf)
-}
-
 impl From<TransactionSignedNoHash> for TransactionSigned {
     fn from(tx: TransactionSignedNoHash) -> Self {
         tx.with_hash()
@@ -1043,7 +987,7 @@ impl From<TransactionSigned> for TransactionSignedNoHash {
 }
 
 /// Signed transaction.
-#[add_arbitrary_tests(rlp)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
 pub struct TransactionSigned {
     /// Transaction hash
@@ -1754,8 +1698,7 @@ mod tests {
     use crate::{
         hex, sign_message,
         transaction::{
-            from_compact_zstd_unaware, signature::Signature, to_compact_ztd_unaware, TxEip1559,
-            TxKind, TxLegacy, PARALLEL_SENDER_RECOVERY_THRESHOLD,
+            signature::Signature, TxEip1559, TxKind, TxLegacy, PARALLEL_SENDER_RECOVERY_THRESHOLD,
         },
         Address, Bytes, Transaction, TransactionSigned, TransactionSignedEcRecovered,
         TransactionSignedNoHash, B256, U256,
@@ -2145,46 +2088,6 @@ mod tests {
         let written_bytes = tx_signed_no_hash.clone().to_compact(&mut buff);
         let (decoded, _) = TransactionSignedNoHash::from_compact(&buff, written_bytes);
         assert_eq!(tx_signed_no_hash, decoded);
-
-        // zstd unaware `to_compact`/`from_compact`
-        let mut buff: Vec<u8> = Vec::new();
-        let written_bytes = to_compact_ztd_unaware(tx_signed_no_hash.clone(), &mut buff);
-        let (decoded_no_zstd, _something) = from_compact_zstd_unaware(&buff, written_bytes);
-        assert_eq!(tx_signed_no_hash, decoded_no_zstd);
-
-        // zstd unaware `to_compact`, but decode with zstd awareness
-        let mut buff: Vec<u8> = Vec::new();
-        let written_bytes = to_compact_ztd_unaware(tx_signed_no_hash.clone(), &mut buff);
-        let (decoded, _) = TransactionSignedNoHash::from_compact(&buff, written_bytes);
-        assert_eq!(tx_signed_no_hash, decoded);
-    }
-
-    #[test]
-    #[should_panic(
-        expected = "zstd-codec feature is not enabled, cannot decode `TransactionSignedNoHash` with zstd flag"
-    )]
-    fn transaction_signed_zstd_encoded_no_zstd_decode() {
-        let signature = Signature {
-            odd_y_parity: false,
-            r: U256::from_str("0xeb96ca19e8a77102767a41fc85a36afd5c61ccb09911cec5d3e86e193d9c5ae")
-                .unwrap(),
-            s: U256::from_str("0x3a456401896b1b6055311536bf00a718568c744d8c1f9df59879e8350220ca18")
-                .unwrap(),
-        };
-        let transaction = Transaction::Legacy(TxLegacy {
-            chain_id: Some(4u64),
-            nonce: 2,
-            gas_price: 1000000000,
-            gas_limit: 100000,
-            to: Address::from_str("d3e8763675e4c425df46cc3b5c0f6cbdac396046").unwrap().into(),
-            value: U256::from(1000000000000000u64),
-            input: Bytes::from(vec![3u8; 64]),
-        });
-        let tx_signed_no_hash = TransactionSignedNoHash { signature, transaction };
-
-        let mut buff: Vec<u8> = Vec::new();
-        let written_bytes = tx_signed_no_hash.to_compact(&mut buff);
-        from_compact_zstd_unaware(&buff, written_bytes);
     }
 
     #[test]

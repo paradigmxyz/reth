@@ -1,5 +1,5 @@
 use crate::{
-    segments::{PruneInput, PruneOutput, Segment},
+    segments::{PruneInput, Segment},
     PrunerError,
 };
 use reth_db::tables;
@@ -7,7 +7,7 @@ use reth_db_api::database::Database;
 use reth_provider::{BlockReader, DatabaseProviderRW, PruneCheckpointWriter, TransactionsProvider};
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, ReceiptsLogPruneConfig,
-    MINIMUM_PRUNING_DISTANCE,
+    SegmentOutput, MINIMUM_PRUNING_DISTANCE,
 };
 use tracing::{instrument, trace};
 
@@ -40,7 +40,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
         &self,
         provider: &DatabaseProviderRW<DB>,
         input: PruneInput,
-    ) -> Result<PruneOutput, PrunerError> {
+    ) -> Result<SegmentOutput, PrunerError> {
         // Contract log filtering removes every receipt possible except the ones in the list. So,
         // for the other receipts it's as if they had a `PruneMode::Distance()` of
         // `MINIMUM_PRUNING_DISTANCE`.
@@ -213,7 +213,7 @@ impl<DB: Database> Segment<DB> for ReceiptsByLogs {
 
         let progress = PruneProgress::new(done, &limiter);
 
-        Ok(PruneOutput { progress, pruned, checkpoint: None })
+        Ok(SegmentOutput { progress, pruned, checkpoint: None })
     }
 }
 

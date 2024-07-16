@@ -2,8 +2,10 @@ use crate::{transaction::util::secp256k1, Address, B256, U256};
 use alloy_primitives::Bytes;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use bytes::Buf;
-use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
+
+#[cfg(test)]
+use reth_codecs::Compact;
 
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
 /// to EIP-2 should have an S value less than or equal to this.
@@ -17,7 +19,7 @@ const SECP256K1N_HALF: U256 = U256::from_be_bytes([
 /// r, s: Values corresponding to the signature of the
 /// transaction and used to determine the sender of
 /// the transaction; formally Tr and Ts. This is expanded in Appendix F of yellow paper.
-#[derive_arbitrary(compact)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::derive_arbitrary(compact))]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct Signature {
     /// The R field of the signature; the point on the curve.
@@ -40,7 +42,8 @@ impl Signature {
     }
 }
 
-impl Compact for Signature {
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for Signature {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,

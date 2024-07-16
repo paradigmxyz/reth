@@ -33,12 +33,12 @@ pub fn derive_zstd(input: TokenStream) -> TokenStream {
 /// If you prefer to manually implement the arbitrary traits, you can still use the [`add_arbitrary_tests()`] function to add arbitrary fuzz tests.
 ///
 /// Example usage:
-/// * `#[main_codec(rlp)]`: will implement `derive_arbitrary(rlp)` or `derive_arbitrary(compact, rlp)`, if `compact` is the `main_codec`.
-/// * `#[main_codec(no_arbitrary)]`: will skip `derive_arbitrary` (both trait implementations and tests)
+/// * `#[reth_codec(rlp)]`: will implement `derive_arbitrary(rlp)` or `derive_arbitrary(compact, rlp)`, if `compact` is the `reth_codec`.
+/// * `#[reth_codec(no_arbitrary)]`: will skip `derive_arbitrary` (both trait implementations and tests)
 #[proc_macro_attribute]
 #[rustfmt::skip]
 #[allow(unreachable_code)]
-pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn reth_codec(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
     let with_zstd = args.clone().into_iter().any(|tk| tk.to_string() == "zstd");

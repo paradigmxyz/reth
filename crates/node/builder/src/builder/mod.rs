@@ -221,7 +221,7 @@ where
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types().with_components(node.components_builder())
+        self.with_types().with_components(node.components_builder()).with_add_ons::<N::AddOns>()
     }
 }
 
@@ -270,7 +270,7 @@ where
     where
         N: Node<RethFullAdapter<DB, N>>,
     {
-        self.with_types().with_components(node.components_builder())
+        self.with_types().with_components(node.components_builder()).with_add_ons::<N::AddOns>()
     }
 
     /// Launches a preconfigured [Node]
@@ -314,16 +314,37 @@ where
     T: NodeTypes,
 {
     /// Advances the state of the node builder to the next state where all components are configured
-    pub fn with_components<CB, AO>(
+    pub fn with_components<CB>(
         self,
         components_builder: CB,
+    ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, ()>>
+    where
+        CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
+    {
+        WithLaunchContext {
+            builder: self.builder.with_components(components_builder),
+            task_executor: self.task_executor,
+        }
+    }
+}
+
+impl<T, DB, CB> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, ()>>
+where
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    T: NodeTypes,
+    CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
+{
+    /// Advances the state of the node builder to the next state where all customizable
+    /// [`NodeAddOns`] types are configured.
+    pub fn with_add_ons<AO>(
+        self,
     ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
     where
         CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
         AO: NodeAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
     {
         WithLaunchContext {
-            builder: self.builder.with_components(components_builder),
+            builder: self.builder.with_add_ons::<AO>(),
             task_executor: self.task_executor,
         }
     }
