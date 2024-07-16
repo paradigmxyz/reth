@@ -149,17 +149,17 @@ impl EvmCommand {
                 thread_start=?thread_start,
                 "fetch td"
             );
-            let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(thread_start -1)?);
-            let executor = block_executor!(provider_factory.chain_spec());
-            let mut executor = executor.batch_executor(db, PruneModes::none());
+            // let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(thread_start -1)?);
+            // let executor = block_executor!(provider_factory.chain_spec());
+            // let mut executor = executor.batch_executor(db, PruneModes::none());
 
             threads.push(thread::spawn(move || {
                 let thread_id = thread::current().id();
                 for loop_start in (thread_start..=thread_end).step_by(self.step_size) {
                     let loop_end = std::cmp::min(loop_start + self.step_size as u64 - 1, thread_end);
-                    // let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(loop_start-1)?);
-                    // let executor = block_executor!(provider_factory.chain_spec());
-                    // let mut executor = executor.batch_executor(db, PruneModes::none());
+                    let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(loop_start-1)?);
+                    let executor = block_executor!(provider_factory.chain_spec());
+                    let mut executor = executor.batch_executor(db, PruneModes::none());
 
                     let blocks = blockchain_db.block_with_senders_range(loop_start..=loop_end).unwrap();
 
@@ -202,6 +202,8 @@ impl EvmCommand {
                         total_difficulty = ?td,
                         "loop"
                     );
+
+                    drop(executor);
                 }
                 Ok(true)
             }));
