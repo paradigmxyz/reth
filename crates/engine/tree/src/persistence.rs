@@ -183,7 +183,7 @@ impl PersistenceHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::get_executed_block_with_number;
+    use crate::test_utils::{get_executed_block_with_number, get_executed_blocks};
     use reth_exex_types::FinishedExExHeight;
     use reth_primitives::B256;
     use reth_provider::{test_utils::create_test_provider_factory, ProviderFactory};
@@ -223,7 +223,7 @@ mod tests {
     #[tokio::test]
     async fn test_save_blocks_single_block() {
         let persistence_handle = default_persistence_handle();
-        let block_number = 5;
+        let block_number = 0;
         let executed = get_executed_block_with_number(block_number);
         let block_hash = executed.block().hash();
 
@@ -234,5 +234,36 @@ mod tests {
 
         let actual_hash = rx.await.unwrap();
         assert_eq!(block_hash, actual_hash);
+    }
+
+    #[tokio::test]
+    async fn test_save_blocks_multiple_blocks() {
+        let persistence_handle = default_persistence_handle();
+
+        let blocks = get_executed_blocks(0..5).collect::<Vec<_>>();
+        let last_hash = blocks.last().unwrap().block().hash();
+        let (tx, rx) = oneshot::channel();
+
+        persistence_handle.save_blocks(blocks, tx);
+
+        let actual_hash = rx.await.unwrap();
+        assert_eq!(last_hash, actual_hash);
+    }
+
+    #[tokio::test]
+    async fn test_save_blocks_multiple_calls() {
+        let persistence_handle = default_persistence_handle();
+
+        let ranges = [0..1, 1..2, 2..4, 4..5];
+        for range in ranges {
+            let blocks = get_executed_blocks(range).collect::<Vec<_>>();
+            let last_hash = blocks.last().unwrap().block().hash();
+            let (tx, rx) = oneshot::channel();
+
+            persistence_handle.save_blocks(blocks, tx);
+
+            let actual_hash = rx.await.unwrap();
+            assert_eq!(last_hash, actual_hash);
+        }
     }
 }
