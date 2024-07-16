@@ -8,8 +8,8 @@ use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::B256;
 use reth_provider::{
-    bundle_state::HashedStateChanges, BlockExecutionWriter, BlockNumReader, BlockWriter,
-    HistoryWriter, OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateWriter,
+    writer::StorageWriter, BlockExecutionWriter, BlockNumReader, BlockWriter, HistoryWriter,
+    OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateWriter,
 };
 use reth_prune::{Pruner, PrunerOutput};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -82,14 +82,16 @@ impl<DB: Database> DatabaseService<DB> {
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
             let execution_outcome = block.execution_outcome().clone();
+            // TODO: use single storage writer in task when sf / db tasks are combined
             execution_outcome.write_to_storage(&provider_rw, None, OriginalValuesKnown::No)?;
 
             // insert hashes and intermediate merkle nodes
             {
                 let trie_updates = block.trie_updates().clone();
                 let hashed_state = block.hashed_state();
-                HashedStateChanges(&hashed_state.clone().into_sorted())
-                    .write_to_db(&provider_rw)?;
+                // TODO: use single storage writer in task when sf / db tasks are combined
+                let storage_writer = StorageWriter::new(Some(&provider_rw), None);
+                storage_writer.write_hashed_state(&hashed_state.clone().into_sorted())?;
                 trie_updates.write_to_database(provider_rw.tx_ref())?;
             }
 

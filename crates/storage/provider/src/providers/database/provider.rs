@@ -1,10 +1,11 @@
 use crate::{
-    bundle_state::{BundleStateInit, HashedStateChanges, RevertsInit},
+    bundle_state::{BundleStateInit, RevertsInit},
     providers::{database::metrics, static_file::StaticFileWriter, StaticFileProvider},
     to_range,
     traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
     },
+    writer::StorageWriter,
     AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, EvmEnvProvider, FinalizedBlockReader, FinalizedBlockWriter,
     HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HistoricalStateProvider,
@@ -3307,7 +3308,8 @@ impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
 
         // insert hashes and intermediate merkle nodes
         {
-            HashedStateChanges(&hashed_state).write_to_db(self)?;
+            let storage_writer = StorageWriter::new(Some(self), None);
+            storage_writer.write_hashed_state(&hashed_state)?;
             trie_updates.write_to_database(&self.tx)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertHashes);
