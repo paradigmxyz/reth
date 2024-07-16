@@ -43,7 +43,6 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     pub fn with_components<CB>(self, components_builder: CB) -> NodeBuilderWithComponents<T, CB, ()>
     where
         CB: NodeComponentsBuilder<T>,
-        AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
     {
         let Self { config, adapter } = self;
 
