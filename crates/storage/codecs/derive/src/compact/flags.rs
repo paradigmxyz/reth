@@ -4,6 +4,7 @@ use super::*;
 /// their potential presence.
 pub(crate) fn generate_flag_struct(
     ident: &Ident,
+    has_lifetime: bool,
     fields: &FieldList,
     is_zstd: bool,
 ) -> TokenStream2 {
@@ -52,15 +53,29 @@ pub(crate) fn generate_flag_struct(
     let docs =
         format!("Fieldset that facilitates compacting the parent type. Used bytes: {total_bytes} | Unused bits: {unused_bits}");
     let bitflag_encoded_bytes = format!("Used bytes by [`{flags_ident}`]");
+    let impl_bitflag_encoded_bytes = if has_lifetime {
+        quote! {
+            impl<'a> #ident<'a> {
+                #[doc = #bitflag_encoded_bytes]
+                pub const fn bitflag_encoded_bytes() -> usize {
+                    #total_bytes as usize
+                }
+           }
+        }
+    } else {
+        quote! {
+            impl #ident {
+                #[doc = #bitflag_encoded_bytes]
+                pub const fn bitflag_encoded_bytes() -> usize {
+                    #total_bytes as usize
+                }
+           }
+        }
+    };
 
     // Generate the flag struct.
     quote! {
-        impl #ident {
-            #[doc = #bitflag_encoded_bytes]
-            pub const fn bitflag_encoded_bytes() -> usize {
-                #total_bytes as usize
-            }
-       }
+        #impl_bitflag_encoded_bytes
         pub use #mod_flags_ident::#flags_ident;
         #[allow(non_snake_case)]
         mod #mod_flags_ident {

@@ -4,7 +4,7 @@ use alloy_primitives::Address;
 
 /// Implement `Compact` for `AccessListItem` and `AccessList`.
 impl Compact for AccessListItem {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -26,7 +26,7 @@ impl Compact for AccessListItem {
 }
 
 impl Compact for AccessList {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -56,7 +56,7 @@ mod tests {
         #[test]
         fn test_roundtrip_compact_access_list_item(access_list_item in arb::<AccessListItem>()) {
             let mut compacted_access_list_item = Vec::<u8>::new();
-            let len = access_list_item.clone().to_compact(&mut compacted_access_list_item);
+            let len = access_list_item.to_compact(&mut compacted_access_list_item);
 
             let (decoded_access_list_item, _) = AccessListItem::from_compact(&compacted_access_list_item, len);
             assert_eq!(access_list_item, decoded_access_list_item);
@@ -67,7 +67,7 @@ mod tests {
         #[test]
         fn test_roundtrip_compact_access_list(access_list in arb::<AccessList>()) {
             let mut compacted_access_list = Vec::<u8>::new();
-            let len = access_list.clone().to_compact(&mut compacted_access_list);
+            let len = access_list.to_compact(&mut compacted_access_list);
 
             let (decoded_access_list, _) = AccessList::from_compact(&compacted_access_list, len);
             assert_eq!(access_list, decoded_access_list);

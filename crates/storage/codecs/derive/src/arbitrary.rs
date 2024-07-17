@@ -26,7 +26,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                     let mut buf = vec![];
                     let len = field.clone().to_compact(&mut buf);
                     let (decoded, _) = super::#type_ident::from_compact(&buf, len);
-                    assert!(field == decoded);
+                    assert!(field == decoded, "maybe_generate_tests::compact");
                 }
             });
         } else if arg.to_string() == "rlp" {
@@ -37,7 +37,7 @@ pub fn maybe_generate_tests(args: TokenStream, ast: &DeriveInput) -> TokenStream
                     let len = field.encode(&mut buf);
                     let mut b = &mut buf.as_slice();
                     let decoded = super::#type_ident::decode(b).unwrap();
-                    assert_eq!(field, decoded);
+                    assert_eq!(field, decoded, "maybe_generate_tests::rlp");
                     // ensure buffer is fully consumed by decode
                     assert!(b.is_empty(), "buffer was not consumed entirely");
 
