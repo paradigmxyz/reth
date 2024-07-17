@@ -1,4 +1,5 @@
 use crate::tree::ExecutedBlock;
+use rand::Rng;
 use reth_chainspec::ChainSpec;
 use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
 use reth_network_p2p::test_utils::TestFullBlockClient;
@@ -82,7 +83,7 @@ pub(crate) fn insert_headers_into_client(
     }
 }
 
-pub(crate) fn get_executed_block_with_number(block_number: BlockNumber) -> ExecutedBlock {
+fn get_executed_block(block_number: BlockNumber, receipts: Receipts) -> ExecutedBlock {
     let mut block = Block::default();
     let mut header = block.header.clone();
     header.number = block_number;
@@ -99,13 +100,23 @@ pub(crate) fn get_executed_block_with_number(block_number: BlockNumber) -> Execu
         Arc::new(sealed_with_senders.senders),
         Arc::new(ExecutionOutcome::new(
             BundleState::default(),
-            Receipts { receipt_vec: vec![vec![]] },
+            receipts,
             block_number,
             vec![Requests::default()],
         )),
         Arc::new(HashedPostState::default()),
         Arc::new(TrieUpdates::default()),
     )
+}
+
+pub(crate) fn get_executed_block_with_receipts(receipts: Receipts) -> ExecutedBlock {
+    let number = rand::thread_rng().gen::<u64>();
+
+    get_executed_block(number, receipts)
+}
+
+pub(crate) fn get_executed_block_with_number(block_number: BlockNumber) -> ExecutedBlock {
+    get_executed_block(block_number, Receipts { receipt_vec: vec![vec![]] })
 }
 
 pub(crate) fn get_executed_blocks(range: Range<u64>) -> impl Iterator<Item = ExecutedBlock> {
