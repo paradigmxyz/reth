@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// Legacy transaction.
 #[reth_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 struct TxLegacy {
     /// Added as EIP-155: Simple replay attack protection
     chain_id: Option<ChainId>,
@@ -86,13 +86,7 @@ mod tests {
     //
     // this check is to ensure we do not inadvertently add too many fields to a struct which would
     // expand the flags field and break backwards compatibility
-    #[cfg(not(feature = "optimism"))]
-    #[test]
-    fn test_ensure_backwards_compatibility() {
-        assert_eq!(TxLegacy::bitflag_encoded_bytes(), 3);
-    }
 
-    #[cfg(feature = "optimism")]
     #[test]
     fn test_ensure_backwards_compatibility() {
         assert_eq!(TxLegacy::bitflag_encoded_bytes(), 3);
