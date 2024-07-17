@@ -7331,6 +7331,7 @@ name = "reth-exex-types"
 version = "1.0.2"
 dependencies = [
  "alloy-primitives",
+ "reth-provider",
 ]
 
 [[package]]
