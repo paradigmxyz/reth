@@ -136,6 +136,7 @@ optimism = [
     "dep:reth-optimism-cli",
     "reth-optimism-cli?/optimism",
     "reth-primitives/optimism",
+    "reth-rpc/optimism",
     "reth-provider/optimism",
     "reth-beacon-consensus/optimism",
     "reth-blockchain-tree/optimism",
