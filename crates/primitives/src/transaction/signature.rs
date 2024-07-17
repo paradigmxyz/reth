@@ -39,6 +39,19 @@ impl Signature {
     pub const fn optimism_deposit_tx_signature() -> Self {
         Self { r: U256::ZERO, s: U256::ZERO, odd_y_parity: false }
     }
+
+    /// Returns the alloy signature, with the given chain id for parity.
+    pub fn as_alloy_signature(&self, chain_id: Option<u64>) -> alloy_primitives::Signature {
+        alloy_primitives::Signature::from_rs_and_parity(
+            self.s,
+            self.s,
+            chain_id.map_or_else(
+                || alloy_primitives::Parity::Parity(self.odd_y_parity),
+                alloy_primitives::Parity::Eip155,
+            ),
+        )
+        .unwrap()
+    }
 }
 
 #[cfg(any(test, feature = "reth-codec"))]
@@ -63,24 +76,6 @@ impl reth_codecs::Compact for Signature {
 }
 
 impl Signature {
-    /// Output the length of the signature without the length of the RLP header, using the legacy
-    /// scheme with EIP-155 support depends on `chain_id`.
-    pub(crate) fn payload_len_with_eip155_chain_id(&self, chain_id: Option<u64>) -> usize {
-        self.v(chain_id).length() + self.r.length() + self.s.length()
-    }
-
-    /// Encode the `v`, `r`, `s` values without a RLP header.
-    /// Encodes the `v` value using the legacy scheme with EIP-155 support depends on `chain_id`.
-    pub(crate) fn encode_with_eip155_chain_id(
-        &self,
-        out: &mut dyn alloy_rlp::BufMut,
-        chain_id: Option<u64>,
-    ) {
-        self.v(chain_id).encode(out);
-        self.r.encode(out);
-        self.s.encode(out);
-    }
-
     /// Output the `v` of the signature depends on `chain_id`
     #[inline]
     #[allow(clippy::missing_const_for_fn)]
@@ -228,16 +223,6 @@ mod tests {
     use std::str::FromStr;
 
     #[test]
-    fn test_payload_len_with_eip155_chain_id() {
-        // Select 1 as an arbitrary nonzero value for R and S, as v() always returns 0 for (0, 0).
-        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
-
-        assert_eq!(3, signature.payload_len_with_eip155_chain_id(None));
-        assert_eq!(3, signature.payload_len_with_eip155_chain_id(Some(1)));
-        assert_eq!(4, signature.payload_len_with_eip155_chain_id(Some(47)));
-    }
-
-    #[test]
     fn test_v() {
         // Select 1 as an arbitrary nonzero value for R and S, as v() always returns 0 for (0, 0).
         let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
@@ -247,26 +232,6 @@ mod tests {
         let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: true };
         assert_eq!(28, signature.v(None));
         assert_eq!(38, signature.v(Some(1)));
-    }
-
-    #[test]
-    fn test_encode_and_decode_with_eip155_chain_id() {
-        // Select 1 as an arbitrary nonzero value for R and S, as v() always returns 0 for (0, 0).
-        let signature = Signature { r: U256::from(1), s: U256::from(1), odd_y_parity: false };
-
-        let mut encoded = Vec::new();
-        signature.encode_with_eip155_chain_id(&mut encoded, None);
-        assert_eq!(encoded.len(), signature.payload_len_with_eip155_chain_id(None));
-        let (decoded, chain_id) = Signature::decode_with_eip155_chain_id(&mut &*encoded).unwrap();
-        assert_eq!(signature, decoded);
-        assert_eq!(None, chain_id);
-
-        let mut encoded = Vec::new();
-        signature.encode_with_eip155_chain_id(&mut encoded, Some(1));
-        assert_eq!(encoded.len(), signature.payload_len_with_eip155_chain_id(Some(1)));
-        let (decoded, chain_id) = Signature::decode_with_eip155_chain_id(&mut &*encoded).unwrap();
-        assert_eq!(signature, decoded);
-        assert_eq!(Some(1), chain_id);
     }
 
     #[test]
