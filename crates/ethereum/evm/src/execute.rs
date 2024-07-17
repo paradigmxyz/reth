@@ -35,6 +35,10 @@ use revm_primitives::{
 
 #[cfg(feature = "std")]
 use std::{fmt::Display, sync::Arc, vec, vec::Vec};
+
+#[cfg(not(feature = "std"))]
+use alloc::{fmt::Display, sync::Arc};
+
 /// Provides executors to execute regular ethereum blocks
 #[derive(Debug, Clone)]
 pub struct EthExecutorProvider<EvmConfig = EthEvmConfig> {
