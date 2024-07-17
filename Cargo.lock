@@ -7291,7 +7291,6 @@ dependencies = [
  "reth-testing-utils",
  "reth-tracing",
  "secp256k1",
- "serde",
  "tokio",
  "tokio-util",
 ]
@@ -7332,6 +7331,7 @@ version = "1.0.2"
 dependencies = [
  "alloy-primitives",
  "reth-provider",
+ "serde",
 ]
 
 [[package]]
