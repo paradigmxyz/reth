@@ -10,18 +10,6 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
-use chainspec::OpChainSpecParser;
-use clap::{command, value_parser, Parser};
-use commands::Commands;
-use reth_chainspec::ChainSpec;
-use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::node::NoArgs;
-use reth_node_core::{
-    args::{utils::chain_help, LogArgs},
-    version::{LONG_VERSION, SHORT_VERSION},
-};
-use std::{ffi::OsString, fmt, sync::Arc};
-
 /// Optimism chain specification parser.
 pub mod chainspec;
 /// Optimism CLI commands.
@@ -38,7 +26,21 @@ pub mod commands;
 /// reth's needs for importing. However, this would require patching the diff in <https://github.com/testinprod-io/op-geth/pull/1> to export the `Receipt` and not `HackReceipt` type (originally
 /// made for op-erigon's import needs).
 pub mod file_codec_ovm_receipt;
+
 pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
+
+use std::{ffi::OsString, fmt, sync::Arc};
+
+use chainspec::OpChainSpecParser;
+use clap::{command, value_parser, Parser};
+use commands::Commands;
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
+use reth_cli_commands::node::NoArgs;
+use reth_node_core::{
+    args::{utils::chain_help, LogArgs},
+    version::{LONG_VERSION, SHORT_VERSION},
+};
 
 /// The main reth cli interface.
 ///

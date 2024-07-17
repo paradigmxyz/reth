@@ -540,7 +540,7 @@ where
         let local_hash = self
             .inner
             .provider
-            .block_hash(terminal_block_number.to())
+            .block_hash(terminal_block_number)
             .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
 
         // Transition configuration exchange is successful if block hashes match
@@ -1154,7 +1154,7 @@ mod tests {
                     .ttd()
                     .unwrap(),
                 terminal_block_hash: consensus_terminal_block.hash(),
-                terminal_block_number: U64::from(terminal_block_number),
+                terminal_block_number,
             };
 
             // Unknown block number
@@ -1196,7 +1196,7 @@ mod tests {
                     .ttd()
                     .unwrap(),
                 terminal_block_hash: terminal_block.hash(),
-                terminal_block_number: U64::from(terminal_block_number),
+                terminal_block_number,
             };
 
             handle.provider.add_block(terminal_block.hash(), terminal_block.unseal());

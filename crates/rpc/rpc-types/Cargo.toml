@@ -26,7 +26,6 @@ alloy-serde.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["jsonrpsee-types"] }
 
 # misc
-serde = { workspace = true, features = ["derive"] }
 jsonrpsee-types = { workspace = true, optional = true }
 
 [dev-dependencies]

@@ -489,13 +489,16 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
                 Self::AuthorizationListInvalidFields
             }
             #[cfg(feature = "optimism")]
-            InvalidTransaction::DepositSystemTxPostRegolith => {
-                Self::other(OptimismInvalidTransactionError::DepositSystemTxPostRegolith)
-            }
-            #[cfg(feature = "optimism")]
-            InvalidTransaction::HaltedDepositPostRegolith => {
-                Self::Other(Box::new(OptimismInvalidTransactionError::HaltedDepositPostRegolith))
-            }
+            InvalidTransaction::OptimismError(err) => match err {
+                revm_primitives::OptimismInvalidTransaction::DepositSystemTxPostRegolith => {
+                    Self::other(OptimismInvalidTransactionError::DepositSystemTxPostRegolith)
+                }
+                revm_primitives::OptimismInvalidTransaction::HaltedDepositPostRegolith => {
+                    Self::Other(Box::new(
+                        OptimismInvalidTransactionError::HaltedDepositPostRegolith,
+                    ))
+                }
+            },
         }
     }
 }

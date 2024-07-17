@@ -1186,7 +1186,7 @@ mod tests {
             .into_iter()
             .map(|item| {
                 let (key, node) = item.unwrap();
-                (key.0, node.0)
+                (key.0, node)
             })
             .collect();
         assert_trie_updates(&account_updates);

@@ -1,10 +1,11 @@
 use crate::PruneMode;
 use alloy_primitives::{BlockNumber, TxNumber};
 use reth_codecs::{reth_codec, Compact};
+use serde::{Deserialize, Serialize};
 
 /// Saves the pruning progress of a stage.
 #[reth_codec]
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Default))]
 pub struct PruneCheckpoint {
     /// Highest pruned block number. If it's [None], the pruning for block `0` is not finished yet.

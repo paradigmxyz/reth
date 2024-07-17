@@ -69,7 +69,7 @@ pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandl
     let server =
         builder.build(TransportRpcModuleConfig::set_ws(modules), Box::new(EthApi::with_spawner));
     RpcServerConfig::ws(Default::default())
-        .with_http_address(test_address())
+        .with_ws_address(test_address())
         .start(&server)
         .await
         .unwrap()
@@ -84,6 +84,7 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
         Box::new(EthApi::with_spawner),
     );
     RpcServerConfig::ws(Default::default())
+        .with_ws_address(test_address())
         .with_ws_address(test_address())
         .with_http(Default::default())
         .with_http_address(test_address())

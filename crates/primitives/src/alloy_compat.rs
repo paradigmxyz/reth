@@ -221,7 +221,7 @@ impl TryFrom<alloy_rpc_types::Transaction> for Transaction {
                         .ok_or_else(|| ConversionError::Custom("MissingSourceHash".to_string()))?,
                     from: tx.from,
                     to: TxKind::from(tx.to),
-                    mint: fields.mint.map(|n| n.to::<u128>()).filter(|n| *n != 0),
+                    mint: fields.mint.filter(|n| *n != 0),
                     value: tx.value,
                     gas_limit: tx
                         .gas
