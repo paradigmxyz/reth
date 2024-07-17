@@ -13,10 +13,12 @@
 extern crate alloc;
 
 use reth_chainspec::{ChainSpec, Head};
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{ConfigureEvm, ConfigureEvmCommit, ConfigureEvmEnv, ConfigureEvmTransact};
 use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned, U256};
-use reth_revm::{Database, EvmBuilder};
-use revm_primitives::{AnalysisKind, Bytes, CfgEnvWithHandlerCfg, Env, TxEnv, TxKind};
+use reth_revm::{Database, DatabaseCommit, EvmBuilder};
+use revm_primitives::{
+    AnalysisKind, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, TxEnv, TxKind,
+};
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};
@@ -101,6 +103,42 @@ impl ConfigureEvmEnv for EthEvmConfig {
 
         // disable the base fee check for this call by setting the base fee to zero
         env.block.basefee = U256::ZERO;
+    }
+}
+
+impl ConfigureEvmCommit for EthEvmConfig {
+    type EvmCommitType<'a, DB: Database + DatabaseCommit + 'a> = reth_revm::Evm<'a, (), DB>;
+
+    fn evm_with_env_commit<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Self::EvmCommitType<'a, DB>
+    where
+        DB: Database + DatabaseCommit + 'a,
+    {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
+    }
+}
+
+impl ConfigureEvmTransact for EthEvmConfig {
+    type EvmTransactType<'a, DB: Database + 'a> = reth_revm::Evm<'a, (), DB>;
+
+    fn evm_with_env_transact<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Self::EvmTransactType<'a, DB>
+    where
+        DB: Database + 'a,
+    {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
     }
 }
 

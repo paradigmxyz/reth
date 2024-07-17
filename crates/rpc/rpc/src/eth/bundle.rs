@@ -3,11 +3,12 @@
 use std::sync::Arc;
 
 use jsonrpsee::core::RpcResult;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{
+    execute::{EvmCommit, EvmTransact},
+    ConfigureEvmCommit, ConfigureEvmEnv,
+};
 use reth_primitives::{
-    keccak256,
-    revm_primitives::db::{DatabaseCommit, DatabaseRef},
-    PooledTransactionsElement, U256,
+    keccak256, revm_primitives::db::DatabaseRef, PooledTransactionsElement, U256,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
@@ -155,7 +156,7 @@ where
                 let mut total_gas_fess = U256::ZERO;
                 let mut hash_bytes = Vec::with_capacity(32 * transactions.len());
 
-                let mut evm = Call::evm_config(&eth_api).evm_with_env(db, env);
+                let mut evm = Call::evm_config(&eth_api).evm_with_env_commit(db, env);
 
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();
@@ -221,7 +222,7 @@ where
                     if transactions.peek().is_some() {
                         // need to apply the state changes of this call before executing
                         // the next call
-                        evm.context.evm.db.commit(state)
+                        evm.commit(state)
                     }
                 }
 

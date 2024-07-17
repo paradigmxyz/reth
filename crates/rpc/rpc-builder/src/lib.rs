@@ -16,7 +16,7 @@
 //! Configure only an http server with a selection of [`RethRpcModule`]s
 //!
 //! ```
-//! use reth_evm::ConfigureEvm;
+//! use reth_evm::ConfigureEvmCommit;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
@@ -37,7 +37,7 @@
 //!     Pool: TransactionPool + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events: CanonStateSubscriptions + Clone + 'static,
-//!     EvmConfig: ConfigureEvm,
+//!     EvmConfig: ConfigureEvmCommit,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -67,7 +67,7 @@
 //!
 //! ```
 //! use reth_engine_primitives::EngineTypes;
-//! use reth_evm::ConfigureEvm;
+//! use reth_evm::ConfigureEvmCommit;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
@@ -94,7 +94,7 @@
 //!     Events: CanonStateSubscriptions + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
 //!     EngineT: EngineTypes + 'static,
-//!     EvmConfig: ConfigureEvm,
+//!     EvmConfig: ConfigureEvmCommit,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -152,7 +152,7 @@ use jsonrpsee::{
     Methods, RpcModule,
 };
 use reth_engine_primitives::EngineTypes;
-use reth_evm::ConfigureEvm;
+use reth_evm::ConfigureEvmCommit;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
@@ -228,7 +228,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmCommit,
     EthApi: FullEthApiServer,
 {
     let module_config = module_config.into();
@@ -399,7 +399,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig>
         evm_config: E,
     ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, E>
     where
-        E: ConfigureEvm + 'static,
+        E: ConfigureEvmCommit + 'static,
     {
         let Self { provider, pool, executor, network, events, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, events, evm_config }
@@ -414,7 +414,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
-    EvmConfig: ConfigureEvm,
+    EvmConfig: ConfigureEvmCommit,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
     /// be used to start the transport server(s).
@@ -461,7 +461,7 @@ where
     /// # Example
     ///
     /// ```no_run
-    /// use reth_evm::ConfigureEvm;
+    /// use reth_evm::ConfigureEvmCommit;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
     /// use reth_rpc::EthApi;
@@ -469,7 +469,7 @@ where
     /// use reth_tasks::TokioTaskExecutor;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
     ///
-    /// fn init<Evm: ConfigureEvm + 'static>(evm: Evm) {
+    /// fn init<Evm: ConfigureEvmCommit + 'static>(evm: Evm) {
     ///     let mut registry = RpcModuleBuilder::default()
     ///         .with_provider(NoopProvider::default())
     ///         .with_pool(NoopTransactionPool::default())
@@ -655,7 +655,7 @@ where
         >,
     ) -> Self
     where
-        EvmConfig: ConfigureEvm,
+        EvmConfig: ConfigureEvmCommit,
     {
         let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
 

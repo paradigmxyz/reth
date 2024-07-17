@@ -1,10 +1,11 @@
 //! Traits for execution.
 
+use crate::{EnvWithHandlerCfg, Evm};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt, Request, U256};
 use reth_prune_types::PruneModes;
-use revm::db::BundleState;
-use revm_primitives::db::Database;
+use revm::{db::BundleState, DatabaseCommit};
+use revm_primitives::{db::Database, EVMError, EVMResult, Env, EvmState, ExecutionResult, TxEnv};
 use std::fmt::Display;
 
 #[cfg(not(feature = "std"))]
@@ -12,6 +13,88 @@ use alloc::vec::Vec;
 
 pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
 pub use reth_storage_errors::provider::ProviderError;
+
+/// Trait that transacts an input (e.g. transaction and height) and produces an output
+/// (e.g. state changes).
+///
+/// The trait cannot commit the state changes to the database directly, see [`EvmCommit`].
+pub trait EvmTransact {
+    /// The database used by the evm.
+    type DB: Database;
+
+    /// Transacts with the current env to produce an output without
+    /// committing to the underlying database.
+    fn transact(&mut self) -> EVMResult<<<Self as EvmTransact>::DB as Database>::Error>;
+
+    /// Returns a mutable reference to the current env.
+    fn env_mut(&mut self) -> &mut Env;
+
+    /// Returns a reference to the current env.
+    fn env(&self) -> &Env;
+
+    /// Returns the current env with handler cfg.
+    fn env_with_handler_cfg(&self) -> EnvWithHandlerCfg;
+
+    /// Returns the mutable reference of transaction.
+    fn tx_mut(&mut self) -> &mut TxEnv;
+}
+
+/// Trait that commits state changes to the database.
+pub trait EvmCommit: EvmTransact {
+    /// The output produced by the evm.
+    type EvmOutput;
+    /// The error produced by the evm.
+    type EvmError;
+
+    /// Commit state changes to the database.
+    fn commit(&mut self, output: EvmState);
+
+    /// Transact, commit the state changes and return them.
+    fn transact_and_commit(&mut self) -> Result<Self::EvmOutput, Self::EvmError>;
+}
+
+impl<'a, C, DB> EvmTransact for Evm<'a, C, DB>
+where
+    DB: Database + 'a,
+{
+    type DB = DB;
+
+    fn transact(&mut self) -> EVMResult<<<Self as EvmTransact>::DB as Database>::Error> {
+        self.transact()
+    }
+
+    fn env_mut(&mut self) -> &mut Env {
+        &mut self.context.evm.inner.env
+    }
+
+    fn env(&self) -> &Env {
+        &self.context.evm.inner.env
+    }
+
+    fn env_with_handler_cfg(&self) -> EnvWithHandlerCfg {
+        EnvWithHandlerCfg { env: Box::new(self.env().clone()), handler_cfg: self.handler.cfg() }
+    }
+
+    fn tx_mut(&mut self) -> &mut TxEnv {
+        self.tx_mut()
+    }
+}
+
+impl<'a, C, DB> EvmCommit for Evm<'a, C, DB>
+where
+    DB: Database + DatabaseCommit + 'a,
+{
+    type EvmOutput = ExecutionResult;
+    type EvmError = EVMError<DB::Error>;
+
+    fn commit(&mut self, output: EvmState) {
+        self.context.evm.db.commit(output)
+    }
+
+    fn transact_and_commit(&mut self) -> Result<Self::EvmOutput, Self::EvmError> {
+        self.transact_commit()
+    }
+}
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).

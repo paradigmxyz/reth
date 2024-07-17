@@ -1,4 +1,4 @@
-//! Loads and formats OP transaction RPC response.   
+//! Loads and formats OP transaction RPC response.
 
 use jsonrpsee_types::error::ErrorObject;
 use reth_rpc_eth_types::EthApiError;

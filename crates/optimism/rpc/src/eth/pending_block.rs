@@ -1,6 +1,7 @@
-//! Loads OP pending block for a RPC response.   
+//! Loads OP pending block for a RPC response.
 
-use reth_evm::ConfigureEvm;
+use crate::OpEthApi;
+use reth_evm::ConfigureEvmCommit;
 use reth_primitives::{revm_primitives::BlockEnv, BlockNumber, B256};
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome, StateProviderFactory,
@@ -8,8 +9,6 @@ use reth_provider::{
 use reth_rpc_eth_api::helpers::LoadPendingBlock;
 use reth_rpc_eth_types::PendingBlock;
 use reth_transaction_pool::TransactionPool;
-
-use crate::OpEthApi;
 
 impl<Eth> LoadPendingBlock for OpEthApi<Eth>
 where
@@ -33,7 +32,7 @@ where
     }
 
     #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm {
+    fn evm_config(&self) -> &impl ConfigureEvmCommit {
         self.inner.evm_config()
     }
 

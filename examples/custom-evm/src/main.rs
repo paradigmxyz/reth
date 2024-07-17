@@ -14,13 +14,15 @@ use reth::{
         handler::register::EvmHandler,
         inspector_handle_register,
         precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
-        ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
+        ContextPrecompiles, Database, DatabaseCommit, Evm, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
 };
 use reth_chainspec::{Chain, ChainSpec, Head};
 use reth_evm_ethereum::EthEvmConfig;
-use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes};
+use reth_node_api::{
+    ConfigureEvm, ConfigureEvmCommit, ConfigureEvmEnv, ConfigureEvmTransact, FullNodeTypes,
+};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{node::EthereumAddOns, EthExecutorProvider, EthereumNode};
 use reth_primitives::{
@@ -28,6 +30,7 @@ use reth_primitives::{
     Address, Header, TransactionSigned, U256,
 };
 use reth_tracing::{RethTracer, Tracer};
+use revm_primitives::EnvWithHandlerCfg;
 use std::sync::Arc;
 
 /// Custom EVM configuration
@@ -129,6 +132,42 @@ impl ConfigureEvm for MyEvmConfig {
             .append_handler_register(MyEvmConfig::set_precompiles)
             .append_handler_register(inspector_handle_register)
             .build()
+    }
+}
+
+impl ConfigureEvmCommit for MyEvmConfig {
+    type EvmCommitType<'a, DB: Database + DatabaseCommit + 'a> = reth_revm::Evm<'a, (), DB>;
+
+    fn evm_with_env_commit<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Self::EvmCommitType<'a, DB>
+    where
+        DB: Database + DatabaseCommit + 'a,
+    {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
+    }
+}
+
+impl ConfigureEvmTransact for MyEvmConfig {
+    type EvmTransactType<'a, DB: Database + 'a> = reth_revm::Evm<'a, (), DB>;
+
+    fn evm_with_env_transact<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Self::EvmTransactType<'a, DB>
+    where
+        DB: Database + 'a,
+    {
+        let mut evm = self.evm(db);
+        evm.modify_spec_id(env.spec_id());
+        evm.context.evm.env = env.env;
+        evm
     }
 }
 

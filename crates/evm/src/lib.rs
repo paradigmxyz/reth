@@ -14,9 +14,10 @@ extern crate alloc;
 
 use core::ops::Deref;
 
+use crate::execute::{EvmCommit, EvmTransact};
 use reth_chainspec::ChainSpec;
 use reth_primitives::{Address, Header, TransactionSigned, TransactionSignedEcRecovered, U256};
-use revm::{inspector_handle_register, Database, Evm, EvmBuilder, GetInspector};
+use revm::{inspector_handle_register, Database, DatabaseCommit, Evm, EvmBuilder, GetInspector};
 use revm_primitives::{
     BlockEnv, Bytes, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv,
 };
@@ -30,6 +31,36 @@ pub mod system_calls;
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
 pub mod test_utils;
+
+/// Trait for configuring the EVM in a generic way with commit.
+pub trait ConfigureEvmCommit: ConfigureEvmTransact {
+    /// Associated type for the EVM type that should be configured for the EVM.
+    type EvmCommitType<'a, DB: Database + DatabaseCommit + 'a>: EvmCommit<DB = DB>;
+
+    /// Returns a new EVM with the given database configured with the given environment settings.
+    fn evm_with_env_commit<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Self::EvmCommitType<'a, DB>
+    where
+        DB: Database + DatabaseCommit + 'a;
+}
+
+/// Trait for configuring the EVM for executing transactions.
+pub trait ConfigureEvmTransact: ConfigureEvm + ConfigureEvmEnv {
+    /// Associated type for the EVM type that should be configured for the EVM.
+    type EvmTransactType<'a, DB: Database + 'a>: EvmTransact<DB = DB>;
+
+    /// Returns a new EVM with the given database configured with the given environment settings.
+    fn evm_with_env_transact<'a, DB>(
+        &'a self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Self::EvmTransactType<'a, DB>
+    where
+        DB: Database + 'a;
+}
 
 /// Trait for configuring the EVM for executing full blocks.
 #[auto_impl::auto_impl(&, Arc)]

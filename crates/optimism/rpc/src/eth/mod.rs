@@ -7,12 +7,10 @@ mod block;
 mod call;
 mod pending_block;
 
-use std::{future::Future, sync::Arc};
-
 use alloy_primitives::{Address, U64};
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_errors::RethResult;
-use reth_evm::ConfigureEvm;
+use reth_evm::ConfigureEvmCommit;
 use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProviderFactory};
 use reth_rpc::eth::DevSigner;
@@ -27,6 +25,7 @@ use reth_rpc_eth_types::EthStateCache;
 use reth_rpc_types::SyncStatus;
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner};
 use reth_transaction_pool::TransactionPool;
+use std::{future::Future, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// OP-Reth `Eth` API implementation.
@@ -147,7 +146,7 @@ impl<Eth: EthCall> EthCall for OpEthApi<Eth> {}
 impl<Eth: EthFees> EthFees for OpEthApi<Eth> {}
 
 impl<Eth: Trace> Trace for OpEthApi<Eth> {
-    fn evm_config(&self) -> &impl ConfigureEvm {
+    fn evm_config(&self) -> &impl ConfigureEvmCommit {
         self.inner.evm_config()
     }
 }
