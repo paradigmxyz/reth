@@ -37,6 +37,9 @@
 mod backfill;
 pub use backfill::*;
 
+mod backfill_stream;
+pub use backfill_stream::*;
+
 mod context;
 pub use context::*;
 
