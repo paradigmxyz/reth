@@ -609,7 +609,7 @@ mod tests {
     }
 
     #[reth_codec]
-    #[derive(Debug, PartialEq, Clone, Default)]
+    #[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize)]
     enum TestEnum {
         #[default]
         Var0,
