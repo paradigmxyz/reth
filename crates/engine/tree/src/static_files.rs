@@ -185,17 +185,11 @@ where
         let mut receipts_writer = sf_provider.get_writer(block_num, StaticFileSegment::Receipts)?;
 
         // finally actually truncate, these internally commit
-        receipts_writer.truncate(StaticFileSegment::Receipts, total_txs, Some(block_num))?;
-        transactions_writer.truncate(
-            StaticFileSegment::Transactions,
-            total_txs,
-            Some(block_num),
-        )?;
-        header_writer.truncate(
-            StaticFileSegment::Headers,
-            highest_static_file_block.saturating_sub(block_num),
-            None,
-        )?;
+        receipts_writer.prune_receipts(total_txs, block_num)?;
+        transactions_writer.prune_transactions(total_txs, block_num)?;
+        header_writer.prune_headers(highest_static_file_block.saturating_sub(block_num))?;
+
+        sf_provider.commit()?;
 
         Ok(())
     }

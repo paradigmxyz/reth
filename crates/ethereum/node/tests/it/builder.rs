@@ -2,7 +2,11 @@
 
 use reth_db::test_utils::create_test_rw_db;
 use reth_node_builder::{FullNodeComponents, NodeBuilder, NodeConfig};
-use reth_node_ethereum::node::{EthereumAddOns, EthereumNode};
+use reth_node_ethereum::{
+    launch::EthNodeLauncher,
+    node::{EthereumAddOns, EthereumNode},
+};
+use reth_tasks::TaskManager;
 
 #[test]
 fn test_basic_setup() {
@@ -32,6 +36,22 @@ fn test_basic_setup() {
             Ok(())
         })
         .check_launch();
+}
+
+#[tokio::test]
+async fn test_eth_launcher() {
+    let tasks = TaskManager::current();
+    let config = NodeConfig::test();
+    let db = create_test_rw_db();
+    let _builder = NodeBuilder::new(config)
+        .with_database(db)
+        .with_types::<EthereumNode>()
+        .with_components(EthereumNode::components())
+        .with_add_ons::<EthereumAddOns>()
+        .launch_with_fn(|builder| {
+            let launcher = EthNodeLauncher::new(tasks.executor(), builder.config.datadir());
+            builder.launch_with(launcher)
+        });
 }
 
 #[test]

@@ -22,6 +22,11 @@ pub use reth_codecs_derive::*;
 use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, U256};
 use bytes::Buf;
 
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 #[cfg(any(test, feature = "alloy"))]
 mod alloy;
 
