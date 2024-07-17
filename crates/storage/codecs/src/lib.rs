@@ -414,6 +414,7 @@ const fn decode_varuint_panic() -> ! {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
+    use serde::{Deserialize, Serialize};
 
     #[test]
     fn compact_bytes() {
@@ -556,7 +557,7 @@ mod tests {
     }
 
     #[reth_codec]
-    #[derive(Debug, PartialEq, Clone)]
+    #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
     struct TestStruct {
         f_u64: u64,
         f_u256: U256,
@@ -608,7 +609,7 @@ mod tests {
     }
 
     #[reth_codec]
-    #[derive(Debug, PartialEq, Clone, Default)]
+    #[derive(Debug, PartialEq, Clone, Default, Serialize, Deserialize)]
     enum TestEnum {
         #[default]
         Var0,

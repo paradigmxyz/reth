@@ -9,6 +9,7 @@ use reth_primitives::{Address, B256, *};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
+use serde::{Deserialize, Serialize};
 
 pub mod accounts;
 pub mod blocks;
@@ -264,7 +265,7 @@ macro_rules! add_wrapper_struct {
         $(
             /// Wrapper struct so it can use StructFlags from Compact, when used as pure table values.
             #[reth_codec]
-            #[derive(Debug, Clone, PartialEq, Eq, Default)]
+            #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
             pub struct $wrapper(pub $name);
 
             impl From<$name> for $wrapper {
