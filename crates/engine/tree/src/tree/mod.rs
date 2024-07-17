@@ -1114,7 +1114,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_canonical_in_memory_state_state_by_hash() {
+    async fn test_in_memory_state_impl_state_by_hash() {
         let mut state_by_hash = HashMap::new();
         let number = rand::thread_rng().gen::<u64>();
         let state = Arc::new(create_mock_state(number));
@@ -1127,7 +1127,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_canonical_in_memory_state_state_by_number() {
+    async fn test_in_memory_state_impl_state_by_number() {
         let mut state_by_hash = HashMap::new();
         let mut hash_by_number = HashMap::new();
 
@@ -1145,7 +1145,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_canonical_in_memory_state_current_head() {
+    async fn test_in_memory_state_impl_current_head() {
         let mut hash_by_number = HashMap::new();
         let hash1 = B256::random();
         let hash2 = B256::random();
@@ -1158,7 +1158,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_canonical_in_memory_state_pending_block_hash() {
+    async fn test_in_memory_state_impl_pending_block_hash() {
         let number = rand::thread_rng().gen::<u64>();
         let pending_state = create_mock_state(number);
         let pending_hash = pending_state.hash();
@@ -1170,7 +1170,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_canonical_in_memory_state_pending_state() {
+    async fn test_in_memory_state_impl_pending_state() {
         let pending_number = rand::thread_rng().gen::<u64>();
         let pending_state = create_mock_state(pending_number);
         let pending_hash = pending_state.hash();
@@ -1186,7 +1186,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_canonical_in_memory_state_no_pending_state() {
+    async fn test_in_memory_state_impl_no_pending_state() {
         let in_memory_state = InMemoryStateImpl::new(HashMap::new(), HashMap::new(), None);
 
         assert_eq!(in_memory_state.pending_block_hash(), None);
