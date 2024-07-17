@@ -189,6 +189,8 @@ where
         transactions_writer.prune_transactions(total_txs, block_num)?;
         header_writer.prune_headers(highest_static_file_block.saturating_sub(block_num))?;
 
+        sf_provider.commit()?;
+
         Ok(())
     }
 }
