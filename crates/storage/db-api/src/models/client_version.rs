@@ -27,10 +27,9 @@ impl Compact for ClientVersion {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let Self { version, git_sha, build_timestamp } = self;
-        version.as_bytes().to_vec().to_compact(buf);
-        git_sha.as_bytes().to_vec().to_compact(buf);
-        build_timestamp.as_bytes().to_vec().to_compact(buf)
+        self.version.as_bytes().to_compact(buf);
+        self.git_sha.as_bytes().to_compact(buf);
+        self.build_timestamp.as_bytes().to_compact(buf)
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
