@@ -21,7 +21,6 @@ reth-network-peers.workspace = true
 
 # misc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
-serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 serde_json.workspace = true
@@ -32,4 +31,3 @@ client = [
     "jsonrpsee/async-client",
     "reth-rpc-eth-api/client"
 ]
-optimism = ["reth-rpc-eth-api/optimism"]

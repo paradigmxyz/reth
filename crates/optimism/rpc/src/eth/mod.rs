@@ -4,6 +4,7 @@ pub mod receipt;
 pub mod transaction;
 
 mod block;
+mod call;
 mod pending_block;
 
 use std::{future::Future, sync::Arc};
@@ -17,7 +18,7 @@ use reth_provider::{BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StatePr
 use reth_rpc::eth::DevSigner;
 use reth_rpc_eth_api::{
     helpers::{
-        AddDevSigners, Call, EthApiSpec, EthCall, EthFees, EthSigner, EthState, LoadFee, LoadState,
+        AddDevSigners, EthApiSpec, EthCall, EthFees, EthSigner, EthState, LoadFee, LoadState,
         SpawnBlocking, Trace, UpdateRawTxForwarder,
     },
     RawTransactionForwarder,
@@ -118,16 +119,6 @@ impl<Eth: LoadFee> LoadFee for OpEthApi<Eth> {
 
     fn fee_history_cache(&self) -> &reth_rpc_eth_types::FeeHistoryCache {
         self.inner.fee_history_cache()
-    }
-}
-
-impl<Eth: Call> Call for OpEthApi<Eth> {
-    fn call_gas_limit(&self) -> u64 {
-        self.inner.call_gas_limit()
-    }
-
-    fn evm_config(&self) -> &impl ConfigureEvm {
-        self.inner.evm_config()
     }
 }
 

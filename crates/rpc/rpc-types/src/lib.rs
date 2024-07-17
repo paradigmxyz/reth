@@ -12,7 +12,6 @@
 #[allow(hidden_glob_reexports)]
 mod eth;
 mod peer;
-mod rpc;
 
 // re-export for convenience
 pub use alloy_rpc_types::serde_helpers;
@@ -54,4 +53,3 @@ pub use eth::{
 };
 
 pub use peer::*;
-pub use rpc::*;

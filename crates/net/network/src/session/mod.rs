@@ -40,13 +40,13 @@ mod counter;
 mod handle;
 pub use crate::message::PeerRequestSender;
 use crate::protocol::{IntoRlpxSubProtocol, RlpxSubProtocolHandlers, RlpxSubProtocols};
+pub use conn::EthRlpxConnection;
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     SessionCommand,
 };
 use reth_eth_wire::multiplex::RlpxProtocolMultiplexer;
 pub use reth_network_api::{Direction, PeerInfo};
-
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
 pub struct SessionId(usize);

@@ -7,6 +7,8 @@
 //! - `alloy-compat`: Adds compatibility conversions for certain alloy types.
 //! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
 //! - `test-utils`: Export utilities for testing
+//! - `reth-codec`: Enables db codec support for reth types including zstd compression for certain
+//!   types.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -24,7 +26,7 @@ extern crate alloc;
 mod alloy_compat;
 pub mod basefee;
 mod block;
-#[cfg(feature = "zstd-codec")]
+#[cfg(feature = "reth-codec")]
 mod compression;
 pub mod constants;
 pub mod eip4844;
@@ -40,7 +42,7 @@ pub use block::{
     Block, BlockBody, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, BlockWithSenders,
     ForkBlock, RpcBlockHash, SealedBlock, SealedBlockWithSenders,
 };
-#[cfg(feature = "zstd-codec")]
+#[cfg(feature = "reth-codec")]
 pub use compression::*;
 pub use constants::{
     DEV_GENESIS_HASH, EMPTY_OMMER_ROOT_HASH, HOLESKY_GENESIS_HASH, KECCAK_EMPTY,

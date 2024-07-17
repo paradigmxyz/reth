@@ -1,67 +1,28 @@
 use crate::{
-    providers::StaticFileProviderRWRefMut, DatabaseProviderRW, StateChanges, StateReverts,
-    StateWriter,
+    providers::StaticFileProviderRWRefMut, writer::StorageWriter, DatabaseProviderRW, StateChanges,
+    StateReverts, StateWriter,
 };
-use reth_db::{tables, Database};
-use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW},
-    transaction::{DbTx, DbTxMut},
-};
+use reth_db::Database;
 pub use reth_execution_types::*;
-use reth_primitives::StaticFileSegment;
-use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_storage_errors::provider::ProviderResult;
 pub use revm::db::states::OriginalValuesKnown;
 
 impl StateWriter for ExecutionOutcome {
     fn write_to_storage<DB>(
         self,
         provider_rw: &DatabaseProviderRW<DB>,
-        mut static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
+        static_file_producer: Option<StaticFileProviderRWRefMut<'_>>,
         is_value_known: OriginalValuesKnown,
     ) -> ProviderResult<()>
     where
         DB: Database,
     {
-        let tx = provider_rw.tx_ref();
         let (plain_state, reverts) = self.bundle.into_plain_state_and_reverts(is_value_known);
 
         StateReverts(reverts).write_to_db(provider_rw, self.first_block)?;
 
-        // write receipts
-        let mut bodies_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
-        let mut receipts_cursor = tx.cursor_write::<tables::Receipts>()?;
-
-        // ATTENTION: Any potential future refactor or change to how this loop works should keep in
-        // mind that the static file producer must always call `increment_block` even if the block
-        // has no receipts. Keeping track of the exact block range of the segment is needed for
-        // consistency, querying and file range segmentation.
-        let blocks = self.receipts.into_iter().enumerate();
-        for (idx, receipts) in blocks {
-            let block_number = self.first_block + idx as u64;
-            let first_tx_index = bodies_cursor
-                .seek_exact(block_number)?
-                .map(|(_, indices)| indices.first_tx_num())
-                .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
-
-            if let Some(static_file_producer) = &mut static_file_producer {
-                // Increment block on static file header.
-                static_file_producer.increment_block(StaticFileSegment::Receipts, block_number)?;
-                let receipts = receipts.into_iter().enumerate().map(|(tx_idx, receipt)| {
-                    Ok((
-                        first_tx_index + tx_idx as u64,
-                        receipt
-                            .expect("receipt should not be filtered when saving to static files."),
-                    ))
-                });
-                static_file_producer.append_receipts(receipts)?;
-            } else if !receipts.is_empty() {
-                for (tx_idx, receipt) in receipts.into_iter().enumerate() {
-                    if let Some(receipt) = receipt {
-                        receipts_cursor.append(first_tx_index + tx_idx as u64, receipt)?;
-                    }
-                }
-            }
-        }
+        StorageWriter::new(Some(provider_rw), static_file_producer)
+            .append_receipts_from_blocks(self.first_block, self.receipts.into_iter())?;
 
         StateChanges(plain_state).write_to_db(provider_rw)?;
 
@@ -73,11 +34,12 @@ impl StateWriter for ExecutionOutcome {
 mod tests {
     use super::*;
     use crate::{test_utils::create_test_provider_factory, AccountReader};
-    use reth_db::test_utils::create_test_rw_db;
+    use reth_db::{tables, test_utils::create_test_rw_db};
     use reth_db_api::{
-        cursor::DbDupCursorRO,
+        cursor::{DbCursorRO, DbDupCursorRO},
         database::Database,
         models::{AccountBeforeTx, BlockNumberAddress},
+        transaction::{DbTx, DbTxMut},
     };
     use reth_primitives::{
         keccak256, Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
