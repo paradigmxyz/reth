@@ -12,9 +12,7 @@ impl Compact for LogData {
     {
         let mut buffer = Vec::new();
 
-        let topics = self.topics().iter().collect::<Vec<_>>();
-        topics.specialized_to_compact(&mut buffer);
-
+        self.topics().specialized_to_compact(&mut buffer);
         self.data.to_compact(&mut buffer);
         buf.put(&buffer[..]);
         buffer.len()

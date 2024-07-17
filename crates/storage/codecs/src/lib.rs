@@ -207,6 +207,57 @@ where
     }
 }
 
+impl<T> Compact for &[T]
+where
+    T: Compact,
+{
+    /// Returns 0 since we won't include it in the `StructFlags`.
+    #[inline]
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        encode_varuint(self.len(), buf);
+
+        let mut tmp: Vec<u8> = Vec::with_capacity(64);
+
+        for element in *self {
+            tmp.clear();
+
+            // We don't know the length until we compact it
+            let length = element.to_compact(&mut tmp);
+            encode_varuint(length, buf);
+
+            buf.put_slice(&tmp);
+        }
+
+        0
+    }
+
+    #[inline]
+    fn from_compact(_: &[u8], _: usize) -> (Self, &[u8]) {
+        unimplemented!()
+    }
+
+    /// To be used by fixed sized types like `&[B256]`.
+    #[inline]
+    fn specialized_to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        encode_varuint(self.len(), buf);
+        for element in *self {
+            element.to_compact(buf);
+        }
+        0
+    }
+
+    #[inline]
+    fn specialized_from_compact(_: &[u8], _: usize) -> (Self, &[u8]) {
+        unimplemented!()
+    }
+}
+
 impl<T> Compact for Option<T>
 where
     T: Compact,
@@ -567,6 +618,33 @@ mod tests {
             assert_eq!(val, decoded);
             assert!(!read_buf.has_remaining());
         });
+    }
+
+    #[test]
+    fn compact_slice() {
+        let vec_list = vec![B256::ZERO, B256::random(), B256::random(), B256::ZERO];
+        
+        // to_compact
+        {
+            let mut vec_buf = vec![];
+            assert_eq!(vec_list.to_compact(&mut vec_buf), 0);
+    
+            let mut slice_buf = vec![];
+            assert_eq!(vec_list.as_slice().to_compact(&mut slice_buf), 0);
+    
+            assert_eq!(vec_buf, slice_buf);
+        }
+
+        // specialized_to_compact
+        {
+            let mut vec_buf = vec![];
+            assert_eq!(vec_list.specialized_to_compact(&mut vec_buf), 0);
+    
+            let mut slice_buf = vec![];
+            assert_eq!(vec_list.as_slice().specialized_to_compact(&mut slice_buf), 0);
+    
+            assert_eq!(vec_buf, slice_buf);
+        }
     }
 
     #[reth_codec]
