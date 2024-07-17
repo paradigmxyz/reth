@@ -1,5 +1,6 @@
-use std::ops::{Shr};
+use reth_primitives::alloy_primitives::utils::ParseUnits::U256;
 use reth_primitives::{Header, U256};
+use std::ops::Shr;
 
 /// Bound divisor of the difficulty (2048)
 /// This constant is the right-shifts to use for the division.
@@ -13,6 +14,10 @@ const EXP_DIFF_PERIOD_UINT: u64 = 100_000;
 // whether difficulty should go up or down.
 const FRONTIER_DURATION_LIMIT: u64 = 13;
 
+// MINIMUM_DIFFICULTY The minimum that the difficulty may ever be.
+const MINIMUM_DIFFICULTY: U256 = 131072;
+
+const U256_ONE: U256 = 1;
 
 /// calc_difficulty_frontier is the difficulty adjustment algorithm. It returns the
 /// difficulty that a new block should have when created at time given the parent
@@ -30,31 +35,90 @@ fn calc_difficulty_frontier(timestamp: u64, parent: &Header) -> Result<U256, ()>
     // Children block timestamp should be later than parent block timestamp
     assert!(timestamp > parent.timestamp);
 
+    // Get number of the current block
+    let block_num = parent.number + 1;
+
     // pdiff_adj = pdiff / 2048
-    let pdiff_adj = parent.difficulty.shr(PARENT_DIFF_SHIFT);
+    let mut pdiff = parent.difficulty.shr(PARENT_DIFF_SHIFT);
 
     // pdiff = pdiff + pdiff / 2048 * (1 if time - ptime < 13 else -1)
-    let pdiff;
     if timestamp - parent.timestamp < FRONTIER_DURATION_LIMIT {
-        pdiff = parent.difficulty.checked_add(pdiff_adj).ok_or(Err(()))?;
+        pdiff = parent.difficulty.checked_add(pdiff).ok_or(Err(()))?;
     } else {
-        pdiff = parent.difficulty.checked_sub(pdiff_adj).ok_or(Err(()))?;
+        pdiff = parent.difficulty.checked_sub(pdiff).ok_or(Err(()))?;
     }
+
+    // int(2^((num // 100000) - 2))
+    let exponent = (block_num / EXP_DIFF_PERIOD_UINT);
+    if exponent > 1 {
+        let exponent = U256::from(exponent.saturating_sub(2));
+        let period_count = U256::from(1).checked_shl(exponent).ok_or(Err(()))?;
+        pdiff = pdiff + period_count;
+    }
+    // block_diff = pdiff + pdiff / 2048 * (1 if time - ptime < 13 else -1) + int(2^((num // 100000) - 2))
+    Ok(pdiff)
+}
+
+
+/// Difficulty adjustment algorithm. It returns
+/// the difficulty that a new block should have when created at time given the
+/// parent block's time and difficulty. The calculation uses the Homestead rules.
+///
+/// ## Algorithm
+///
+/// Source:
+/// block_diff = pdiff + pdiff / 2048 * max(1 - (time - ptime) / 10, -99) + 2 ^ int((num / 100000) - 2))
+///
+/// Current modification to use unsigned ints:
+/// block_diff = pdiff - pdiff / 2048 * max((time - ptime) / 10 - 1, 99) + 2 ^ int((num / 100000) - 2))
+///
+/// Where:
+/// - pdiff  = parent.difficulty
+/// - ptime = parent.time
+/// - time = block.timestamp
+/// - num = block.number
+fn calc_difficulty_homestead(timestamp: u64, parent: &Header) -> Result<U256, ()> {
+    // Children block timestamp should be later than parent block timestamp
+    assert!(timestamp > parent.timestamp);
 
     // Get number of the current block
     let block_num = parent.number + 1;
 
-    // int(2^((num // 100000) - 2))
-    let exponent = (block_num / EXP_DIFF_PERIOD_UINT) - 2;
-    let exponent = exponent.try_into()?;
-    let period_count = U256::from(1).checked_shl(exponent).ok_or(Err(()))?;
+    let mut pdiff = parent.difficulty.shr(PARENT_DIFF_SHIFT);
+    let mut time_adj = (timestamp - parent.timestamp) / 10;
+    let mut negative = true;
 
-    // block_diff = pdiff + pdiff / 2048 * (1 if time - ptime < 13 else -1) + int(2^((num // 100000) - 2))
-    let block_diff = pdiff + period_count;
+    time_adj = match time_adj {
+        0 => {
+            negative = false;
+            1
+        }
+        100.. => 99,
+        _ => time_adj - 1,
+    };
 
-    Ok(block_diff)
+    pdiff = pdiff.checked_mul(U256::from(time_adj)).ok_or(Err(()))?;
+
+    if negative {
+        pdiff = pdiff.checked_sub(U256::from(1)).ok_or(Err(()))?;
+    } else {
+        pdiff = pdiff.checked_add(U256::from(1)).ok_or(Err(()))?;
+    }
+
+    if pdiff < MINIMUM_DIFFICULTY {
+        pdiff = MINIMUM_DIFFICULTY;
+    }
+
+    let exponent = (block_num / EXP_DIFF_PERIOD_UINT);
+    if exponent > 1 {
+        let exponent = U256::from(exponent.saturating_sub(2));
+        let period_count = U256::from(1).checked_shl(exponent).ok_or(Err(()))?;
+        pdiff = pdiff + period_count;
+    }
+
+    Ok(pdiff)
 }
-// fn calc_difficulty_homestead() {}
+
 // fn calc_difficulty_generic(bomb_delay: i64) {
 //     /*
 //         https://github.com/ethereum/EIPs/issues/100
@@ -73,9 +137,8 @@ fn calc_difficulty_frontier(timestamp: u64, parent: &Header) -> Result<U256, ()>
 //     // diff = (parent_diff +
 //     //         (parent_diff / 2048 * max((2 if len(parent.uncles) else 1) - ((timestamp - parent.timestamp) // 9), -99))
 //     //        ) + 2^(periodCount - 2)
-//
 // }
-//
+
 // fn calculate_difficulty(timestamp: u64, parent: &Header, bomb_delay_from_parent: u64) {
 //     let block_time = timestamp;
 //     let parent_time = parent.timestamp;
@@ -89,11 +152,7 @@ fn calc_difficulty_frontier(timestamp: u64, parent: &Header) -> Result<U256, ()>
 //     let pdiff_adj = parent.difficulty.shr(PARENT_DIFF_SHIFT);
 //
 //     // uncles_adj = (2 if len(parent.uncles) else 1)
-//     let uncles_adj: u64 = if parent.ommers_hash_is_empty() {
-//         1
-//     } else {
-//         2
-//     };
+//     let uncles_adj: u64 = if parent.ommers_hash_is_empty() { 1 } else { 2 };
 //
 //     // adj_factor = max((2 if len(parent.uncles) else 1) - ((timestamp - parent.timestamp) // 9), -99)
 //     // adj_factor = max(uncles_adj - timestamp_adj, -99)
@@ -101,11 +160,6 @@ fn calc_difficulty_frontier(timestamp: u64, parent: &Header) -> Result<U256, ()>
 //     let mut adj_factor = (uncles_adj.wrapping_sub(timestamp_adj)).max(-99);
 //
 //     if uncles_adj < timestamp_adj {
-//
 //     } else {
-//
 //     }
-//
-//
 // }
-//
