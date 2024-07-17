@@ -20,11 +20,14 @@ mod tests {
     use proptest::proptest;
     use proptest_arbitrary_interop::arb;
     use reth_codecs::{reth_codec, Compact};
+    use serde::{Deserialize, Serialize};
 
     /// This type is kept for compatibility tests after the codec support was added to
     /// alloy-primitives Log type natively
     #[reth_codec(rlp)]
-    #[derive(Clone, Debug, PartialEq, Eq, RlpDecodable, RlpEncodable, Default)]
+    #[derive(
+        Clone, Debug, PartialEq, Eq, RlpDecodable, RlpEncodable, Default, Serialize, Deserialize,
+    )]
     struct Log {
         /// Contract that emitted this log.
         address: Address,

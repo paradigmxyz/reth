@@ -1,6 +1,6 @@
 use crate::{
-    walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles, StorageTrieEntry,
-    StoredBranchNode, StoredNibbles, StoredNibblesSubKey,
+    walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles, StorageTrieEntry, StoredNibbles,
+    StoredNibblesSubKey,
 };
 use reth_db::tables;
 use reth_db_api::{
@@ -119,7 +119,7 @@ impl TrieUpdates {
                 Some(node) => {
                     if !nibbles.0.is_empty() {
                         num_entries += 1;
-                        account_trie_cursor.upsert(nibbles, StoredBranchNode(node))?;
+                        account_trie_cursor.upsert(nibbles, node)?;
                     }
                 }
                 None => {

@@ -45,3 +45,5 @@ pub use crate::{
 // Re-export wire types
 #[doc(inline)]
 pub use reth_eth_wire_types::*;
+
+pub use disconnect::UnknownDisconnectReason;

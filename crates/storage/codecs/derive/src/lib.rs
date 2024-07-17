@@ -45,13 +45,13 @@ pub fn reth_codec(args: TokenStream, input: TokenStream) -> TokenStream {
 
     let compact = if with_zstd {
         quote! {
-            #[derive(CompactZstd, serde::Serialize, serde::Deserialize)]
+            #[derive(CompactZstd)]
             #ast
         }
         .into()
     } else {
         quote! {
-            #[derive(Compact, serde::Serialize, serde::Deserialize)]
+            #[derive(Compact)]
             #ast
         }
         .into()
