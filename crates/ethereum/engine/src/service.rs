@@ -90,7 +90,8 @@ where
 }
 
 /// Potential error returned by `EthService`.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("Eth service error.")]
 pub struct EthServiceError {}
 
 #[cfg(test)]

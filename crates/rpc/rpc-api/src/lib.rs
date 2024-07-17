@@ -22,7 +22,6 @@ mod ganache;
 mod hardhat;
 mod mev;
 mod net;
-mod optimism;
 mod otterscan;
 mod reth;
 mod rpc;

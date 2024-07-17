@@ -37,7 +37,6 @@ tokio-util.workspace = true
 ## misc
 eyre.workspace = true
 metrics.workspace = true
-serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-chainspec.workspace = true
@@ -53,4 +52,4 @@ secp256k1.workspace = true
 
 [features]
 default = []
-serde = ["dep:serde", "reth-provider/serde"]
+serde = ["reth-provider/serde", "reth-exex-types/serde"]

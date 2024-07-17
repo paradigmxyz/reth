@@ -299,6 +299,7 @@ reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
 reth-ethereum-cli = { path = "crates/ethereum/cli" }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus" }
+reth-ethereum-engine = { path = "crates/ethereum/engine" }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives" }
 reth-ethereum-forks = { path = "crates/ethereum-forks" }
 reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
@@ -339,8 +340,8 @@ reth-optimism-rpc = { path = "crates/optimism/rpc" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
-reth-primitives = { path = "crates/primitives", default-features = false, features = ["std", "c-kzg"] }
-reth-primitives-traits = { path = "crates/primitives-traits" }
+reth-primitives = { path = "crates/primitives", default-features = false, features = ["std"] }
+reth-primitives-traits = { path = "crates/primitives-traits", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types" }
@@ -373,15 +374,15 @@ reth-trie-common = { path = "crates/trie/common" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "11.0.0", features = [
+revm = { version = "12.1.0", features = [
     "std",
     "secp256k1",
     "blst",
 ], default-features = false }
-revm-primitives = { version = "6.0.0", features = [
+revm-primitives = { version = "7.1.0", features = [
     "std",
 ], default-features = false }
-revm-inspectors = "0.4"
+revm-inspectors = "0.5"
 
 # eth
 alloy-chains = "0.1.18"
@@ -389,38 +390,38 @@ alloy-primitives = "0.7.2"
 alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
-alloy-trie = "0.4"
-alloy-rpc-types = { version = "0.1", default-features = false, features = [
+alloy-trie = { version = "0.4", default-features = false }
+alloy-rpc-types = { version = "0.2", default-features = false, features = [
     "eth",
 ] }
-alloy-rpc-types-anvil = { version = "0.1", default-features = false }
-alloy-rpc-types-beacon = { version = "0.1", default-features = false }
-alloy-rpc-types-admin = { version = "0.1", default-features = false }
-alloy-rpc-types-txpool = { version = "0.1", default-features = false }
-alloy-serde = { version = "0.1", default-features = false }
-alloy-rpc-types-engine = { version = "0.1", default-features = false }
-alloy-rpc-types-eth = { version = "0.1", default-features = false }
-alloy-rpc-types-mev = { version = "0.1", default-features = false }
-alloy-rpc-types-trace = { version = "0.1", default-features = false }
-alloy-genesis = { version = "0.1", default-features = false }
-alloy-node-bindings = { version = "0.1", default-features = false }
-alloy-provider = { version = "0.1", default-features = false, features = [
+alloy-rpc-types-anvil = { version = "0.2", default-features = false }
+alloy-rpc-types-beacon = { version = "0.2", default-features = false }
+alloy-rpc-types-admin = { version = "0.2", default-features = false }
+alloy-rpc-types-txpool = { version = "0.2", default-features = false }
+alloy-serde = { version = "0.2", default-features = false }
+alloy-rpc-types-engine = { version = "0.2", default-features = false }
+alloy-rpc-types-eth = { version = "0.2", default-features = false }
+alloy-rpc-types-mev = { version = "0.2", default-features = false }
+alloy-rpc-types-trace = { version = "0.2", default-features = false }
+alloy-genesis = { version = "0.2", default-features = false }
+alloy-node-bindings = { version = "0.2", default-features = false }
+alloy-provider = { version = "0.2", default-features = false, features = [
     "reqwest",
 ] }
-alloy-eips = { version = "0.1", default-features = false }
-alloy-signer = { version = "0.1", default-features = false }
-alloy-signer-local = { version = "0.1", default-features = false }
-alloy-network = { version = "0.1", default-features = false }
-alloy-consensus = { version = "0.1", default-features = false }
-alloy-transport = { version = "0.1" }
-alloy-transport-http = { version = "0.1", features = [
+alloy-eips = { version = "0.2", default-features = false }
+alloy-signer = { version = "0.2", default-features = false }
+alloy-signer-local = { version = "0.2", default-features = false }
+alloy-network = { version = "0.2", default-features = false }
+alloy-consensus = { version = "0.2", default-features = false }
+alloy-transport = { version = "0.2" }
+alloy-transport-http = { version = "0.2", features = [
     "reqwest-rustls-tls",
 ], default-features = false }
-alloy-transport-ws = { version = "0.1", default-features = false }
-alloy-transport-ipc = { version = "0.1", default-features = false }
-alloy-pubsub = { version = "0.1", default-features = false }
-alloy-json-rpc = { version = "0.1", default-features = false }
-alloy-rpc-client = { version = "0.1", default-features = false }
+alloy-transport-ws = { version = "0.2", default-features = false }
+alloy-transport-ipc = { version = "0.2", default-features = false }
+alloy-pubsub = { version = "0.2", default-features = false }
+alloy-json-rpc = { version = "0.2", default-features = false }
+alloy-rpc-client = { version = "0.2", default-features = false }
 
 # op
 op-alloy-rpc-types = "0.1"
@@ -448,7 +449,7 @@ serde_with = "3.3.0"
 humantime = "2.1"
 humantime-serde = "1.1"
 rand = "0.8.5"
-rustc-hash = "2.0"
+rustc-hash = {  version = "2.0", default-features = false }
 schnellru = "0.2"
 strum = "0.26"
 rayon = "1.7"
