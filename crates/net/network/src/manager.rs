@@ -1077,9 +1077,29 @@ pub enum NetworkEvent {
     PeerRemoved(PeerId),
 }
 
+/// Represents events related to peer discovery in the network.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiscoveredEvent {
-    EventQueued { peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId> },
+    /// Indicates that a new peer has been discovered and queued for potential connection.
+    ///
+    /// This event is generated when the system becomes aware of a new peer
+    /// but hasn't yet established a connection.
+    ///
+    /// # Fields
+    ///
+    /// * `peer_id` - The unique identifier of the discovered peer.
+    /// * `addr` - The network address of the discovered peer.
+    /// * `fork_id` - An optional identifier for the fork that this peer is associated with. `None`
+    ///   if the peer is not associated with a specific fork.
+    EventQueued {
+        /// The unique identifier of the discovered peer.
+        peer_id: PeerId,
+        /// The network address of the discovered peer.
+        addr: PeerAddr,
+        /// An optional identifier for the fork that this peer is associated with.
+        /// `None` if the peer is not associated with a specific fork.
+        fork_id: Option<ForkId>,
+    },
 }
 
 #[derive(Debug, Default)]

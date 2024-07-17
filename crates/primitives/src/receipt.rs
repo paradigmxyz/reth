@@ -16,7 +16,9 @@ use alloc::{vec, vec::Vec};
 /// Receipt containing result of transaction execution.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec(no_arbitrary, zstd))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
-#[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
+)]
 #[rlp(trailing)]
 pub struct Receipt {
     /// Receipt type.
@@ -141,7 +143,7 @@ impl From<Receipt> for ReceiptWithBloom {
 
 /// [`Receipt`] with calculated bloom filter.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ReceiptWithBloom {
     /// Bloom filter build from logs.
     pub bloom: Bloom,

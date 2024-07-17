@@ -2,6 +2,7 @@ use crate::Compact;
 use alloy_genesis::GenesisAccount as AlloyGenesisAccount;
 use alloy_primitives::{Bytes, B256, U256};
 use reth_codecs_derive::reth_codec;
+use serde::{Deserialize, Serialize};
 
 /// GenesisAccount acts as bridge which simplifies Compact implementation for AlloyGenesisAccount.
 ///
@@ -22,7 +23,7 @@ struct GenesisAccountRef<'a> {
 }
 
 #[reth_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 struct GenesisAccount {
     /// The nonce of the account at genesis.
     nonce: Option<u64>,
@@ -37,13 +38,13 @@ struct GenesisAccount {
 }
 
 #[reth_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 struct StorageEntries {
     entries: Vec<StorageEntry>,
 }
 
 #[reth_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 struct StorageEntry {
     key: B256,
     value: B256,

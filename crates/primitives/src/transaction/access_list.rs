@@ -12,12 +12,22 @@ mod tests {
     use proptest::proptest;
     use proptest_arbitrary_interop::arb;
     use reth_codecs::{reth_codec, Compact};
+    use serde::{Deserialize, Serialize};
 
     /// This type is kept for compatibility tests after the codec support was added to alloy-eips
     /// AccessList type natively
     #[reth_codec(rlp)]
     #[derive(
-        Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodableWrapper, RlpEncodableWrapper,
+        Clone,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+        Default,
+        RlpDecodableWrapper,
+        RlpEncodableWrapper,
+        Serialize,
+        Deserialize,
     )]
     struct RethAccessList(Vec<RethAccessListItem>);
 
@@ -29,7 +39,18 @@ mod tests {
 
     // This
     #[reth_codec(rlp)]
-    #[derive(Clone, Debug, PartialEq, Eq, Hash, Default, RlpDecodable, RlpEncodable)]
+    #[derive(
+        Clone,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+        Default,
+        RlpDecodable,
+        RlpEncodable,
+        Serialize,
+        Deserialize,
+    )]
     #[serde(rename_all = "camelCase")]
     struct RethAccessListItem {
         /// Account address that would be loaded at the start of execution

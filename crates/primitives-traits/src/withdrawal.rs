@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 /// Re-export from `alloy_eips`.
 #[doc(inline)]
 pub use alloy_eips::eip4895::Withdrawal;
+use serde::{Deserialize, Serialize};
 
 /// Represents a collection of Withdrawals.
 #[reth_codec]
@@ -27,6 +28,8 @@ pub use alloy_eips::eip4895::Withdrawal;
     IntoIterator,
     RlpEncodableWrapper,
     RlpDecodableWrapper,
+    Serialize,
+    Deserialize,
 )]
 #[as_ref(forward)]
 pub struct Withdrawals(Vec<Withdrawal>);
@@ -93,7 +96,18 @@ mod tests {
     /// This type is kept for compatibility tests after the codec support was added to alloy-eips
     /// Withdrawal type natively
     #[reth_codec]
-    #[derive(Debug, Clone, PartialEq, Eq, Default, Hash, RlpEncodable, RlpDecodable)]
+    #[derive(
+        Debug,
+        Clone,
+        PartialEq,
+        Eq,
+        Default,
+        Hash,
+        RlpEncodable,
+        RlpDecodable,
+        Serialize,
+        Deserialize,
+    )]
     struct RethWithdrawal {
         /// Monotonically increasing identifier issued by consensus layer.
         index: u64,

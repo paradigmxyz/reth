@@ -42,27 +42,16 @@ pub fn reth_codec(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
     let with_zstd = args.clone().into_iter().any(|tk| tk.to_string() == "zstd");
-    let without_serde = args.clone().into_iter().any(|tk| tk.to_string() == "no_serde");
     let without_arbitrary = args.clone().into_iter().any(|tk| tk.to_string() == "no_arbitrary");
-
-    let serde = if !without_serde {
-        quote! {
-            #[derive(serde::Serialize, serde::Deserialize)]
-        }
-    } else {
-        quote! {}
-    };
     
     let compact = if with_zstd {
         quote! {
-            #serde
             #[derive(CompactZstd)]
             #ast
         }
         .into()
     } else {
         quote! {
-            #serde
             #[derive(Compact)]
             #ast
         }

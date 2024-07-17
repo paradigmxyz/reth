@@ -2,14 +2,17 @@ use super::access_list::AccessList;
 use crate::{keccak256, Bytes, ChainId, Signature, TxKind, TxType, B256, U256};
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::mem;
+
+#[cfg(any(test, feature = "reth-codec"))]
 use reth_codecs::Compact;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+use serde::{Deserialize, Serialize};
 
 /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct TxEip2930 {
     /// Added as EIP-155: Simple replay attack protection
     pub chain_id: ChainId,

@@ -12,6 +12,6 @@ pub(crate) const MAINNET_DEPOSIT_CONTRACT: DepositContract = DepositContract::ne
 #[cfg(feature = "optimism")]
 pub(crate) const BASE_SEPOLIA_MAX_GAS_LIMIT: u64 = 45_000_000;
 
-/// Max gas limit on Base: <https://basescan.org/block/16995982>
+/// Max gas limit on Base: <https://basescan.org/block/17208876>
 #[cfg(feature = "optimism")]
-pub(crate) const BASE_MAINNET_MAX_GAS_LIMIT: u64 = 97_500_000;
+pub(crate) const BASE_MAINNET_MAX_GAS_LIMIT: u64 = 105_000_000;

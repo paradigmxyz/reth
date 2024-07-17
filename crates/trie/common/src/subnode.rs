@@ -1,4 +1,4 @@
-use super::{BranchNodeCompact, StoredBranchNode};
+use super::BranchNodeCompact;
 use bytes::Buf;
 use reth_codecs::Compact;
 use std::borrow::Cow;
@@ -37,7 +37,7 @@ impl Compact for StoredSubNode {
         if let Some(node) = &self.node {
             buf.put_u8(1);
             len += 1;
-            len += StoredBranchNode(node).to_compact(buf);
+            len += node.to_compact(buf);
         } else {
             len += 1;
             buf.put_u8(0);
@@ -56,9 +56,9 @@ impl Compact for StoredSubNode {
 
         let node_exists = buf.get_u8() != 0;
         let node = if node_exists {
-            let (node, rest) = StoredBranchNode::from_compact(buf, 0);
+            let (node, rest) = BranchNodeCompact::from_compact(buf, 0);
             buf = rest;
-            Some(node.0.into_owned())
+            Some(node)
         } else {
             None
         };

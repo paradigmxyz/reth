@@ -5,8 +5,7 @@ use proptest_arbitrary_interop::arb;
 use rayon::ThreadPoolBuilder;
 use reth_primitives::{Account, B256, U256};
 use reth_provider::{
-    bundle_state::HashedStateChanges, providers::ConsistentDbView,
-    test_utils::create_test_provider_factory,
+    providers::ConsistentDbView, test_utils::create_test_provider_factory, writer::StorageWriter,
 };
 use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
@@ -27,7 +26,8 @@ pub fn calculate_state_root(c: &mut Criterion) {
         let provider_factory = create_test_provider_factory();
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
-            HashedStateChanges(&db_state.into_sorted()).write_to_db(&provider_rw).unwrap();
+            let storage_writer = StorageWriter::new(Some(&provider_rw), None);
+            storage_writer.write_hashed_state(&db_state.into_sorted()).unwrap();
             let (_, updates) =
                 StateRoot::from_tx(provider_rw.tx_ref()).root_with_updates().unwrap();
             updates.write_to_database(provider_rw.tx_ref()).unwrap();

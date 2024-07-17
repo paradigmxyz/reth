@@ -18,11 +18,12 @@ use bytes::BufMut;
 use core::mem;
 use reth_codecs::{add_arbitrary_tests, reth_codec, Compact};
 use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
+use serde::{Deserialize, Serialize};
 
 /// Block header
 #[reth_codec(no_arbitrary)]
 #[add_arbitrary_tests(rlp, 25)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Header {
     /// The Keccak 256-bit hash of the parent
     /// block’s header, in its entirety; formally Hp.

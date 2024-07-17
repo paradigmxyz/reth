@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 /// An Ethereum account.
 #[reth_codec]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Account {
     /// Account nonce.
     pub nonce: u64,
