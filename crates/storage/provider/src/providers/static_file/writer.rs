@@ -338,7 +338,7 @@ impl StaticFileProviderRW {
     ///
     /// # Note
     /// Commits to the configuration file at the end.
-    pub fn truncate(
+    fn truncate(
         &mut self,
         segment: StaticFileSegment,
         num_rows: u64,
