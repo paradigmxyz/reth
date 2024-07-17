@@ -7,6 +7,8 @@ use reth_codecs::{reth_codec, Compact};
 use serde::{Deserialize, Serialize};
 use std::mem;
 
+pub use op_alloy_consensus::TxDeposit;
+
 /// Deposit transactions, also known as deposits are initiated on L1, and executed on L2.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codec)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
