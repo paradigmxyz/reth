@@ -623,15 +623,15 @@ mod tests {
     #[test]
     fn compact_slice() {
         let vec_list = vec![B256::ZERO, B256::random(), B256::random(), B256::ZERO];
-        
+
         // to_compact
         {
             let mut vec_buf = vec![];
             assert_eq!(vec_list.to_compact(&mut vec_buf), 0);
-    
+
             let mut slice_buf = vec![];
             assert_eq!(vec_list.as_slice().to_compact(&mut slice_buf), 0);
-    
+
             assert_eq!(vec_buf, slice_buf);
         }
 
@@ -639,10 +639,10 @@ mod tests {
         {
             let mut vec_buf = vec![];
             assert_eq!(vec_list.specialized_to_compact(&mut vec_buf), 0);
-    
+
             let mut slice_buf = vec![];
             assert_eq!(vec_list.as_slice().specialized_to_compact(&mut slice_buf), 0);
-    
+
             assert_eq!(vec_buf, slice_buf);
         }
     }
