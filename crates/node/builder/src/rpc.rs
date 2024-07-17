@@ -252,7 +252,7 @@ impl<'a, Node: FullNodeComponents, EthApi> RpcContext<'a, Node, EthApi> {
 }
 
 /// Launch the rpc servers.
-pub(crate) async fn launch_rpc_servers<Node, Engine, EthApi>(
+pub async fn launch_rpc_servers<Node, Engine, EthApi>(
     node: Node,
     engine_api: Engine,
     config: &NodeConfig,

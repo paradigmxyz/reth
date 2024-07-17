@@ -7107,6 +7107,7 @@ dependencies = [
  "reth-network-p2p",
  "reth-stages-api",
  "reth-tasks",
+ "thiserror",
  "tokio",
  "tokio-stream",
 ]
@@ -7721,6 +7722,7 @@ dependencies = [
  "reth-consensus",
  "reth-db",
  "reth-e2e-test-utils",
+ "reth-ethereum-engine",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-payload-builder",
  "reth-evm-ethereum",
@@ -7729,13 +7731,19 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
+ "reth-node-events",
  "reth-payload-builder",
  "reth-provider",
  "reth-rpc",
+ "reth-rpc-engine-api",
+ "reth-rpc-types",
+ "reth-tasks",
+ "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
  "serde_json",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
