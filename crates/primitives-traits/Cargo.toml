@@ -40,6 +40,8 @@ proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
+alloy-primitives = { workspace = true, features = ["arbitrary"] }
+alloy-consensus = { workspace = true, features = ["arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
@@ -53,7 +55,9 @@ default = ["std"]
 std = ["thiserror-no-std/std"]
 test-utils = ["arbitrary"]
 arbitrary = [
+    "std",
     "alloy-consensus/arbitrary",
+    "alloy-primitives/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
     "dep:proptest-arbitrary-interop",

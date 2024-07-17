@@ -1,8 +1,5 @@
-#[cfg(feature = "std")]
-use std::time::Duration;
-
-#[cfg(not(feature = "std"))]
 use core::time::Duration;
+
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
 
