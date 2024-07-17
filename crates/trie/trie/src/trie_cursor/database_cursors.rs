@@ -131,7 +131,6 @@ mod tests {
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_primitives::hex_literal::hex;
     use reth_provider::test_utils::create_test_provider_factory;
-    use std::borrow::Cow;
 
     #[test]
     fn test_account_trie_order() {

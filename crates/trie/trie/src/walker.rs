@@ -247,7 +247,6 @@ mod tests {
     use reth_db::tables;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_provider::test_utils::create_test_provider_factory;
-    use std::borrow::Cow;
 
     #[test]
     fn walk_nodes_with_common_prefix() {

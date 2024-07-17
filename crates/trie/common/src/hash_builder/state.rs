@@ -4,7 +4,6 @@ use bytes::Buf;
 use nybbles::Nibbles;
 use reth_codecs::{derive_arbitrary, Compact};
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 
 /// The hash builder state for storing in the database.
 /// Check the `reth-trie` crate for more info on hash builder.
@@ -140,18 +139,7 @@ impl Compact for HashBuilderState {
         }
 
         let stored_in_database = buf.get_u8() != 0;
-        (
-            Self {
-                key,
-                stack,
-                value: value.into_owned(),
-                groups,
-                tree_masks,
-                hash_masks,
-                stored_in_database,
-            },
-            buf,
-        )
+        (Self { key, stack, value, groups, tree_masks, hash_masks, stored_in_database }, buf)
     }
 }
 

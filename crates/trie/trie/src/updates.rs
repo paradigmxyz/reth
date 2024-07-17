@@ -8,10 +8,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_primitives::B256;
-use std::{
-    borrow::Cow,
-    collections::{HashMap, HashSet},
-};
+use std::collections::{HashMap, HashSet};
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
