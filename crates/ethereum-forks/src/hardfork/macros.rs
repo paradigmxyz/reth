@@ -1,3 +1,6 @@
+#[cfg(not(feature = "std"))]
+use alloc::format;
+
 /// Macro that defines different variants of a chain specific enum. See [`crate::Hardfork`] as an
 /// example.
 #[macro_export]
