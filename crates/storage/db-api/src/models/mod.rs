@@ -179,9 +179,9 @@ impl Decode for ClientVersion {
 
 /// Implements compression for Compact type.
 macro_rules! impl_compression_for_compact {
-    ($($name:ident $(<$lt:lifetime>)?),+) => {
+    ($($name:tt),+) => {
         $(
-            impl$(<$lt>)? Compress for $name$(<$lt>)? {
+            impl Compress for $name {
                 type Compressed = Vec<u8>;
 
                 fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
@@ -189,8 +189,8 @@ macro_rules! impl_compression_for_compact {
                 }
             }
 
-            impl$(<$lt>)? Decompress for $name$(<$lt>)? {
-                fn decompress<B: AsRef<[u8]>>(value: B) -> Result<$name$(<$lt>)?, $crate::DatabaseError> {
+            impl Decompress for $name {
+                fn decompress<B: AsRef<[u8]>>(value: B) -> Result<$name, $crate::DatabaseError> {
                     let value = value.as_ref();
                     let (obj, _) = Compact::from_compact(&value, value.len());
                     Ok(obj)
