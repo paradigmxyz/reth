@@ -132,7 +132,7 @@ mod tests {
         );
 
         let mut out = Vec::new();
-        let compact_len = n.clone().to_compact(&mut out);
+        let compact_len = n.to_compact(&mut out);
         assert_eq!(BranchNodeCompact::from_compact(&out, compact_len).0, n);
     }
 }
