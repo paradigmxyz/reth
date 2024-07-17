@@ -154,10 +154,8 @@ impl std::error::Error for RoaringBitmapError {}
 impl fmt::Display for RoaringBitmapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RoaringBitmapError::InvalidInput {} => f.write_str("the provided input is invalid"),
-            RoaringBitmapError::FailedToDeserialize {} => {
-                f.write_str("failed to deserialize data into type")
-            }
+            Self::InvalidInput => f.write_str("the provided input is invalid"),
+            Self::FailedToDeserialize {} => f.write_str("failed to deserialize data into type"),
         }
     }
 }
