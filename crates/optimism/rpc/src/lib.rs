@@ -10,8 +10,10 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+pub mod api;
 pub mod error;
 pub mod eth;
 
+pub use api::OpEthApiServer;
 pub use error::OpEthApiError;
 pub use eth::{receipt::op_receipt_fields, transaction::OptimismTxMeta, OpEthApi};
