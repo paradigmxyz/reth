@@ -176,16 +176,6 @@ impl InMemoryStateImpl {
     }
 }
 
-impl Clone for InMemoryStateImpl {
-    fn clone(&self) -> Self {
-        Self {
-            blocks: RwLock::new(self.blocks.read().clone()),
-            numbers: RwLock::new(self.numbers.read().clone()),
-            pending: RwLock::new(self.pending.read().clone()),
-        }
-    }
-}
-
 impl InMemoryState for InMemoryStateImpl {
     fn state_by_hash(&self, hash: B256) -> Option<Arc<State>> {
         self.blocks.read().get(&hash).cloned()
@@ -210,7 +200,7 @@ impl InMemoryState for InMemoryStateImpl {
 
 /// Inner type to provide in memory state. It includes a chain tracker to be
 /// advanced internally by the tree.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct CanonicalInMemoryStateInner {
     chain_info_tracker: ChainInfoTracker,
     in_memory_state: InMemoryStateImpl,
