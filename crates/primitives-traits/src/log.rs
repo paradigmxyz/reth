@@ -58,7 +58,7 @@ mod tests {
         fn test_roundtrip_conversion_between_log_and_alloy_log(log in arb::<Log>()) {
             // Convert log to buffer and then create alloy_log from buffer and compare
             let mut compacted_log = Vec::<u8>::new();
-            let len = log.clone().to_compact(&mut compacted_log);
+            let len = log.to_compact(&mut compacted_log);
 
             let alloy_log = AlloyLog::from_compact(&compacted_log, len).0;
             assert_eq!(log, alloy_log.into());

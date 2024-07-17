@@ -6,7 +6,7 @@ use alloy_trie::{hash_builder::HashBuilderValue, BranchNodeCompact, TrieMask};
 use bytes::{Buf, BufMut};
 
 impl Compact for HashBuilderValue {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: BufMut + AsMut<[u8]>,
     {
@@ -42,7 +42,7 @@ impl Compact for HashBuilderValue {
 }
 
 impl Compact for BranchNodeCompact {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -99,7 +99,7 @@ impl Compact for BranchNodeCompact {
 }
 
 impl Compact for TrieMask {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -132,7 +132,7 @@ mod tests {
         );
 
         let mut out = Vec::new();
-        let compact_len = n.clone().to_compact(&mut out);
+        let compact_len = n.to_compact(&mut out);
         assert_eq!(BranchNodeCompact::from_compact(&out, compact_len).0, n);
     }
 }

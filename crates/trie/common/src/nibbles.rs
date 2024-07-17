@@ -57,7 +57,7 @@ impl core::borrow::Borrow<[u8]> for StoredNibbles {
 }
 
 impl Compact for StoredNibbles {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -98,7 +98,7 @@ impl From<StoredNibblesSubKey> for Nibbles {
 }
 
 impl Compact for StoredNibblesSubKey {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
