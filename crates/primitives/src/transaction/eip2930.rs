@@ -8,10 +8,11 @@ use reth_codecs::Compact;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+use serde::{Deserialize, Serialize};
 
 /// Transaction with an [`AccessList`] ([EIP-2930](https://eips.ethereum.org/EIPS/eip-2930)).
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct TxEip2930 {
     /// Added as EIP-155: Simple replay attack protection
     pub chain_id: ChainId,
