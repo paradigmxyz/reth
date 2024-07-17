@@ -43,7 +43,7 @@ impl Signature {
     /// Returns the alloy signature, with the given chain id for parity.
     pub fn as_alloy_signature(&self, chain_id: Option<u64>) -> alloy_primitives::Signature {
         alloy_primitives::Signature::from_rs_and_parity(
-            self.s,
+            self.r,
             self.s,
             chain_id.map_or_else(
                 || alloy_primitives::Parity::Parity(self.odd_y_parity),
