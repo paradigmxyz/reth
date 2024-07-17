@@ -152,15 +152,15 @@ impl TreeState {
     }
 }
 
-/// Container type for in memory state of the canonical chain.
+/// Container type for in memory state data.
 #[derive(Debug, Default)]
-pub struct CanonicalInMemoryState {
+pub struct InMemoryStateImpl {
     blocks: HashMap<B256, Arc<State>>,
     numbers: HashMap<u64, B256>,
     pending: Option<State>,
 }
 
-impl CanonicalInMemoryState {
+impl InMemoryStateImpl {
     const fn new(
         blocks: HashMap<B256, Arc<State>>,
         numbers: HashMap<u64, B256>,
@@ -170,7 +170,7 @@ impl CanonicalInMemoryState {
     }
 }
 
-impl InMemoryState for CanonicalInMemoryState {
+impl InMemoryState for InMemoryStateImpl {
     fn state_by_hash(&self, hash: B256) -> Option<Arc<State>> {
         self.blocks.get(&hash).cloned()
     }
@@ -316,7 +316,7 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     persistence_state: PersistenceState,
     /// (tmp) The flag indicating whether the pipeline is active.
     is_pipeline_active: bool,
-    canonical_in_memory_state: CanonicalInMemoryState,
+    canonical_in_memory_state: InMemoryStateImpl,
     _marker: PhantomData<T>,
 }
 
@@ -348,7 +348,7 @@ where
             persistence_state: PersistenceState::default(),
             is_pipeline_active: false,
             state,
-            canonical_in_memory_state: CanonicalInMemoryState::default(),
+            canonical_in_memory_state: InMemoryStateImpl::default(),
             _marker: PhantomData,
         }
     }
@@ -1060,7 +1060,7 @@ mod tests {
         let last_executed_block = blocks.last().unwrap().clone();
         let pending = Some(State::new(last_executed_block));
         tree.canonical_in_memory_state =
-            CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending);
+            InMemoryStateImpl::new(state_by_hash, hash_by_number, pending);
 
         TestHarness { tree, to_tree_tx, blocks, sf_action_rx }
     }
@@ -1120,7 +1120,7 @@ mod tests {
         let state = Arc::new(create_mock_state(number));
         state_by_hash.insert(state.hash(), state.clone());
 
-        let in_memory_state = CanonicalInMemoryState::new(state_by_hash, HashMap::new(), None);
+        let in_memory_state = InMemoryStateImpl::new(state_by_hash, HashMap::new(), None);
 
         assert_eq!(in_memory_state.state_by_hash(state.hash()), Some(state));
         assert_eq!(in_memory_state.state_by_hash(B256::random()), None);
@@ -1138,7 +1138,7 @@ mod tests {
         state_by_hash.insert(hash, state.clone());
         hash_by_number.insert(number, hash);
 
-        let in_memory_state = CanonicalInMemoryState::new(state_by_hash, hash_by_number, None);
+        let in_memory_state = InMemoryStateImpl::new(state_by_hash, hash_by_number, None);
 
         assert_eq!(in_memory_state.state_by_number(number), Some(state));
         assert_eq!(in_memory_state.state_by_number(number + 1), None);
@@ -1152,7 +1152,7 @@ mod tests {
         hash_by_number.insert(1, hash1);
         hash_by_number.insert(2, hash2);
 
-        let in_memory_state = CanonicalInMemoryState::new(HashMap::new(), hash_by_number, None);
+        let in_memory_state = InMemoryStateImpl::new(HashMap::new(), hash_by_number, None);
 
         assert_eq!(in_memory_state.current_head(), Some((2, hash2)));
     }
@@ -1164,7 +1164,7 @@ mod tests {
         let pending_hash = pending_state.hash();
 
         let in_memory_state =
-            CanonicalInMemoryState::new(HashMap::new(), HashMap::new(), Some(pending_state));
+            InMemoryStateImpl::new(HashMap::new(), HashMap::new(), Some(pending_state));
 
         assert_eq!(in_memory_state.pending_block_hash(), Some(pending_hash));
     }
@@ -1176,7 +1176,7 @@ mod tests {
         let pending_hash = pending_state.hash();
 
         let in_memory_state =
-            CanonicalInMemoryState::new(HashMap::new(), HashMap::new(), Some(pending_state));
+            InMemoryStateImpl::new(HashMap::new(), HashMap::new(), Some(pending_state));
 
         let result = in_memory_state.pending_state();
         assert!(result.is_some());
@@ -1187,7 +1187,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_canonical_in_memory_state_no_pending_state() {
-        let in_memory_state = CanonicalInMemoryState::new(HashMap::new(), HashMap::new(), None);
+        let in_memory_state = InMemoryStateImpl::new(HashMap::new(), HashMap::new(), None);
 
         assert_eq!(in_memory_state.pending_block_hash(), None);
         assert_eq!(in_memory_state.pending_state(), None);
