@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// GenesisAccount acts as bridge which simplifies Compact implementation for AlloyGenesisAccount.
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_genesis::GenesisAccount`
-#[reth_codec(no_arbitrary, no_serde)]
+#[reth_codec(no_arbitrary)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GenesisAccountRef<'a> {
     /// The nonce of the account at genesis.
