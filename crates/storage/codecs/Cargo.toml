@@ -19,12 +19,12 @@ alloy-consensus = { workspace = true, optional = true }
 alloy-eips = { workspace = true, optional = true }
 alloy-genesis = { workspace = true, optional = true }
 alloy-primitives.workspace = true
-alloy-trie.workspace = true
+alloy-trie = { workspace = true, optional = true }
 
 # misc
 bytes.workspace = true
 modular-bitfield = { workspace = true, optional = true }
-serde.workspace = true
+serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 alloy-eips = { workspace = true, default-features = false, features = [
@@ -43,10 +43,11 @@ proptest-arbitrary-interop.workspace = true
 
 [features]
 default = ["std", "alloy"]
-std = ["alloy-primitives/std", "bytes/std"]
+std = ["alloy-primitives/std", "bytes/std", "serde/std"]
 alloy = [
     "dep:alloy-consensus",
     "dep:alloy-eips",
     "dep:alloy-genesis",
     "dep:modular-bitfield",
+    "dep:alloy-trie",
 ]
