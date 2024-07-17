@@ -24,7 +24,7 @@ pub struct TxEip1559 {
     /// this transaction. This is paid up-front, before any
     /// computation is done and may not be increased
     /// later; formally Tg.
-    pub gas_limit: u64,
+    pub gas_limit: u128,
 
     /// A scalar value equal to the maximum
     /// amount of gas that should be used in executing

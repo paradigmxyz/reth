@@ -226,11 +226,11 @@ where
 
         // Checks for gas limit
         let transaction_gas_limit = transaction.gas_limit();
-        if transaction_gas_limit > self.block_gas_limit {
+        if transaction_gas_limit > self.block_gas_limit.into() {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::ExceedsGasLimit(
-                    transaction_gas_limit,
+                    transaction_gas_limit as u64,
                     self.block_gas_limit,
                 ),
             )
@@ -783,7 +783,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         transaction.authorization_count() as u64,
     );
 
-    if transaction.gas_limit() < gas_after_merge {
+    if transaction.gas_limit() < gas_after_merge.into() {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
     } else {
         Ok(())

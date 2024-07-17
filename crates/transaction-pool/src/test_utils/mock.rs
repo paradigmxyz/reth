@@ -106,7 +106,7 @@ pub enum MockTransaction {
         /// The gas price for the transaction.
         gas_price: u128,
         /// The gas limit for the transaction.
-        gas_limit: u64,
+        gas_limit: u128,
         /// The transaction's destination.
         to: TxKind,
         /// The value of the transaction.
@@ -129,7 +129,7 @@ pub enum MockTransaction {
         /// The transaction's destination.
         to: TxKind,
         /// The gas limit for the transaction.
-        gas_limit: u64,
+        gas_limit: u128,
         /// The transaction input data.
         input: Bytes,
         /// The value of the transaction.
@@ -156,7 +156,7 @@ pub enum MockTransaction {
         /// The maximum priority fee per gas for the transaction.
         max_priority_fee_per_gas: u128,
         /// The gas limit for the transaction.
-        gas_limit: u64,
+        gas_limit: u128,
         /// The transaction's destination.
         to: TxKind,
         /// The value of the transaction.
@@ -185,7 +185,7 @@ pub enum MockTransaction {
         /// The maximum fee per blob gas for the transaction.
         max_fee_per_blob_gas: u128,
         /// The gas limit for the transaction.
-        gas_limit: u64,
+        gas_limit: u128,
         /// Placeholder for backwards compatibility.
         placeholder: Option<()>,
         /// The transaction's destination.
@@ -210,7 +210,7 @@ impl MockTransaction {
         nonce => u64;
         hash => B256;
         sender => Address;
-        gas_limit => u64;
+        gas_limit => u128;
         value => U256;
         input => Bytes;
         size => usize
@@ -598,7 +598,7 @@ impl PoolTransaction for MockTransaction {
         }
     }
 
-    fn gas_limit(&self) -> u64 {
+    fn gas_limit(&self) -> u128 {
         self.get_gas_limit()
     }
 
@@ -1279,7 +1279,7 @@ pub struct MockTransactionDistribution {
     /// ratio of each transaction type to generate
     transaction_ratio: MockTransactionRatio,
     /// generates the gas limit
-    gas_limit_range: Uniform<u64>,
+    gas_limit_range: Uniform<u128>,
     /// generates the transaction's fake size
     size_range: Uniform<usize>,
     /// generates fees for the given transaction types
@@ -1291,7 +1291,7 @@ impl MockTransactionDistribution {
     pub fn new(
         transaction_ratio: MockTransactionRatio,
         fee_ranges: MockFeeRange,
-        gas_limit_range: Range<u64>,
+        gas_limit_range: Range<u128>,
         size_range: Range<usize>,
     ) -> Self {
         Self {

@@ -153,8 +153,8 @@ pub fn random_block<R: Rng>(
         header: Header {
             parent_hash: parent.unwrap_or_default(),
             number,
-            gas_used: total_gas,
-            gas_limit: total_gas,
+            gas_used: total_gas as u64,
+            gas_limit: total_gas as u64,
             transactions_root,
             ommers_hash,
             base_fee_per_gas: Some(rng.gen()),
@@ -362,7 +362,7 @@ pub fn random_receipt<R: Rng>(
     Receipt {
         tx_type: transaction.tx_type(),
         success,
-        cumulative_gas_used: rng.gen_range(0..=transaction.gas_limit()),
+        cumulative_gas_used: rng.gen_range(0..=transaction.gas_limit()) as u64,
         logs: if success {
             (0..logs_count).map(|_| random_log(rng, None, None)).collect()
         } else {

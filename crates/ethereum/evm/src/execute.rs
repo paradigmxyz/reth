@@ -171,9 +171,9 @@ where
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.header.gas_limit - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas {
+            if transaction.gas_limit() > block_available_gas.into() {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: transaction.gas_limit(),
+                    transaction_gas_limit: transaction.gas_limit() as u64,
                     block_available_gas,
                 }
                 .into())

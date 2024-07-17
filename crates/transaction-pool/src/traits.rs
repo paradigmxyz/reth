@@ -780,7 +780,7 @@ pub trait PoolTransaction:
     fn cost(&self) -> U256;
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
-    fn gas_limit(&self) -> u64;
+    fn gas_limit(&self) -> u128;
 
     /// Returns the EIP-1559 the maximum fee per gas the caller is willing to pay.
     ///
@@ -1019,7 +1019,7 @@ impl PoolTransaction for EthPooledTransaction {
     }
 
     /// Amount of gas that should be used in executing this transaction. This is paid up-front.
-    fn gas_limit(&self) -> u64 {
+    fn gas_limit(&self) -> u128 {
         self.transaction.gas_limit()
     }
 

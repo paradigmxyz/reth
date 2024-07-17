@@ -147,7 +147,7 @@ impl TransactionBuilder {
             TxLegacy {
                 chain_id: Some(self.chain_id),
                 nonce: self.nonce,
-                gas_limit: self.gas_limit,
+                gas_limit: self.gas_limit.into(),
                 gas_price: self.max_fee_per_gas,
                 to: self.to,
                 value: self.value,
@@ -164,7 +164,7 @@ impl TransactionBuilder {
             TxEip1559 {
                 chain_id: self.chain_id,
                 nonce: self.nonce,
-                gas_limit: self.gas_limit,
+                gas_limit: self.gas_limit.into(),
                 max_fee_per_gas: self.max_fee_per_gas,
                 max_priority_fee_per_gas: self.max_priority_fee_per_gas,
                 to: self.to,
@@ -182,7 +182,7 @@ impl TransactionBuilder {
             TxEip4844 {
                 chain_id: self.chain_id,
                 nonce: self.nonce,
-                gas_limit: self.gas_limit,
+                gas_limit: self.gas_limit.into(),
                 max_fee_per_gas: self.max_fee_per_gas,
                 max_priority_fee_per_gas: self.max_priority_fee_per_gas,
                 placeholder: None,

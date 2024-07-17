@@ -309,7 +309,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
 
     /// Maximum amount of gas that the transaction is allowed to consume.
     pub fn gas_limit(&self) -> u64 {
-        self.transaction.gas_limit()
+        self.transaction.gas_limit() as u64
     }
 
     /// Whether the transaction originated locally.

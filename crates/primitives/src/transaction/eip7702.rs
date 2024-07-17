@@ -28,7 +28,7 @@ pub struct TxEip7702 {
     /// As ethereum circulation is around 120mil eth as of 2022 that is around
     /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
     /// 340282366920938463463374607431768211455
-    pub gas_limit: u64,
+    pub gas_limit: u128,
     /// A scalar value equal to the maximum
     /// amount of gas that should be used in executing
     /// this transaction. This is paid up-front, before any

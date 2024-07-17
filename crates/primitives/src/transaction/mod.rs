@@ -270,7 +270,7 @@ impl Transaction {
     }
 
     /// Get the gas limit of the transaction.
-    pub const fn gas_limit(&self) -> u64 {
+    pub const fn gas_limit(&self) -> u128 {
         match self {
             Self::Legacy(TxLegacy { gas_limit, .. }) |
             Self::Eip2930(TxEip2930 { gas_limit, .. }) |
@@ -511,7 +511,7 @@ impl Transaction {
     }
 
     /// This sets the transaction's gas limit.
-    pub fn set_gas_limit(&mut self, gas_limit: u64) {
+    pub fn set_gas_limit(&mut self, gas_limit: u128) {
         match self {
             Self::Legacy(tx) => tx.gas_limit = gas_limit,
             Self::Eip2930(tx) => tx.gas_limit = gas_limit,
@@ -1820,7 +1820,7 @@ mod tests {
             chain_id: Some(4),
             nonce: 1u64,
             gas_price: 1000000000,
-            gas_limit: 100000u64,
+            gas_limit: 100000,
             to: Address::from_slice(&hex!("d3e8763675e4c425df46cc3b5c0f6cbdac396046")[..]).into(),
             value: U256::from(693361000000000u64),
             input: Default::default(),
