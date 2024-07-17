@@ -22,7 +22,7 @@ pub struct TxDeposit {
     ///  The ETH value to send to the recipient account.
     pub value: U256,
     /// The gas limit for the L2 transaction.
-    pub gas_limit: u64,
+    pub gas_limit: u128,
     /// Field indicating if this transaction is exempt from the L2 gas limit.
     pub is_system_transaction: bool,
     /// Input has two uses depending if transaction is Create or Call (if `to` field is None or
