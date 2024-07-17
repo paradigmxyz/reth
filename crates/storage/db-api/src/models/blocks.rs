@@ -2,6 +2,7 @@
 
 use reth_codecs::{reth_codec, Compact};
 use reth_primitives::{Header, TxNumber, Withdrawals, B256};
+use serde::{Deserialize, Serialize};
 use std::ops::Range;
 
 /// Total number of transactions.
@@ -11,7 +12,7 @@ pub type NumTransactions = u64;
 ///
 /// It has the pointer to the transaction Number of the first
 /// transaction in the block and the total number of transactions.
-#[derive(Debug, Default, Eq, PartialEq, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone, Serialize, Deserialize)]
 #[reth_codec]
 pub struct StoredBlockBodyIndices {
     /// The number of the first transaction in this block
@@ -69,7 +70,7 @@ impl StoredBlockBodyIndices {
 ///
 /// It is stored as the headers of the block's uncles.
 #[reth_codec]
-#[derive(Debug, Default, Eq, PartialEq, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct StoredBlockOmmers {
     /// The block headers of this block's uncles.
     pub ommers: Vec<Header>,
@@ -77,7 +78,7 @@ pub struct StoredBlockOmmers {
 
 /// The storage representation of block withdrawals.
 #[reth_codec]
-#[derive(Debug, Default, Eq, PartialEq, Clone)]
+#[derive(Debug, Default, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct StoredBlockWithdrawals {
     /// The block withdrawals.
     pub withdrawals: Withdrawals,

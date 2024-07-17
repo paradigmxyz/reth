@@ -7,6 +7,7 @@ use core::mem;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+use serde::{Deserialize, Serialize};
 
 #[cfg(any(test, feature = "reth-codec"))]
 use reth_codecs::Compact;
@@ -15,7 +16,7 @@ use reth_codecs::Compact;
 ///
 /// Set EOA account code for one transaction
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct TxEip7702 {
     /// Added as EIP-155: Simple replay attack protection
     pub chain_id: ChainId,

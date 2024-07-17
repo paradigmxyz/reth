@@ -4448,7 +4448,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e310b3a6b5907f99202fcdb4960ff45b93735d7c7d96b760fcff8db2dc0e103d"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -6575,6 +6575,7 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
+ "alloy-trie",
  "arbitrary",
  "bytes",
  "modular-bitfield",
@@ -7910,6 +7911,8 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
+ "serde",
+ "serde_json",
  "thiserror",
  "tokio",
 ]
@@ -8210,7 +8213,6 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-eth-api",
  "reth-rpc-types",
- "serde",
  "serde_json",
 ]
 
@@ -8778,9 +8780,9 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "12.0.0"
+version = "12.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05f930db322034ac6c530d0d5137cd3f562da4bbc74ae533bc255e93f98245c7"
+checksum = "c6cfb48bce8ca2113e157bdbddbd5eeb09daac1c903d79ec17085897c38c7c91"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -8793,9 +8795,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d37905c9d80d261bb24692b3627b00c4827d0aa9fb9e48271aa5d9ffcba06ca"
+checksum = "d485a7ccfbbcaf2d0c08c3d866dae279c6f71d7357862cbea637f23f27b7b695"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
@@ -8811,9 +8813,9 @@ dependencies = [
 
 [[package]]
 name = "revm-interpreter"
-version = "8.0.0"
+version = "8.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31e80a0eafda56c4e85453c16913d4c2a8e92b3772b75c35e99c516aec84b703"
+checksum = "e6b0daddea06fc6da5346acc39b32a357bbe3579e9e3d94117d9ae125cd596fc"
 dependencies = [
  "revm-primitives",
  "serde",
@@ -8821,9 +8823,9 @@ dependencies = [
 
 [[package]]
 name = "revm-precompile"
-version = "9.1.0"
+version = "9.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51b941a8459a7c883d098bd573d9eebf8d4229a10d91a0feed03b1173933525a"
+checksum = "ef55228211251d7b6c7707c3ee13bb70dea4d2fd81ec4034521e4fe31010b2ea"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -8841,9 +8843,9 @@ dependencies = [
 
 [[package]]
 name = "revm-primitives"
-version = "7.0.0"
+version = "7.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "390a506e644fc09feeace6fa283b49ca0ea4bc2fe6d48d216baaa3b4332dc1da"
+checksum = "2fc4311037ee093ec50ec734e1424fcb3e12d535c6cef683b75d1c064639630c"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",

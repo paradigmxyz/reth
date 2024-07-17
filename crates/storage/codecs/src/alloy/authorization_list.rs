@@ -3,12 +3,13 @@ use alloy_eips::eip7702::{Authorization as AlloyAuthorization, SignedAuthorizati
 use alloy_primitives::{Address, ChainId, U256};
 use bytes::Buf;
 use reth_codecs_derive::reth_codec;
+use serde::{Deserialize, Serialize};
 
 /// Authorization acts as bridge which simplifies Compact implementation for AlloyAuthorization.
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_eips::eip7702::Authorization`
 #[reth_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 struct Authorization {
     chain_id: ChainId,
     address: Address,
