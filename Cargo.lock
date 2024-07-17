@@ -7911,6 +7911,8 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
+ "serde",
+ "serde_json",
  "thiserror",
  "tokio",
 ]
@@ -8211,7 +8213,6 @@ dependencies = [
  "reth-primitives",
  "reth-rpc-eth-api",
  "reth-rpc-types",
- "serde",
  "serde_json",
 ]
 
