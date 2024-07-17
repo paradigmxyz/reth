@@ -9,6 +9,9 @@ use core::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(feature = "std"))]
+use alloc::{string::String, boxed::Box, format};
+
 hardfork!(
     /// The name of an Ethereum hardfork.
     EthereumHardfork {
