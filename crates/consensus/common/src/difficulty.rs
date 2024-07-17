@@ -1,4 +1,3 @@
-use reth_primitives::alloy_primitives::utils::ParseUnits::U256;
 use reth_primitives::{Header, U256};
 use std::ops::Shr;
 
@@ -15,16 +14,24 @@ const EXP_DIFF_PERIOD_UINT: u64 = 100_000;
 const FRONTIER_DURATION_LIMIT: u64 = 13;
 
 // MINIMUM_DIFFICULTY The minimum that the difficulty may ever be.
-const MINIMUM_DIFFICULTY: U256 = 131072;
+const MINIMUM_DIFFICULTY: U256 = U256::from(131072);
 
-const U256_ONE: U256 = 1;
-
+/// Bomb delays for different EIPS
+pub enum BombDelay {
+    Byzantium = 3_000_000,
+    Constantinople = 5_000_000,
+    Eip2384 = 9_000_000,
+    Eip3554 = 9_700_000,
+    Eip4345 = 10_700_000,
+    Eip5133 = 11_400_000,
+}
 /// calc_difficulty_frontier is the difficulty adjustment algorithm. It returns the
 /// difficulty that a new block should have when created at time given the parent
 /// block's time and difficulty. The calculation uses the Frontier rules.
 ///
 /// ## Algorithm
-/// block_diff = pdiff + pdiff / 2048 * (1 if time - ptime < 13 else -1) + int(2^((num // 100000) - 2))
+/// block_diff = pdiff + pdiff / 2048 * (1 if time - ptime < 13 else -1) + int(2^((num // 100000) -
+/// 2))
 ///
 /// Where:
 /// - pdiff  = parent.difficulty
@@ -51,14 +58,14 @@ fn calc_difficulty_frontier(timestamp: u64, parent: &Header) -> Result<U256, ()>
     // int(2^((num // 100000) - 2))
     let exponent = (block_num / EXP_DIFF_PERIOD_UINT);
     if exponent > 1 {
-        let exponent = U256::from(exponent.saturating_sub(2));
+        let exponent = exponent.saturating_sub(2).try_into()?;
         let period_count = U256::from(1).checked_shl(exponent).ok_or(Err(()))?;
         pdiff = pdiff + period_count;
     }
-    // block_diff = pdiff + pdiff / 2048 * (1 if time - ptime < 13 else -1) + int(2^((num // 100000) - 2))
+    // block_diff = pdiff + pdiff / 2048 * (1 if time - ptime < 13 else -1) + int(2^((num // 100000)
+    // - 2))
     Ok(pdiff)
 }
-
 
 /// Difficulty adjustment algorithm. It returns
 /// the difficulty that a new block should have when created at time given the
@@ -67,10 +74,12 @@ fn calc_difficulty_frontier(timestamp: u64, parent: &Header) -> Result<U256, ()>
 /// ## Algorithm
 ///
 /// Source:
-/// block_diff = pdiff + pdiff / 2048 * max(1 - (time - ptime) / 10, -99) + 2 ^ int((num / 100000) - 2))
+/// block_diff = pdiff + pdiff / 2048 * max(1 - (time - ptime) / 10, -99) + 2 ^ int((num / 100000) -
+/// 2))
 ///
 /// Current modification to use unsigned ints:
-/// block_diff = pdiff - pdiff / 2048 * max((time - ptime) / 10 - 1, 99) + 2 ^ int((num / 100000) - 2))
+/// block_diff = pdiff - pdiff / 2048 * max((time - ptime) / 10 - 1, 99) + 2 ^ int((num / 100000) -
+/// 2))
 ///
 /// Where:
 /// - pdiff  = parent.difficulty
@@ -111,7 +120,7 @@ fn calc_difficulty_homestead(timestamp: u64, parent: &Header) -> Result<U256, ()
 
     let exponent = (block_num / EXP_DIFF_PERIOD_UINT);
     if exponent > 1 {
-        let exponent = U256::from(exponent.saturating_sub(2));
+        let exponent = exponent.saturating_sub(2).try_into()?;
         let period_count = U256::from(1).checked_shl(exponent).ok_or(Err(()))?;
         pdiff = pdiff + period_count;
     }
@@ -119,47 +128,71 @@ fn calc_difficulty_homestead(timestamp: u64, parent: &Header) -> Result<U256, ()
     Ok(pdiff)
 }
 
-// fn calc_difficulty_generic(bomb_delay: i64) {
-//     /*
-//         https://github.com/ethereum/EIPs/issues/100
-//         pDiff = parent.difficulty
-//         BLOCK_DIFF_FACTOR = 9
-//         adj_factor = max((2 if len(parent.uncles) else 1) - ((timestamp - parent.timestamp) // 9), -99)
-//         a = pDiff + (pDiff // BLOCK_DIFF_FACTOR) * adj_factor
-//         b = min(parent.difficulty, MIN_DIFF)
-//         child_diff = max(a,b )
-//     */
-//
-//     let bomb_delay_from_parent = bomb_delay.saturating_sub(1);
-//
-//     // https://github.com/ethereum/EIPs/issues/100.
-//     // algorithm:
-//     // diff = (parent_diff +
-//     //         (parent_diff / 2048 * max((2 if len(parent.uncles) else 1) - ((timestamp - parent.timestamp) // 9), -99))
-//     //        ) + 2^(periodCount - 2)
-// }
+/// calc_difficulty_generic calculates the difficulty with Byzantium rules, which differs from Homestead in
+/// how uncles affect the calculation.
+///
+/// ## Algorithm
+///
+/// https://github.com/ethereum/EIPs/issues/100
+/// adj_factor = max((2 if len(parent.uncles) else 1) - ((timestamp - parent.timestamp) // 9), -99)
+/// child_diff = int(max(parent.difficulty + (parent.difficulty // BLOCK_DIFF_FACTOR) * adj_factor, min(parent.difficulty, MIN_DIFF)))
+fn calc_difficulty_generic(
+    timestamp: u64,
+    parent: &Header,
+    bomb_delay: &BombDelay,
+) -> Result<U256, ()> {
+    /*
+        https://github.com/ethereum/EIPs/issues/100
+        pDiff = parent.difficulty
+        BLOCK_DIFF_FACTOR = 9
+        adj_factor = max((2 if len(parent.uncles) else 1) - ((timestamp - parent.timestamp) // 9), -99)
+        a = pDiff + (pDiff // BLOCK_DIFF_FACTOR) * adj_factor
+        b = min(parent.difficulty, MIN_DIFF)
+        child_diff = max(a,b )
+    */
+    // Children block timestamp should be later than parent block timestamp
+    assert!(timestamp > parent.timestamp);
 
-// fn calculate_difficulty(timestamp: u64, parent: &Header, bomb_delay_from_parent: u64) {
-//     let block_time = timestamp;
-//     let parent_time = parent.timestamp;
-//
-//     assert!(block_time > parent_time);
-//
-//     // timestamp_adj = ((timestamp - parent.timestamp) // 9)
-//     let timestamp_adj = (block_time - parent_time) / 9;
-//
-//     // pdiff_adj = (parent_diff / 2048)
-//     let pdiff_adj = parent.difficulty.shr(PARENT_DIFF_SHIFT);
-//
-//     // uncles_adj = (2 if len(parent.uncles) else 1)
-//     let uncles_adj: u64 = if parent.ommers_hash_is_empty() { 1 } else { 2 };
-//
-//     // adj_factor = max((2 if len(parent.uncles) else 1) - ((timestamp - parent.timestamp) // 9), -99)
-//     // adj_factor = max(uncles_adj - timestamp_adj, -99)
-//     // casting u64 to i128 is safe
-//     let mut adj_factor = (uncles_adj.wrapping_sub(timestamp_adj)).max(-99);
-//
-//     if uncles_adj < timestamp_adj {
-//     } else {
-//     }
-// }
+    // Note, the calculations below looks at the parent number, which is 1 below
+    // the block number. Thus, we remove one from the delay given
+    let bomb_delay_from_parent = u64::from(bomb_delay) - 1;
+
+    let mut time_adj = (timestamp - parent.timestamp) / 9;
+    let uncle_adj = if parent.ommers_hash_is_empty() { 1 } else { 2 };
+
+    let negative = time_adj >= uncle_adj;
+    if negative {
+        time_adj = time_adj - uncle_adj;
+    } else {
+        time_adj = uncle_adj - time_adj;
+    }
+    if time_adj > 99 {
+        time_adj = 99;
+    }
+
+    let mut pdiff = parent.difficulty.shr(PARENT_DIFF_SHIFT);
+
+    pdiff = pdiff.checked_mul(U256::from(time_adj)).ok_or(Err(()))?;
+
+    if negative {
+        pdiff = parent.difficulty.checked_sub(pdiff).ok_or(Err(()))?;
+    } else {
+        pdiff = parent.difficulty.checked_add(pdiff).ok_or(Err(()))?;
+    }
+
+    if pdiff < MINIMUM_DIFFICULTY {
+        pdiff = MINIMUM_DIFFICULTY;
+    }
+
+    if bomb_delay_from_parent > parent.number {
+        let fake_block_num = parent.number - bomb_delay_from_parent;
+        if fake_block_num >= 2 * EXP_DIFF_PERIOD_UINT {
+            let mut exponent = (fake_block_num / EXP_DIFF_PERIOD_UINT);
+            let exponent = exponent.saturating_sub(2).try_into()?;
+            let period_count = U256::from(1).checked_shl(exponent).ok_or(Err(()))?;
+            pdiff = pdiff.checked_add(period_count).ok_or(Err(()))?;
+        }
+    }
+
+    Ok(pdiff)
+}
