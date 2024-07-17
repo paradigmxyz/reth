@@ -78,7 +78,7 @@ impl Compact for HashBuilderState {
             len += 2 + item.len();
         }
 
-        len += StoredHashBuilderValue(Cow::Borrowed(&self.value)).to_compact(buf);
+        len += StoredHashBuilderValue(self.value).to_compact(buf);
 
         buf.put_u16(self.groups.len() as u16);
         len += 2;

@@ -22,7 +22,7 @@ impl Compact for StorageTrieEntry {
         B: bytes::BufMut + AsMut<[u8]>,
     {
         let nibbles_len = self.nibbles.to_compact(buf);
-        let node_len = StoredBranchNode(Cow::Borrowed(&self.node)).to_compact(buf);
+        let node_len = StoredBranchNode(self.node).to_compact(buf);
         nibbles_len + node_len
     }
 

@@ -37,7 +37,7 @@ impl Compact for StoredSubNode {
         if let Some(node) = &self.node {
             buf.put_u8(1);
             len += 1;
-            len += StoredBranchNode(Cow::Borrowed(node)).to_compact(buf);
+            len += StoredBranchNode(node).to_compact(buf);
         } else {
             len += 1;
             buf.put_u8(0);

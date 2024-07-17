@@ -277,9 +277,7 @@ mod tests {
 
         let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
         for (k, v) in &inputs {
-            account_cursor
-                .upsert(k.clone().into(), StoredBranchNode(Cow::Owned(v.clone())))
-                .unwrap();
+            account_cursor.upsert(k.clone().into(), StoredBranchNode(v.clone())).unwrap();
         }
         let account_trie = DatabaseAccountTrieCursor::new(account_cursor);
         test_cursor(account_trie, &expected);

@@ -36,7 +36,7 @@ use reth_primitives_traits::IntegerList;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{
-    nodes::StoredBranchNodeStatic, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
+    nodes::StoredBranchNode, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -383,7 +383,7 @@ tables! {
     table HashedStorages<Key = B256, Value = StorageEntry, SubKey = B256>;
 
     /// Stores the current state's Merkle Patricia Tree.
-    table AccountsTrie<Key = StoredNibbles, Value = StoredBranchNodeStatic>;
+    table AccountsTrie<Key = StoredNibbles, Value = StoredBranchNode>;
 
     /// From HashedAddress => NibblesSubKey => Intermediate value
     table StoragesTrie<Key = B256, Value = StorageTrieEntry, SubKey = StoredNibblesSubKey>;

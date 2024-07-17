@@ -153,13 +153,13 @@ mod tests {
             cursor
                 .upsert(
                     key.into(),
-                    StoredBranchNode(Cow::Owned(BranchNodeCompact::new(
+                    StoredBranchNode(BranchNodeCompact::new(
                         0b0000_0010_0000_0001,
                         0b0000_0010_0000_0001,
                         0,
                         Vec::default(),
                         None,
-                    ))),
+                    )),
                 )
                 .unwrap();
         }

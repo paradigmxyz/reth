@@ -207,7 +207,7 @@ impl_compression_for_compact!(
     Receipt,
     TxType,
     StorageEntry,
-    StoredBranchNode<'a>,
+    StoredBranchNode,
     StoredNibbles,
     StoredNibblesSubKey,
     StorageTrieEntry,

@@ -7,9 +7,6 @@ use bytes::Buf;
 use reth_codecs::Compact;
 use serde::{Deserialize, Serialize};
 
-/// [`StoredBranchNode`] with a `static` lifetime.
-pub type StoredBranchNodeStatic = StoredBranchNode<'static>;
-
 /// Wrapper around `BranchNodeCompact` that implements `Compact`.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredBranchNode<'a>(pub Cow<'a, BranchNodeCompact>);
@@ -95,7 +92,7 @@ mod tests {
         );
 
         let mut out = Vec::new();
-        let compact_len = StoredBranchNode(Cow::Borrowed(&n)).to_compact(&mut out);
+        let compact_len = StoredBranchNode(n.clone()).to_compact(&mut out);
         assert_eq!(StoredBranchNode::from_compact(&out, compact_len).0 .0.into_owned(), n);
     }
 }

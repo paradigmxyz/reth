@@ -122,7 +122,7 @@ impl TrieUpdates {
                 Some(node) => {
                     if !nibbles.0.is_empty() {
                         num_entries += 1;
-                        account_trie_cursor.upsert(nibbles, StoredBranchNode(Cow::Owned(node)))?;
+                        account_trie_cursor.upsert(nibbles, StoredBranchNode(node))?;
                     }
                 }
                 None => {
