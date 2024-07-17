@@ -2,12 +2,12 @@ use crate::Compact;
 use alloy_eips::eip7702::{Authorization as AlloyAuthorization, SignedAuthorization};
 use alloy_primitives::{Address, ChainId, U256};
 use bytes::Buf;
-use reth_codecs_derive::main_codec;
+use reth_codecs_derive::reth_codec;
 
 /// Authorization acts as bridge which simplifies Compact implementation for AlloyAuthorization.
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_eips::eip7702::Authorization`
-#[main_codec]
+#[reth_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct Authorization {
     chain_id: ChainId,
@@ -36,7 +36,7 @@ impl Compact for AlloyAuthorization {
     }
 }
 
-impl Compact for SignedAuthorization<alloy_primitives::Signature> {
+impl Compact for SignedAuthorization {
     fn to_compact<B>(self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,

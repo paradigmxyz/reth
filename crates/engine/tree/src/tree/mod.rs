@@ -44,7 +44,7 @@ use tracing::*;
 mod memory_overlay;
 pub use memory_overlay::MemoryOverlayStateProvider;
 
-/// Maximum number of blocks to be kept in memory without triggering persistence.
+/// Maximum number of blocks to be kept only in memory without triggering persistence.
 const PERSISTENCE_THRESHOLD: u64 = 256;
 
 /// Represents an executed block stored in-memory.
@@ -101,11 +101,22 @@ pub struct TreeState {
     blocks_by_hash: HashMap<B256, ExecutedBlock>,
     /// Executed blocks grouped by their respective block number.
     blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock>>,
+    /// Pending state not yet applied
+    pending: Option<Arc<State>>,
+    /// Block number and hash of the current head.
+    current_head: Option<(BlockNumber, B256)>,
 }
 
 impl TreeState {
     fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlock>> {
         self.blocks_by_hash.get(&hash).map(|b| b.block.clone())
+    }
+
+    fn block_by_number(&self, number: BlockNumber) -> Option<Arc<SealedBlock>> {
+        self.blocks_by_number
+            .get(&number)
+            .and_then(|blocks| blocks.last())
+            .map(|executed_block| executed_block.block.clone())
     }
 
     /// Insert executed block into the state.
@@ -138,6 +149,30 @@ impl TreeState {
     /// Returns the maximum block number stored.
     pub(crate) fn max_block_number(&self) -> BlockNumber {
         *self.blocks_by_number.last_key_value().unwrap_or((&BlockNumber::default(), &vec![])).0
+    }
+}
+
+impl InMemoryState for TreeState {
+    fn in_memory_state_by_hash(&self, hash: B256) -> Option<Arc<State>> {
+        let sealed_block = self.block_by_hash(hash)?;
+        Some(Arc::new(State::new(sealed_block)))
+    }
+
+    fn in_memory_state_by_number(&self, number: u64) -> Option<Arc<State>> {
+        let sealed_block = self.block_by_number(number)?;
+        Some(Arc::new(State::new(sealed_block)))
+    }
+
+    fn in_memory_current_head(&self) -> Option<(BlockNumber, B256)> {
+        self.current_head
+    }
+
+    fn in_memory_pending_state(&self) -> Option<Arc<State>> {
+        self.pending.clone()
+    }
+
+    fn in_memory_pending_block_hash(&self) -> Option<B256> {
+        self.pending.as_ref().map(|state| state.block_hash)
     }
 }
 
@@ -393,17 +428,18 @@ where
     }
 
     /// Returns true if the canonical chain length minus the last persisted
-    /// block is more than the persistence threshold.
+    /// block is greater than or equal to the persistence threshold.
     fn should_persist(&self) -> bool {
         self.state.tree_state.max_block_number() -
-            self.persistence_state.last_persisted_block_number >
+            self.persistence_state.last_persisted_block_number >=
             PERSISTENCE_THRESHOLD
     }
 
     fn get_blocks_to_persist(&self) -> Vec<ExecutedBlock> {
-        let start = self.persistence_state.last_persisted_block_number + 1;
+        let start = self.persistence_state.last_persisted_block_number;
         let end = start + PERSISTENCE_THRESHOLD;
 
+        // NOTE: this is an exclusive range, to try to include exactly PERSISTENCE_THRESHOLD blocks
         self.state
             .tree_state
             .blocks_by_number
@@ -875,6 +911,49 @@ impl PersistenceState {
     }
 }
 
+/// Represents the tree state kept in memory.
+trait InMemoryState: Send + Sync {
+    /// Returns the state for a given block hash.
+    fn in_memory_state_by_hash(&self, hash: B256) -> Option<Arc<State>>;
+    /// Returns the state for a given block number.
+    fn in_memory_state_by_number(&self, number: u64) -> Option<Arc<State>>;
+    /// Returns the current chain head.
+    fn in_memory_current_head(&self) -> Option<(BlockNumber, B256)>;
+    /// Returns the pending block hash.
+    fn in_memory_pending_block_hash(&self) -> Option<B256>;
+    /// Returns the pending state corresponding to the current head plus one,
+    /// from the payload received in newPayload that does not have a FCU yet.
+    fn in_memory_pending_state(&self) -> Option<Arc<State>>;
+}
+
+/// State composed of a block hash, and the receipts, state and transactions root
+/// after executing it.
+#[derive(Debug, PartialEq, Eq)]
+pub struct State {
+    /// Block hash defining the state.
+    block_hash: B256,
+    /// Block number defining the state.
+    block_number: BlockNumber,
+    /// State root after applying the block.
+    state_root: B256,
+    /// Transactions root of the block.
+    transactions_root: B256,
+    /// Receipts root after applying the block.
+    receipts_root: B256,
+}
+
+impl State {
+    fn new(sealed_block: Arc<SealedBlock>) -> Self {
+        Self {
+            block_hash: sealed_block.hash(),
+            block_number: sealed_block.number,
+            state_root: sealed_block.state_root,
+            transactions_root: sealed_block.transactions_root,
+            receipts_root: sealed_block.receipts_root,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -887,14 +966,31 @@ mod tests {
     use std::sync::mpsc::{channel, Sender};
     use tokio::sync::mpsc::unbounded_channel;
 
-    #[allow(clippy::type_complexity)]
-    fn get_default_tree(
-        persistence_handle: PersistenceHandle,
-        tree_state: TreeState,
-    ) -> (
-        EngineApiTreeHandlerImpl<MockEthProvider, MockExecutorProvider, EthEngineTypes>,
-        Sender<FromEngine<BeaconEngineMessage<EthEngineTypes>>>,
-    ) {
+    struct TestHarness {
+        tree: EngineApiTreeHandlerImpl<MockEthProvider, MockExecutorProvider, EthEngineTypes>,
+        to_tree_tx: Sender<FromEngine<BeaconEngineMessage<EthEngineTypes>>>,
+        blocks: Vec<ExecutedBlock>,
+        sf_action_rx: Receiver<StaticFileAction>,
+    }
+
+    fn get_default_test_harness(number_of_blocks: u64) -> TestHarness {
+        let blocks: Vec<_> = get_executed_blocks(0..number_of_blocks).collect();
+
+        let mut blocks_by_hash = HashMap::new();
+        let mut blocks_by_number = BTreeMap::new();
+        for block in &blocks {
+            blocks_by_hash.insert(block.block().hash(), block.clone());
+            blocks_by_number
+                .entry(block.block().number)
+                .or_insert_with(Vec::new)
+                .push(block.clone());
+        }
+        let tree_state = TreeState { blocks_by_hash, blocks_by_number, ..Default::default() };
+
+        let (action_tx, action_rx) = channel();
+        let (sf_action_tx, sf_action_rx) = channel();
+        let persistence_handle = PersistenceHandle::new(action_tx, sf_action_tx);
+
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -920,8 +1016,8 @@ mod tests {
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         };
 
-        (
-            EngineApiTreeHandlerImpl::new(
+        TestHarness {
+            tree: EngineApiTreeHandlerImpl::new(
                 provider,
                 executor_factory,
                 consensus,
@@ -932,44 +1028,52 @@ mod tests {
                 persistence_handle,
             ),
             to_tree_tx,
-        )
+            blocks,
+            sf_action_rx,
+        }
     }
 
     #[tokio::test]
     async fn test_tree_persist_blocks() {
         // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
         // persistence task.
-        let mut blocks = get_executed_blocks(PERSISTENCE_THRESHOLD + 1);
-
-        let mut blocks_by_hash = HashMap::new();
-        let mut blocks_by_number = BTreeMap::new();
-        for block in &blocks {
-            blocks_by_hash.insert(block.block().hash(), block.clone());
-            blocks_by_number
-                .entry(block.block().number)
-                .or_insert_with(Vec::new)
-                .push(block.clone());
-        }
-        let tree_state = TreeState { blocks_by_hash, blocks_by_number };
-
-        let (action_tx, action_rx) = channel();
-        let (sf_action_tx, sf_action_rx) = channel();
-        let persistence_handle = PersistenceHandle::new(action_tx, sf_action_tx);
-
-        let (tree, to_tree_tx) = get_default_tree(persistence_handle, tree_state);
+        let TestHarness { tree, to_tree_tx, sf_action_rx, mut blocks } =
+            get_default_test_harness(PERSISTENCE_THRESHOLD + 1);
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| tree.run()).unwrap();
 
-        // send a message to the tree
+        // send a message to the tree to enter the main loop.
         to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
 
         let received_action = sf_action_rx.recv().expect("Failed to receive saved blocks");
         if let StaticFileAction::WriteExecutionData((saved_blocks, _)) = received_action {
             // only PERSISTENCE_THRESHOLD will be persisted
             blocks.pop();
-            assert_eq!(saved_blocks, blocks);
             assert_eq!(saved_blocks.len() as u64, PERSISTENCE_THRESHOLD);
+            assert_eq!(saved_blocks, blocks);
         } else {
             panic!("unexpected action received {received_action:?}");
+        }
+    }
+
+    #[test]
+    fn test_in_memory_state_trait_impl() {
+        let TestHarness { tree, to_tree_tx, sf_action_rx, blocks } = get_default_test_harness(10);
+
+        let head_block = blocks.last().unwrap().block();
+        let first_block = blocks.first().unwrap().block();
+
+        for executed_block in blocks {
+            let sealed_block = executed_block.block();
+
+            let expected_state = State::new(Arc::new(sealed_block.clone()));
+
+            let actual_state_by_hash =
+                tree.state.tree_state.in_memory_state_by_hash(sealed_block.hash()).unwrap();
+            assert_eq!(expected_state, *actual_state_by_hash);
+
+            let actual_state_by_number =
+                tree.state.tree_state.in_memory_state_by_number(sealed_block.number).unwrap();
+            assert_eq!(expected_state, *actual_state_by_number);
         }
     }
 }

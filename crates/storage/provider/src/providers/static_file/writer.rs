@@ -1,8 +1,7 @@
-use crate::providers::static_file::metrics::StaticFileProviderOperation;
-
 use super::{
     manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics, StaticFileProvider,
 };
+use crate::providers::static_file::metrics::StaticFileProviderOperation;
 use dashmap::mapref::one::RefMut;
 use reth_codecs::Compact;
 use reth_db_api::models::CompactU256;
@@ -339,7 +338,7 @@ impl StaticFileProviderRW {
     ///
     /// # Note
     /// Commits to the configuration file at the end.
-    fn truncate(
+    pub fn truncate(
         &mut self,
         segment: StaticFileSegment,
         num_rows: u64,

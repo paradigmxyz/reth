@@ -1,8 +1,10 @@
-//! Loads and formats OP transaction RPC response.   
+//! Loads and formats OP transaction RPC response.  
+
+use std::sync::Arc;
 
 use reth_evm_optimism::RethL1BlockInfo;
 use reth_primitives::TransactionSigned;
-use reth_provider::BlockReaderIdExt;
+use reth_provider::{BlockReaderIdExt, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction},
     RawTransactionForwarder,
@@ -17,7 +19,7 @@ impl<Eth: EthTransactions> EthTransactions for OpEthApi<Eth> {
         EthTransactions::provider(&self.inner)
     }
 
-    fn raw_tx_forwarder(&self) -> Option<std::sync::Arc<dyn RawTransactionForwarder>> {
+    fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
         self.inner.raw_tx_forwarder()
     }
 
@@ -29,7 +31,7 @@ impl<Eth: EthTransactions> EthTransactions for OpEthApi<Eth> {
 impl<Eth: LoadTransaction> LoadTransaction for OpEthApi<Eth> {
     type Pool = Eth::Pool;
 
-    fn provider(&self) -> impl reth_provider::TransactionsProvider {
+    fn provider(&self) -> impl TransactionsProvider {
         LoadTransaction::provider(&self.inner)
     }
 

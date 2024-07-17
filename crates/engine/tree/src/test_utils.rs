@@ -108,6 +108,6 @@ pub(crate) fn get_executed_block_with_number(block_number: BlockNumber) -> Execu
     )
 }
 
-pub(crate) fn get_executed_blocks(number: u64) -> Vec<ExecutedBlock> {
-    (1..=number).map(get_executed_block_with_number).collect()
+pub(crate) fn get_executed_blocks(range: Range<u64>) -> impl Iterator<Item = ExecutedBlock> {
+    range.map(get_executed_block_with_number)
 }

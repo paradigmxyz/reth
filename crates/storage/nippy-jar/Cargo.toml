@@ -26,7 +26,7 @@ cuckoofilter = { version = "0.5.0", features = [
 ] }
 
 # compression
-zstd = { version = "0.13", features = ["experimental", "zdict_builder"] }
+zstd = { workspace = true, features = ["experimental", "zdict_builder"] }
 lz4_flex = { version = "0.11", default-features = false }
 
 # offsets

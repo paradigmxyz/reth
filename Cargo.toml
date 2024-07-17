@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 rust-version = "1.79"
 license = "MIT OR Apache-2.0"
@@ -152,6 +152,7 @@ rust.unreachable_pub = "warn"
 rust.unused_must_use = "deny"
 rust.rust_2018_idioms = { level = "deny", priority = -1 }
 rustdoc.all = "warn"
+# rust.unnameable-types = "warn"
 
 [workspace.lints.clippy]
 # These are some of clippy's nursery (i.e., experimental) lints that we like.
@@ -372,15 +373,15 @@ reth-trie-common = { path = "crates/trie/common" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
 
 # revm
-revm = { version = "11.0.0", features = [
+revm = { version = "12.0.0", features = [
     "std",
     "secp256k1",
     "blst",
 ], default-features = false }
-revm-primitives = { version = "6.0.0", features = [
+revm-primitives = { version = "7.0.0", features = [
     "std",
 ], default-features = false }
-revm-inspectors = "0.4"
+revm-inspectors = "0.5"
 
 # eth
 alloy-chains = "0.1.18"
@@ -389,37 +390,37 @@ alloy-dyn-abi = "0.7.2"
 alloy-sol-types = "0.7.2"
 alloy-rlp = "0.3.4"
 alloy-trie = "0.4"
-alloy-rpc-types = { version = "0.1", default-features = false, features = [
+alloy-rpc-types = { version = "0.2", default-features = false, features = [
     "eth",
 ] }
-alloy-rpc-types-anvil = { version = "0.1", default-features = false }
-alloy-rpc-types-beacon = { version = "0.1", default-features = false }
-alloy-rpc-types-admin = { version = "0.1", default-features = false }
-alloy-rpc-types-txpool = { version = "0.1", default-features = false }
-alloy-serde = { version = "0.1", default-features = false }
-alloy-rpc-types-engine = { version = "0.1", default-features = false }
-alloy-rpc-types-eth = { version = "0.1", default-features = false }
-alloy-rpc-types-mev = { version = "0.1", default-features = false }
-alloy-rpc-types-trace = { version = "0.1", default-features = false }
-alloy-genesis = { version = "0.1", default-features = false }
-alloy-node-bindings = { version = "0.1", default-features = false }
-alloy-provider = { version = "0.1", default-features = false, features = [
+alloy-rpc-types-anvil = { version = "0.2", default-features = false }
+alloy-rpc-types-beacon = { version = "0.2", default-features = false }
+alloy-rpc-types-admin = { version = "0.2", default-features = false }
+alloy-rpc-types-txpool = { version = "0.2", default-features = false }
+alloy-serde = { version = "0.2", default-features = false }
+alloy-rpc-types-engine = { version = "0.2", default-features = false }
+alloy-rpc-types-eth = { version = "0.2", default-features = false }
+alloy-rpc-types-mev = { version = "0.2", default-features = false }
+alloy-rpc-types-trace = { version = "0.2", default-features = false }
+alloy-genesis = { version = "0.2", default-features = false }
+alloy-node-bindings = { version = "0.2", default-features = false }
+alloy-provider = { version = "0.2", default-features = false, features = [
     "reqwest",
 ] }
-alloy-eips = { version = "0.1", default-features = false }
-alloy-signer = { version = "0.1", default-features = false }
-alloy-signer-local = { version = "0.1", default-features = false }
-alloy-network = { version = "0.1", default-features = false }
-alloy-consensus = { version = "0.1", default-features = false }
-alloy-transport = { version = "0.1" }
-alloy-transport-http = { version = "0.1", features = [
+alloy-eips = { version = "0.2", default-features = false }
+alloy-signer = { version = "0.2", default-features = false }
+alloy-signer-local = { version = "0.2", default-features = false }
+alloy-network = { version = "0.2", default-features = false }
+alloy-consensus = { version = "0.2", default-features = false }
+alloy-transport = { version = "0.2" }
+alloy-transport-http = { version = "0.2", features = [
     "reqwest-rustls-tls",
 ], default-features = false }
-alloy-transport-ws = { version = "0.1", default-features = false }
-alloy-transport-ipc = { version = "0.1", default-features = false }
-alloy-pubsub = { version = "0.1", default-features = false }
-alloy-json-rpc = { version = "0.1", default-features = false }
-alloy-rpc-client = { version = "0.1", default-features = false }
+alloy-transport-ws = { version = "0.2", default-features = false }
+alloy-transport-ipc = { version = "0.2", default-features = false }
+alloy-pubsub = { version = "0.2", default-features = false }
+alloy-json-rpc = { version = "0.2", default-features = false }
+alloy-rpc-client = { version = "0.2", default-features = false }
 
 # op
 op-alloy-rpc-types = "0.1"
@@ -465,6 +466,7 @@ url = "2.3"
 backon = "0.4"
 boyer-moore-magiclen = "0.2.16"
 shellexpand = "3.0.0"
+zstd = "0.13"
 
 # metrics
 metrics = "0.23.0"

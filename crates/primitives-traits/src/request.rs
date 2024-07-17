@@ -4,7 +4,7 @@ pub use alloy_consensus::Request;
 use alloy_eips::eip7685::{Decodable7685, Encodable7685};
 use alloy_rlp::{Decodable, Encodable};
 use derive_more::{Deref, DerefMut, From, IntoIterator};
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{reth_codec, Compact};
 use revm_primitives::Bytes;
 
 #[cfg(not(feature = "std"))]
@@ -13,7 +13,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 /// A list of EIP-7685 requests.
-#[main_codec]
+#[reth_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash, Deref, DerefMut, From, IntoIterator)]
 pub struct Requests(pub Vec<Request>);
 

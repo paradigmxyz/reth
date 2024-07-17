@@ -49,11 +49,12 @@ mod tests {
     use super::*;
     use alloy_primitives::Bytes;
     use proptest::proptest;
+    use proptest_arbitrary_interop::arb;
     use serde::Deserialize;
 
     proptest! {
         #[test]
-        fn test_roundtrip_compact_access_list_item(access_list_item: AccessListItem) {
+        fn test_roundtrip_compact_access_list_item(access_list_item in arb::<AccessListItem>()) {
             let mut compacted_access_list_item = Vec::<u8>::new();
             let len = access_list_item.clone().to_compact(&mut compacted_access_list_item);
 
@@ -64,7 +65,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn test_roundtrip_compact_access_list(access_list: AccessList) {
+        fn test_roundtrip_compact_access_list(access_list in arb::<AccessList>()) {
             let mut compacted_access_list = Vec::<u8>::new();
             let len = access_list.clone().to_compact(&mut compacted_access_list);
 

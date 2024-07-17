@@ -254,7 +254,7 @@ where
     let mut account_info = DatabaseRef::basic_ref(db, account)?.unwrap_or_default();
 
     if let Some(nonce) = account_override.nonce {
-        account_info.nonce = nonce.to();
+        account_info.nonce = nonce;
     }
     if let Some(code) = account_override.code {
         account_info.code = Some(Bytecode::new_raw(code));
