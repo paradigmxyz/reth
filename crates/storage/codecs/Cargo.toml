@@ -51,3 +51,4 @@ alloy = [
     "dep:modular-bitfield",
     "dep:alloy-trie",
 ]
+optimism = []
