@@ -24,7 +24,7 @@ ARG RUSTFLAGS=""
 ENV RUSTFLAGS "$RUSTFLAGS"
 
 # Extra Cargo features
-ARG FEATURES=""
+ARG FEATURES="optimism"
 ENV FEATURES $FEATURES
 
 # Builds dependencies
@@ -32,7 +32,7 @@ RUN cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --recipe-pat
 
 # Build application
 COPY . .
-RUN cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin reth
+RUN cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin op-reth
 
 # ARG is not resolved in COPY so we have to hack around it by copying the
 # binary to a temporary location
