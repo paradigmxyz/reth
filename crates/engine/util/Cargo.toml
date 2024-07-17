@@ -36,7 +36,4 @@ tracing.workspace = true
 futures.workspace = true
 
 [features]
-optimism = [
-    "reth-rpc/optimism",
-    "reth-beacon-consensus/optimism",
-]
+optimism = ["reth-beacon-consensus/optimism"]
