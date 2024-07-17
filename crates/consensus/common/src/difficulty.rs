@@ -38,7 +38,7 @@ pub enum BombDelay {
 /// - ptime = parent.time
 /// - time = block.timestamp
 /// - num = block.number
-fn calc_difficulty_frontier(timestamp: u64, parent: &Header) -> Result<U256, ()> {
+pub fn calc_difficulty_frontier(timestamp: u64, parent: &Header) -> Result<U256, ()> {
     // Children block timestamp should be later than parent block timestamp
     assert!(timestamp > parent.timestamp);
 
@@ -86,7 +86,7 @@ fn calc_difficulty_frontier(timestamp: u64, parent: &Header) -> Result<U256, ()>
 /// - ptime = parent.time
 /// - time = block.timestamp
 /// - num = block.number
-fn calc_difficulty_homestead(timestamp: u64, parent: &Header) -> Result<U256, ()> {
+pub fn calc_difficulty_homestead(timestamp: u64, parent: &Header) -> Result<U256, ()> {
     // Children block timestamp should be later than parent block timestamp
     assert!(timestamp > parent.timestamp);
 
@@ -136,7 +136,7 @@ fn calc_difficulty_homestead(timestamp: u64, parent: &Header) -> Result<U256, ()
 /// https://github.com/ethereum/EIPs/issues/100
 /// adj_factor = max((2 if len(parent.uncles) else 1) - ((timestamp - parent.timestamp) // 9), -99)
 /// child_diff = int(max(parent.difficulty + (parent.difficulty // BLOCK_DIFF_FACTOR) * adj_factor, min(parent.difficulty, MIN_DIFF)))
-fn calc_difficulty_generic(
+pub fn calc_difficulty_generic(
     timestamp: u64,
     parent: &Header,
     bomb_delay: &BombDelay,
