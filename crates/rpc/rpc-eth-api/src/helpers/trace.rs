@@ -6,17 +6,19 @@ use reth_primitives::B256;
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
-    EthApiError, EthResult,
+    EthApiError,
 };
 use reth_rpc_types::{BlockId, TransactionInfo};
 use revm::{db::CacheDB, Database, DatabaseCommit, GetInspector, Inspector};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use revm_primitives::{EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState};
 
+use crate::{EthApiTypes, FromEvmError};
+
 use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 
 /// Executes CPU heavy tasks.
-pub trait Trace: LoadState {
+pub trait Trace<T: EthApiTypes>: LoadState<T> {
     /// Returns a handle for reading evm config.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -29,10 +31,10 @@ pub trait Trace: LoadState {
         db: DB,
         env: EnvWithHandlerCfg,
         inspector: I,
-    ) -> EthResult<(ResultAndState, EnvWithHandlerCfg)>
+    ) -> Result<(ResultAndState, EnvWithHandlerCfg), T::Error>
     where
         DB: Database,
-        <DB as Database>::Error: Into<EthApiError>,
+        EthApiError: From<DB::Error>,
         I: GetInspector<DB>,
     {
         self.inspect_and_return_db(db, env, inspector).map(|(res, env, _)| (res, env))
@@ -48,14 +50,14 @@ pub trait Trace: LoadState {
         db: DB,
         env: EnvWithHandlerCfg,
         inspector: I,
-    ) -> EthResult<(ResultAndState, EnvWithHandlerCfg, DB)>
+    ) -> Result<(ResultAndState, EnvWithHandlerCfg, DB), T::Error>
     where
         DB: Database,
-        <DB as Database>::Error: Into<EthApiError>,
+        EthApiError: From<DB::Error>,
         I: GetInspector<DB>,
     {
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, env, inspector);
-        let res = evm.transact()?;
+        let res = evm.transact().map_err(T::Error::from_evm_err)?;
         let (db, env) = evm.into_db_and_env_with_handler_cfg();
         Ok((res, env, db))
     }
@@ -73,10 +75,10 @@ pub trait Trace: LoadState {
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
-    ) -> EthResult<R>
+    ) -> Result<R, T::Error>
     where
-        Self: Call,
-        F: FnOnce(TracingInspector, ResultAndState) -> EthResult<R>,
+        Self: Call<T>,
+        F: FnOnce(TracingInspector, ResultAndState) -> Result<R, T::Error>,
     {
         self.with_state_at_block(at, |state| {
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
@@ -99,10 +101,10 @@ pub trait Trace: LoadState {
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
-    ) -> impl Future<Output = EthResult<R>> + Send
+    ) -> impl Future<Output = Result<R, T::Error>> + Send
     where
-        Self: LoadPendingBlock + Call,
-        F: FnOnce(TracingInspector, ResultAndState, StateCacheDb<'_>) -> EthResult<R>
+        Self: LoadPendingBlock<T> + Call<T>,
+        F: FnOnce(TracingInspector, ResultAndState, StateCacheDb<'_>) -> Result<R, T::Error>
             + Send
             + 'static,
         R: Send + 'static,
@@ -130,15 +132,15 @@ pub trait Trace: LoadState {
         hash: B256,
         config: TracingInspectorConfig,
         f: F,
-    ) -> impl Future<Output = EthResult<Option<R>>> + Send
+    ) -> impl Future<Output = Result<Option<R>, T::Error>> + Send
     where
-        Self: LoadPendingBlock + LoadTransaction + Call,
+        Self: LoadPendingBlock<T> + LoadTransaction<T> + Call<T>,
         F: FnOnce(
                 TransactionInfo,
                 TracingInspector,
                 ResultAndState,
                 StateCacheDb<'_>,
-            ) -> EthResult<R>
+            ) -> Result<R, T::Error>
             + Send
             + 'static,
         R: Send + 'static,
@@ -160,10 +162,10 @@ pub trait Trace: LoadState {
         hash: B256,
         mut inspector: Insp,
         f: F,
-    ) -> impl Future<Output = EthResult<Option<R>>> + Send
+    ) -> impl Future<Output = Result<Option<R>, T::Error>> + Send
     where
-        Self: LoadPendingBlock + LoadTransaction + Call,
-        F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDb<'_>) -> EthResult<R>
+        Self: LoadPendingBlock<T> + LoadTransaction<T> + Call<T>,
+        F: FnOnce(TransactionInfo, Insp, ResultAndState, StateCacheDb<'_>) -> Result<R, T::Error>
             + Send
             + 'static,
         Insp: for<'a, 'b> Inspector<StateCacheDbRefMutWrapper<'a, 'b>> + Send + 'static,
@@ -222,16 +224,16 @@ pub trait Trace: LoadState {
         highest_index: Option<u64>,
         config: TracingInspectorConfig,
         f: F,
-    ) -> impl Future<Output = EthResult<Option<Vec<R>>>> + Send
+    ) -> impl Future<Output = Result<Option<Vec<R>>, T::Error>> + Send
     where
-        Self: LoadBlock,
+        Self: LoadBlock<T>,
         F: Fn(
                 TransactionInfo,
                 TracingInspector,
                 ExecutionResult,
                 &EvmState,
                 &StateCacheDb<'_>,
-            ) -> EthResult<R>
+            ) -> Result<R, T::Error>
             + Send
             + 'static,
         R: Send + 'static,
@@ -260,10 +262,16 @@ pub trait Trace: LoadState {
         highest_index: Option<u64>,
         mut inspector_setup: Setup,
         f: F,
-    ) -> impl Future<Output = EthResult<Option<Vec<R>>>> + Send
+    ) -> impl Future<Output = Result<Option<Vec<R>>, T::Error>> + Send
     where
-        Self: LoadBlock,
-        F: Fn(TransactionInfo, Insp, ExecutionResult, &EvmState, &StateCacheDb<'_>) -> EthResult<R>
+        Self: LoadBlock<T>,
+        F: Fn(
+                TransactionInfo,
+                Insp,
+                ExecutionResult,
+                &EvmState,
+                &StateCacheDb<'_>,
+            ) -> Result<R, T::Error>
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
@@ -360,9 +368,9 @@ pub trait Trace: LoadState {
         block_id: BlockId,
         config: TracingInspectorConfig,
         f: F,
-    ) -> impl Future<Output = EthResult<Option<Vec<R>>>> + Send
+    ) -> impl Future<Output = Result<Option<Vec<R>>, T::Error>> + Send
     where
-        Self: LoadBlock,
+        Self: LoadBlock<T>,
         // This is the callback that's invoked for each transaction with the inspector, the result,
         // state and db
         F: Fn(
@@ -371,7 +379,7 @@ pub trait Trace: LoadState {
                 ExecutionResult,
                 &EvmState,
                 &StateCacheDb<'_>,
-            ) -> EthResult<R>
+            ) -> Result<R, T::Error>
             + Send
             + 'static,
         R: Send + 'static,
@@ -398,12 +406,18 @@ pub trait Trace: LoadState {
         block_id: BlockId,
         insp_setup: Setup,
         f: F,
-    ) -> impl Future<Output = EthResult<Option<Vec<R>>>> + Send
+    ) -> impl Future<Output = Result<Option<Vec<R>>, T::Error>> + Send
     where
-        Self: LoadBlock,
+        Self: LoadBlock<T>,
         // This is the callback that's invoked for each transaction with the inspector, the result,
         // state and db
-        F: Fn(TransactionInfo, Insp, ExecutionResult, &EvmState, &StateCacheDb<'_>) -> EthResult<R>
+        F: Fn(
+                TransactionInfo,
+                Insp,
+                ExecutionResult,
+                &EvmState,
+                &StateCacheDb<'_>,
+            ) -> Result<R, T::Error>
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,

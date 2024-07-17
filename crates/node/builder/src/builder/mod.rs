@@ -340,7 +340,6 @@ where
         self,
     ) -> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
     where
-        CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
         AO: NodeAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
     {
         WithLaunchContext {

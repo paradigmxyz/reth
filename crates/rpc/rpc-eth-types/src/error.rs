@@ -137,6 +137,11 @@ impl EthApiError {
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
+
+    /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
+    pub const fn is_gas_too_high(&self) -> bool {
+        matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh))
+    }
 }
 
 impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
@@ -221,18 +226,20 @@ impl From<reth_errors::ProviderError> for EthApiError {
     }
 }
 
-impl<T> From<EVMError<T>> for EthApiError
+impl<T> TryFrom<EVMError<T>> for EthApiError
 where
     T: Into<Self>,
 {
-    fn from(err: EVMError<T>) -> Self {
+    type Error = revm::primitives::InvalidTransaction;
+
+    fn try_from(err: EVMError<T>) -> Result<Self, Self::Error> {
         match err {
-            EVMError::Transaction(err) => RpcInvalidTransactionError::from(err).into(),
-            EVMError::Header(InvalidHeader::PrevrandaoNotSet) => Self::PrevrandaoNotSet,
-            EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => Self::ExcessBlobGasNotSet,
-            EVMError::Database(err) => err.into(),
-            EVMError::Custom(err) => Self::EvmCustom(err),
-            EVMError::Precompile(err) => Self::EvmPrecompile(err),
+            EVMError::Transaction(err) => Ok(RpcInvalidTransactionError::try_from(err)?.into()),
+            EVMError::Header(InvalidHeader::PrevrandaoNotSet) => Ok(Self::PrevrandaoNotSet),
+            EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => Ok(Self::ExcessBlobGasNotSet),
+            EVMError::Database(err) => Ok(err.into()),
+            EVMError::Custom(err) => Ok(Self::EvmCustom(err)),
+            EVMError::Precompile(err) => Ok(Self::EvmPrecompile(err)),
         }
     }
 }
@@ -381,29 +388,6 @@ impl RpcInvalidTransactionError {
     }
 }
 
-/// Optimism specific invalid transaction errors
-#[cfg(feature = "optimism")]
-#[derive(thiserror::Error, Debug)]
-pub enum OptimismInvalidTransactionError {
-    /// A deposit transaction was submitted as a system transaction post-regolith.
-    #[error("no system transactions allowed after regolith")]
-    DepositSystemTxPostRegolith,
-    /// A deposit transaction halted post-regolith
-    #[error("deposit transaction halted after regolith")]
-    HaltedDepositPostRegolith,
-}
-
-#[cfg(feature = "optimism")]
-impl ToRpcError for OptimismInvalidTransactionError {
-    fn to_rpc_error(&self) -> jsonrpsee_types::error::ErrorObject<'static> {
-        match self {
-            Self::DepositSystemTxPostRegolith | Self::HaltedDepositPostRegolith => {
-                rpc_err(EthRpcErrorCode::TransactionRejected.code(), self.to_string(), None)
-            }
-        }
-    }
-}
-
 impl RpcInvalidTransactionError {
     /// Returns the rpc error code for this error.
     const fn error_code(&self) -> i32 {
@@ -455,50 +439,47 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
     }
 }
 
-impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
-    fn from(err: revm::primitives::InvalidTransaction) -> Self {
+impl TryFrom<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
+    type Error = revm::primitives::InvalidTransaction;
+
+    fn try_from(err: revm::primitives::InvalidTransaction) -> Result<Self, Self::Error> {
         use revm::primitives::InvalidTransaction;
         match err {
-            InvalidTransaction::InvalidChainId => Self::InvalidChainId,
-            InvalidTransaction::PriorityFeeGreaterThanMaxFee => Self::TipAboveFeeCap,
-            InvalidTransaction::GasPriceLessThanBasefee => Self::FeeCapTooLow,
-            InvalidTransaction::CallerGasLimitMoreThanBlock => Self::GasTooHigh,
-            InvalidTransaction::CallGasCostMoreThanGasLimit => Self::GasTooHigh,
-            InvalidTransaction::RejectCallerWithCode => Self::SenderNoEOA,
-            InvalidTransaction::LackOfFundForMaxFee { .. } => Self::InsufficientFunds,
-            InvalidTransaction::OverflowPaymentInTransaction => Self::GasUintOverflow,
-            InvalidTransaction::NonceOverflowInTransaction => Self::NonceMaxValue,
-            InvalidTransaction::CreateInitCodeSizeLimit => Self::MaxInitCodeSizeExceeded,
-            InvalidTransaction::NonceTooHigh { .. } => Self::NonceTooHigh,
-            InvalidTransaction::NonceTooLow { .. } => Self::NonceTooLow,
-            InvalidTransaction::AccessListNotSupported => Self::AccessListNotSupported,
-            InvalidTransaction::MaxFeePerBlobGasNotSupported => Self::MaxFeePerBlobGasNotSupported,
-            InvalidTransaction::BlobVersionedHashesNotSupported => {
-                Self::BlobVersionedHashesNotSupported
+            InvalidTransaction::InvalidChainId => Ok(Self::InvalidChainId),
+            InvalidTransaction::PriorityFeeGreaterThanMaxFee => Ok(Self::TipAboveFeeCap),
+            InvalidTransaction::GasPriceLessThanBasefee => Ok(Self::FeeCapTooLow),
+            InvalidTransaction::CallerGasLimitMoreThanBlock |
+            InvalidTransaction::CallGasCostMoreThanGasLimit => Ok(Self::GasTooHigh),
+            InvalidTransaction::RejectCallerWithCode => Ok(Self::SenderNoEOA),
+            InvalidTransaction::LackOfFundForMaxFee { .. } => Ok(Self::InsufficientFunds),
+            InvalidTransaction::OverflowPaymentInTransaction => Ok(Self::GasUintOverflow),
+            InvalidTransaction::NonceOverflowInTransaction => Ok(Self::NonceMaxValue),
+            InvalidTransaction::CreateInitCodeSizeLimit => Ok(Self::MaxInitCodeSizeExceeded),
+            InvalidTransaction::NonceTooHigh { .. } => Ok(Self::NonceTooHigh),
+            InvalidTransaction::NonceTooLow { .. } => Ok(Self::NonceTooLow),
+            InvalidTransaction::AccessListNotSupported => Ok(Self::AccessListNotSupported),
+            InvalidTransaction::MaxFeePerBlobGasNotSupported => {
+                Ok(Self::MaxFeePerBlobGasNotSupported)
             }
-            InvalidTransaction::BlobGasPriceGreaterThanMax => Self::BlobFeeCapTooLow,
-            InvalidTransaction::EmptyBlobs => Self::BlobTransactionMissingBlobHashes,
-            InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
-            InvalidTransaction::TooManyBlobs { max, have } => Self::TooManyBlobs { max, have },
-            InvalidTransaction::BlobCreateTransaction => Self::BlobTransactionIsCreate,
-            InvalidTransaction::EofCrateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
+            InvalidTransaction::BlobVersionedHashesNotSupported => {
+                Ok(Self::BlobVersionedHashesNotSupported)
+            }
+            InvalidTransaction::BlobGasPriceGreaterThanMax => Ok(Self::BlobFeeCapTooLow),
+            InvalidTransaction::EmptyBlobs => Ok(Self::BlobTransactionMissingBlobHashes),
+            InvalidTransaction::BlobVersionNotSupported => Ok(Self::BlobHashVersionMismatch),
+            InvalidTransaction::TooManyBlobs { max, have } => Ok(Self::TooManyBlobs { max, have }),
+            InvalidTransaction::BlobCreateTransaction => Ok(Self::BlobTransactionIsCreate),
+            InvalidTransaction::EofCrateShouldHaveToAddress => {
+                Ok(Self::EofCrateShouldHaveToAddress)
+            }
             InvalidTransaction::AuthorizationListNotSupported => {
-                Self::AuthorizationListNotSupported
+                Ok(Self::AuthorizationListNotSupported)
             }
             InvalidTransaction::AuthorizationListInvalidFields => {
-                Self::AuthorizationListInvalidFields
+                Ok(Self::AuthorizationListInvalidFields)
             }
-            #[cfg(feature = "optimism")]
-            InvalidTransaction::OptimismError(err) => match err {
-                revm_primitives::OptimismInvalidTransaction::DepositSystemTxPostRegolith => {
-                    Self::other(OptimismInvalidTransactionError::DepositSystemTxPostRegolith)
-                }
-                revm_primitives::OptimismInvalidTransaction::HaltedDepositPostRegolith => {
-                    Self::Other(Box::new(
-                        OptimismInvalidTransactionError::HaltedDepositPostRegolith,
-                    ))
-                }
-            },
+            #[allow(unreachable_patterns)]
+            _ => Err(err),
         }
     }
 }

@@ -19,7 +19,10 @@ pub mod helpers;
 pub mod pubsub;
 
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
-pub use core::{EthApiServer, FullEthApiServer};
+pub use core::{
+    AsEthApiError, EthApiServer, EthApiTypes, FromEthApiError, FromEvmError, FullEthApiServer,
+    IntoEthApiError,
+};
 pub use filter::EthFilterApiServer;
 pub use pubsub::EthPubSubApiServer;
 
