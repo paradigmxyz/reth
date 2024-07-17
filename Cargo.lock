@@ -6572,6 +6572,7 @@ version = "1.0.1"
 dependencies = [
  "auto_impl",
  "reth-primitives",
+ "thiserror",
  "thiserror-no-std",
 ]
 
@@ -7945,6 +7946,7 @@ dependencies = [
  "sucds",
  "tempfile",
  "test-fuzz",
+ "thiserror",
  "thiserror-no-std",
  "toml",
  "triehash",
@@ -8377,6 +8379,7 @@ dependencies = [
  "serde",
  "serde_json",
  "similar-asserts",
+ "thiserror-no-std",
 ]
 
 [[package]]
