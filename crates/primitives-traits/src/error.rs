@@ -5,6 +5,8 @@ use core::{
 
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
+#[cfg(not(feature = "std"))]
+extern crate alloc;
 
 /// A pair of values, one of which is expected and one of which is actual.
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]

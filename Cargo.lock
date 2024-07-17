@@ -8042,7 +8042,6 @@ dependencies = [
  "serde",
  "serde_json",
  "test-fuzz",
- "thiserror-no-std",
 ]
 
 [[package]]
