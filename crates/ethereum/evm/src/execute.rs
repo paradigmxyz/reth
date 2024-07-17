@@ -27,7 +27,7 @@ use reth_revm::{
     db::states::bundle_state::BundleRetention,
     inspectors::NoOpInspector,
     state_change::{apply_blockhashes_update, post_block_balance_increments},
-    Evm, Inspector, State,
+    Evm, EvmBuilder, Inspector, State,
 };
 use revm_primitives::{
     db::{Database, DatabaseCommit},
@@ -308,8 +308,8 @@ where
     /// EIP-7685 [requests](Request).
     ///
     /// Returns an error if execution fails.
-    fn execute_without_verification<'b>(
-        &'b mut self,
+    fn execute_without_verification(
+        &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
     ) -> Result<EthExecuteOutput, BlockExecutionError> {
@@ -320,11 +320,13 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let output = {
             if let Some(inspector) = self.inspector.as_mut() {
-                let evm = self.executor.evm_config.evm_with_env_and_inspector(
-                    &mut self.state,
-                    env,
-                    inspector,
-                );
+                let mut evm = EvmBuilder::default()
+                    .with_db(&mut self.state)
+                    .with_external_context(inspector)
+                    .build();
+                evm.modify_spec_id(env.spec_id());
+                evm.context.evm.env = env.env;
+
                 self.executor.execute_state_transitions(block, evm)
             } else {
                 let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
