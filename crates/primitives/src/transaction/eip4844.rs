@@ -5,6 +5,8 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::mem;
+
+#[cfg(any(test, feature = "reth-codec"))]
 use reth_codecs::Compact;
 
 /// To be used with `Option<CompactPlaceholder>` to place or replace one bit on the bitflag struct.
