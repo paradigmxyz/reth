@@ -1,5 +1,6 @@
 //! Main evm command for launching a evm tools
 
+use std::collections::VecDeque;
 use clap::Parser;
 use eyre::Result;
 use tracing::{info, debug};
@@ -74,11 +75,11 @@ impl EvmCommand {
 
 
         // 创建任务池
-        let mut tasks = Vec::new();
+        let mut tasks = VecDeque::new();
         let mut current_start = self.begin_number;
         while current_start <= self.end_number {
             let current_end = std::cmp::min(current_start + self.step_size as u64 - 1, self.end_number);
-            tasks.push(Task {
+            tasks.push_back(Task {
                 start: current_start,
                 end: current_end,
             });
@@ -158,66 +159,60 @@ impl EvmCommand {
                         if queue.is_empty() {
                             break;
                         }
-                        queue.remove(0)
+                        queue.pop_front()
                     };
 
-                    let mut td = blockchain_db.header_td_by_number(task.start - 1)?
-                        .ok_or_else(|| ProviderError::HeaderNotFound(task.start.into()))?;
+                    if let Some(task) = task {
+                        let mut td = blockchain_db.header_td_by_number(task.start - 1)?
+                            .ok_or_else(|| ProviderError::HeaderNotFound(task.start.into()))?;
 
-                    debug!(
-                        target: "exex::evm",
-                        td = ?td,
-                        thread_start = ?task.start,
-                        "fetch td"
-                    );
+                        let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(task.start - 1)?);
+                        let executor = block_executor!(provider_factory.chain_spec());
+                        let mut executor = executor.batch_executor(db);
+                        let blocks = blockchain_db.block_with_senders_range(task.start..=task.end).unwrap();
 
+                        let start = Instant::now();
+                        let mut step_cumulative_gas: u64 = 0;
+                        let mut step_txs_counter: usize = 0;
 
-                    let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(task.start-1)?);
-                    let executor = block_executor!(provider_factory.chain_spec());
-                    let mut executor = executor.batch_executor(db);
-                    let blocks = blockchain_db.block_with_senders_range(task.start..=task.end).unwrap();
-
-                    let start = Instant::now();
-                    let mut step_cumulative_gas:u64 = 0;
-                    let mut step_txs_counter:usize = 0;
-
-                    executor.execute_and_verify_many(blocks.iter()
-                        .map(|block| {
-                            let result = (block, td).into();
-                            td += block.header.difficulty;
-                            step_cumulative_gas += block.block.gas_used;
-                            step_txs_counter += block.block.body.len();
-                            // info!(target:"exex::evm", block_number=block.block.header.number, txs_count= block.block.body.len(), "Adding transactions count");
-                            result
-                        })
-                        .collect::<Vec<_>>())?;
+                        executor.execute_and_verify_many(blocks.iter()
+                            .map(|block| {
+                                let result = (block, td).into();
+                                td += block.header.difficulty;
+                                step_cumulative_gas += block.block.gas_used;
+                                step_txs_counter += block.block.body.len();
+                                // info!(target:"exex::evm", block_number=block.block.header.number, txs_count= block.block.body.len(), "Adding transactions count");
+                                result
+                            })
+                            .collect::<Vec<_>>())?;
 
 
-                    // Ensure the locks are correctly used without deadlock
-                    {
-                        *cumulative_gas.lock().unwrap() +=step_cumulative_gas;
+                        // Ensure the locks are correctly used without deadlock
+                        {
+                            *cumulative_gas.lock().unwrap() += step_cumulative_gas;
+                        }
+                        {
+                            *block_counter.lock().unwrap() += blocks.len() as u64;
+                        }
+                        {
+                            *txs_counter.lock().unwrap() += step_txs_counter as u64;
+                        }
+
+                        debug!(
+                            target:"exex::evm",
+                            task_start = task.start,
+                            task_end = task.end,
+                            txs=step_txs_counter,
+                            blocks = blocks.len(),
+                            throughput = format_gas_throughput(step_cumulative_gas, start.elapsed()),
+                            time = ?start.elapsed(),
+                            thread_id = ?thread_id,
+                            total_difficulty = ?td,
+                            "loop"
+                        );
+
+                        drop(executor);
                     }
-                    {
-                        *block_counter.lock().unwrap()+= blocks.len() as u64;
-                    }
-                    {
-                        *txs_counter.lock().unwrap() += step_txs_counter as u64;
-                    }
-
-                    debug!(
-                        target:"exex::evm",
-                        task_start = task.start,
-                        task_end = task.end,
-                        txs=step_txs_counter,
-                        blocks = blocks.len(),
-                        throughput = format_gas_throughput(step_cumulative_gas, start.elapsed()),
-                        time = ?start.elapsed(),
-                        thread_id = ?thread_id,
-                        total_difficulty = ?td,
-                        "loop"
-                    );
-
-                    drop(executor);
                 }
                 Ok(true)
             }));
