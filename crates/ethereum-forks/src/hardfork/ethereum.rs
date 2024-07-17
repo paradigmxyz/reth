@@ -10,7 +10,7 @@ use core::{
 use serde::{Deserialize, Serialize};
 
 #[cfg(not(feature = "std"))]
-use alloc::{string::String, boxed::Box, format};
+use alloc::{boxed::Box, format, string::String};
 
 hardfork!(
     /// The name of an Ethereum hardfork.

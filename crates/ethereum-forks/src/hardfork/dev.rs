@@ -3,7 +3,7 @@ use alloy_primitives::U256;
 use once_cell::sync::Lazy;
 
 #[cfg(not(feature = "std"))]
-use alloc::{ vec};
+use alloc::vec;
 
 /// Dev hardforks
 pub static DEV_HARDFORKS: Lazy<ChainHardforks> = Lazy::new(|| {
