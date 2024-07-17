@@ -19,6 +19,7 @@ alloy-consensus = { workspace = true, optional = true }
 alloy-eips = { workspace = true, optional = true }
 alloy-genesis = { workspace = true, optional = true }
 alloy-primitives.workspace = true
+alloy-trie.workspace = true
 
 # misc
 bytes.workspace = true
