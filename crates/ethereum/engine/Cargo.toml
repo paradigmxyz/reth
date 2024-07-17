@@ -27,5 +27,8 @@ pin-project.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 
+# misc
+thiserror.workspace = true
+
 [dev-dependencies]
 reth-engine-tree = { workspace = true, features = ["test-utils"] }
