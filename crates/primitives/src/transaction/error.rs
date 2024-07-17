@@ -1,8 +1,16 @@
 use crate::{GotExpectedBoxed, U256};
 
+#[cfg(feature = "std")]
+use thiserror::Error;
+
+#[cfg(not(feature = "std"))]
+use thiserror_no_std::Error;
+// core::error::Error;
+
+
 /// Represents error variants that can happen when trying to validate a
 /// [Transaction](crate::Transaction)
-#[derive(Debug, Clone, Eq, PartialEq, thiserror_no_std::Error)]
+#[derive(Debug, Clone, Eq, PartialEq, Error)]
 pub enum InvalidTransactionError {
     /// The sender does not have enough funds to cover the transaction fees
     #[error(
@@ -58,7 +66,7 @@ pub enum InvalidTransactionError {
 
 /// Represents error variants that can happen when trying to convert a transaction to
 /// [`PooledTransactionsElement`](crate::PooledTransactionsElement)
-#[derive(Debug, Clone, Eq, PartialEq, thiserror_no_std::Error)]
+#[derive(Debug, Clone, Eq, PartialEq, Error)]
 pub enum TransactionConversionError {
     /// This error variant is used when a transaction cannot be converted into a
     /// [`PooledTransactionsElement`](crate::PooledTransactionsElement) because it is not supported
@@ -69,7 +77,7 @@ pub enum TransactionConversionError {
 
 /// Represents error variants than can happen when trying to convert a
 /// [`TransactionSignedEcRecovered`](crate::TransactionSignedEcRecovered) transaction.
-#[derive(Debug, Clone, Eq, PartialEq, thiserror_no_std::Error)]
+#[derive(Debug, Clone, Eq, PartialEq, Error)]
 pub enum TryFromRecoveredTransactionError {
     /// Thrown if the transaction type is unsupported.
     #[error("Unsupported transaction type: {0}")]
