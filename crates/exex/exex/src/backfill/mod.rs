@@ -1,7 +1,7 @@
 mod factory;
 mod job;
 mod stream;
-#[cfg(any(test, feature = "test-utils"))]
+#[cfg(test)]
 mod test_utils;
 
 pub use factory::BackfillJobFactory;

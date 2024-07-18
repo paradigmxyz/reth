@@ -39,13 +39,6 @@ tokio.workspace = true
 eyre.workspace = true
 metrics.workspace = true
 
-# test-utils
-reth-chainspec = { workspace = true, optional = true }
-reth-db-api = { workspace = true, optional = true }
-reth-evm-ethereum = { workspace = true, optional = true }
-reth-testing-utils = { workspace = true, optional = true }
-secp256k1 = { workspace = true, optional = true }
-
 [dev-dependencies]
 reth-blockchain-tree.workspace = true
 reth-chainspec.workspace = true
@@ -61,11 +54,3 @@ secp256k1.workspace = true
 [features]
 default = []
 serde = ["reth-provider/serde", "reth-exex-types/serde"]
-test-utils = [
-    "reth-provider/test-utils",
-    "dep:reth-chainspec",
-    "dep:reth-db-api",
-    "dep:reth-evm-ethereum",
-    "dep:reth-testing-utils",
-    "dep:secp256k1"
-]
