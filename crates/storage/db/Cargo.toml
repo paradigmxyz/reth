@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 # reth
 reth-db-api.workspace = true
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = ["reth-codec"] }
 reth-primitives-traits.workspace = true
 reth-fs-util.workspace = true
 reth-storage-errors.workspace = true
