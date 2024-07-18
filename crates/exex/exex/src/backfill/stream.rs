@@ -29,7 +29,7 @@ pub struct BackFillJobStream<E, P> {
     job: SingleBlockBackfillJob<E, P>,
     tasks: BackfillTasks,
     range: RangeInclusive<BlockNumber>,
-    capacity: usize,
+    parallelism: usize,
 }
 
 impl<E, P> BackFillJobStream<E, P>
