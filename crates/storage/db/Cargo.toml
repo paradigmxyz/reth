@@ -34,7 +34,7 @@ eyre = { workspace = true, optional = true }
 # codecs
 serde = { workspace = true, default-features = false }
 
-# `metrics` feature
+# metrics
 reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 
