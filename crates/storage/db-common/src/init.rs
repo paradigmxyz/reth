@@ -20,6 +20,7 @@ use reth_provider::{
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
+use reth_trie_db::StateRootFromDbTx;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},

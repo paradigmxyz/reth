@@ -11,6 +11,7 @@ use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
 };
+use reth_trie_db::StateRootFromDbTx;
 use reth_trie_parallel::{async_root::AsyncStateRoot, parallel_root::ParallelStateRoot};
 use std::collections::HashMap;
 

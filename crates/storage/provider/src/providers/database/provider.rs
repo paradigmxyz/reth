@@ -47,6 +47,7 @@ use reth_trie::{
     updates::TrieUpdates,
     HashedPostStateSorted, Nibbles, StateRoot,
 };
+use reth_trie_db::StateRootFromDbTx;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     cmp::Ordering,

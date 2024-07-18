@@ -156,6 +156,14 @@ pub struct StorageTrieUpdates {
     pub(crate) removed_nodes: HashSet<Nibbles>,
 }
 
+#[cfg(feature = "test-utils")]
+impl StorageTrieUpdates {
+    /// Creates a new storage trie updates that are not marked as deleted.
+    pub fn new(updates: HashMap<Nibbles, BranchNodeCompact>) -> Self {
+        Self { storage_nodes: updates, ..Default::default() }
+    }
+}
+
 impl StorageTrieUpdates {
     /// Returns empty storage trie updates with `deleted` set to `true`.
     pub fn deleted() -> Self {

@@ -45,6 +45,7 @@ mod tests {
         keccak256, Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
     };
     use reth_trie::{test_utils::state_root, StateRoot};
+    use reth_trie_db::StateRootFromDbTx;
     use revm::{
         db::{
             states::{
@@ -863,14 +864,16 @@ mod tests {
 
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
             assert_eq!(
-                ExecutionOutcome::new(
-                    state.bundle_state.clone(),
-                    Receipts::default(),
-                    0,
-                    Vec::new()
+                StateRoot::overlay(
+                    &tx,
+                    ExecutionOutcome::new(
+                        state.bundle_state.clone(),
+                        Receipts::default(),
+                        0,
+                        Vec::new()
+                    )
+                    .hash_state_slow()
                 )
-                .hash_state_slow()
-                .state_root(&tx)
                 .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
                     address,
