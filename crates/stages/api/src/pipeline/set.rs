@@ -201,12 +201,11 @@ where
     }
 
     /// Disables all given stages. See [`disable`](Self::disable).
-    #[track_caller]
+    ///
+    /// If any of the stages is not in this set, it is ignored.
     pub fn disable_all(mut self, stages: &[StageId]) -> Self {
         for stage_id in stages {
-            let entry = self.stages.get_mut(stage_id).unwrap_or_else(|| {
-                panic!("Cannot disable a stage that is not in the set: {stage_id}")
-            });
+            let Some(entry) = self.stages.get_mut(stage_id) else { continue };
             entry.enabled = false;
         }
         self
