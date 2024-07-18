@@ -170,7 +170,6 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                         Some(ErrorData::new(err)),
                     )
                 }
-                //(*err).into(), //.into(),
                 BeaconForkChoiceUpdateError::EngineUnavailable |
                 BeaconForkChoiceUpdateError::Internal(_) => {
                     jsonrpsee_types::error::ErrorObject::owned(
