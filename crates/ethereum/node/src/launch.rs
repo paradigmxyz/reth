@@ -89,7 +89,7 @@ where
             .inspect(|_| {
                 info!(target: "reth::cli", "Database opened");
             })
-            .with_prometheus().await?
+            .with_prometheus_server().await?
             .inspect(|this| {
                 debug!(target: "reth::cli", chain=%this.chain_id(), genesis=?this.genesis_hash(), "Initializing genesis");
             })
@@ -97,7 +97,7 @@ where
             .inspect(|this| {
                 info!(target: "reth::cli", "\n{}", this.chain_spec().display_hardforks());
             })
-            .with_metrics()
+            .with_metrics_task()
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
             .with_blockchain_db::<T>()?
