@@ -60,7 +60,7 @@ impl From<HashBuilder> for HashBuilderState {
 }
 
 impl Compact for HashBuilderState {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -163,7 +163,7 @@ mod tests {
         #[test]
         fn hash_builder_state_roundtrip(state in arb::<HashBuilderState>()) {
             let mut buf = vec![];
-            let len = state.clone().to_compact(&mut buf);
+            let len = state.to_compact(&mut buf);
             let (decoded, _) = HashBuilderState::from_compact(&buf, len);
             assert_eq!(state, decoded);
         }

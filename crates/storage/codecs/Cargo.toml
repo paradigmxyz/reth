@@ -31,7 +31,7 @@ alloy-eips = { workspace = true, default-features = false, features = [
     "arbitrary",
     "serde",
 ] }
-alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
+alloy-primitives = { workspace = true, features = ["arbitrary", "serde", "rand"] }
 alloy-consensus = { workspace = true, features = ["arbitrary"] }
 test-fuzz.workspace = true
 serde_json.workspace = true

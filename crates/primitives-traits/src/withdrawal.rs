@@ -144,7 +144,7 @@ mod tests {
             // Convert to buffer and then create alloy_access_list from buffer and
             // compare
             let mut compacted_reth_withdrawal = Vec::<u8>::new();
-            let len = withdrawal.clone().to_compact(&mut compacted_reth_withdrawal);
+            let len = withdrawal.to_compact(&mut compacted_reth_withdrawal);
 
             // decode the compacted buffer to AccessList
             let alloy_withdrawal = Withdrawal::from_compact(&compacted_reth_withdrawal, len).0;

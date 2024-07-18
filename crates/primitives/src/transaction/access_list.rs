@@ -73,7 +73,7 @@ mod tests {
             // Convert access_list to buffer and then create alloy_access_list from buffer and
             // compare
             let mut compacted_reth_access_list = Vec::<u8>::new();
-            let len = access_list.clone().to_compact(&mut compacted_reth_access_list);
+            let len = access_list.to_compact(&mut compacted_reth_access_list);
 
             // decode the compacted buffer to AccessList
             let alloy_access_list = AccessList::from_compact(&compacted_reth_access_list, len).0;
