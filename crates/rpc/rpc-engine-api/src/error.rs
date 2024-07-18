@@ -161,10 +161,11 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 error.to_string(),
                 None::<()>,
             ),
+
             // Error responses from the consensus engine
             EngineApiError::ForkChoiceUpdate(ref err) => match err {
-                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => (*err).into(),
                 BeaconForkChoiceUpdateError::EngineUnavailable |
+                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(_) |
                 BeaconForkChoiceUpdateError::Internal(_) => {
                     jsonrpsee_types::error::ErrorObject::owned(
                         INTERNAL_ERROR_CODE,
