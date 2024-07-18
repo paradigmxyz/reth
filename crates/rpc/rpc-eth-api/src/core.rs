@@ -44,7 +44,7 @@ where
     where
         EthApiError: From<E>,
     {
-        Into::<T>::into(Into::<EthApiError>::into(err))
+        T::from(EthApiError::from(err))
     }
 }
 
@@ -58,13 +58,13 @@ pub trait IntoEthApiError: Into<EthApiError> {
 
 impl<T> IntoEthApiError for T
 where
-    T: Into<EthApiError>,
+    EthApiError: From<T>,
 {
     fn into_err<E>(self) -> E
     where
         E: FromEthApiError,
     {
-        Into::<E>::into(Into::<EthApiError>::into(self))
+        E::from_err(self)
     }
 }
 
