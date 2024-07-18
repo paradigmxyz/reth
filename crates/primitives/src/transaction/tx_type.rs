@@ -1,6 +1,5 @@
 use crate::{U64, U8};
 use alloy_rlp::{Decodable, Encodable};
-use bytes::Buf;
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -9,6 +8,7 @@ use reth_codecs::Compact;
 /// For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
 /// parameter. In the case of a 3, the full transaction type is read from the buffer as a
 /// single byte.
+#[cfg(any(test, feature = "reth-codec"))]
 const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
 
 /// Identifier for legacy transaction, however [`TxLegacy`](crate::TxLegacy) this is technically not
@@ -166,6 +166,7 @@ impl reth_codecs::Compact for TxType {
     // parameter. In the case of a 3, the full transaction type is read from the buffer as a
     // single byte.
     fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
         (
             match identifier {
                 0 => Self::Legacy,
