@@ -320,13 +320,11 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let output = {
             if let Some(inspector) = self.inspector.as_mut() {
-                let mut evm = EvmBuilder::default()
-                    .with_db(&mut self.state)
-                    .with_external_context(inspector)
-                    .build();
-                evm.modify_spec_id(env.spec_id());
-                evm.context.evm.env = env.env;
-
+                let evm = self.executor.evm_config.evm_with_env_and_inspector(
+                    &mut self.state,
+                    env,
+                    inspector,
+                );
                 self.executor.execute_state_transitions(block, evm)
             } else {
                 let evm = self.executor.evm_config.evm_with_env(&mut self.state, env);
