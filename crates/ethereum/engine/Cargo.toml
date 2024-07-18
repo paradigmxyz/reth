@@ -18,13 +18,14 @@ reth-db-api.workspace = true
 reth-engine-tree.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-network-p2p.workspace = true
+reth-provider.workspace = true
+reth-prune.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 
 # async
 futures.workspace = true
 pin-project.workspace = true
-tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 
 # misc
@@ -32,3 +33,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 reth-engine-tree = { workspace = true, features = ["test-utils"] }
+reth-exex-types.workspace = true
+reth-primitives.workspace = true
+
+tokio = { workspace = true, features = ["sync"] }

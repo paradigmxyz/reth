@@ -40,13 +40,21 @@ use std::{
     marker::PhantomData,
     sync::{mpsc::Receiver, Arc},
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::sync::{
+    mpsc::{UnboundedReceiver, UnboundedSender},
+    oneshot,
+};
 use tracing::*;
 
 mod memory_overlay;
 mod state;
 /// Maximum number of blocks to be kept only in memory without triggering persistence.
 const PERSISTENCE_THRESHOLD: u64 = 256;
+/// Number of pending blocks that cannot be executed due to missing parent and
+/// are kept in cache.
+const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
+/// Number of invalid headers to keep in cache.
+const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -288,7 +296,7 @@ where
     T: EngineTypes + 'static,
 {
     #[allow(clippy::too_many_arguments)]
-    fn new(
+    pub fn new(
         provider: P,
         executor_provider: E,
         consensus: Arc<dyn Consensus>,
@@ -315,25 +323,32 @@ where
         }
     }
 
+    /// Creates a new `EngineApiTreeHandlerImpl` instance and spawns it in its
+    /// own thread. Returns the receiver end of a `EngineApiEvent` unbounded
+    /// channel to receive events from the engine.
     #[allow(clippy::too_many_arguments)]
-    fn spawn_new(
+    pub fn spawn_new(
         provider: P,
         executor_provider: E,
         consensus: Arc<dyn Consensus>,
         payload_validator: ExecutionPayloadValidator,
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
-        state: EngineApiTreeState,
-        header: SealedHeader,
         persistence: PersistenceHandle,
-    ) -> UnboundedSender<EngineApiEvent> {
-        let (outgoing, rx) = tokio::sync::mpsc::unbounded_channel();
+    ) -> UnboundedReceiver<EngineApiEvent> {
+        let (tx, outgoing) = tokio::sync::mpsc::unbounded_channel();
+        let state = EngineApiTreeState::new(
+            DEFAULT_BLOCK_BUFFER_LIMIT,
+            DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
+        );
+        let header = SealedHeader::default();
+
         let task = Self::new(
             provider,
             executor_provider,
             consensus,
             payload_validator,
             incoming,
-            outgoing.clone(),
+            tx,
             state,
             header,
             persistence,
@@ -342,7 +357,7 @@ where
         outgoing
     }
 
-    fn run(mut self) {
+    pub fn run(mut self) {
         while let Ok(msg) = self.incoming.recv() {
             match msg {
                 FromEngine::Event(event) => match event {
