@@ -11,8 +11,7 @@ use crate::{EthApiTypes, FromEthApiError};
 /// Assembles transaction receipt data w.r.t to network.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` receipts RPC methods.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait LoadReceipt<T: EthApiTypes>: Send + Sync {
+pub trait LoadReceipt: EthApiTypes + Send + Sync {
     /// Returns a handle for reading data from memory.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -24,14 +23,14 @@ pub trait LoadReceipt<T: EthApiTypes>: Send + Sync {
         tx: TransactionSigned,
         meta: TransactionMeta,
         receipt: Receipt,
-    ) -> impl Future<Output = Result<AnyTransactionReceipt, T::Error>> + Send {
+    ) -> impl Future<Output = Result<AnyTransactionReceipt, Self::Error>> + Send {
         async move {
             // get all receipts for the block
             let all_receipts = match self
                 .cache()
                 .get_receipts(meta.block_hash)
                 .await
-                .map_err(T::Error::from_err)?
+                .map_err(Self::Error::from_err)?
             {
                 Some(recpts) => recpts,
                 None => return Err(EthApiError::UnknownBlockNumber.into()),

@@ -20,7 +20,7 @@ use crate::{EthApiTypes, FromEthApiError};
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 
 /// Helper methods for `eth_` methods relating to state (accounts).
-pub trait EthState<T: EthApiTypes>: LoadState<T> + SpawnBlocking<T> {
+pub trait EthState: LoadState + SpawnBlocking {
     /// Returns the maximum number of blocks into the past for generating state proofs.
     fn max_proof_window(&self) -> u64;
 
@@ -32,7 +32,7 @@ pub trait EthState<T: EthApiTypes>: LoadState<T> + SpawnBlocking<T> {
         &self,
         address: Address,
         block_id: Option<BlockId>,
-    ) -> impl Future<Output = Result<U256, T::Error>> + Send {
+    ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
         LoadState::transaction_count(self, address, block_id)
     }
 
@@ -41,12 +41,12 @@ pub trait EthState<T: EthApiTypes>: LoadState<T> + SpawnBlocking<T> {
         &self,
         address: Address,
         block_id: Option<BlockId>,
-    ) -> impl Future<Output = Result<Bytes, T::Error>> + Send {
+    ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
         self.spawn_blocking_io(move |this| {
             Ok(this
                 .state_at_block_id_or_latest(block_id)?
                 .account_code(address)
-                .map_err(T::Error::from_err)?
+                .map_err(Self::Error::from_err)?
                 .unwrap_or_default()
                 .original_bytes())
         })
@@ -57,12 +57,12 @@ pub trait EthState<T: EthApiTypes>: LoadState<T> + SpawnBlocking<T> {
         &self,
         address: Address,
         block_id: Option<BlockId>,
-    ) -> impl Future<Output = Result<U256, T::Error>> + Send {
+    ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
         self.spawn_blocking_io(move |this| {
             Ok(this
                 .state_at_block_id_or_latest(block_id)?
                 .account_balance(address)
-                .map_err(T::Error::from_err)?
+                .map_err(Self::Error::from_err)?
                 .unwrap_or_default())
         })
     }
@@ -73,12 +73,12 @@ pub trait EthState<T: EthApiTypes>: LoadState<T> + SpawnBlocking<T> {
         address: Address,
         index: JsonStorageKey,
         block_id: Option<BlockId>,
-    ) -> impl Future<Output = Result<B256, T::Error>> + Send {
+    ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         self.spawn_blocking_io(move |this| {
             Ok(B256::new(
                 this.state_at_block_id_or_latest(block_id)?
                     .storage(address, index.0)
-                    .map_err(T::Error::from_err)?
+                    .map_err(Self::Error::from_err)?
                     .unwrap_or_default()
                     .to_be_bytes(),
             ))
@@ -91,18 +91,21 @@ pub trait EthState<T: EthApiTypes>: LoadState<T> + SpawnBlocking<T> {
         address: Address,
         keys: Vec<JsonStorageKey>,
         block_id: Option<BlockId>,
-    ) -> Result<impl Future<Output = Result<EIP1186AccountProofResponse, T::Error>> + Send, T::Error>
+    ) -> Result<
+        impl Future<Output = Result<EIP1186AccountProofResponse, Self::Error>> + Send,
+        Self::Error,
+    >
     where
         Self: EthApiSpec,
     {
-        let chain_info = self.chain_info().map_err(T::Error::from_err)?;
+        let chain_info = self.chain_info().map_err(Self::Error::from_err)?;
         let block_id = block_id.unwrap_or_default();
 
         // Check whether the distance to the block exceeds the maximum configured window.
         let block_number = self
             .provider()
             .block_number_for_id(block_id)
-            .map_err(T::Error::from_err)?
+            .map_err(Self::Error::from_err)?
             .ok_or(EthApiError::UnknownBlockNumber)?;
         let max_window = self.max_proof_window();
         if chain_info.best_number.saturating_sub(block_number) > max_window {
@@ -119,7 +122,7 @@ pub trait EthState<T: EthApiTypes>: LoadState<T> + SpawnBlocking<T> {
                 let storage_keys = keys.iter().map(|key| key.0).collect::<Vec<_>>();
                 let proof = state
                     .proof(&BundleState::default(), address, &storage_keys)
-                    .map_err(T::Error::from_err)?;
+                    .map_err(Self::Error::from_err)?;
                 Ok(from_primitive_account_proof(proof))
             })
             .await
@@ -130,7 +133,7 @@ pub trait EthState<T: EthApiTypes>: LoadState<T> + SpawnBlocking<T> {
 /// Loads state from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` state RPC methods.
-pub trait LoadState<T: EthApiTypes> {
+pub trait LoadState: EthApiTypes {
     /// Returns a handle for reading state from database.
     ///
     /// Data access in default trait method implementations.
@@ -147,21 +150,21 @@ pub trait LoadState<T: EthApiTypes> {
     fn pool(&self) -> impl TransactionPool;
 
     /// Returns the state at the given block number
-    fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, T::Error> {
-        self.provider().history_by_block_hash(block_hash).map_err(T::Error::from_err)
+    fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, Self::Error> {
+        self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_err)
     }
 
     /// Returns the state at the given [`BlockId`] enum.
     ///
     /// Note: if not [`BlockNumberOrTag::Pending`](reth_primitives::BlockNumberOrTag) then this
     /// will only return canonical state. See also <https://github.com/paradigmxyz/reth/issues/4515>
-    fn state_at_block_id(&self, at: BlockId) -> Result<StateProviderBox, T::Error> {
-        self.provider().state_by_block_id(at).map_err(T::Error::from_err)
+    fn state_at_block_id(&self, at: BlockId) -> Result<StateProviderBox, Self::Error> {
+        self.provider().state_by_block_id(at).map_err(Self::Error::from_err)
     }
 
     /// Returns the _latest_ state
-    fn latest_state(&self) -> Result<StateProviderBox, T::Error> {
-        self.provider().latest().map_err(T::Error::from_err)
+    fn latest_state(&self) -> Result<StateProviderBox, Self::Error> {
+        self.provider().latest().map_err(Self::Error::from_err)
     }
 
     /// Returns the state at the given [`BlockId`] enum or the latest.
@@ -170,7 +173,7 @@ pub trait LoadState<T: EthApiTypes> {
     fn state_at_block_id_or_latest(
         &self,
         block_id: Option<BlockId>,
-    ) -> Result<StateProviderBox, T::Error> {
+    ) -> Result<StateProviderBox, Self::Error> {
         if let Some(block_id) = block_id {
             self.state_at_block_id(block_id)
         } else {
@@ -187,9 +190,9 @@ pub trait LoadState<T: EthApiTypes> {
     fn evm_env_at(
         &self,
         at: BlockId,
-    ) -> impl Future<Output = Result<(CfgEnvWithHandlerCfg, BlockEnv, BlockId), T::Error>> + Send
+    ) -> impl Future<Output = Result<(CfgEnvWithHandlerCfg, BlockEnv, BlockId), Self::Error>> + Send
     where
-        Self: LoadPendingBlock<T> + SpawnBlocking<T>,
+        Self: LoadPendingBlock + SpawnBlocking,
     {
         async move {
             if at.is_pending() {
@@ -200,10 +203,10 @@ pub trait LoadState<T: EthApiTypes> {
                 // Use cached values if there is no pending block
                 let block_hash = LoadPendingBlock::provider(self)
                     .block_hash_for_id(at)
-                    .map_err(T::Error::from_err)?
+                    .map_err(Self::Error::from_err)?
                     .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
                 let (cfg, env) =
-                    self.cache().get_evm_env(block_hash).await.map_err(T::Error::from_err)?;
+                    self.cache().get_evm_env(block_hash).await.map_err(Self::Error::from_err)?;
                 Ok((cfg, env, block_hash.into()))
             }
         }
@@ -215,9 +218,9 @@ pub trait LoadState<T: EthApiTypes> {
     fn evm_env_for_raw_block(
         &self,
         header: &Header,
-    ) -> impl Future<Output = Result<(CfgEnvWithHandlerCfg, BlockEnv), T::Error>> + Send
+    ) -> impl Future<Output = Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error>> + Send
     where
-        Self: LoadPendingBlock<T> + SpawnBlocking<T>,
+        Self: LoadPendingBlock + SpawnBlocking,
     {
         async move {
             // get the parent config first
@@ -238,9 +241,9 @@ pub trait LoadState<T: EthApiTypes> {
         &self,
         address: Address,
         block_id: Option<BlockId>,
-    ) -> impl Future<Output = Result<U256, T::Error>> + Send
+    ) -> impl Future<Output = Result<U256, Self::Error>> + Send
     where
-        Self: SpawnBlocking<T>,
+        Self: SpawnBlocking,
     {
         self.spawn_blocking_io(move |this| {
             if block_id == Some(BlockId::pending()) {
@@ -248,7 +251,7 @@ pub trait LoadState<T: EthApiTypes> {
                 if let Some(highest_nonce) =
                     address_txs.iter().map(|item| item.transaction.nonce()).max()
                 {
-                    let tx_count = highest_nonce.checked_add(1).ok_or(T::Error::from(
+                    let tx_count = highest_nonce.checked_add(1).ok_or(Self::Error::from(
                         EthApiError::InvalidTransaction(RpcInvalidTransactionError::NonceMaxValue),
                     ))?;
                     return Ok(U256::from(tx_count))
@@ -257,7 +260,7 @@ pub trait LoadState<T: EthApiTypes> {
 
             let state = this.state_at_block_id_or_latest(block_id)?;
             Ok(U256::from(
-                state.account_nonce(address).map_err(T::Error::from_err)?.unwrap_or_default(),
+                state.account_nonce(address).map_err(Self::Error::from_err)?.unwrap_or_default(),
             ))
         })
     }

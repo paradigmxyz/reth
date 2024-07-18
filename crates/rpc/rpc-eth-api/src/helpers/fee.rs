@@ -10,33 +10,33 @@ use reth_rpc_eth_types::{
 use reth_rpc_types::{BlockNumberOrTag, FeeHistory};
 use tracing::debug;
 
-use crate::{EthApiTypes, FromEthApiError};
+use crate::FromEthApiError;
 
 use super::LoadBlock;
 
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
-pub trait EthFees<T: EthApiTypes>: LoadFee<T> {
+pub trait EthFees: LoadFee {
     /// Returns a suggestion for a gas price for legacy transactions.
     ///
     /// See also: <https://github.com/ethereum/pm/issues/328#issuecomment-853234014>
-    fn gas_price(&self) -> impl Future<Output = Result<U256, T::Error>> + Send
+    fn gas_price(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send
     where
-        Self: LoadBlock<T>,
+        Self: LoadBlock,
     {
         LoadFee::gas_price(self)
     }
 
     /// Returns a suggestion for a base fee for blob transactions.
-    fn blob_base_fee(&self) -> impl Future<Output = Result<U256, T::Error>> + Send
+    fn blob_base_fee(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send
     where
-        Self: LoadBlock<T>,
+        Self: LoadBlock,
     {
         LoadFee::blob_base_fee(self)
     }
 
     /// Returns a suggestion for the priority fee (the tip)
-    fn suggested_priority_fee(&self) -> impl Future<Output = Result<U256, T::Error>> + Send
+    fn suggested_priority_fee(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send
     where
         Self: 'static,
     {
@@ -52,7 +52,7 @@ pub trait EthFees<T: EthApiTypes>: LoadFee<T> {
         mut block_count: u64,
         newest_block: BlockNumberOrTag,
         reward_percentiles: Option<Vec<f64>>,
-    ) -> impl Future<Output = Result<FeeHistory, T::Error>> + Send {
+    ) -> impl Future<Output = Result<FeeHistory, Self::Error>> + Send {
         async move {
             if block_count == 0 {
                 return Ok(FeeHistory::default())
@@ -76,7 +76,7 @@ pub trait EthFees<T: EthApiTypes>: LoadFee<T> {
 
             let Some(end_block) = LoadFee::provider(self)
                 .block_number_for_id(newest_block.into())
-                .map_err(T::Error::from_err)?
+                .map_err(Self::Error::from_err)?
             else {
                 return Err(EthApiError::UnknownBlockNumber.into())
             };
@@ -147,7 +147,7 @@ pub trait EthFees<T: EthApiTypes>: LoadFee<T> {
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
             } else {
             // read the requested header range
-            let headers = LoadFee::provider(self).sealed_headers_range(start_block..=end_block).map_err(T::Error::from_err)?;
+            let headers = LoadFee::provider(self).sealed_headers_range(start_block..=end_block).map_err(Self::Error::from_err)?;
             if headers.len() != block_count as usize {
                 return Err(EthApiError::InvalidBlockRange.into())
             }
@@ -165,7 +165,7 @@ pub trait EthFees<T: EthApiTypes>: LoadFee<T> {
                 if let Some(percentiles) = &reward_percentiles {
                     let (transactions, receipts) = LoadFee::cache(self)
                         .get_transactions_and_receipts(header.hash())
-                        .await.map_err(T::Error::from_err)?
+                        .await.map_err(Self::Error::from_err)?
                         .ok_or(EthApiError::InvalidBlockRange)?;
                     rewards.push(
                         calculate_reward_percentiles_for_block(
@@ -228,7 +228,7 @@ pub trait EthFees<T: EthApiTypes>: LoadFee<T> {
 /// Loads fee from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` fees RPC methods.
-pub trait LoadFee<T: EthApiTypes>: LoadBlock<T> {
+pub trait LoadFee: LoadBlock {
     // Returns a handle for reading data from disk.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -254,7 +254,7 @@ pub trait LoadFee<T: EthApiTypes>: LoadBlock<T> {
     fn legacy_gas_price(
         &self,
         gas_price: Option<U256>,
-    ) -> impl Future<Output = Result<U256, T::Error>> + Send {
+    ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
         async move {
             match gas_price {
                 Some(gas_price) => Ok(gas_price),
@@ -274,7 +274,7 @@ pub trait LoadFee<T: EthApiTypes>: LoadBlock<T> {
         &self,
         max_fee_per_gas: Option<U256>,
         max_priority_fee_per_gas: Option<U256>,
-    ) -> impl Future<Output = Result<(U256, U256), T::Error>> + Send {
+    ) -> impl Future<Output = Result<(U256, U256), Self::Error>> + Send {
         async move {
             let max_fee_per_gas = match max_fee_per_gas {
                 Some(max_fee_per_gas) => max_fee_per_gas,
@@ -306,7 +306,7 @@ pub trait LoadFee<T: EthApiTypes>: LoadBlock<T> {
     fn eip4844_blob_fee(
         &self,
         blob_fee: Option<U256>,
-    ) -> impl Future<Output = Result<U256, T::Error>> + Send {
+    ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
         async move {
             match blob_fee {
                 Some(blob_fee) => Ok(blob_fee),
@@ -318,7 +318,7 @@ pub trait LoadFee<T: EthApiTypes>: LoadBlock<T> {
     /// Returns a suggestion for a gas price for legacy transactions.
     ///
     /// See also: <https://github.com/ethereum/pm/issues/328#issuecomment-853234014>
-    fn gas_price(&self) -> impl Future<Output = Result<U256, T::Error>> + Send {
+    fn gas_price(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send {
         let header = self.block(BlockNumberOrTag::Latest.into());
         let suggested_tip = self.suggested_priority_fee();
         async move {
@@ -329,7 +329,7 @@ pub trait LoadFee<T: EthApiTypes>: LoadBlock<T> {
     }
 
     /// Returns a suggestion for a base fee for blob transactions.
-    fn blob_base_fee(&self) -> impl Future<Output = Result<U256, T::Error>> + Send {
+    fn blob_base_fee(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send {
         async move {
             self.block(BlockNumberOrTag::Latest.into())
                 .await?
@@ -340,10 +340,10 @@ pub trait LoadFee<T: EthApiTypes>: LoadBlock<T> {
     }
 
     /// Returns a suggestion for the priority fee (the tip)
-    fn suggested_priority_fee(&self) -> impl Future<Output = Result<U256, T::Error>> + Send
+    fn suggested_priority_fee(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send
     where
         Self: 'static,
     {
-        async move { self.gas_oracle().suggest_tip_cap().await.map_err(T::Error::from_err) }
+        async move { self.gas_oracle().suggest_tip_cap().await.map_err(Self::Error::from_err) }
     }
 }

@@ -101,20 +101,14 @@ pub trait FromEvmError: From<EthApiError> + From<revm_primitives::InvalidTransac
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
 /// server.
-pub trait FullEthApiServer<T: EthApiTypes>:
-    EthApiServer<T> + FullEthApi<T> + UpdateRawTxForwarder + Clone
-{
-}
+pub trait FullEthApiServer: EthApiServer + FullEthApi + UpdateRawTxForwarder + Clone {}
 
-impl<T: EthApiTypes, EthApi> FullEthApiServer<T> for EthApi where
-    EthApi: EthApiServer<T> + FullEthApi<T> + UpdateRawTxForwarder + Clone
-{
-}
+impl<T> FullEthApiServer for T where T: EthApiServer + FullEthApi + UpdateRawTxForwarder + Clone {}
 
 /// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
-pub trait EthApi<T: EthApiTypes> {
+pub trait EthApi {
     /// Returns the protocol version encoded as a string.
     #[method(name = "protocolVersion")]
     async fn protocol_version(&self) -> RpcResult<U64>;
@@ -414,10 +408,9 @@ pub trait EthApi<T: EthApiTypes> {
 }
 
 #[async_trait::async_trait]
-impl<T> EthApiServer<T> for T
+impl<T> EthApiServer for T
 where
-    Self: FullEthApi<T>,
-    T: EthApiTypes,
+    T: FullEthApi,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> RpcResult<U64> {
@@ -739,7 +732,7 @@ where
     /// Handler for: `eth_blobBaseFee`
     async fn blob_base_fee(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
-        EthFees::<T>::blob_base_fee(self).await.map_err(|err| err.to_rpc_error())
+        EthFees::blob_base_fee(self).await.map_err(|err| err.to_rpc_error())
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further

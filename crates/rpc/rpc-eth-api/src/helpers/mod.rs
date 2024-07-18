@@ -41,41 +41,38 @@ pub use transaction::{EthTransactions, LoadTransaction, UpdateRawTxForwarder};
 use crate::EthApiTypes;
 
 /// Extension trait that bundles traits needed for tracing transactions.
-pub trait TraceExt<T: EthApiTypes>:
-    LoadTransaction<T> + LoadBlock<T> + LoadPendingBlock<T> + SpawnBlocking<T> + Trace<T> + Call<T>
+pub trait TraceExt:
+    LoadTransaction + LoadBlock + LoadPendingBlock + SpawnBlocking + Trace + Call
 {
 }
 
-impl<T: EthApiTypes> TraceExt<T> for T where
-    T: LoadTransaction<T> + LoadBlock<T> + LoadPendingBlock<T> + Trace<T> + Call<T>
-{
-}
+impl<T> TraceExt for T where T: LoadTransaction + LoadBlock + LoadPendingBlock + Trace + Call {}
 
 /// Helper trait to unify all `eth` rpc server building block traits, for simplicity.
 ///
 /// This trait is automatically implemented for any type that implements all the `Eth` traits.
-pub trait FullEthApi<T: EthApiTypes>:
-    EthApiSpec
-    + EthTransactions<T>
-    + EthBlocks<T>
-    + EthState<T>
-    + EthCall<T>
-    + EthFees<T>
-    + Trace<T>
-    + LoadReceipt<T>
+pub trait FullEthApi:
+    EthApiTypes
+    + EthApiSpec
+    + EthTransactions
+    + EthBlocks
+    + EthState
+    + EthCall
+    + EthFees
+    + Trace
+    + LoadReceipt
 {
 }
 
-impl<T, EthApi> FullEthApi<T> for EthApi
-where
-    T: EthApiTypes,
-    EthApi: EthApiSpec
-        + EthTransactions<T>
-        + EthBlocks<T>
-        + EthState<T>
-        + EthCall<T>
-        + EthFees<T>
-        + Trace<T>
-        + LoadReceipt<T>,
+impl<T> FullEthApi for T where
+    T: EthApiTypes
+        + EthApiSpec
+        + EthTransactions
+        + EthBlocks
+        + EthState
+        + EthCall
+        + EthFees
+        + Trace
+        + LoadReceipt
 {
 }
