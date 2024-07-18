@@ -165,7 +165,7 @@ where
         let (_from_tree_tx, from_tree_rx) = unbounded_channel();
 
         // Configure the consensus engine
-        let eth_service = EthService::new(
+        let mut eth_service = EthService::new(
             ctx.chain_spec(),
             network_client.clone(),
             // to tree
@@ -243,8 +243,10 @@ where
         let (tx, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
-            let res = eth_service.await;
-            let _ = tx.send(res);
+            while let Some(event) = eth_service.next().await {
+                info!(target: "reth::cli", "Event: {event:?}");
+            }
+            let _ = tx.send(());
         });
 
         let full_node = FullNode {
@@ -265,7 +267,7 @@ where
 
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(
-                async { Ok(rx.await??) },
+                async { Ok(rx.await?) },
                 full_node.config.debug.terminate,
             ),
             node: full_node,
