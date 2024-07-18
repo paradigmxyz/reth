@@ -33,11 +33,10 @@ impl StateWriter for ExecutionOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::create_test_provider_factory, AccountReader};
-    use reth_db::{tables, test_utils::create_test_rw_db};
+    use crate::{test_utils::create_test_provider_factory, AccountReader, TrieWriter};
+    use reth_db::tables;
     use reth_db_api::{
         cursor::{DbCursorRO, DbDupCursorRO},
-        database::Database,
         models::{AccountBeforeTx, BlockNumberAddress},
         transaction::{DbTx, DbTxMut},
     };
@@ -838,28 +837,26 @@ mod tests {
             })
             .collect();
 
-        let db = create_test_rw_db();
+        let provider_factory = create_test_provider_factory();
+        let provider_rw = provider_factory.provider_rw().unwrap();
 
         // insert initial state to the database
-        db.update(|tx| {
-            for (address, (account, storage)) in &prestate {
-                let hashed_address = keccak256(address);
-                tx.put::<tables::HashedAccounts>(hashed_address, *account).unwrap();
-                for (slot, value) in storage {
-                    tx.put::<tables::HashedStorages>(
-                        hashed_address,
-                        StorageEntry { key: keccak256(slot), value: *value },
-                    )
-                    .unwrap();
-                }
+        let tx = provider_rw.tx_ref();
+        for (address, (account, storage)) in &prestate {
+            let hashed_address = keccak256(address);
+            tx.put::<tables::HashedAccounts>(hashed_address, *account).unwrap();
+            for (slot, value) in storage {
+                tx.put::<tables::HashedStorages>(
+                    hashed_address,
+                    StorageEntry { key: keccak256(slot), value: *value },
+                )
+                .unwrap();
             }
+        }
 
-            let (_, updates) = StateRoot::from_tx(tx).root_with_updates().unwrap();
-            updates.write_to_database(tx).unwrap();
-        })
-        .unwrap();
+        let (_, updates) = StateRoot::from_tx(tx).root_with_updates().unwrap();
+        provider_rw.write_trie_updates(&updates).unwrap();
 
-        let tx = db.tx().unwrap();
         let mut state = State::builder().with_bundle_update().build();
 
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
@@ -873,8 +870,7 @@ mod tests {
                         Vec::new()
                     )
                     .hash_state_slow()
-                )
-                .unwrap(),
+                ).unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
                     address,
                     (account, storage.into_iter())

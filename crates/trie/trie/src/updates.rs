@@ -1,5 +1,5 @@
 use crate::{
-    walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles, StorageTrieEntry, StoredNibbles,
+    walker::TrieWalker, BranchNodeCompact, HashBuilder, Nibbles, StorageTrieEntry,
     StoredNibblesSubKey,
 };
 use reth_db::tables;

@@ -1,22 +1,11 @@
 use crate::{
-    bundle_state::{BundleStateInit, RevertsInit},
-    providers::{database::metrics, static_file::StaticFileWriter, StaticFileProvider},
-    to_range,
-    traits::{
+    bundle_state::{BundleStateInit, RevertsInit}, providers::{database::metrics, static_file::StaticFileWriter, StaticFileProvider}, to_range, traits::{
         AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
-    },
-    writer::StorageWriter,
-    AccountReader, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader,
-    BlockReader, BlockWriter, EvmEnvProvider, FinalizedBlockReader, FinalizedBlockWriter,
-    HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HistoricalStateProvider,
-    HistoryWriter, LatestStateProvider, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, RequestsProvider, StageCheckpointReader, StateProviderBox, StateWriter,
-    StatsReader, StorageReader, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
-    WithdrawalsProvider,
+    }, writer::StorageWriter, AccountReader, TrieWriter, BlockExecutionReader, BlockExecutionWriter, BlockHashReader, BlockNumReader, BlockReader, BlockWriter, EvmEnvProvider, FinalizedBlockReader, FinalizedBlockWriter, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, HistoricalStateProvider, HistoryWriter, LatestStateProvider, OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RequestsProvider, StageCheckpointReader, StateProviderBox, StateWriter, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt, WithdrawalsProvider
 };
 use itertools::{izip, Itertools};
 use reth_chainspec::{ChainInfo, ChainSpec, EthereumHardforks};
-use reth_db::{tables, BlockNumberList, PlainAccountState, PlainStorageState};
+use reth_db::{cursor::DbDupCursorRW, tables, BlockNumberList, PlainAccountState, PlainStorageState};
 use reth_db_api::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, RangeWalker},
@@ -43,9 +32,7 @@ use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
-    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
-    updates::TrieUpdates,
-    HashedPostStateSorted, Nibbles, StateRoot,
+    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets}, updates::{StorageTrieUpdates, TrieUpdates}, HashedPostStateSorted, Nibbles, StateRoot, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey
 };
 use reth_trie_db::DatabaseStateRoot;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
@@ -2627,6 +2614,102 @@ impl<TX: DbTx> StorageReader for DatabaseProvider<TX> {
     }
 }
 
+impl<TX: DbTxMut + DbTx> TrieWriter for DatabaseProvider<TX> {
+    /// Writes trie updates. Returns the number of entries modified.
+    fn write_trie_updates(&self, trie_updates: &TrieUpdates) -> ProviderResult<usize> {
+        if trie_updates.is_empty() {
+            return Ok(0)
+        }
+
+        // Track the number of inserted entries.
+        let mut num_entries = 0;
+
+        // Merge updated and removed nodes. Updated nodes must take precedence.
+        let mut account_updates = trie_updates
+            .removed_nodes_ref()
+            .into_iter()
+            .filter_map(|n| (!trie_updates.account_nodes_ref().contains_key(n)).then_some((n, None)))
+            .collect::<Vec<_>>();
+        account_updates
+            .extend(trie_updates.account_nodes_ref().into_iter().map(|(nibbles, node)| (nibbles, Some(node))));
+        // Sort trie node updates.
+        account_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        let tx = self.tx_ref();
+        let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
+        for (key, updated_node) in account_updates {
+            let nibbles = StoredNibbles(key.clone());
+            match updated_node {
+                Some(node) => {
+                    if !nibbles.0.is_empty() {
+                        num_entries += 1;
+                        account_trie_cursor.upsert(nibbles, node.clone())?;
+                    }
+                }
+                None => {
+                    num_entries += 1;
+                    if account_trie_cursor.seek_exact(nibbles)?.is_some() {
+                        account_trie_cursor.delete_current()?;
+                    }
+                }
+            }
+        }
+
+        num_entries += self.write_storage_trie_updates(trie_updates.storage_tries_ref())?;
+
+        Ok(num_entries)
+    }
+}
+
+impl<TX: DbTxMut + DbTx> StorageTrieWriter for DatabaseProvider<TX> {
+    /// Writes storage trie updates from the given storage trie map. First sorts the storage trie
+    /// updates by the hashed address, writing in sorted order.
+    fn write_storage_trie_updates(&self, storage_tries: &HashMap<B256, StorageTrieUpdates>) -> ProviderResult<usize> {
+        let mut num_entries = 0;
+        let mut storage_tries = Vec::from_iter(storage_tries);
+        storage_tries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let mut cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
+        for (hashed_address, storage_trie_updates) in storage_tries {
+
+            // The storage trie for this account has to be deleted.
+            if storage_trie_updates.is_deleted() && cursor.seek_exact(*hashed_address)?.is_some() {
+                cursor.delete_current_duplicates()?;
+            }
+
+            // Merge updated and removed nodes. Updated nodes must take precedence.
+            let mut storage_updates = storage_trie_updates
+                .removed_nodes_ref()
+                .into_iter()
+                .filter_map(|n| (!storage_trie_updates.storage_nodes_ref().contains_key(n)).then_some((n, None)))
+                .collect::<Vec<_>>();
+            storage_updates
+                .extend(storage_trie_updates.storage_nodes_ref().into_iter().map(|(nibbles, node)| (nibbles, Some(node))));
+            // Sort trie node updates.
+            storage_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+            for (nibbles, maybe_updated) in storage_updates.into_iter().filter(|(n, _)| !n.is_empty()) {
+                num_entries += 1;
+                let nibbles = StoredNibblesSubKey(nibbles.clone());
+                // Delete the old entry if it exists.
+                if cursor
+                    .seek_by_key_subkey(*hashed_address, nibbles.clone())?
+                    .filter(|e| e.nibbles == nibbles)
+                    .is_some()
+                {
+                    cursor.delete_current()?;
+                }
+
+                // There is an updated version of this node, insert new entry.
+                if let Some(node) = maybe_updated {
+                    cursor.upsert(*hashed_address, StorageTrieEntry { nibbles, node: node.clone() })?;
+                }
+            }
+        }
+
+        Ok(num_entries)
+    }
+}
+
 impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
     fn unwind_account_hashing(
         &self,
@@ -2822,7 +2905,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     block_hash: end_block_hash,
                 })))
             }
-            trie_updates.write_to_database(&self.tx)?;
+            self.write_trie_updates(&trie_updates)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertMerkleTree);
 
@@ -3031,7 +3114,7 @@ impl<DB: Database> BlockExecutionWriter for DatabaseProviderRW<DB> {
                 block_hash: parent_hash,
             })))
         }
-        trie_updates.write_to_database(&self.tx)?;
+        self.write_trie_updates(&trie_updates)?;
 
         // get blocks
         let blocks = self.take_block_range(range.clone())?;
@@ -3119,7 +3202,7 @@ impl<DB: Database> BlockExecutionWriter for DatabaseProviderRW<DB> {
                 block_hash: parent_hash,
             })))
         }
-        trie_updates.write_to_database(&self.tx)?;
+        self.write_trie_updates(&trie_updates)?;
 
         // get blocks
         let blocks = self.take_block_range(range.clone())?;
@@ -3340,7 +3423,7 @@ impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
         {
             let storage_writer = StorageWriter::new(Some(self), None);
             storage_writer.write_hashed_state(&hashed_state)?;
-            trie_updates.write_to_database(&self.tx)?;
+            self.write_trie_updates(&trie_updates)?;
         }
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 

@@ -24,6 +24,9 @@ pub use spec::ChainSpecProvider;
 mod hashing;
 pub use hashing::HashingWriter;
 
+mod trie;
+pub use trie::{TrieWriter, StorageTrieWriter};
+
 mod history;
 pub use history::HistoryWriter;
 
