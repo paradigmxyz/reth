@@ -10,7 +10,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use jsonrpsee::{core::RpcResult, server::IdProvider};
+use jsonrpsee::{core::RpcResult, server::IdProvider, types::SubscriptionId};
 use reth_chainspec::ChainInfo;
 use reth_primitives::{IntoRecoveredTransaction, TxHash};
 use reth_provider::{BlockIdReader, BlockReader, EvmEnvProvider, ProviderError};
@@ -401,7 +401,14 @@ where
     /// Installs a new filter and returns the new identifier.
     async fn install_filter(&self, kind: FilterKind) -> RpcResult<FilterId> {
         let last_poll_block_number = self.provider.best_block_number().to_rpc_result()?;
-        let id = FilterId::from(self.id_provider.next_id());
+        let value_00: SubscriptionId<'static> = self.id_provider.next_id();
+        let num_value: u64 = match value_00 {
+            SubscriptionId::Num(n) => n,
+            SubscriptionId::Str(ref s) => {
+                s.parse::<u64>().expect("Failed to convert string to u64")
+            }
+        };
+        let id = FilterId::from(num_value);
         let mut filters = self.active_filters.inner.lock().await;
         filters.insert(
             id.clone(),
