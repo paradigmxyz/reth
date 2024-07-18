@@ -26,7 +26,7 @@ pub enum BlockSource {
     /// blocks that are not yet finalized.
     Pending,
     /// The block was fetched from the database.
-    Database,
+    Canonical,
 }
 
 impl BlockSource {
@@ -35,9 +35,9 @@ impl BlockSource {
         matches!(self, Self::Pending | Self::Any)
     }
 
-    /// Returns `true` if the block source is `Database` or `Any`.
+    /// Returns `true` if the block source is `Canonical` or `Any`.
     pub const fn is_database(&self) -> bool {
-        matches!(self, Self::Database | Self::Any)
+        matches!(self, Self::Canonical | Self::Any)
     }
 }
 
