@@ -401,7 +401,6 @@ where
     /// Installs a new filter and returns the new identifier.
     async fn install_filter(&self, kind: FilterKind) -> RpcResult<FilterId> {
         let last_poll_block_number = self.provider.best_block_number().to_rpc_result()?;
-        
         let subscription_id: SubscriptionId<'static> = self.id_provider.next_id();
         let id = match subscription_id {
             SubscriptionId::Num(n) => FilterId::from(n),
