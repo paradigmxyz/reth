@@ -2,7 +2,7 @@
 
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
-    hooks::{EngineHooks, PruneHook, StaticFileHook},
+    hooks::{EngineHooks, StaticFileHook},
     BeaconConsensusEngineHandle,
 };
 use reth_ethereum_engine::service::EthService;
@@ -158,7 +158,6 @@ where
 
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
-        hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor().clone())));
 
         // Configure the consensus engine
         let mut eth_service = EthService::new(
@@ -168,8 +167,8 @@ where
             pipeline,
             Box::new(ctx.task_executor().clone()),
             ctx.provider_factory().clone(),
-            ctx.blochain_db().clone(),
-            pruner.clone,
+            ctx.blockchain_db().clone(),
+            pruner,
         );
 
         let event_sender = EventSender::default();
