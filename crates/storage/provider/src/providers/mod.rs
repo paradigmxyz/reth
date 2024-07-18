@@ -55,7 +55,7 @@ mod bundle_state_provider;
 pub use bundle_state_provider::BundleStateProvider;
 
 mod chain_info;
-use chain_info::ChainInfoTracker;
+pub use chain_info::ChainInfoTracker;
 
 mod consistent_view;
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -74,8 +74,8 @@ pub struct BlockchainProvider<DB> {
     tree: Arc<dyn TreeViewer>,
     /// Tracks the chain info wrt forkchoice updates
     chain_info: ChainInfoTracker,
-    // TODO: In-memory state for recent blocks and pending state.
-    //in_memory_state: Arc<dyn InMemoryState>,
+    // TODO: replace chain_info with CanonicalInMemoryState.
+    //canonical_in_memory_state: CanonicalInMemoryState,
 }
 
 impl<DB> Clone for BlockchainProvider<DB> {
@@ -84,8 +84,8 @@ impl<DB> Clone for BlockchainProvider<DB> {
             database: self.database.clone(),
             tree: self.tree.clone(),
             chain_info: self.chain_info.clone(),
-            // TODO: add in_memory_state
-            // in_memory_state: self.in_memory_state.clone(),
+            // TODO: add canonical_in_memory_state
+            // canonical_in_memory_state: self.canonical_in_memory_state.clone(),
         }
     }
 }
