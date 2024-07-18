@@ -494,10 +494,7 @@ impl Transaction {
         match self {
             Self::Legacy(legacy_tx) => {
                 // do nothing w/ with_header
-                legacy_tx.encode_with_signature_fields(
-                    &signature.as_alloy_signature(legacy_tx.chain_id),
-                    out,
-                )
+                legacy_tx.encode_with_signature_fields(&signature.as_alloy_signature(None), out)
             }
             Self::Eip2930(access_list_tx) => {
                 access_list_tx.encode_with_signature(signature, out, with_header)
@@ -1176,8 +1173,9 @@ impl TransactionSigned {
     /// only `true`.
     pub(crate) fn payload_len_inner(&self) -> usize {
         match &self.transaction {
-            Transaction::Legacy(legacy_tx) => legacy_tx
-                .encoded_len_with_signature(&self.signature.as_alloy_signature(legacy_tx.chain_id)),
+            Transaction::Legacy(legacy_tx) => {
+                legacy_tx.encoded_len_with_signature(&self.signature.as_alloy_signature(None))
+            }
             Transaction::Eip2930(access_list_tx) => {
                 access_list_tx.payload_len_with_signature(&self.signature)
             }
@@ -1381,8 +1379,9 @@ impl TransactionSigned {
     pub fn length_without_header(&self) -> usize {
         // method computes the payload len without a RLP header
         match &self.transaction {
-            Transaction::Legacy(legacy_tx) => legacy_tx
-                .encoded_len_with_signature(&self.signature.as_alloy_signature(legacy_tx.chain_id)),
+            Transaction::Legacy(legacy_tx) => {
+                legacy_tx.encoded_len_with_signature(&self.signature.as_alloy_signature(None))
+            }
             Transaction::Eip2930(access_list_tx) => {
                 access_list_tx.payload_len_with_signature_without_header(&self.signature)
             }
