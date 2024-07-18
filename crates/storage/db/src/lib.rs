@@ -17,7 +17,7 @@
 
 mod implementation;
 pub mod lockfile;
-#[cfg(feature = "metrics")]
+#[cfg(feature = "mdbx")]
 mod metrics;
 pub mod static_file;
 pub mod tables;

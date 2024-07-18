@@ -76,17 +76,21 @@ paste.workspace = true
 assert_matches.workspace = true
 
 [features]
-default = ["std","mdbx", "metrics"]
-mdbx = ["dep:reth-libmdbx", "dep:eyre", "dep:page_size"]
-metrics = ["reth-metrics", "dep:metrics", "dep:strum"]
+default = ["mdbx"]
+mdbx = [
+    "dep:reth-libmdbx",
+    "dep:eyre",
+    "dep:page_size",
+    "reth-metrics",
+    "dep:metrics",
+    "dep:strum",
+    "dep:rustc-hash",
+]
 test-utils = ["dep:tempfile", "arbitrary"]
 bench = []
 arbitrary = ["reth-primitives/arbitrary", "reth-db-api/arbitrary"]
 optimism = []
 disable-lock = []
-std = ["rustc-hash/std"]
-rustc-hash =["dep:rustc-hash"]
-strum = ["dep:strum"]
 
 [[bench]]
 name = "hash_keys"
