@@ -5233,7 +5233,7 @@ dependencies = [
 
 [[package]]
 name = "op-reth"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "clap",
  "reth-cli-util",
