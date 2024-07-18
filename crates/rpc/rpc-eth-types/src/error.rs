@@ -476,6 +476,10 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::AuthorizationListInvalidFields => {
                 Self::AuthorizationListInvalidFields
             }
+            #[allow(unreachable_patterns)]
+            _ => panic!(
+                "use `<OptimismInvalidTransactionError as From<InvalidTransaction>>::try_from`"
+            ),
         }
     }
 }

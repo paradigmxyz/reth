@@ -7,7 +7,7 @@ use alloy_primitives::Bytes;
 use bytes::BufMut;
 
 impl Compact for Request {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: BufMut + AsMut<[u8]>,
     {

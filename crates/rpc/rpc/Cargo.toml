@@ -54,7 +54,6 @@ http-body.workspace = true
 hyper.workspace = true
 jsonwebtoken.workspace = true
 serde_json.workspace = true
-jsonrpsee-types = { workspace = true, optional = true }
 
 # async
 async-trait.workspace = true
@@ -91,5 +90,4 @@ optimism = [
     "reth-provider/optimism",
     "reth-rpc-eth-api/optimism",
     "reth-revm/optimism",
-    "jsonrpsee-types",
 ]

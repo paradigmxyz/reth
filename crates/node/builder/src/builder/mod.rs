@@ -29,7 +29,7 @@ use reth_node_core::{
     rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
 };
 use reth_primitives::revm_primitives::EnvKzgSettings;
-use reth_provider::{providers::BlockchainProvider, ChainSpecProvider};
+use reth_provider::{providers::BlockchainProvider, ChainSpecProvider, FullProvider};
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, TransactionPool};
 use secp256k1::SecretKey;
@@ -207,6 +207,17 @@ where
     pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
         T: NodeTypes,
+    {
+        self.with_types_and_provider()
+    }
+
+    /// Configures the types of the node and the provider type that will be used by the node.
+    pub fn with_types_and_provider<T, P>(
+        self,
+    ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>
+    where
+        T: NodeTypes,
+        P: FullProvider<DB>,
     {
         NodeBuilderWithTypes::new(self.config, self.database)
     }

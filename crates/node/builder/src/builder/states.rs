@@ -60,9 +60,9 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
 }
 
 /// Container for the node's types and the database the node uses.
-pub(crate) struct NodeTypesAdapter<T: FullNodeTypes> {
+pub struct NodeTypesAdapter<T: FullNodeTypes> {
     /// The database type used by the node.
-    pub(crate) database: T::DB,
+    pub database: T::DB,
 }
 
 impl<T: FullNodeTypes> NodeTypesAdapter<T> {
@@ -152,13 +152,13 @@ pub struct NodeBuilderWithComponents<
     AO: NodeAddOns<NodeAdapter<T, CB::Components>>,
 > {
     /// All settings for how the node should be configured.
-    pub(crate) config: NodeConfig,
+    pub config: NodeConfig,
     /// Adapter for the underlying node types and database
-    pub(crate) adapter: NodeTypesAdapter<T>,
+    pub adapter: NodeTypesAdapter<T>,
     /// container for type specific components
-    pub(crate) components_builder: CB,
+    pub components_builder: CB,
     /// Additional node extensions.
-    pub(crate) add_ons: AddOns<NodeAdapter<T, CB::Components>, AO>,
+    pub add_ons: AddOns<NodeAdapter<T, CB::Components>, AO>,
 }
 
 impl<T, CB> NodeBuilderWithComponents<T, CB, ()>

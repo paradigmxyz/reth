@@ -15,9 +15,6 @@ use core::{
 };
 use dyn_clone::DynClone;
 
-#[cfg(not(feature = "std"))]
-use alloc::{format, string::String};
-
 /// Generic hardfork trait.
 #[auto_impl::auto_impl(&, Box)]
 pub trait Hardfork: Any + DynClone + Send + Sync + 'static {

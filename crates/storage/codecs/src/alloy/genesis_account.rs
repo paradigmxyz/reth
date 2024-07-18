@@ -7,6 +7,21 @@ use serde::{Deserialize, Serialize};
 /// GenesisAccount acts as bridge which simplifies Compact implementation for AlloyGenesisAccount.
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_genesis::GenesisAccount`
+#[reth_codec(no_arbitrary)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GenesisAccountRef<'a> {
+    /// The nonce of the account at genesis.
+    nonce: Option<u64>,
+    /// The balance of the account at genesis.
+    balance: &'a U256,
+    /// The account's bytecode at genesis.
+    code: Option<&'a Bytes>,
+    /// The account's storage at genesis.
+    storage: Option<StorageEntries>,
+    /// The account's private key. Should only be used for testing.
+    private_key: Option<&'a B256>,
+}
+
 #[reth_codec]
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 struct GenesisAccount {
@@ -36,18 +51,21 @@ struct StorageEntry {
 }
 
 impl Compact for AlloyGenesisAccount {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let account = GenesisAccount {
+        let account = GenesisAccountRef {
             nonce: self.nonce,
-            balance: self.balance,
-            code: self.code,
-            storage: self.storage.map(|s| StorageEntries {
-                entries: s.into_iter().map(|(key, value)| StorageEntry { key, value }).collect(),
+            balance: &self.balance,
+            code: self.code.as_ref(),
+            storage: self.storage.as_ref().map(|s| StorageEntries {
+                entries: s
+                    .iter()
+                    .map(|(key, value)| StorageEntry { key: *key, value: *value })
+                    .collect(),
             }),
-            private_key: self.private_key,
+            private_key: self.private_key.as_ref(),
         };
         account.to_compact(buf)
     }

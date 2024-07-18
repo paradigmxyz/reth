@@ -42,7 +42,8 @@ pub fn reth_codec(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
     let with_zstd = args.clone().into_iter().any(|tk| tk.to_string() == "zstd");
-
+    let without_arbitrary = args.clone().into_iter().any(|tk| tk.to_string() == "no_arbitrary");
+    
     let compact = if with_zstd {
         quote! {
             #[derive(CompactZstd)]
@@ -57,10 +58,8 @@ pub fn reth_codec(args: TokenStream, input: TokenStream) -> TokenStream {
         .into()
     };
 
-    if let Some(first_arg) = args.clone().into_iter().next() {
-        if first_arg.to_string() == "no_arbitrary" {
-            return compact
-        }
+    if without_arbitrary {
+        return compact
     }
 
     let mut args = args.into_iter().collect::<Vec<_>>();

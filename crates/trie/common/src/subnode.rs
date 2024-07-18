@@ -14,7 +14,7 @@ pub struct StoredSubNode {
 }
 
 impl Compact for StoredSubNode {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -33,7 +33,7 @@ impl Compact for StoredSubNode {
             len += 1;
         }
 
-        if let Some(node) = self.node {
+        if let Some(node) = &self.node {
             buf.put_u8(1);
             len += 1;
             len += node.to_compact(buf);
@@ -87,7 +87,7 @@ mod tests {
         };
 
         let mut encoded = vec![];
-        subnode.clone().to_compact(&mut encoded);
+        subnode.to_compact(&mut encoded);
         let (decoded, _) = StoredSubNode::from_compact(&encoded[..], 0);
 
         assert_eq!(subnode, decoded);
