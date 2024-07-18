@@ -192,8 +192,10 @@ where
     /// Panics if the stage is not in this set.
     #[track_caller]
     pub fn disable(mut self, stage_id: StageId) -> Self {
-        let entry =
-            self.stages.get_mut(&stage_id).expect("Cannot disable a stage that is not in the set.");
+        let entry = self
+            .stages
+            .get_mut(&stage_id)
+            .unwrap_or_else(|| panic!("Cannot disable a stage that is not in the set: {stage_id}"));
         entry.enabled = false;
         self
     }
@@ -202,10 +204,9 @@ where
     #[track_caller]
     pub fn disable_all(mut self, stages: &[StageId]) -> Self {
         for stage_id in stages {
-            let entry = self
-                .stages
-                .get_mut(stage_id)
-                .expect("Cannot disable a stage that is not in the set.");
+            let entry = self.stages.get_mut(stage_id).unwrap_or_else(|| {
+                panic!("Cannot disable a stage that is not in the set: {stage_id}")
+            });
             entry.enabled = false;
         }
         self
