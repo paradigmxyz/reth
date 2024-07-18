@@ -33,6 +33,7 @@ reth-stages-api.workspace = true
 ## async
 tokio.workspace = true
 tokio-util.workspace = true
+futures.workspace = true
 
 ## misc
 eyre.workspace = true
