@@ -1,11 +1,11 @@
-use futures::{ready, StreamExt};
+use futures::{Stream, StreamExt};
 use pin_project::pin_project;
 use reth_beacon_consensus::{BeaconEngineMessage, EthBeaconConsensus};
 use reth_chainspec::ChainSpec;
 use reth_db_api::database::Database;
 use reth_engine_tree::{
     backfill::PipelineSync,
-    chain::ChainOrchestrator,
+    chain::{ChainEvent, ChainOrchestrator},
     download::BasicBlockDownloader,
     engine::{EngineApiEvent, EngineApiRequestHandler, EngineHandler, FromEngine},
 };
@@ -14,7 +14,6 @@ use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersCli
 use reth_stages_api::Pipeline;
 use reth_tasks::TaskSpawner;
 use std::{
-    future::Future,
     pin::Pin,
     sync::{mpsc::Sender, Arc},
     task::{Context, Poll},
@@ -70,22 +69,16 @@ where
     }
 }
 
-impl<DB, Client> Future for EthService<DB, Client>
+impl<DB, Client> Stream for EthService<DB, Client>
 where
     DB: Database + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
-    type Output = Result<(), EthServiceError>;
+    type Item = ChainEvent<EngineApiEvent>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        // Call poll on the inner orchestrator.
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut orchestrator = self.project().orchestrator;
-        loop {
-            match ready!(StreamExt::poll_next_unpin(&mut orchestrator, cx)) {
-                Some(_event) => continue,
-                None => return Poll::Ready(Ok(())),
-            }
-        }
+        StreamExt::poll_next_unpin(&mut orchestrator, cx)
     }
 }
 
