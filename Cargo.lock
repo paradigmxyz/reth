@@ -7333,7 +7333,8 @@ name = "reth-exex-types"
 version = "1.0.2"
 dependencies = [
  "alloy-primitives",
- "reth-provider",
+ "reth-execution-types",
+ "reth-provider-types",
  "serde",
 ]
 
