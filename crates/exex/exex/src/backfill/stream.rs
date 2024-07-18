@@ -49,14 +49,13 @@ where
         Self { job, tasks: FuturesOrdered::new(), range, parallelism: DEFAULT_PARALLELISM }
     }
 
-    /// Creates a new [`BackFillJobStream`] with a specified parallelism.
+    /// Configures the parallelism of the [`BackFillJobStream`] to handle active tasks.
     ///
     /// # Parameters
-    /// - `job`: The [`SingleBlockBackfillJob`] to be executed asynchronously.
-    /// - `parallelism`: The parallelism of the [`BackFillJobStream`] to handle active tasks.
+    /// - `parallelism`: The parallelism to handle active tasks.
     ///
     /// # Returns
-    /// A new instance of [`BackFillJobStream`] with the specified parallelism.
+    /// The modified instance of [`BackFillJobStream`] with the specified parallelism.
     pub const fn with_parallelism(mut self, parallelism: usize) -> Self {
         self.parallelism = parallelism;
         self
