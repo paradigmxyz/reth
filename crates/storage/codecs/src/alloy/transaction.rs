@@ -43,7 +43,7 @@ struct TxLegacy {
 }
 
 impl Compact for AlloyTxLegacy {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -54,7 +54,7 @@ impl Compact for AlloyTxLegacy {
             gas_limit: self.gas_limit as u64,
             to: self.to,
             value: self.value,
-            input: self.input,
+            input: self.input.clone(),
         };
 
         tx.to_compact(buf)
