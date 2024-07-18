@@ -4,7 +4,7 @@ use crate::{
     engine::{DownloadRequest, EngineApiEvent, FromEngine},
     persistence::PersistenceHandle,
 };
-use parking_lot::RwLock;
+pub use memory_overlay::MemoryOverlayStateProvider;
 use reth_beacon_consensus::{
     BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated,
 };
@@ -23,8 +23,7 @@ use reth_primitives::{
     SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
-    providers::ChainInfoTracker, BlockReader, ExecutionOutcome, StateProvider,
-    StateProviderFactory, StateRootProvider,
+    BlockReader, ExecutionOutcome, StateProvider, StateProviderFactory, StateRootProvider,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
@@ -35,6 +34,7 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
+pub use state::{BlockState, CanonicalInMemoryState, InMemoryState, InMemoryStateImpl};
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
@@ -44,19 +44,18 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot};
 use tracing::*;
 
 mod memory_overlay;
-pub use memory_overlay::MemoryOverlayStateProvider;
-
+mod state;
 /// Maximum number of blocks to be kept only in memory without triggering persistence.
 const PERSISTENCE_THRESHOLD: u64 = 256;
 
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutedBlock {
-    block: Arc<SealedBlock>,
-    senders: Arc<Vec<Address>>,
-    execution_output: Arc<ExecutionOutcome>,
-    hashed_state: Arc<HashedPostState>,
-    trie: Arc<TrieUpdates>,
+    pub(crate) block: Arc<SealedBlock>,
+    pub(crate) senders: Arc<Vec<Address>>,
+    pub(crate) execution_output: Arc<ExecutionOutcome>,
+    pub(crate) hashed_state: Arc<HashedPostState>,
+    pub(crate) trie: Arc<TrieUpdates>,
 }
 
 impl ExecutedBlock {
@@ -104,7 +103,7 @@ pub struct TreeState {
     /// Executed blocks grouped by their respective block number.
     blocks_by_number: BTreeMap<BlockNumber, Vec<ExecutedBlock>>,
     /// Pending state not yet applied
-    pending: Option<Arc<State>>,
+    pending: Option<Arc<BlockState>>,
     /// Block number and hash of the current head.
     current_head: Option<(BlockNumber, B256)>,
 }
@@ -151,111 +150,6 @@ impl TreeState {
     /// Returns the maximum block number stored.
     pub(crate) fn max_block_number(&self) -> BlockNumber {
         *self.blocks_by_number.last_key_value().unwrap_or((&BlockNumber::default(), &vec![])).0
-    }
-}
-
-/// Container type for in memory state data.
-#[derive(Debug, Default)]
-pub struct InMemoryStateImpl {
-    blocks: RwLock<HashMap<B256, Arc<State>>>,
-    numbers: RwLock<HashMap<u64, B256>>,
-    pending: RwLock<Option<State>>,
-}
-
-impl InMemoryStateImpl {
-    const fn new(
-        blocks: HashMap<B256, Arc<State>>,
-        numbers: HashMap<u64, B256>,
-        pending: Option<State>,
-    ) -> Self {
-        Self {
-            blocks: RwLock::new(blocks),
-            numbers: RwLock::new(numbers),
-            pending: RwLock::new(pending),
-        }
-    }
-}
-
-impl InMemoryState for InMemoryStateImpl {
-    fn state_by_hash(&self, hash: B256) -> Option<Arc<State>> {
-        self.blocks.read().get(&hash).cloned()
-    }
-
-    fn state_by_number(&self, number: u64) -> Option<Arc<State>> {
-        self.numbers.read().get(&number).and_then(|hash| self.blocks.read().get(hash).cloned())
-    }
-
-    fn head_state(&self) -> Option<Arc<State>> {
-        self.numbers
-            .read()
-            .iter()
-            .max_by_key(|(&number, _)| number)
-            .and_then(|(_, hash)| self.blocks.read().get(hash).cloned())
-    }
-
-    fn pending_state(&self) -> Option<Arc<State>> {
-        self.pending.read().as_ref().map(|state| Arc::new(State(state.0.clone())))
-    }
-}
-
-/// Inner type to provide in memory state. It includes a chain tracker to be
-/// advanced internally by the tree.
-#[derive(Debug)]
-struct CanonicalInMemoryStateInner {
-    chain_info_tracker: ChainInfoTracker,
-    in_memory_state: InMemoryStateImpl,
-}
-
-/// This type is responsible for providing the blocks, receipts, and state for
-/// all canonical blocks not on disk yet and keeps track of the block range that
-/// is in memory.
-#[derive(Debug, Clone)]
-pub struct CanonicalInMemoryState {
-    inner: Arc<CanonicalInMemoryStateInner>,
-}
-
-impl CanonicalInMemoryState {
-    fn new(
-        blocks: HashMap<B256, Arc<State>>,
-        numbers: HashMap<u64, B256>,
-        pending: Option<State>,
-    ) -> Self {
-        let in_memory_state = InMemoryStateImpl::new(blocks, numbers, pending);
-        let head_state = in_memory_state.head_state();
-        let header = match head_state {
-            Some(state) => state.block().block().header.clone(),
-            None => SealedHeader::default(),
-        };
-        let chain_info_tracker = ChainInfoTracker::new(header);
-        let inner = CanonicalInMemoryStateInner { chain_info_tracker, in_memory_state };
-
-        Self { inner: Arc::new(inner) }
-    }
-
-    fn with_header(header: SealedHeader) -> Self {
-        let chain_info_tracker = ChainInfoTracker::new(header);
-        let in_memory_state = InMemoryStateImpl::default();
-        let inner = CanonicalInMemoryStateInner { chain_info_tracker, in_memory_state };
-
-        Self { inner: Arc::new(inner) }
-    }
-}
-
-impl InMemoryState for CanonicalInMemoryState {
-    fn state_by_hash(&self, hash: B256) -> Option<Arc<State>> {
-        self.inner.in_memory_state.state_by_hash(hash)
-    }
-
-    fn state_by_number(&self, number: u64) -> Option<Arc<State>> {
-        self.inner.in_memory_state.state_by_number(number)
-    }
-
-    fn head_state(&self) -> Option<Arc<State>> {
-        self.inner.in_memory_state.head_state()
-    }
-
-    fn pending_state(&self) -> Option<Arc<State>> {
-        self.inner.in_memory_state.pending_state()
     }
 }
 
@@ -416,7 +310,7 @@ where
             persistence_state: PersistenceState::default(),
             is_pipeline_active: false,
             state,
-            canonical_in_memory_state: CanonicalInMemoryState::with_header(header),
+            canonical_in_memory_state: CanonicalInMemoryState::with_head(header),
             _marker: PhantomData,
         }
     }
@@ -999,49 +893,6 @@ impl PersistenceState {
     }
 }
 
-/// Represents the tree state kept in memory.
-trait InMemoryState: Send + Sync {
-    /// Returns the state for a given block hash.
-    fn state_by_hash(&self, hash: B256) -> Option<Arc<State>>;
-    /// Returns the state for a given block number.
-    fn state_by_number(&self, number: u64) -> Option<Arc<State>>;
-    /// Returns the current chain head state.
-    fn head_state(&self) -> Option<Arc<State>>;
-    /// Returns the pending state corresponding to the current head plus one,
-    /// from the payload received in newPayload that does not have a FCU yet.
-    fn pending_state(&self) -> Option<Arc<State>>;
-}
-
-/// State after applying the given block.
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct State(ExecutedBlock);
-
-impl State {
-    const fn new(executed_block: ExecutedBlock) -> Self {
-        Self(executed_block)
-    }
-
-    fn block(&self) -> ExecutedBlock {
-        self.0.clone()
-    }
-
-    fn hash(&self) -> B256 {
-        self.0.block().hash()
-    }
-
-    fn number(&self) -> u64 {
-        self.0.block().number
-    }
-
-    fn state_root(&self) -> B256 {
-        self.0.block().header.state_root
-    }
-
-    fn receipts(&self) -> &Receipts {
-        &self.0.execution_outcome().receipts
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1081,7 +932,7 @@ mod tests {
             let number = sealed_block.number;
             blocks_by_hash.insert(hash, block.clone());
             blocks_by_number.entry(number).or_insert_with(Vec::new).push(block.clone());
-            state_by_hash.insert(hash, Arc::new(State(block.clone())));
+            state_by_hash.insert(hash, Arc::new(BlockState(block.clone())));
             hash_by_number.insert(number, hash);
         }
         let tree_state = TreeState { blocks_by_hash, blocks_by_number, ..Default::default() };
@@ -1128,15 +979,15 @@ mod tests {
             persistence_handle,
         );
         let last_executed_block = blocks.last().unwrap().clone();
-        let pending = Some(State::new(last_executed_block));
+        let pending = Some(BlockState::new(last_executed_block));
         tree.canonical_in_memory_state =
             CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending);
 
         TestHarness { tree, to_tree_tx, blocks, sf_action_rx }
     }
 
-    fn create_mock_state(block_number: u64) -> State {
-        State::new(get_executed_block_with_number(block_number))
+    fn create_mock_state(block_number: u64) -> BlockState {
+        BlockState::new(get_executed_block_with_number(block_number))
     }
 
     #[tokio::test]
@@ -1171,7 +1022,7 @@ mod tests {
         for executed_block in blocks {
             let sealed_block = executed_block.block();
 
-            let expected_state = State::new(executed_block.clone());
+            let expected_state = BlockState::new(executed_block.clone());
 
             let actual_state_by_hash = tree
                 .canonical_in_memory_state
@@ -1270,9 +1121,9 @@ mod tests {
         let number = rand::thread_rng().gen::<u64>();
         let block = get_executed_block_with_number(number);
 
-        let state = State::new(block.clone());
+        let state = BlockState::new(block.clone());
 
-        assert_eq!(state.0, block);
+        assert_eq!(state.block(), block);
     }
 
     #[tokio::test]
@@ -1280,7 +1131,7 @@ mod tests {
         let number = rand::thread_rng().gen::<u64>();
         let block = get_executed_block_with_number(number);
 
-        let state = State::new(block.clone());
+        let state = BlockState::new(block.clone());
 
         assert_eq!(state.block(), block);
     }
@@ -1290,7 +1141,7 @@ mod tests {
         let number = rand::thread_rng().gen::<u64>();
         let block = get_executed_block_with_number(number);
 
-        let state = State::new(block.clone());
+        let state = BlockState::new(block.clone());
 
         assert_eq!(state.hash(), block.block().hash());
     }
@@ -1300,7 +1151,7 @@ mod tests {
         let number = rand::thread_rng().gen::<u64>();
         let block = get_executed_block_with_number(number);
 
-        let state = State::new(block);
+        let state = BlockState::new(block);
 
         assert_eq!(state.number(), number);
     }
@@ -1310,7 +1161,7 @@ mod tests {
         let number = rand::thread_rng().gen::<u64>();
         let block = get_executed_block_with_number(number);
 
-        let state = State::new(block.clone());
+        let state = BlockState::new(block.clone());
 
         assert_eq!(state.state_root(), block.block().state_root);
     }
@@ -1321,7 +1172,7 @@ mod tests {
 
         let block = get_executed_block_with_receipts(receipts.clone());
 
-        let state = State::new(block);
+        let state = BlockState::new(block);
 
         assert_eq!(state.receipts(), &receipts);
     }
