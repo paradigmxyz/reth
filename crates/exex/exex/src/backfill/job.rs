@@ -1,4 +1,9 @@
 use crate::BackFillJobStream;
+use std::{
+    ops::RangeInclusive,
+    time::{Duration, Instant},
+};
+
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
@@ -11,10 +16,6 @@ use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::{debug, trace};
-use std::{
-    ops::RangeInclusive,
-    time::{Duration, Instant},
-};
 
 /// Backfill job started for a specific range.
 ///
@@ -218,9 +219,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::{
-        test_utils::{
-            blocks_and_execution_outputs, chain_spec, execute_block_and_commit_to_database,
-        },
+        backfill::test_utils::{blocks_and_execution_outputs, chain_spec, to_execution_outcome},
         BackfillJobFactory,
     };
     use reth_blockchain_tree::noop::NoopBlockchainTree;

@@ -1,4 +1,10 @@
 use crate::SingleBlockBackfillJob;
+use std::{
+    ops::RangeInclusive,
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
+
 use futures::{
     stream::{FuturesOrdered, Stream},
     StreamExt,
@@ -6,11 +12,6 @@ use futures::{
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
 use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
 use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
-use std::{
-    ops::RangeInclusive,
-    pin::Pin,
-    task::{ready, Context, Poll},
-};
 use tokio::task::JoinHandle;
 
 type BackfillTasks = FuturesOrdered<
@@ -103,10 +104,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::{
-        test_utils::{
-            blocks_and_execution_outputs, chain_spec, execute_block_and_commit_to_database,
-            sign_tx_with_key_pair,
-        },
+        backfill::test_utils::{blocks_and_execution_outputs, chain_spec},
         BackfillJobFactory,
     };
     use futures::StreamExt;

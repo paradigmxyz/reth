@@ -1,4 +1,21 @@
-fn to_execution_outcome(
+use std::sync::Arc;
+
+use eyre::OptionExt;
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET};
+use reth_evm::execute::{
+    BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
+};
+use reth_evm_ethereum::execute::EthExecutorProvider;
+use reth_primitives::{
+    b256, constants::ETH_TO_WEI, Address, Block, BlockWithSenders, Genesis, GenesisAccount, Header,
+    Receipt, Requests, SealedBlockWithSenders, Transaction, TxEip2930, TxKind, U256,
+};
+use reth_provider::{BlockWriter as _, ExecutionOutcome, LatestStateProviderRef, ProviderFactory};
+use reth_revm::database::StateProviderDatabase;
+use reth_testing_utils::generators::sign_tx_with_key_pair;
+use secp256k1::Keypair;
+
+pub(crate) fn to_execution_outcome(
     block_number: u64,
     block_execution_output: &BlockExecutionOutput<Receipt>,
 ) -> ExecutionOutcome {
@@ -10,7 +27,7 @@ fn to_execution_outcome(
     }
 }
 
-fn chain_spec(address: Address) -> Arc<ChainSpec> {
+pub(crate) fn chain_spec(address: Address) -> Arc<ChainSpec> {
     // Create a chain spec with a genesis state that contains the
     // provided sender
     Arc::new(
@@ -29,7 +46,7 @@ fn chain_spec(address: Address) -> Arc<ChainSpec> {
     )
 }
 
-fn execute_block_and_commit_to_database<DB>(
+pub(crate) fn execute_block_and_commit_to_database<DB>(
     provider_factory: &ProviderFactory<DB>,
     chain_spec: Arc<ChainSpec>,
     block: &BlockWithSenders,
@@ -65,7 +82,7 @@ where
     Ok(block_execution_output)
 }
 
-fn blocks_and_execution_outputs<DB>(
+pub(crate) fn blocks_and_execution_outputs<DB>(
     provider_factory: ProviderFactory<DB>,
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,

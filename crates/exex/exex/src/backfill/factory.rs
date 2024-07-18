@@ -1,9 +1,10 @@
 use crate::BackfillJob;
+use std::ops::RangeInclusive;
+
 use reth_node_api::FullNodeComponents;
 use reth_primitives::BlockNumber;
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
-use std::ops::RangeInclusive;
 
 /// Factory for creating new backfill jobs.
 #[derive(Debug, Clone)]
