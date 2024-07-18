@@ -6,11 +6,14 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{Receipt, Receipts, Request, Requests};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
+#[cfg(feature = "std")]
 use std::collections::HashSet;
 use tracing::debug;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+#[cfg(not(feature = "std"))]
+use alloc::collections::BTreeSet;
 
 /// Takes care of:
 ///  - recording receipts during execution of multiple blocks.
@@ -37,6 +40,9 @@ pub struct BlockBatchRecord {
     ///
     /// Empty implies that there is going to be addresses to include in the filter in a future
     /// block. None means there isn't any kind of configuration.
+    #[cfg(not(feature = "std"))]
+    pruning_address_filter: Option<(u64, BTreeSet<Address>)>,
+    #[cfg(feature = "std")]
     pruning_address_filter: Option<(u64, HashSet<Address>)>,
     /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
@@ -153,6 +159,10 @@ impl BlockBatchRecord {
         let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
 
         if !contract_log_pruner.is_empty() {
+            #[cfg(not(feature = "std"))]
+            let (prev_block, filter) =
+                self.pruning_address_filter.get_or_insert_with(|| (0, BTreeSet::new()));
+            #[cfg(feature = "std")]
             let (prev_block, filter) =
                 self.pruning_address_filter.get_or_insert_with(|| (0, HashSet::new()));
             for (_, addresses) in contract_log_pruner.range(*prev_block..=block_number) {
@@ -216,7 +226,12 @@ mod tests {
     use super::*;
     use reth_primitives::{Address, Log, Receipt};
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
+    #[cfg(feature = "std")]
     use std::collections::BTreeMap;
+    #[cfg(not(feature = "std"))]
+    extern crate alloc;
+    #[cfg(not(feature = "std"))]
+    use alloc::collections::BTreeMap;
 
     #[test]
     fn test_save_receipts_empty() {
