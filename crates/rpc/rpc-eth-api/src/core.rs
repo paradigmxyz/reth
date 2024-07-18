@@ -4,7 +4,7 @@
 use alloy_dyn_abi::TypedData;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives::{
-    revm_primitives, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
+    revm_primitives::EVMError, Address, BlockId, BlockNumberOrTag, Bytes, B256, B64, U256, U64,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -12,8 +12,8 @@ use reth_rpc_types::{
     serde_helpers::JsonStorageKey,
     state::{EvmOverrides, StateOverride},
     AccessListWithGasUsed, AnyTransactionReceipt, BlockOverrides, Bundle,
-    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, RichBlock,
-    StateContext, SyncStatus, ToRpcError, Transaction, TransactionRequest, Work,
+    EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Header, Index, IntoRpcError,
+    RichBlock, StateContext, SyncStatus, Transaction, TransactionRequest, Work,
 };
 use tracing::trace;
 
@@ -23,9 +23,9 @@ use crate::helpers::{
 };
 
 /// Network specific `eth` API types.
-pub trait EthApiTypes: Send + 'static {
+pub trait EthApiTypes: Send + Sync {
     /// Extension of [`EthApiError`], with network specific errors.
-    type Error: ToRpcError + FromEthApiError + AsEthApiError + FromEvmError;
+    type Error: IntoRpcError + FromEthApiError + AsEthApiError + FromEvmError;
 }
 
 /// Helper trait to wrap core [`EthApiError`].
@@ -85,17 +85,29 @@ pub trait AsEthApiError {
     }
 }
 
+impl AsEthApiError for EthApiError {
+    fn as_err(&self) -> Option<&EthApiError> {
+        Some(self)
+    }
+}
+
 /// Helper trait to convert from revm errors.
-pub trait FromEvmError: From<EthApiError> + From<revm_primitives::InvalidTransaction> {
+pub trait FromEvmError: From<EthApiError> {
     /// Converts from a revm error.
-    fn from_evm_err<E>(err: revm_primitives::EVMError<E>) -> Self
+    fn from_evm_err<E>(err: EVMError<E>) -> Self
+    where
+        EthApiError: From<E>;
+}
+
+impl<T> FromEvmError for T
+where
+    T: From<EthApiError>,
+{
+    fn from_evm_err<E>(err: EVMError<E>) -> Self
     where
         EthApiError: From<E>,
     {
-        match EthApiError::try_from(err) {
-            Ok(err) => err.into(),       // error inherited from l1
-            Err(err) => Self::from(err), // l2 specific error
-        }
+        err.into_err()
     }
 }
 
@@ -452,7 +464,7 @@ where
     /// Handler for: `eth_getBlockByHash`
     async fn block_by_hash(&self, hash: B256, full: bool) -> RpcResult<Option<RichBlock>> {
         trace!(target: "rpc::eth", ?hash, ?full, "Serving eth_getBlockByHash");
-        EthBlocks::rpc_block(self, hash.into(), full).await.map_err(|err| err.to_rpc_error())
+        EthBlocks::rpc_block(self, hash.into(), full).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getBlockByNumber`
@@ -462,7 +474,7 @@ where
         full: bool,
     ) -> RpcResult<Option<RichBlock>> {
         trace!(target: "rpc::eth", ?number, ?full, "Serving eth_getBlockByNumber");
-        EthBlocks::rpc_block(self, number.into(), full).await.map_err(|err| err.to_rpc_error())
+        EthBlocks::rpc_block(self, number.into(), full).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getBlockTransactionCountByHash`
@@ -470,7 +482,7 @@ where
         trace!(target: "rpc::eth", ?hash, "Serving eth_getBlockTransactionCountByHash");
         Ok(EthBlocks::block_transaction_count(self, hash.into())
             .await
-            .map_err(|err| err.to_rpc_error())?
+            .map_err(T::Error::into_rpc_err)?
             .map(U256::from))
     }
 
@@ -482,7 +494,7 @@ where
         trace!(target: "rpc::eth", ?number, "Serving eth_getBlockTransactionCountByNumber");
         Ok(EthBlocks::block_transaction_count(self, number.into())
             .await
-            .map_err(|err| err.to_rpc_error())?
+            .map_err(T::Error::into_rpc_err)?
             .map(U256::from))
     }
 
@@ -490,7 +502,7 @@ where
     async fn block_uncles_count_by_hash(&self, hash: B256) -> RpcResult<Option<U256>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getUncleCountByBlockHash");
         Ok(EthBlocks::ommers(self, hash.into())
-            .map_err(|err| err.to_rpc_error())?
+            .map_err(T::Error::into_rpc_err)?
             .map(|ommers| U256::from(ommers.len())))
     }
 
@@ -501,7 +513,7 @@ where
     ) -> RpcResult<Option<U256>> {
         trace!(target: "rpc::eth", ?number, "Serving eth_getUncleCountByBlockNumber");
         Ok(EthBlocks::ommers(self, number.into())
-            .map_err(|err| err.to_rpc_error())?
+            .map_err(T::Error::into_rpc_err)?
             .map(|ommers| U256::from(ommers.len())))
     }
 
@@ -511,7 +523,7 @@ where
         block_id: BlockId,
     ) -> RpcResult<Option<Vec<AnyTransactionReceipt>>> {
         trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockReceipts");
-        EthBlocks::block_receipts(self, block_id).await.map_err(|err| err.to_rpc_error())
+        EthBlocks::block_receipts(self, block_id).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getUncleByBlockHashAndIndex`
@@ -523,7 +535,7 @@ where
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getUncleByBlockHashAndIndex");
         EthBlocks::ommer_by_block_and_index(self, hash.into(), index)
             .await
-            .map_err(|err| err.to_rpc_error())
+            .map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getUncleByBlockNumberAndIndex`
@@ -535,13 +547,13 @@ where
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getUncleByBlockNumberAndIndex");
         EthBlocks::ommer_by_block_and_index(self, number.into(), index)
             .await
-            .map_err(|err| err.to_rpc_error())
+            .map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getRawTransactionByHash`
     async fn raw_transaction_by_hash(&self, hash: B256) -> RpcResult<Option<Bytes>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getRawTransactionByHash");
-        EthTransactions::raw_transaction_by_hash(self, hash).await.map_err(|err| err.to_rpc_error())
+        EthTransactions::raw_transaction_by_hash(self, hash).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getTransactionByHash`
@@ -549,7 +561,7 @@ where
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
         Ok(EthTransactions::transaction_by_hash(self, hash)
             .await
-            .map_err(|err| err.to_rpc_error())?
+            .map_err(T::Error::into_rpc_err)?
             .map(Into::into))
     }
 
@@ -562,7 +574,7 @@ where
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getRawTransactionByBlockHashAndIndex");
         EthTransactions::raw_transaction_by_block_and_tx_index(self, hash.into(), index.into())
             .await
-            .map_err(|err| err.to_rpc_error())
+            .map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getTransactionByBlockHashAndIndex`
@@ -574,7 +586,7 @@ where
         trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getTransactionByBlockHashAndIndex");
         EthTransactions::transaction_by_block_and_tx_index(self, hash.into(), index.into())
             .await
-            .map_err(|err| err.to_rpc_error())
+            .map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getRawTransactionByBlockNumberAndIndex`
@@ -586,7 +598,7 @@ where
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getRawTransactionByBlockNumberAndIndex");
         EthTransactions::raw_transaction_by_block_and_tx_index(self, number.into(), index.into())
             .await
-            .map_err(|err| err.to_rpc_error())
+            .map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getTransactionByBlockNumberAndIndex`
@@ -598,19 +610,19 @@ where
         trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getTransactionByBlockNumberAndIndex");
         EthTransactions::transaction_by_block_and_tx_index(self, number.into(), index.into())
             .await
-            .map_err(|err| err.to_rpc_error())
+            .map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getTransactionReceipt`
     async fn transaction_receipt(&self, hash: B256) -> RpcResult<Option<AnyTransactionReceipt>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionReceipt");
-        EthTransactions::transaction_receipt(self, hash).await.map_err(|err| err.to_rpc_error())
+        EthTransactions::transaction_receipt(self, hash).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getBalance`
     async fn balance(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getBalance");
-        EthState::balance(self, address, block_number).await.map_err(|err| err.to_rpc_error())
+        EthState::balance(self, address, block_number).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getStorageAt`
@@ -623,7 +635,7 @@ where
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getStorageAt");
         EthState::storage_at(self, address, index, block_number)
             .await
-            .map_err(|err| err.to_rpc_error())
+            .map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getTransactionCount`
@@ -635,27 +647,25 @@ where
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getTransactionCount");
         EthState::transaction_count(self, address, block_number)
             .await
-            .map_err(|err| err.to_rpc_error())
+            .map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getCode`
     async fn get_code(&self, address: Address, block_number: Option<BlockId>) -> RpcResult<Bytes> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getCode");
-        EthState::get_code(self, address, block_number).await.map_err(|err| err.to_rpc_error())
+        EthState::get_code(self, address, block_number).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getHeaderByNumber`
     async fn header_by_number(&self, block_number: BlockNumberOrTag) -> RpcResult<Option<Header>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_getHeaderByNumber");
-        EthBlocks::rpc_block_header(self, block_number.into())
-            .await
-            .map_err(|err| err.to_rpc_error())
+        EthBlocks::rpc_block_header(self, block_number.into()).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getHeaderByHash`
     async fn header_by_hash(&self, hash: B256) -> RpcResult<Option<Header>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getHeaderByHash");
-        EthBlocks::rpc_block_header(self, hash.into()).await.map_err(|err| err.to_rpc_error())
+        EthBlocks::rpc_block_header(self, hash.into()).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_call`
@@ -674,7 +684,7 @@ where
             EvmOverrides::new(state_overrides, block_overrides),
         )
         .await
-        .map_err(|err| err.to_rpc_error())
+        .map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_callMany`
@@ -687,7 +697,7 @@ where
         trace!(target: "rpc::eth", ?bundle, ?state_context, ?state_override, "Serving eth_callMany");
         EthCall::call_many(self, bundle, state_context, state_override)
             .await
-            .map_err(|err| err.to_rpc_error())
+            .map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_createAccessList`
@@ -699,7 +709,7 @@ where
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_createAccessList");
         let access_list_with_gas_used = EthCall::create_access_list_at(self, request, block_number)
             .await
-            .map_err(|err| err.to_rpc_error())?;
+            .map_err(T::Error::into_rpc_err)?;
 
         Ok(access_list_with_gas_used)
     }
@@ -714,25 +724,25 @@ where
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
         EthCall::estimate_gas_at(self, request, block_number.unwrap_or_default(), state_override)
             .await
-            .map_err(|err| err.to_rpc_error())
+            .map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_gasPrice`
     async fn gas_price(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_gasPrice");
-        EthFees::gas_price(self).await.map_err(|err| err.to_rpc_error())
+        EthFees::gas_price(self).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_maxPriorityFeePerGas`
     async fn max_priority_fee_per_gas(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_maxPriorityFeePerGas");
-        EthFees::suggested_priority_fee(self).await.map_err(|err| err.to_rpc_error())
+        EthFees::suggested_priority_fee(self).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_blobBaseFee`
     async fn blob_base_fee(&self) -> RpcResult<U256> {
         trace!(target: "rpc::eth", "Serving eth_blobBaseFee");
-        EthFees::blob_base_fee(self).await.map_err(|err| err.to_rpc_error())
+        EthFees::blob_base_fee(self).await.map_err(T::Error::into_rpc_err)
     }
 
     // FeeHistory is calculated based on lazy evaluation of fees for historical blocks, and further
@@ -753,7 +763,7 @@ where
         trace!(target: "rpc::eth", ?block_count, ?newest_block, ?reward_percentiles, "Serving eth_feeHistory");
         EthFees::fee_history(self, block_count.to(), newest_block, reward_percentiles)
             .await
-            .map_err(|err| err.to_rpc_error())
+            .map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_mining`
@@ -789,19 +799,19 @@ where
     /// Handler for: `eth_sendTransaction`
     async fn send_transaction(&self, request: TransactionRequest) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?request, "Serving eth_sendTransaction");
-        EthTransactions::send_transaction(self, request).await.map_err(|err| err.to_rpc_error())
+        EthTransactions::send_transaction(self, request).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_sendRawTransaction`
     async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransaction");
-        EthTransactions::send_raw_transaction(self, tx).await.map_err(|err| err.to_rpc_error())
+        EthTransactions::send_raw_transaction(self, tx).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_sign`
     async fn sign(&self, address: Address, message: Bytes) -> RpcResult<Bytes> {
         trace!(target: "rpc::eth", ?address, ?message, "Serving eth_sign");
-        EthTransactions::sign(self, address, message).await.map_err(|err| err.to_rpc_error())
+        EthTransactions::sign(self, address, message).await.map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_signTransaction`
@@ -812,7 +822,7 @@ where
     /// Handler for: `eth_signTypedData`
     async fn sign_typed_data(&self, address: Address, data: TypedData) -> RpcResult<Bytes> {
         trace!(target: "rpc::eth", ?address, ?data, "Serving eth_signTypedData");
-        EthTransactions::sign_typed_data(self, &data, address).map_err(|err| err.to_rpc_error())
+        EthTransactions::sign_typed_data(self, &data, address).map_err(T::Error::into_rpc_err)
     }
 
     /// Handler for: `eth_getProof`
@@ -824,8 +834,8 @@ where
     ) -> RpcResult<EIP1186AccountProofResponse> {
         trace!(target: "rpc::eth", ?address, ?keys, ?block_number, "Serving eth_getProof");
         EthState::get_proof(self, address, keys, block_number)
-            .map_err(|err| err.to_rpc_error())?
+            .map_err(T::Error::into_rpc_err)?
             .await
-            .map_err(|err| err.to_rpc_error())
+            .map_err(T::Error::into_rpc_err)
     }
 }

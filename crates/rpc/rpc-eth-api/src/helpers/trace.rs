@@ -54,6 +54,7 @@ pub trait Trace: LoadState {
     where
         DB: Database,
         EthApiError: From<DB::Error>,
+
         I: GetInspector<DB>,
     {
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, env, inspector);

@@ -14,8 +14,11 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::DebugApiServer;
-use reth_rpc_eth_api::helpers::{Call, EthApiSpec, EthTransactions, TraceExt};
-use reth_rpc_eth_types::{EthApiError, EthResult, StateCacheDb};
+use reth_rpc_eth_api::{
+    helpers::{Call, EthApiSpec, EthTransactions, TraceExt},
+    EthApiTypes, FromEthApiError,
+};
+use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_rpc_types::{
     state::EvmOverrides,
@@ -23,7 +26,7 @@ use reth_rpc_types::{
         BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType, GethDebugTracerType,
         GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, NoopFrame, TraceResult,
     },
-    BlockError, Bundle, RichBlock, StateContext, TransactionRequest,
+    BlockError, Bundle, IntoRpcError, RichBlock, StateContext, TransactionRequest,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
@@ -68,7 +71,7 @@ where
         + StateProviderFactory
         + EvmEnvProvider
         + 'static,
-    Eth: TraceExt + 'static,
+    Eth: EthApiTypes + TraceExt + 'static,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -83,7 +86,7 @@ where
         cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
-    ) -> EthResult<Vec<TraceResult>> {
+    ) -> Result<Vec<TraceResult>, Eth::Error> {
         if transactions.is_empty() {
             // nothing to trace
             return Ok(Vec::new())
@@ -141,9 +144,10 @@ where
         &self,
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
-    ) -> EthResult<Vec<TraceResult>> {
-        let block =
-            Block::decode(&mut rlp_block.as_ref()).map_err(BlockError::RlpDecodeRawBlock)?;
+    ) -> Result<Vec<TraceResult>, Eth::Error> {
+        let block = Block::decode(&mut rlp_block.as_ref())
+            .map_err(BlockError::RlpDecodeRawBlock)
+            .map_err(Eth::Error::from_err)?;
 
         let (cfg, block_env) = self.eth_api().evm_env_for_raw_block(&block.header).await?;
         // we trace on top the block's parent block
@@ -158,8 +162,9 @@ where
                     .map(|tx| {
                         tx.into_ecrecovered()
                             .ok_or_else(|| EthApiError::InvalidTransactionSignature)
+                            .map_err(Eth::Error::from_err)
                     })
-                    .collect::<EthResult<Vec<_>>>()?
+                    .collect::<Result<Vec<_>, Eth::Error>>()?
             } else {
                 block
                     .body
@@ -167,8 +172,9 @@ where
                     .map(|tx| {
                         tx.into_ecrecovered_unchecked()
                             .ok_or_else(|| EthApiError::InvalidTransactionSignature)
+                            .map_err(Eth::Error::from_err)
                     })
-                    .collect::<EthResult<Vec<_>>>()?
+                    .collect::<Result<Vec<_>, Eth::Error>>()?
             };
 
         self.trace_block(parent.into(), transactions, cfg, block_env, opts).await
@@ -179,11 +185,12 @@ where
         &self,
         block_id: BlockId,
         opts: GethDebugTracingOptions,
-    ) -> EthResult<Vec<TraceResult>> {
+    ) -> Result<Vec<TraceResult>, Eth::Error> {
         let block_hash = self
             .inner
             .provider
-            .block_hash_for_id(block_id)?
+            .block_hash_for_id(block_id)
+            .map_err(Eth::Error::from_err)?
             .ok_or_else(|| EthApiError::UnknownBlockNumber)?;
 
         let ((cfg, block_env, _), block) = futures::try_join!(
@@ -213,9 +220,9 @@ where
         &self,
         tx_hash: B256,
         opts: GethDebugTracingOptions,
-    ) -> EthResult<GethTrace> {
+    ) -> Result<GethTrace, Eth::Error> {
         let (transaction, block) = match self.inner.eth_api.transaction_and_block(tx_hash).await? {
-            None => return Err(EthApiError::TransactionNotFound),
+            None => return Err(EthApiError::TransactionNotFound.into()),
             Some(res) => res,
         };
         let (cfg, block_env, _) = self.inner.eth_api.evm_env_at(block.hash().into()).await?;
@@ -277,7 +284,7 @@ where
         call: TransactionRequest,
         block_id: Option<BlockId>,
         opts: GethDebugTracingCallOptions,
-    ) -> EthResult<GethTrace> {
+    ) -> Result<GethTrace, Eth::Error> {
         let at = block_id.unwrap_or_default();
         let GethDebugTracingCallOptions { tracing_options, state_overrides, block_overrides } =
             opts;
@@ -330,22 +337,23 @@ where
                             TracingInspectorConfig::from_geth_prestate_config(&prestate_config),
                         );
 
-                        let frame =
-                            self.inner
-                                .eth_api
-                                .spawn_with_call_at(call, at, overrides, move |db, env| {
-                                    // wrapper is hack to get around 'higher-ranked lifetime error',
-                                    // see <https://github.com/rust-lang/rust/issues/100013>
-                                    let db = db.0;
+                        let frame = self
+                            .inner
+                            .eth_api
+                            .spawn_with_call_at(call, at, overrides, move |db, env| {
+                                // wrapper is hack to get around 'higher-ranked lifetime error',
+                                // see <https://github.com/rust-lang/rust/issues/100013>
+                                let db = db.0;
 
-                                    let (res, _) =
-                                        this.eth_api().inspect(&mut *db, env, &mut inspector)?;
-                                    let frame = inspector
-                                        .into_geth_builder()
-                                        .geth_prestate_traces(&res, prestate_config, db)?;
-                                    Ok(frame)
-                                })
-                                .await?;
+                                let (res, _) =
+                                    this.eth_api().inspect(&mut *db, env, &mut inspector)?;
+                                let frame = inspector
+                                    .into_geth_builder()
+                                    .geth_prestate_traces(&res, prestate_config, db)
+                                    .map_err(Eth::Error::from_err)?;
+                                Ok(frame)
+                            })
+                            .await?;
                         return Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
@@ -354,7 +362,8 @@ where
                             .into_mux_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
-                        let mut inspector = MuxInspector::try_from_config(mux_config)?;
+                        let mut inspector = MuxInspector::try_from_config(mux_config)
+                            .map_err(Eth::Error::from_err)?;
 
                         let frame = self
                             .inner
@@ -366,7 +375,9 @@ where
 
                                 let (res, _) =
                                     this.eth_api().inspect(&mut *db, env, &mut inspector)?;
-                                let frame = inspector.try_into_mux_frame(&res, db)?;
+                                let frame = inspector
+                                    .try_into_mux_frame(&res, db)
+                                    .map_err(Eth::Error::from_err)?;
                                 Ok(frame.into())
                             })
                             .await?;
@@ -386,10 +397,11 @@ where
                             // <https://github.com/rust-lang/rust/issues/100013>
                             let db = db.0;
 
-                            let mut inspector = JsInspector::new(code, config)?;
+                            let mut inspector =
+                                JsInspector::new(code, config).map_err(Eth::Error::from_err)?;
                             let (res, _) =
                                 this.eth_api().inspect(&mut *db, env.clone(), &mut inspector)?;
-                            Ok(inspector.json_result(res, &env, db)?)
+                            inspector.json_result(res, &env, db).map_err(Eth::Error::from_err)
                         })
                         .await?;
 
@@ -426,9 +438,9 @@ where
         bundles: Vec<Bundle>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> EthResult<Vec<Vec<GethTrace>>> {
+    ) -> Result<Vec<Vec<GethTrace>>, Eth::Error> {
         if bundles.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")))
+            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
@@ -546,7 +558,7 @@ where
         env: EnvWithHandlerCfg,
         db: &mut StateCacheDb<'_>,
         transaction_context: Option<TransactionContext>,
-    ) -> EthResult<(GethTrace, revm_primitives::EvmState)> {
+    ) -> Result<(GethTrace, revm_primitives::EvmState), Eth::Error> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
 
         if let Some(tracer) = tracer {
@@ -584,11 +596,10 @@ where
                         );
                         let (res, _) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
 
-                        let frame = inspector.into_geth_builder().geth_prestate_traces(
-                            &res,
-                            prestate_config,
-                            db,
-                        )?;
+                        let frame = inspector
+                            .into_geth_builder()
+                            .geth_prestate_traces(&res, prestate_config, db)
+                            .map_err(Eth::Error::from_err)?;
 
                         return Ok((frame.into(), res.state))
                     }
@@ -600,10 +611,12 @@ where
                             .into_mux_config()
                             .map_err(|_| EthApiError::InvalidTracerConfig)?;
 
-                        let mut inspector = MuxInspector::try_from_config(mux_config)?;
+                        let mut inspector = MuxInspector::try_from_config(mux_config)
+                            .map_err(Eth::Error::from_err)?;
 
                         let (res, _) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
-                        let frame = inspector.try_into_mux_frame(&res, db)?;
+                        let frame =
+                            inspector.try_into_mux_frame(&res, db).map_err(Eth::Error::from_err)?;
                         return Ok((frame.into(), res.state))
                     }
                 },
@@ -613,11 +626,13 @@ where
                         code,
                         config,
                         transaction_context.unwrap_or_default(),
-                    )?;
+                    )
+                    .map_err(Eth::Error::from_err)?;
                     let (res, env) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
 
                     let state = res.state.clone();
-                    let result = inspector.json_result(res, &env, db)?;
+                    let result =
+                        inspector.json_result(res, &env, db).map_err(Eth::Error::from_err)?;
                     Ok((GethTrace::JS(result), state))
                 }
             }
@@ -690,7 +705,7 @@ where
     ///
     /// Returns the bytes of the transaction for the given hash.
     async fn raw_transaction(&self, hash: B256) -> RpcResult<Option<Bytes>> {
-        Ok(self.inner.eth_api.raw_transaction_by_hash(hash).await?)
+        self.inner.eth_api.raw_transaction_by_hash(hash).await.map_err(Eth::Error::into_rpc_err)
     }
 
     /// Handler for `debug_getRawTransactions`
@@ -739,7 +754,9 @@ where
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default()).await?)
+        Self::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default())
+            .await
+            .map_err(Eth::Error::into_rpc_err)
     }
 
     /// Handler for `debug_traceBlockByHash`
@@ -749,7 +766,9 @@ where
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::debug_trace_block(self, block.into(), opts.unwrap_or_default()).await?)
+        Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
+            .await
+            .map_err(Eth::Error::into_rpc_err)
     }
 
     /// Handler for `debug_traceBlockByNumber`
@@ -759,7 +778,9 @@ where
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::debug_trace_block(self, block.into(), opts.unwrap_or_default()).await?)
+        Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
+            .await
+            .map_err(Eth::Error::into_rpc_err)
     }
 
     /// Handler for `debug_traceTransaction`
@@ -769,7 +790,9 @@ where
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<GethTrace> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default()).await?)
+        Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default())
+            .await
+            .map_err(Eth::Error::into_rpc_err)
     }
 
     /// Handler for `debug_traceCall`
@@ -780,7 +803,9 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::debug_trace_call(self, request, block_number, opts.unwrap_or_default()).await?)
+        Self::debug_trace_call(self, request, block_number, opts.unwrap_or_default())
+            .await
+            .map_err(Eth::Error::into_rpc_err)
     }
 
     async fn debug_trace_call_many(
@@ -790,7 +815,9 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<GethTrace>>> {
         let _permit = self.acquire_trace_permit().await;
-        Ok(Self::debug_trace_call_many(self, bundles, state_context, opts).await?)
+        Self::debug_trace_call_many(self, bundles, state_context, opts)
+            .await
+            .map_err(Eth::Error::into_rpc_err)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {

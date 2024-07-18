@@ -32,12 +32,17 @@ impl ToRpcError for OpEthApiError {
     }
 }
 
-impl From<InvalidTransaction> for OpEthApiError {
-    fn from(err: InvalidTransaction) -> Self {
+impl<T> From<EVMError<T>> for EthApiError
+where
+    T: Into<EthApiError>,
+{
+    fn from(err: EVMError<T>) -> Self {
         match err {
-            InvalidTransaction::DepositSystemTxPostRegolith |
-            InvalidTransaction::HaltedDepositPostRegolith => Self::InvalidTransaction(err.into()),
-            _ => expect!("should cover all network specific match arms"),
+            EVMError::Transaction(err) => match OptimismInvalidTransactionError::try_from(err) {
+                Ok(err) => Self::InvalidTransaction(err.into()),
+                Err(err) => Self::Core(EthApiError::InvalidTransaction(err.into())),
+            },
+            _ => err.into_err(),
         }
     }
 }
@@ -72,12 +77,16 @@ impl ToRpcError for OptimismInvalidTransactionError {
     }
 }
 
-impl From<InvalidTransaction> for OptimismInvalidTransactionError {
-    fn from(err: InvalidTransaction) -> Self {
+impl TryFrom<InvalidTransaction> for OptimismInvalidTransactionError {
+    type Error = InvalidTransaction;
+
+    fn try_from(err: InvalidTransaction) -> Result<Self, Self::Error> {
         match err {
-            InvalidTransaction::DepositSystemTxPostRegolith => Self::DepositSystemTxPostRegolith,
-            InvalidTransaction::HaltedDepositPostRegolith => Self::HaltedDepositPostRegolith,
-            _ => expect!("should cover all network specific match arms"),
+            InvalidTransaction::DepositSystemTxPostRegolith => {
+                Ok(Self::DepositSystemTxPostRegolith)
+            }
+            InvalidTransaction::HaltedDepositPostRegolith => Ok(Self::HaltedDepositPostRegolith),
+            _ => Err(err),
         }
     }
 }

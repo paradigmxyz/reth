@@ -9,7 +9,7 @@ use reth_rpc_server_types::result::{
     internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
 use reth_rpc_types::{
-    error::EthRpcErrorCode, request::TransactionInputError, BlockError, ToRpcError,
+    error::EthRpcErrorCode, request::TransactionInputError, BlockError, IntoRpcError, ToRpcError,
 };
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolError, PoolErrorKind,
@@ -226,21 +226,25 @@ impl From<reth_errors::ProviderError> for EthApiError {
     }
 }
 
-impl<T> TryFrom<EVMError<T>> for EthApiError
+impl<T> From<EVMError<T>> for EthApiError
 where
     T: Into<Self>,
 {
-    type Error = revm::primitives::InvalidTransaction;
-
-    fn try_from(err: EVMError<T>) -> Result<Self, Self::Error> {
+    fn from(err: EVMError<T>) -> Self {
         match err {
-            EVMError::Transaction(err) => Ok(RpcInvalidTransactionError::try_from(err)?.into()),
-            EVMError::Header(InvalidHeader::PrevrandaoNotSet) => Ok(Self::PrevrandaoNotSet),
-            EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => Ok(Self::ExcessBlobGasNotSet),
-            EVMError::Database(err) => Ok(err.into()),
-            EVMError::Custom(err) => Ok(Self::EvmCustom(err)),
-            EVMError::Precompile(err) => Ok(Self::EvmPrecompile(err)),
+            EVMError::Transaction(err) => RpcInvalidTransactionError::from(err).into(),
+            EVMError::Header(InvalidHeader::PrevrandaoNotSet) => Self::PrevrandaoNotSet,
+            EVMError::Header(InvalidHeader::ExcessBlobGasNotSet) => Self::ExcessBlobGasNotSet,
+            EVMError::Database(err) => err.into(),
+            EVMError::Custom(err) => Self::EvmCustom(err),
+            EVMError::Precompile(err) => Self::EvmPrecompile(err),
         }
+    }
+}
+
+impl IntoRpcError for EthApiError {
+    fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
+        self.into()
     }
 }
 
@@ -439,47 +443,39 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
     }
 }
 
-impl TryFrom<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
-    type Error = revm::primitives::InvalidTransaction;
-
-    fn try_from(err: revm::primitives::InvalidTransaction) -> Result<Self, Self::Error> {
+impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
+    fn from(err: revm::primitives::InvalidTransaction) -> Self {
         use revm::primitives::InvalidTransaction;
         match err {
-            InvalidTransaction::InvalidChainId => Ok(Self::InvalidChainId),
-            InvalidTransaction::PriorityFeeGreaterThanMaxFee => Ok(Self::TipAboveFeeCap),
-            InvalidTransaction::GasPriceLessThanBasefee => Ok(Self::FeeCapTooLow),
+            InvalidTransaction::InvalidChainId => Self::InvalidChainId,
+            InvalidTransaction::PriorityFeeGreaterThanMaxFee => Self::TipAboveFeeCap,
+            InvalidTransaction::GasPriceLessThanBasefee => Self::FeeCapTooLow,
             InvalidTransaction::CallerGasLimitMoreThanBlock |
-            InvalidTransaction::CallGasCostMoreThanGasLimit => Ok(Self::GasTooHigh),
-            InvalidTransaction::RejectCallerWithCode => Ok(Self::SenderNoEOA),
-            InvalidTransaction::LackOfFundForMaxFee { .. } => Ok(Self::InsufficientFunds),
-            InvalidTransaction::OverflowPaymentInTransaction => Ok(Self::GasUintOverflow),
-            InvalidTransaction::NonceOverflowInTransaction => Ok(Self::NonceMaxValue),
-            InvalidTransaction::CreateInitCodeSizeLimit => Ok(Self::MaxInitCodeSizeExceeded),
-            InvalidTransaction::NonceTooHigh { .. } => Ok(Self::NonceTooHigh),
-            InvalidTransaction::NonceTooLow { .. } => Ok(Self::NonceTooLow),
-            InvalidTransaction::AccessListNotSupported => Ok(Self::AccessListNotSupported),
-            InvalidTransaction::MaxFeePerBlobGasNotSupported => {
-                Ok(Self::MaxFeePerBlobGasNotSupported)
-            }
+            InvalidTransaction::CallGasCostMoreThanGasLimit => Self::GasTooHigh,
+            InvalidTransaction::RejectCallerWithCode => Self::SenderNoEOA,
+            InvalidTransaction::LackOfFundForMaxFee { .. } => Self::InsufficientFunds,
+            InvalidTransaction::OverflowPaymentInTransaction => Self::GasUintOverflow,
+            InvalidTransaction::NonceOverflowInTransaction => Self::NonceMaxValue,
+            InvalidTransaction::CreateInitCodeSizeLimit => Self::MaxInitCodeSizeExceeded,
+            InvalidTransaction::NonceTooHigh { .. } => Self::NonceTooHigh,
+            InvalidTransaction::NonceTooLow { .. } => Self::NonceTooLow,
+            InvalidTransaction::AccessListNotSupported => Self::AccessListNotSupported,
+            InvalidTransaction::MaxFeePerBlobGasNotSupported => Self::MaxFeePerBlobGasNotSupported,
             InvalidTransaction::BlobVersionedHashesNotSupported => {
-                Ok(Self::BlobVersionedHashesNotSupported)
+                Self::BlobVersionedHashesNotSupported
             }
-            InvalidTransaction::BlobGasPriceGreaterThanMax => Ok(Self::BlobFeeCapTooLow),
-            InvalidTransaction::EmptyBlobs => Ok(Self::BlobTransactionMissingBlobHashes),
-            InvalidTransaction::BlobVersionNotSupported => Ok(Self::BlobHashVersionMismatch),
-            InvalidTransaction::TooManyBlobs { max, have } => Ok(Self::TooManyBlobs { max, have }),
-            InvalidTransaction::BlobCreateTransaction => Ok(Self::BlobTransactionIsCreate),
-            InvalidTransaction::EofCrateShouldHaveToAddress => {
-                Ok(Self::EofCrateShouldHaveToAddress)
-            }
+            InvalidTransaction::BlobGasPriceGreaterThanMax => Self::BlobFeeCapTooLow,
+            InvalidTransaction::EmptyBlobs => Self::BlobTransactionMissingBlobHashes,
+            InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
+            InvalidTransaction::TooManyBlobs { max, have } => Self::TooManyBlobs { max, have },
+            InvalidTransaction::BlobCreateTransaction => Self::BlobTransactionIsCreate,
+            InvalidTransaction::EofCrateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
             InvalidTransaction::AuthorizationListNotSupported => {
-                Ok(Self::AuthorizationListNotSupported)
+                Self::AuthorizationListNotSupported
             }
             InvalidTransaction::AuthorizationListInvalidFields => {
-                Ok(Self::AuthorizationListInvalidFields)
+                Self::AuthorizationListInvalidFields
             }
-            #[allow(unreachable_patterns)]
-            _ => Err(err),
         }
     }
 }
