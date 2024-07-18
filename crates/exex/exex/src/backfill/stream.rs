@@ -57,7 +57,7 @@ where
     ///
     /// # Returns
     /// A new instance of [`BackFillJobStream`] with the specified parallelism.
-    pub fn with_parallelism(mut self, parallelism: usize) -> Self {
+    pub const fn with_parallelism(mut self, parallelism: usize) -> Self {
         self.parallelism = parallelism;
         self
     }
