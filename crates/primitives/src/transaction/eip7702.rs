@@ -15,7 +15,10 @@ use reth_codecs::Compact;
 /// [EIP-7702 Set Code Transaction](https://eips.ethereum.org/EIPS/eip-7702)
 ///
 /// Set EOA account code for one transaction
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::reth_codec)]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::reth_codec(no_arbitrary, add_arbitrary_tests)
+)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct TxEip7702 {
     /// Added as EIP-155: Simple replay attack protection
@@ -242,6 +245,73 @@ impl TxEip7702 {
         let mut buf = Vec::with_capacity(self.payload_len_for_signature());
         self.encode_for_signing(&mut buf);
         keccak256(&buf)
+    }
+}
+
+// TODO(onbjerg): This is temporary until we upstream `Arbitrary` to EIP-7702 types and `Signature`
+// in alloy
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for TxEip7702 {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        use arbitrary::Arbitrary;
+        #[derive(Arbitrary)]
+        struct ArbitrarySignedAuth {
+            chain_id: ChainId,
+            address: alloy_primitives::Address,
+            nonce: Option<u64>,
+            parity: bool,
+            r: U256,
+            s: U256,
+        }
+
+        let iter = u.arbitrary_iter::<ArbitrarySignedAuth>()?;
+        let mut authorization_list = Vec::new();
+        for auth in iter {
+            let auth = auth?;
+
+            let sig = alloy_primitives::Signature::from_rs_and_parity(
+                auth.r,
+                auth.s,
+                alloy_primitives::Parity::Parity(auth.parity),
+            )
+            .unwrap_or_else(|_| {
+                // Give a default one if the randomly generated one failed
+                alloy_primitives::Signature::from_rs_and_parity(
+                    alloy_primitives::b256!(
+                        "1fd474b1f9404c0c5df43b7620119ffbc3a1c3f942c73b6e14e9f55255ed9b1d"
+                    )
+                    .into(),
+                    alloy_primitives::b256!(
+                        "29aca24813279a901ec13b5f7bb53385fa1fc627b946592221417ff74a49600d"
+                    )
+                    .into(),
+                    false,
+                )
+                .unwrap()
+            });
+
+            authorization_list.push(
+                alloy_eips::eip7702::Authorization {
+                    chain_id: auth.chain_id,
+                    address: auth.address,
+                    nonce: auth.nonce.into(),
+                }
+                .into_signed(sig),
+            );
+        }
+
+        Ok(Self {
+            chain_id: Arbitrary::arbitrary(u)?,
+            nonce: Arbitrary::arbitrary(u)?,
+            gas_limit: Arbitrary::arbitrary(u)?,
+            max_fee_per_gas: Arbitrary::arbitrary(u)?,
+            max_priority_fee_per_gas: Arbitrary::arbitrary(u)?,
+            to: Arbitrary::arbitrary(u)?,
+            value: Arbitrary::arbitrary(u)?,
+            access_list: Arbitrary::arbitrary(u)?,
+            authorization_list,
+            input: Arbitrary::arbitrary(u)?,
+        })
     }
 }
 
