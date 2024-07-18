@@ -402,13 +402,10 @@ where
     async fn install_filter(&self, kind: FilterKind) -> RpcResult<FilterId> {
         let last_poll_block_number = self.provider.best_block_number().to_rpc_result()?;
         let subscription_id: SubscriptionId<'static> = self.id_provider.next_id();
-        let num_value: u64 = match subscription_id {
-            SubscriptionId::Num(n) => n,
-            SubscriptionId::Str(ref s) => {
-                s.parse::<u64>().expect("Failed to convert string to u64")
-            }
+        let id = match subscription_id {
+            SubscriptionId::Num(n) => FilterId::from(n),
+            SubscriptionId::Str(ref s) => FilterId::from(s.to_string()),
         };
-        let id = FilterId::from(num_value);
         let mut filters = self.active_filters.inner.lock().await;
         filters.insert(
             id.clone(),
