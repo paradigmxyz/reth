@@ -1,0 +1,12 @@
+[package]
+name = "reth-trie-db"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Database integration with merkle trie implementation"
+
+[lints]
+workspace = true
