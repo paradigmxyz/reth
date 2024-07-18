@@ -190,20 +190,23 @@ where
     /// # Panics
     ///
     /// Panics if the stage is not in this set.
+    #[track_caller]
     pub fn disable(mut self, stage_id: StageId) -> Self {
-        let entry =
-            self.stages.get_mut(&stage_id).expect("Cannot disable a stage that is not in the set.");
+        let entry = self
+            .stages
+            .get_mut(&stage_id)
+            .unwrap_or_else(|| panic!("Cannot disable a stage that is not in the set: {stage_id}"));
         entry.enabled = false;
         self
     }
 
     /// Disables all given stages. See [`disable`](Self::disable).
+    #[track_caller]
     pub fn disable_all(mut self, stages: &[StageId]) -> Self {
         for stage_id in stages {
-            let entry = self
-                .stages
-                .get_mut(stage_id)
-                .expect("Cannot disable a stage that is not in the set.");
+            let entry = self.stages.get_mut(stage_id).unwrap_or_else(|| {
+                panic!("Cannot disable a stage that is not in the set: {stage_id}")
+            });
             entry.enabled = false;
         }
         self
@@ -212,6 +215,7 @@ where
     /// Disables the given stage if the given closure returns true.
     ///
     /// See [`Self::disable`]
+    #[track_caller]
     pub fn disable_if<F>(self, stage_id: StageId, f: F) -> Self
     where
         F: FnOnce() -> bool,
@@ -225,6 +229,7 @@ where
     /// Disables all given stages if the given closure returns true.
     ///
     /// See [`Self::disable`]
+    #[track_caller]
     pub fn disable_all_if<F>(self, stages: &[StageId], f: F) -> Self
     where
         F: FnOnce() -> bool,
