@@ -401,8 +401,8 @@ where
     /// Installs a new filter and returns the new identifier.
     async fn install_filter(&self, kind: FilterKind) -> RpcResult<FilterId> {
         let last_poll_block_number = self.provider.best_block_number().to_rpc_result()?;
-        let value_00: SubscriptionId<'static> = self.id_provider.next_id();
-        let num_value: u64 = match value_00 {
+        let subscription_id: SubscriptionId<'static> = self.id_provider.next_id();
+        let num_value: u64 = match subscription_id {
             SubscriptionId::Num(n) => n,
             SubscriptionId::Str(ref s) => {
                 s.parse::<u64>().expect("Failed to convert string to u64")
