@@ -17,13 +17,13 @@ type BackfillTasks = FuturesOrdered<
     JoinHandle<Result<(BlockWithSenders, BlockExecutionOutput<Receipt>), BlockExecutionError>>,
 >;
 
-/// The default capacity of active tasks for [`BackFillJobStream`].
-const DEFAULT_CAPACITY: usize = 100;
+/// The default parallelism for active tasks in [`BackFillJobStream`].
+const DEFAULT_PARALLELISM: usize = 4;
 
 /// Stream for processing backfill jobs asynchronously.
 ///
 /// This struct manages the execution of [`SingleBlockBackfillJob`] tasks, allowing blocks to be
-/// processed asynchronously within a specified range.
+/// processed asynchronously but in order within a specified range.
 #[derive(Debug)]
 pub struct BackFillJobStream<E, P> {
     job: SingleBlockBackfillJob<E, P>,
@@ -37,28 +37,29 @@ where
     E: BlockExecutorProvider + Clone + Send + 'static,
     P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + 'static,
 {
-    /// Creates a new [`BackFillJobStream`] with the default capacity size.
+    /// Creates a new [`BackFillJobStream`] with the default parallelism.
     ///
     /// # Parameters
     /// - `job`: The [`SingleBlockBackfillJob`] to be executed asynchronously.
     ///
     /// # Returns
-    /// A new instance of [`BackFillJobStream`] with the default capacity size.
+    /// A new instance of [`BackFillJobStream`] with the default parallelism.
     pub fn new(job: SingleBlockBackfillJob<E, P>) -> Self {
-        Self::new_with_capacity(job, DEFAULT_CAPACITY)
+        let range = job.range.clone();
+        Self { job, tasks: FuturesOrdered::new(), range, parallelism: DEFAULT_PARALLELISM }
     }
 
-    /// Creates a new [`BackFillJobStream`] with a specified capacity size.
+    /// Creates a new [`BackFillJobStream`] with a specified parallelism.
     ///
     /// # Parameters
     /// - `job`: The [`SingleBlockBackfillJob`] to be executed asynchronously.
-    /// - `capacity`: The capacity of the [`BackFillJobStream`] to handle active tasks.
+    /// - `parallelism`: The parallelism of the [`BackFillJobStream`] to handle active tasks.
     ///
     /// # Returns
-    /// A new instance of [`BackFillJobStream`] with the specified capacity size.
-    pub fn new_with_capacity(job: SingleBlockBackfillJob<E, P>, capacity: usize) -> Self {
-        let range = job.range.clone();
-        Self { job, tasks: FuturesOrdered::new(), range, capacity }
+    /// A new instance of [`BackFillJobStream`] with the specified parallelism.
+    pub fn with_parallelism(mut self, parallelism: usize) -> Self {
+        self.parallelism = parallelism;
+        self
     }
 
     fn spawn_task(
@@ -81,8 +82,8 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        // Spawn new tasks only if we are below the stream capacity size
-        while this.tasks.len() < this.capacity {
+        // Spawn new tasks only if we are below the parallelism configured.
+        while this.tasks.len() < this.parallelism {
             if let Some(block_number) = this.range.next() {
                 let task = this.spawn_task(block_number);
                 this.tasks.push_back(task);
