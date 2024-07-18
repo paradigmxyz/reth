@@ -4,7 +4,7 @@ use reth_execution_types::{BlockReceipts, Chain};
 use reth_primitives::SealedBlockWithSenders;
 
 /// Chain action that is triggered when a new block is imported or old block is reverted.
-/// and will return all [`crate::ExecutionOutcome`] and
+/// and will return all [`reth_execution_types::ExecutionOutcome`] and
 /// [`reth_primitives::SealedBlockWithSenders`] of both reverted and committed blocks.
 #[derive(Clone, Debug)]
 pub enum CanonStateNotification {
