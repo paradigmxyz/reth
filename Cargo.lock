@@ -8074,6 +8074,7 @@ dependencies = [
  "reth-network-p2p",
  "reth-nippy-jar",
  "reth-primitives",
+ "reth-provider-types",
  "reth-prune-types",
  "reth-stages-types",
  "reth-storage-api",
@@ -8086,6 +8087,14 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+]
+
+[[package]]
+name = "reth-provider-types"
+version = "1.0.2"
+dependencies = [
+ "reth-execution-types",
+ "reth-primitives",
 ]
 
 [[package]]

@@ -39,6 +39,10 @@ pub use bundle_state::{OriginalValuesKnown, StateChanges, StateReverts};
 /// Writer standalone type.
 pub mod writer;
 
+// Re-export provider types
+#[doc(inline)]
+pub use reth_provider_types::*;
+
 pub(crate) fn to_range<R: std::ops::RangeBounds<u64>>(bounds: R) -> std::ops::Range<u64> {
     let start = match bounds.start_bound() {
         std::ops::Bound::Included(&v) => v,

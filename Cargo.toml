@@ -343,6 +343,7 @@ reth-payload-validator = { path = "crates/payload/validator" }
 reth-primitives = { path = "crates/primitives", default-features = false, features = ["std"] }
 reth-primitives-traits = { path = "crates/primitives-traits", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
+reth-provider-types = { path = "crates/storage/provider-types" }
 reth-prune = { path = "crates/prune/prune" }
 reth-prune-types = { path = "crates/prune/types" }
 reth-revm = { path = "crates/revm" }
