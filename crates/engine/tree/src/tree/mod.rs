@@ -340,7 +340,9 @@ where
             DEFAULT_BLOCK_BUFFER_LIMIT,
             DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
         );
-        let header = SealedHeader::default();
+
+        let best_block_number = provider.best_block_number().unwrap_or(0);
+        let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
 
         let task = Self::new(
             provider,
