@@ -19,12 +19,15 @@ mod tests {
     use alloy_rlp::{RlpDecodable, RlpEncodable};
     use proptest::proptest;
     use proptest_arbitrary_interop::arb;
-    use reth_codecs::{main_codec, Compact};
+    use reth_codecs::{reth_codec, Compact};
+    use serde::{Deserialize, Serialize};
 
     /// This type is kept for compatibility tests after the codec support was added to
     /// alloy-primitives Log type natively
-    #[main_codec(rlp)]
-    #[derive(Clone, Debug, PartialEq, Eq, RlpDecodable, RlpEncodable, Default)]
+    #[reth_codec(rlp)]
+    #[derive(
+        Clone, Debug, PartialEq, Eq, RlpDecodable, RlpEncodable, Default, Serialize, Deserialize,
+    )]
     struct Log {
         /// Contract that emitted this log.
         address: Address,
@@ -55,7 +58,7 @@ mod tests {
         fn test_roundtrip_conversion_between_log_and_alloy_log(log in arb::<Log>()) {
             // Convert log to buffer and then create alloy_log from buffer and compare
             let mut compacted_log = Vec::<u8>::new();
-            let len = log.clone().to_compact(&mut compacted_log);
+            let len = log.to_compact(&mut compacted_log);
 
             let alloy_log = AlloyLog::from_compact(&compacted_log, len).0;
             assert_eq!(log, alloy_log.into());

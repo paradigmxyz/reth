@@ -12,4 +12,15 @@ description = "Commonly used types for exex usage in reth."
 workspace = true
 
 [dependencies]
+# reth
+reth-provider.workspace = true
+
+# reth
 alloy-primitives.workspace = true
+
+# misc
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde", "reth-provider/serde"]

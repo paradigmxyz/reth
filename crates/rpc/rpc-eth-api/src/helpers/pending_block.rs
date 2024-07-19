@@ -169,15 +169,13 @@ pub trait LoadPendingBlock {
         result: ExecutionResult,
         cumulative_gas_used: u64,
     ) -> Receipt {
+        #[allow(clippy::needless_update)]
         Receipt {
             tx_type: tx.tx_type(),
             success: result.is_success(),
             cumulative_gas_used,
             logs: result.into_logs().into_iter().map(Into::into).collect(),
-            #[cfg(feature = "optimism")]
-            deposit_nonce: None,
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: None,
+            ..Default::default()
         }
     }
 

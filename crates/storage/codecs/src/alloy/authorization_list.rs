@@ -1,14 +1,17 @@
+use core::ops::Deref;
+
 use crate::Compact;
 use alloy_eips::eip7702::{Authorization as AlloyAuthorization, SignedAuthorization};
 use alloy_primitives::{Address, ChainId, U256};
 use bytes::Buf;
-use reth_codecs_derive::main_codec;
+use reth_codecs_derive::reth_codec;
+use serde::{Deserialize, Serialize};
 
 /// Authorization acts as bridge which simplifies Compact implementation for AlloyAuthorization.
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_eips::eip7702::Authorization`
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[reth_codec]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 struct Authorization {
     chain_id: ChainId,
     address: Address,
@@ -16,7 +19,7 @@ struct Authorization {
 }
 
 impl Compact for AlloyAuthorization {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -36,12 +39,12 @@ impl Compact for AlloyAuthorization {
     }
 }
 
-impl Compact for SignedAuthorization<alloy_primitives::Signature> {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+impl Compact for SignedAuthorization {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let (auth, signature) = self.into_parts();
+        let signature = self.signature();
         let (v, r, s) = (signature.v(), signature.r(), signature.s());
         buf.put_u8(v.y_parity_byte());
         buf.put_slice(r.as_le_slice());
@@ -49,7 +52,7 @@ impl Compact for SignedAuthorization<alloy_primitives::Signature> {
 
         // to_compact doesn't write the len to buffer.
         // By placing it as last, we don't need to store it either.
-        1 + 32 + 32 + auth.to_compact(buf)
+        1 + 32 + 32 + self.deref().to_compact(buf)
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
@@ -88,7 +91,7 @@ mod tests {
             .unwrap(),
         );
         let mut compacted_authorization = Vec::<u8>::new();
-        let len = authorization.clone().to_compact(&mut compacted_authorization);
+        let len = authorization.to_compact(&mut compacted_authorization);
         let (decoded_authorization, _) =
             SignedAuthorization::from_compact(&compacted_authorization, len);
         assert_eq!(authorization, decoded_authorization);

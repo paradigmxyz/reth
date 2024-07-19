@@ -4,16 +4,22 @@ use crate::{
 };
 use alloy_rlp::{length_of_length, Decodable, Encodable, Header};
 use core::mem;
-use reth_codecs::{main_codec, Compact};
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+use serde::{Deserialize, Serialize};
+
+#[cfg(any(test, feature = "reth-codec"))]
+use reth_codecs::Compact;
 
 /// [EIP-7702 Set Code Transaction](https://eips.ethereum.org/EIPS/eip-7702)
 ///
 /// Set EOA account code for one transaction
-#[main_codec(no_arbitrary, add_arbitrary_tests)]
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(
+    any(test, feature = "reth-codec"),
+    reth_codecs::reth_codec(no_arbitrary, add_arbitrary_tests)
+)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct TxEip7702 {
     /// Added as EIP-155: Simple replay attack protection
     pub chain_id: ChainId,
@@ -64,7 +70,7 @@ pub struct TxEip7702 {
     /// Authorizations are used to temporarily set the code of its signer to
     /// the code referenced by `address`. These also include a `chain_id` (which
     /// can be set to zero and not evaluated) as well as an optional `nonce`.
-    pub authorization_list: Vec<SignedAuthorization<alloy_primitives::Signature>>,
+    pub authorization_list: Vec<SignedAuthorization>,
     /// Input has two uses depending if the transaction `to` field is [`TxKind::Create`] or
     /// [`TxKind::Call`].
     ///
@@ -105,7 +111,7 @@ impl TxEip7702 {
         self.to.size() + // to
         mem::size_of::<U256>() + // value
         self.access_list.size() + // access_list
-        mem::size_of::<SignedAuthorization<alloy_primitives::Signature>>()
+        mem::size_of::<SignedAuthorization>()
              * self.authorization_list.capacity() + // authorization_list
         self.input.len() // input
     }
@@ -306,24 +312,6 @@ impl<'a> arbitrary::Arbitrary<'a> for TxEip7702 {
             authorization_list,
             input: Arbitrary::arbitrary(u)?,
         })
-    }
-}
-
-// TODO(onbjerg): This is temporary until we upstream `Hash` for EIP-7702 types in alloy
-impl core::hash::Hash for TxEip7702 {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.chain_id.hash(state);
-        self.nonce.hash(state);
-        self.gas_limit.hash(state);
-        self.max_fee_per_gas.hash(state);
-        self.max_priority_fee_per_gas.hash(state);
-        self.to.hash(state);
-        self.value.hash(state);
-        self.access_list.hash(state);
-        for auth in &self.authorization_list {
-            auth.signature_hash().hash(state);
-        }
-        self.input.hash(state);
     }
 }
 

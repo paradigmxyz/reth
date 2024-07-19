@@ -59,6 +59,13 @@ where
         &mut self.handler
     }
 
+    /// Triggers a backfill sync for the __valid__ given target.
+    ///
+    /// CAUTION: This function should be used with care and with a valid target.
+    pub fn start_backfill_sync(&mut self, target: impl Into<PipelineTarget>) {
+        self.backfill_sync.on_action(BackfillAction::Start(target.into()));
+    }
+
     /// Internal function used to advance the chain.
     ///
     /// Polls the `ChainOrchestrator` for the next event.

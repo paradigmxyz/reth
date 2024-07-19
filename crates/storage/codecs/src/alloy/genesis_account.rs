@@ -1,13 +1,29 @@
 use crate::Compact;
 use alloy_genesis::GenesisAccount as AlloyGenesisAccount;
 use alloy_primitives::{Bytes, B256, U256};
-use reth_codecs_derive::main_codec;
+use reth_codecs_derive::reth_codec;
+use serde::{Deserialize, Serialize};
 
 /// GenesisAccount acts as bridge which simplifies Compact implementation for AlloyGenesisAccount.
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_genesis::GenesisAccount`
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[reth_codec(no_arbitrary)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GenesisAccountRef<'a> {
+    /// The nonce of the account at genesis.
+    nonce: Option<u64>,
+    /// The balance of the account at genesis.
+    balance: &'a U256,
+    /// The account's bytecode at genesis.
+    code: Option<&'a Bytes>,
+    /// The account's storage at genesis.
+    storage: Option<StorageEntries>,
+    /// The account's private key. Should only be used for testing.
+    private_key: Option<&'a B256>,
+}
+
+#[reth_codec]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 struct GenesisAccount {
     /// The nonce of the account at genesis.
     nonce: Option<u64>,
@@ -21,32 +37,35 @@ struct GenesisAccount {
     private_key: Option<B256>,
 }
 
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[reth_codec]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 struct StorageEntries {
     entries: Vec<StorageEntry>,
 }
 
-#[main_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[reth_codec]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 struct StorageEntry {
     key: B256,
     value: B256,
 }
 
 impl Compact for AlloyGenesisAccount {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let account = GenesisAccount {
+        let account = GenesisAccountRef {
             nonce: self.nonce,
-            balance: self.balance,
-            code: self.code,
-            storage: self.storage.map(|s| StorageEntries {
-                entries: s.into_iter().map(|(key, value)| StorageEntry { key, value }).collect(),
+            balance: &self.balance,
+            code: self.code.as_ref(),
+            storage: self.storage.as_ref().map(|s| StorageEntries {
+                entries: s
+                    .iter()
+                    .map(|(key, value)| StorageEntry { key: *key, value: *value })
+                    .collect(),
             }),
-            private_key: self.private_key,
+            private_key: self.private_key.as_ref(),
         };
         account.to_compact(buf)
     }

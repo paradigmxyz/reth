@@ -4,13 +4,13 @@ use alloy_primitives::{keccak256, Bytes, B256, U256};
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::Buf;
 use derive_more::Deref;
-use reth_codecs::{main_codec, Compact};
+use reth_codecs::{reth_codec, Compact};
 use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, JumpTable};
 use serde::{Deserialize, Serialize};
 
 /// An Ethereum account.
-#[main_codec]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[reth_codec]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Account {
     /// Account nonce.
     pub nonce: u64,
@@ -67,7 +67,7 @@ impl Bytecode {
 }
 
 impl Compact for Bytecode {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
@@ -209,7 +209,7 @@ mod tests {
             2,
             JumpTable::from_slice(&[0]),
         )));
-        let len = bytecode.clone().to_compact(&mut buf);
+        let len = bytecode.to_compact(&mut buf);
         assert_eq!(len, 16);
 
         let (decoded, remainder) = Bytecode::from_compact(&buf, len);

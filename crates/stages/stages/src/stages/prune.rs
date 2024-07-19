@@ -1,6 +1,8 @@
 use reth_db_api::database::Database;
-use reth_provider::{DatabaseProviderRW, PruneCheckpointReader};
-use reth_prune::{PruneMode, PruneModes, PruneSegment, PrunerBuilder};
+use reth_provider::{DatabaseProviderRW, PruneCheckpointReader, PruneCheckpointWriter};
+use reth_prune::{
+    PruneMode, PruneModes, PruneSegment, PrunerBuilder, SegmentOutput, SegmentOutputCheckpoint,
+};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
@@ -49,7 +51,34 @@ impl<DB: Database> Stage<DB> for PruneStage {
         if result.progress.is_finished() {
             Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
         } else {
-            info!(target: "sync::stages::prune::exec", segments = ?result.segments, "Pruner has more data to prune");
+            if let Some((last_segment, last_segment_output)) = result.segments.last() {
+                match last_segment_output {
+                    SegmentOutput {
+                        progress,
+                        pruned,
+                        checkpoint:
+                            checkpoint @ Some(SegmentOutputCheckpoint { block_number: Some(_), .. }),
+                    } => {
+                        info!(
+                            target: "sync::stages::prune::exec",
+                            ?last_segment,
+                            ?progress,
+                            ?pruned,
+                            ?checkpoint,
+                            "Last segment has more data to prune"
+                        )
+                    }
+                    SegmentOutput { progress, pruned, checkpoint: _ } => {
+                        info!(
+                            target: "sync::stages::prune::exec",
+                            ?last_segment,
+                            ?progress,
+                            ?pruned,
+                            "Last segment has more data to prune"
+                        )
+                    }
+                }
+            }
             // We cannot set the checkpoint yet, because prune segments may have different highest
             // pruned block numbers
             Ok(ExecOutput { checkpoint: input.checkpoint(), done: false })
@@ -58,10 +87,16 @@ impl<DB: Database> Stage<DB> for PruneStage {
 
     fn unwind(
         &mut self,
-        _provider: &DatabaseProviderRW<DB>,
+        provider: &DatabaseProviderRW<DB>,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        info!(target: "sync::stages::prune::unwind", "Stage is always skipped");
+        // We cannot recover the data that was pruned in `execute`, so we just update the
+        // checkpoints.
+        let prune_checkpoints = provider.get_prune_checkpoints()?;
+        for (segment, mut checkpoint) in prune_checkpoints {
+            checkpoint.block_number = Some(input.unwind_to);
+            provider.save_prune_checkpoint(segment, checkpoint)?;
+        }
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }

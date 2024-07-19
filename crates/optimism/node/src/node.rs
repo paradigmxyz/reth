@@ -1,14 +1,12 @@
 //! Optimism Node types config.
 
-use crate::{
-    args::RollupArgs,
-    txpool::{OpTransactionPool, OpTransactionValidator},
-    OptimismEngineTypes,
-};
+use std::sync::Arc;
+
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_evm::ConfigureEvm;
 use reth_evm_optimism::{OpExecutorProvider, OptimismEvmConfig};
 use reth_network::{NetworkHandle, NetworkManager};
+use reth_node_api::{FullNodeComponents, NodeAddOns};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
@@ -18,14 +16,21 @@ use reth_node_builder::{
     BuilderContext, Node, PayloadBuilderConfig,
 };
 use reth_optimism_consensus::OptimismBeaconConsensus;
+use reth_optimism_rpc::OpEthApi;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::CanonStateSubscriptions;
+use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
     TransactionValidationTaskExecutor,
 };
-use std::sync::Arc;
+
+use crate::{
+    args::RollupArgs,
+    txpool::{OpTransactionPool, OpTransactionValidator},
+    OptimismEngineTypes,
+};
 
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
@@ -82,15 +87,25 @@ where
         OptimismConsensusBuilder,
     >;
 
-    fn components_builder(self) -> Self::ComponentsBuilder {
+    type AddOns = OptimismAddOns;
+
+    fn components_builder(&self) -> Self::ComponentsBuilder {
         let Self { args } = self;
-        Self::components(args)
+        Self::components(args.clone())
     }
 }
 
 impl NodeTypes for OptimismNode {
     type Primitives = ();
     type Engine = OptimismEngineTypes;
+}
+
+/// Add-ons w.r.t. optimism.
+#[derive(Debug, Clone)]
+pub struct OptimismAddOns;
+
+impl<N: FullNodeComponents> NodeAddOns<N> for OptimismAddOns {
+    type EthApi = OpEthApi<EthApi<N::Provider, N::Pool, NetworkHandle, N::Evm>>;
 }
 
 /// A regular optimism evm and executor builder.

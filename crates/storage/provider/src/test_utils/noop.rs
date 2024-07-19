@@ -474,6 +474,10 @@ impl PruneCheckpointReader for NoopProvider {
     ) -> ProviderResult<Option<PruneCheckpoint>> {
         Ok(None)
     }
+
+    fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        Ok(Vec::new())
+    }
 }
 
 impl StaticFileProviderFactory for NoopProvider {

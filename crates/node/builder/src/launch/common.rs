@@ -454,8 +454,10 @@ where
         self.right().static_file_provider()
     }
 
+    /// This launches the prometheus endpoint.
+    ///
     /// Convenience function to [`Self::start_prometheus_endpoint`]
-    pub async fn with_prometheus(self) -> eyre::Result<Self> {
+    pub async fn with_prometheus_server(self) -> eyre::Result<Self> {
         self.start_prometheus_endpoint().await?;
         Ok(self)
     }
@@ -486,7 +488,12 @@ where
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the
     /// launch context.
-    pub fn with_metrics(self) -> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<DB>>> {
+    ///
+    /// This spawns a metrics task that listens for metrics related events and updates metrics for
+    /// prometheus.
+    pub fn with_metrics_task(
+        self,
+    ) -> LaunchContextWith<Attached<WithConfigs, WithMeteredProvider<DB>>> {
         let (metrics_sender, metrics_receiver) = unbounded_channel();
 
         let with_metrics =

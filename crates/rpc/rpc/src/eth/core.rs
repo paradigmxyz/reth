@@ -1,24 +1,25 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
-use futures::Future;
 use std::sync::Arc;
 
 use derive_more::Deref;
+use futures::Future;
+use reth_node_api::{BuilderProvider, FullNodeComponents};
 use reth_primitives::{BlockNumberOrTag, U256};
-use reth_provider::BlockReaderIdExt;
+use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{transaction::UpdateRawTxForwarder, EthSigner, SpawnBlocking},
     RawTransactionForwarder,
 };
-use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock};
+use reth_rpc_eth_types::{
+    EthApiBuilderCtx, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
+};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskSpawner, TokioTaskExecutor,
+    TaskExecutor, TaskSpawner, TokioTaskExecutor,
 };
 use tokio::sync::{AcquireError, Mutex, OwnedSemaphorePermit};
-
-use crate::eth::DevSigner;
 
 /// `Eth` API implementation.
 ///
@@ -55,66 +56,59 @@ where
         raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
         proof_permits: usize,
     ) -> Self {
-        Self::with_spawner(
+        let inner = EthApiInner::new(
             provider,
             pool,
             network,
-            eth_cache,
-            gas_oracle,
-            gas_cap.into().into(),
-            eth_proof_window,
-            Box::<TokioTaskExecutor>::default(),
-            blocking_task_pool,
-            fee_history_cache,
-            evm_config,
-            raw_transaction_forwarder,
-            proof_permits,
-        )
-    }
-
-    /// Creates a new, shareable instance.
-    #[allow(clippy::too_many_arguments)]
-    pub fn with_spawner(
-        provider: Provider,
-        pool: Pool,
-        network: Network,
-        eth_cache: EthStateCache,
-        gas_oracle: GasPriceOracle<Provider>,
-        gas_cap: u64,
-        eth_proof_window: u64,
-        task_spawner: Box<dyn TaskSpawner>,
-        blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache,
-        evm_config: EvmConfig,
-        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
-        proof_permits: usize,
-    ) -> Self {
-        // get the block number of the latest block
-        let latest_block = provider
-            .header_by_number_or_tag(BlockNumberOrTag::Latest)
-            .ok()
-            .flatten()
-            .map(|header| header.number)
-            .unwrap_or_default();
-
-        let inner = EthApiInner {
-            provider,
-            pool,
-            network,
-            signers: parking_lot::RwLock::new(Default::default()),
             eth_cache,
             gas_oracle,
             gas_cap,
             eth_proof_window,
-            starting_block: U256::from(latest_block),
-            task_spawner,
-            pending_block: Default::default(),
             blocking_task_pool,
             fee_history_cache,
             evm_config,
-            raw_transaction_forwarder: parking_lot::RwLock::new(raw_transaction_forwarder),
-            blocking_task_guard: BlockingTaskGuard::new(proof_permits),
-        };
+            TokioTaskExecutor::default(),
+            raw_transaction_forwarder,
+            proof_permits,
+        );
+
+        Self { inner: Arc::new(inner) }
+    }
+}
+
+impl<Provider, Pool, EvmConfig, Network> EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: ChainSpecProvider + BlockReaderIdExt + Clone + 'static,
+    Pool: Clone,
+    EvmConfig: Clone,
+    Network: Clone,
+{
+    /// Creates a new, shareable instance.
+    pub fn with_spawner<Tasks, Events>(
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    ) -> Self
+    where
+        Tasks: TaskSpawner + Clone + 'static,
+        Events: CanonStateSubscriptions,
+    {
+        let blocking_task_pool =
+            BlockingTaskPool::build().expect("failed to build blocking task pool");
+
+        let inner = EthApiInner::new(
+            ctx.provider.clone(),
+            ctx.pool.clone(),
+            ctx.network.clone(),
+            ctx.cache.clone(),
+            ctx.new_gas_price_oracle(),
+            ctx.config.rpc_gas_cap,
+            ctx.config.eth_proof_window,
+            blocking_task_pool,
+            ctx.new_fee_history_cache(),
+            ctx.evm_config.clone(),
+            ctx.executor.clone(),
+            None,
+            ctx.config.proof_permits,
+        );
 
         Self { inner: Arc::new(inner) }
     }
@@ -163,12 +157,16 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig> {
-    /// Generates 20 random developer accounts.
-    /// Used in DEV mode.
-    pub fn with_dev_accounts(&self) {
-        let mut signers = self.inner.signers.write();
-        *signers = DevSigner::random_signers(20);
+impl<N, Network> BuilderProvider<N> for EthApi<N::Provider, N::Pool, Network, N::Evm>
+where
+    N: FullNodeComponents,
+    Network: Send + Sync + Clone + 'static,
+{
+    type Ctx<'a> =
+        &'a EthApiBuilderCtx<N::Provider, N::Pool, N::Evm, Network, TaskExecutor, N::Provider>;
+
+    fn builder() -> Box<dyn for<'a> Fn(Self::Ctx<'a>) -> Self + Send> {
+        Box::new(|ctx| Self::with_spawner(ctx))
     }
 }
 
@@ -207,6 +205,59 @@ pub struct EthApiInner<Provider, Pool, Network, EvmConfig> {
     raw_transaction_forwarder: parking_lot::RwLock<Option<Arc<dyn RawTransactionForwarder>>>,
     /// Guard for getproof calls
     blocking_task_guard: BlockingTaskGuard,
+}
+
+impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReaderIdExt,
+{
+    /// Creates a new, shareable instance using the default tokio task spawner.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        provider: Provider,
+        pool: Pool,
+        network: Network,
+        eth_cache: EthStateCache,
+        gas_oracle: GasPriceOracle<Provider>,
+        gas_cap: impl Into<GasCap>,
+        eth_proof_window: u64,
+        blocking_task_pool: BlockingTaskPool,
+        fee_history_cache: FeeHistoryCache,
+        evm_config: EvmConfig,
+        task_spawner: impl TaskSpawner + 'static,
+        raw_transaction_forwarder: Option<Arc<dyn RawTransactionForwarder>>,
+        proof_permits: usize,
+    ) -> Self {
+        let signers = parking_lot::RwLock::new(Default::default());
+        // get the block number of the latest block
+        let starting_block = U256::from(
+            provider
+                .header_by_number_or_tag(BlockNumberOrTag::Latest)
+                .ok()
+                .flatten()
+                .map(|header| header.number)
+                .unwrap_or_default(),
+        );
+
+        Self {
+            provider,
+            pool,
+            network,
+            signers,
+            eth_cache,
+            gas_oracle,
+            gas_cap: gas_cap.into().into(),
+            eth_proof_window,
+            starting_block,
+            task_spawner: Box::new(task_spawner),
+            pending_block: Default::default(),
+            blocking_task_pool,
+            fee_history_cache,
+            evm_config,
+            raw_transaction_forwarder: parking_lot::RwLock::new(raw_transaction_forwarder),
+            blocking_task_guard: BlockingTaskGuard::new(proof_permits),
+        }
+    }
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig> {

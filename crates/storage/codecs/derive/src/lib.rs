@@ -33,34 +33,33 @@ pub fn derive_zstd(input: TokenStream) -> TokenStream {
 /// If you prefer to manually implement the arbitrary traits, you can still use the [`add_arbitrary_tests()`] function to add arbitrary fuzz tests.
 ///
 /// Example usage:
-/// * `#[main_codec(rlp)]`: will implement `derive_arbitrary(rlp)` or `derive_arbitrary(compact, rlp)`, if `compact` is the `main_codec`.
-/// * `#[main_codec(no_arbitrary)]`: will skip `derive_arbitrary` (both trait implementations and tests)
+/// * `#[reth_codec(rlp)]`: will implement `derive_arbitrary(rlp)` or `derive_arbitrary(compact, rlp)`, if `compact` is the `reth_codec`.
+/// * `#[reth_codec(no_arbitrary)]`: will skip `derive_arbitrary` (both trait implementations and tests)
 #[proc_macro_attribute]
 #[rustfmt::skip]
 #[allow(unreachable_code)]
-pub fn main_codec(args: TokenStream, input: TokenStream) -> TokenStream {
+pub fn reth_codec(args: TokenStream, input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
 
     let with_zstd = args.clone().into_iter().any(|tk| tk.to_string() == "zstd");
-
+    let without_arbitrary = args.clone().into_iter().any(|tk| tk.to_string() == "no_arbitrary");
+    
     let compact = if with_zstd {
         quote! {
-            #[derive(CompactZstd, serde::Serialize, serde::Deserialize)]
+            #[derive(CompactZstd)]
             #ast
         }
         .into()
     } else {
         quote! {
-            #[derive(Compact, serde::Serialize, serde::Deserialize)]
+            #[derive(Compact)]
             #ast
         }
         .into()
     };
 
-    if let Some(first_arg) = args.clone().into_iter().next() {
-        if first_arg.to_string() == "no_arbitrary" {
-            return compact
-        }
+    if without_arbitrary {
+        return compact
     }
 
     let mut args = args.into_iter().collect::<Vec<_>>();
