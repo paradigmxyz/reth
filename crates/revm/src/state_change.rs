@@ -10,13 +10,9 @@ use revm::{
 };
 
 // reuse revm's hashbrown implementation for no-std
-#[cfg(not(feature = "std"))]
 use crate::precompile::HashMap;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, format, string::ToString, vec::Vec};
-
-#[cfg(feature = "std")]
-use std::collections::HashMap;
 
 /// Collect all balance changes at the end of the block.
 ///

@@ -6,12 +6,8 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
-
-#[cfg(feature = "std")]
-use std::collections::HashMap;
-
-#[cfg(not(feature = "std"))]
 use crate::precompile::HashMap;
+
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
