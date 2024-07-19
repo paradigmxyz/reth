@@ -34,7 +34,7 @@ use reth_rpc_types::{
     ExecutionPayload,
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
-pub use state::{BlockState, CanonicalInMemoryState, InMemoryState, InMemoryStateImpl};
+pub use state::{BlockState, CanonicalInMemoryState, InMemoryState};
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
@@ -913,18 +913,11 @@ impl PersistenceState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        static_files::StaticFileAction,
-        test_utils::{
-            get_executed_block_with_number, get_executed_block_with_receipts, get_executed_blocks,
-        },
-    };
-    use rand::Rng;
+    use crate::{static_files::StaticFileAction, test_utils::get_executed_blocks};
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
-    use reth_primitives::Receipt;
     use reth_provider::test_utils::MockEthProvider;
     use std::sync::mpsc::{channel, Sender};
     use tokio::sync::mpsc::unbounded_channel;
@@ -1003,10 +996,6 @@ mod tests {
         TestHarness { tree, to_tree_tx, blocks, sf_action_rx }
     }
 
-    fn create_mock_state(block_number: u64) -> BlockState {
-        BlockState::new(get_executed_block_with_number(block_number))
-    }
-
     #[tokio::test]
     async fn test_tree_persist_blocks() {
         // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
@@ -1057,140 +1046,5 @@ mod tests {
                 .unwrap();
             assert_eq!(expected_state, *actual_state_by_number);
         }
-    }
-
-    #[tokio::test]
-    async fn test_in_memory_state_impl_state_by_hash() {
-        let mut state_by_hash = HashMap::new();
-        let number = rand::thread_rng().gen::<u64>();
-        let state = Arc::new(create_mock_state(number));
-        state_by_hash.insert(state.hash(), state.clone());
-
-        let in_memory_state = InMemoryStateImpl::new(state_by_hash, HashMap::new(), None);
-
-        assert_eq!(in_memory_state.state_by_hash(state.hash()), Some(state));
-        assert_eq!(in_memory_state.state_by_hash(B256::random()), None);
-    }
-
-    #[tokio::test]
-    async fn test_in_memory_state_impl_state_by_number() {
-        let mut state_by_hash = HashMap::new();
-        let mut hash_by_number = HashMap::new();
-
-        let number = rand::thread_rng().gen::<u64>();
-        let state = Arc::new(create_mock_state(number));
-        let hash = state.hash();
-
-        state_by_hash.insert(hash, state.clone());
-        hash_by_number.insert(number, hash);
-
-        let in_memory_state = InMemoryStateImpl::new(state_by_hash, hash_by_number, None);
-
-        assert_eq!(in_memory_state.state_by_number(number), Some(state));
-        assert_eq!(in_memory_state.state_by_number(number + 1), None);
-    }
-
-    #[tokio::test]
-    async fn test_in_memory_state_impl_head_state() {
-        let mut state_by_hash = HashMap::new();
-        let mut hash_by_number = HashMap::new();
-        let state1 = Arc::new(create_mock_state(1));
-        let state2 = Arc::new(create_mock_state(2));
-        let hash1 = state1.hash();
-        let hash2 = state2.hash();
-        hash_by_number.insert(1, hash1);
-        hash_by_number.insert(2, hash2);
-        state_by_hash.insert(hash1, state1);
-        state_by_hash.insert(hash2, state2);
-
-        let in_memory_state = InMemoryStateImpl::new(state_by_hash, hash_by_number, None);
-        let head_state = in_memory_state.head_state().unwrap();
-
-        assert_eq!(head_state.hash(), hash2);
-        assert_eq!(head_state.number(), 2);
-    }
-
-    #[tokio::test]
-    async fn test_in_memory_state_impl_pending_state() {
-        let pending_number = rand::thread_rng().gen::<u64>();
-        let pending_state = create_mock_state(pending_number);
-        let pending_hash = pending_state.hash();
-
-        let in_memory_state =
-            InMemoryStateImpl::new(HashMap::new(), HashMap::new(), Some(pending_state));
-
-        let result = in_memory_state.pending_state();
-        assert!(result.is_some());
-        let actual_pending_state = result.unwrap();
-        assert_eq!(actual_pending_state.0.block().hash(), pending_hash);
-        assert_eq!(actual_pending_state.0.block().number, pending_number);
-    }
-
-    #[tokio::test]
-    async fn test_in_memory_state_impl_no_pending_state() {
-        let in_memory_state = InMemoryStateImpl::new(HashMap::new(), HashMap::new(), None);
-
-        assert_eq!(in_memory_state.pending_state(), None);
-    }
-
-    #[tokio::test]
-    async fn test_state_new() {
-        let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
-
-        let state = BlockState::new(block.clone());
-
-        assert_eq!(state.block(), block);
-    }
-
-    #[tokio::test]
-    async fn test_state_block() {
-        let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
-
-        let state = BlockState::new(block.clone());
-
-        assert_eq!(state.block(), block);
-    }
-
-    #[tokio::test]
-    async fn test_state_hash() {
-        let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
-
-        let state = BlockState::new(block.clone());
-
-        assert_eq!(state.hash(), block.block().hash());
-    }
-
-    #[tokio::test]
-    async fn test_state_number() {
-        let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
-
-        let state = BlockState::new(block);
-
-        assert_eq!(state.number(), number);
-    }
-
-    #[tokio::test]
-    async fn test_state_state_root() {
-        let number = rand::thread_rng().gen::<u64>();
-        let block = get_executed_block_with_number(number);
-
-        let state = BlockState::new(block.clone());
-
-        assert_eq!(state.state_root(), block.block().state_root);
-    }
-
-    #[tokio::test]
-    async fn test_state_receipts() {
-        let receipts = Receipts { receipt_vec: vec![vec![Some(Receipt::default())]] };
-
-        let block = get_executed_block_with_receipts(receipts.clone());
-
-        let state = BlockState::new(block);
-
-        assert_eq!(state.receipts(), &receipts);
     }
 }
