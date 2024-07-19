@@ -512,6 +512,9 @@ impl<DB: Database> StageCheckpointReader for ProviderFactory<DB> {
     fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>> {
         self.provider()?.get_stage_checkpoint_progress(id)
     }
+    fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
+        self.provider()?.get_all_checkpoints()
+    }
 }
 
 impl<DB: Database> EvmEnvProvider for ProviderFactory<DB> {
