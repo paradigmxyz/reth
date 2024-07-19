@@ -5,7 +5,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     transaction::DbTxMut,
 };
-use reth_primitives::{Bytecode, StorageEntry, };
+use reth_primitives::{Bytecode, StorageEntry};
 use reth_storage_errors::db::DatabaseError;
 use revm::db::states::{PlainStorageChangeset, StateChangeset};
 
