@@ -6,7 +6,7 @@ use crate::{
     tree::TreeEvent,
 };
 use futures::{Stream, StreamExt};
-use reth_beacon_consensus::BeaconEngineMessage;
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
 use reth_engine_primitives::EngineTypes;
 use reth_primitives::{SealedBlockWithSenders, B256};
 use std::{
@@ -185,8 +185,17 @@ where
 /// Events emitted by the engine API handler.
 #[derive(Debug)]
 pub enum EngineApiEvent {
+    /// Event from the consensus engine.
+    // TODO(mattsse): find a more appropriate name for this variant, consider phasing it out.
+    BeaconConsensus(BeaconConsensusEngineEvent),
     /// Bubbled from tree.
     FromTree(TreeEvent),
+}
+
+impl From<BeaconConsensusEngineEvent> for EngineApiEvent {
+    fn from(event: BeaconConsensusEngineEvent) -> Self {
+        Self::BeaconConsensus(event)
+    }
 }
 
 #[derive(Debug)]
