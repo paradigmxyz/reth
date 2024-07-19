@@ -2,7 +2,7 @@
 
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
-    hooks::{EngineHooks, PruneHook, StaticFileHook},
+    hooks::{EngineHooks, StaticFileHook},
     BeaconConsensusEngineHandle,
 };
 use reth_ethereum_engine::service::EthService;
@@ -29,7 +29,6 @@ use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, info};
-use std::sync::mpsc::channel;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -159,22 +158,17 @@ where
 
         let pruner_events = pruner.events();
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
-        hooks.add(PruneHook::new(pruner, Box::new(ctx.task_executor().clone())));
-
-        let (to_tree_tx, _to_tree_rx) = channel();
-        let (_from_tree_tx, from_tree_rx) = unbounded_channel();
 
         // Configure the consensus engine
         let mut eth_service = EthService::new(
             ctx.chain_spec(),
             network_client.clone(),
-            // to tree
-            to_tree_tx,
-            // from tree
-            from_tree_rx,
             UnboundedReceiverStream::new(consensus_engine_rx),
             pipeline,
             Box::new(ctx.task_executor().clone()),
+            ctx.provider_factory().clone(),
+            ctx.blockchain_db().clone(),
+            pruner,
         );
 
         let event_sender = EventSender::default();
