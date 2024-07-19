@@ -22,7 +22,8 @@ pub trait StorageTrieWriter: Send + Sync {
     /// First sorts the storage trie updates by the hashed address key, writing in sorted order.
     ///
     /// Returns the number of entries modified.
-    fn write_storage_trie_updates(&self, storage_tries: &HashMap<B256, StorageTrieUpdates>) -> ProviderResult<usize>;
+    fn write_storage_trie_updates(
+        &self,
+        storage_tries: &HashMap<B256, StorageTrieUpdates>,
+    ) -> ProviderResult<usize>;
 }
-
-

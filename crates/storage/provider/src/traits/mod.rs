@@ -25,7 +25,7 @@ mod hashing;
 pub use hashing::HashingWriter;
 
 mod trie;
-pub use trie::{TrieWriter, StorageTrieWriter};
+pub use trie::{StorageTrieWriter, TrieWriter};
 
 mod history;
 pub use history::HistoryWriter;

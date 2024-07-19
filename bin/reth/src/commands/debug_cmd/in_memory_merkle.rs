@@ -19,9 +19,9 @@ use reth_network::NetworkHandle;
 use reth_network_api::NetworkInfo;
 use reth_primitives::BlockHashOrNumber;
 use reth_provider::{
-    AccountExtReader, ChainSpecProvider, HashingWriter, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateWriter,
-    StaticFileProviderFactory, StorageReader,
+    writer::StorageWriter, AccountExtReader, ChainSpecProvider, HashingWriter, HeaderProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderFactory, StageCheckpointReader,
+    StateWriter, StaticFileProviderFactory, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
@@ -168,7 +168,8 @@ impl Command {
                 .try_seal_with_senders()
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
         )?;
-        execution_outcome.write_to_storage(&provider_rw, None, OriginalValuesKnown::No)?;
+        let mut storage_writer = StorageWriter::new(Some(&provider_rw), None);
+        storage_writer.write_to_storage(execution_outcome, OriginalValuesKnown::No)?;
         let storage_lists = provider_rw.changed_storages_with_range(block.number..=block.number)?;
         let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;
