@@ -251,7 +251,7 @@ where
         filter: TraceFilter,
     ) -> EthResult<Vec<LocalizedTransactionTrace>> {
         let matcher = filter.matcher();
-        let TraceFilter { from_block, to_block, .. } = filter;
+        let TraceFilter { from_block, to_block, after, count, .. } = filter;
         let start = from_block.unwrap_or(0);
         let end = if let Some(to_block) = to_block {
             to_block
@@ -340,6 +340,23 @@ where
                 break
             }
         }
+
+        // apply after and count to filter if specified, this allows for a pagination style,
+        // retrieving data in a structured manner
+
+        // only consider traces after
+        let all_traces: Vec<_> = if let Some(after) = after {
+            all_traces.into_iter().skip(after as usize).collect()
+        } else {
+            all_traces
+        };
+
+        // at most, return count of traces
+        let all_traces: Vec<_> = if let Some(count) = count {
+            all_traces.into_iter().take(count as usize).collect()
+        } else {
+            all_traces
+        };
 
         Ok(all_traces)
     }
