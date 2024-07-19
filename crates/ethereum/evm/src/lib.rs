@@ -107,10 +107,10 @@ impl ConfigureEvmEnv for EthEvmConfig {
 impl ConfigureEvm for EthEvmConfig {
     type DefaultExternalContext<'a> = ();
 
-    fn evm<'a, DB: Database + 'a>(
+    fn evm<DB: Database>(
         &self,
         db: DB,
-    ) -> reth_revm::Evm<'a, Self::DefaultExternalContext<'a>, DB> {
+    ) -> reth_revm::Evm<'_, Self::DefaultExternalContext<'_>, DB> {
         EvmBuilder::default().with_db(db).build()
     }
 }
