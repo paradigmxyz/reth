@@ -196,25 +196,24 @@ where
         }
 
         // Calculate the requests and the requests root.
-        let (requests, requests_root) = if chain_spec
-            .is_prague_active_at_timestamp(attributes.timestamp)
-        {
-            // We do not calculate the EIP-6110 deposit requests because there are no
-            // transactions in an empty payload.
-            let withdrawal_requests = post_block_withdrawal_requests_contract_call::<EvmConfig, _>(
-                &self.evm_config,
-                &mut db,
-                &initialized_cfg,
-                &initialized_block_env,
-            )
-            .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
+        let (requests, requests_root) =
+            if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
+                // We do not calculate the EIP-6110 deposit requests because there are no
+                // transactions in an empty payload.
+                let withdrawal_requests = post_block_withdrawal_requests_contract_call(
+                    &self.evm_config,
+                    &mut db,
+                    &initialized_cfg,
+                    &initialized_block_env,
+                )
+                .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
-            let requests = withdrawal_requests;
-            let requests_root = calculate_requests_root(&requests);
-            (Some(requests.into()), Some(requests_root))
-        } else {
-            (None, None)
-        };
+                let requests = withdrawal_requests;
+                let requests_root = calculate_requests_root(&requests);
+                (Some(requests.into()), Some(requests_root))
+            } else {
+                (None, None)
+            };
 
         let header = Header {
             parent_hash: parent_block.hash(),

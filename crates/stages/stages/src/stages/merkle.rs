@@ -562,7 +562,7 @@ mod tests {
                     }
                     let storage = storage_entries
                         .into_iter()
-                        .filter(|v| v.value != U256::ZERO)
+                        .filter(|v| !v.value.is_zero())
                         .map(|v| (v.key, v.value))
                         .collect::<Vec<_>>();
                     accounts.insert(key, (account, storage));
@@ -636,7 +636,7 @@ mod tests {
                                 storage_cursor.delete_current().unwrap();
                             }
 
-                            if value != U256::ZERO {
+                            if !value.is_zero() {
                                 let storage_entry = StorageEntry { key: hashed_slot, value };
                                 storage_cursor.upsert(hashed_address, storage_entry).unwrap();
                             }

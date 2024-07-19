@@ -386,7 +386,7 @@ impl TestStageDB {
                 tx.put::<tables::HashedAccounts>(hashed_address, account)?;
 
                 // Insert into storage tables.
-                storage.into_iter().filter(|e| e.value != U256::ZERO).try_for_each(|entry| {
+                storage.into_iter().filter(|e| !e.value.is_zero()).try_for_each(|entry| {
                     let hashed_entry = StorageEntry { key: keccak256(entry.key), ..entry };
 
                     let mut cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
