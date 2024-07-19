@@ -341,9 +341,7 @@ where
             }
         }
 
-        // apply after and count to filter if specified, this allows for a pagination style,
-        // retrieving data in a structured manner
-
+        // apply after and count to traces if specified, this allows for a pagination style.
         // only consider traces after
         let all_traces: Vec<_> = if let Some(after) = after {
             all_traces.into_iter().skip(after as usize).collect()
