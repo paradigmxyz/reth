@@ -102,7 +102,7 @@ where
     /// Writes storage updates
     pub fn write_storage_trie_updates(
         &mut self,
-        updates: StorageTrieUpdates,
+        updates: &StorageTrieUpdates,
     ) -> Result<usize, DatabaseError> {
         // The storage trie for this account has to be deleted.
         if updates.is_deleted && self.cursor.seek_exact(self.hashed_address)?.is_some() {
@@ -112,19 +112,19 @@ where
         // Merge updated and removed nodes. Updated nodes must take precedence.
         let mut storage_updates = updates
             .removed_nodes
-            .into_iter()
-            .filter_map(|n| (!updates.storage_nodes.contains_key(&n)).then_some((n, None)))
+            .iter()
+            .filter_map(|n| (!updates.storage_nodes.contains_key(n)).then_some((n, None)))
             .collect::<Vec<_>>();
         storage_updates
-            .extend(updates.storage_nodes.into_iter().map(|(nibbles, node)| (nibbles, Some(node))));
+            .extend(updates.storage_nodes.iter().map(|(nibbles, node)| (nibbles, Some(node))));
 
         // Sort trie node updates.
-        storage_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        storage_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
         let mut num_entries = 0;
         for (nibbles, maybe_updated) in storage_updates.into_iter().filter(|(n, _)| !n.is_empty()) {
             num_entries += 1;
-            let nibbles = StoredNibblesSubKey(nibbles);
+            let nibbles = StoredNibblesSubKey(nibbles.clone());
             // Delete the old entry if it exists.
             if self
                 .cursor
@@ -137,7 +137,10 @@ where
 
             // There is an updated version of this node, insert new entry.
             if let Some(node) = maybe_updated {
-                self.cursor.upsert(self.hashed_address, StorageTrieEntry { nibbles, node })?;
+                self.cursor.upsert(
+                    self.hashed_address,
+                    StorageTrieEntry { nibbles, node: node.clone() },
+                )?;
             }
         }
 

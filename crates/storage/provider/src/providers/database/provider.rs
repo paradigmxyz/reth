@@ -16,9 +16,7 @@ use crate::{
 };
 use itertools::{izip, Itertools};
 use reth_chainspec::{ChainInfo, ChainSpec, EthereumHardforks};
-use reth_db::{
-    cursor::DbDupCursorRW, tables, BlockNumberList, PlainAccountState, PlainStorageState,
-};
+use reth_db::{tables, BlockNumberList, PlainAccountState, PlainStorageState};
 use reth_db_api::{
     common::KeyValue,
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, RangeWalker},
@@ -46,9 +44,9 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
+    trie_cursor::DatabaseStorageTrieCursor,
     updates::{StorageTrieUpdates, TrieUpdates},
-    HashedPostStateSorted, Nibbles, StateRoot, StorageTrieEntry, StoredNibbles,
-    StoredNibblesSubKey,
+    HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
 };
 use reth_trie_db::DatabaseStateRoot;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
@@ -2643,19 +2641,16 @@ impl<TX: DbTxMut + DbTx> TrieWriter for DatabaseProvider<TX> {
         // Merge updated and removed nodes. Updated nodes must take precedence.
         let mut account_updates = trie_updates
             .removed_nodes_ref()
-            .into_iter()
+            .iter()
             .filter_map(|n| {
                 (!trie_updates.account_nodes_ref().contains_key(n)).then_some((n, None))
             })
             .collect::<Vec<_>>();
         account_updates.extend(
-            trie_updates
-                .account_nodes_ref()
-                .into_iter()
-                .map(|(nibbles, node)| (nibbles, Some(node))),
+            trie_updates.account_nodes_ref().iter().map(|(nibbles, node)| (nibbles, Some(node))),
         );
         // Sort trie node updates.
-        account_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        account_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
         let tx = self.tx_ref();
         let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
@@ -2692,53 +2687,14 @@ impl<TX: DbTxMut + DbTx> StorageTrieWriter for DatabaseProvider<TX> {
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
         let mut storage_tries = Vec::from_iter(storage_tries);
-        storage_tries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
         let mut cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
         for (hashed_address, storage_trie_updates) in storage_tries {
-            // The storage trie for this account has to be deleted.
-            if storage_trie_updates.is_deleted() && cursor.seek_exact(*hashed_address)?.is_some() {
-                cursor.delete_current_duplicates()?;
-            }
-
-            // Merge updated and removed nodes. Updated nodes must take precedence.
-            let mut storage_updates = storage_trie_updates
-                .removed_nodes_ref()
-                .into_iter()
-                .filter_map(|n| {
-                    (!storage_trie_updates.storage_nodes_ref().contains_key(n)).then_some((n, None))
-                })
-                .collect::<Vec<_>>();
-            storage_updates.extend(
-                storage_trie_updates
-                    .storage_nodes_ref()
-                    .into_iter()
-                    .map(|(nibbles, node)| (nibbles, Some(node))),
-            );
-            // Sort trie node updates.
-            storage_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-
-            for (nibbles, maybe_updated) in
-                storage_updates.into_iter().filter(|(n, _)| !n.is_empty())
-            {
-                num_entries += 1;
-                let nibbles = StoredNibblesSubKey(nibbles.clone());
-                // Delete the old entry if it exists.
-                if cursor
-                    .seek_by_key_subkey(*hashed_address, nibbles.clone())?
-                    .filter(|e| e.nibbles == nibbles)
-                    .is_some()
-                {
-                    cursor.delete_current()?;
-                }
-
-                // There is an updated version of this node, insert new entry.
-                if let Some(node) = maybe_updated {
-                    cursor.upsert(
-                        *hashed_address,
-                        StorageTrieEntry { nibbles, node: node.clone() },
-                    )?;
-                }
-            }
+            let mut db_storage_trie_cursor =
+                DatabaseStorageTrieCursor::new(cursor, *hashed_address);
+            num_entries +=
+                db_storage_trie_cursor.write_storage_trie_updates(storage_trie_updates)?;
+            cursor = db_storage_trie_cursor.cursor;
         }
 
         Ok(num_entries)
@@ -2749,6 +2705,13 @@ impl<TX: DbTxMut + DbTx> StorageTrieWriter for DatabaseProvider<TX> {
         hashed_address: B256,
         updates: &StorageTrieUpdates,
     ) -> ProviderResult<usize> {
+        if updates.is_empty() {
+            return Ok(0)
+        }
+
+        let cursor = self.tx_ref().cursor_dup_write::<tables::StoragesTrie>()?;
+        let mut trie_db_cursor = DatabaseStorageTrieCursor::new(cursor, hashed_address);
+        Ok(trie_db_cursor.write_storage_trie_updates(updates)?)
     }
 }
 
