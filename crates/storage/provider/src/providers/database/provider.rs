@@ -1948,7 +1948,7 @@ impl<TX: DbTx> BlockNumReader for DatabaseProvider<TX> {
 
 impl<TX: DbTx> BlockReader for DatabaseProvider<TX> {
     fn find_block_by_hash(&self, hash: B256, source: BlockSource) -> ProviderResult<Option<Block>> {
-        if source.is_database() {
+        if source.is_canonical() {
             self.block(hash.into())
         } else {
             Ok(None)
