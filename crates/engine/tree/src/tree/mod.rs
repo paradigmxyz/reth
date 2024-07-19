@@ -388,7 +388,8 @@ where
                         }
                     }
                     BeaconEngineMessage::TransitionConfigurationExchanged => {
-                        todo!()
+                        // this is a reporting no-op because the engine API impl does not need
+                        // additional input to handle this request
                     }
                 },
                 FromEngine::DownloadedBlocks(blocks) => {
