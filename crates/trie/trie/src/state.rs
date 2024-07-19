@@ -309,7 +309,7 @@ impl HashedStorage {
         let mut non_zero_valued_slots = Vec::new();
         let mut zero_valued_slots = HashSet::default();
         for (hashed_slot, value) in self.storage {
-            if value == U256::ZERO {
+            if value.is_zero() {
                 zero_valued_slots.insert(hashed_slot);
             } else {
                 non_zero_valued_slots.push((hashed_slot, value));
