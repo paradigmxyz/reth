@@ -4,10 +4,10 @@ use futures::StreamExt;
 use rand::thread_rng;
 use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEvents};
 use reth_network_api::PeersInfo;
-use reth_primitives::{TransactionSigned, TxLegacy, U256};
+use reth_primitives::{Signature, TransactionSigned, TxLegacy, U256};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tx_gossip() {
@@ -129,7 +129,18 @@ async fn test_sending_invalid_transactions() {
             value: Default::default(),
             input: Default::default(),
         };
-        let tx = TransactionSigned::from_transaction_and_signature(tx.into(), Default::default());
+        let signature = Signature {
+            r: U256::from_str(
+                "18515461264373351373200002665853028612451056578545711640558177340181847433846",
+            )
+            .unwrap(),
+            s: U256::from_str(
+                "46948507304638947509940763649030358759909902576025900602547168820602576006531",
+            )
+            .unwrap(),
+            odd_y_parity: false,
+        };
+        let tx = TransactionSigned::from_transaction_and_signature(tx.into(), signature);
         peer0.network().send_transactions(*peer1.peer_id(), vec![Arc::new(tx)]);
     }
 
