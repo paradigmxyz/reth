@@ -2508,6 +2508,14 @@ impl<TX: DbTx> StageCheckpointReader for DatabaseProvider<TX> {
         Ok(self.tx.get::<tables::StageCheckpoints>(id.to_string())?)
     }
 
+    fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
+        self.tx
+            .cursor_read::<tables::StageCheckpoints>()?
+            .walk(None)?
+            .collect::<Result<Vec<(String, StageCheckpoint)>, _>>()
+            .map_err(ProviderError::Database)
+    }
+
     /// Get stage checkpoint progress.
     fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>> {
         Ok(self.tx.get::<tables::StageCheckpointProgresses>(id.to_string())?)
