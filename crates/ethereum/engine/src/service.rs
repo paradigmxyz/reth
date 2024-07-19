@@ -7,7 +7,7 @@ use reth_engine_tree::{
     backfill::PipelineSync,
     chain::{ChainEvent, ChainOrchestrator},
     download::BasicBlockDownloader,
-    engine::{EngineApiRequestHandler, EngineHandler},
+    engine::{EngineApiEvent, EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
     tree::EngineApiTreeHandlerImpl,
 };
