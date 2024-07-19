@@ -6,11 +6,11 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{Receipt, Receipts, Request, Requests};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
-use crate::precompile::HashSet;
 use tracing::debug;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+use crate::precompile::HashSet;
 
 /// Takes care of:
 ///  - recording receipts during execution of multiple blocks.
@@ -37,9 +37,6 @@ pub struct BlockBatchRecord {
     ///
     /// Empty implies that there is going to be addresses to include in the filter in a future
     /// block. None means there isn't any kind of configuration.
-    // #[cfg(not(feature = "std"))]
-    // pruning_address_filter: Option<(u64, BTreeSet<Address>)>,
-    // #[cfg(feature = "std")]
     pruning_address_filter: Option<(u64, HashSet<Address>)>,
     /// First block will be initialized to `None`
     /// and be set to the block number of first block executed.
