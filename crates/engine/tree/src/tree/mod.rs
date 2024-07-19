@@ -283,8 +283,8 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     outgoing: UnboundedSender<EngineApiEvent>,
     persistence: PersistenceHandle,
     persistence_state: PersistenceState,
-    /// (tmp) The flag indicating whether the pipeline is active.
-    is_pipeline_active: bool,
+    /// Flag indicating whether the node is currently syncing via backfill.
+    is_backfill_active: bool,
     canonical_in_memory_state: CanonicalInMemoryState,
     _marker: PhantomData<T>,
 }
@@ -316,7 +316,7 @@ where
             outgoing,
             persistence,
             persistence_state: PersistenceState::default(),
-            is_pipeline_active: false,
+            is_backfill_active: false,
             state,
             canonical_in_memory_state: CanonicalInMemoryState::with_head(header),
             _marker: PhantomData,
@@ -363,11 +363,13 @@ where
         while let Ok(msg) = self.incoming.recv() {
             match msg {
                 FromEngine::Event(event) => match event {
-                    FromOrchestrator::BackfillSyncFinished => {
-                        todo!()
-                    }
                     FromOrchestrator::BackfillSyncStarted => {
-                        todo!()
+                        debug!(target: "consensus::engine", "received backfill sync started event");
+                        self.is_backfill_active = true;
+                    }
+                    FromOrchestrator::BackfillSyncFinished => {
+                        debug!(target: "consensus::engine", "received backfill sync finished event");
+                        self.is_backfill_active = false;
                     }
                 },
                 FromEngine::Request(request) => match request {
@@ -729,7 +731,7 @@ where
             return Ok(Some(OnForkChoiceUpdated::with_invalid(status)))
         }
 
-        if self.is_pipeline_active {
+        if self.is_backfill_active {
             // We can only process new forkchoice updates if the pipeline is idle, since it requires
             // exclusive access to the database
             trace!(target: "consensus::engine", "Pipeline is syncing, skipping forkchoice update");
@@ -821,7 +823,7 @@ where
             return Ok(TreeOutcome::new(status))
         }
 
-        let status = if self.is_pipeline_active {
+        let status = if self.is_backfill_active {
             self.buffer_block_without_senders(block).unwrap();
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         } else {
