@@ -8256,6 +8256,7 @@ name = "reth-rpc-builder"
 version = "1.0.3"
 dependencies = [
  "clap",
+ "futures-core",
  "http 1.1.0",
  "jsonrpsee",
  "metrics",
@@ -8292,6 +8293,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tokio-util",
  "tower",
  "tower-http",
  "tracing",

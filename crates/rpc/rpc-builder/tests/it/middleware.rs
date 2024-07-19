@@ -66,9 +66,15 @@ async fn test_rpc_middleware() {
 
     let mylayer = MyMiddlewareLayer::default();
 
+    let limit_layer = GlobalConcurrencyLimitLayer::new(2);
+
+    let rpc_middleware = RpcServiceBuilder::new()
+    //.layer(mylayer.clone());
+    .layer(limit_layer.clone());
+
     let handle = RpcServerConfig::http(Default::default())
         .with_http_address(test_address())
-        .set_rpc_middleware(RpcServiceBuilder::new().layer(mylayer.clone()))
+        .set_rpc_middleware(rpc_middleware)
         .start(&modules)
         .await
         .unwrap();
