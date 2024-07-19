@@ -1001,7 +1001,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
 
                 // insert value if needed
-                if *old_storage_value != U256::ZERO {
+                if !old_storage_value.is_zero() {
                     plain_storage_cursor.upsert(*address, storage_entry)?;
                 }
             }
@@ -1099,7 +1099,7 @@ impl<TX: DbTxMut + DbTx> DatabaseProvider<TX> {
                 }
 
                 // insert value if needed
-                if *old_storage_value != U256::ZERO {
+                if !old_storage_value.is_zero() {
                     plain_storage_cursor.upsert(*address, storage_entry)?;
                 }
             }
@@ -2704,7 +2704,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                 hashed_storage.delete_current()?;
             }
 
-            if value != U256::ZERO {
+            if !value.is_zero() {
                 hashed_storage.upsert(hashed_address, StorageEntry { key, value })?;
             }
         }
@@ -2744,7 +2744,7 @@ impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
                     hashed_storage_cursor.delete_current()?;
                 }
 
-                if value != U256::ZERO {
+                if !value.is_zero() {
                     hashed_storage_cursor.upsert(hashed_address, StorageEntry { key, value })?;
                 }
                 Ok(())

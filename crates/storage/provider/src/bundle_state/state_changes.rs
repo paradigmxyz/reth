@@ -5,7 +5,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     transaction::DbTxMut,
 };
-use reth_primitives::{Bytecode, StorageEntry, U256};
+use reth_primitives::{Bytecode, StorageEntry};
 use reth_storage_errors::db::DatabaseError;
 use revm::db::states::{PlainStorageChangeset, StateChangeset};
 
@@ -77,7 +77,7 @@ impl StateChanges {
                     }
                 }
 
-                if entry.value != U256::ZERO {
+                if !entry.value.is_zero() {
                     storages_cursor.upsert(address, entry)?;
                 }
             }

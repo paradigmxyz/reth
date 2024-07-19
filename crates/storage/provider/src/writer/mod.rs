@@ -7,7 +7,7 @@ use reth_db::{
     Database,
 };
 use reth_errors::{ProviderError, ProviderResult};
-use reth_primitives::{BlockNumber, StorageEntry, U256};
+use reth_primitives::{BlockNumber, StorageEntry};
 use reth_storage_api::ReceiptWriter;
 use reth_storage_errors::writer::StorageWriterError;
 use reth_trie::HashedPostStateSorted;
@@ -129,7 +129,7 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
                     }
                 }
 
-                if entry.value != U256::ZERO {
+                if !entry.value.is_zero() {
                     hashed_storage_cursor.upsert(*hashed_address, entry)?;
                 }
             }
@@ -206,7 +206,7 @@ mod tests {
     use super::*;
     use crate::test_utils::create_test_provider_factory;
     use reth_db_api::transaction::DbTx;
-    use reth_primitives::{keccak256, Account, Address, B256};
+    use reth_primitives::{keccak256, Account, Address, B256, U256};
     use reth_trie::{HashedPostState, HashedStorage};
 
     #[test]
