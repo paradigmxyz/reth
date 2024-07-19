@@ -19,16 +19,16 @@ pub struct ChainInfoTracker {
 impl ChainInfoTracker {
     /// Create a new chain info container for the given canonical head.
     pub fn new(head: SealedHeader) -> Self {
-        let (finalized_block, _) = watch::channel(None);
-        let (safe_block, _) = watch::channel(None);
+        let (finalized_block_sender, _) = watch::channel(None);
+        let (safe_block_sender, _) = watch::channel(None);
         Self {
             inner: Arc::new(ChainInfoInner {
                 last_forkchoice_update: RwLock::new(None),
                 last_transition_configuration_exchange: RwLock::new(None),
                 canonical_head_number: AtomicU64::new(head.number),
                 canonical_head: RwLock::new(head),
-                safe_block,
-                finalized_block,
+                safe_block: safe_block_sender,
+                finalized_block: finalized_block_sender,
             }),
         }
     }
@@ -66,16 +66,17 @@ impl ChainInfoTracker {
 
     /// Returns the safe header of the chain.
     pub fn get_safe_header(&self) -> Option<SealedHeader> {
-        self.inner.safe_block.borrow().clone()
+        let (_, receiver) = watch::channel(self.inner.safe_block.clone());
+        *receiver.borrow()
     }
 
     /// Returns the finalized header of the chain.
     pub fn get_finalized_header(&self) -> Option<SealedHeader> {
-        self.inner.finalized_block.borrow().clone()
+        let (_, receiver) = watch::channel(self.inner.finalized_block.clone());
+        *receiver.borrow()
     }
 
     /// Returns the canonical head of the chain.
-    #[allow(dead_code)]
     pub fn get_canonical_num_hash(&self) -> BlockNumHash {
         self.inner.canonical_head.read().num_hash()
     }
@@ -86,17 +87,15 @@ impl ChainInfoTracker {
     }
 
     /// Returns the safe header of the chain.
-    #[allow(dead_code)]
     pub fn get_safe_num_hash(&self) -> Option<BlockNumHash> {
-        let h = self.inner.safe_block.borrow();
-        h.as_ref().map(|h| h.num_hash())
+        let (_, receiver) = watch::channel(self.inner.safe_block.clone());
+        receiver.borrow().as_ref().map(|h| h.num_hash())
     }
 
     /// Returns the finalized header of the chain.
-    #[allow(dead_code)]
     pub fn get_finalized_num_hash(&self) -> Option<BlockNumHash> {
-        let h = self.inner.finalized_block.borrow();
-        h.as_ref().map(|h| h.num_hash())
+        let (_, receiver) = watch::channel(self.inner.finalized_block.clone());
+        receiver.borrow().as_ref().map(|h| h.num_hash())
     }
 
     /// Sets the canonical head of the chain.
@@ -104,22 +103,22 @@ impl ChainInfoTracker {
         let number = header.number;
         *self.inner.canonical_head.write() = header;
 
-        // also update the atomic number.
+        // Also update the atomic number.
         self.inner.canonical_head_number.store(number, Ordering::Relaxed);
     }
 
     /// Sets the safe header of the chain.
     pub fn set_safe(&self, header: SealedHeader) {
-        self.inner.safe_block.send_modify(|h| {
-            let _ = h.replace(header);
-        });
+        // Create a new channel to send updates
+        let (sender, _) = watch::channel(Some(header));
+        self.inner.safe_block = sender;
     }
 
     /// Sets the finalized header of the chain.
     pub fn set_finalized(&self, header: SealedHeader) {
-        self.inner.finalized_block.send_modify(|h| {
-            let _ = h.replace(header);
-        });
+        // Create a new channel to send updates
+        let (sender, _) = watch::channel(Some(header));
+        self.inner.finalized_block = sender;
     }
 }
 
