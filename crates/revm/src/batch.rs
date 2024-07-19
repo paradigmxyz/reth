@@ -7,10 +7,10 @@ use reth_primitives::{Receipt, Receipts, Request, Requests};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
 use tracing::debug;
+use crate::precompile::HashSet;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
-use crate::precompile::HashSet;
 
 /// Takes care of:
 ///  - recording receipts during execution of multiple blocks.
