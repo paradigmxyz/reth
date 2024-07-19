@@ -47,7 +47,7 @@ impl<P, E> AnyNodeTypes<P, E> {
 impl<P, E> NodeTypes for AnyNodeTypes<P, E>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
-    E: EngineTypes + Send + Sync + Unpin + 'static,
+    E: EngineTypes + Send + Sync + Unpin,
 {
     type Primitives = P;
 
