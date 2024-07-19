@@ -31,6 +31,65 @@ pub mod system_calls;
 /// test helpers for mocking executor
 pub mod test_utils;
 
+/// Builder for creating an EVM with a database and environment.
+#[derive(Debug)]
+pub struct RethEvmBuilder<DB: Database> {
+    /// The database to use for the EVM.
+    db: DB,
+    /// The environment to use for the EVM.
+    env: Option<Box<Env>>,
+}
+
+impl<DB> RethEvmBuilder<DB>
+where
+    DB: Database,
+{
+    /// Create a new EVM builder with the given database.
+    pub fn new(db: DB) -> Self {
+        Self { db, env: None }
+    }
+
+    /// Set the environment for the EVM.
+    pub fn with_env(mut self, env: Box<Env>) -> Self {
+        self.env = Some(env);
+        self
+    }
+
+    /// Build the EVM with the given database and environment.
+    pub fn build<'a>(self) -> Evm<'a, (), DB> {
+        let mut builder = EvmBuilder::default().with_db(self.db);
+        if let Some(env) = self.env {
+            builder = builder.with_env(env);
+        }
+        builder.build()
+    }
+
+    /// Build the EVM with the given database and environment, using the given inspector.
+    pub fn build_with_inspector<'a, I>(self, inspector: I) -> Evm<'a, I, DB>
+    where
+        I: GetInspector<DB>,
+    {
+        let mut builder = EvmBuilder::default().with_db(self.db);
+        if let Some(env) = self.env {
+            builder = builder.with_env(env);
+        }
+        builder
+            .with_external_context(inspector)
+            .append_handler_register(inspector_handle_register)
+            .build()
+    }
+}
+
+/// Trait for configuring an EVM builder.
+pub trait ConfigureEvmBuilder<DB: Database> {
+    /// Create a new EVM builder with the given database.
+    fn builder(db: DB) -> RethEvmBuilder<DB> {
+        RethEvmBuilder::new(db)
+    }
+}
+
+impl<DB: Database> ConfigureEvmBuilder<DB> for RethEvmBuilder<DB> {}
+
 /// Trait for configuring the EVM for executing full blocks.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvm: ConfigureEvmEnv {
