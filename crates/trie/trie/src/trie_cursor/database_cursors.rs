@@ -1,11 +1,17 @@
 use super::{TrieCursor, TrieCursorFactory};
-use crate::{BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey};
-use reth_db::{tables, DatabaseError};
+use crate::{
+    updates::StorageTrieUpdates, BranchNodeCompact, Nibbles, StoredNibbles, StoredNibblesSubKey,
+};
+use reth_db::{
+    cursor::{DbCursorRW, DbDupCursorRW},
+    tables, DatabaseError,
+};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     transaction::DbTx,
 };
 use reth_primitives::B256;
+use reth_trie_common::StorageTrieEntry;
 
 /// Implementation of the trie cursor factory for a database transaction.
 impl<'a, TX: DbTx> TrieCursorFactory for &'a TX {
@@ -83,6 +89,59 @@ impl<C> DatabaseStorageTrieCursor<C> {
     /// Create a new storage trie cursor.
     pub const fn new(cursor: C, hashed_address: B256) -> Self {
         Self { cursor, hashed_address }
+    }
+}
+
+impl<C> DatabaseStorageTrieCursor<C>
+where
+    C: DbCursorRO<tables::StoragesTrie>
+        + DbCursorRW<tables::StoragesTrie>
+        + DbDupCursorRO<tables::StoragesTrie>
+        + DbDupCursorRW<tables::StoragesTrie>,
+{
+    /// Writes storage updates
+    pub fn write_storage_trie_updates(
+        &mut self,
+        updates: StorageTrieUpdates,
+    ) -> Result<usize, DatabaseError> {
+        // The storage trie for this account has to be deleted.
+        if updates.is_deleted && self.cursor.seek_exact(self.hashed_address)?.is_some() {
+            self.cursor.delete_current_duplicates()?;
+        }
+
+        // Merge updated and removed nodes. Updated nodes must take precedence.
+        let mut storage_updates = updates
+            .removed_nodes
+            .into_iter()
+            .filter_map(|n| (!updates.storage_nodes.contains_key(&n)).then_some((n, None)))
+            .collect::<Vec<_>>();
+        storage_updates
+            .extend(updates.storage_nodes.into_iter().map(|(nibbles, node)| (nibbles, Some(node))));
+
+        // Sort trie node updates.
+        storage_updates.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        let mut num_entries = 0;
+        for (nibbles, maybe_updated) in storage_updates.into_iter().filter(|(n, _)| !n.is_empty()) {
+            num_entries += 1;
+            let nibbles = StoredNibblesSubKey(nibbles);
+            // Delete the old entry if it exists.
+            if self
+                .cursor
+                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
+                .filter(|e| e.nibbles == nibbles)
+                .is_some()
+            {
+                self.cursor.delete_current()?;
+            }
+
+            // There is an updated version of this node, insert new entry.
+            if let Some(node) = maybe_updated {
+                self.cursor.upsert(self.hashed_address, StorageTrieEntry { nibbles, node })?;
+            }
+        }
+
+        Ok(num_entries)
     }
 }
 

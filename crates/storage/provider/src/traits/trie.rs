@@ -26,4 +26,11 @@ pub trait StorageTrieWriter: Send + Sync {
         &self,
         storage_tries: &HashMap<B256, StorageTrieUpdates>,
     ) -> ProviderResult<usize>;
+
+    /// Writes storage trie updates for the given hashed address.
+    fn write_individual_storage_trie_updates(
+        &self,
+        hashed_address: B256,
+        updates: &StorageTrieUpdates,
+    ) -> ProviderResult<usize>;
 }

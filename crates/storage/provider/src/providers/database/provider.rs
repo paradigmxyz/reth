@@ -2743,6 +2743,13 @@ impl<TX: DbTxMut + DbTx> StorageTrieWriter for DatabaseProvider<TX> {
 
         Ok(num_entries)
     }
+
+    fn write_individual_storage_trie_updates(
+        &self,
+        hashed_address: B256,
+        updates: &StorageTrieUpdates,
+    ) -> ProviderResult<usize> {
+    }
 }
 
 impl<TX: DbTxMut + DbTx> HashingWriter for DatabaseProvider<TX> {
