@@ -36,7 +36,7 @@ pub trait EvmEnvProvider: Send + Sync {
     {
         let mut cfg = CfgEnvWithHandlerCfg::new_with_spec_id(CfgEnv::default(), SpecId::LATEST);
         let mut block_env = BlockEnv::default();
-        self.fill_env_with_header::<EvmConfig>(&mut cfg, &mut block_env, header, evm_config)?;
+        self.fill_env_with_header(&mut cfg, &mut block_env, header, evm_config)?;
         Ok((cfg, block_env))
     }
 

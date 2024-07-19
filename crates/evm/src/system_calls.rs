@@ -162,7 +162,7 @@ where
         .build();
 
     // initialize a block from the env, because the post block call needs the block itself
-    apply_withdrawal_requests_contract_call::<EvmConfig, _, _>(evm_config, &mut evm_post_block)
+    apply_withdrawal_requests_contract_call(evm_config, &mut evm_post_block)
 }
 
 /// Applies the post-block call to the EIP-7002 withdrawal requests contract.
