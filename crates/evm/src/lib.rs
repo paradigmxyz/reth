@@ -45,7 +45,7 @@ where
     DB: Database,
 {
     /// Create a new EVM builder with the given database.
-    pub fn new(db: DB) -> Self {
+    pub const fn new(db: DB) -> Self {
         Self { db, env: None }
     }
 
@@ -81,14 +81,10 @@ where
 }
 
 /// Trait for configuring an EVM builder.
-pub trait ConfigureEvmBuilder<DB: Database> {
-    /// Create a new EVM builder with the given database.
-    fn builder(db: DB) -> RethEvmBuilder<DB> {
-        RethEvmBuilder::new(db)
-    }
+pub trait ConfigureEvmBuilder {
+    /// The type of EVM builder that this trait can configure.
+    type Builder<'a, DB: Database>;
 }
-
-impl<DB: Database> ConfigureEvmBuilder<DB> for RethEvmBuilder<DB> {}
 
 /// Trait for configuring the EVM for executing full blocks.
 #[auto_impl::auto_impl(&, Arc)]
