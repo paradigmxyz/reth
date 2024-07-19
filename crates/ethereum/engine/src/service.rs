@@ -7,18 +7,23 @@ use reth_engine_tree::{
     backfill::PipelineSync,
     chain::{ChainEvent, ChainOrchestrator},
     download::BasicBlockDownloader,
-    engine::{EngineApiEvent, EngineApiRequestHandler, EngineHandler, FromEngine},
+    engine::{EngineApiEvent, EngineApiRequestHandler, EngineHandler},
+    persistence::PersistenceHandle,
+    tree::EngineApiTreeHandlerImpl,
 };
 use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
+use reth_payload_validator::ExecutionPayloadValidator;
+use reth_provider::{providers::BlockchainProvider, ProviderFactory};
+use reth_prune::Pruner;
 use reth_stages_api::Pipeline;
 use reth_tasks::TaskSpawner;
 use std::{
     pin::Pin,
-    sync::{mpsc::Sender, Arc},
+    sync::{mpsc::channel, Arc},
     task::{Context, Poll},
 };
-use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// Alias for Ethereum chain orchestrator.
@@ -48,19 +53,36 @@ where
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
     /// Constructor for `EthService`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         chain_spec: Arc<ChainSpec>,
         client: Client,
-        to_tree: Sender<FromEngine<BeaconEngineMessage<EthEngineTypes>>>,
-        from_tree: UnboundedReceiver<EngineApiEvent>,
         incoming_requests: UnboundedReceiverStream<BeaconEngineMessage<EthEngineTypes>>,
         pipeline: Pipeline<DB>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
+        provider: ProviderFactory<DB>,
+        blockchain_db: BlockchainProvider<DB>,
+        pruner: Pruner<DB, ProviderFactory<DB>>,
     ) -> Self {
-        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));
-        let downloader = BasicBlockDownloader::new(client, consensus);
+        let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
+        let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-        let engine_handler = EngineApiRequestHandler::new(to_tree, from_tree);
+        let (to_tree_tx, to_tree_rx) = channel();
+
+        let persistence_handle = PersistenceHandle::spawn_services(provider, pruner);
+        let payload_validator = ExecutionPayloadValidator::new(chain_spec.clone());
+        let executor_factory = EthExecutorProvider::ethereum(chain_spec);
+
+        let from_tree = EngineApiTreeHandlerImpl::spawn_new(
+            blockchain_db,
+            executor_factory,
+            consensus,
+            payload_validator,
+            to_tree_rx,
+            persistence_handle,
+        );
+
+        let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
         let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
 
         let backfill_sync = PipelineSync::new(pipeline, pipeline_task_spawner);
@@ -90,13 +112,21 @@ pub struct EthServiceError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_blockchain_tree::{
+        BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
+    };
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_consensus::test_utils::TestConsensus;
     use reth_engine_tree::test_utils::TestPipelineBuilder;
     use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
+    use reth_primitives::SealedHeader;
+    use reth_provider::test_utils::create_test_provider_factory_with_chain_spec;
+    use reth_prune::PruneModes;
     use reth_tasks::TokioTaskExecutor;
-    use std::sync::{mpsc::channel, Arc};
-    use tokio::sync::mpsc::unbounded_channel;
+    use std::sync::Arc;
+    use tokio::sync::{mpsc::unbounded_channel, watch};
 
     #[test]
     fn eth_chain_orchestrator_build() {
@@ -115,18 +145,38 @@ mod tests {
 
         let pipeline = TestPipelineBuilder::new().build(chain_spec.clone());
         let pipeline_task_spawner = Box::<TokioTaskExecutor>::default();
+        let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let consensus = Arc::new(TestConsensus::default());
+        let executor_factory = EthExecutorProvider::ethereum(chain_spec.clone());
+        let externals = TreeExternals::new(provider_factory.clone(), consensus, executor_factory);
+        let tree = Arc::new(ShareableBlockchainTree::new(
+            BlockchainTree::new(
+                externals,
+                BlockchainTreeConfig::new(1, 2, 3, 2),
+                PruneModes::default(),
+            )
+            .expect("failed to create tree"),
+        ));
 
-        let (to_tree_tx, _to_tree_rx) = channel();
-        let (_from_tree_tx, from_tree_rx) = unbounded_channel();
+        let blockchain_db = BlockchainProvider::with_latest(
+            provider_factory.clone(),
+            tree,
+            SealedHeader::default(),
+        );
 
-        let _eth_chain_orchestrator = EthService::new(
+        let (_tx, rx) = watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::<_, ProviderFactory<_>>::new(provider_factory.clone(), vec![], 0, 0, None, rx);
+
+        let _eth_service = EthService::new(
             chain_spec,
             client,
-            to_tree_tx,
-            from_tree_rx,
             incoming_requests,
             pipeline,
             pipeline_task_spawner,
+            provider_factory,
+            blockchain_db,
+            pruner,
         );
     }
 }
