@@ -2,7 +2,8 @@
 //! <https://github.com/rust-lang/rust/issues/100013> in default implementation of
 //! `reth_rpc_eth_api::helpers::Call`.
 
-use reth_primitives::{B256, U256};
+use reth_errors::ProviderResult;
+use reth_primitives::{Address, BlockNumber, B256, U256};
 use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
 use revm::Database;
@@ -28,6 +29,14 @@ impl<'a> reth_provider::StateRootProvider for StateProviderTraitObjWrapper<'a> {
         hashed_state: reth_trie::HashedPostState,
     ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
         self.0.hashed_state_root_with_updates(hashed_state)
+    }
+
+    fn storage_root_from_reverts(
+        &self,
+        address: Address,
+        from: BlockNumber,
+    ) -> ProviderResult<B256> {
+        self.0.storage_root_from_reverts(address, from)
     }
 }
 

@@ -10,14 +10,15 @@ use reth_db_api::{
     transaction::DbTx,
 };
 use reth_primitives::{
-    constants::EPOCH_SLOTS, Account, Address, BlockNumber, Bytecode, Bytes, StaticFileSegment,
-    StorageKey, StorageValue, B256,
+    constants::EPOCH_SLOTS, keccak256, Account, Address, BlockNumber, Bytecode, Bytes,
+    StaticFileSegment, StorageKey, StorageValue, B256,
 };
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    proof::Proof, updates::TrieUpdates, witness::TrieWitness, AccountProof, HashedPostState,
-    StateRoot,
+    hashed_cursor::HashedPostStateCursorFactory, proof::Proof, updates::TrieUpdates,
+    witness::TrieWitness, AccountProof, HashedAccountsSorted, HashedPostState,
+    HashedPostStateSorted, HashedStorage, StateRoot, StorageRoot,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseProof, DatabaseStateRoot, DatabaseTrieWitness,
@@ -276,6 +277,24 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state);
         StateRoot::overlay_root_with_updates(self.tx, revert_state, Default::default())
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
+    fn storage_root_from_reverts(
+        &self,
+        address: Address,
+        from: BlockNumber,
+    ) -> ProviderResult<B256> {
+        let hashed_address = keccak256(address);
+        let hashed_storage = HashedStorage::from_reverts(address, self.tx, from)?;
+        let hashed_storage_sorted = hashed_storage.into_sorted();
+        let hashed_storages = HashMap::from([(hashed_address, hashed_storage_sorted)]);
+        let hashed_state_sorted =
+            HashedPostStateSorted::new(HashedAccountsSorted::default(), hashed_storages);
+        let hashed_cursor_factory =
+            HashedPostStateCursorFactory::new(self.tx, &hashed_state_sorted);
+        StorageRoot::new_hashed(self.tx, hashed_cursor_factory, hashed_address, Default::default())
+            .root()
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }

@@ -559,6 +559,14 @@ impl StateRootProvider for MockEthProvider {
         let state_root = self.state_roots.lock().pop().unwrap_or_default();
         Ok((state_root, Default::default()))
     }
+
+    fn storage_root_from_reverts(
+        &self,
+        _address: Address,
+        _from: BlockNumber,
+    ) -> ProviderResult<B256> {
+        Ok(B256::default())
+    }
 }
 
 impl StateProofProvider for MockEthProvider {

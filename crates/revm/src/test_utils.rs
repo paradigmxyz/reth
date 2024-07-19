@@ -78,6 +78,14 @@ impl StateRootProvider for StateProviderTest {
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }
+
+    fn storage_root_from_reverts(
+        &self,
+        _address: Address,
+        _from: BlockNumber,
+    ) -> ProviderResult<B256> {
+        unimplemented!("storage root from range is not supported")
+    }
 }
 
 impl StateProofProvider for StateProviderTest {

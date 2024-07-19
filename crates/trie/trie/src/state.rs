@@ -207,6 +207,14 @@ impl HashedPostStateSorted {
     pub const fn account_storages(&self) -> &HashMap<B256, HashedStorageSorted> {
         &self.storages
     }
+
+    /// Create new instance of [`HashedPostStateSorted`]
+    pub const fn new(
+        accounts: HashedAccountsSorted,
+        storages: HashMap<B256, HashedStorageSorted>,
+    ) -> Self {
+        Self { accounts, storages }
+    }
 }
 
 /// Sorted account state optimized for iterating during state trie calculation.

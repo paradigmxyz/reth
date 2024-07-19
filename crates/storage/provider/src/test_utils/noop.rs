@@ -323,6 +323,14 @@ impl StateRootProvider for NoopProvider {
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
     }
+
+    fn storage_root_from_reverts(
+        &self,
+        _address: Address,
+        _from: BlockNumber,
+    ) -> ProviderResult<B256> {
+        Ok(B256::default())
+    }
 }
 
 impl StateProofProvider for NoopProvider {

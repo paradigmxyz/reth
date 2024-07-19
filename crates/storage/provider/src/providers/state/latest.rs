@@ -93,6 +93,14 @@ impl<'b, TX: DbTx> StateRootProvider for LatestStateProviderRef<'b, TX> {
         StateRoot::overlay_root_with_updates(self.tx, hashed_state, Default::default())
             .map_err(|err| ProviderError::Database(err.into()))
     }
+
+    fn storage_root_from_reverts(
+        &self,
+        _address: Address,
+        _from: BlockNumber,
+    ) -> ProviderResult<B256> {
+        unimplemented!("LatestStateProviderRef storage root from range not support")
+    }
 }
 
 impl<'b, TX: DbTx> StateProofProvider for LatestStateProviderRef<'b, TX> {

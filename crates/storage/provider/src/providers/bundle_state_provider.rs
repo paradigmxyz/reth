@@ -98,6 +98,14 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateRootProvider
         state.extend(hashed_state);
         self.state_provider.hashed_state_root_with_updates(state)
     }
+
+    fn storage_root_from_reverts(
+        &self,
+        _address: Address,
+        _from: BlockNumber,
+    ) -> ProviderResult<B256> {
+        unimplemented!()
+    }
 }
 
 impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider

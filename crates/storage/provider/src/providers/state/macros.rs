@@ -46,6 +46,7 @@ macro_rules! delegate_provider_impls {
                 fn hashed_state_root(&self, state: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<reth_primitives::B256>;
                 fn state_root_with_updates(&self, state: &revm::db::BundleState) -> reth_storage_errors::provider::ProviderResult<(reth_primitives::B256, reth_trie::updates::TrieUpdates)>;
                 fn hashed_state_root_with_updates(&self, state: reth_trie::HashedPostState) -> reth_storage_errors::provider::ProviderResult<(reth_primitives::B256, reth_trie::updates::TrieUpdates)>;
+                fn storage_root_from_reverts(&self,address: Address,from: BlockNumber) ->  reth_storage_errors::provider::ProviderResult<reth_primitives::B256>;
             }
             StateProofProvider $(where [$($generics)*])? {
                 fn proof(&self, state: &revm::db::BundleState, address: reth_primitives::Address, slots: &[reth_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_trie::AccountProof>;

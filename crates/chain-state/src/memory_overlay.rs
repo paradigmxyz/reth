@@ -101,6 +101,14 @@ impl StateRootProvider for MemoryOverlayStateProvider {
         state.extend(hashed_state);
         self.historical.hashed_state_root_with_updates(state)
     }
+
+    fn storage_root_from_reverts(
+        &self,
+        address: Address,
+        from: BlockNumber,
+    ) -> ProviderResult<B256> {
+        self.historical.storage_root_from_reverts(address, from)
+    }
 }
 
 impl StateProofProvider for MemoryOverlayStateProvider {

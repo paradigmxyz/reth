@@ -1,4 +1,4 @@
-use reth_primitives::{Address, Bytes, B256};
+use reth_primitives::{Address, BlockNumber, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState};
 use revm::db::BundleState;
@@ -36,6 +36,13 @@ pub trait StateRootProvider: Send + Sync {
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)>;
+
+    /// Return the storage root from special block to last.
+    fn storage_root_from_reverts(
+        &self,
+        address: Address,
+        from: BlockNumber,
+    ) -> ProviderResult<B256>;
 }
 
 /// A type that can generate state proof on top of a given post state.
