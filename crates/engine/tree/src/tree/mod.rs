@@ -293,7 +293,7 @@ impl<P, E, T> EngineApiTreeHandlerImpl<P, E, T>
 where
     P: BlockReader + StateProviderFactory + Clone + 'static,
     E: BlockExecutorProvider,
-    T: EngineTypes + 'static,
+    T: EngineTypes,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -744,7 +744,7 @@ impl<P, E, T> EngineApiTreeHandler for EngineApiTreeHandlerImpl<P, E, T>
 where
     P: BlockReader + StateProviderFactory + Clone + 'static,
     E: BlockExecutorProvider,
-    T: EngineTypes + 'static,
+    T: EngineTypes,
 {
     type Engine = T;
 
