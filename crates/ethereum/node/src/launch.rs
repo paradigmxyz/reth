@@ -180,7 +180,7 @@ where
 
         let events = stream_select!(
             ctx.components().network().event_listener().map(Into::into),
-            // TODO get engine events
+            beacon_engine_handle.event_listener().map(Into::into),
             pipeline_events.map(Into::into),
             if ctx.node_config().debug.tip.is_none() && !ctx.is_dev() {
                 Either::Left(
