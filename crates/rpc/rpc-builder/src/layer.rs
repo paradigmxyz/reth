@@ -97,7 +97,9 @@ where
     S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
 {
     //type Future = Pin<Box<dyn Future<Output = MethodResponse> + Send + 'a>>;
-    type Future = ResponseFuture<S::Future>;
+    //type Future = ResponseFuture<S::Future>;
+    /// The future response value.
+	type Future: Future<Output = MethodResponse> + Send;
 
     fn call(&self, req: Request<'a>) -> Self::Future {
         // tracing::info!("MyMiddleware processed call {}", req.method);
@@ -139,5 +141,16 @@ pub struct ResponseFuture<T> {
 impl<T> ResponseFuture<T> {
     pub(crate) fn new(inner: T, permit: OwnedSemaphorePermit) -> ResponseFuture<T> {
         ResponseFuture { inner, permit }
+    }
+}
+
+impl<F, T, E> Future for ResponseFuture<F>
+where
+    F: Future<Output = Result<T, E>>,
+{
+    type Output = Result<T, E>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Poll::Ready(ready!(self.project().inner.poll(cx)))
     }
 }
