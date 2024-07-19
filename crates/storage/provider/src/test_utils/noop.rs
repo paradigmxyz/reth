@@ -442,6 +442,10 @@ impl StageCheckpointReader for NoopProvider {
     fn get_stage_checkpoint_progress(&self, _id: StageId) -> ProviderResult<Option<Vec<u8>>> {
         Ok(None)
     }
+
+    fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
+        Ok(Vec::new())
+    }
 }
 
 impl WithdrawalsProvider for NoopProvider {
