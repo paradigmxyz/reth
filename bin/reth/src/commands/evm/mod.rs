@@ -1,9 +1,10 @@
 //! Main evm command for launching a evm tools
 
 use std::collections::VecDeque;
+use std::panic::AssertUnwindSafe;
 use clap::Parser;
-use eyre::Result;
-use tracing::{info, debug};
+use eyre::{Report, Result};
+use tracing::{info, debug, error};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
@@ -78,7 +79,10 @@ impl EvmCommand {
         let mut tasks = VecDeque::new();
         let mut current_start = self.begin_number;
         while current_start <= self.end_number {
-            let current_end = std::cmp::min(current_start + self.step_size as u64 - 1, self.end_number);
+            let mut current_end = std::cmp::min(current_start + self.step_size as u64 - 1, self.end_number);
+            if current_end == self.end_number - 1 {
+                current_end += 1;
+            }
             tasks.push_back(Task {
                 start: current_start,
                 end: current_end,
@@ -89,7 +93,7 @@ impl EvmCommand {
 
         // 获取 CPU 核心数，减一作为线程数
         let thread_count = self.get_cpu_count() * 2 - 1;
-        let mut threads: Vec<JoinHandle<Result<bool>>> = Vec::with_capacity(thread_count);
+        let mut threads: Vec<JoinHandle<Result<()>>> = Vec::with_capacity(thread_count);
 
 
         // 创建共享 gas 计数器
@@ -163,58 +167,79 @@ impl EvmCommand {
                     };
 
                     if let Some(task) = task {
-                        let mut td = blockchain_db.header_td_by_number(task.start - 1)?
-                            .ok_or_else(|| ProviderError::HeaderNotFound(task.start.into()))?;
-
-                        let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(task.start - 1)?);
-                        let executor = block_executor!(provider_factory.chain_spec());
-                        let mut executor = executor.batch_executor(db);
-                        let blocks = blockchain_db.block_with_senders_range(task.start..=task.end).unwrap();
-
-                        let start = Instant::now();
-                        let mut step_cumulative_gas: u64 = 0;
-                        let mut step_txs_counter: usize = 0;
-
-                        executor.execute_and_verify_many(blocks.iter()
-                            .map(|block| {
-                                let result = (block, td).into();
-                                td += block.header.difficulty;
-                                step_cumulative_gas += block.block.gas_used;
-                                step_txs_counter += block.block.body.len();
-                                // info!(target:"exex::evm", block_number=block.block.header.number, txs_count= block.block.body.len(), "Adding transactions count");
-                                result
-                            })
-                            .collect::<Vec<_>>())?;
-
-
-                        // Ensure the locks are correctly used without deadlock
-                        {
-                            *cumulative_gas.lock().unwrap() += step_cumulative_gas;
-                        }
-                        {
-                            *block_counter.lock().unwrap() += blocks.len() as u64;
-                        }
-                        {
-                            *txs_counter.lock().unwrap() += step_txs_counter as u64;
-                        }
-
                         debug!(
                             target:"exex::evm",
                             task_start = task.start,
                             task_end = task.end,
-                            txs=step_txs_counter,
-                            blocks = blocks.len(),
-                            throughput = format_gas_throughput(step_cumulative_gas, start.elapsed()),
-                            time = ?start.elapsed(),
                             thread_id = ?thread_id,
-                            total_difficulty = ?td,
-                            "loop"
+                            "start loop",
                         );
+                        let result =  std::panic::catch_unwind(AssertUnwindSafe(||-> Result<(), Report>  {
+                            let mut td = blockchain_db.header_td_by_number(task.start - 1)?
+                                .ok_or_else(|| ProviderError::HeaderNotFound(task.start.into()))?;
 
-                        drop(executor);
+                            let db = StateProviderDatabase::new(blockchain_db.history_by_block_number(task.start - 1)?);
+                            let executor = block_executor!(provider_factory.chain_spec());
+                            let mut executor = executor.batch_executor(db);
+                            let blocks = blockchain_db.block_with_senders_range(task.start..=task.end).unwrap();
+
+                            let start = Instant::now();
+                            let mut step_cumulative_gas: u64 = 0;
+                            let mut step_txs_counter: usize = 0;
+
+                            executor.execute_and_verify_many(blocks.iter()
+                                .map(|block| {
+                                    let result = (block, td).into();
+                                    td += block.header.difficulty;
+                                    step_cumulative_gas += block.block.gas_used;
+                                    step_txs_counter += block.block.body.len();
+                                    debug!(target:"exex::evm", block_number=block.block.header.number, txs_count= block.block.body.len(), thread_id = ?thread_id,"Adding transactions count");
+                                    result
+                                })
+                                .collect::<Vec<_>>())?;
+
+
+                            // Ensure the locks are correctly used without deadlock
+                            {
+                                *cumulative_gas.lock().unwrap() += step_cumulative_gas;
+                            }
+                            {
+                                *block_counter.lock().unwrap() += blocks.len() as u64;
+                            }
+                            {
+                                *txs_counter.lock().unwrap() += step_txs_counter as u64;
+                            }
+
+                            debug!(
+                                target:"exex::evm",
+                                task_start = task.start,
+                                task_end = task.end,
+                                txs=step_txs_counter,
+                                blocks = blocks.len(),
+                                throughput = format_gas_throughput(step_cumulative_gas, start.elapsed()),
+                                time = ?start.elapsed(),
+                                thread_id = ?thread_id,
+                                total_difficulty = ?td,
+                                "loop"
+                            );
+
+                            drop(executor);
+                            Ok(())
+                        }));
+
+                        match result {
+                            Ok(res) => {
+                                if let Err(e) = res {
+                                    error!("Thread {:?} execution error: {:?}", thread_id, e);
+                                }
+                            },
+                            Err(e) => {
+                                error!("Thread {:?} execution error: {:?}", thread_id, e);
+                            },
+                        };
                     }
                 }
-                Ok(true)
+                Ok(())
             }));
         }
 
@@ -222,10 +247,10 @@ impl EvmCommand {
             match thread.join() {
                 Ok(res) => {
                     if let Err(e) = res {
-                        return Err(eyre::eyre!("Thread execution error: {:?}", e));
+                        error!("Thread execution error: {:?}", e);
                     }
                 },
-                Err(e) => return Err(eyre::eyre!("Thread join error: {:?}", e)),
+                Err(e) => error!("Thread execution error: {:?}", e),
             };
         }
         thread::sleep(Duration::from_secs(1));
