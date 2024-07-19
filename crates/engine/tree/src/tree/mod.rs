@@ -6,7 +6,8 @@ use crate::{
 };
 pub use memory_overlay::MemoryOverlayStateProvider;
 use reth_beacon_consensus::{
-    BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache, OnForkChoiceUpdated,
+    BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
+    OnForkChoiceUpdated,
 };
 use reth_blockchain_tree::{
     error::InsertBlockErrorKind, BlockAttachment, BlockBuffer, BlockStatus,
@@ -373,6 +374,15 @@ where
                 FromEngine::Request(request) => match request {
                     BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
                         let output = self.on_forkchoice_updated(state, payload_attrs);
+
+                        if let Ok(res) = &output {
+                            // emit an event about the handled FCU
+                            self.emit_event(BeaconConsensusEngineEvent::ForkchoiceUpdated(
+                                state,
+                                res.outcome.forkchoice_status(),
+                            ));
+                        }
+
                         if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(Into::into)) {
                             error!("Failed to send event: {err:?}");
                         }
@@ -424,6 +434,14 @@ where
                 }
             }
         }
+    }
+
+    /// Emits an outgoing event to the engine.
+    fn emit_event(&self, event: impl Into<EngineApiEvent>) {
+        let _ = self
+            .outgoing
+            .send(event.into())
+            .inspect_err(|err| error!("Failed to send internal event: {err:?}"));
     }
 
     /// Returns true if the canonical chain length minus the last persisted
