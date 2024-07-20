@@ -434,7 +434,7 @@ bytes = "1.5"
 bitflags = "2.4"
 clap = "4"
 const_format = { version = "0.2.32", features = ["rust_1_64"] }
-dashmap = "5.5"
+dashmap = "6.0"
 derive_more = "0.99.17"
 fdlimit = "0.3.0"
 eyre = "0.6"
