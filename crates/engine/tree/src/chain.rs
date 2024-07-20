@@ -113,9 +113,9 @@ where
             match this.handler.poll(cx) {
                 Poll::Ready(handler_event) => {
                     match handler_event {
-                        HandlerEvent::BackfillSync(target) => {
-                            // trigger backfill sync and start polling it
-                            this.backfill_sync.on_action(BackfillAction::Start(target));
+                        HandlerEvent::BackfillSync(action) => {
+                            // forward action to backfill_sync
+                            this.backfill_sync.on_action(action);
                             continue 'outer
                         }
                         HandlerEvent::Event(ev) => {
@@ -187,8 +187,8 @@ pub trait ChainHandler: Send + Sync {
 /// Events/Requests that the [`ChainHandler`] can emit to the [`ChainOrchestrator`].
 #[derive(Clone, Debug)]
 pub enum HandlerEvent<T> {
-    /// Request to start a backfill sync
-    BackfillSync(PipelineTarget),
+    /// Request an action to backfill sync
+    BackfillSync(BackfillAction),
     /// Other event emitted by the handler
     Event(T),
 }

@@ -12,7 +12,7 @@ use reth_primitives::{SealedBlockWithSenders, B256};
 use std::{
     collections::HashSet,
     sync::mpsc::Sender,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -177,7 +177,7 @@ impl<T> EngineRequestHandler for EngineApiRequestHandler<T>
 where
     T: EngineTypes,
 {
-    type Event = EngineApiEvent;
+    type Event = BeaconConsensusEngineEvent;
     type Request = BeaconEngineMessage<T>;
 
     fn on_event(&mut self, event: FromEngine<Self::Request>) {
@@ -186,7 +186,23 @@ where
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
-        todo!("poll tree")
+        let Some(ev) = ready!(self.from_tree.poll_recv(cx)) else { return Poll::Pending };
+        let ev = match ev {
+            EngineApiEvent::BeaconConsensus(ev) => {
+                RequestHandlerEvent::HandlerEvent(HandlerEvent::Event(ev))
+            }
+            EngineApiEvent::FromTree(ev) => match ev {
+                TreeEvent::BackfillAction(target) => {
+                    RequestHandlerEvent::HandlerEvent(HandlerEvent::BackfillSync(target))
+                }
+                TreeEvent::Download(download) => RequestHandlerEvent::Download(download),
+                TreeEvent::TreeAction(ev) => {
+                    // TODO revise this
+                    return Poll::Pending
+                }
+            },
+        };
+        Poll::Ready(ev)
     }
 }
 
