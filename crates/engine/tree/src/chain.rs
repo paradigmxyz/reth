@@ -176,7 +176,7 @@ pub enum ChainEvent<T> {
 ///
 /// ## Control flow
 ///
-/// The [`ChainOrchestrator`] is responsible for advancing this handler [`ChainHandler::poll`] and
+/// The [`ChainOrchestrator`] is responsible for advancing this handler through [`ChainHandler::poll`] and
 /// handling the emitted events, for example [`HandlerEvent::BackfillSync`] to start a backfill
 /// sync. Events from the [`ChainOrchestrator`] are passed to the handler via
 /// [`ChainHandler::on_event`], e.g. [`FromOrchestrator::BackfillSyncStarted`] once the backfill
