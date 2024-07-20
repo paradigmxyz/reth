@@ -32,8 +32,13 @@ pub mod system_calls;
 pub mod test_utils;
 
 /// Builder for creating an EVM with a database and environment.
+///
+/// Wrapper around [`EvmBuilder`] that allows for setting the database and environment for the EVM.
+///
+/// This is useful for creating an EVM with a custom database and environment without having to
+/// necessarily rely on Revm inspector.
 #[derive(Debug)]
-pub struct RethEvmBuilder<DB: Database, EXT> {
+pub struct RethEvmBuilder<DB: Database, EXT = ()> {
     /// The database to use for the EVM.
     db: DB,
     /// The environment to use for the EVM.
@@ -55,6 +60,11 @@ where
     pub fn with_env(mut self, env: Box<Env>) -> Self {
         self.env = Some(env);
         self
+    }
+
+    /// Set the external context for the EVM.
+    pub fn with_external_context<EXT1>(self, external_context: EXT1) -> RethEvmBuilder<DB, EXT1> {
+        RethEvmBuilder { db: self.db, env: self.env, external_context }
     }
 
     /// Build the EVM with the given database and environment.
@@ -93,8 +103,7 @@ pub trait ConfigureEvmBuilder {
 }
 
 /// Trait for configuring the EVM for executing full blocks.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait EvmFactory: ConfigureEvmEnv {
+pub trait EvmFactory {
     /// Associated type for the default external context that should be configured for the EVM.
     type DefaultExternalContext<'a>;
 
@@ -106,7 +115,10 @@ pub trait EvmFactory: ConfigureEvmEnv {
     /// This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It is up to
     /// the caller to call an appropriate method to fill the transaction and block environment
     /// before executing any transactions using the provided EVM.
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+    fn evm<DB: Database>(self, db: DB) -> Evm<'static, Self::DefaultExternalContext<'static>, DB>
+    where
+        Self: Sized,
+    {
         RethEvmBuilder::new(db, self.default_external_context()).build()
     }
 
@@ -154,6 +166,14 @@ pub trait EvmFactory: ConfigureEvmEnv {
         I: GetInspector<DB>,
     {
         RethEvmBuilder::new(db, self.default_external_context()).build_with_inspector(inspector)
+    }
+}
+
+impl<DB: Database, EXT: Clone> EvmFactory for RethEvmBuilder<DB, EXT> {
+    type DefaultExternalContext<'a> = EXT;
+
+    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {
+        self.external_context.clone()
     }
 }
 
