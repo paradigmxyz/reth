@@ -81,7 +81,6 @@ where
             // try to poll the backfill sync to completion, if active
             match this.backfill_sync.poll(cx) {
                 Poll::Ready(backfill_sync_event) => match backfill_sync_event {
-                    BackfillEvent::Idle => {}
                     BackfillEvent::Started(_) => {
                         // notify handler that backfill sync started
                         this.handler.on_event(FromOrchestrator::BackfillSyncStarted);
