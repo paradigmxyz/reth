@@ -5,7 +5,7 @@ use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
     BeaconConsensusEngineHandle,
 };
-use reth_ethereum_engine::service::{ChainEvent, EngineApiEvent, EthService};
+use reth_ethereum_engine::service::{ChainEvent, EthService};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_exex::ExExManagerHandle;
 use reth_network::NetworkEvents;
@@ -243,12 +243,9 @@ where
                 match event {
                     ChainEvent::BackfillSyncFinished | ChainEvent::BackfillSyncStarted => {}
                     ChainEvent::FatalError => break,
-                    ChainEvent::Handler(ev) => match ev {
-                        EngineApiEvent::BeaconConsensus(ev) => {
-                            event_sender.notify(ev);
-                        }
-                        EngineApiEvent::FromTree(_) => {}
-                    },
+                    ChainEvent::Handler(ev) => {
+                        event_sender.notify(ev);
+                    }
                 }
             }
             let _ = tx.send(());
