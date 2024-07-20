@@ -34,8 +34,6 @@ pub enum BackfillAction {
 /// The events that can be emitted on backfill sync.
 #[derive(Debug)]
 pub enum BackfillEvent {
-    /// Backfill sync idle.
-    Idle,
     /// Backfill sync started.
     Started(PipelineTarget),
     /// Backfill sync finished.
