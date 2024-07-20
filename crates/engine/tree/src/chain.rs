@@ -114,7 +114,7 @@ where
                 Poll::Ready(handler_event) => {
                     match handler_event {
                         HandlerEvent::BackfillSync(action) => {
-                            // trigger backfill sync and start polling it
+                            // forward action to backfill_sync
                             this.backfill_sync.on_action(action);
                             continue 'outer
                         }
