@@ -343,17 +343,19 @@ where
 
         // apply after and count to traces if specified, this allows for a pagination style.
         // only consider traces after
-        let all_traces: Vec<_> = if let Some(after) = after {
-            all_traces.into_iter().skip(after as usize).collect()
-        } else {
-            all_traces
+        all_traces = match after.map(|a| a as usize) {
+            Some(after_index) if after_index < all_traces.len() => {
+                all_traces.split_off(after_index)
+            }
+            _ => all_traces,
         };
 
         // at most, return count of traces
-        let all_traces: Vec<_> = if let Some(count) = count {
-            all_traces.into_iter().take(count as usize).collect()
-        } else {
-            all_traces
+        if let Some(count) = count {
+            let count = count as usize;
+            if count < all_traces.len() {
+                all_traces.truncate(count);
+            }
         };
 
         Ok(all_traces)
