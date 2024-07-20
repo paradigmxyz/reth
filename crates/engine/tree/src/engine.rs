@@ -27,6 +27,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 /// received from the CL to the handler.
 ///
 /// It is responsible for handling the following:
+/// - Delegating incoming requests to the [`EngineRequestHandler`].
+/// - Advancing the [`EngineRequestHandler`] by polling it and emitting events.
 /// - Downloading blocks on demand from the network if requested by the [`EngineApiRequestHandler`].
 ///
 /// The core logic is part of the [`EngineRequestHandler`], which is responsible for processing the
@@ -111,7 +113,14 @@ where
     }
 }
 
-/// A type that processes incoming requests (e.g. requests from the consensus layer, engine API)
+/// A type that processes incoming requests (e.g. requests from the consensus layer, engine API,
+/// such as newPayload).
+///
+/// ## Control flow
+///
+/// Requests and certain updates, such as a change in backfill sync status, are delegated to this
+/// type via [`EngineRequestHandler::on_event`]. This type is responsible for processing the
+/// incoming requests and advancing the chain and emit events when it is polled.
 pub trait EngineRequestHandler: Send + Sync {
     /// Even type this handler can emit
     type Event: Send;
