@@ -25,6 +25,8 @@ use std::{
     task::{Context, Poll},
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use reth_engine_tree::backfill::BackfillSync;
+use reth_engine_tree::chain::ChainHandler;
 
 /// Alias for Ethereum chain orchestrator.
 type EthServiceType<DB, Client> = ChainOrchestrator<
@@ -35,6 +37,36 @@ type EthServiceType<DB, Client> = ChainOrchestrator<
     >,
     PipelineSync<DB>,
 >;
+
+/// The type that drives the Ethereum chain forward and communicates progress.
+#[pin_project]
+#[allow(missing_debug_implementations)]
+pub struct EthService2<T, P>
+{
+    /// The chain orchestrator that drives the chain forward.
+    orchestrator: ChainOrchestrator<T, P>,
+}
+
+impl<T, P> EthService2<T, P>
+{
+    /// Constructor for `EthService`.
+    pub fn new(orchestrator: T) -> Self {
+        Self { orchestrator }
+    }
+}
+
+impl<T, P> Stream for EthService<T, P>
+where
+    T: ChainHandler + Unpin,
+    P: BackfillSync + Unpin,
+{
+    type Item = ChainEvent<T::Event>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut orchestrator = self.project().orchestrator;
+        StreamExt::poll_next_unpin(&mut orchestrator, cx)
+    }
+}
 
 /// The type that drives the Ethereum chain forward and communicates progress.
 #[pin_project]
