@@ -79,12 +79,12 @@ pub trait Consensus: Debug + Send + Sync {
     fn validate_header_range(&self, headers: &[SealedHeader]) -> Result<(), HeaderConsensusError> {
         if let Some((initial_header, remaining_headers)) = headers.split_first() {
             self.validate_header(initial_header)
-                .map_err(|e| HeaderConsensusError(e, initial_header.clone()))?;
+                .map_err(|e| HeaderConsensusError::new(e, initial_header.clone()))?;
             let mut parent = initial_header;
             for child in remaining_headers {
-                self.validate_header(child).map_err(|e| HeaderConsensusError(e, child.clone()))?;
+                self.validate_header(child).map_err(|e| HeaderConsensusError::new(e, child.clone()))?;
                 self.validate_header_against_parent(child, parent)
-                    .map_err(|e| HeaderConsensusError(e, child.clone()))?;
+                    .map_err(|e| HeaderConsensusError::new(e, child.clone()))?;
                 parent = child;
             }
         }
@@ -154,29 +154,23 @@ pub enum ConsensusError {
 
     /// Error when the transaction root in the block is different from the expected transaction
     /// root.
-    // #[error("mismatched block transaction root: {0}")]
     BodyTransactionRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when the receipt root in the block is different from the expected receipt root.
-    // #[error("receipt root mismatch: {0}")]
     BodyReceiptRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when header bloom filter is different from the expected bloom filter.
-    // #[error("header bloom filter mismatch: {0}")]
     BodyBloomLogDiff(GotExpectedBoxed<Bloom>),
 
     /// Error when the withdrawals root in the block is different from the expected withdrawals
     /// root.
-    // #[error("mismatched block withdrawals root: {0}")]
     BodyWithdrawalsRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when the requests root in the block is different from the expected requests
     /// root.
-    // #[error("mismatched block requests root: {0}")]
     BodyRequestsRootDiff(GotExpectedBoxed<B256>),
 
     /// Error when a block with a specific hash and number is already known.
-    // #[error("block with [hash={hash}, number={number}] is already known")]
     BlockKnown {
         /// The hash of the known block.
         hash: BlockHash,
@@ -185,16 +179,12 @@ pub enum ConsensusError {
     },
 
     /// Error when the parent hash of a block is not known.
-    // #[error("block parent [hash={hash}] is not known")]
     ParentUnknown {
         /// The hash of the unknown parent block.
         hash: BlockHash,
     },
 
     /// Error when the block number does not match the parent block number.
-    // #[error(
-    //     "block number {block_number} does not match parent block number {parent_block_number}"
-    // )]
     ParentBlockNumberMismatch {
         /// The parent block number.
         parent_block_number: BlockNumber,
@@ -207,7 +197,6 @@ pub enum ConsensusError {
     ParentHashMismatch(GotExpectedBoxed<B256>),
 
     /// Error when the block timestamp is in the future compared to our clock time.
-    // #[error("block timestamp {timestamp} is in the future compared to our clock time {present_timestamp}")]
     TimestampIsInFuture {
         /// The block's timestamp.
         timestamp: u64,
@@ -223,74 +212,57 @@ pub enum ConsensusError {
     TransactionSignerRecoveryError,
 
     /// Error when the extra data length exceeds the maximum allowed.
-    // #[error("extra data {len} exceeds max length")]
     ExtraDataExceedsMax {
         /// The length of the extra data.
         len: usize,
     },
 
     /// Error when the difficulty after a merge is not zero.
-    // #[error("difficulty after merge is not zero")]
     TheMergeDifficultyIsNotZero,
 
     /// Error when the nonce after a merge is not zero.
-    // #[error("nonce after merge is not zero")]
     TheMergeNonceIsNotZero,
 
     /// Error when the ommer root after a merge is not empty.
-    // #[error("ommer root after merge is not empty")]
     TheMergeOmmerRootIsNotEmpty,
 
     /// Error when the withdrawals root is missing.
-    // #[error("missing withdrawals root")]
     WithdrawalsRootMissing,
 
     /// Error when the requests root is missing.
-    // #[error("missing requests root")]
     RequestsRootMissing,
 
     /// Error when an unexpected withdrawals root is encountered.
-    // #[error("unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
 
     /// Error when an unexpected requests root is encountered.
-    // #[error("unexpected requests root")]
     RequestsRootUnexpected,
 
     /// Error when withdrawals are missing.
-    // #[error("missing withdrawals")]
     BodyWithdrawalsMissing,
 
     /// Error when requests are missing.
-    // #[error("missing requests")]
     BodyRequestsMissing,
 
     /// Error when blob gas used is missing.
-    // #[error("missing blob gas used")]
     BlobGasUsedMissing,
 
     /// Error when unexpected blob gas used is encountered.
-    // #[error("unexpected blob gas used")]
     BlobGasUsedUnexpected,
 
     /// Error when excess blob gas is missing.
-    // #[error("missing excess blob gas")]
     ExcessBlobGasMissing,
 
     /// Error when unexpected excess blob gas is encountered.
-    // #[error("unexpected excess blob gas")]
     ExcessBlobGasUnexpected,
 
     /// Error when the parent beacon block root is missing.
-    // #[error("missing parent beacon block root")]
     ParentBeaconBlockRootMissing,
 
     /// Error when an unexpected parent beacon block root is encountered.
-    // #[error("unexpected parent beacon block root")]
     ParentBeaconBlockRootUnexpected,
 
     /// Error when blob gas used exceeds the maximum allowed.
-    // #[error("blob gas used {blob_gas_used} exceeds maximum allowance {max_blob_gas_per_block}")]
     BlobGasUsedExceedsMaxBlobGasPerBlock {
         /// The actual blob gas used.
         blob_gas_used: u64,
@@ -299,9 +271,6 @@ pub enum ConsensusError {
     },
 
     /// Error when blob gas used is not a multiple of blob gas per blob.
-    // #[error(
-    //     "blob gas used {blob_gas_used} is not a multiple of blob gas per blob {blob_gas_per_blob}"
-    // )]
     BlobGasUsedNotMultipleOfBlobGasPerBlob {
         /// The actual blob gas used.
         blob_gas_used: u64,
@@ -310,9 +279,6 @@ pub enum ConsensusError {
     },
 
     /// Error when excess blob gas is not a multiple of blob gas per blob.
-    // #[error(
-    //     "excess blob gas {excess_blob_gas} is not a multiple of blob gas per blob {blob_gas_per_blob}"
-    // )]
     ExcessBlobGasNotMultipleOfBlobGasPerBlob {
         /// The actual excess blob gas.
         excess_blob_gas: u64,
@@ -321,23 +287,20 @@ pub enum ConsensusError {
     },
 
     /// Error when the blob gas used in the header does not match the expected blob gas used.
-    // #[error("blob gas used mismatch: {0}")]
     BlobGasUsedDiff(GotExpected<u64>),
 
     /// Error for a transaction that violates consensus.
     // #[error(transparent)]
-    InvalidTransaction(#[from] InvalidTransactionError),
+    InvalidTransaction(
+        // #[from] 
+        InvalidTransactionError
+    ),
 
     /// Error when the block's base fee is different from the expected base fee.
     // #[error("block base fee mismatch: {0}")]
     BaseFeeDiff(GotExpected<u64>),
 
     /// Error when there is an invalid excess blob gas.
-    // #[error(
-    //     "invalid excess blob gas: {diff}; \
-    //         parent excess blob gas: {parent_excess_blob_gas}, \
-    //         parent blob gas used: {parent_blob_gas_used}"
-    // )]
     ExcessBlobGasDiff {
         /// The excess blob gas diff.
         diff: GotExpected<u64>,
@@ -348,7 +311,6 @@ pub enum ConsensusError {
     },
 
     /// Error when the child gas limit exceeds the maximum allowed increase.
-    // #[error("child gas_limit {child_gas_limit} max increase is {parent_gas_limit}/1024")]
     GasLimitInvalidIncrease {
         /// The parent gas limit.
         parent_gas_limit: u64,
@@ -359,14 +321,12 @@ pub enum ConsensusError {
     /// Error indicating that the child gas limit is below the minimum allowed limit.
     ///
     /// This error occurs when the child gas limit is less than the specified minimum gas limit.
-    // #[error("child gas limit {child_gas_limit} is below the minimum allowed limit ({MINIMUM_GAS_LIMIT})")]
     GasLimitInvalidMinimum {
         /// The child gas limit.
         child_gas_limit: u64,
     },
 
     /// Error when the child gas limit exceeds the maximum allowed decrease.
-    // #[error("child gas_limit {child_gas_limit} max decrease is {parent_gas_limit}/1024")]
     GasLimitInvalidDecrease {
         /// The parent gas limit.
         parent_gas_limit: u64,
@@ -375,7 +335,6 @@ pub enum ConsensusError {
     },
 
     /// Error when the block timestamp is in the past compared to the parent timestamp.
-    // #[error("block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}")]
     TimestampIsInPast {
         /// The parent block's timestamp.
         parent_timestamp: u64,
@@ -391,66 +350,102 @@ impl fmt::Display for ConsensusError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::HeaderGasUsedExceedsGasLimit {gas_used, gas_limit} => {
-                f.write_fmt(
-                    format_args!("block used gas ({gas_used}) is greater than gas limit ({gas_limit})")
-                )
+                f.write_fmt(format_args!("block used gas ({gas_used}) is greater than gas limit ({gas_limit})"))
             },
             Self::BlockGasUsed { gas, gas_spent_by_tx } => { 
-                f.write_fmt(
-                    format_args!("block gas used mismatch: {gas}; gas spent by each transaction: {gas_spent_by_tx:?}")
-                )
+                f.write_fmt(format_args!("block gas used mismatch: {gas}; gas spent by each transaction: {gas_spent_by_tx:?}"))
             },
-            Self::BodyOmmersHashDiff(hashes) => {
-                f.write_fmt(format_args!("mismatched block ommer hash: {hashes}"))
+            Self::BodyOmmersHashDiff(ommer_hashes) => {
+                f.write_fmt(format_args!("mismatched block ommer hash: {}", ommer_hashes.got))
             },
-            Self::BodyStateRootDiff(root_state) => {
-                f.write_fmt(
-                    format_args!("mismatched block state root: {root_state}")
-                )
+            Self::BodyStateRootDiff(block_state_roots) => {
+                f.write_fmt(format_args!("mismatched block state root: {}", block_state_roots.got))
+            },
+            Self::BodyTransactionRootDiff(transaction_roots) => {
+                f.write_fmt(format_args!("mismatched block transaction root: {}", transaction_roots.got))
+            }
+            Self::BodyReceiptRootDiff(receipt_roots) => {
+                f.write_fmt(format_args!("mismatched block requests root: {}", receipt_roots.got))
+            },
+            Self::BodyBloomLogDiff(bloom_filters) => {
+                f.write_fmt(format_args!("header bloom filter mismatch: {}", bloom_filters.got))
+            },
+            Self::BodyWithdrawalsRootDiff(withdrawal_roots) => {
+                f.write_fmt(format_args!("mismatched block withdrawals root: {}", withdrawal_roots.got))
+            },
+            Self::BodyRequestsRootDiff(block_requests_roots) => {
+                f.write_fmt(format_args!("mismatched block requests root: {}", block_requests_roots.got))
+            },
+            Self::BlockKnown { hash, number } => {
+                f.write_fmt(format_args!("block with [hash={}, number={}] is already known", hash, number))
+            },
+            Self::ParentUnknown { hash } => {
+                f.write_fmt(format_args!("block parent [hash={hash}] is not known"))
+            },
+            Self::ParentBlockNumberMismatch { parent_block_number, block_number } => {
+                f.write_fmt(format_args!("block number {block_number} does not match parent block number {parent_block_number}"))
+            },
+            Self::ParentHashMismatch(parent_hashes) => {
+                f.write_fmt(format_args!("mismatched parent hash: {}", parent_hashes.got))
+            },
+            Self::TimestampIsInFuture { timestamp, present_timestamp } => {
+                f.write_fmt(format_args!("block timestamp {timestamp} is in the future compared to our clock time {present_timestamp}"))
             },
             Self::BaseFeeMissing => f.write_str("base fee missing"),
-            Self::BodyTransactionRootDiff(transaction_roots) => {
-                f.write_fmt(
-                    format_args!("mismatched block transaction root: {transaction_roots}")
-                )
-            }
-            Self::BodyReceiptRootDiff(_) => todo!(),
-            Self::BodyBloomLogDiff(_) => todo!(),
-            Self::BodyWithdrawalsRootDiff(_) => todo!(),
-            Self::BodyRequestsRootDiff(_) => todo!(),
-            Self::BlockKnown { hash, number } => todo!(),
-            Self::ParentUnknown { hash } => todo!(),
-            Self::ParentBlockNumberMismatch { parent_block_number, block_number } => todo!(),
-            Self::ParentHashMismatch(_) => todo!(),
-            Self::TimestampIsInFuture { timestamp, present_timestamp } => todo!(),
-            Self::TransactionSignerRecoveryError => todo!(),
-            Self::ExtraDataExceedsMax { len } => todo!(),
-            Self::TheMergeDifficultyIsNotZero => todo!(),
-            Self::TheMergeNonceIsNotZero => todo!(),
-            Self::TheMergeOmmerRootIsNotEmpty => todo!(),
-            Self::WithdrawalsRootMissing => todo!(),
-            Self::RequestsRootMissing => todo!(),
-            Self::WithdrawalsRootUnexpected => todo!(),
-            Self::RequestsRootUnexpected => todo!(),
-            Self::BodyWithdrawalsMissing => todo!(),
-            Self::BodyRequestsMissing => todo!(),
-            Self::BlobGasUsedMissing => todo!(),
-            Self::BlobGasUsedUnexpected => todo!(),
-            Self::ExcessBlobGasMissing => todo!(),
-            Self::ExcessBlobGasUnexpected => todo!(),
-            Self::ParentBeaconBlockRootMissing => todo!(),
-            Self::ParentBeaconBlockRootUnexpected => todo!(),
-            Self::BlobGasUsedExceedsMaxBlobGasPerBlock { blob_gas_used, max_blob_gas_per_block } => todo!(),
-            Self::BlobGasUsedNotMultipleOfBlobGasPerBlob { blob_gas_used, blob_gas_per_blob } => todo!(),
-            Self::ExcessBlobGasNotMultipleOfBlobGasPerBlob { excess_blob_gas, blob_gas_per_blob } => todo!(),
-            Self::BlobGasUsedDiff(_) => todo!(),
-            Self::InvalidTransaction(_) => todo!(),
-            Self::BaseFeeDiff(_) => todo!(),
-            Self::ExcessBlobGasDiff { diff, parent_excess_blob_gas, parent_blob_gas_used } => todo!(),
-            Self::GasLimitInvalidIncrease { parent_gas_limit, child_gas_limit } => todo!(),
-            Self::GasLimitInvalidMinimum { child_gas_limit } => todo!(),
-            Self::GasLimitInvalidDecrease { parent_gas_limit, child_gas_limit } => todo!(),
-            Self::TimestampIsInPast { parent_timestamp, timestamp } => todo!(),
+            Self::TransactionSignerRecoveryError => f.write_str("transaction signer recovery error"),
+            Self::ExtraDataExceedsMax { len } => {
+                f.write_fmt(format_args!("extra data {len} exceeds max length"))
+            },
+            Self::TheMergeDifficultyIsNotZero => f.write_str("difficulty after merge is not zero"),
+            Self::TheMergeNonceIsNotZero => f.write_str("nonce after merge is not zero"),
+            Self::TheMergeOmmerRootIsNotEmpty => f.write_str("ommer root after merge is not empty"),
+            Self::WithdrawalsRootMissing => f.write_str("missing withdrawals root"),
+            Self::RequestsRootMissing => f.write_str("missing requests root"),
+            Self::WithdrawalsRootUnexpected => f.write_str("unexpected withdrawals root"),
+            Self::RequestsRootUnexpected => f.write_str("unexpected requests root"),
+            Self::BodyWithdrawalsMissing => f.write_str("missing withdrawals"),
+            Self::BodyRequestsMissing => f.write_str("missing requests"),
+            Self::BlobGasUsedMissing => f.write_str("missing blob gas used"),
+            Self::BlobGasUsedUnexpected => f.write_str("unexpected blob gas used"),
+            Self::ExcessBlobGasMissing => f.write_str("missing excess blob gas"),
+            Self::ExcessBlobGasUnexpected => f.write_str("unexpected excess blob gas"),
+            Self::ParentBeaconBlockRootMissing => f.write_str("missing parent beacon block root"),
+            Self::ParentBeaconBlockRootUnexpected => f.write_str("unexpected parent beacon block root"),
+            Self::BlobGasUsedExceedsMaxBlobGasPerBlock { blob_gas_used, max_blob_gas_per_block } => {
+                f.write_fmt(format_args!("blob gas used {blob_gas_used} exceeds maximum allowance {max_blob_gas_per_block}"))
+            },
+            Self::BlobGasUsedNotMultipleOfBlobGasPerBlob { blob_gas_used, blob_gas_per_blob } => {
+                f.write_fmt(format_args!("blob gas used {blob_gas_used} is not a multiple of blob gas per blob {blob_gas_per_blob}"))
+            },
+            Self::ExcessBlobGasNotMultipleOfBlobGasPerBlob { excess_blob_gas, blob_gas_per_blob } => {
+                f.write_fmt(format_args!("excess blob gas {excess_blob_gas} is not a multiple of blob gas per blob {blob_gas_per_blob}"))
+            },
+            Self::BlobGasUsedDiff(blob_gas) => {
+                f.write_fmt(format_args!("blob gas used mismatch: {}", blob_gas.got))
+            },
+            Self::InvalidTransaction(_) => {
+                f.write_str("invalid transaction")
+            },
+            Self::BaseFeeDiff(block_base_fee) => {
+                f.write_fmt(format_args!("block base fee mismatch: {}", block_base_fee))
+            },
+            Self::ExcessBlobGasDiff { diff, parent_excess_blob_gas, parent_blob_gas_used } => {
+                f.write_fmt(format_args!(
+                    "invalid excess blob gas: {diff}; parent excess blob gas: {parent_excess_blob_gas}, parent blob gas used: {parent_blob_gas_used}"
+                ))
+            },
+            Self::GasLimitInvalidIncrease { parent_gas_limit, child_gas_limit } => {
+                f.write_fmt(format_args!("child gas_limit {child_gas_limit} max increase is {parent_gas_limit}/1024"))
+            },
+            Self::GasLimitInvalidMinimum { child_gas_limit } => {
+                f.write_fmt(format_args!("child gas limit {child_gas_limit} is below the minimum allowed limit ({MINIMUM_GAS_LIMIT})"))
+            },
+            Self::GasLimitInvalidDecrease { parent_gas_limit, child_gas_limit } => {
+                f.write_fmt(format_args!("child gas_limit {child_gas_limit} max decrease is {parent_gas_limit}/1024"))
+            },
+            Self::TimestampIsInPast { parent_timestamp, timestamp } => {
+                f.write_fmt(format_args!("block timestamp {timestamp} is in the past compared to the parent timestamp {parent_timestamp}"))
+            },
         }
     }
 }
@@ -463,6 +458,32 @@ impl ConsensusError {
 }
 
 /// `HeaderConsensusError` combines a `ConsensusError` with the `SealedHeader` it relates to.
-#[derive(thiserror_no_std::Error, Debug)]
-#[error("Consensus error: {0}, Invalid header: {1:?}")]
-pub struct HeaderConsensusError(ConsensusError, SealedHeader);
+#[derive(Debug)]
+// #[error("Consensus error: {0}, Invalid header: {1:?}")]
+pub struct HeaderConsensusError {
+    /// `ConsensusError`
+    pub consensus_error: ConsensusError,
+    /// `SealedHeader`
+    pub sealed_header: SealedHeader
+}
+
+impl HeaderConsensusError {
+    /// Creates a `HeaderConsensusError`
+    pub const fn new(consensus_error: ConsensusError, sealed_header: SealedHeader) -> Self {
+        Self {
+            consensus_error,
+            sealed_header
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for HeaderConsensusError {}
+
+impl fmt::Display for HeaderConsensusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(
+            format_args!("Consensus error: {}, Invalid header: {}", self.consensus_error, self.sealed_header)
+        )
+    }
+}
