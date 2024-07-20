@@ -130,7 +130,7 @@ impl<'b, TX: DbTx> HistoricalStateProviderRef<'b, TX> {
             );
         }
 
-        Ok(HashedPostState::from_revert_range(self.tx, self.block_number..=tip)?)
+        Ok(HashedPostState::from_reverts(self.tx, self.block_number)?)
     }
 
     fn history_info<T, K>(

@@ -12,7 +12,7 @@ use reth_primitives::{SealedBlockWithSenders, B256};
 use std::{
     collections::HashSet,
     sync::mpsc::Sender,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -27,6 +27,8 @@ use tokio::sync::mpsc::UnboundedReceiver;
 /// received from the CL to the handler.
 ///
 /// It is responsible for handling the following:
+/// - Delegating incoming requests to the [`EngineRequestHandler`].
+/// - Advancing the [`EngineRequestHandler`] by polling it and emitting events.
 /// - Downloading blocks on demand from the network if requested by the [`EngineApiRequestHandler`].
 ///
 /// The core logic is part of the [`EngineRequestHandler`], which is responsible for processing the
@@ -71,7 +73,6 @@ where
             // drain the handler first
             while let Poll::Ready(ev) = self.handler.poll(cx) {
                 match ev {
-                    RequestHandlerEvent::Idle => break,
                     RequestHandlerEvent::HandlerEvent(ev) => {
                         return match ev {
                             HandlerEvent::BackfillSync(target) => {
@@ -112,7 +113,14 @@ where
     }
 }
 
-/// A type that processes incoming requests (e.g. requests from the consensus layer, engine API)
+/// A type that processes incoming requests (e.g. requests from the consensus layer, engine API,
+/// such as newPayload).
+///
+/// ## Control flow
+///
+/// Requests and certain updates, such as a change in backfill sync status, are delegated to this
+/// type via [`EngineRequestHandler::on_event`]. This type is responsible for processing the
+/// incoming requests and advancing the chain and emit events when it is polled.
 pub trait EngineRequestHandler: Send + Sync {
     /// Even type this handler can emit
     type Event: Send;
@@ -169,7 +177,7 @@ impl<T> EngineRequestHandler for EngineApiRequestHandler<T>
 where
     T: EngineTypes,
 {
-    type Event = EngineApiEvent;
+    type Event = BeaconConsensusEngineEvent;
     type Request = BeaconEngineMessage<T>;
 
     fn on_event(&mut self, event: FromEngine<Self::Request>) {
@@ -178,7 +186,23 @@ where
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<RequestHandlerEvent<Self::Event>> {
-        todo!("poll tree")
+        let Some(ev) = ready!(self.from_tree.poll_recv(cx)) else { return Poll::Pending };
+        let ev = match ev {
+            EngineApiEvent::BeaconConsensus(ev) => {
+                RequestHandlerEvent::HandlerEvent(HandlerEvent::Event(ev))
+            }
+            EngineApiEvent::FromTree(ev) => match ev {
+                TreeEvent::BackfillAction(target) => {
+                    RequestHandlerEvent::HandlerEvent(HandlerEvent::BackfillSync(target))
+                }
+                TreeEvent::Download(download) => RequestHandlerEvent::Download(download),
+                TreeEvent::TreeAction(ev) => {
+                    // TODO revise this
+                    return Poll::Pending
+                }
+            },
+        };
+        Poll::Ready(ev)
     }
 }
 
@@ -217,8 +241,6 @@ impl<Req> From<FromOrchestrator> for FromEngine<Req> {
 /// Requests produced by a [`EngineRequestHandler`].
 #[derive(Debug)]
 pub enum RequestHandlerEvent<T> {
-    /// The handler is idle.
-    Idle,
     /// An event emitted by the handler.
     HandlerEvent(HandlerEvent<T>),
     /// Request to download blocks.

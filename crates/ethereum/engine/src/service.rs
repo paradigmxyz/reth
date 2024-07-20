@@ -1,6 +1,6 @@
 use futures::{Stream, StreamExt};
 use pin_project::pin_project;
-use reth_beacon_consensus::{BeaconEngineMessage, EthBeaconConsensus};
+use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage, EthBeaconConsensus};
 use reth_chainspec::ChainSpec;
 use reth_db_api::database::Database;
 use reth_engine_tree::{
@@ -99,7 +99,7 @@ where
     DB: Database + 'static,
     Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
 {
-    type Item = ChainEvent<EngineApiEvent>;
+    type Item = ChainEvent<BeaconConsensusEngineEvent>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut orchestrator = self.project().orchestrator;

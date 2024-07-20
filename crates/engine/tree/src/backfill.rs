@@ -34,8 +34,6 @@ pub enum BackfillAction {
 /// The events that can be emitted on backfill sync.
 #[derive(Debug)]
 pub enum BackfillEvent {
-    /// Backfill sync idle.
-    Idle,
     /// Backfill sync started.
     Started(PipelineTarget),
     /// Backfill sync finished.
@@ -168,7 +166,7 @@ where
         }
 
         // make sure we poll the pipeline if it's active, and return any ready pipeline events
-        if !self.is_pipeline_idle() {
+        if self.is_pipeline_active() {
             // advance the pipeline
             if let Poll::Ready(event) = self.poll_pipeline(cx) {
                 return Poll::Ready(event)
