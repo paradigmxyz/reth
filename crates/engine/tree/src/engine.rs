@@ -71,7 +71,6 @@ where
             // drain the handler first
             while let Poll::Ready(ev) = self.handler.poll(cx) {
                 match ev {
-                    RequestHandlerEvent::Idle => break,
                     RequestHandlerEvent::HandlerEvent(ev) => {
                         return match ev {
                             HandlerEvent::BackfillSync(target) => {
@@ -217,8 +216,6 @@ impl<Req> From<FromOrchestrator> for FromEngine<Req> {
 /// Requests produced by a [`EngineRequestHandler`].
 #[derive(Debug)]
 pub enum RequestHandlerEvent<T> {
-    /// The handler is idle.
-    Idle,
     /// An event emitted by the handler.
     HandlerEvent(HandlerEvent<T>),
     /// Request to download blocks.
