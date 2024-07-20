@@ -147,15 +147,7 @@ where
     }
 }
 
-/// Represents the sync mode the chain is operating in.
-#[derive(Debug, Default)]
-enum SyncMode {
-    #[default]
-    Handler,
-    Backfill,
-}
-
-/// Event emitted by the [`ChainOrchestrator`].
+/// Event emitted by the [`ChainOrchestrator`]
 ///
 /// These are meant to be used for observability and debugging purposes.
 #[derive(Debug)]
@@ -208,26 +200,4 @@ pub enum FromOrchestrator {
     BackfillSyncFinished,
     /// Invoked when backfill sync started
     BackfillSyncStarted,
-}
-
-/// Represents the state of the chain.
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
-pub enum OrchestratorState {
-    /// Orchestrator has exclusive write access to the database.
-    BackfillSyncActive,
-    /// Node is actively processing the chain.
-    #[default]
-    Idle,
-}
-
-impl OrchestratorState {
-    /// Returns `true` if the state is [`OrchestratorState::BackfillSyncActive`].
-    pub const fn is_backfill_sync_active(&self) -> bool {
-        matches!(self, Self::BackfillSyncActive)
-    }
-
-    /// Returns `true` if the state is [`OrchestratorState::Idle`].
-    pub const fn is_idle(&self) -> bool {
-        matches!(self, Self::Idle)
-    }
 }
