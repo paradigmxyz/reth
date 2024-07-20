@@ -5,7 +5,7 @@ use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
     BeaconConsensusEngineHandle,
 };
-use reth_ethereum_engine::service::EthService;
+use reth_ethereum_engine::service::{ChainEvent, EthService};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_exex::ExExManagerHandle;
 use reth_network::NetworkEvents;
@@ -174,7 +174,7 @@ where
         let event_sender = EventSender::default();
 
         let beacon_engine_handle =
-            BeaconConsensusEngineHandle::new(consensus_engine_tx, event_sender);
+            BeaconConsensusEngineHandle::new(consensus_engine_tx, event_sender.clone());
 
         info!(target: "reth::cli", "Consensus engine initialized");
 
@@ -237,8 +237,16 @@ where
         let (tx, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
+            // advance the chain and handle events
             while let Some(event) = eth_service.next().await {
-                info!(target: "reth::cli", "Event: {event:?}");
+                debug!(target: "reth::cli", "Event: {event:?}");
+                match event {
+                    ChainEvent::BackfillSyncFinished | ChainEvent::BackfillSyncStarted => {}
+                    ChainEvent::FatalError => break,
+                    ChainEvent::Handler(ev) => {
+                        event_sender.notify(ev);
+                    }
+                }
             }
             let _ = tx.send(());
         });
