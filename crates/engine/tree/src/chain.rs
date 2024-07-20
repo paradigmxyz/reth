@@ -179,7 +179,7 @@ pub trait ChainHandler: Send + Sync {
 /// Events/Requests that the [`ChainHandler`] can emit to the [`ChainOrchestrator`].
 #[derive(Clone, Debug)]
 pub enum HandlerEvent<T> {
-    /// Request to start a backfill sync
+    /// Request an action to backfill sync
     BackfillSync(BackfillAction),
     /// Other event emitted by the handler
     Event(T),
