@@ -17,10 +17,7 @@ use reth_execution_errors::StateRootError;
 use reth_primitives::{keccak256, Account, Address, BlockNumber, B256, U256};
 use reth_trie_common::AccountProof;
 use revm::db::BundleAccount;
-use std::{
-    collections::{hash_map, HashMap, HashSet},
-    ops::RangeInclusive,
-};
+use std::collections::{hash_map, HashMap, HashSet};
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -62,20 +59,13 @@ impl HashedPostState {
         Self { accounts, storages }
     }
 
-    /// Initialize [`HashedPostState`] from revert range.
-    /// Iterate over state reverts in the specified block range and
-    /// apply them to hashed state in reverse.
-    ///
-    /// NOTE: In order to have the resulting [`HashedPostState`] be a correct
-    /// overlay of the plain state, the end of the range must be the current tip.
-    pub fn from_revert_range<TX: DbTx>(
-        tx: &TX,
-        range: RangeInclusive<BlockNumber>,
-    ) -> Result<Self, DatabaseError> {
+    /// Initializes [`HashedPostState`] from reverts. Iterates over state reverts from the specified
+    /// block up to the current tip and aggregates them into hashed state in reverse.
+    pub fn from_reverts<TX: DbTx>(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError> {
         // Iterate over account changesets and record value before first occurring account change.
         let mut accounts = HashMap::<Address, Option<Account>>::default();
         let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
-        for entry in account_changesets_cursor.walk_range(range.clone())? {
+        for entry in account_changesets_cursor.walk_range(from..)? {
             let (_, AccountBeforeTx { address, info }) = entry?;
             if let hash_map::Entry::Vacant(entry) = accounts.entry(address) {
                 entry.insert(info);
@@ -85,7 +75,9 @@ impl HashedPostState {
         // Iterate over storage changesets and record value before first occurring storage change.
         let mut storages = HashMap::<Address, HashMap<B256, U256>>::default();
         let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
-        for entry in storage_changesets_cursor.walk_range(BlockNumberAddress::range(range))? {
+        for entry in
+            storage_changesets_cursor.walk_range(BlockNumberAddress((from, Address::ZERO))..)?
+        {
             let (BlockNumberAddress((_, address)), storage) = entry?;
             let account_storage = storages.entry(address).or_default();
             if let hash_map::Entry::Vacant(entry) = account_storage.entry(storage.key) {
