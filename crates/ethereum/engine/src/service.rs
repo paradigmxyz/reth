@@ -5,11 +5,14 @@ use reth_chainspec::ChainSpec;
 use reth_db_api::database::Database;
 use reth_engine_tree::{
     backfill::PipelineSync,
-    chain::{ChainEvent, ChainOrchestrator},
     download::BasicBlockDownloader,
-    engine::{EngineApiEvent, EngineApiRequestHandler, EngineHandler},
+    engine::{EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
     tree::EngineApiTreeHandlerImpl,
+};
+pub use reth_engine_tree::{
+    chain::{ChainEvent, ChainOrchestrator},
+    engine::EngineApiEvent,
 };
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm_ethereum::execute::EthExecutorProvider;
