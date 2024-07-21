@@ -47,7 +47,9 @@ impl Signature {
             self.s,
             chain_id.map_or_else(
                 || alloy_primitives::Parity::NonEip155(self.odd_y_parity),
-                alloy_primitives::Parity::Eip155,
+                |chain_id| {
+                    alloy_primitives::Parity::NonEip155(self.odd_y_parity).with_chain_id(chain_id)
+                },
             ),
         )
         .unwrap()
