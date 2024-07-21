@@ -1,16 +1,16 @@
 //! Loads and formats OP transaction RPC response.  
 
-use std::sync::Arc;
-
+use alloy_primitives::{Bytes, B256};
 use reth_evm_optimism::RethL1BlockInfo;
-use reth_primitives::TransactionSigned;
+use reth_primitives::{FromRecoveredPooledTransaction, TransactionSigned};
 use reth_provider::{BlockReaderIdExt, TransactionsProvider};
-use reth_rpc_eth_api::{
-    helpers::{EthApiSpec, EthSigner, EthTransactions, LoadTransaction},
-    RawTransactionForwarder,
+use reth_rpc_eth_api::helpers::{
+    EthApiSpec, EthSigner, EthTransactions, LoadTransaction, SequencerClient,
 };
-use reth_rpc_eth_types::{EthResult, EthStateCache};
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthResult, EthStateCache};
+use reth_transaction_pool::{TransactionOrigin, TransactionPool};
 use revm::L1BlockInfo;
+use std::sync::Arc;
 
 use crate::{OpEthApi, OpEthApiError};
 
@@ -19,12 +19,31 @@ impl<Eth: EthTransactions> EthTransactions for OpEthApi<Eth> {
         EthTransactions::provider(&self.inner)
     }
 
-    fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>> {
-        self.inner.raw_tx_forwarder()
-    }
-
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
         self.inner.signers()
+    }
+
+    /// Decodes and recovers the transaction and submits it to the pool.
+    ///
+    /// Returns the hash of the transaction.
+    async fn send_raw_transaction(&self, tx: Bytes) -> EthResult<B256> {
+        // On optimism, transactions are forwarded directly to the sequencer to be included in
+        // blocks that it builds.
+        if let Some(client) = self.sequencer_client.as_deref() {
+            tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
+            client.forward_raw_transaction(&tx).await?;
+        }
+
+        let recovered = recover_raw_transaction(tx)?;
+        let pool_transaction =
+            <Self::Pool as TransactionPool>::Transaction::from_recovered_pooled_transaction(
+                recovered,
+            );
+
+        // submit the transaction to the pool with a `Local` origin
+        let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
+
+        Ok(hash)
     }
 }
 
@@ -41,6 +60,11 @@ impl<Eth: LoadTransaction> LoadTransaction for OpEthApi<Eth> {
 
     fn pool(&self) -> &Self::Pool {
         LoadTransaction::pool(&self.inner)
+    }
+
+    #[inline]
+    fn set_sequencer_client(&mut self, sequencer_client: Arc<SequencerClient>) {
+        self.sequencer_client = Some(sequencer_client);
     }
 }
 

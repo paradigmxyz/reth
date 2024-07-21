@@ -7805,7 +7805,6 @@ dependencies = [
  "clap",
  "eyre",
  "jsonrpsee",
- "jsonrpsee-types",
  "parking_lot 0.12.3",
  "reqwest",
  "reth",
@@ -7949,6 +7948,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -8353,7 +8353,9 @@ dependencies = [
  "dyn-clone",
  "futures",
  "jsonrpsee",
+ "jsonrpsee-types",
  "parking_lot 0.12.3",
+ "reqwest",
  "reth-chainspec",
  "reth-errors",
  "reth-evm",
@@ -8370,6 +8372,8 @@ dependencies = [
  "revm",
  "revm-inspectors",
  "revm-primitives",
+ "serde_json",
+ "thiserror",
  "tokio",
  "tracing",
 ]
