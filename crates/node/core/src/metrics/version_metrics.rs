@@ -46,5 +46,6 @@ impl VersionInfo {
         ];
 
         let _gauge = gauge!("info", &labels);
+        _gauge.set(1)
     }
 }
