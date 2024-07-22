@@ -123,7 +123,7 @@ where
             // receipt is pruned
             for maybe_receipt in receipts.first().unwrap() {
                 if let Some(receipt) = maybe_receipt {
-                    receipts_writer.append_receipt(current_receipt, &receipt)?;
+                    receipts_writer.append_receipt(current_receipt, receipt)?;
                 }
                 current_receipt += 1;
             }
