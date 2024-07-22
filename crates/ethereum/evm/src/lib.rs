@@ -18,6 +18,9 @@ use reth_primitives::{transaction::FillTxEnv, Address, Header, TransactionSigned
 use reth_revm::{Database, EvmBuilder};
 use revm_primitives::{AnalysisKind, Bytes, CfgEnvWithHandlerCfg, Env, TxEnv, TxKind};
 
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};
 
