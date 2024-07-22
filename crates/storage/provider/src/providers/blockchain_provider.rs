@@ -259,23 +259,15 @@ where
     }
 
     fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
-        Ok(self
-            .canonical_in_memory_state
-            .pending_state()
-            .map(|block_state| block_state.block().block().clone()))
+        Ok(self.canonical_in_memory_state.pending_block())
     }
 
     fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
-        Ok(self
-            .canonical_in_memory_state
-            .pending_state()
-            .and_then(|block_state| block_state.block().block().clone().seal_with_senders()))
+        Ok(self.canonical_in_memory_state.pending_block_with_senders())
     }
 
     fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
-        Ok(self.canonical_in_memory_state.pending_state().map(|block_state| {
-            (block_state.block().block().clone(), block_state.flattened_receipts())
-        }))
+        Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
@@ -628,7 +620,7 @@ where
     fn pending(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting provider for pending state");
 
-        if let Some(block) = self.tree.pending_block_num_hash() {
+        if let Some(block) = self.canonical_in_memory_state.pending_block_num_hash() {
             if let Ok(pending) = self.tree.pending_state_provider(block.hash) {
                 return self.pending_with_provider(pending)
             }
@@ -727,7 +719,8 @@ where
                 self.canonical_in_memory_state.get_safe_header().map(|h| h.unseal())
             }
             BlockNumberOrTag::Earliest => self.header_by_number(0)?,
-            BlockNumberOrTag::Pending => self.tree.pending_header().map(|h| h.unseal()),
+            BlockNumberOrTag::Pending => self.canonical_in_memory_state.pending_header(),
+
             BlockNumberOrTag::Number(num) => self.header_by_number(num)?,
         })
     }
@@ -747,7 +740,7 @@ where
             BlockNumberOrTag::Earliest => {
                 self.header_by_number(0)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
             }
-            BlockNumberOrTag::Pending => Ok(self.tree.pending_header()),
+            BlockNumberOrTag::Pending => Ok(self.canonical_in_memory_state.pending_sealed_header()),
             BlockNumberOrTag::Number(num) => {
                 self.header_by_number(num)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
             }

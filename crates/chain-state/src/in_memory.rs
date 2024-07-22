@@ -4,7 +4,10 @@ use crate::ChainInfoTracker;
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{Address, BlockNumHash, Receipt, Receipts, SealedBlock, SealedHeader, B256};
+use reth_primitives::{
+    Address, BlockNumHash, Header, Receipt, Receipts, SealedBlock, SealedBlockWithSenders,
+    SealedHeader, B256,
+};
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
@@ -195,6 +198,35 @@ impl CanonicalInMemoryState {
     /// Safe header getter.
     pub fn get_safe_header(&self) -> Option<SealedHeader> {
         self.inner.chain_info_tracker.get_safe_header()
+    }
+
+    /// Returns the `SealedHeader` corresponding to the pending state.
+    pub fn pending_sealed_header(&self) -> Option<SealedHeader> {
+        self.pending_state().map(|h| h.block().block().header.clone())
+    }
+
+    /// Returns the `Header` corresponding to the pending state.
+    pub fn pending_header(&self) -> Option<Header> {
+        self.pending_sealed_header().map(|sealed_header| sealed_header.unseal())
+    }
+
+    /// Returns the `SealedBlock` corresponding to the pending state.
+    pub fn pending_block(&self) -> Option<SealedBlock> {
+        self.pending_state().map(|block_state| block_state.block().block().clone())
+    }
+
+    /// Returns the `SealedBlockWithSenders` corresponding to the pending state.
+    pub fn pending_block_with_senders(&self) -> Option<SealedBlockWithSenders> {
+        self.pending_state()
+            .and_then(|block_state| block_state.block().block().clone().seal_with_senders())
+    }
+
+    /// Returns a tuple with the `SealedBlock` corresponding to the pending
+    /// state and a vector of its `Receipt`s.
+    pub fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<Receipt>)> {
+        self.pending_state().map(|block_state| {
+            (block_state.block().block().clone(), block_state.flattened_receipts())
+        })
     }
 }
 
