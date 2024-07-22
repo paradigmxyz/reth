@@ -283,7 +283,7 @@ pub fn insert_genesis_header<DB: Database>(
         Ok(None) | Err(ProviderError::MissingStaticFileBlock(StaticFileSegment::Headers, 0)) => {
             let (difficulty, hash) = (header.difficulty, block_hash);
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-            writer.append_header(header, difficulty, hash)?;
+            writer.append_header(&header, difficulty, &hash)?;
         }
         Ok(Some(_)) => {}
         Err(e) => return Err(e),
