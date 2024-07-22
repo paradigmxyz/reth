@@ -5,13 +5,13 @@ set -eo pipefail
 no_std_packages=(
 #   reth-codecs
 #   reth-consensus
-    reth-db
-#   reth-errors
+#   reth-db
+    reth-errors
     reth-ethereum-forks
 #   reth-evm
 #   reth-evm-ethereum
     reth-network-peers
-#   reth-primitives
+    reth-primitives
 #   reth-primitives-traits
     reth-revm
 )
