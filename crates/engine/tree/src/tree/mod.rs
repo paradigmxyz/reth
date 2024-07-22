@@ -266,6 +266,13 @@ pub enum TreeEvent {
     Download(DownloadRequest),
 }
 
+impl TreeEvent {
+    /// Returns true if the event is a backfill action.
+    fn is_backfill_action(&self) -> bool {
+        matches!(self, TreeEvent::BackfillAction(_))
+    }
+}
+
 /// The actions that can be performed on the tree.
 #[derive(Debug)]
 pub enum TreeAction {
@@ -821,10 +828,14 @@ where
     type Engine = T;
 
     fn on_downloaded(&mut self, blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
-       for block in blocks {
+        for block in blocks {
             if let Some(event) = self.on_downloaded_block(block) {
-                // TODO: handle the event
-
+                let needs_backfill = event.is_backfill_action();
+                self.on_tree_event(event);
+                if needs_backfill {
+                    // can exit early if backfill is needed
+                    break
+                }
             }
         }
         None
@@ -932,8 +943,8 @@ where
         let mut outcome = TreeOutcome::new(status);
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
             // if the block is valid and it is the sync target head, make it canonical
-            outcome = outcome
-                .with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical(block_hash)));
+            outcome =
+                outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical(block_hash)));
         }
 
         Ok(outcome)
