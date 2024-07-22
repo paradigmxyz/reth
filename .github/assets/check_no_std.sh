@@ -5,15 +5,15 @@ set -eo pipefail
 no_std_packages=(
 #   reth-codecs
 #   reth-consensus
-#   reth-db
+    reth-db
 #   reth-errors
     reth-ethereum-forks
 #   reth-evm
 #   reth-evm-ethereum
-#   reth-network-peers
+    reth-network-peers
 #   reth-primitives
 #   reth-primitives-traits
-#   reth-revm
+    reth-revm
 )
 
 for package in "${no_std_packages[@]}"; do
