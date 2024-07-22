@@ -18,7 +18,7 @@ impl<'a, TX> Clone for DatabaseHashedCursorFactory<'a, TX> {
 
 impl<'a, TX> DatabaseHashedCursorFactory<'a, TX> {
     /// Create new database hashed cursor factory.
-    pub fn new(tx: &'a TX) -> Self {
+    pub const fn new(tx: &'a TX) -> Self {
         Self(tx)
     }
 }
@@ -50,7 +50,7 @@ pub struct DatabaseHashedAccountCursor<C>(C);
 
 impl<C> DatabaseHashedAccountCursor<C> {
     /// Create new database hashed account cursor.
-    pub fn new(cursor: C) -> Self {
+    pub const fn new(cursor: C) -> Self {
         Self(cursor)
     }
 }
