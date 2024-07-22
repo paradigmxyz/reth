@@ -3142,6 +3142,27 @@ impl<DB: Database> BlockExecutionWriter for DatabaseProviderRW<DB> {
 }
 
 impl<DB: Database> BlockWriter for DatabaseProviderRW<DB> {
+    /// Inserts the block into the database, always modifying the following tables:
+    /// * [`CanonicalHeaders`](tables::CanonicalHeaders)
+    /// * [`Headers`](tables::Headers)
+    /// * [`HeaderNumbers`](tables::HeaderNumbers)
+    /// * [`HeaderTerminalDifficulties`](tables::HeaderTerminalDifficulties)
+    /// * [`BlockBodyIndices`](tables::BlockBodyIndices)
+    ///
+    /// If there are transactions in the block, the following tables will be modified:
+    /// * [`Transactions`](tables::Transactions)
+    /// * [`TransactionBlocks`](tables::TransactionBlocks)
+    ///
+    /// If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
+    /// If withdrawals are not empty, this will modify
+    /// [`BlockWithdrawals`](tables::BlockWithdrawals).
+    /// If requests are not empty, this will modify [`BlockRequests`](tables::BlockRequests).
+    ///
+    /// If the provider has __not__ configured full sender pruning, this will modify
+    /// [`TransactionSenders`](tables::TransactionSenders).
+    ///
+    /// If the provider has __not__ configured full transaction lookup pruning, this will modify
+    /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
     fn insert_block(
         &self,
         block: SealedBlockWithSenders,
