@@ -1,5 +1,5 @@
 use crate::{
-    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
+    hashed_cursor::{DatabaseHashedCursorFactory, HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::TriePrefixSetsMut,
     trie_cursor::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor},
@@ -46,10 +46,10 @@ impl<'a, TX, H> Proof<'a, TX, H> {
     }
 }
 
-impl<'a, TX> Proof<'a, TX, &'a TX> {
+impl<'a, TX> Proof<'a, TX, DatabaseHashedCursorFactory<'a, TX>> {
     /// Create a new [Proof] instance from database transaction.
     pub fn from_tx(tx: &'a TX) -> Self {
-        Self::new(tx, tx)
+        Self::new(tx, DatabaseHashedCursorFactory::new(tx))
     }
 }
 

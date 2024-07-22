@@ -9,7 +9,8 @@ use reth_provider::{
 };
 use reth_tasks::pool::BlockingTaskPool;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StateRoot,
+    hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
+    HashedPostState, HashedStorage, StateRoot,
 };
 use reth_trie_db::DatabaseStateRoot;
 use reth_trie_parallel::{async_root::AsyncStateRoot, parallel_root::ParallelStateRoot};
@@ -47,11 +48,12 @@ pub fn calculate_state_root(c: &mut Criterion) {
                     (provider, sorted_state, prefix_sets)
                 },
                 |(provider, sorted_state, prefix_sets)| async move {
+                    let hashed_cursor_factory = HashedPostStateCursorFactory::new(
+                        DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                        &sorted_state,
+                    );
                     StateRoot::from_tx(provider.tx_ref())
-                        .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                            provider.tx_ref(),
-                            &sorted_state,
-                        ))
+                        .with_hashed_cursor_factory(hashed_cursor_factory)
                         .with_prefix_sets(prefix_sets)
                         .root()
                 },

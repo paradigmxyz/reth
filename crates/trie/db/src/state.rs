@@ -2,7 +2,9 @@ use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateRootError;
 use reth_primitives::{BlockNumber, B256};
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, prefix_set::PrefixSetLoader, updates::TrieUpdates,
+    hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
+    prefix_set::PrefixSetLoader,
+    updates::TrieUpdates,
     HashedPostState, StateRoot, StateRootProgress,
 };
 use std::ops::RangeInclusive;
@@ -100,9 +102,11 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 }
 
-impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX> for StateRoot<&'a TX, &'a TX> {
+impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
+    for StateRoot<&'a TX, DatabaseHashedCursorFactory<'a, TX>>
+{
     fn from_tx(tx: &'a TX) -> Self {
-        Self::new(tx, tx)
+        Self::new(tx, DatabaseHashedCursorFactory::new(tx))
     }
 
     fn incremental_root_calculator(
@@ -140,10 +144,12 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX> for StateRoot<&'a TX, &'a TX> {
     fn overlay_root(tx: &'a TX, post_state: HashedPostState) -> Result<B256, StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         let sorted = post_state.into_sorted();
-        Self::from_tx(tx)
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
-            .with_prefix_sets(prefix_sets)
-            .root()
+        StateRoot::new(
+            tx,
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &sorted),
+        )
+        .with_prefix_sets(prefix_sets)
+        .root()
     }
 
     fn overlay_root_with_updates(
@@ -152,10 +158,12 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX> for StateRoot<&'a TX, &'a TX> {
     ) -> Result<(B256, TrieUpdates), StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         let sorted = post_state.into_sorted();
-        Self::from_tx(tx)
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
-            .with_prefix_sets(prefix_sets)
-            .root_with_updates()
+        StateRoot::new(
+            tx,
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &sorted),
+        )
+        .with_prefix_sets(prefix_sets)
+        .root_with_updates()
     }
 }
 

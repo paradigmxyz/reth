@@ -1,5 +1,5 @@
 use crate::{
-    hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
+    hashed_cursor::{DatabaseHashedCursorFactory, HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, TriePrefixSets},
     progress::{IntermediateStateRootState, StateRootProgress},
@@ -363,12 +363,12 @@ impl<T, H> StorageRoot<T, H> {
     }
 }
 
-impl<'a, TX: DbTx> StorageRoot<&'a TX, &'a TX> {
+impl<'a, TX: DbTx> StorageRoot<&'a TX, DatabaseHashedCursorFactory<'a, TX>> {
     /// Create a new storage root calculator from database transaction and raw address.
     pub fn from_tx(tx: &'a TX, address: Address) -> Self {
         Self::new(
             tx,
-            tx,
+            DatabaseHashedCursorFactory::new(tx),
             address,
             #[cfg(feature = "metrics")]
             TrieRootMetrics::new(TrieType::Storage),
@@ -379,7 +379,7 @@ impl<'a, TX: DbTx> StorageRoot<&'a TX, &'a TX> {
     pub fn from_tx_hashed(tx: &'a TX, hashed_address: B256) -> Self {
         Self::new_hashed(
             tx,
-            tx,
+            DatabaseHashedCursorFactory::new(tx),
             hashed_address,
             #[cfg(feature = "metrics")]
             TrieRootMetrics::new(TrieType::Storage),
