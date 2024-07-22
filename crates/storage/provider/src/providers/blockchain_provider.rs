@@ -1,18 +1,20 @@
 use crate::{
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, BlockchainTreePendingStateProvider, CanonChainTracker, ChainSpecProvider,
-    ChangeSetReader, DatabaseProviderFactory, EvmEnvProvider, FullExecutionDataProvider,
-    HeaderProvider, ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    RequestsProvider, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, TreeViewer,
-    WithdrawalsProvider,
+    providers::BundleStateProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, BlockchainTreePendingStateProvider,
+    CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions, ChainSpecProvider,
+    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderRO, EvmEnvProvider,
+    FullExecutionDataProvider, HeaderProvider, ProviderError, ProviderFactory,
+    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, RequestsProvider,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_rpc_types_engine::ForkchoiceState;
 use reth_blockchain_tree_api::{
     error::{CanonicalError, InsertBlockError},
     BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
     InsertPayloadOk,
 };
-use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions, ChainInfoTracker};
+use reth_chain_state::CanonicalInMemoryState;
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
     database::Database,
@@ -37,30 +39,7 @@ use std::{
 };
 use tracing::trace;
 
-mod database;
-pub use database::*;
-
-mod static_file;
-pub use static_file::{
-    StaticFileAccess, StaticFileJarProvider, StaticFileProvider, StaticFileProviderRW,
-    StaticFileProviderRWRefMut, StaticFileWriter,
-};
-
-mod state;
-pub use state::{
-    historical::{HistoricalStateProvider, HistoricalStateProviderRef},
-    latest::{LatestStateProvider, LatestStateProviderRef},
-};
-
-mod bundle_state_provider;
-pub use bundle_state_provider::BundleStateProvider;
-
-mod consistent_view;
-use alloy_rpc_types_engine::ForkchoiceState;
-pub use consistent_view::{ConsistentDbView, ConsistentViewError};
-
-mod blockchain_provider;
-pub use blockchain_provider::BlockchainProvider2;
+use super::StaticFileProvider;
 
 /// The main type for interacting with the blockchain.
 ///
@@ -68,76 +47,51 @@ pub use blockchain_provider::BlockchainProvider2;
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
 #[allow(missing_debug_implementations)]
-pub struct BlockchainProvider<DB> {
+pub struct BlockchainProvider2<DB> {
     /// Provider type used to access the database.
     database: ProviderFactory<DB>,
-    /// The blockchain tree instance.
-    tree: Arc<dyn TreeViewer>,
-    /// Tracks the chain info wrt forkchoice updates
-    chain_info: ChainInfoTracker,
-    // TODO: replace chain_info with CanonicalInMemoryState.
-    //canonical_in_memory_state: CanonicalInMemoryState,
+    /// Tracks the chain info wrt forkchoice updates and in memory canonical
+    /// state.
+    canonical_in_memory_state: CanonicalInMemoryState,
 }
 
-impl<DB> Clone for BlockchainProvider<DB> {
+impl<DB> Clone for BlockchainProvider2<DB> {
     fn clone(&self) -> Self {
         Self {
             database: self.database.clone(),
-            tree: self.tree.clone(),
-            chain_info: self.chain_info.clone(),
-            // TODO: add canonical_in_memory_state
-            // canonical_in_memory_state: self.canonical_in_memory_state.clone(),
+            canonical_in_memory_state: self.canonical_in_memory_state.clone(),
         }
     }
 }
 
-impl<DB> BlockchainProvider<DB> {
+impl<DB> BlockchainProvider2<DB> {
     /// Create new provider instance that wraps the database and the blockchain tree, using the
     /// provided latest header to initialize the chain info tracker.
-    pub fn with_latest(
-        database: ProviderFactory<DB>,
-        tree: Arc<dyn TreeViewer>,
-        // TODO: add in_memory_state
-        // in_memory_state: Arc<dyn InMemoryState>,
-        latest: SealedHeader,
-    ) -> Self {
-        Self {
-            database,
-            tree,
-            // TODO: add in_memory_state
-            // in_memory_state,
-            chain_info: ChainInfoTracker::new(latest),
-        }
-    }
-
-    /// Sets the treeviewer for the provider.
-    #[doc(hidden)]
-    pub fn with_tree(mut self, tree: Arc<dyn TreeViewer>) -> Self {
-        self.tree = tree;
-        self
+    pub fn with_latest(database: ProviderFactory<DB>, latest: SealedHeader) -> Self {
+        Self { database, canonical_in_memory_state: CanonicalInMemoryState::with_head(latest) }
     }
 }
 
-impl<DB> BlockchainProvider<DB>
+impl<DB> BlockchainProvider2<DB>
 where
     DB: Database,
 {
-    /// Create a new provider using only the database and the tree, fetching the latest header from
+    /// Create a new provider using only the database, fetching the latest header from
     /// the database to initialize the provider.
-    pub fn new(database: ProviderFactory<DB>, tree: Arc<dyn TreeViewer>) -> ProviderResult<Self> {
+    pub fn new(database: ProviderFactory<DB>) -> ProviderResult<Self> {
         let provider = database.provider()?;
         let best: ChainInfo = provider.chain_info()?;
         match provider.header_by_number(best.best_number)? {
             Some(header) => {
                 drop(provider);
-                Ok(Self::with_latest(database, tree, header.seal(best.best_hash)))
+                Ok(Self::with_latest(database, header.seal(best.best_hash)))
             }
             None => Err(ProviderError::HeaderNotFound(best.best_number.into())),
         }
     }
 }
 
-impl<DB> BlockchainProvider<DB>
+impl<DB> BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -160,7 +114,7 @@ where
     }
 }
 
-impl<DB> DatabaseProviderFactory<DB> for BlockchainProvider<DB>
+impl<DB> DatabaseProviderFactory<DB> for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -169,13 +123,13 @@ where
     }
 }
 
-impl<DB> StaticFileProviderFactory for BlockchainProvider<DB> {
+impl<DB> StaticFileProviderFactory for BlockchainProvider2<DB> {
     fn static_file_provider(&self) -> StaticFileProvider {
         self.database.static_file_provider()
     }
 }
 
-impl<DB> HeaderProvider for BlockchainProvider<DB>
+impl<DB> HeaderProvider for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -219,7 +173,7 @@ where
     }
 }
 
-impl<DB> BlockHashReader for BlockchainProvider<DB>
+impl<DB> BlockHashReader for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -236,16 +190,16 @@ where
     }
 }
 
-impl<DB> BlockNumReader for BlockchainProvider<DB>
+impl<DB> BlockNumReader for BlockchainProvider2<DB>
 where
     DB: Database,
 {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
-        Ok(self.chain_info.chain_info())
+        Ok(self.canonical_in_memory_state.chain_info())
     }
 
     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
-        Ok(self.chain_info.get_canonical_block_number())
+        Ok(self.canonical_in_memory_state.get_canonical_block_number())
     }
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
@@ -257,24 +211,24 @@ where
     }
 }
 
-impl<DB> BlockIdReader for BlockchainProvider<DB>
+impl<DB> BlockIdReader for BlockchainProvider2<DB>
 where
     DB: Database,
 {
     fn pending_block_num_hash(&self) -> ProviderResult<Option<BlockNumHash>> {
-        Ok(self.tree.pending_block_num_hash())
+        Ok(self.canonical_in_memory_state.pending_block_num_hash())
     }
 
     fn safe_block_num_hash(&self) -> ProviderResult<Option<BlockNumHash>> {
-        Ok(self.chain_info.get_safe_num_hash())
+        Ok(self.canonical_in_memory_state.get_safe_num_hash())
     }
 
     fn finalized_block_num_hash(&self) -> ProviderResult<Option<BlockNumHash>> {
-        Ok(self.chain_info.get_finalized_num_hash())
+        Ok(self.canonical_in_memory_state.get_finalized_num_hash())
     }
 }
 
-impl<DB> BlockReader for BlockchainProvider<DB>
+impl<DB> BlockReader for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -368,7 +322,7 @@ where
     }
 }
 
-impl<DB> TransactionsProvider for BlockchainProvider<DB>
+impl<DB> TransactionsProvider for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -435,7 +389,7 @@ where
     }
 }
 
-impl<DB> ReceiptProvider for BlockchainProvider<DB>
+impl<DB> ReceiptProvider for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -459,7 +413,7 @@ where
     }
 }
 
-impl<DB> ReceiptProviderIdExt for BlockchainProvider<DB>
+impl<DB> ReceiptProviderIdExt for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -486,7 +440,7 @@ where
     }
 }
 
-impl<DB> WithdrawalsProvider for BlockchainProvider<DB>
+impl<DB> WithdrawalsProvider for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -503,7 +457,7 @@ where
     }
 }
 
-impl<DB> RequestsProvider for BlockchainProvider<DB>
+impl<DB> RequestsProvider for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -516,7 +470,7 @@ where
     }
 }
 
-impl<DB> StageCheckpointReader for BlockchainProvider<DB>
+impl<DB> StageCheckpointReader for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -527,13 +481,9 @@ where
     fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>> {
         self.database.provider()?.get_stage_checkpoint_progress(id)
     }
-
-    fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
-        self.database.provider()?.get_all_checkpoints()
-    }
 }
 
-impl<DB> EvmEnvProvider for BlockchainProvider<DB>
+impl<DB> EvmEnvProvider for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -588,7 +538,7 @@ where
     }
 }
 
-impl<DB> PruneCheckpointReader for BlockchainProvider<DB>
+impl<DB> PruneCheckpointReader for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -604,7 +554,7 @@ where
     }
 }
 
-impl<DB> ChainSpecProvider for BlockchainProvider<DB>
+impl<DB> ChainSpecProvider for BlockchainProvider2<DB>
 where
     DB: Send + Sync,
 {
@@ -613,7 +563,7 @@ where
     }
 }
 
-impl<DB> StateProviderFactory for BlockchainProvider<DB>
+impl<DB> StateProviderFactory for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -689,7 +639,7 @@ where
     }
 }
 
-impl<DB> BlockchainTreeEngine for BlockchainProvider<DB>
+impl<DB> BlockchainTreeEngine for BlockchainProvider2<DB>
 where
     DB: Send + Sync,
 {
@@ -731,7 +681,7 @@ where
     }
 }
 
-impl<DB> BlockchainTreeViewer for BlockchainProvider<DB>
+impl<DB> BlockchainTreeViewer for BlockchainProvider2<DB>
 where
     DB: Send + Sync,
 {
@@ -776,42 +726,42 @@ where
     }
 }
 
-impl<DB> CanonChainTracker for BlockchainProvider<DB>
+impl<DB> CanonChainTracker for BlockchainProvider2<DB>
 where
     DB: Send + Sync,
     Self: BlockReader,
 {
     fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
         // update timestamp
-        self.chain_info.on_forkchoice_update_received();
+        self.canonical_in_memory_state.on_forkchoice_update_received();
     }
 
     fn last_received_update_timestamp(&self) -> Option<Instant> {
-        self.chain_info.last_forkchoice_update_received_at()
+        self.canonical_in_memory_state.last_received_update_timestamp()
     }
 
     fn on_transition_configuration_exchanged(&self) {
-        self.chain_info.on_transition_configuration_exchanged();
+        self.canonical_in_memory_state.on_transition_configuration_exchanged();
     }
 
     fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
-        self.chain_info.last_transition_configuration_exchanged_at()
+        self.canonical_in_memory_state.last_exchanged_transition_configuration_timestamp()
     }
 
     fn set_canonical_head(&self, header: SealedHeader) {
-        self.chain_info.set_canonical_head(header);
+        self.canonical_in_memory_state.set_canonical_head(header);
     }
 
     fn set_safe(&self, header: SealedHeader) {
-        self.chain_info.set_safe(header);
+        self.canonical_in_memory_state.set_safe(header);
     }
 
     fn set_finalized(&self, header: SealedHeader) {
-        self.chain_info.set_finalized(header);
+        self.canonical_in_memory_state.set_finalized(header);
     }
 }
 
-impl<DB> BlockReaderIdExt for BlockchainProvider<DB>
+impl<DB> BlockReaderIdExt for BlockchainProvider2<DB>
 where
     Self: BlockReader + BlockIdReader + ReceiptProviderIdExt,
 {
@@ -835,11 +785,15 @@ where
 
     fn header_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Header>> {
         Ok(match id {
-            BlockNumberOrTag::Latest => Some(self.chain_info.get_canonical_head().unseal()),
-            BlockNumberOrTag::Finalized => {
-                self.chain_info.get_finalized_header().map(|h| h.unseal())
+            BlockNumberOrTag::Latest => {
+                Some(self.canonical_in_memory_state.get_canonical_head().unseal())
             }
-            BlockNumberOrTag::Safe => self.chain_info.get_safe_header().map(|h| h.unseal()),
+            BlockNumberOrTag::Finalized => {
+                self.canonical_in_memory_state.get_finalized_header().map(|h| h.unseal())
+            }
+            BlockNumberOrTag::Safe => {
+                self.canonical_in_memory_state.get_safe_header().map(|h| h.unseal())
+            }
             BlockNumberOrTag::Earliest => self.header_by_number(0)?,
             BlockNumberOrTag::Pending => self.tree.pending_header().map(|h| h.unseal()),
             BlockNumberOrTag::Number(num) => self.header_by_number(num)?,
@@ -851,9 +805,13 @@ where
         id: BlockNumberOrTag,
     ) -> ProviderResult<Option<SealedHeader>> {
         match id {
-            BlockNumberOrTag::Latest => Ok(Some(self.chain_info.get_canonical_head())),
-            BlockNumberOrTag::Finalized => Ok(self.chain_info.get_finalized_header()),
-            BlockNumberOrTag::Safe => Ok(self.chain_info.get_safe_header()),
+            BlockNumberOrTag::Latest => {
+                Ok(Some(self.canonical_in_memory_state.get_canonical_head()))
+            }
+            BlockNumberOrTag::Finalized => {
+                Ok(self.canonical_in_memory_state.get_finalized_header())
+            }
+            BlockNumberOrTag::Safe => Ok(self.canonical_in_memory_state.get_safe_header()),
             BlockNumberOrTag::Earliest => {
                 self.header_by_number(0)?.map_or_else(|| Ok(None), |h| Ok(Some(h.seal_slow())))
             }
@@ -890,7 +848,7 @@ where
     }
 }
 
-impl<DB> BlockchainTreePendingStateProvider for BlockchainProvider<DB>
+impl<DB> BlockchainTreePendingStateProvider for BlockchainProvider2<DB>
 where
     DB: Send + Sync,
 {
@@ -902,7 +860,7 @@ where
     }
 }
 
-impl<DB> CanonStateSubscriptions for BlockchainProvider<DB>
+impl<DB> CanonStateSubscriptions for BlockchainProvider2<DB>
 where
     DB: Send + Sync,
 {
@@ -911,7 +869,7 @@ where
     }
 }
 
-impl<DB> ChangeSetReader for BlockchainProvider<DB>
+impl<DB> ChangeSetReader for BlockchainProvider2<DB>
 where
     DB: Database,
 {
@@ -923,7 +881,7 @@ where
     }
 }
 
-impl<DB> AccountReader for BlockchainProvider<DB>
+impl<DB> AccountReader for BlockchainProvider2<DB>
 where
     DB: Database + Sync + Send,
 {
