@@ -24,7 +24,7 @@ use reth_rpc_types::{
         parity::*,
         tracerequest::TraceCallRequest,
     },
-    BlockError, BlockOverrides, Index, TransactionRequest,
+    BlockOverrides, Index, TransactionRequest,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
@@ -277,42 +277,14 @@ where
         // fetch all blocks in that range
         let blocks = self.provider().block_range(start..=end).map_err(Eth::Error::from_eth_err)?;
 
-        // find relevant blocks to trace
-        let mut target_blocks = Vec::new();
+        // trace all blocks
+        let mut block_traces = Vec::with_capacity(blocks.len());
         for block in &blocks {
-            let mut transaction_indices = HashSet::new();
-            let mut highest_matching_index = 0;
-            for (tx_idx, tx) in block.body.iter().enumerate() {
-                let from = tx
-                    .recover_signer_unchecked()
-                    .ok_or(BlockError::InvalidSignature)
-                    .map_err(Eth::Error::from_eth_err)?;
-                let to = tx.to();
-                if matcher.matches(from, to) {
-                    let idx = tx_idx as u64;
-                    transaction_indices.insert(idx);
-                    highest_matching_index = idx;
-                }
-            }
-            if !transaction_indices.is_empty() {
-                target_blocks.push((block.number, transaction_indices, highest_matching_index));
-            }
-        }
-
-        // trace all relevant blocks
-        let mut block_traces = Vec::with_capacity(target_blocks.len());
-        for (num, indices, highest_idx) in target_blocks {
             let traces = self.inner.eth_api.trace_block_until(
-                num.into(),
-                Some(highest_idx),
+                block.number.into(),
+                None,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, _, _, _| {
-                    if let Some(idx) = tx_info.index {
-                        if !indices.contains(&idx) {
-                            // only record traces for relevant transactions
-                            return Ok(None)
-                        }
-                    }
+                move |tx_info, inspector, res, _, _, _| {
                     let traces =
                         inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
                     Ok(Some(traces))
