@@ -38,7 +38,6 @@ alloy-chains = { workspace = true, features = ["arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-proptest-derive.workspace = true
 rand.workspace = true
 
 [features]

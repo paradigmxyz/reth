@@ -51,7 +51,6 @@ zstd = { workspace = true, features = ["experimental"], optional = true }
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
-# proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
 # eth
@@ -67,7 +66,6 @@ assert_matches.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-proptest-derive.workspace = true
 rand.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
