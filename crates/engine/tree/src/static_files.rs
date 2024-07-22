@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+use crate::database::{DatabaseAction, DatabaseServiceHandle};
+use reth_chain_state::ExecutedBlock;
 use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256};
@@ -11,9 +13,6 @@ use std::sync::{
     Arc,
 };
 use tokio::sync::oneshot;
-
-use crate::database::{DatabaseAction, DatabaseServiceHandle};
-use reth_state::ExecutedBlock;
 
 /// Writes finalized blocks to reth's static files.
 ///

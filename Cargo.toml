@@ -14,6 +14,7 @@ members = [
     "crates/blockchain-tree/",
     "crates/blockchain-tree-api/",
     "crates/chainspec/",
+    "crates/chain-state/",
     "crates/cli/cli/",
     "crates/cli/commands/",
     "crates/cli/runner/",
@@ -96,7 +97,6 @@ members = [
     "crates/stages/api/",
     "crates/stages/stages/",
     "crates/stages/types/",
-    "crates/state/",
     "crates/static-file/types/",
     "crates/static-file/static-file",
     "crates/storage/codecs/",
@@ -274,6 +274,7 @@ reth-beacon-consensus = { path = "crates/consensus/beacon" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-blockchain-tree-api = { path = "crates/blockchain-tree-api" }
 reth-chainspec = { path = "crates/chainspec" }
+reth-chain-state = { path = "crates/chain-state" }
 reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
@@ -362,7 +363,6 @@ reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types" }
-reth-state = { path = "crates/state" }
 reth-static-file = { path = "crates/static-file/static-file" }
 reth-static-file-types = { path = "crates/static-file/types" }
 reth-storage-api = { path = "crates/storage/storage-api" }

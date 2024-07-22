@@ -13,6 +13,7 @@ use reth_blockchain_tree::{
     error::InsertBlockErrorKind, BlockAttachment, BlockBuffer, BlockStatus,
 };
 use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, ExecutedBlock};
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
@@ -34,7 +35,6 @@ use reth_rpc_types::{
     },
     ExecutionPayload,
 };
-use reth_state::{BlockState, CanonicalInMemoryState, ExecutedBlock};
 use reth_trie::HashedPostState;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -986,11 +986,11 @@ mod tests {
     use super::*;
     use crate::static_files::StaticFileAction;
     use reth_beacon_consensus::EthBeaconConsensus;
+    use reth_chain_state::test_utils::get_executed_blocks;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_state::test_utils::get_executed_blocks;
     use std::sync::mpsc::{channel, Sender};
     use tokio::sync::mpsc::unbounded_channel;
 

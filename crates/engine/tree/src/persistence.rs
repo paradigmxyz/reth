@@ -4,11 +4,11 @@ use crate::{
     database::{DatabaseAction, DatabaseService, DatabaseServiceHandle},
     static_files::{StaticFileAction, StaticFileService, StaticFileServiceHandle},
 };
+use reth_chain_state::ExecutedBlock;
 use reth_db::Database;
 use reth_primitives::{SealedBlock, B256, U256};
 use reth_provider::ProviderFactory;
 use reth_prune::{Pruner, PrunerOutput};
-use reth_state::ExecutedBlock;
 use std::sync::{
     mpsc::{SendError, Sender},
     Arc,
@@ -181,11 +181,11 @@ impl PersistenceHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_chain_state::test_utils::{get_executed_block_with_number, get_executed_blocks};
     use reth_exex_types::FinishedExExHeight;
     use reth_primitives::B256;
     use reth_provider::{test_utils::create_test_provider_factory, ProviderFactory};
     use reth_prune::Pruner;
-    use reth_state::test_utils::{get_executed_block_with_number, get_executed_blocks};
 
     fn default_persistence_handle() -> PersistenceHandle {
         let provider = create_test_provider_factory();
