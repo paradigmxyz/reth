@@ -6,7 +6,6 @@ no_std_packages=(
 # The following were confirmed not working in the past, but could be enabled if issues have been resolved
 #   reth-db
 #   reth-primitives
-#   reth-codecs
 #   reth-revm
 #   reth-evm
 #   reth-evm-ethereum
@@ -16,6 +15,7 @@ no_std_packages=(
     reth-ethereum-forks
     reth-network-peers
     reth-primitives-traits
+    reth-codecs
 )
 
 for package in "${no_std_packages[@]}"; do
