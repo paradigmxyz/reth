@@ -164,7 +164,7 @@ impl TreeState {
 
 /// Tracks the state of the engine api internals.
 ///
-/// This type is shareable.
+/// This type is not shareable.
 #[derive(Debug)]
 pub struct EngineApiTreeState {
     /// Tracks the state of the blockchain tree.
@@ -273,20 +273,32 @@ pub enum TreeAction {
     MakeCanonical(B256),
 }
 
+/// The engine API tree handler implementation.
+///
+/// This type is responsible for processing engine API requests, maintaining the canonical state and
+/// emitting events.
 #[derive(Debug)]
 pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     provider: P,
     executor_provider: E,
     consensus: Arc<dyn Consensus>,
     payload_validator: ExecutionPayloadValidator,
+    /// Keeps track of internals such as executed and buffered blocks.
     state: EngineApiTreeState,
+    /// Incoming engine API requests.
     incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
+    /// Outgoing events that are emitted to the handler.
     outgoing: UnboundedSender<EngineApiEvent>,
+    /// Channels to the persistence layer.
     persistence: PersistenceHandle,
+    /// Tracks the state changes of the persistence task.
     persistence_state: PersistenceState,
     /// Flag indicating whether the node is currently syncing via backfill.
     is_backfill_active: bool,
+    /// Keeps track of the state of the canonical chain that isn't persisted yet.
+    /// This is intended to be accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState,
+    /// Marker for the engine types.
     _marker: PhantomData<T>,
 }
 
