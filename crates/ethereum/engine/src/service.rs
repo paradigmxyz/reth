@@ -179,6 +179,7 @@ mod tests {
         let pruner =
             Pruner::<_, ProviderFactory<_>>::new(provider_factory.clone(), vec![], 0, 0, None, rx);
 
+        let (tx, _rx) = unbounded_channel();
         let _eth_service = EthService::new(
             chain_spec,
             client,
@@ -188,6 +189,7 @@ mod tests {
             provider_factory,
             blockchain_db,
             pruner,
+            PayloadBuilderHandle::new(tx),
         );
     }
 }
