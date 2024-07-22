@@ -20,7 +20,7 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_primitives::PayloadTypes;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Address, Block, BlockNumber, GotExpected, Receipts, Requests, SealedBlock,
+    Address, Block, BlockNumHash, BlockNumber, GotExpected, Receipts, Requests, SealedBlock,
     SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
@@ -702,11 +702,24 @@ where
         Ok(())
     }
 
+    /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
+    ///
+    /// This mainly compares the missing parent of the downloaded block with the current canonical
+    /// tip, and decides whether or not backfill sync should be triggered.
+    const fn on_disconnected_downloaded_block(
+        &self,
+        downloaded_block: BlockNumHash,
+        missing_parent: BlockNumHash,
+        head: BlockNumHash,
+    ) -> Option<TreeEvent> {
+        None
+    }
+
     fn on_downloaded_block(&mut self, block: SealedBlockWithSenders) -> Option<TreeEvent> {
-        let block_hash = block.hash();
-        let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
+        let block_num_hash = block.num_hash();
+        let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
         if self
-            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_hash)
+            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_num_hash.hash)
             .ok()?
             .is_some()
         {
@@ -720,11 +733,18 @@ where
         // try to append the block
         match self.insert_block(block) {
             Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(_))) => {
-                if self.is_sync_target_head(block_hash) {
-                    return Some(TreeEvent::TreeAction(TreeAction::MakeCanonical(block_hash)))
+                if self.is_sync_target_head(block_num_hash.hash) {
+                    return Some(TreeEvent::TreeAction(TreeAction::MakeCanonical(
+                        block_num_hash.hash,
+                    )))
                 }
             }
-            _ => return None,
+            Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected { head, missing_ancestor })) => {
+                // block is not connected to the canonical head, we need to download
+                // its missing branch first
+                return self.on_disconnected_downloaded_block(block_num_hash, missing_ancestor, head)
+            }
+            _ => {}
         }
         None
     }
