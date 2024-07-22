@@ -37,27 +37,6 @@ pub enum PersistenceAction {
     PruneBefore((u64, oneshot::Sender<PrunerOutput>)),
 }
 
-/// An error type for when there is a [`SendError`] while sending an action to one of the services.
-#[derive(Debug)]
-pub enum PersistenceSendError {
-    /// When there is an error sending to the static file service
-    StaticFile(SendError<StaticFileAction>),
-    /// When there is an error sending to the database service
-    Database(SendError<DatabaseAction>),
-}
-
-impl From<SendError<StaticFileAction>> for PersistenceSendError {
-    fn from(value: SendError<StaticFileAction>) -> Self {
-        Self::StaticFile(value)
-    }
-}
-
-impl From<SendError<DatabaseAction>> for PersistenceSendError {
-    fn from(value: SendError<DatabaseAction>) -> Self {
-        Self::Database(value)
-    }
-}
-
 /// A handle to the database and static file services. This will send commands to the correct
 /// service, depending on the command.
 ///
@@ -125,15 +104,15 @@ impl PersistenceHandle {
 
     /// Sends a specific [`PersistenceAction`] in the contained channel. The caller is responsible
     /// for creating any channels for the given action.
-    pub fn send_action(&self, action: PersistenceAction) -> Result<(), PersistenceSendError> {
+    pub fn send_action(&self, action: PersistenceAction) -> Result<(), SendError<DatabaseAction>> {
         match action {
             PersistenceAction::LogTransactions(input) => self
-                .static_file_sender
-                .send(StaticFileAction::LogTransactions(input))
+                .db_sender
+                .send(DatabaseAction::LogTransactions(input))
                 .map_err(From::from),
             PersistenceAction::SaveBlocks(input) => self
-                .static_file_sender
-                .send(StaticFileAction::WriteExecutionData(input))
+                .db_sender
+                .send(DatabaseAction::SaveBlocks(input))
                 .map_err(From::from),
             PersistenceAction::RemoveBlocksAbove(input) => {
                 self.db_sender.send(DatabaseAction::RemoveBlocksAbove(input)).map_err(From::from)

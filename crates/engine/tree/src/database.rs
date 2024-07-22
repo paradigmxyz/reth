@@ -4,14 +4,18 @@ use crate::static_files::{StaticFileAction, StaticFileServiceHandle};
 use reth_chain_state::ExecutedBlock;
 use reth_db::database::Database;
 use reth_errors::ProviderResult;
-use reth_primitives::B256;
+use reth_primitives::{SealedBlock, StaticFileSegment, TransactionSignedNoHash, B256, U256};
 use reth_provider::{
     writer::StorageWriter, BlockExecutionWriter, BlockNumReader, BlockWriter, HistoryWriter,
     OriginalValuesKnown, ProviderFactory, StageCheckpointWriter, StateWriter,
+    StaticFileProviderFactory, StaticFileWriter, TransactionsProviderExt,
 };
 use reth_prune::{Pruner, PrunerOutput};
 use reth_stages_types::{StageCheckpoint, StageId};
-use std::sync::mpsc::{Receiver, SendError, Sender};
+use std::sync::{
+    mpsc::{Receiver, SendError, Sender},
+    Arc,
+};
 use tokio::sync::oneshot;
 use tracing::debug;
 
@@ -145,6 +149,123 @@ impl<DB: Database> DatabaseService<DB> {
         provider_rw.commit()?;
         Ok(())
     }
+
+    // TODO: some things about this are a bit weird, and just to make the underlying static file
+    // writes work - tx number, total difficulty inclusion. They require either additional in memory
+    // data or a db lookup. Maybe we can use a db read here
+    /// Writes the transactions to static files, to act as a log.
+    ///
+    /// This will then send a command to the db service, that it should update the checkpoints for
+    /// headers and block bodies.
+    fn log_transactions(
+        &self,
+        block: Arc<SealedBlock>,
+        start_tx_number: u64,
+        td: U256,
+    ) -> ProviderResult<u64> {
+        let provider = self.provider.static_file_provider();
+        let mut header_writer = provider.get_writer(block.number, StaticFileSegment::Headers)?;
+        let mut transactions_writer =
+            provider.get_writer(block.number, StaticFileSegment::Transactions)?;
+
+        header_writer.append_header(block.header().clone(), td, block.hash())?;
+        let no_hash_transactions =
+            block.body.clone().into_iter().map(TransactionSignedNoHash::from);
+
+        let mut tx_number = start_tx_number;
+        for tx in no_hash_transactions {
+            transactions_writer.append_transaction(tx_number, tx)?;
+            tx_number += 1;
+        }
+
+        // increment block for transactions
+        transactions_writer.increment_block(StaticFileSegment::Transactions, block.number)?;
+
+        // finally commit
+        transactions_writer.commit()?;
+        header_writer.commit()?;
+
+        Ok(block.number)
+    }
+
+    /// Write execution-related block data to static files.
+    ///
+    /// This will then send a command to the db service, that it should write new data, and update
+    /// the checkpoints for execution and beyond.
+    fn write_execution_data(&self, blocks: &[ExecutedBlock]) -> ProviderResult<()> {
+        if blocks.is_empty() {
+            return Ok(())
+        }
+        let provider_rw = self.provider.provider_rw()?;
+        let provider = self.provider.static_file_provider();
+
+        // NOTE: checked non-empty above
+        let first_block = blocks.first().unwrap().block();
+        let last_block = blocks.last().unwrap().block().clone();
+
+        // use the storage writer
+        let current_block = first_block.number;
+        let receipts_writer =
+            provider.get_writer(first_block.number, StaticFileSegment::Receipts)?;
+
+        let storage_writer = StorageWriter::new(Some(&provider_rw), Some(receipts_writer));
+        let receipts_iter = blocks.iter().map(|block| {
+            let receipts = block.execution_outcome().receipts().receipt_vec.clone();
+            debug_assert!(receipts.len() == 1);
+            receipts.first().unwrap().clone()
+        });
+        storage_writer.append_receipts_from_blocks(current_block, receipts_iter)?;
+
+        Ok(())
+    }
+
+    /// Removes the blocks above the given block number from static files. Also removes related
+    /// receipt and header data.
+    ///
+    /// This is exclusive, i.e., it only removes blocks above `block_number`, and does not remove
+    /// `block_number`.
+    ///
+    /// Returns the block hash for the lowest block removed from the database, which should be
+    /// the hash for `block_number + 1`.
+    ///
+    /// This is meant to be called by the db service, as this should only be done after related data
+    /// is removed from the database, and checkpoints are updated.
+    ///
+    /// Returns the hash of the lowest removed block.
+    fn remove_static_file_blocks_above(
+        &self,
+        block_num: u64,
+        sender: oneshot::Sender<()>,
+    ) -> ProviderResult<()> {
+        let sf_provider = self.provider.static_file_provider();
+        let db_provider_rw = self.provider.provider_rw()?;
+
+        // get highest static file block for the total block range
+        let highest_static_file_block = sf_provider
+            .get_highest_static_file_block(StaticFileSegment::Headers)
+            .expect("todo: error handling, headers should exist");
+
+        // Get the total txs for the block range, so we have the correct number of columns for
+        // receipts and transactions
+        let tx_range = db_provider_rw
+            .transaction_range_by_block_range(block_num..=highest_static_file_block)?;
+        let total_txs = tx_range.end().saturating_sub(*tx_range.start());
+
+        // get the writers
+        let mut header_writer = sf_provider.get_writer(block_num, StaticFileSegment::Headers)?;
+        let mut transactions_writer =
+            sf_provider.get_writer(block_num, StaticFileSegment::Transactions)?;
+        let mut receipts_writer = sf_provider.get_writer(block_num, StaticFileSegment::Receipts)?;
+
+        // finally actually truncate, these internally commit
+        receipts_writer.prune_receipts(total_txs, block_num)?;
+        transactions_writer.prune_transactions(total_txs, block_num)?;
+        header_writer.prune_headers(highest_static_file_block.saturating_sub(block_num))?;
+
+        sf_provider.commit()?;
+
+        Ok(())
+    }
 }
 
 impl<DB> DatabaseService<DB>
@@ -165,7 +286,10 @@ where
                         todo!("return error or something");
                     }
                     let last_block_hash = blocks.last().unwrap().block().hash();
-                    self.write(blocks).unwrap();
+                    // first write to db
+                    self.write_execution_data(&blocks).expect("todo: handle errors");
+                    // then write to static files
+                    self.write(blocks).expect("todo: handle errors");
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(last_block_hash);
@@ -176,7 +300,10 @@ where
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(res);
                 }
-                DatabaseAction::UpdateTransactionMeta((block_num, sender)) => {
+                DatabaseAction::LogTransactions((block, start_tx_number, td, sender)) => {
+                    let block_num = self
+                        .log_transactions(block, start_tx_number, td)
+                        .expect("todo: handle errors");
                     self.update_transaction_meta(block_num).expect("todo: handle errors");
 
                     // we ignore the error because the caller may or may not care about the result
@@ -197,9 +324,12 @@ pub enum DatabaseAction {
     /// receipt-related data should already be written to static files.
     SaveBlocks((Vec<ExecutedBlock>, oneshot::Sender<B256>)),
 
-    /// Updates checkpoints related to block headers and bodies. This should be called by the
-    /// static file service, after new transactions have been successfully written to disk.
-    UpdateTransactionMeta((u64, oneshot::Sender<()>)),
+    /// The given block has been added to the canonical chain, its transactions and headers will be
+    /// persisted for durability.
+    ///
+    /// This will then send a command to the db service, that it should update the checkpoints for
+    /// headers and block bodies.
+    LogTransactions((Arc<SealedBlock>, u64, U256, oneshot::Sender<()>)),
 
     /// Removes block data above the given block number from the database.
     ///

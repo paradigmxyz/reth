@@ -83,9 +83,9 @@ where
 
         // TODO: do we care about the mpsc error here?
         // send a command to the db service to update the checkpoints for headers / bodies
-        let _ = self
-            .database_handle
-            .send_action(DatabaseAction::UpdateTransactionMeta((block.number, sender)));
+        // let _ = self
+        //     .database_handle
+        //     .send_action(DatabaseAction::UpdateTransactionMeta((block.number, sender)));
 
         Ok(())
     }
