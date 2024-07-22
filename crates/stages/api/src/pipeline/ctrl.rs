@@ -4,7 +4,7 @@ use reth_primitives_traits::SealedHeader;
 /// Determines the control flow during pipeline execution.
 ///
 /// See [`Pipeline::run_loop`](crate::Pipeline::run_loop) for more information.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ControlFlow {
     /// An unwind was requested and must be performed before continuing.
     Unwind {
