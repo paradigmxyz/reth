@@ -268,8 +268,8 @@ pub enum TreeEvent {
 
 impl TreeEvent {
     /// Returns true if the event is a backfill action.
-    fn is_backfill_action(&self) -> bool {
-        matches!(self, TreeEvent::BackfillAction(_))
+    const fn is_backfill_action(&self) -> bool {
+        matches!(self, Self::BackfillAction(_))
     }
 }
 
