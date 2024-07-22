@@ -9,11 +9,6 @@ use crate::{
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_blockchain_tree_api::{
-    error::{CanonicalError, InsertBlockError},
-    BlockValidationKind, BlockchainTreeEngine, BlockchainTreeViewer, CanonicalOutcome,
-    InsertPayloadOk,
-};
 use reth_chain_state::CanonicalInMemoryState;
 use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db_api::{
@@ -32,7 +27,6 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
-    collections::BTreeMap,
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
     time::Instant,
@@ -240,11 +234,17 @@ where
                 if block.is_none() {
                     // Note: it's fine to return the unsealed block because the caller already has
                     // the hash
-                    block = self.tree.block_by_hash(hash).map(|block| block.unseal());
+                    block = self
+                        .canonical_in_memory_state
+                        .state_by_hash(hash)
+                        .map(|block_state| block_state.block().block().clone().unseal());
                 }
                 block
             }
-            BlockSource::Pending => self.tree.block_by_hash(hash).map(|block| block.unseal()),
+            BlockSource::Pending => self
+                .canonical_in_memory_state
+                .state_by_hash(hash)
+                .map(|block_state| block_state.block().block().clone().unseal()),
             BlockSource::Canonical => self.database.block_by_hash(hash)?,
         };
 
@@ -259,15 +259,31 @@ where
     }
 
     fn pending_block(&self) -> ProviderResult<Option<SealedBlock>> {
-        Ok(self.tree.pending_block())
+        Ok(self
+            .canonical_in_memory_state
+            .pending_state()
+            .map(|block_state| block_state.block().block().clone()))
     }
 
     fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
-        Ok(self.tree.pending_block_with_senders())
+        Ok(self
+            .canonical_in_memory_state
+            .pending_state()
+            .and_then(|block_state| block_state.block().block().clone().seal_with_senders()))
     }
 
     fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
-        Ok(self.tree.pending_block_and_receipts())
+        Ok(self.canonical_in_memory_state.pending_state().map(|block_state| {
+            let flattened_receipts: Vec<Receipt> = block_state
+                .receipts()
+                .receipt_vec
+                .iter()
+                .flatten()
+                .filter_map(|opt_receipt| opt_receipt.clone())
+                .collect();
+
+            (block_state.block().block().clone(), flattened_receipts)
+        }))
     }
 
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
@@ -422,6 +438,10 @@ where
             BlockId::Hash(rpc_block_hash) => {
                 let mut receipts = self.receipts_by_block(rpc_block_hash.block_hash.into())?;
                 if receipts.is_none() && !rpc_block_hash.require_canonical.unwrap_or(false) {
+                    let block_state = self
+                        .canonical_in_memory_state
+                        .state_by_hash(rpc_block_hash.block_hash)
+                        .ok_or(ProviderError::StateForHashNotFound(rpc_block_hash.block_hash))?;
                     receipts = self.tree.receipts_by_block_hash(rpc_block_hash.block_hash);
                 }
                 Ok(receipts)
@@ -640,93 +660,6 @@ where
         let state_provider = self.history_by_block_hash(canonical_fork.hash)?;
         let bundle_state_provider = BundleStateProvider::new(state_provider, bundle_state_data);
         Ok(Box::new(bundle_state_provider))
-    }
-}
-
-impl<DB> BlockchainTreeEngine for BlockchainProvider2<DB>
-where
-    DB: Send + Sync,
-{
-    fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
-        self.tree.buffer_block(block)
-    }
-
-    fn insert_block(
-        &self,
-        block: SealedBlockWithSenders,
-        validation_kind: BlockValidationKind,
-    ) -> Result<InsertPayloadOk, InsertBlockError> {
-        self.tree.insert_block(block, validation_kind)
-    }
-
-    fn finalize_block(&self, finalized_block: BlockNumber) -> ProviderResult<()> {
-        self.tree.finalize_block(finalized_block)
-    }
-
-    fn connect_buffered_blocks_to_canonical_hashes_and_finalize(
-        &self,
-        last_finalized_block: BlockNumber,
-    ) -> Result<(), CanonicalError> {
-        self.tree.connect_buffered_blocks_to_canonical_hashes_and_finalize(last_finalized_block)
-    }
-
-    fn update_block_hashes_and_clear_buffered(
-        &self,
-    ) -> Result<BTreeMap<BlockNumber, B256>, CanonicalError> {
-        self.tree.update_block_hashes_and_clear_buffered()
-    }
-
-    fn connect_buffered_blocks_to_canonical_hashes(&self) -> Result<(), CanonicalError> {
-        self.tree.connect_buffered_blocks_to_canonical_hashes()
-    }
-
-    fn make_canonical(&self, block_hash: BlockHash) -> Result<CanonicalOutcome, CanonicalError> {
-        self.tree.make_canonical(block_hash)
-    }
-}
-
-impl<DB> BlockchainTreeViewer for BlockchainProvider2<DB>
-where
-    DB: Send + Sync,
-{
-    fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
-        self.tree.header_by_hash(hash)
-    }
-
-    fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
-        self.tree.block_by_hash(block_hash)
-    }
-
-    fn block_with_senders_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlockWithSenders> {
-        self.tree.block_with_senders_by_hash(block_hash)
-    }
-
-    fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader> {
-        self.tree.buffered_header_by_hash(block_hash)
-    }
-
-    fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {
-        self.tree.is_canonical(hash)
-    }
-
-    fn lowest_buffered_ancestor(&self, hash: BlockHash) -> Option<SealedBlockWithSenders> {
-        self.tree.lowest_buffered_ancestor(hash)
-    }
-
-    fn canonical_tip(&self) -> BlockNumHash {
-        self.tree.canonical_tip()
-    }
-
-    fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
-        self.tree.pending_block_num_hash()
-    }
-
-    fn pending_block_and_receipts(&self) -> Option<(SealedBlock, Vec<Receipt>)> {
-        self.tree.pending_block_and_receipts()
-    }
-
-    fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<Receipt>> {
-        self.tree.receipts_by_block_hash(block_hash)
     }
 }
 

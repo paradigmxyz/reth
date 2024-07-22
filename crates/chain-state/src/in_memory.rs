@@ -209,23 +209,29 @@ impl BlockState {
         Self(executed_block)
     }
 
-    pub(crate) fn block(&self) -> ExecutedBlock {
+    /// Returns the executed block that determines the state.
+    pub fn block(&self) -> ExecutedBlock {
         self.0.clone()
     }
 
-    pub(crate) fn hash(&self) -> B256 {
+    /// Returns the hash of executed block that determines the state.
+    pub fn hash(&self) -> B256 {
         self.0.block().hash()
     }
 
-    pub(crate) fn number(&self) -> u64 {
+    /// Returns the block number of executed block that determines the state.
+    pub fn number(&self) -> u64 {
         self.0.block().number
     }
 
-    pub(crate) fn state_root(&self) -> B256 {
+    /// Returns the state root after applying the executed block that determines
+    /// the state.
+    pub fn state_root(&self) -> B256 {
         self.0.block().header.state_root
     }
 
-    pub(crate) fn receipts(&self) -> &Receipts {
+    /// Returns the receipts of executed block that determines the state.
+    pub fn receipts(&self) -> &Receipts {
         &self.0.execution_outcome().receipts
     }
 }
