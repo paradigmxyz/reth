@@ -333,77 +333,89 @@ where
         outgoing
     }
 
+    /// Run the engine API handler.
+    ///
+    /// This will block the current thread and process incoming messages.
     pub fn run(mut self) {
         while let Ok(msg) = self.incoming.recv() {
-            match msg {
-                FromEngine::Event(event) => match event {
-                    FromOrchestrator::BackfillSyncStarted => {
-                        debug!(target: "consensus::engine", "received backfill sync started event");
-                        self.is_backfill_active = true;
-                    }
-                    FromOrchestrator::BackfillSyncFinished(ctrl) => {
-                        self.on_backfill_sync_finished(ctrl);
-                    }
-                },
-                FromEngine::Request(request) => match request {
-                    BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
-                        let output = self.on_forkchoice_updated(state, payload_attrs);
+            self.run_once(msg);
+        }
+    }
 
-                        if let Ok(res) = &output {
-                            // emit an event about the handled FCU
-                            self.emit_event(BeaconConsensusEngineEvent::ForkchoiceUpdated(
-                                state,
-                                res.outcome.forkchoice_status(),
-                            ));
-                        }
+    /// Run the engine API handler once.
+    fn run_once(&mut self, msg: FromEngine<BeaconEngineMessage<T>>) {
+        self.on_engine_message(msg);
 
-                        if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(Into::into)) {
-                            error!("Failed to send event: {err:?}");
-                        }
-                    }
-                    BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
-                        let output = self.on_new_payload(payload, cancun_fields);
-                        if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(|e| {
-                            reth_beacon_consensus::BeaconOnNewPayloadError::Internal(Box::new(e))
-                        })) {
-                            error!("Failed to send event: {err:?}");
-                        }
-                    }
-                    BeaconEngineMessage::TransitionConfigurationExchanged => {
-                        // this is a reporting no-op because the engine API impl does not need
-                        // additional input to handle this request
-                    }
-                },
-                FromEngine::DownloadedBlocks(blocks) => {
-                    if let Some(event) = self.on_downloaded(blocks) {
-                        self.on_tree_event(event);
-                    }
+        if self.should_persist() && !self.persistence_state.in_progress() {
+            let blocks_to_persist = self.get_blocks_to_persist();
+            let (tx, rx) = oneshot::channel();
+            self.persistence.save_blocks(blocks_to_persist, tx);
+            self.persistence_state.start(rx);
+        }
+
+        if self.persistence_state.in_progress() {
+            let rx = self
+                .persistence_state
+                .rx
+                .as_mut()
+                .expect("if a persistence task is in progress Receiver must be Some");
+            // Check if persistence has completed
+            if let Ok(last_persisted_block_hash) = rx.try_recv() {
+                if let Some(block) = self.state.tree_state.block_by_hash(last_persisted_block_hash)
+                {
+                    self.persistence_state.finish(last_persisted_block_hash, block.number);
+                    self.remove_persisted_blocks_from_memory();
+                } else {
+                    error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
                 }
             }
+        }
+    }
 
-            if self.should_persist() && !self.persistence_state.in_progress() {
-                let blocks_to_persist = self.get_blocks_to_persist();
-                let (tx, rx) = oneshot::channel();
-                self.persistence.save_blocks(blocks_to_persist, tx);
-                self.persistence_state.start(rx);
-            }
+    /// Handles a message from the engine.
+    fn on_engine_message(&mut self, msg: FromEngine<BeaconEngineMessage<T>>) {
+        match msg {
+            FromEngine::Event(event) => match event {
+                FromOrchestrator::BackfillSyncStarted => {
+                    debug!(target: "consensus::engine", "received backfill sync started event");
+                    self.is_backfill_active = true;
+                }
+                FromOrchestrator::BackfillSyncFinished(ctrl) => {
+                    self.on_backfill_sync_finished(ctrl);
+                }
+            },
+            FromEngine::Request(request) => match request {
+                BeaconEngineMessage::ForkchoiceUpdated { state, payload_attrs, tx } => {
+                    let output = self.on_forkchoice_updated(state, payload_attrs);
 
-            if self.persistence_state.in_progress() {
-                let rx = self
-                    .persistence_state
-                    .rx
-                    .as_mut()
-                    .expect("if a persistence task is in progress Receiver must be Some");
-                // Check if persistence has completed
-                if let Ok(last_persisted_block_hash) = rx.try_recv() {
-                    if let Some(block) =
-                        self.state.tree_state.block_by_hash(last_persisted_block_hash)
-                    {
-                        self.persistence_state.finish(last_persisted_block_hash, block.number);
-                        self.remove_persisted_blocks_from_memory();
-                    } else {
-                        error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
+                    if let Ok(res) = &output {
+                        // emit an event about the handled FCU
+                        self.emit_event(BeaconConsensusEngineEvent::ForkchoiceUpdated(
+                            state,
+                            res.outcome.forkchoice_status(),
+                        ));
                     }
+
+                    if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(Into::into)) {
+                        error!("Failed to send event: {err:?}");
+                    }
+                }
+                BeaconEngineMessage::NewPayload { payload, cancun_fields, tx } => {
+                    let output = self.on_new_payload(payload, cancun_fields);
+                    if let Err(err) = tx.send(output.map(|o| o.outcome).map_err(|e| {
+                        reth_beacon_consensus::BeaconOnNewPayloadError::Internal(Box::new(e))
+                    })) {
+                        error!("Failed to send event: {err:?}");
+                    }
+                }
+                BeaconEngineMessage::TransitionConfigurationExchanged => {
+                    // this is a reporting no-op because the engine API impl does not need
+                    // additional input to handle this request
+                }
+            },
+            FromEngine::DownloadedBlocks(blocks) => {
+                if let Some(event) = self.on_downloaded(blocks) {
+                    self.on_tree_event(event);
                 }
             }
         }
