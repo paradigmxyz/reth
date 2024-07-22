@@ -2,7 +2,7 @@
 
 use crate::metrics::version_metrics::VersionInfo;
 use eyre::WrapErr;
-use http::Response;
+use http::{header::CONTENT_TYPE, HeaderValue, Response};
 use metrics::describe_gauge;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
@@ -84,7 +84,9 @@ async fn start_endpoint<F: Hook + 'static>(
             let service = tower::service_fn(move |_| {
                 (hook)();
                 let metrics = handle.render();
-                async move { Ok::<_, Infallible>(Response::new(metrics)) }
+                let mut response = Response::new(metrics);
+                response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+                async move { Ok::<_, Infallible>(response) }
             });
 
             let mut shutdown = signal.clone().ignore_guard();
