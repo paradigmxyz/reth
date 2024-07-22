@@ -1,7 +1,9 @@
 //! This exposes reth's version information over prometheus.
-
-use crate::version::{BUILD_PROFILE_NAME, VERGEN_GIT_SHA};
 use metrics::gauge;
+use reth_node_core::version::{
+    BUILD_PROFILE_NAME, VERGEN_BUILD_TIMESTAMP, VERGEN_CARGO_FEATURES, VERGEN_CARGO_TARGET_TRIPLE,
+    VERGEN_GIT_SHA,
+};
 
 /// Contains version information for the application.
 #[derive(Debug, Clone)]
@@ -24,10 +26,10 @@ impl Default for VersionInfo {
     fn default() -> Self {
         Self {
             version: env!("CARGO_PKG_VERSION"),
-            build_timestamp: env!("VERGEN_BUILD_TIMESTAMP"),
-            cargo_features: env!("VERGEN_CARGO_FEATURES"),
+            build_timestamp: VERGEN_BUILD_TIMESTAMP,
+            cargo_features: VERGEN_CARGO_FEATURES,
             git_sha: VERGEN_GIT_SHA,
-            target_triple: env!("VERGEN_CARGO_TARGET_TRIPLE"),
+            target_triple: VERGEN_CARGO_TARGET_TRIPLE,
             build_profile: BUILD_PROFILE_NAME,
         }
     }

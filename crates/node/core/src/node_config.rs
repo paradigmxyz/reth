@@ -6,7 +6,6 @@ use crate::{
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
-    metrics::prometheus_exporter,
     utils::get_single_header,
 };
 use metrics_exporter_prometheus::PrometheusHandle;

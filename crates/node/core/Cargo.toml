@@ -44,15 +44,6 @@ reth-stages-types.workspace = true
 alloy-genesis.workspace = true
 alloy-rpc-types-engine.workspace = true
 
-# async
-tokio.workspace = true
-
-# metrics
-reth-metrics.workspace = true
-metrics.workspace = true
-metrics-exporter-prometheus.workspace = true
-metrics-process.workspace = true
-metrics-util.workspace = true
 
 # misc
 eyre.workspace = true
@@ -68,10 +59,7 @@ dirs-next = "2.0.0"
 shellexpand.workspace = true
 serde_json.workspace = true
 
-# http/rpc
-http.workspace = true
-jsonrpsee.workspace = true
-tower.workspace = true
+
 
 # tracing
 tracing.workspace = true
@@ -95,6 +83,7 @@ procfs = "0.16.0"
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
+tokio.workspace = true
 
 [features]
 optimism = [

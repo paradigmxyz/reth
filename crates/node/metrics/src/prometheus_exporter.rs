@@ -1,6 +1,5 @@
 //! Prometheus exporter
 
-use crate::metrics::version_metrics::VersionInfo;
 use eyre::WrapErr;
 use http::{header::CONTENT_TYPE, HeaderValue, Response};
 use metrics::describe_gauge;
@@ -8,6 +7,7 @@ use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
 use reth_db_api::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
+use reth_node_core::metrics::version_metrics::VersionInfo;
 use reth_provider::providers::StaticFileProvider;
 use reth_tasks::TaskExecutor;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
@@ -297,8 +297,7 @@ const fn describe_io_stats() {}
 
 #[cfg(test)]
 mod tests {
-    use crate::node_config::PROMETHEUS_RECORDER_HANDLE;
-
+    use reth_node_core::node_config::PROMETHEUS_RECORDER_HANDLE;
     // Dependencies using different version of the `metrics` crate (to be exact, 0.21 vs 0.22)
     // may not be able to communicate with each other through the global recorder.
     //

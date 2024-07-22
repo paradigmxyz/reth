@@ -139,7 +139,7 @@ members = [
     "examples/txpool-tracing/",
     "examples/custom-rlpx-subprotocol",
     "testing/ef-tests/",
-    "testing/testing-utils",
+    "testing/testing-utils", "crates/node/metrics",
 ]
 default-members = ["bin/reth"]
 
@@ -332,6 +332,7 @@ reth-nippy-jar = { path = "crates/storage/nippy-jar" }
 reth-node-api = { path = "crates/node/api" }
 reth-node-builder = { path = "crates/node/builder" }
 reth-node-core = { path = "crates/node/core" }
+reth-node-metrics = { path = "crates/node/metrics" }
 reth-node-ethereum = { path = "crates/ethereum/node" }
 reth-node-events = { path = "crates/node/events" }
 reth-node-optimism = { path = "crates/optimism/node" }

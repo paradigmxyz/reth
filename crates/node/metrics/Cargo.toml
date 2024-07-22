@@ -1,0 +1,29 @@
+[package]
+name = "reth-node-metrics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+reth-node-core.workspace = true
+reth-db-api.workspace = true
+reth-provider.workspace = true
+reth-tasks.workspace = true
+eyre.workspace = true
+tokio.workspace = true
+jsonrpsee.workspace = true
+tracing.workspace = true
+http.workspace = true
+tower.workspace = true
+reth-metrics.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
+metrics-process.workspace = true
+metrics-util.workspace = true
+
+[lints]
+workspace = true
