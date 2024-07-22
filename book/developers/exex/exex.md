@@ -13,7 +13,7 @@ initiated by Reth.
 
 Read more about things you can build with Execution Extensions in the [Paradigm blog](https://www.paradigm.xyz/2024/05/reth-exex).
 
-## What Execution Extensions are not?
+## What Execution Extensions are not
 
 Execution Extensions are not separate processes that connect to the main Reth node process.
 Instead, ExExes are compiled into the same binary as Reth, and run alongside it, using shared memory for communication.
