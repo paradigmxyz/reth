@@ -315,6 +315,29 @@ where
             }
         }
 
+        // filter out traces that don't match the filter
+        all_traces = all_traces
+            .into_iter()
+            .filter(|trace| {
+                let trace = &trace.trace;
+                let (from_address, to_address) = match trace.action {
+                    Action::Call(CallAction { from, to, .. }) => (Some(from), Some(to)),
+                    Action::Create(CreateAction { from, .. }) => (
+                        Some(from),
+                        match trace.result {
+                            Some(TraceOutput::Create(CreateOutput { address: to, .. })) => Some(to),
+                            _ => None,
+                        },
+                    ),
+                    Action::Selfdestruct(SelfdestructAction {
+                        address, refund_address, ..
+                    }) => (Some(address), Some(refund_address)),
+                    Action::Reward(RewardAction { author, .. }) => (None, Some(author)),
+                };
+                matcher.matches(from_address, to_address)
+            })
+            .collect::<Vec<_>>();
+
         // apply after and count to traces if specified, this allows for a pagination style.
         // only consider traces after
         if let Some(after) = after.map(|a| a as usize).filter(|a| *a < all_traces.len()) {
