@@ -37,7 +37,7 @@ use reth_rpc_types::{
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 pub use state::{BlockState, CanonicalInMemoryState, InMemoryState};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     marker::PhantomData,
     sync::{mpsc::Receiver, Arc},
 };
@@ -720,6 +720,17 @@ where
         block > local_tip && block - local_tip > MIN_BLOCKS_FOR_PIPELINE_RUN
     }
 
+    /// Returns how far the local tip is from the given block. If the local tip is at the same
+    /// height or its block number is greater than the given block, this returns None.
+    #[inline]
+    const fn distance_from_local_tip(&self, local_tip: u64, block: u64) -> Option<u64> {
+        if block > local_tip {
+            Some(block - local_tip)
+        } else {
+            None
+        }
+    }
+
     /// Returns the target hash to sync to if the distance from the local tip to the block is
     /// greater than the threshold and we're not synced to the finalized block yet (if we've seen
     /// that block already).
@@ -806,15 +817,46 @@ where
     ///
     /// This mainly compares the missing parent of the downloaded block with the current canonical
     /// tip, and decides whether or not backfill sync should be triggered.
-    const fn on_disconnected_downloaded_block(
+    fn on_disconnected_downloaded_block(
         &self,
         downloaded_block: BlockNumHash,
         missing_parent: BlockNumHash,
         head: BlockNumHash,
     ) -> Option<TreeEvent> {
-        None
+        // compare the missing parent with the canonical tip
+        if let Some(target) =
+            self.backfill_sync_target(head.number, missing_parent.number, Some(downloaded_block))
+        {
+            return Some(TreeEvent::BackfillAction(BackfillAction::Start(target.into())));
+        }
+
+        // continue downloading the missing parent
+        //
+        // this happens if either:
+        //  * the missing parent block num < canonical tip num
+        //    * this case represents a missing block on a fork that is shorter than the canonical
+        //      chain
+        //  * the missing parent block num >= canonical tip num, but the number of missing blocks is
+        //    less than the pipeline threshold
+        //    * this case represents a potentially long range of blocks to download and execute
+        let request = if let Some(distance) =
+            self.distance_from_local_tip(head.number, missing_parent.number)
+        {
+            DownloadRequest::BlockRange(missing_parent.hash, distance)
+        } else {
+            // This happens when the missing parent is on an outdated
+            // sidechain and we can only download the missing block itself
+            DownloadRequest::BlockSet(HashSet::from_iter([missing_parent.hash]))
+        };
+
+        Some(TreeEvent::Download(request))
     }
 
+    /// Invoked with a block downloaded from the network
+    ///
+    /// Returns an event with the appropriate action to take, such as:
+    ///  - download more missing blocks
+    ///  - try to canonicalize the target if the `block` is the tracked target (head) block.
     fn on_downloaded_block(&mut self, block: SealedBlockWithSenders) -> Option<TreeEvent> {
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
