@@ -84,7 +84,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///
     /// // Calculate the state root
     /// let tx = db.tx().expect("failed to create transaction");
-    /// let state_root = StateRoot::overlay(&tx, hashed_state);
+    /// let state_root = StateRoot::overlay_root(&tx, hashed_state);
     /// ```
     ///
     /// # Returns
@@ -93,7 +93,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     fn overlay_root(tx: &'a TX, post_state: HashedPostState) -> Result<B256, StateRootError>;
 
     /// Calculates the state root for this [`HashedPostState`] and returns it alongside trie
-    /// updates. See [`Self::overlay`] for more info.
+    /// updates. See [`Self::overlay_root`] for more info.
     fn overlay_root_with_updates(
         tx: &'a TX,
         post_state: HashedPostState,
