@@ -39,7 +39,10 @@ pub struct DatabaseService<DB> {
 }
 
 impl<DB: Database> DatabaseService<DB> {
-    /// Create a new database service
+    /// Create a new database service.
+    ///
+    /// NOTE: The [`ProviderFactory`] and [`Pruner`] should be built using an identical
+    /// [`PruneModes`](reth_prune::PruneModes).
     pub const fn new(
         provider: ProviderFactory<DB>,
         incoming: Receiver<DatabaseAction>,
