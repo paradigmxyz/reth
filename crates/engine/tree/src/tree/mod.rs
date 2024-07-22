@@ -953,17 +953,6 @@ where
                 }
                 InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
                 InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
-                    // TODO: isn't this check redundant?
-                    // check if the block's parent is already marked as invalid
-                    // if let Some(status) = self
-                    //     .check_invalid_ancestor_with_head(block.parent_hash, block.hash())
-                    //     .map_err(|error| {
-                    //         InsertBlockError::new(block, InsertBlockErrorKind::Provider(error))
-                    //     })?
-                    // {
-                    //     return Ok(status)
-                    // }
-
                     // not known to be invalid, but we don't know anything else
                     PayloadStatusEnum::Syncing
                 }
