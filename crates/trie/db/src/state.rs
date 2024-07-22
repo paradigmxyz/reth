@@ -70,7 +70,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// use reth_db_api::database::Database;
     /// use reth_primitives::{Account, U256};
     /// use reth_trie::{HashedPostState, StateRoot};
-    /// use reth_trie_db::StateRootFromDbTx;
+    /// use reth_trie_db::DatabaseStateRoot;
     ///
     /// // Initialize the database
     /// let db = create_test_rw_db();
