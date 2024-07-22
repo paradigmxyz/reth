@@ -387,7 +387,7 @@ where
                         debug!(target: "consensus::engine", "received backfill sync started event");
                         self.is_backfill_active = true;
                     }
-                    FromOrchestrator::BackfillSyncFinished => {
+                    FromOrchestrator::BackfillSyncFinished(_ctrl) => {
                         debug!(target: "consensus::engine", "received backfill sync finished event");
                         self.is_backfill_active = false;
                     }
