@@ -404,9 +404,7 @@ where
                 },
                 FromEngine::DownloadedBlocks(blocks) => {
                     if let Some(event) = self.on_downloaded(blocks) {
-                        if let Err(err) = self.outgoing.send(EngineApiEvent::FromTree(event)) {
-                            error!("Failed to send event: {err:?}");
-                        }
+                        self.on_tree_event(event);
                     }
                 }
             }
@@ -435,6 +433,21 @@ where
                         error!("could not find persisted block with hash {last_persisted_block_hash} in memory");
                     }
                 }
+            }
+        }
+    }
+
+    /// Handles a tree event.
+    fn on_tree_event(&self, event: TreeEvent) {
+        match event {
+            TreeEvent::TreeAction(action) => {
+                // TODO: handle
+            }
+            TreeEvent::BackfillAction(action) => {
+                self.emit_event(EngineApiEvent::BackfillAction(action));
+            }
+            TreeEvent::Download(action) => {
+                self.emit_event(EngineApiEvent::Download(action));
             }
         }
     }
