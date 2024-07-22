@@ -432,6 +432,10 @@ where
             return
         };
 
+        if sync_target_state.finalized_block_hash.is_zero() {
+            return
+        }
+
         // get the block number of the finalized block, if we have it
         let newest_finalized = self
             .state
@@ -440,10 +444,6 @@ where
             .map(|block| block.number);
 
         // TODO: state housekeeping
-
-        if sync_target_state.finalized_block_hash.is_zero() {
-            return
-        }
 
         // The block number that the backfill finished at - if the progress or newest
         // finalized is None then we can't check the distance anyways.
