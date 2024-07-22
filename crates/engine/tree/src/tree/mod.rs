@@ -449,7 +449,7 @@ where
         // finalized is None then we can't check the distance anyways.
         //
         // If both are Some, we perform another distance check and return the desired
-        // pipeline target
+        // backfill target
         let Some(backfill_target) =
             ctrl.block_number().zip(newest_finalized).and_then(|(progress, finalized_number)| {
                 // Determines whether or not we should run backfill again, in case
@@ -780,12 +780,10 @@ where
             }
         }
 
-        // if the number of missing blocks is greater than the max, run the
-        // pipeline
+        // if the number of missing blocks is greater than the max, trigger backfill
         if exceeds_backfill_threshold {
             if let Some(state) = sync_target_state {
-                // if we have already canonicalized the finalized block, we should
-                // skip the pipeline run
+                // if we have already canonicalized the finalized block, we should skip backfill
                 match self.provider.header_by_hash_or_number(state.finalized_block_hash.into()) {
                     Err(err) => {
                         warn!(target: "consensus::engine", %err, "Failed to get finalized block header");
@@ -810,7 +808,7 @@ where
                         //
                         // However, optimism chains will do this. The risk of a reorg is however
                         // low.
-                        debug!(target: "consensus::engine", hash=?state.head_block_hash, "Setting head hash as an optimistic pipeline target.");
+                        debug!(target: "consensus::engine", hash=?state.head_block_hash, "Setting head hash as an optimistic backfill target.");
                         return Some(state.head_block_hash)
                     }
                     Ok(Some(_)) => {
@@ -847,7 +845,7 @@ where
         //    * this case represents a missing block on a fork that is shorter than the canonical
         //      chain
         //  * the missing parent block num >= canonical tip num, but the number of missing blocks is
-        //    less than the pipeline threshold
+        //    less than the backfill threshold
         //    * this case represents a potentially long range of blocks to download and execute
         let request = if let Some(distance) =
             self.distance_from_local_tip(head.number, missing_parent.number)
