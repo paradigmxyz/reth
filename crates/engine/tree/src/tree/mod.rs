@@ -369,8 +369,7 @@ where
                         self.is_backfill_active = true;
                     }
                     FromOrchestrator::BackfillSyncFinished => {
-                        debug!(target: "consensus::engine", "received backfill sync finished event");
-                        self.is_backfill_active = false;
+                        self.on_backfill_sync_finished();
                     }
                 },
                 FromEngine::Request(request) => match request {
@@ -435,6 +434,31 @@ where
                 }
             }
         }
+    }
+
+    /// Invoked if the backfill sync has finished to target.
+    ///
+    /// Checks the tracked finalized block against the block on disk and restarts backfill if
+    /// needed.
+    ///
+    /// This will also try to connect the buffered blocks.
+    fn on_backfill_sync_finished(&mut self) {
+        debug!(target: "consensus::engine", "received backfill sync finished event");
+        self.is_backfill_active = false;
+
+        let Some(sync_target_state) = self.state.forkchoice_state_tracker.sync_target_state()
+        else {
+            return
+        };
+
+        // get the block number of the finalized block, if we have it
+        let newest_finalized = self
+            .state
+            .buffer
+            .block(&sync_target_state.finalized_block_hash)
+            .map(|block| block.number);
+
+        // TODO: check the distance between on disk and the latest finalized block
     }
 
     /// Handles a tree event.
