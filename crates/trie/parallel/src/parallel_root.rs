@@ -6,7 +6,9 @@ use reth_execution_errors::StorageRootError;
 use reth_primitives::B256;
 use reth_provider::{providers::ConsistentDbView, DatabaseProviderFactory, ProviderError};
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    hashed_cursor::{
+        DatabaseHashedCursorFactory, HashedCursorFactory, HashedPostStateCursorFactory,
+    },
     node_iter::{TrieElement, TrieNodeIter},
     trie_cursor::TrieCursorFactory,
     updates::TrieUpdates,
@@ -91,9 +93,13 @@ where
             .into_par_iter()
             .map(|(hashed_address, prefix_set)| {
                 let provider_ro = self.view.provider_ro()?;
+                let hashed_cursor_factory = HashedPostStateCursorFactory::new(
+                    DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                    &hashed_state_sorted,
+                );
                 let storage_root_result = StorageRoot::new_hashed(
                     provider_ro.tx_ref(),
-                    HashedPostStateCursorFactory::new(provider_ro.tx_ref(), &hashed_state_sorted),
+                    hashed_cursor_factory,
                     hashed_address,
                     #[cfg(feature = "metrics")]
                     self.metrics.storage_trie.clone(),
@@ -108,8 +114,10 @@ where
         let mut trie_updates = TrieUpdates::default();
 
         let provider_ro = self.view.provider_ro()?;
-        let hashed_cursor_factory =
-            HashedPostStateCursorFactory::new(provider_ro.tx_ref(), &hashed_state_sorted);
+        let hashed_cursor_factory = HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+            &hashed_state_sorted,
+        );
         let trie_cursor_factory = provider_ro.tx_ref();
 
         let walker = TrieWalker::new(
