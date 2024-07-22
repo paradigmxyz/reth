@@ -3,15 +3,16 @@ set -eo pipefail
 
 # TODO
 no_std_packages=(
+#   reth-db
+#   reth-primitives
 #   reth-codecs
 #   reth-consensus
-#   reth-db
+# the following are confirmed working
     reth-errors
     reth-ethereum-forks
-#   reth-evm
+    reth-evm
 #   reth-evm-ethereum
     reth-network-peers
-    reth-primitives
 #   reth-primitives-traits
     reth-revm
 )
