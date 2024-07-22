@@ -33,6 +33,8 @@ use revm_primitives::{
     BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, ResultAndState,
 };
 
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, fmt::Display, sync::Arc, vec, vec::Vec};
 #[cfg(feature = "std")]
 use std::{fmt::Display, sync::Arc, vec, vec::Vec};
 /// Provides executors to execute regular ethereum blocks
@@ -145,7 +147,7 @@ where
     ) -> Result<EthExecuteOutput, BlockExecutionError>
     where
         DB: Database,
-        DB::Error: Into<ProviderError> + std::fmt::Display,
+        DB::Error: Into<ProviderError> + Display,
     {
         // apply pre execution changes
         apply_beacon_root_contract_call(
@@ -363,7 +365,7 @@ where
 impl<EvmConfig, DB> Executor<DB> for EthBlockExecutor<EvmConfig, DB>
 where
     EvmConfig: ConfigureEvm,
-    DB: Database<Error: Into<ProviderError> + std::fmt::Display>,
+    DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
     type Output = BlockExecutionOutput<Receipt>;
