@@ -266,6 +266,13 @@ pub enum TreeEvent {
     Download(DownloadRequest),
 }
 
+impl TreeEvent {
+    /// Returns true if the event is a backfill action.
+    const fn is_backfill_action(&self) -> bool {
+        matches!(self, Self::BackfillAction(_))
+    }
+}
+
 /// The actions that can be performed on the tree.
 #[derive(Debug)]
 pub enum TreeAction {
@@ -614,6 +621,16 @@ where
         .with_latest_valid_hash(valid_parent_hash.unwrap_or_default()))
     }
 
+    /// Returns true if the given hash is the last received sync target block.
+    ///
+    /// See [`ForkchoiceStateTracker::sync_target_state`]
+    fn is_sync_target_head(&self, block_hash: B256) -> bool {
+        if let Some(target) = self.state.forkchoice_state_tracker.sync_target_state() {
+            return target.head_block_hash == block_hash
+        }
+        false
+    }
+
     /// Checks if the given `check` hash points to an invalid header, inserting the given `head`
     /// block into the invalid header cache if the `check` hash has a known invalid ancestor.
     ///
@@ -683,6 +700,33 @@ where
         }
         self.state.buffer.insert_block(block);
         Ok(())
+    }
+
+    fn on_downloaded_block(&mut self, block: SealedBlockWithSenders) -> Option<TreeEvent> {
+        let block_hash = block.hash();
+        let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
+        if self
+            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_hash)
+            .ok()?
+            .is_some()
+        {
+            return None
+        }
+
+        if self.is_backfill_active {
+            return None
+        }
+
+        // try to append the block
+        match self.insert_block(block) {
+            Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(_))) => {
+                if self.is_sync_target_head(block_hash) {
+                    return Some(TreeEvent::TreeAction(TreeAction::MakeCanonical(block_hash)))
+                }
+            }
+            _ => return None,
+        }
+        None
     }
 
     fn insert_block_without_senders(
@@ -794,8 +838,17 @@ where
 {
     type Engine = T;
 
-    fn on_downloaded(&mut self, _blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
-        debug!("not implemented");
+    fn on_downloaded(&mut self, blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
+        for block in blocks {
+            if let Some(event) = self.on_downloaded_block(block) {
+                let needs_backfill = event.is_backfill_action();
+                self.on_tree_event(event);
+                if needs_backfill {
+                    // can exit early if backfill is needed
+                    break
+                }
+            }
+        }
         None
     }
 
@@ -899,14 +952,12 @@ where
         };
 
         let mut outcome = TreeOutcome::new(status);
-        if outcome.outcome.is_valid() {
-            if let Some(target) = self.state.forkchoice_state_tracker.sync_target_state() {
-                if target.head_block_hash == block_hash {
-                    outcome = outcome
-                        .with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical(block_hash)));
-                }
-            }
+        if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
+            // if the block is valid and it is the sync target head, make it canonical
+            outcome =
+                outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical(block_hash)));
         }
+
         Ok(outcome)
     }
 
