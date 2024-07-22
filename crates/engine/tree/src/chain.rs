@@ -112,7 +112,7 @@ where
             match this.handler.poll(cx) {
                 Poll::Ready(handler_event) => {
                     match handler_event {
-                        HandlerEvent::BackfillSync(action) => {
+                        HandlerEvent::BackfillAction(action) => {
                             // forward action to backfill_sync
                             this.backfill_sync.on_action(action);
                             continue 'outer
@@ -169,7 +169,7 @@ pub enum ChainEvent<T> {
 ///
 /// The [`ChainOrchestrator`] is responsible for advancing this handler through
 /// [`ChainHandler::poll`] and handling the emitted events, for example
-/// [`HandlerEvent::BackfillSync`] to start a backfill sync. Events from the [`ChainOrchestrator`]
+/// [`HandlerEvent::BackfillAction`] to start a backfill sync. Events from the [`ChainOrchestrator`]
 /// are passed to the handler via [`ChainHandler::on_event`], e.g.
 /// [`FromOrchestrator::BackfillSyncStarted`] once the backfill sync started or finished.
 pub trait ChainHandler: Send + Sync {
@@ -187,7 +187,7 @@ pub trait ChainHandler: Send + Sync {
 #[derive(Clone, Debug)]
 pub enum HandlerEvent<T> {
     /// Request an action to backfill sync
-    BackfillSync(BackfillAction),
+    BackfillAction(BackfillAction),
     /// Other event emitted by the handler
     Event(T),
 }
