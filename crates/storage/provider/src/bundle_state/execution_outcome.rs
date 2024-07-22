@@ -45,7 +45,7 @@ mod tests {
         keccak256, Account, Address, Receipt, Receipts, StorageEntry, B256, U256,
     };
     use reth_trie::{test_utils::state_root, StateRoot};
-    use reth_trie_db::StateRootFromDbTx;
+    use reth_trie_db::DatabaseStateRoot;
     use revm::{
         db::{
             states::{
@@ -864,7 +864,7 @@ mod tests {
 
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
             assert_eq!(
-                StateRoot::overlay(
+                StateRoot::overlay_root(
                     &tx,
                     ExecutionOutcome::new(
                         state.bundle_state.clone(),

@@ -27,7 +27,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
 use reth_trie::StateRoot;
-use reth_trie_db::StateRootFromDbTx;
+use reth_trie_db::DatabaseStateRoot;
 use std::{path::PathBuf, sync::Arc};
 use tracing::*;
 
@@ -149,7 +149,7 @@ impl Command {
             ExecutionOutcome::new(state, receipts.into(), block.number, vec![requests.into()]);
 
         // Unpacked `BundleState::state_root_slow` function
-        let (in_memory_state_root, in_memory_updates) = StateRoot::overlay_with_updates(
+        let (in_memory_state_root, in_memory_updates) = StateRoot::overlay_root_with_updates(
             provider.tx_ref(),
             execution_outcome.hash_state_slow(),
         )?;

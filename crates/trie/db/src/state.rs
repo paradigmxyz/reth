@@ -9,7 +9,7 @@ use std::ops::RangeInclusive;
 use tracing::debug;
 
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
-pub trait StateRootFromDbTx<'a, TX>: Sized {
+pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// Create a new [`StateRoot`] instance.
     fn from_tx(tx: &'a TX) -> Self;
 
@@ -90,17 +90,17 @@ pub trait StateRootFromDbTx<'a, TX>: Sized {
     /// # Returns
     ///
     /// The state root for this [`HashedPostState`].
-    fn overlay(tx: &'a TX, post_state: HashedPostState) -> Result<B256, StateRootError>;
+    fn overlay_root(tx: &'a TX, post_state: HashedPostState) -> Result<B256, StateRootError>;
 
     /// Calculates the state root for this [`HashedPostState`] and returns it alongside trie
     /// updates. See [`Self::overlay`] for more info.
-    fn overlay_with_updates(
+    fn overlay_root_with_updates(
         tx: &'a TX,
         post_state: HashedPostState,
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 }
 
-impl<'a, TX: DbTx> StateRootFromDbTx<'a, TX> for StateRoot<&'a TX, &'a TX> {
+impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX> for StateRoot<&'a TX, &'a TX> {
     fn from_tx(tx: &'a TX) -> Self {
         Self::new(tx, tx)
     }
@@ -137,7 +137,7 @@ impl<'a, TX: DbTx> StateRootFromDbTx<'a, TX> for StateRoot<&'a TX, &'a TX> {
         Self::incremental_root_calculator(tx, range)?.root_with_progress()
     }
 
-    fn overlay(tx: &'a TX, post_state: HashedPostState) -> Result<B256, StateRootError> {
+    fn overlay_root(tx: &'a TX, post_state: HashedPostState) -> Result<B256, StateRootError> {
         let prefix_sets = post_state.construct_prefix_sets().freeze();
         let sorted = post_state.into_sorted();
         Self::from_tx(tx)
@@ -146,7 +146,7 @@ impl<'a, TX: DbTx> StateRootFromDbTx<'a, TX> for StateRoot<&'a TX, &'a TX> {
             .root()
     }
 
-    fn overlay_with_updates(
+    fn overlay_root_with_updates(
         tx: &'a TX,
         post_state: HashedPostState,
     ) -> Result<(B256, TrieUpdates), StateRootError> {
@@ -193,7 +193,7 @@ mod tests {
         let db = create_test_rw_db();
         let tx = db.tx().expect("failed to create transaction");
         assert_eq!(
-            StateRoot::overlay(&tx, post_state).unwrap(),
+            StateRoot::overlay_root(&tx, post_state).unwrap(),
             hex!("b464525710cafcf5d4044ac85b72c08b1e76231b8d91f288fe438cc41d8eaafd")
         );
     }

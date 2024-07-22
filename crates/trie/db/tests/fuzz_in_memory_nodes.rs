@@ -9,7 +9,7 @@ use reth_trie::{
     StateRoot,
 };
 use reth_trie_common::Nibbles;
-use reth_trie_db::StateRootFromDbTx;
+use reth_trie_db::DatabaseStateRoot;
 use std::collections::BTreeMap;
 
 proptest! {

@@ -8,7 +8,7 @@ use reth_provider::{test_utils::create_test_provider_factory, HashingWriter, Pro
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{proof::Proof, Nibbles, StateRoot};
 use reth_trie_common::{AccountProof, StorageProof};
-use reth_trie_db::StateRootFromDbTx;
+use reth_trie_db::DatabaseStateRoot;
 use std::{str::FromStr, sync::Arc};
 
 /*

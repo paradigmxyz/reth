@@ -16,7 +16,7 @@ use reth_primitives::{
 use reth_storage_api::StateProofProvider;
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, StateRoot};
-use reth_trie_db::StateRootFromDbTx;
+use reth_trie_db::DatabaseStateRoot;
 use std::fmt::Debug;
 
 /// State provider for a given block number which takes a tx reference.
@@ -260,7 +260,8 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
     fn hashed_state_root(&self, hashed_state: &HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state.clone());
-        StateRoot::overlay(self.tx, revert_state).map_err(|err| ProviderError::Database(err.into()))
+        StateRoot::overlay_root(self.tx, revert_state)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn hashed_state_root_with_updates(
@@ -269,7 +270,7 @@ impl<'b, TX: DbTx> StateRootProvider for HistoricalStateProviderRef<'b, TX> {
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
         revert_state.extend(hashed_state.clone());
-        StateRoot::overlay_with_updates(self.tx, revert_state)
+        StateRoot::overlay_root_with_updates(self.tx, revert_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 }
