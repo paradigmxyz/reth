@@ -1322,4 +1322,27 @@ mod tests {
             assert_eq!(expected_state, *actual_state_by_number);
         }
     }
+
+    #[tokio::test]
+    async fn test_engine_request_during_backfill() {
+        let TestHarness { mut tree, to_tree_tx, sf_action_rx, blocks, payload_command_rx } =
+            get_default_test_harness(PERSISTENCE_THRESHOLD);
+
+        // set backfill active
+        tree.is_backfill_active = true;
+
+        let (tx, rx) = oneshot::channel();
+        tree.on_engine_message(FromEngine::Request(BeaconEngineMessage::ForkchoiceUpdated {
+            state: ForkchoiceState {
+                head_block_hash: B256::random(),
+                safe_block_hash: B256::random(),
+                finalized_block_hash: B256::random(),
+            },
+            payload_attrs: None,
+            tx,
+        }));
+
+        let resp = rx.await.unwrap().unwrap().await.unwrap();
+        assert!(resp.payload_status.is_syncing());
+    }
 }
