@@ -1,5 +1,4 @@
 use reth_chainspec::ChainSpecBuilder;
-use reth_db::mdbx::DatabaseArguments;
 use reth_primitives::{Address, B256};
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
@@ -26,10 +25,9 @@ fn main() -> eyre::Result<()> {
     let factory = ProviderFactory::new_with_database_path(
         db_path,
         spec.into(),
-        DatabaseArguments::new(Default::default()),
+        Default::default(),
         StaticFileProvider::read_only(db_path.join("static_files"))?,
-    )
-    .unwrap();
+    )?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.
