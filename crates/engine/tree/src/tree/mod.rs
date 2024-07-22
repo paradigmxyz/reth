@@ -693,8 +693,10 @@ where
     fn on_downloaded_block(&mut self, block: SealedBlockWithSenders) -> Option<TreeEvent> {
         let block_hash = block.hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
-        if let Some(_) =
-            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_hash).ok()?
+        if self
+            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_hash)
+            .ok()?
+            .is_some()
         {
             return None
         }
