@@ -481,6 +481,10 @@ where
     fn get_stage_checkpoint_progress(&self, id: StageId) -> ProviderResult<Option<Vec<u8>>> {
         self.database.provider()?.get_stage_checkpoint_progress(id)
     }
+
+    fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
+        self.database.provider()?.get_all_checkpoints()
+    }
 }
 
 impl<DB> EvmEnvProvider for BlockchainProvider2<DB>
