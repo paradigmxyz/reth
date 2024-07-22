@@ -146,8 +146,7 @@ where
 
         let pipeline_events = pipeline.events();
 
-        // TODO: support --debug.tip
-        let _initial_target = ctx.node_config().debug.tip;
+        let initial_target = ctx.node_config().debug.tip;
 
         let mut pruner_builder = ctx.pruner_builder();
         if let Some(exex_manager_handle) = &exex_manager_handle {
@@ -237,6 +236,11 @@ where
         let (tx, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
+            if let Some(initial_target) = initial_target {
+                debug!(target: "reth::cli", %initial_target,  "start backfill sync");
+                eth_service.orchestrator_mut().start_backfill_sync(initial_target);
+            }
+
             // advance the chain and handle events
             while let Some(event) = eth_service.next().await {
                 debug!(target: "reth::cli", "Event: {event:?}");
