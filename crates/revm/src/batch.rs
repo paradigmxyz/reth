@@ -1,13 +1,15 @@
 //! Helper for handling execution of multiple blocks.
 
-use crate::{precompile::Address, primitives::alloy_primitives::BlockNumber};
+use crate::{
+    precompile::{Address, HashSet},
+    primitives::alloy_primitives::BlockNumber,
+};
 use core::time::Duration;
 use reth_execution_errors::BlockExecutionError;
 use reth_primitives::{Receipt, Receipts, Request, Requests};
 use reth_prune_types::{PruneMode, PruneModes, PruneSegmentError, MINIMUM_PRUNING_DISTANCE};
 use revm::db::states::bundle_state::BundleRetention;
 use tracing::debug;
-use crate::precompile::HashSet;
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
