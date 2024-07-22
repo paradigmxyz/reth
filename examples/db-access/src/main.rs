@@ -21,7 +21,6 @@ fn main() -> eyre::Result<()> {
     // Instantiate a provider factory for Ethereum mainnet using the provided DB.
     // TODO: Should the DB version include the spec so that you do not need to specify it here?
     let spec = ChainSpecBuilder::mainnet().build();
-
     let factory = ProviderFactory::new_with_database_path(
         db_path,
         spec.into(),
