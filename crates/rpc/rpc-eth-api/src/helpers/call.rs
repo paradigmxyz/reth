@@ -614,7 +614,11 @@ pub trait Call: LoadState + SpawnBlocking {
 
         // At this point we know the call succeeded but want to find the _best_ (lowest) gas the
         // transaction succeeds with. We find this by doing a binary search over the possible range.
-        //
+
+        // we know the tx succeeded with the configured gas limit, so we can use that as the
+        // highest, in case we applied a gas cap due to caller allowance above
+        highest_gas_limit = env.tx.gas_limit;
+
         // NOTE: this is the gas the transaction used, which is less than the
         // transaction requires to succeed.
         let mut gas_used = res.result.gas_used();
