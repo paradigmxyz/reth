@@ -704,17 +704,14 @@ where
         }
 
         // try to append the block
-        if let Ok(status) = self.insert_block(block) {
-            match status {
-                InsertPayloadOk::Inserted(BlockStatus::Valid(_)) => {
-                    if self.is_sync_target_head(block_hash) {
-                        return Some(TreeEvent::TreeAction(TreeAction::MakeCanonical(block_hash)))
-                    }
+        match self.insert_block(block) {
+            Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(_))) => {
+                if self.is_sync_target_head(block_hash) {
+                    return Some(TreeEvent::TreeAction(TreeAction::MakeCanonical(block_hash)))
                 }
-                _ => return None,
             }
+            _ => return None,
         }
-
         None
     }
 
