@@ -3,8 +3,8 @@
 use crate::{
     database::{DatabaseAction, DatabaseService, DatabaseServiceHandle},
     static_files::{StaticFileAction, StaticFileService, StaticFileServiceHandle},
-    tree::ExecutedBlock,
 };
+use reth_chain_state::ExecutedBlock;
 use reth_db::Database;
 use reth_primitives::{SealedBlock, B256, U256};
 use reth_provider::ProviderFactory;
@@ -181,7 +181,7 @@ impl PersistenceHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::{get_executed_block_with_number, get_executed_blocks};
+    use reth_chain_state::test_utils::{get_executed_block_with_number, get_executed_blocks};
     use reth_exex_types::FinishedExExHeight;
     use reth_primitives::B256;
     use reth_provider::{test_utils::create_test_provider_factory, ProviderFactory};
