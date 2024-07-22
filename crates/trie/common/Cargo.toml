@@ -38,7 +38,6 @@ arbitrary = { workspace = true, features = ["derive"] }
 assert_matches.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-proptest-derive.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
 toml.workspace = true
