@@ -461,19 +461,16 @@ where
     /// This will update the tracked canonical in memory state and do the necessary housekeeping.
     const fn make_canonical(&self, target: B256) {
         // TODO: implement state updates and shift canonical state
-
     }
 
     /// Handles a tree event.
     fn on_tree_event(&self, event: TreeEvent) {
         match event {
-            TreeEvent::TreeAction(action) => {
-               match action {
-                   TreeAction::MakeCanonical(target) => {
-                       self.make_canonical(target);
-                   }
-               }
-            }
+            TreeEvent::TreeAction(action) => match action {
+                TreeAction::MakeCanonical(target) => {
+                    self.make_canonical(target);
+                }
+            },
             TreeEvent::BackfillAction(action) => {
                 self.emit_event(EngineApiEvent::BackfillAction(action));
             }
@@ -1000,6 +997,9 @@ where
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
             self.state.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
+
+            // TODO: make canonical and process payload attributes if valid
+
             return Ok(TreeOutcome::new(on_updated))
         }
 
