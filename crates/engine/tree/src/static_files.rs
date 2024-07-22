@@ -12,10 +12,8 @@ use std::sync::{
 };
 use tokio::sync::oneshot;
 
-use crate::{
-    database::{DatabaseAction, DatabaseServiceHandle},
-    tree::ExecutedBlock,
-};
+use crate::database::{DatabaseAction, DatabaseServiceHandle};
+use reth_state::ExecutedBlock;
 
 /// Writes finalized blocks to reth's static files.
 ///

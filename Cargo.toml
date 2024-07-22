@@ -96,6 +96,7 @@ members = [
     "crates/stages/api/",
     "crates/stages/stages/",
     "crates/stages/types/",
+    "crates/state/",
     "crates/static-file/types/",
     "crates/static-file/static-file",
     "crates/storage/codecs/",
@@ -361,6 +362,7 @@ reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types" }
+reth-state = { path = "crates/state" }
 reth-static-file = { path = "crates/static-file/static-file" }
 reth-static-file-types = { path = "crates/static-file/types" }
 reth-storage-api = { path = "crates/storage/storage-api" }

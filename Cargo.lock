@@ -6992,6 +6992,7 @@ dependencies = [
  "reth-stages",
  "reth-stages-api",
  "reth-stages-types",
+ "reth-state",
  "reth-static-file",
  "reth-tasks",
  "reth-tokio-util",
@@ -8103,6 +8104,7 @@ dependencies = [
  "reth-primitives",
  "reth-prune-types",
  "reth-stages-types",
+ "reth-state",
  "reth-storage-api",
  "reth-storage-errors",
  "reth-testing-utils",
@@ -8577,6 +8579,20 @@ dependencies = [
  "reth-trie-common",
  "serde",
  "test-fuzz",
+]
+
+[[package]]
+name = "reth-state"
+version = "1.0.3"
+dependencies = [
+ "parking_lot 0.12.3",
+ "rand 0.8.5",
+ "reth-chainspec",
+ "reth-execution-types",
+ "reth-primitives",
+ "reth-trie",
+ "revm",
+ "tokio",
 ]
 
 [[package]]

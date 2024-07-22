@@ -1,9 +1,6 @@
 #![allow(dead_code)]
 
-use crate::{
-    static_files::{StaticFileAction, StaticFileServiceHandle},
-    tree::ExecutedBlock,
-};
+use crate::static_files::{StaticFileAction, StaticFileServiceHandle};
 use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::B256;
@@ -13,6 +10,7 @@ use reth_provider::{
 };
 use reth_prune::{Pruner, PrunerOutput};
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_state::ExecutedBlock;
 use std::sync::mpsc::{Receiver, SendError, Sender};
 use tokio::sync::oneshot;
 use tracing::debug;

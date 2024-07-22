@@ -26,6 +26,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
+use reth_state::ChainInfoTracker;
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -53,9 +54,6 @@ pub use state::{
 
 mod bundle_state_provider;
 pub use bundle_state_provider::BundleStateProvider;
-
-mod chain_info;
-pub use chain_info::ChainInfoTracker;
 
 mod consistent_view;
 use alloy_rpc_types_engine::ForkchoiceState;
