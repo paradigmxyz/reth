@@ -7,12 +7,13 @@ use crate::{
 pub use memory_overlay::MemoryOverlayStateProvider;
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
-    OnForkChoiceUpdated,
+    OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
     error::InsertBlockErrorKind, BlockAttachment, BlockBuffer, BlockStatus,
 };
 use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, ExecutedBlock};
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
@@ -20,7 +21,7 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_primitives::PayloadTypes;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Address, Block, BlockNumber, GotExpected, Receipts, Requests, SealedBlock,
+    Block, BlockNumHash, BlockNumber, GotExpected, Receipts, Requests, SealedBlock,
     SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
@@ -34,10 +35,10 @@ use reth_rpc_types::{
     },
     ExecutionPayload,
 };
-use reth_trie::{updates::TrieUpdates, HashedPostState};
-pub use state::{BlockState, CanonicalInMemoryState, InMemoryState};
+use reth_stages_api::ControlFlow;
+use reth_trie::HashedPostState;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     marker::PhantomData,
     sync::{mpsc::Receiver, Arc},
 };
@@ -48,7 +49,7 @@ use tokio::sync::{
 use tracing::*;
 
 mod memory_overlay;
-mod state;
+
 /// Maximum number of blocks to be kept only in memory without triggering persistence.
 const PERSISTENCE_THRESHOLD: u64 = 256;
 /// Number of pending blocks that cannot be executed due to missing parent and
@@ -56,53 +57,6 @@ const PERSISTENCE_THRESHOLD: u64 = 256;
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 /// Number of invalid headers to keep in cache.
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
-
-/// Represents an executed block stored in-memory.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ExecutedBlock {
-    pub(crate) block: Arc<SealedBlock>,
-    pub(crate) senders: Arc<Vec<Address>>,
-    pub(crate) execution_output: Arc<ExecutionOutcome>,
-    pub(crate) hashed_state: Arc<HashedPostState>,
-    pub(crate) trie: Arc<TrieUpdates>,
-}
-
-impl ExecutedBlock {
-    pub(crate) const fn new(
-        block: Arc<SealedBlock>,
-        senders: Arc<Vec<Address>>,
-        execution_output: Arc<ExecutionOutcome>,
-        hashed_state: Arc<HashedPostState>,
-        trie: Arc<TrieUpdates>,
-    ) -> Self {
-        Self { block, senders, execution_output, hashed_state, trie }
-    }
-
-    /// Returns a reference to the executed block.
-    pub(crate) fn block(&self) -> &SealedBlock {
-        &self.block
-    }
-
-    /// Returns a reference to the block's senders
-    pub(crate) fn senders(&self) -> &Vec<Address> {
-        &self.senders
-    }
-
-    /// Returns a reference to the block's execution outcome
-    pub(crate) fn execution_outcome(&self) -> &ExecutionOutcome {
-        &self.execution_output
-    }
-
-    /// Returns a reference to the hashed state result of the execution outcome
-    pub(crate) fn hashed_state(&self) -> &HashedPostState {
-        &self.hashed_state
-    }
-
-    /// Returns a reference to the trie updates for the block
-    pub(crate) fn trie_updates(&self) -> &TrieUpdates {
-        &self.trie
-    }
-}
 
 /// Keeps track of the state of the tree.
 #[derive(Debug, Default)]
@@ -164,7 +118,7 @@ impl TreeState {
 
 /// Tracks the state of the engine api internals.
 ///
-/// This type is shareable.
+/// This type is not shareable.
 #[derive(Debug)]
 pub struct EngineApiTreeState {
     /// Tracks the state of the blockchain tree.
@@ -266,6 +220,13 @@ pub enum TreeEvent {
     Download(DownloadRequest),
 }
 
+impl TreeEvent {
+    /// Returns true if the event is a backfill action.
+    const fn is_backfill_action(&self) -> bool {
+        matches!(self, Self::BackfillAction(_))
+    }
+}
+
 /// The actions that can be performed on the tree.
 #[derive(Debug)]
 pub enum TreeAction {
@@ -273,20 +234,32 @@ pub enum TreeAction {
     MakeCanonical(B256),
 }
 
+/// The engine API tree handler implementation.
+///
+/// This type is responsible for processing engine API requests, maintaining the canonical state and
+/// emitting events.
 #[derive(Debug)]
 pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     provider: P,
     executor_provider: E,
     consensus: Arc<dyn Consensus>,
     payload_validator: ExecutionPayloadValidator,
+    /// Keeps track of internals such as executed and buffered blocks.
     state: EngineApiTreeState,
+    /// Incoming engine API requests.
     incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
+    /// Outgoing events that are emitted to the handler.
     outgoing: UnboundedSender<EngineApiEvent>,
+    /// Channels to the persistence layer.
     persistence: PersistenceHandle,
+    /// Tracks the state changes of the persistence task.
     persistence_state: PersistenceState,
     /// Flag indicating whether the node is currently syncing via backfill.
     is_backfill_active: bool,
+    /// Keeps track of the state of the canonical chain that isn't persisted yet.
+    /// This is intended to be accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState,
+    /// Marker for the engine types.
     _marker: PhantomData<T>,
 }
 
@@ -368,8 +341,8 @@ where
                         debug!(target: "consensus::engine", "received backfill sync started event");
                         self.is_backfill_active = true;
                     }
-                    FromOrchestrator::BackfillSyncFinished => {
-                        self.on_backfill_sync_finished();
+                    FromOrchestrator::BackfillSyncFinished(ctrl) => {
+                        self.on_backfill_sync_finished(ctrl);
                     }
                 },
                 FromEngine::Request(request) => match request {
@@ -442,9 +415,17 @@ where
     /// needed.
     ///
     /// This will also try to connect the buffered blocks.
-    fn on_backfill_sync_finished(&mut self) {
+    fn on_backfill_sync_finished(&mut self, ctrl: ControlFlow) {
         debug!(target: "consensus::engine", "received backfill sync finished event");
         self.is_backfill_active = false;
+
+        // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
+        if let ControlFlow::Unwind { bad_block, .. } = ctrl {
+            warn!(target: "consensus::engine", invalid_hash=?bad_block.hash(), invalid_number=?bad_block.number, "Bad block detected in unwind");
+            // update the `invalid_headers` cache with the new invalid header
+            self.state.invalid_headers.insert(*bad_block);
+            return
+        }
 
         let Some(sync_target_state) = self.state.forkchoice_state_tracker.sync_target_state()
         else {
@@ -458,15 +439,48 @@ where
             .block(&sync_target_state.finalized_block_hash)
             .map(|block| block.number);
 
-        // TODO: check the distance between on disk and the latest finalized block
+        // TODO: state housekeeping
+
+        if sync_target_state.finalized_block_hash.is_zero() {
+            return
+        }
+
+        // The block number that the backfill finished at - if the progress or newest
+        // finalized is None then we can't check the distance anyways.
+        //
+        // If both are Some, we perform another distance check and return the desired
+        // pipeline target
+        let Some(backfill_target) =
+            ctrl.block_number().zip(newest_finalized).and_then(|(progress, finalized_number)| {
+                // Determines whether or not we should run backfill again, in case
+                // the new gap is still large enough and requires running backfill again
+                self.backfill_sync_target(progress, finalized_number, None)
+            })
+        else {
+            return
+        };
+
+        // request another backfill run
+        self.emit_event(EngineApiEvent::BackfillAction(BackfillAction::Start(
+            backfill_target.into(),
+        )));
+    }
+
+    /// Attempts to make the given target canonical.
+    ///
+    /// This will update the tracked canonical in memory state and do the necessary housekeeping.
+    const fn make_canonical(&self, target: B256) {
+        // TODO: implement state updates and shift canonical state
     }
 
     /// Handles a tree event.
     fn on_tree_event(&self, event: TreeEvent) {
         match event {
-            TreeEvent::TreeAction(action) => {
-                // TODO: handle
-            }
+            TreeEvent::TreeAction(action) => match action {
+                TreeAction::MakeCanonical(target) => {
+                    self.make_canonical(target);
+                }
+            },
             TreeEvent::BackfillAction(action) => {
                 self.emit_event(EngineApiEvent::BackfillAction(action));
             }
@@ -626,6 +640,16 @@ where
         .with_latest_valid_hash(valid_parent_hash.unwrap_or_default()))
     }
 
+    /// Returns true if the given hash is the last received sync target block.
+    ///
+    /// See [`ForkchoiceStateTracker::sync_target_state`]
+    fn is_sync_target_head(&self, block_hash: B256) -> bool {
+        if let Some(target) = self.state.forkchoice_state_tracker.sync_target_state() {
+            return target.head_block_hash == block_hash
+        }
+        false
+    }
+
     /// Checks if the given `check` hash points to an invalid header, inserting the given `head`
     /// block into the invalid header cache if the `check` hash has a known invalid ancestor.
     ///
@@ -695,6 +719,186 @@ where
         }
         self.state.buffer.insert_block(block);
         Ok(())
+    }
+
+    /// Returns true if the distance from the local tip to the block is greater than the configured
+    /// threshold.
+    ///
+    /// If the `local_tip` is greater than the `block`, then this will return false.
+    #[inline]
+    const fn exceeds_backfill_run_threshold(&self, local_tip: u64, block: u64) -> bool {
+        block > local_tip && block - local_tip > MIN_BLOCKS_FOR_PIPELINE_RUN
+    }
+
+    /// Returns how far the local tip is from the given block. If the local tip is at the same
+    /// height or its block number is greater than the given block, this returns None.
+    #[inline]
+    const fn distance_from_local_tip(&self, local_tip: u64, block: u64) -> Option<u64> {
+        if block > local_tip {
+            Some(block - local_tip)
+        } else {
+            None
+        }
+    }
+
+    /// Returns the target hash to sync to if the distance from the local tip to the block is
+    /// greater than the threshold and we're not synced to the finalized block yet (if we've seen
+    /// that block already).
+    ///
+    /// If this is invoked after a new block has been downloaded, the downloaded block could be the
+    /// (missing) finalized block.
+    fn backfill_sync_target(
+        &self,
+        canonical_tip_num: u64,
+        target_block_number: u64,
+        downloaded_block: Option<BlockNumHash>,
+    ) -> Option<B256> {
+        let sync_target_state = self.state.forkchoice_state_tracker.sync_target_state();
+
+        // check if the distance exceeds the threshold for backfill sync
+        let mut exceeds_backfill_threshold =
+            self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number);
+
+        // check if the downloaded block is the tracked finalized block
+        if let Some(buffered_finalized) = sync_target_state
+            .as_ref()
+            .and_then(|state| self.state.buffer.block(&state.finalized_block_hash))
+        {
+            // if we have buffered the finalized block, we should check how far
+            // we're off
+            exceeds_backfill_threshold =
+                self.exceeds_backfill_run_threshold(canonical_tip_num, buffered_finalized.number);
+        }
+
+        // If this is invoked after we downloaded a block we can check if this block is the
+        // finalized block
+        if let (Some(downloaded_block), Some(ref state)) = (downloaded_block, sync_target_state) {
+            if downloaded_block.hash == state.finalized_block_hash {
+                // we downloaded the finalized block and can now check how far we're off
+                exceeds_backfill_threshold =
+                    self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number);
+            }
+        }
+
+        // if the number of missing blocks is greater than the max, run the
+        // pipeline
+        if exceeds_backfill_threshold {
+            if let Some(state) = sync_target_state {
+                // if we have already canonicalized the finalized block, we should
+                // skip the pipeline run
+                match self.provider.header_by_hash_or_number(state.finalized_block_hash.into()) {
+                    Err(err) => {
+                        warn!(target: "consensus::engine", %err, "Failed to get finalized block header");
+                    }
+                    Ok(None) => {
+                        // ensure the finalized block is known (not the zero hash)
+                        if !state.finalized_block_hash.is_zero() {
+                            // we don't have the block yet and the distance exceeds the allowed
+                            // threshold
+                            return Some(state.finalized_block_hash)
+                        }
+
+                        // OPTIMISTIC SYNCING
+                        //
+                        // It can happen when the node is doing an
+                        // optimistic sync, where the CL has no knowledge of the finalized hash,
+                        // but is expecting the EL to sync as high
+                        // as possible before finalizing.
+                        //
+                        // This usually doesn't happen on ETH mainnet since CLs use the more
+                        // secure checkpoint syncing.
+                        //
+                        // However, optimism chains will do this. The risk of a reorg is however
+                        // low.
+                        debug!(target: "consensus::engine", hash=?state.head_block_hash, "Setting head hash as an optimistic pipeline target.");
+                        return Some(state.head_block_hash)
+                    }
+                    Ok(Some(_)) => {
+                        // we're fully synced to the finalized block
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
+    ///
+    /// This mainly compares the missing parent of the downloaded block with the current canonical
+    /// tip, and decides whether or not backfill sync should be triggered.
+    fn on_disconnected_downloaded_block(
+        &self,
+        downloaded_block: BlockNumHash,
+        missing_parent: BlockNumHash,
+        head: BlockNumHash,
+    ) -> Option<TreeEvent> {
+        // compare the missing parent with the canonical tip
+        if let Some(target) =
+            self.backfill_sync_target(head.number, missing_parent.number, Some(downloaded_block))
+        {
+            return Some(TreeEvent::BackfillAction(BackfillAction::Start(target.into())));
+        }
+
+        // continue downloading the missing parent
+        //
+        // this happens if either:
+        //  * the missing parent block num < canonical tip num
+        //    * this case represents a missing block on a fork that is shorter than the canonical
+        //      chain
+        //  * the missing parent block num >= canonical tip num, but the number of missing blocks is
+        //    less than the pipeline threshold
+        //    * this case represents a potentially long range of blocks to download and execute
+        let request = if let Some(distance) =
+            self.distance_from_local_tip(head.number, missing_parent.number)
+        {
+            DownloadRequest::BlockRange(missing_parent.hash, distance)
+        } else {
+            // This happens when the missing parent is on an outdated
+            // sidechain and we can only download the missing block itself
+            DownloadRequest::BlockSet(HashSet::from_iter([missing_parent.hash]))
+        };
+
+        Some(TreeEvent::Download(request))
+    }
+
+    /// Invoked with a block downloaded from the network
+    ///
+    /// Returns an event with the appropriate action to take, such as:
+    ///  - download more missing blocks
+    ///  - try to canonicalize the target if the `block` is the tracked target (head) block.
+    fn on_downloaded_block(&mut self, block: SealedBlockWithSenders) -> Option<TreeEvent> {
+        let block_num_hash = block.num_hash();
+        let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
+        if self
+            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block_num_hash.hash)
+            .ok()?
+            .is_some()
+        {
+            return None
+        }
+
+        if self.is_backfill_active {
+            return None
+        }
+
+        // try to append the block
+        match self.insert_block(block) {
+            Ok(InsertPayloadOk::Inserted(BlockStatus::Valid(_))) => {
+                if self.is_sync_target_head(block_num_hash.hash) {
+                    return Some(TreeEvent::TreeAction(TreeAction::MakeCanonical(
+                        block_num_hash.hash,
+                    )))
+                }
+            }
+            Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected { head, missing_ancestor })) => {
+                // block is not connected to the canonical head, we need to download
+                // its missing branch first
+                return self.on_disconnected_downloaded_block(block_num_hash, missing_ancestor, head)
+            }
+            _ => {}
+        }
+        None
     }
 
     fn insert_block_without_senders(
@@ -806,8 +1010,17 @@ where
 {
     type Engine = T;
 
-    fn on_downloaded(&mut self, _blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
-        debug!("not implemented");
+    fn on_downloaded(&mut self, blocks: Vec<SealedBlockWithSenders>) -> Option<TreeEvent> {
+        for block in blocks {
+            if let Some(event) = self.on_downloaded_block(block) {
+                let needs_backfill = event.is_backfill_action();
+                self.on_tree_event(event);
+                if needs_backfill {
+                    // can exit early if backfill is needed
+                    break
+                }
+            }
+        }
         None
     }
 
@@ -892,17 +1105,6 @@ where
                 }
                 InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
                 InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
-                    // TODO: isn't this check redundant?
-                    // check if the block's parent is already marked as invalid
-                    // if let Some(status) = self
-                    //     .check_invalid_ancestor_with_head(block.parent_hash, block.hash())
-                    //     .map_err(|error| {
-                    //         InsertBlockError::new(block, InsertBlockErrorKind::Provider(error))
-                    //     })?
-                    // {
-                    //     return Ok(status)
-                    // }
-
                     // not known to be invalid, but we don't know anything else
                     PayloadStatusEnum::Syncing
                 }
@@ -911,14 +1113,12 @@ where
         };
 
         let mut outcome = TreeOutcome::new(status);
-        if outcome.outcome.is_valid() {
-            if let Some(target) = self.state.forkchoice_state_tracker.sync_target_state() {
-                if target.head_block_hash == block_hash {
-                    outcome = outcome
-                        .with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical(block_hash)));
-                }
-            }
+        if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
+            // if the block is valid and it is the sync target head, make it canonical
+            outcome =
+                outcome.with_event(TreeEvent::TreeAction(TreeAction::MakeCanonical(block_hash)));
         }
+
         Ok(outcome)
     }
 
@@ -929,6 +1129,9 @@ where
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
             self.state.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
+
+            // TODO: make canonical and process payload attributes if valid
+
             return Ok(TreeOutcome::new(on_updated))
         }
 
@@ -971,8 +1174,9 @@ impl PersistenceState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{static_files::StaticFileAction, test_utils::get_executed_blocks};
+    use crate::static_files::StaticFileAction;
     use reth_beacon_consensus::EthBeaconConsensus;
+    use reth_chain_state::test_utils::get_executed_blocks;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
@@ -1088,20 +1292,12 @@ mod tests {
 
             let expected_state = BlockState::new(executed_block.clone());
 
-            let actual_state_by_hash = tree
-                .canonical_in_memory_state
-                .inner
-                .in_memory_state
-                .state_by_hash(sealed_block.hash())
-                .unwrap();
+            let actual_state_by_hash =
+                tree.canonical_in_memory_state.state_by_hash(sealed_block.hash()).unwrap();
             assert_eq!(expected_state, *actual_state_by_hash);
 
-            let actual_state_by_number = tree
-                .canonical_in_memory_state
-                .inner
-                .in_memory_state
-                .state_by_number(sealed_block.number)
-                .unwrap();
+            let actual_state_by_number =
+                tree.canonical_in_memory_state.state_by_number(sealed_block.number).unwrap();
             assert_eq!(expected_state, *actual_state_by_number);
         }
     }

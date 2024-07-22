@@ -1,14 +1,16 @@
 //! Types for tracking the canonical chain state in memory.
 
-use crate::tree::ExecutedBlock;
+use crate::ChainInfoTracker;
 use parking_lot::RwLock;
-use reth_primitives::{Receipts, SealedHeader, B256};
-use reth_provider::providers::ChainInfoTracker;
-use std::{collections::HashMap, sync::Arc};
+use reth_chainspec::ChainInfo;
+use reth_execution_types::ExecutionOutcome;
+use reth_primitives::{Address, BlockNumHash, Receipts, SealedBlock, SealedHeader, B256};
+use reth_trie::{updates::TrieUpdates, HashedPostState};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 
 /// Container type for in memory state data.
 #[derive(Debug, Default)]
-pub struct InMemoryState {
+pub(crate) struct InMemoryState {
     blocks: RwLock<HashMap<B256, Arc<BlockState>>>,
     numbers: RwLock<HashMap<u64, B256>>,
     pending: RwLock<Option<BlockState>>,
@@ -97,29 +99,113 @@ impl CanonicalInMemoryState {
         Self { inner: Arc::new(inner) }
     }
 
-    fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState>> {
+    /// Returns in memory state corresponding the given hash.
+    pub fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState>> {
         self.inner.in_memory_state.state_by_hash(hash)
     }
 
-    fn state_by_number(&self, number: u64) -> Option<Arc<BlockState>> {
+    /// Returns in memory state corresponding the block number.
+    pub fn state_by_number(&self, number: u64) -> Option<Arc<BlockState>> {
         self.inner.in_memory_state.state_by_number(number)
     }
 
-    fn head_state(&self) -> Option<Arc<BlockState>> {
+    /// Returns the in memory head state.
+    pub fn head_state(&self) -> Option<Arc<BlockState>> {
         self.inner.in_memory_state.head_state()
     }
 
-    fn pending_state(&self) -> Option<Arc<BlockState>> {
+    /// Returns the in memory pending state.
+    pub fn pending_state(&self) -> Option<Arc<BlockState>> {
         self.inner.in_memory_state.pending_state()
+    }
+
+    /// Returns the in memory pending `BlockNumHash`.
+    pub fn pending_block_num_hash(&self) -> Option<BlockNumHash> {
+        self.inner
+            .in_memory_state
+            .pending_state()
+            .map(|state| BlockNumHash { number: state.number(), hash: state.hash() })
+    }
+
+    /// Returns the current `ChainInfo`.
+    pub fn chain_info(&self) -> ChainInfo {
+        self.inner.chain_info_tracker.chain_info()
+    }
+
+    /// Returns the latest canonical block number.
+    pub fn get_canonical_block_number(&self) -> u64 {
+        self.inner.chain_info_tracker.get_canonical_block_number()
+    }
+
+    /// Returns the `BlockNumHash` of the safe head.
+    pub fn get_safe_num_hash(&self) -> Option<BlockNumHash> {
+        self.inner.chain_info_tracker.get_safe_num_hash()
+    }
+
+    /// Returns the `BlockNumHash` of the finalized head.
+    pub fn get_finalized_num_hash(&self) -> Option<BlockNumHash> {
+        self.inner.chain_info_tracker.get_finalized_num_hash()
+    }
+
+    /// Hook for new fork choice update.
+    pub fn on_forkchoice_update_received(&self) {
+        self.inner.chain_info_tracker.on_forkchoice_update_received();
+    }
+
+    /// Returns the timestamp of the last received update.
+    pub fn last_received_update_timestamp(&self) -> Option<Instant> {
+        self.inner.chain_info_tracker.last_forkchoice_update_received_at()
+    }
+
+    /// Hook for transition configuration exchanged.
+    pub fn on_transition_configuration_exchanged(&self) {
+        self.inner.chain_info_tracker.on_transition_configuration_exchanged();
+    }
+
+    /// Returns the timepstamp of the last transition configuration exchanged,
+    pub fn last_exchanged_transition_configuration_timestamp(&self) -> Option<Instant> {
+        self.inner.chain_info_tracker.last_transition_configuration_exchanged_at()
+    }
+
+    /// Canonical head setter.
+    pub fn set_canonical_head(&self, header: SealedHeader) {
+        self.inner.chain_info_tracker.set_canonical_head(header);
+    }
+
+    /// Safe head setter.
+    pub fn set_safe(&self, header: SealedHeader) {
+        self.inner.chain_info_tracker.set_safe(header);
+    }
+
+    /// Finalized head setter.
+    pub fn set_finalized(&self, header: SealedHeader) {
+        self.inner.chain_info_tracker.set_finalized(header);
+    }
+
+    /// Canonical head getter.
+    pub fn get_canonical_head(&self) -> SealedHeader {
+        self.inner.chain_info_tracker.get_canonical_head()
+    }
+
+    /// Finalized header getter.
+    pub fn get_finalized_header(&self) -> Option<SealedHeader> {
+        self.inner.chain_info_tracker.get_finalized_header()
+    }
+
+    /// Safe header getter.
+    pub fn get_safe_header(&self) -> Option<SealedHeader> {
+        self.inner.chain_info_tracker.get_safe_header()
     }
 }
 
 /// State after applying the given block.
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct BlockState(pub(crate) ExecutedBlock);
+pub struct BlockState(pub ExecutedBlock);
 
+#[allow(dead_code)]
 impl BlockState {
-    pub(crate) const fn new(executed_block: ExecutedBlock) -> Self {
+    /// `BlockState` constructor.
+    pub const fn new(executed_block: ExecutedBlock) -> Self {
         Self(executed_block)
     }
 
@@ -141,6 +227,59 @@ impl BlockState {
 
     pub(crate) fn receipts(&self) -> &Receipts {
         &self.0.execution_outcome().receipts
+    }
+}
+
+/// Represents an executed block stored in-memory.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExecutedBlock {
+    /// Sealed block the rest of fields refer to.
+    pub block: Arc<SealedBlock>,
+    /// Block's senders.
+    pub senders: Arc<Vec<Address>>,
+    /// Block's execution outcome.
+    pub execution_output: Arc<ExecutionOutcome>,
+    /// Block's hashedst state.
+    pub hashed_state: Arc<HashedPostState>,
+    /// Trie updates that result of applying the block.
+    pub trie: Arc<TrieUpdates>,
+}
+
+impl ExecutedBlock {
+    /// `ExecutedBlock` constructor.
+    pub const fn new(
+        block: Arc<SealedBlock>,
+        senders: Arc<Vec<Address>>,
+        execution_output: Arc<ExecutionOutcome>,
+        hashed_state: Arc<HashedPostState>,
+        trie: Arc<TrieUpdates>,
+    ) -> Self {
+        Self { block, senders, execution_output, hashed_state, trie }
+    }
+
+    /// Returns a reference to the executed block.
+    pub fn block(&self) -> &SealedBlock {
+        &self.block
+    }
+
+    /// Returns a reference to the block's senders
+    pub fn senders(&self) -> &Vec<Address> {
+        &self.senders
+    }
+
+    /// Returns a reference to the block's execution outcome
+    pub fn execution_outcome(&self) -> &ExecutionOutcome {
+        &self.execution_output
+    }
+
+    /// Returns a reference to the hashed state result of the execution outcome
+    pub fn hashed_state(&self) -> &HashedPostState {
+        &self.hashed_state
+    }
+
+    /// Returns a reference to the trie updates for the block
+    pub fn trie_updates(&self) -> &TrieUpdates {
+        &self.trie
     }
 }
 

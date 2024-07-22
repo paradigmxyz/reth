@@ -1,9 +1,7 @@
 #![allow(dead_code)]
 
-use crate::{
-    static_files::{StaticFileAction, StaticFileServiceHandle},
-    tree::ExecutedBlock,
-};
+use crate::static_files::{StaticFileAction, StaticFileServiceHandle};
+use reth_chain_state::ExecutedBlock;
 use reth_db::database::Database;
 use reth_errors::ProviderResult;
 use reth_primitives::B256;

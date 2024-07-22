@@ -8,7 +8,7 @@ use reth_beacon_consensus::{
 use reth_ethereum_engine::service::{ChainEvent, EthService};
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_exex::ExExManagerHandle;
-use reth_network::NetworkEvents;
+use reth_network::{NetworkEvents, NetworkSyncUpdater, SyncState};
 use reth_node_api::{FullNodeTypes, NodeAddOns};
 use reth_node_builder::{
     hooks::NodeHooks,
@@ -233,6 +233,7 @@ where
         .await?;
 
         // Run consensus engine to completion
+        let network_handle = ctx.components().network().clone();
         let (tx, rx) = oneshot::channel();
         info!(target: "reth::cli", "Starting consensus engine");
         ctx.task_executor().spawn_critical_blocking("consensus engine", async move {
@@ -245,7 +246,12 @@ where
             while let Some(event) = eth_service.next().await {
                 debug!(target: "reth::cli", "Event: {event:?}");
                 match event {
-                    ChainEvent::BackfillSyncFinished | ChainEvent::BackfillSyncStarted => {}
+                    ChainEvent::BackfillSyncFinished => {
+                        network_handle.update_sync_state(SyncState::Idle);
+                    }
+                    ChainEvent::BackfillSyncStarted => {
+                        network_handle.update_sync_state(SyncState::Syncing);
+                    }
                     ChainEvent::FatalError => break,
                     ChainEvent::Handler(ev) => {
                         event_sender.notify(ev);

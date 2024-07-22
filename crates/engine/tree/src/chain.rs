@@ -1,6 +1,6 @@
 use crate::backfill::{BackfillAction, BackfillEvent, BackfillSync};
 use futures::Stream;
-use reth_stages_api::PipelineTarget;
+use reth_stages_api::{ControlFlow, PipelineTarget};
 use std::{
     pin::Pin,
     task::{Context, Poll},
@@ -88,10 +88,10 @@ where
                     }
                     BackfillEvent::Finished(res) => {
                         return match res {
-                            Ok(event) => {
-                                tracing::debug!(?event, "backfill sync finished");
+                            Ok(ctrl) => {
+                                tracing::debug!(?ctrl, "backfill sync finished");
                                 // notify handler that backfill sync finished
-                                this.handler.on_event(FromOrchestrator::BackfillSyncFinished);
+                                this.handler.on_event(FromOrchestrator::BackfillSyncFinished(ctrl));
                                 Poll::Ready(ChainEvent::BackfillSyncFinished)
                             }
                             Err(err) => {
@@ -196,7 +196,7 @@ pub enum HandlerEvent<T> {
 #[derive(Clone, Debug)]
 pub enum FromOrchestrator {
     /// Invoked when backfill sync finished
-    BackfillSyncFinished,
+    BackfillSyncFinished(ControlFlow),
     /// Invoked when backfill sync started
     BackfillSyncStarted,
 }
