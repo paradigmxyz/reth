@@ -7,7 +7,7 @@ use crate::{
 pub use memory_overlay::MemoryOverlayStateProvider;
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, ForkchoiceStateTracker, InvalidHeaderCache,
-    OnForkChoiceUpdated,
+    OnForkChoiceUpdated, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
 use reth_blockchain_tree::{
     error::InsertBlockErrorKind, BlockAttachment, BlockBuffer, BlockStatus,
@@ -709,6 +709,97 @@ where
         }
         self.state.buffer.insert_block(block);
         Ok(())
+    }
+
+    /// Returns true if the distance from the local tip to the block is greater than the configured
+    /// threshold.
+    ///
+    /// If the `local_tip` is greater than the `block`, then this will return false.
+    #[inline]
+    const fn exceeds_backfill_run_threshold(&self, local_tip: u64, block: u64) -> bool {
+        block > local_tip && block - local_tip > MIN_BLOCKS_FOR_PIPELINE_RUN
+    }
+
+    /// Returns the target hash to sync to if the distance from the local tip to the block is
+    /// greater than the threshold and we're not synced to the finalized block yet (if we've seen
+    /// that block already).
+    ///
+    /// If this is invoked after a new block has been downloaded, the downloaded block could be the
+    /// (missing) finalized block.
+    fn backfill_sync_target(
+        &self,
+        canonical_tip_num: u64,
+        target_block_number: u64,
+        downloaded_block: Option<BlockNumHash>,
+    ) -> Option<B256> {
+        let sync_target_state = self.state.forkchoice_state_tracker.sync_target_state();
+
+        // check if the distance exceeds the threshold for backfill sync
+        let mut exceeds_backfill_threshold =
+            self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number);
+
+        // check if the downloaded block is the tracked finalized block
+        if let Some(buffered_finalized) = sync_target_state
+            .as_ref()
+            .and_then(|state| self.state.buffer.block(&state.finalized_block_hash))
+        {
+            // if we have buffered the finalized block, we should check how far
+            // we're off
+            exceeds_backfill_threshold =
+                self.exceeds_backfill_run_threshold(canonical_tip_num, buffered_finalized.number);
+        }
+
+        // If this is invoked after we downloaded a block we can check if this block is the
+        // finalized block
+        if let (Some(downloaded_block), Some(ref state)) = (downloaded_block, sync_target_state) {
+            if downloaded_block.hash == state.finalized_block_hash {
+                // we downloaded the finalized block and can now check how far we're off
+                exceeds_backfill_threshold =
+                    self.exceeds_backfill_run_threshold(canonical_tip_num, downloaded_block.number);
+            }
+        }
+
+        // if the number of missing blocks is greater than the max, run the
+        // pipeline
+        if exceeds_backfill_threshold {
+            if let Some(state) = sync_target_state {
+                // if we have already canonicalized the finalized block, we should
+                // skip the pipeline run
+                match self.provider.header_by_hash_or_number(state.finalized_block_hash.into()) {
+                    Err(err) => {
+                        warn!(target: "consensus::engine", %err, "Failed to get finalized block header");
+                    }
+                    Ok(None) => {
+                        // ensure the finalized block is known (not the zero hash)
+                        if !state.finalized_block_hash.is_zero() {
+                            // we don't have the block yet and the distance exceeds the allowed
+                            // threshold
+                            return Some(state.finalized_block_hash)
+                        }
+
+                        // OPTIMISTIC SYNCING
+                        //
+                        // It can happen when the node is doing an
+                        // optimistic sync, where the CL has no knowledge of the finalized hash,
+                        // but is expecting the EL to sync as high
+                        // as possible before finalizing.
+                        //
+                        // This usually doesn't happen on ETH mainnet since CLs use the more
+                        // secure checkpoint syncing.
+                        //
+                        // However, optimism chains will do this. The risk of a reorg is however
+                        // low.
+                        debug!(target: "consensus::engine", hash=?state.head_block_hash, "Setting head hash as an optimistic pipeline target.");
+                        return Some(state.head_block_hash)
+                    }
+                    Ok(Some(_)) => {
+                        // we're fully synced to the finalized block
+                    }
+                }
+            }
+        }
+
+        None
     }
 
     /// This handles downloaded blocks that are shown to be disconnected from the canonical chain.
