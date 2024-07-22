@@ -15,6 +15,7 @@ use reth_stages_api::{
     StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_trie::{IntermediateStateRootState, StateRoot, StateRootProgress, StoredSubNode};
+use reth_trie_db::DatabaseStateRoot;
 use std::fmt::Debug;
 use tracing::*;
 

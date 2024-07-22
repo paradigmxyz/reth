@@ -27,6 +27,7 @@ use reth_prune_types::PruneModes;
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{hashed_cursor::HashedPostStateCursorFactory, StateRoot};
+use reth_trie_db::DatabaseStateRoot;
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashSet},
     sync::Arc,
