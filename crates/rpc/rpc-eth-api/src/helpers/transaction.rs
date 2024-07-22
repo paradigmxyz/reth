@@ -629,6 +629,7 @@ pub trait LoadTransaction: SpawnBlocking {
             Ok(block.map(|block| (transaction, block.seal(block_hash))))
         }
     }
+
     /// Sets a `SequencerClient` for `eth_sendRawTransaction`
     fn set_sequencer_client(&mut self, sequencer_client: Arc<SequencerClient>);
 }

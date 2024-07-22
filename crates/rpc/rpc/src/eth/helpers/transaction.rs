@@ -51,6 +51,7 @@ where
     fn pool(&self) -> &Self::Pool {
         self.inner.pool()
     }
+
     #[inline]
     fn set_sequencer_client(&mut self, _sequencer_client: Arc<SequencerClient>) {}
 }
