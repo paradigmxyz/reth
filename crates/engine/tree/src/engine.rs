@@ -1,9 +1,9 @@
 //! An engine API handler for the chain.
 
 use crate::{
+    backfill::BackfillAction,
     chain::{ChainHandler, FromOrchestrator, HandlerEvent},
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
-    tree::TreeEvent,
 };
 use futures::{Stream, StreamExt};
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage};
@@ -75,10 +75,10 @@ where
                 match ev {
                     RequestHandlerEvent::HandlerEvent(ev) => {
                         return match ev {
-                            HandlerEvent::BackfillSync(target) => {
+                            HandlerEvent::BackfillAction(target) => {
                                 // bubble up backfill sync request request
                                 self.downloader.on_action(DownloadAction::Clear);
-                                Poll::Ready(HandlerEvent::BackfillSync(target))
+                                Poll::Ready(HandlerEvent::BackfillAction(target))
                             }
                             HandlerEvent::Event(ev) => {
                                 // bubble up the event
@@ -191,16 +191,10 @@ where
             EngineApiEvent::BeaconConsensus(ev) => {
                 RequestHandlerEvent::HandlerEvent(HandlerEvent::Event(ev))
             }
-            EngineApiEvent::FromTree(ev) => match ev {
-                TreeEvent::BackfillAction(target) => {
-                    RequestHandlerEvent::HandlerEvent(HandlerEvent::BackfillSync(target))
-                }
-                TreeEvent::Download(download) => RequestHandlerEvent::Download(download),
-                TreeEvent::TreeAction(ev) => {
-                    // TODO revise this
-                    return Poll::Pending
-                }
-            },
+            EngineApiEvent::BackfillAction(action) => {
+                RequestHandlerEvent::HandlerEvent(HandlerEvent::BackfillAction(action))
+            }
+            EngineApiEvent::Download(action) => RequestHandlerEvent::Download(action),
         };
         Poll::Ready(ev)
     }
@@ -212,8 +206,10 @@ pub enum EngineApiEvent {
     /// Event from the consensus engine.
     // TODO(mattsse): find a more appropriate name for this variant, consider phasing it out.
     BeaconConsensus(BeaconConsensusEngineEvent),
-    /// Bubbled from tree.
-    FromTree(TreeEvent),
+    /// Backfill action is needed.
+    BackfillAction(BackfillAction),
+    /// Block download is needed.
+    Download(DownloadRequest),
 }
 
 impl From<BeaconConsensusEngineEvent> for EngineApiEvent {
