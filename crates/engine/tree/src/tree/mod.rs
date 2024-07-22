@@ -13,6 +13,7 @@ use reth_blockchain_tree::{
     error::InsertBlockErrorKind, BlockAttachment, BlockBuffer, BlockStatus,
 };
 use reth_blockchain_tree_api::{error::InsertBlockError, InsertPayloadOk};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, ExecutedBlock};
 use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
@@ -20,7 +21,7 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_primitives::PayloadTypes;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Address, Block, BlockNumHash, BlockNumber, GotExpected, Receipts, Requests, SealedBlock,
+    Block, BlockNumHash, BlockNumber, GotExpected, Receipts, Requests, SealedBlock,
     SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
@@ -34,8 +35,7 @@ use reth_rpc_types::{
     },
     ExecutionPayload,
 };
-use reth_trie::{updates::TrieUpdates, HashedPostState};
-pub use state::{BlockState, CanonicalInMemoryState, InMemoryState};
+use reth_trie::HashedPostState;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     marker::PhantomData,
@@ -48,7 +48,7 @@ use tokio::sync::{
 use tracing::*;
 
 mod memory_overlay;
-mod state;
+
 /// Maximum number of blocks to be kept only in memory without triggering persistence.
 const PERSISTENCE_THRESHOLD: u64 = 256;
 /// Number of pending blocks that cannot be executed due to missing parent and
@@ -56,53 +56,6 @@ const PERSISTENCE_THRESHOLD: u64 = 256;
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
 /// Number of invalid headers to keep in cache.
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
-
-/// Represents an executed block stored in-memory.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ExecutedBlock {
-    pub(crate) block: Arc<SealedBlock>,
-    pub(crate) senders: Arc<Vec<Address>>,
-    pub(crate) execution_output: Arc<ExecutionOutcome>,
-    pub(crate) hashed_state: Arc<HashedPostState>,
-    pub(crate) trie: Arc<TrieUpdates>,
-}
-
-impl ExecutedBlock {
-    pub(crate) const fn new(
-        block: Arc<SealedBlock>,
-        senders: Arc<Vec<Address>>,
-        execution_output: Arc<ExecutionOutcome>,
-        hashed_state: Arc<HashedPostState>,
-        trie: Arc<TrieUpdates>,
-    ) -> Self {
-        Self { block, senders, execution_output, hashed_state, trie }
-    }
-
-    /// Returns a reference to the executed block.
-    pub(crate) fn block(&self) -> &SealedBlock {
-        &self.block
-    }
-
-    /// Returns a reference to the block's senders
-    pub(crate) fn senders(&self) -> &Vec<Address> {
-        &self.senders
-    }
-
-    /// Returns a reference to the block's execution outcome
-    pub(crate) fn execution_outcome(&self) -> &ExecutionOutcome {
-        &self.execution_output
-    }
-
-    /// Returns a reference to the hashed state result of the execution outcome
-    pub(crate) fn hashed_state(&self) -> &HashedPostState {
-        &self.hashed_state
-    }
-
-    /// Returns a reference to the trie updates for the block
-    pub(crate) fn trie_updates(&self) -> &TrieUpdates {
-        &self.trie
-    }
-}
 
 /// Keeps track of the state of the tree.
 #[derive(Debug, Default)]
@@ -1164,8 +1117,9 @@ impl PersistenceState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{static_files::StaticFileAction, test_utils::get_executed_blocks};
+    use crate::static_files::StaticFileAction;
     use reth_beacon_consensus::EthBeaconConsensus;
+    use reth_chain_state::test_utils::get_executed_blocks;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
@@ -1281,20 +1235,12 @@ mod tests {
 
             let expected_state = BlockState::new(executed_block.clone());
 
-            let actual_state_by_hash = tree
-                .canonical_in_memory_state
-                .inner
-                .in_memory_state
-                .state_by_hash(sealed_block.hash())
-                .unwrap();
+            let actual_state_by_hash =
+                tree.canonical_in_memory_state.state_by_hash(sealed_block.hash()).unwrap();
             assert_eq!(expected_state, *actual_state_by_hash);
 
-            let actual_state_by_number = tree
-                .canonical_in_memory_state
-                .inner
-                .in_memory_state
-                .state_by_number(sealed_block.number)
-                .unwrap();
+            let actual_state_by_number =
+                tree.canonical_in_memory_state.state_by_number(sealed_block.number).unwrap();
             assert_eq!(expected_state, *actual_state_by_number);
         }
     }
