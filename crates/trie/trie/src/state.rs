@@ -1,5 +1,5 @@
 use crate::{
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::{DatabaseHashedCursorFactory, HashedPostStateCursorFactory},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     proof::Proof,
     Nibbles,
@@ -203,8 +203,10 @@ impl HashedPostState {
     ) -> Result<AccountProof, StateRootError> {
         let sorted = self.clone().into_sorted();
         let prefix_sets = self.construct_prefix_sets();
+        let hashed_cursor_factory =
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &sorted);
         Proof::from_tx(tx)
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(tx, &sorted))
+            .with_hashed_cursor_factory(hashed_cursor_factory)
             .with_prefix_sets_mut(prefix_sets)
             .account_proof(address, slots)
     }
