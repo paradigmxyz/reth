@@ -6,7 +6,7 @@ use reth_db_api::{
 };
 use reth_primitives::{Account, B256, U256};
 
-/// A struct wrapping database transaction that implements [HashedCursorFactory].
+/// A struct wrapping database transaction that implements [`HashedCursorFactory`].
 #[derive(Debug)]
 pub struct DatabaseHashedCursorFactory<'a, TX>(&'a TX);
 
@@ -43,8 +43,8 @@ impl<'a, TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<'a, TX> {
     }
 }
 
-/// A struct wrapping database cursor over hashed accounts implementing [HashedCursor] for iterating
-/// over accounts.
+/// A struct wrapping database cursor over hashed accounts implementing [`HashedCursor`] for
+/// iterating over accounts.
 #[derive(Debug)]
 pub struct DatabaseHashedAccountCursor<C>(C);
 
