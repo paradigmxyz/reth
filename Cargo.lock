@@ -8248,6 +8248,7 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-tokio-util",
+ "reth-transaction-pool",
  "serde",
  "thiserror",
  "tokio",
@@ -8358,6 +8359,7 @@ dependencies = [
 name = "reth-rpc-types"
 version = "1.0.1"
 dependencies = [
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-rpc-types-admin",
@@ -8619,6 +8621,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
+ "reth-rpc-types",
  "reth-tasks",
  "reth-tracing",
  "revm",

@@ -3,6 +3,7 @@ use crate::blobstore::{
 };
 use parking_lot::RwLock;
 use reth_primitives::B256;
+use reth_rpc_types::BlobAndProofV1;
 use std::{collections::HashMap, sync::Arc};
 
 /// An in-memory blob store.
@@ -34,7 +35,7 @@ impl BlobStore for InMemoryBlobStore {
 
     fn insert_all(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
-            return Ok(())
+            return Ok(());
         }
         let mut store = self.inner.store.write();
         let mut total_add = 0;
@@ -57,7 +58,7 @@ impl BlobStore for InMemoryBlobStore {
 
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
-            return Ok(())
+            return Ok(());
         }
         let mut store = self.inner.store.write();
         let mut total_sub = 0;
@@ -106,11 +107,37 @@ impl BlobStore for InMemoryBlobStore {
             if let Some(item) = store.get(&tx) {
                 items.push(item.clone());
             } else {
-                return Err(BlobStoreError::MissingSidecar(tx))
+                return Err(BlobStoreError::MissingSidecar(tx));
             }
         }
 
         Ok(items)
+    }
+
+    fn get_by_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
+        let mut result = vec![None; versioned_hashes.len()];
+        for (_tx_hash, blob_sidecar) in self.inner.store.read().iter() {
+            // FIXME(sproul): these versioned hashes could be cached
+            for (i, blob_versioned_hash) in blob_sidecar.versioned_hashes().enumerate() {
+                for (j, target_versioned_hash) in versioned_hashes.iter().enumerate() {
+                    if blob_versioned_hash == *target_versioned_hash {
+                        result[j].get_or_insert_with(|| BlobAndProofV1 {
+                            blob: blob_sidecar.blobs[i].clone(),
+                            proof: blob_sidecar.proofs[i].clone(),
+                        });
+                    }
+                }
+            }
+
+            // Return early if all blobs are found.
+            if result.iter().all(|blob| blob.is_some()) {
+                break;
+            }
+        }
+        Ok(result)
     }
 
     fn data_size_hint(&self) -> Option<usize> {

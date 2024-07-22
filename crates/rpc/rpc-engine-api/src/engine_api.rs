@@ -16,12 +16,14 @@ use reth_primitives::{
     Block, BlockHash, BlockHashOrNumber, BlockNumber, EthereumHardfork, B256, U64,
 };
 use reth_rpc_api::EngineApiServer;
-use reth_rpc_types::engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodiesV2, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
-    ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    TransitionConfiguration,
-    BlobTransactionId, GetBlobsResponse,
+use reth_rpc_types::{
+    engine::{
+        CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
+        ExecutionPayloadBodiesV2, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
+        ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+        TransitionConfiguration,
+    },
+    BlobAndProofV1,
 };
 use reth_rpc_types_compat::engine::payload::{
     convert_payload_input_v2_to_payload, convert_to_payload_body_v1, convert_to_payload_body_v2,
@@ -915,20 +917,14 @@ where
 
     async fn get_blobs_v1(
         &self,
-        transaction_ids: Vec<BlobTransactionId>,
-    ) -> RpcResult<GetBlobsResponse> {
-        let mut results = vec![];
-
-        for transaction_id in transaction_ids {
-            results.push(
-                self.inner
-                    .tx_pool
-                    .get_blob(transaction_id.tx_hash)
-                    .map_err(|e| EngineApiError::Internal(Box::new(e)))?,
-            );
-        }
-
-        Ok(GetBlobsResponse { blobs: results })
+        versioned_hashes: Vec<B256>,
+    ) -> RpcResult<Vec<Option<BlobAndProofV1>>> {
+        // FIXME(sproul): work out error wrapping or make infallible
+        Ok(self
+            .inner
+            .tx_pool
+            .get_blobs_for_versioned_hashes(&versioned_hashes)
+            .expect("get_blobs_for_versioned_hashes is infallible"))
     }
 }
 

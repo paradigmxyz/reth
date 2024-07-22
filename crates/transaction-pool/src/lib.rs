@@ -152,8 +152,11 @@
 use crate::{identifier::TransactionId, pool::PoolInner};
 use aquamarine as _;
 use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::{Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, U256};
+use reth_primitives::{
+    Address, BlobTransactionSidecar, PooledTransactionsElement, TxHash, B256, U256,
+};
 use reth_provider::StateProviderFactory;
+use reth_rpc_types::BlobAndProofV1;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
 use tracing::{instrument, trace};
@@ -520,6 +523,13 @@ where
         tx_hashes: Vec<TxHash>,
     ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
         self.pool.blob_store().get_exact(tx_hashes)
+    }
+
+    fn get_blobs_for_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
+        self.pool.blob_store().get_by_versioned_hashes(versioned_hashes)
     }
 }
 

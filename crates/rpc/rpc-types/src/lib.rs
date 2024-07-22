@@ -56,15 +56,16 @@ pub use eth::{
 pub use peer::*;
 pub use rpc::*;
 
+use alloy_eips::eip4844::BYTES_PER_BLOB;
+use alloy_primitives::FixedBytes;
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize)]
-pub struct BlobTransactionId {
-    pub tx_hash: alloy_primitives::TxHash,
-    pub versioned_hashes: Vec<alloy_primitives::B256>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct GetBlobsResponse {
-    pub blobs: Vec<Option<BlobTransactionSidecar>>,
+/// Blob type returned in responses to `engine_getBlobsV1`.
+// FIXME(sproul): move to alloy?
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BlobAndProofV1 {
+    /// The blob data.
+    pub blob: FixedBytes<BYTES_PER_BLOB>,
+    /// The KZG proof for the blob.
+    pub proof: FixedBytes<48>,
 }

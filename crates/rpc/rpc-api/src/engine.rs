@@ -13,8 +13,7 @@ use reth_rpc_types::{
         ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, TransitionConfiguration,
     },
     state::StateOverride,
-    BlobTransactionId, BlockOverrides, Filter, GetBlobsResponse, Log, RichBlock, SyncStatus,
-    TransactionRequest,
+    BlobAndProofV1, BlockOverrides, Filter, Log, RichBlock, SyncStatus, TransactionRequest,
 };
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
 // generic here. It would be nice if the rpc macro would understand which types need to have serde.
@@ -213,11 +212,12 @@ pub trait EngineApi<Engine: EngineTypes> {
     #[method(name = "exchangeCapabilities")]
     async fn exchange_capabilities(&self, capabilities: Vec<String>) -> RpcResult<Vec<String>>;
 
+    /// Fetch blobs for the consensus layer from the in-memory blob cache.
     #[method(name = "getBlobsV1")]
     async fn get_blobs_v1(
         &self,
-        transaction_ids: Vec<BlobTransactionId>,
-    ) -> RpcResult<GetBlobsResponse>;
+        transaction_ids: Vec<B256>,
+    ) -> RpcResult<Vec<Option<BlobAndProofV1>>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
