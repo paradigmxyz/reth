@@ -64,13 +64,13 @@ where
             provider.get_writer(block.number, StaticFileSegment::Transactions)?;
 
         // TODO: does to_compact require ownership?
-        header_writer.append_header(block.header().clone(), td, block.hash())?;
+        header_writer.append_header(block.header(), td, &block.hash())?;
         let no_hash_transactions =
             block.body.clone().into_iter().map(TransactionSignedNoHash::from);
 
         let mut tx_number = start_tx_number;
         for tx in no_hash_transactions {
-            transactions_writer.append_transaction(tx_number, tx)?;
+            transactions_writer.append_transaction(tx_number, &tx)?;
             tx_number += 1;
         }
 
@@ -123,7 +123,7 @@ where
             // receipt is pruned
             for maybe_receipt in receipts.first().unwrap() {
                 if let Some(receipt) = maybe_receipt {
-                    receipts_writer.append_receipt(current_receipt, receipt.clone())?;
+                    receipts_writer.append_receipt(current_receipt, &receipt)?;
                 }
                 current_receipt += 1;
             }

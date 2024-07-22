@@ -202,11 +202,11 @@ impl<DB: Database> DatabaseProviderRW<DB> {
             for block_number in 0..block.number {
                 let mut prev = block.header.clone().unseal();
                 prev.number = block_number;
-                writer.append_header(prev, U256::ZERO, B256::ZERO)?;
+                writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
             }
         }
 
-        writer.append_header(block.header.as_ref().clone(), ttd, block.hash())?;
+        writer.append_header(block.header.as_ref(), ttd, &block.hash())?;
 
         self.insert_block(block)
     }
