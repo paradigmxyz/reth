@@ -92,6 +92,11 @@ where
 
         Self { orchestrator: ChainOrchestrator::new(handler, backfill_sync) }
     }
+
+    /// Returns a mutable reference to the orchestrator.
+    pub fn orchestrator_mut(&mut self) -> &mut EthServiceType<DB, Client> {
+        &mut self.orchestrator
+    }
 }
 
 impl<DB, Client> Stream for EthService<DB, Client>
