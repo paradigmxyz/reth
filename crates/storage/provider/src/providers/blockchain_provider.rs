@@ -274,15 +274,7 @@ where
 
     fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
         Ok(self.canonical_in_memory_state.pending_state().map(|block_state| {
-            let flattened_receipts: Vec<Receipt> = block_state
-                .receipts()
-                .receipt_vec
-                .iter()
-                .flatten()
-                .filter_map(|opt_receipt| opt_receipt.clone())
-                .collect();
-
-            (block_state.block().block().clone(), flattened_receipts)
+            (block_state.block().block().clone(), block_state.flattened_receipts())
         }))
     }
 
@@ -442,12 +434,15 @@ where
                         .canonical_in_memory_state
                         .state_by_hash(rpc_block_hash.block_hash)
                         .ok_or(ProviderError::StateForHashNotFound(rpc_block_hash.block_hash))?;
-                    receipts = self.tree.receipts_by_block_hash(rpc_block_hash.block_hash);
+                    receipts = Some(block_state.flattened_receipts());
                 }
                 Ok(receipts)
             }
             BlockId::Number(num_tag) => match num_tag {
-                BlockNumberOrTag::Pending => Ok(self.tree.pending_receipts()),
+                BlockNumberOrTag::Pending => Ok(self
+                    .canonical_in_memory_state
+                    .pending_state()
+                    .and_then(|block_state| Some(block_state.flattened_receipts()))),
                 _ => {
                     if let Some(num) = self.convert_block_number(num_tag)? {
                         self.receipts_by_block(num.into())

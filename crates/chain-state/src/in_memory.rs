@@ -4,7 +4,7 @@ use crate::ChainInfoTracker;
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{Address, BlockNumHash, Receipts, SealedBlock, SealedHeader, B256};
+use reth_primitives::{Address, BlockNumHash, Receipt, Receipts, SealedBlock, SealedHeader, B256};
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 
@@ -230,9 +230,19 @@ impl BlockState {
         self.0.block().header.state_root
     }
 
-    /// Returns the receipts of executed block that determines the state.
+    /// Returns the `Receipts` of executed block that determines the state.
     pub fn receipts(&self) -> &Receipts {
         &self.0.execution_outcome().receipts
+    }
+
+    /// Returns a vector of `Receipt` of executed block that determines the state.
+    pub fn flattened_receipts(&self) -> Vec<Receipt> {
+        self.receipts()
+            .receipt_vec
+            .iter()
+            .flatten()
+            .filter_map(|opt_receipt| opt_receipt.clone())
+            .collect()
     }
 }
 
