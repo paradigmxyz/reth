@@ -17,6 +17,7 @@ pub use reth_engine_tree::{
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_network_p2p::{bodies::client::BodiesClient, headers::client::HeadersClient};
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_provider::{providers::BlockchainProvider, ProviderFactory};
 use reth_prune::Pruner;
@@ -66,6 +67,7 @@ where
         provider: ProviderFactory<DB>,
         blockchain_db: BlockchainProvider<DB>,
         pruner: Pruner<DB, ProviderFactory<DB>>,
+        payload_builder: PayloadBuilderHandle<EthEngineTypes>,
     ) -> Self {
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
@@ -83,6 +85,7 @@ where
             payload_validator,
             to_tree_rx,
             persistence_handle,
+            payload_builder,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
@@ -176,6 +179,7 @@ mod tests {
         let pruner =
             Pruner::<_, ProviderFactory<_>>::new(provider_factory.clone(), vec![], 0, 0, None, rx);
 
+        let (tx, _rx) = unbounded_channel();
         let _eth_service = EthService::new(
             chain_spec,
             client,
@@ -185,6 +189,7 @@ mod tests {
             provider_factory,
             blockchain_db,
             pruner,
+            PayloadBuilderHandle::new(tx),
         );
     }
 }

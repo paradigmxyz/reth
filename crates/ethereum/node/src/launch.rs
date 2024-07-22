@@ -168,6 +168,7 @@ where
             ctx.provider_factory().clone(),
             ctx.blockchain_db().clone(),
             pruner,
+            ctx.components().payload_builder().clone(),
         );
 
         let event_sender = EventSender::default();

@@ -18,6 +18,7 @@ use reth_consensus::{Consensus, PostExecutionInput};
 use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::PayloadTypes;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
@@ -39,7 +40,6 @@ use reth_stages_api::ControlFlow;
 use reth_trie::HashedPostState;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    marker::PhantomData,
     sync::{mpsc::Receiver, Arc},
 };
 use tokio::sync::{
@@ -259,8 +259,9 @@ pub struct EngineApiTreeHandlerImpl<P, E, T: EngineTypes> {
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
     /// This is intended to be accessed from external sources, such as rpc.
     canonical_in_memory_state: CanonicalInMemoryState,
-    /// Marker for the engine types.
-    _marker: PhantomData<T>,
+    /// Handle to the payload builder that will receive payload attributes for valid forkchoice
+    /// updates
+    payload_builder: PayloadBuilderHandle<T>,
 }
 
 impl<P, E, T> EngineApiTreeHandlerImpl<P, E, T>
@@ -280,6 +281,7 @@ where
         state: EngineApiTreeState,
         header: SealedHeader,
         persistence: PersistenceHandle,
+        payload_builder: PayloadBuilderHandle<T>,
     ) -> Self {
         Self {
             provider,
@@ -293,7 +295,7 @@ where
             is_backfill_active: false,
             state,
             canonical_in_memory_state: CanonicalInMemoryState::with_head(header),
-            _marker: PhantomData,
+            payload_builder,
         }
     }
 
@@ -308,6 +310,7 @@ where
         payload_validator: ExecutionPayloadValidator,
         incoming: Receiver<FromEngine<BeaconEngineMessage<T>>>,
         persistence: PersistenceHandle,
+        payload_builder: PayloadBuilderHandle<T>,
     ) -> UnboundedReceiver<EngineApiEvent> {
         let (tx, outgoing) = tokio::sync::mpsc::unbounded_channel();
         let state = EngineApiTreeState::new(
@@ -328,6 +331,7 @@ where
             state,
             header,
             persistence,
+            payload_builder,
         );
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
         outgoing
@@ -1190,6 +1194,7 @@ mod tests {
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm::test_utils::MockExecutorProvider;
+    use reth_payload_builder::PayloadServiceCommand;
     use reth_provider::test_utils::MockEthProvider;
     use std::sync::mpsc::{channel, Sender};
     use tokio::sync::mpsc::unbounded_channel;
@@ -1199,6 +1204,7 @@ mod tests {
         to_tree_tx: Sender<FromEngine<BeaconEngineMessage<EthEngineTypes>>>,
         blocks: Vec<ExecutedBlock>,
         sf_action_rx: Receiver<StaticFileAction>,
+        payload_command_rx: UnboundedReceiver<PayloadServiceCommand<EthEngineTypes>>,
     }
 
     fn get_default_test_harness(number_of_blocks: u64) -> TestHarness {
@@ -1249,6 +1255,9 @@ mod tests {
         };
 
         let header = blocks.first().unwrap().block().header.clone();
+
+        let (to_payload_service, payload_command_rx) = unbounded_channel();
+        let payload_builder = PayloadBuilderHandle::new(to_payload_service);
         let mut tree = EngineApiTreeHandlerImpl::new(
             provider,
             executor_factory,
@@ -1259,20 +1268,21 @@ mod tests {
             engine_api_tree_state,
             header,
             persistence_handle,
+            payload_builder,
         );
         let last_executed_block = blocks.last().unwrap().clone();
         let pending = Some(BlockState::new(last_executed_block));
         tree.canonical_in_memory_state =
             CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending);
 
-        TestHarness { tree, to_tree_tx, blocks, sf_action_rx }
+        TestHarness { tree, to_tree_tx, blocks, sf_action_rx, payload_command_rx }
     }
 
     #[tokio::test]
     async fn test_tree_persist_blocks() {
         // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
         // persistence task.
-        let TestHarness { tree, to_tree_tx, sf_action_rx, mut blocks } =
+        let TestHarness { tree, to_tree_tx, sf_action_rx, mut blocks, payload_command_rx } =
             get_default_test_harness(PERSISTENCE_THRESHOLD + 1);
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| tree.run()).unwrap();
 
@@ -1292,7 +1302,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_in_memory_state_trait_impl() {
-        let TestHarness { tree, to_tree_tx, sf_action_rx, blocks } = get_default_test_harness(10);
+        let TestHarness { tree, to_tree_tx, sf_action_rx, blocks, payload_command_rx } =
+            get_default_test_harness(10);
 
         let head_block = blocks.last().unwrap().block();
         let first_block = blocks.first().unwrap().block();

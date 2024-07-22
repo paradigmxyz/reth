@@ -7144,6 +7144,7 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-exex-types",
  "reth-network-p2p",
+ "reth-payload-builder",
  "reth-payload-validator",
  "reth-primitives",
  "reth-provider",
