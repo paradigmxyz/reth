@@ -343,12 +343,9 @@ where
 
         // apply after and count to traces if specified, this allows for a pagination style.
         // only consider traces after
-        all_traces = match after.map(|a| a as usize) {
-            Some(after_index) if after_index < all_traces.len() => {
-                all_traces.split_off(after_index)
-            }
-            _ => all_traces,
-        };
+        if let Some(after) = after.map(|a| a as usize).filter(|a| *a < all_traces.len()) {
+            all_traces = all_traces.split_off(after);
+        }
 
         // at most, return count of traces
         if let Some(count) = count {
