@@ -1357,7 +1357,7 @@ impl PersistenceState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::static_files::StaticFileAction;
+    use crate::persistence::PersistenceAction;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chain_state::{test_utils::get_executed_blocks, BlockState};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -1372,7 +1372,7 @@ mod tests {
         tree: EngineApiTreeHandlerImpl<MockEthProvider, MockExecutorProvider, EthEngineTypes>,
         to_tree_tx: Sender<FromEngine<BeaconEngineMessage<EthEngineTypes>>>,
         blocks: Vec<ExecutedBlock>,
-        sf_action_rx: Receiver<StaticFileAction>,
+        action_rx: Receiver<PersistenceAction>,
         payload_command_rx: UnboundedReceiver<PayloadServiceCommand<EthEngineTypes>>,
     }
 
@@ -1395,8 +1395,7 @@ mod tests {
         let tree_state = TreeState { blocks_by_hash, blocks_by_number, ..Default::default() };
 
         let (action_tx, action_rx) = channel();
-        let (sf_action_tx, sf_action_rx) = channel();
-        let persistence_handle = PersistenceHandle::new(action_tx, sf_action_tx);
+        let persistence_handle = PersistenceHandle::new(action_tx);
 
         let chain_spec = Arc::new(
             ChainSpecBuilder::default()
@@ -1444,22 +1443,22 @@ mod tests {
         tree.canonical_in_memory_state =
             CanonicalInMemoryState::new(state_by_hash, hash_by_number, pending);
 
-        TestHarness { tree, to_tree_tx, blocks, sf_action_rx, payload_command_rx }
+        TestHarness { tree, to_tree_tx, blocks, action_rx, payload_command_rx }
     }
 
     #[tokio::test]
     async fn test_tree_persist_blocks() {
         // we need more than PERSISTENCE_THRESHOLD blocks to trigger the
         // persistence task.
-        let TestHarness { tree, to_tree_tx, sf_action_rx, mut blocks, payload_command_rx } =
+        let TestHarness { tree, to_tree_tx, action_rx, mut blocks, payload_command_rx } =
             get_default_test_harness(PERSISTENCE_THRESHOLD + 1);
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| tree.run()).unwrap();
 
         // send a message to the tree to enter the main loop.
         to_tree_tx.send(FromEngine::DownloadedBlocks(vec![])).unwrap();
 
-        let received_action = sf_action_rx.recv().expect("Failed to receive saved blocks");
-        if let StaticFileAction::WriteExecutionData((saved_blocks, _)) = received_action {
+        let received_action = action_rx.recv().expect("Failed to receive saved blocks");
+        if let PersistenceAction::SaveBlocks((saved_blocks, _)) = received_action {
             // only PERSISTENCE_THRESHOLD will be persisted
             blocks.pop();
             assert_eq!(saved_blocks.len() as u64, PERSISTENCE_THRESHOLD);
@@ -1471,7 +1470,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_in_memory_state_trait_impl() {
-        let TestHarness { tree, to_tree_tx, sf_action_rx, blocks, payload_command_rx } =
+        let TestHarness { tree, to_tree_tx, action_rx, blocks, payload_command_rx } =
             get_default_test_harness(10);
 
         let head_block = blocks.last().unwrap().block();
@@ -1494,7 +1493,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_engine_request_during_backfill() {
-        let TestHarness { mut tree, to_tree_tx, sf_action_rx, blocks, payload_command_rx } =
+        let TestHarness { mut tree, to_tree_tx, action_rx, blocks, payload_command_rx } =
             get_default_test_harness(PERSISTENCE_THRESHOLD);
 
         // set backfill active

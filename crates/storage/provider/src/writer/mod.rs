@@ -171,13 +171,27 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
             StorageType::StaticFile(self.static_file_writer())
         };
 
+        let mut last_tx_idx = None;
         for (idx, receipts) in blocks.enumerate() {
             let block_number = initial_block_number + idx as u64;
 
-            let first_tx_index = bodies_cursor
-                .seek_exact(block_number)?
-                .map(|(_, indices)| indices.first_tx_num())
+            let mut first_tx_index =
+                bodies_cursor.seek_exact(block_number)?.map(|(_, indices)| indices.first_tx_num());
+
+            // If there are no indices, that means there have been no transactions
+            //
+            // So instead of returning an error, use zero
+            if block_number == initial_block_number && first_tx_index.is_none() {
+                first_tx_index = Some(0);
+            }
+
+            // TODO: I guess this error will never be returned
+            let first_tx_index = first_tx_index
+                .or(last_tx_idx)
                 .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
+
+            // update for empty blocks
+            last_tx_idx = Some(first_tx_index);
 
             match &mut storage_type {
                 StorageType::Database(cursor) => {
