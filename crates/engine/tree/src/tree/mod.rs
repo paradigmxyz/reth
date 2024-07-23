@@ -213,19 +213,19 @@ impl NewCanonicalChain {
         match self {
             Self::Commit { new } => CanonStateNotification::Commit {
                 new: Arc::new(Chain::new(
-                    vec![],
+                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
                     new.last().unwrap().execution_output.deref().clone(),
                     None,
                 )),
             },
             Self::Reorg { new, old } => CanonStateNotification::Reorg {
-                old: Arc::new(Chain::new(
-                    vec![],
+                new: Arc::new(Chain::new(
+                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
                     new.last().unwrap().execution_output.deref().clone(),
                     None,
                 )),
-                new: Arc::new(Chain::new(
-                    vec![],
+                old: Arc::new(Chain::new(
+                    old.iter().map(ExecutedBlock::sealed_block_with_senders),
                     old.last().unwrap().execution_output.deref().clone(),
                     None,
                 )),

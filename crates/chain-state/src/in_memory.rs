@@ -350,6 +350,13 @@ impl ExecutedBlock {
         &self.senders
     }
 
+    /// Returns a [`SealedBlockWithSenders`]
+    ///
+    /// Note: this clones the block and senders.
+    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders {
+        SealedBlockWithSenders { block: (*self.block).clone(), senders: (*self.senders).clone() }
+    }
+
     /// Returns a reference to the block's execution outcome
     pub fn execution_outcome(&self) -> &ExecutionOutcome {
         &self.execution_output
