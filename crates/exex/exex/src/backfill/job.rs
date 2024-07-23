@@ -1,4 +1,4 @@
-use crate::BackFillJobStream;
+use crate::StreamBackfillJob;
 use std::{
     ops::RangeInclusive,
     time::{Duration, Instant},
@@ -51,6 +51,16 @@ where
     E: BlockExecutorProvider,
     P: BlockReader + HeaderProvider + StateProviderFactory,
 {
+    /// Converts the backfill job into a single block backfill job.
+    pub fn into_single_blocks(self) -> SingleBlockBackfillJob<E, P> {
+        self.into()
+    }
+
+    /// Converts the backfill job into a stream.
+    pub fn into_stream(self) -> StreamBackfillJob<E, P, Chain> {
+        self.into()
+    }
+
     fn execute_range(&mut self) -> Result<Chain, BlockExecutionError> {
         let mut executor = self.executor.batch_executor(StateProviderDatabase::new(
             self.provider.history_by_block_number(self.range.start().saturating_sub(1))?,
@@ -136,30 +146,14 @@ where
     }
 }
 
-impl<E, P> BackfillJob<E, P> {
-    /// Converts the backfill job into a single block backfill job.
-    pub fn into_single_blocks(self) -> SingleBlockBackfillJob<E, P> {
-        self.into()
-    }
-
-    /// Converts the backfill job into a backfill job stream.
-    pub fn into_stream(self) -> BackFillJobStream<E, P>
-    where
-        E: BlockExecutorProvider + Clone + 'static,
-        P: HeaderProvider + BlockReader + StateProviderFactory + Clone + 'static,
-    {
-        BackFillJobStream::new(self.into_single_blocks())
-    }
-}
-
 /// Single block Backfill job started for a specific range.
 ///
 /// It implements [`Iterator`] which executes a block each time the
 /// iterator is advanced and yields ([`BlockWithSenders`], [`BlockExecutionOutput`])
 #[derive(Debug, Clone)]
 pub struct SingleBlockBackfillJob<E, P> {
-    executor: E,
-    provider: P,
+    pub(crate) executor: E,
+    pub(crate) provider: P,
     pub(crate) range: RangeInclusive<BlockNumber>,
 }
 
@@ -180,6 +174,13 @@ where
     E: BlockExecutorProvider,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
+    /// Converts the single block backfill job into a stream.
+    pub fn into_stream(
+        self,
+    ) -> StreamBackfillJob<E, P, (BlockWithSenders, BlockExecutionOutput<Receipt>)> {
+        self.into()
+    }
+
     pub(crate) fn execute_block(
         &self,
         block_number: u64,
