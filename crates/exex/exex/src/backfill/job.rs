@@ -28,6 +28,7 @@ pub struct BackfillJob<E, P> {
     pub(crate) prune_modes: PruneModes,
     pub(crate) thresholds: ExecutionStageThresholds,
     pub(crate) range: RangeInclusive<BlockNumber>,
+    pub(crate) stream_parallelism: usize,
 }
 
 impl<E, P> Iterator for BackfillJob<E, P>
@@ -155,6 +156,7 @@ pub struct SingleBlockBackfillJob<E, P> {
     pub(crate) executor: E,
     pub(crate) provider: P,
     pub(crate) range: RangeInclusive<BlockNumber>,
+    pub(crate) stream_parallelism: usize,
 }
 
 impl<E, P> Iterator for SingleBlockBackfillJob<E, P>
@@ -210,8 +212,13 @@ where
 }
 
 impl<E, P> From<BackfillJob<E, P>> for SingleBlockBackfillJob<E, P> {
-    fn from(value: BackfillJob<E, P>) -> Self {
-        Self { executor: value.executor, provider: value.provider, range: value.range }
+    fn from(job: BackfillJob<E, P>) -> Self {
+        Self {
+            executor: job.executor,
+            provider: job.provider,
+            range: job.range,
+            stream_parallelism: job.stream_parallelism,
+        }
     }
 }
 

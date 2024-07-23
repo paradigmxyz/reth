@@ -213,19 +213,19 @@ impl NewCanonicalChain {
         match self {
             Self::Commit { new } => CanonStateNotification::Commit {
                 new: Arc::new(Chain::new(
-                    vec![],
+                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
                     new.last().unwrap().execution_output.deref().clone(),
                     None,
                 )),
             },
             Self::Reorg { new, old } => CanonStateNotification::Reorg {
-                old: Arc::new(Chain::new(
-                    vec![],
+                new: Arc::new(Chain::new(
+                    new.iter().map(ExecutedBlock::sealed_block_with_senders),
                     new.last().unwrap().execution_output.deref().clone(),
                     None,
                 )),
-                new: Arc::new(Chain::new(
-                    vec![],
+                old: Arc::new(Chain::new(
+                    old.iter().map(ExecutedBlock::sealed_block_with_senders),
                     old.last().unwrap().execution_output.deref().clone(),
                     None,
                 )),
@@ -1380,7 +1380,9 @@ where
             // TODO
             //  update inmemory state
             //  update trackers
-            //  emit notification
+
+            // sends an event to all active listeners about the new canonical chain
+            self.canonical_in_memory_state.notify_canon_state(update.to_chain_notification());
 
             if let Some(attr) = attrs {
                 let updated = self.process_payload_attributes(attr, &update.tip().header, state);
@@ -1467,7 +1469,7 @@ mod tests {
             let number = sealed_block.number;
             blocks_by_hash.insert(hash, block.clone());
             blocks_by_number.entry(number).or_insert_with(Vec::new).push(block.clone());
-            state_by_hash.insert(hash, Arc::new(BlockState(block.clone())));
+            state_by_hash.insert(hash, Arc::new(BlockState::new(block.clone())));
             hash_by_number.insert(number, hash);
         }
         let tree_state = TreeState { blocks_by_hash, blocks_by_number, ..Default::default() };

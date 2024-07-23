@@ -17,7 +17,7 @@ use reth_stages_api::ExecutionStageThresholds;
 use tokio::task::JoinHandle;
 
 /// The default parallelism for active tasks in [`StreamBackfillJob`].
-const DEFAULT_PARALLELISM: usize = 4;
+pub(crate) const DEFAULT_PARALLELISM: usize = 4;
 /// The default batch size for active tasks in [`StreamBackfillJob`].
 const DEFAULT_BATCH_SIZE: usize = 100;
 
@@ -83,6 +83,7 @@ where
                     executor: this.executor.clone(),
                     provider: this.provider.clone(),
                     range: block_number..=block_number,
+                    stream_parallelism: this.parallelism,
                 };
                 let task =
                     tokio::task::spawn_blocking(move || job.next().expect("non-empty range"));
@@ -124,6 +125,7 @@ where
                     prune_modes: this.prune_modes.clone(),
                     thresholds: ExecutionStageThresholds::default(),
                     range,
+                    stream_parallelism: this.parallelism,
                 };
                 let task =
                     tokio::task::spawn_blocking(move || job.next().expect("non-empty range"));
@@ -145,7 +147,7 @@ impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, Single
             prune_modes: PruneModes::default(),
             range: job.range,
             tasks: FuturesOrdered::new(),
-            parallelism: DEFAULT_PARALLELISM,
+            parallelism: job.stream_parallelism,
             batch_size: 1,
         }
     }
@@ -159,7 +161,7 @@ impl<E, P> From<BackfillJob<E, P>> for StreamBackfillJob<E, P, BatchBlockStreamI
             prune_modes: job.prune_modes,
             range: job.range,
             tasks: FuturesOrdered::new(),
-            parallelism: DEFAULT_PARALLELISM,
+            parallelism: job.stream_parallelism,
             batch_size: job.thresholds.max_blocks.map_or(DEFAULT_BATCH_SIZE, |max| max as usize),
         }
     }

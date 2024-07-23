@@ -1,6 +1,8 @@
 //! Types for tracking the canonical chain state in memory.
 
-use crate::{CanonStateNotificationSender, CanonStateNotifications, ChainInfoTracker};
+use crate::{
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications, ChainInfoTracker,
+};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_execution_types::ExecutionOutcome;
@@ -58,7 +60,7 @@ impl InMemoryState {
     /// Returns the pending state corresponding to the current head plus one,
     /// from the payload received in newPayload that does not have a FCU yet.
     pub(crate) fn pending_state(&self) -> Option<Arc<BlockState>> {
-        self.pending.read().as_ref().map(|state| Arc::new(BlockState(state.0.clone())))
+        self.pending.read().as_ref().map(|state| Arc::new(BlockState::new(state.block.clone())))
     }
 }
 
@@ -251,43 +253,51 @@ impl CanonicalInMemoryState {
     pub fn subscribe_canon_state(&self) -> CanonStateNotifications {
         self.inner.canon_state_notification_sender.subscribe()
     }
+
+    /// Attempts to send a new [`CanonStateNotification`] to all active Receiver handles.
+    pub fn notify_canon_state(&self, event: CanonStateNotification) {
+        self.inner.canon_state_notification_sender.send(event).ok();
+    }
 }
 
 /// State after applying the given block.
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct BlockState(pub ExecutedBlock);
+pub struct BlockState {
+    /// The executed block that determines the state.
+    pub block: ExecutedBlock,
+}
 
 #[allow(dead_code)]
 impl BlockState {
     /// `BlockState` constructor.
-    pub const fn new(executed_block: ExecutedBlock) -> Self {
-        Self(executed_block)
+    pub const fn new(block: ExecutedBlock) -> Self {
+        Self { block }
     }
 
     /// Returns the executed block that determines the state.
     pub fn block(&self) -> ExecutedBlock {
-        self.0.clone()
+        self.block.clone()
     }
 
     /// Returns the hash of executed block that determines the state.
     pub fn hash(&self) -> B256 {
-        self.0.block().hash()
+        self.block.block().hash()
     }
 
     /// Returns the block number of executed block that determines the state.
     pub fn number(&self) -> u64 {
-        self.0.block().number
+        self.block.block().number
     }
 
     /// Returns the state root after applying the executed block that determines
     /// the state.
     pub fn state_root(&self) -> B256 {
-        self.0.block().header.state_root
+        self.block.block().header.state_root
     }
 
     /// Returns the `Receipts` of executed block that determines the state.
     pub fn receipts(&self) -> &Receipts {
-        &self.0.execution_outcome().receipts
+        &self.block.execution_outcome().receipts
     }
 
     /// Returns a vector of `Receipt` of executed block that determines the state.
@@ -348,6 +358,13 @@ impl ExecutedBlock {
     /// Returns a reference to the block's senders
     pub fn senders(&self) -> &Vec<Address> {
         &self.senders
+    }
+
+    /// Returns a [`SealedBlockWithSenders`]
+    ///
+    /// Note: this clones the block and senders.
+    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders {
+        SealedBlockWithSenders { block: (*self.block).clone(), senders: (*self.senders).clone() }
     }
 
     /// Returns a reference to the block's execution outcome
@@ -440,8 +457,8 @@ mod tests {
         let result = in_memory_state.pending_state();
         assert!(result.is_some());
         let actual_pending_state = result.unwrap();
-        assert_eq!(actual_pending_state.0.block().hash(), pending_hash);
-        assert_eq!(actual_pending_state.0.block().number, pending_number);
+        assert_eq!(actual_pending_state.block.block().hash(), pending_hash);
+        assert_eq!(actual_pending_state.block.block().number, pending_number);
     }
 
     #[tokio::test]
