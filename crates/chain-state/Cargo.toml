@@ -22,9 +22,16 @@ revm = { workspace = true, optional = true}
 
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
+tokio-stream = { workspace = true, features = ["sync"] }
+
+# tracing
+tracing.workspace = true
 
 # misc
+auto_impl.workspace = true
+derive_more.workspace = true
 parking_lot.workspace = true
+pin-project.workspace = true
 rand = { workspace = true, optional = true }
 
 [dev-dependencies]

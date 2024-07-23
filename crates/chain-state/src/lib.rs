@@ -14,6 +14,13 @@ pub use in_memory::*;
 mod chain_info;
 pub use chain_info::ChainInfoTracker;
 
+mod notifications;
+pub use notifications::{
+    CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
+    CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications, ForkChoiceStream,
+    ForkChoiceSubscriptions,
+};
+
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers
 pub mod test_utils;

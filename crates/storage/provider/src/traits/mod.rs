@@ -18,13 +18,6 @@ pub use header_sync_gap::{HeaderSyncGap, HeaderSyncGapProvider};
 mod state;
 pub use state::StateWriter;
 
-mod chain;
-pub use chain::{
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
-    CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications, ForkChoiceStream,
-    ForkChoiceSubscriptions,
-};
-
 mod spec;
 pub use spec::ChainSpecProvider;
 
