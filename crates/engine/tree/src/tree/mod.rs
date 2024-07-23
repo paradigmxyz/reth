@@ -25,10 +25,7 @@ use reth_primitives::{
     Block, BlockNumHash, BlockNumber, GotExpected, Receipts, Requests, SealedBlock,
     SealedBlockWithSenders, SealedHeader, B256, U256,
 };
-use reth_provider::{
-    BlockReader, CanonStateNotification, ExecutionOutcome, StateProvider, StateProviderFactory,
-    StateRootProvider,
-};
+use reth_provider::{BlockReader, CanonStateNotification, Chain, ExecutionOutcome, StateProvider, StateProviderFactory, StateRootProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_types::{
     engine::{
@@ -43,6 +40,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::{mpsc::Receiver, Arc},
 };
+use std::ops::Deref;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -157,8 +155,8 @@ impl TreeState {
     ///
     /// This also handles reorgs.
     fn on_new_head(&self, new_head: B256) -> Option<NewCanonicalChain> {
-        let new_head_block = self.block_by_hash(new_head)?;
-        let mut parent = new_head_block.num_hash();
+        let new_head_block = self.blocks_by_hash.get(&new_head).cloned()?;
+        let mut parent = new_head_block.block.num_hash();
         let mut new_chain = vec![new_head_block];
         let mut reorged = vec![];
 
@@ -166,24 +164,39 @@ impl TreeState {
         while parent.hash != self.canonical_block_hash() {
             if parent.number == self.canonical_head().number {
                 // we have a reorg
+                todo!("handle reorg")
             }
-            let parent_block = self.block_by_hash(parent.hash)?;
+            let parent_block = self.blocks_by_hash.get(&new_head).cloned()?;
+            parent = parent_block.block.num_hash();
             new_chain.push(parent_block);
-            parent = parent_block.num_hash();
         }
 
-        // TODO walk the chain back and connect to canonical chain or detect reorg
+        // reverse the chains
+        new_chain.reverse();
+        reorged.reverse();
 
-        None
+       let chain = if reorged.is_empty() {
+            NewCanonicalChain::Append { new: new_chain }
+        } else {
+            NewCanonicalChain::Reorg { new: new_chain, old: reorged }
+        };
+
+        Some(chain)
     }
 }
 
+/// Non-empty chain of blocks.
 enum NewCanonicalChain {
-    Appended {
+    /// A simple append to the current canonical head
+    Append {
+        /// all blocks that lead back to the canonical head
         new: Vec<ExecutedBlock>
     },
-    Reorged {
+    /// A reorged chain consists of two chains that trace back to a shared ancestor block at which point they diverge.
+    Reorg {
+        /// All blocks of the _new_ chain
         new: Vec<ExecutedBlock>,
+        /// All blocks of the _old_ chain
         old: Vec<ExecutedBlock>,
     }
 }
@@ -192,7 +205,27 @@ impl NewCanonicalChain {
 
     /// Converts the new chain into a notification that will be emitted to listeners
     fn to_chain_notification(&self) -> CanonStateNotification {
-        todo!("merge execution outcome?")
+       // TODO: do we need to merge execution outcome for multiblock append or reorg?
+       //  implement this properly
+        match self {
+            Self::Append { new } => CanonStateNotification::Commit {
+                new: Arc::new(Chain::new(vec![], new.last().unwrap().execution_output.deref().clone(), None))
+            },
+            Self::Reorg { new, old } => CanonStateNotification::Reorg {
+                old: Arc::new(Chain::new(vec![], new.last().unwrap().execution_output.deref().clone(), None)),
+                new: Arc::new(Chain::new(vec![], old.last().unwrap().execution_output.deref().clone(), None))
+            }
+        }
+    }
+
+    /// Returns the new tip of the chain.
+    ///
+    /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
+    /// 1 new block.
+    fn tip(&self) -> &SealedBlock {
+        match self {
+            Self::Append { new } | Self::Reorg { new, .. } => new.last().unwrap().block(),
+        }
     }
 
 }
