@@ -91,7 +91,7 @@ where
 {
     /// Ensures that the given block number is canonical (synced)
     ///
-    /// This is a helper for guarding the [`HistoricalStateProvider`] against block numbers that are
+    /// This is a helper for guarding the `HistoricalStateProvider` against block numbers that are
     /// out of range and would lead to invalid results, mainly during initial sync.
     ///
     /// Verifying the `block_number` would be expensive since we need to lookup sync table
