@@ -1,6 +1,6 @@
 //! Types for tracking the canonical chain state in memory.
 
-use crate::ChainInfoTracker;
+use crate::{CanonStateNotificationSender, CanonStateNotifications, ChainInfoTracker};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_execution_types::ExecutionOutcome;
@@ -10,6 +10,10 @@ use reth_primitives::{
 };
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::HashMap, sync::Arc, time::Instant};
+use tokio::sync::broadcast;
+
+/// Size of the broadcast channel used to notify canonical state events.
+const CANON_STATE_NOTIFICATION_CHANNEL_SIZE: usize = 256;
 
 /// Container type for in memory state data.
 #[derive(Debug, Default)]
@@ -64,6 +68,7 @@ impl InMemoryState {
 pub(crate) struct CanonicalInMemoryStateInner {
     pub(crate) chain_info_tracker: ChainInfoTracker,
     pub(crate) in_memory_state: InMemoryState,
+    pub(crate) canon_state_notification_sender: CanonStateNotificationSender,
 }
 
 /// This type is responsible for providing the blocks, receipts, and state for
@@ -88,7 +93,14 @@ impl CanonicalInMemoryState {
             None => SealedHeader::default(),
         };
         let chain_info_tracker = ChainInfoTracker::new(header);
-        let inner = CanonicalInMemoryStateInner { chain_info_tracker, in_memory_state };
+        let (canon_state_notification_sender, _canon_state_notification_receiver) =
+            broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
+
+        let inner = CanonicalInMemoryStateInner {
+            chain_info_tracker,
+            in_memory_state,
+            canon_state_notification_sender,
+        };
 
         Self { inner: Arc::new(inner) }
     }
@@ -97,7 +109,13 @@ impl CanonicalInMemoryState {
     pub fn with_head(head: SealedHeader) -> Self {
         let chain_info_tracker = ChainInfoTracker::new(head);
         let in_memory_state = InMemoryState::default();
-        let inner = CanonicalInMemoryStateInner { chain_info_tracker, in_memory_state };
+        let (canon_state_notification_sender, _canon_state_notification_receiver) =
+            broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
+        let inner = CanonicalInMemoryStateInner {
+            chain_info_tracker,
+            in_memory_state,
+            canon_state_notification_sender,
+        };
 
         Self { inner: Arc::new(inner) }
     }
@@ -227,6 +245,11 @@ impl CanonicalInMemoryState {
         self.pending_state().map(|block_state| {
             (block_state.block().block().clone(), block_state.executed_block_receipts())
         })
+    }
+
+    /// Subscribe to new blocks events.
+    pub fn subscribe_canon_state(&self) -> CanonStateNotifications {
+        self.inner.canon_state_notification_sender.subscribe()
     }
 }
 
