@@ -35,7 +35,7 @@ impl BlobStore for InMemoryBlobStore {
 
     fn insert_all(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
-            return Ok(());
+            return Ok(())
         }
         let mut store = self.inner.store.write();
         let mut total_add = 0;
@@ -58,7 +58,7 @@ impl BlobStore for InMemoryBlobStore {
 
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
         if txs.is_empty() {
-            return Ok(());
+            return Ok(())
         }
         let mut store = self.inner.store.write();
         let mut total_sub = 0;
@@ -107,7 +107,7 @@ impl BlobStore for InMemoryBlobStore {
             if let Some(item) = store.get(&tx) {
                 items.push(item.clone());
             } else {
-                return Err(BlobStoreError::MissingSidecar(tx));
+                return Err(BlobStoreError::MissingSidecar(tx))
             }
         }
 
