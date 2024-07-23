@@ -448,6 +448,10 @@ where
                     let mut output = self.on_forkchoice_updated(state, payload_attrs);
 
                     if let Ok(res) = &mut output {
+                        self.state
+                            .forkchoice_state_tracker
+                            .set_latest(state, res.outcome.forkchoice_status());
+
                         // emit an event about the handled FCU
                         self.emit_event(BeaconConsensusEngineEvent::ForkchoiceUpdated(
                             state,
@@ -1212,7 +1216,6 @@ where
         attrs: Option<<Self::Engine as PayloadTypes>::PayloadAttributes>,
     ) -> ProviderResult<TreeOutcome<OnForkChoiceUpdated>> {
         if let Some(on_updated) = self.pre_validate_forkchoice_update(state)? {
-            self.state.forkchoice_state_tracker.set_latest(state, on_updated.forkchoice_status());
             return Ok(TreeOutcome::new(on_updated))
         }
 
