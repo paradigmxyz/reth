@@ -1,11 +1,13 @@
 use crate::{providers::StaticFileProvider, HashingWriter, ProviderFactory, TrieWriter};
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_db::{
-    test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase}, Database, DatabaseEnv
+    test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
+    Database, DatabaseEnv,
 };
 use reth_errors::ProviderResult;
 use reth_primitives::{Account, StorageEntry, B256};
 use reth_trie::StateRoot;
+use reth_trie_db::DatabaseStateRoot;
 use std::sync::Arc;
 
 pub mod blocks;
@@ -54,9 +56,7 @@ pub fn insert_genesis<DB: Database>(
         account.storage.map(|storage| {
             (
                 addr,
-                storage
-                    .into_iter()
-                    .map(|(key, value)| StorageEntry { key, value: value.into() }),
+                storage.into_iter().map(|(key, value)| StorageEntry { key, value: value.into() }),
             )
         })
     });
