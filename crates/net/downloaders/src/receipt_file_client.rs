@@ -232,6 +232,7 @@ mod test {
     use tokio_util::codec::Decoder;
 
     #[derive(Debug, PartialEq, Eq, RlpDecodable)]
+    #[allow(unnameable_types)]
     pub struct MockReceipt {
         tx_type: u8,
         status: u64,
