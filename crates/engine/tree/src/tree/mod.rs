@@ -19,10 +19,10 @@ use reth_engine_primitives::EngineTypes;
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::PayloadTypes;
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes, PayloadTypes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    Block, BlockNumHash, BlockNumber, GotExpected, Receipts, Requests, SealedBlock,
+    Block, BlockNumHash, BlockNumber, GotExpected, Header, Receipts, Requests, SealedBlock,
     SealedBlockWithSenders, SealedHeader, B256, U256,
 };
 use reth_provider::{
@@ -1084,6 +1084,58 @@ where
 
         Ok(None)
     }
+
+    /// Validates the payload attributes with respect to the header and fork choice state.
+    ///
+    /// Note: At this point, the fork choice update is considered to be VALID, however, we can still
+    /// return an error if the payload attributes are invalid.
+    fn process_payload_attributes(
+        &self,
+        attrs: T::PayloadAttributes,
+        head: &Header,
+        state: ForkchoiceState,
+    ) -> OnForkChoiceUpdated {
+        // 7. Client software MUST ensure that payloadAttributes.timestamp is greater than timestamp
+        //    of a block referenced by forkchoiceState.headBlockHash. If this condition isn't held
+        //    client software MUST respond with -38003: `Invalid payload attributes` and MUST NOT
+        //    begin a payload build process. In such an event, the forkchoiceState update MUST NOT
+        //    be rolled back.
+        if attrs.timestamp() <= head.timestamp {
+            return OnForkChoiceUpdated::invalid_payload_attributes()
+        }
+
+        // 8. Client software MUST begin a payload build process building on top of
+        //    forkchoiceState.headBlockHash and identified via buildProcessId value if
+        //    payloadAttributes is not null and the forkchoice state has been updated successfully.
+        //    The build process is specified in the Payload building section.
+        match <T::PayloadBuilderAttributes as PayloadBuilderAttributes>::try_new(
+            state.head_block_hash,
+            attrs,
+        ) {
+            Ok(attributes) => {
+                // send the payload to the builder and return the receiver for the pending payload
+                // id, initiating payload job is handled asynchronously
+                let pending_payload_id = self.payload_builder.send_new_payload(attributes);
+
+                // Client software MUST respond to this method call in the following way:
+                // {
+                //      payloadStatus: {
+                //          status: VALID,
+                //          latestValidHash: forkchoiceState.headBlockHash,
+                //          validationError: null
+                //      },
+                //      payloadId: buildProcessId
+                // }
+                //
+                // if the payload is deemed VALID and the build process has begun.
+                OnForkChoiceUpdated::updated_with_pending_payload_id(
+                    PayloadStatus::new(PayloadStatusEnum::Valid, Some(state.head_block_hash)),
+                    pending_payload_id,
+                )
+            }
+            Err(_) => OnForkChoiceUpdated::invalid_payload_attributes(),
+        }
+    }
 }
 
 impl<P, E, T> EngineApiTreeHandler for EngineApiTreeHandlerImpl<P, E, T>
@@ -1251,7 +1303,11 @@ where
             //  update inmemory state
             //  update trackers
             //  emit notification
-            //  validate and handle payload attributes
+
+            if let Some(attr) = attrs {
+                let updated = self.process_payload_attributes(attr, &update.tip().header, state);
+                return Ok(TreeOutcome::new(updated))
+            }
 
             return Ok(valid_outcome(state.head_block_hash))
         }
