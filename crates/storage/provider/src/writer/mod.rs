@@ -215,7 +215,6 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
                 first_tx_index = Some(0);
             }
 
-            // TODO: I guess this error will never be returned
             let mut tx_index = first_tx_index
                 .or(last_tx_idx)
                 .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;
@@ -284,7 +283,6 @@ impl<'a, 'b, DB: Database> StorageWriter<'a, 'b, DB> {
                 first_tx_index = Some(0);
             }
 
-            // TODO: I guess this error will never be returned
             let first_tx_index = first_tx_index
                 .or(last_tx_idx)
                 .ok_or_else(|| ProviderError::BlockBodyIndicesNotFound(block_number))?;

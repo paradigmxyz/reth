@@ -135,12 +135,12 @@ impl<DB: Database> PersistenceService<DB> {
         Ok(())
     }
 
-    /// Writes the transactions to static files, to act as a log.
+    /// Writes the transactions to static files.
     ///
     /// The [`update_transaction_meta`](Self::update_transaction_meta) method should be called
     /// after this, to update the checkpoints for headers and block bodies.
-    fn log_transactions(&self, block: Arc<SealedBlock>) -> ProviderResult<u64> {
-        debug!(target: "tree::persistence", "Logging transactions");
+    fn write_transactions(&self, block: Arc<SealedBlock>) -> ProviderResult<u64> {
+        debug!(target: "tree::persistence", "Writing transactions");
         let provider = self.provider.static_file_provider();
 
         let header_writer = provider.get_writer(block.number, StaticFileSegment::Headers)?;
@@ -280,8 +280,8 @@ where
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(res);
                 }
-                PersistenceAction::LogTransactions((block, sender)) => {
-                    let block_num = self.log_transactions(block).expect("todo: handle errors");
+                PersistenceAction::WriteTransactions((block, sender)) => {
+                    let block_num = self.write_transactions(block).expect("todo: handle errors");
                     self.update_transaction_meta(block_num).expect("todo: handle errors");
 
                     // we ignore the error because the caller may or may not care about the result
@@ -307,7 +307,7 @@ pub enum PersistenceAction {
     ///
     /// This will first append the header and transactions to static files, then update the
     /// checkpoints for headers and block bodies in the database.
-    LogTransactions((Arc<SealedBlock>, oneshot::Sender<()>)),
+    WriteTransactions((Arc<SealedBlock>, oneshot::Sender<()>)),
 
     /// Removes block data above the given block number from the database.
     ///
