@@ -6,8 +6,6 @@ mod exex;
 pub use common::LaunchContext;
 pub use exex::ExExLauncher;
 
-use std::{future::Future, sync::Arc};
-
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, PruneHook, StaticFileHook},
@@ -23,9 +21,10 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
     rpc::eth::{helpers::AddDevSigners, FullEthApiServer},
-    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
+    version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT},
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
+use reth_node_metrics::version_metrics::VERGEN_GIT_SHA;
 use reth_primitives::format_ether;
 use reth_provider::providers::BlockchainProvider;
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
@@ -33,6 +32,7 @@ use reth_rpc_types::engine::ClientVersionV1;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::TransactionPool;
+use std::{future::Future, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 

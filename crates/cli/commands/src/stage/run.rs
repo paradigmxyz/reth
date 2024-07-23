@@ -11,10 +11,8 @@ use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookup
 use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_node_core::{
-    args::{NetworkArgs, StageEnum},
-    prometheus_exporter,
-};
+use reth_node_core::args::{NetworkArgs, StageEnum};
+use reth_node_metrics::prometheus_exporter;
 use reth_provider::{
     ChainSpecProvider, StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory,
     StaticFileWriter,

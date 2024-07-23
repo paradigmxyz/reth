@@ -8,12 +8,14 @@ use crate::{
     dirs::{ChainPath, DataDirPath},
     utils::get_single_header,
 };
-use metrics_exporter_prometheus::PrometheusHandle;
-use once_cell::sync::Lazy;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_network_p2p::headers::client::HeadersClient;
+use reth_node_metrics::{
+    prometheus_exporter::{self, PROMETHEUS_RECORDER_HANDLE},
+    PrometheusHandle,
+};
 use reth_primitives::{
     revm_primitives::EnvKzgSettings, BlockHashOrNumber, BlockNumber, Head, SealedHeader, B256,
 };
@@ -26,11 +28,6 @@ use reth_storage_errors::provider::ProviderResult;
 use reth_tasks::TaskExecutor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::*;
-
-/// The default prometheus recorder handle. We use a global static to ensure that it is only
-/// installed once.
-pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
-    Lazy::new(|| prometheus_exporter::install_recorder().unwrap());
 
 /// This includes all necessary configuration to launch the node.
 /// The individual configuration options can be overwritten before launching the node.
@@ -306,7 +303,7 @@ impl NodeConfig {
                 prometheus_handle,
                 db,
                 static_file_provider,
-                metrics_process::Collector::default(),
+                reth_node_metrics::Collector::default(),
                 task_executor,
             )
             .await?;

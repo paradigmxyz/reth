@@ -5,12 +5,18 @@ use http::{header::CONTENT_TYPE, HeaderValue, Response};
 use metrics::describe_gauge;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
+use once_cell::sync::Lazy;
 use reth_db_api::database_metrics::DatabaseMetrics;
 use reth_metrics::metrics::Unit;
-use reth_node_core::metrics::version_metrics::VersionInfo;
 use reth_provider::providers::StaticFileProvider;
 use reth_tasks::TaskExecutor;
 use std::{convert::Infallible, net::SocketAddr, sync::Arc};
+
+use crate::version_metrics::VersionInfo;
+/// The default prometheus recorder handle. We use a global static to ensure that it is only
+/// installed once.
+pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
+    Lazy::new(|| install_recorder().unwrap());
 
 pub(crate) trait Hook: Fn() + Send + Sync {}
 impl<T: Fn() + Send + Sync> Hook for T {}
@@ -245,10 +251,10 @@ fn describe_memory_stats() {
 }
 
 #[cfg(not(all(feature = "jemalloc", unix)))]
-fn collect_memory_stats() {}
+const fn collect_memory_stats() {}
 
 #[cfg(not(all(feature = "jemalloc", unix)))]
-fn describe_memory_stats() {}
+const fn describe_memory_stats() {}
 
 #[cfg(target_os = "linux")]
 fn collect_io_stats() {
@@ -297,7 +303,7 @@ const fn describe_io_stats() {}
 
 #[cfg(test)]
 mod tests {
-    use reth_node_core::node_config::PROMETHEUS_RECORDER_HANDLE;
+    use super::*;
     // Dependencies using different version of the `metrics` crate (to be exact, 0.21 vs 0.22)
     // may not be able to communicate with each other through the global recorder.
     //

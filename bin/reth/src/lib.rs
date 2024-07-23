@@ -61,7 +61,7 @@ pub mod core {
 
 /// Re-exported from `reth_node_core`.
 pub mod prometheus_exporter {
-    pub use reth_node_core::prometheus_exporter::*;
+    pub use reth_node_metrics::prometheus_exporter::*;
 }
 
 /// Re-export of the `reth_node_core` types specifically in the `args` module.

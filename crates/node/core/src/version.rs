@@ -1,5 +1,8 @@
 //! Version information for reth.
 use reth_db_api::models::ClientVersion;
+use reth_node_metrics::version_metrics::{
+    VERGEN_BUILD_TIMESTAMP, VERGEN_GIT_SHA, VERGEN_GIT_SHA_LONG,
+};
 use reth_rpc_types::engine::ClientCode;
 
 /// The client code for Reth
@@ -10,17 +13,6 @@ pub const NAME_CLIENT: &str = "Reth";
 
 /// The latest version from Cargo.toml.
 pub const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-/// The full SHA of the latest commit.
-pub const VERGEN_GIT_SHA_LONG: &str = env!("VERGEN_GIT_SHA");
-
-/// The 8 character short SHA of the latest commit.
-pub const VERGEN_GIT_SHA: &str = const_format::str_index!(VERGEN_GIT_SHA_LONG, ..8);
-
-/// The build timestamp.
-pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
-pub const VERGEN_CARGO_FEATURES: &str = env!("VERGEN_CARGO_FEATURES");
-pub const VERGEN_CARGO_TARGET_TRIPLE: &str = env!("VERGEN_CARGO_TARGET_TRIPLE");
 
 /// The short version information for reth.
 ///
